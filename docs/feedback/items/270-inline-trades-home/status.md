@@ -1,8 +1,22 @@
 # #270 / #272 / #279 — Inline Trades Home mockup lab
 
-**Status: MOCKUP ONLY — 2026-08-09.** No code changed. Deliverable:
-`mockups/polish-lab-2026-08/trades-home-inline.html` (current + baseline +
-4 variants + 1 extra `#279` frame, 393×852pt, Chalkline tokens).
+**Status: built-dark — 2026-08-09.** Branch `worktree-agent-acc329e0f3f9a3cd5`
+(base `worktree-agent-a16b8c9e20f110454`, includes the #279 landing this
+item builds on top of). #279 (aggregate pick-equivalent labels on
+`LeagueSummaryScreen`) shipped separately —
+[docs/feedback/items/279-aggregate-tier-labels/status.md](../279-aggregate-tier-labels/status.md).
+This item builds **variant (a) Minimal ("strip") and variant (b)
+Calculator-style ("canvas")** from the spectrum below, per the operator's
+2026-08-09 decision: *"I can't decide between A or B. Build both and
+implement a test. I'll try A first, then B."* Both ship behind a new A/B
+experiment, `trades_home_inline` — see "Built — 2026-08-09" below for the
+mechanism, the shipped scope, and the A→B switch runbook. **Not merged or
+pushed** — worktree branch only, per the build task's brief.
+
+Everything from here through "Recommendation" below is the **original
+mockup-lab record** (unchanged) — design history, not current status.
+Deliverable: `mockups/polish-lab-2026-08/trades-home-inline.html` (current +
+baseline + 4 variants + 1 extra `#279` frame, 393×852pt, Chalkline tokens).
 
 ## 2026-08-09 revision — two operator directives on the lab
 
@@ -270,3 +284,239 @@ not just a mockup caption.
    labeling in scope at all, or is #279 satisfied by the team-total swap
    alone (item 1 above, already a clean win) plus the existing
    `TierBadge` roster drill-in fix?
+
+## Built — 2026-08-09
+
+Operator decision (open question 1, above): build **both** (a) Minimal and
+(b) Calculator-style, ship both behind one A/B experiment, operator starts
+on (a) and switches to (b) later without a new build. (c) Maximal inline
+and (d) Accordion were NOT built — out of scope for this pass.
+
+### Rollout mechanism: experiment `trades_home_inline`
+
+Mirrors `aggregate_tier_labels`
+([docs/feedback/items/279-aggregate-tier-labels/status.md](../279-aggregate-tier-labels/status.md))
+and `onboarding_v2_rollout`
+([docs/business/analytics/2026-07-18-onboarding-v2-rollout-experiment.md](../../../business/analytics/2026-07-18-onboarding-v2-rollout-experiment.md)):
+
+| Field | Value | Why |
+|---|---|---|
+| key / version | `trades_home_inline` v1 | One key; `/revise` moves the operator between variants (see below) |
+| layer | `trades_ui` | Semantically correct home — a `TradesScreen.tsx` landing-surface experiment, not `ranking`/`onboarding` |
+| unit_type | `account` | Same reasoning as `aggregate_tier_labels` — the surface requires sign-in + a selected league |
+| buckets | `[0, 10000)` | Full layer — targeting narrows to the operator, not bucketing |
+| targeting | `{"is_tester_allowlist": true}` | Same allowlist mechanism (`config/tester_allowlist.json` ∪ `FTF_TESTER_ALLOWLIST`) |
+| variants | `control` 0bp / `strip` 10000bp / `canvas` 0bp (day-1) | 0-weight control+canvas makes `strip` certain for the allowlisted unit; everyone else never matches targeting → `control` |
+| `strip` client_config | `{"flags": {"trades_home_inline.strip": true}}` | Overlaid client-side (same `configs.<key>.flags` merge `mobile/src/api/flags.ts` already does for onboarding) |
+| `canvas` client_config | `{"flags": {"trades_home_inline.canvas": true}}` | Same mechanism, mutually exclusive with `strip` (a unit is assigned exactly one variant) |
+| primary_metric | `wat` | Placeholder catalog metric — no readout intended (n=1, same as the two precedents) |
+| exposure_surface | `trades_home` | |
+| scope | none | No funnel-event stamping need for a UI-layout swap |
+
+**Why a boolean-flag overlay (not a payload field, unlike #279):** this is a
+UI-flow toggle — which component tree `TradesScreen.tsx` renders — not a
+value shown inside an existing payload. The #279 status doc's own note
+calls this out: "onboarding's UI-flow toggle, where a boolean flag is the
+more natural fit" vs. #279's payload-field-presence gate. Two flag keys
+(rather than one, the way onboarding's ten `onboarding.*` keys work under
+one master switch) because there are two mutually-exclusive UI trees, not a
+layered feature set — `homeInlineVariant` in `TradesScreen.tsx` reduces them
+to one three-way value (`'control' | 'strip' | 'canvas'`) at the top of the
+component so nothing downstream branches on two booleans separately.
+
+**No `server.py` route change was needed.** `/api/feature-flags`
+(`feature_flags_route`) already resolves ANY running experiment generically
+via `experiments.resolve_for_unit` and returns its `client_config.flags`
+overlay in `configs`; the client already merges `configs.*.flags` over the
+global flag map (`mobile/src/api/flags.ts`, built for onboarding). This
+experiment rides that existing, already-tested plumbing — the new backend
+test file only seeds a `trades_home_inline` row and exercises the
+pre-existing generic path against it.
+
+### A → B switch procedure (binding requirement — no new build)
+
+Moving the operator from `strip` to `canvas` is a pure admin-API weight
+change against the SAME experiment key — no code change, no redeploy, no
+TestFlight build. `revise()` mints a new DRAFT version (edits to a running
+experiment are forbidden by design — metrics reset, prior readout
+archived), so it still needs the same required spec fields as the initial
+create, plus a follow-up `transition` to `running` exactly like the initial
+launch:
+
+```bash
+curl -s -X POST https://fantasy-trade-finder.onrender.com/api/admin/experiments/trades_home_inline/revise \
+  -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "layer": "trades_ui", "unit_type": "account",
+    "bucket_start": 0, "bucket_end": 10000,
+    "targeting": {"is_tester_allowlist": true},
+    "variants": [
+      {"name": "control", "weight_bp": 0},
+      {"name": "strip", "weight_bp": 0},
+      {"name": "canvas", "weight_bp": 10000,
+       "client_config": {"flags": {"trades_home_inline.canvas": true}}}
+    ],
+    "primary_metric": "wat", "exposure_surface": "trades_home"
+  }'
+# → {"key": "trades_home_inline", "version": 2, "status": "draft"}
+
+curl -s -X POST https://fantasy-trade-finder.onrender.com/api/admin/experiments/trades_home_inline/transition \
+  -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{"to": "running", "version": 2, "override_underpowered": true,
+       "reason": "n=1 operator switch strip→canvas, not a powered test"}'
+```
+
+Force-quit and reopen the app — the boot flags fetch resolves `canvas`
+deterministically (100% weight on the one non-zero variant, same technique
+`aggregate_tier_labels` documents for its own "widening the cohort" path).
+To move back to `strip`, repeat both calls with the weights swapped. Both
+directions are exercised by
+`backend/tests/test_trades_home_inline_experiment.py::test_switch_to_canvas_is_a_pure_weight_revise`,
+which seeds the post-`/revise` weight shape directly and confirms
+`variant_for` resolves to `canvas`.
+
+**Initial launch** (creating the experiment for the first time, before any
+switch) uses the same `POST /api/admin/experiments` + `.../transition`
+two-step the `aggregate_tier_labels` runbook documents, with the `strip`
+variant at 10000bp and `canvas` at 0bp — the operator's account
+(`313560442465169408`, already in `config/tester_allowlist.json`) resolves
+to `strip` on first boot after launch.
+
+### What shipped, per variant
+
+Both variants are scoped to the guided landing only
+(`finderMode === 'guided'` in `TradesScreen.tsx`) — team/player deck modes
+(reachable only via a stored deep link post-#269, since the mode-bar's
+chips are hidden) keep today's `TradeFinderModeBar` untouched regardless of
+assignment. Control (or any non-allowlisted unit, or any non-guided mode)
+renders exactly as before — verified byte-identical by
+`test_route_byte_identical_for_non_allowlisted_caller`.
+
+**Both variants** (new component `mobile/src/components/TradeHomeUtilityRow.tsx`
++ `mobile/src/components/TradingWithStrip.tsx`):
+- The mode-bar's row is replaced by a 3-button utility row: Draft (28pt,
+  omitted when `draft.room` is off, same as today), Free Agents (28pt,
+  borrows the shared `search` glyph — no dedicated icon exists), Manual
+  calc (24pt `swap` glyph, a plain button with no league or player
+  reference — #272 verbatim).
+- A League + "Trading with" 2-pill strip renders above the deck
+  (`TradingWithStrip`), reusing the SAME #269 sheet-scoped state
+  (`league?.league_name`, `scopedOpponentName`) and the SAME picker Modals
+  (`teamPickerOpen`/`leaguePickerOpen`) the full sheet's own rows open —
+  just opened directly (new `openTeamPickerFromStrip`/
+  `openLeaguePickerFromStrip` handlers) instead of via the sheet's
+  close-then-reopen dance, since popping the full sheet back open on close
+  would defeat the point of a strip that exists to avoid the sheet.
+- `OutlookBiasReceipt` (existing component, unchanged) still renders below
+  and still stands in as the "prefs summary + Change" line — see the
+  judgment call below.
+- The `TradeDnaSheet` full sheet (#257/#172/#269 machinery) is completely
+  untouched and remains the target of every "Change" affordance in both
+  variants, exactly as the brief required.
+
+**`canvas` additionally** (new component
+`mobile/src/components/TradeBuildCanvas.tsx`, rendered after the existing
+Find-a-Trade CTA, before the deck): a two-column hand-built trade canvas
+that mounts the shipped `InLeagueCalculator` **wholesale** — not a re-skinned
+subset — reusing `TradeSide`, `PlayerPickerModal`, `ConsensusVerdictCard`,
+evener rows, lineup-impact, Send-in-Sleeper, and share, exactly as the task
+brief specified ("reuse the calc machinery... same component, same `tierOf`
+tier-badge treatment"). Below it, a horizontal suggestion rail built from
+the guided deck's own `TradeCard[]` (the SAME cards the swipe deck already
+generated for this session); tapping a card prefills the canvas by bumping
+a remount `key` with fresh `initialOpponentId`/`initialGiveIds`/
+`initialReceiveIds` — `InLeagueCalculator` documents that it "owns all
+state after mount" (initial props are read once), so a fresh mount is the
+correct prefill technique, the same one the deck's existing "Edit in
+calculator" hand-off already uses elsewhere in the app. Excluded (renders
+nothing beyond the shared utility row/strip) in first-run and single-pin
+featured mode — see the scope-bound decision below.
+
+### Two deliberate scope-bounding decisions (flagged for the operator)
+
+1. **The canvas is additive, not a replacement.** The mockup lab's B1/B2
+   frames show the swipe deck fully replaced by the canvas + suggestion
+   rail. This build instead renders the canvas ABOVE the existing deck,
+   which stays fully intact and reachable by scrolling past it — nothing
+   about the deck's rendering, state, or job-polling was touched. Reasoning:
+   (a) forking `TradesScreen.tsx`'s ~2,500-line deck-rendering region behind
+   a second top-level branch would be a large, hard-to-verify restructuring
+   of code this build doesn't otherwise need to touch, working against the
+   "surgical changes" guideline on a change this size; (b) the lab's own
+   "Con" for variant (b) explicitly flagged losing "the zero-effort swipe
+   discovery loop that's the app's core PFO surface" as a real regression
+   risk for a brand-new user with no target in mind — keeping the deck
+   intact avoids that risk entirely; (c) it gives the operator MORE signal
+   during the A/B trial (canvas AND deck both visible) rather than a hard
+   cutover. This is a genuine interpretation-narrowing call on an
+   ambiguous, large-scope item — surfaced here explicitly per root
+   `CLAUDE.md`'s guidance to note ambiguous frame details rather than
+   silently pick one.
+2. **The "prefs summary line" reuses `OutlookBiasReceipt` verbatim**, not a
+   new composite string. The canvas mock's B1/B2 frames show a line reading
+   "Contend · Chasing WR · Value moves — Change ›" combining outlook +
+   chasing/shopping positions + trade-idea lane. `TradesScreen.tsx` has no
+   existing state or query that assembles that exact string — chasing/
+   shopping positions live entirely inside `TradeDnaSheet.tsx`'s own local
+   state (autosaved, never lifted to the screen) and pulling them out just
+   for this experiment would be new state plumbing unrelated to #270/#272's
+   actual ask. `OutlookBiasReceipt` is the closest existing analog (same
+   "Change" affordance opening the same sheet, sourced from the same
+   `league-prefs` query) and is what both variants render for this role.
+
+### Gates run
+
+- `python3 -m pytest backend/tests -q` → **2068 passed, 1 skipped**
+  (baseline 2064 passed / 1 skipped + 4 new tests in
+  `backend/tests/test_trades_home_inline_experiment.py`: operator-only
+  assignment starting on `strip`, the `/revise`-to-`canvas` switch proven
+  directly, `/api/feature-flags` overlay correctness for the allowlisted
+  caller, and byte-identical responses for a non-allowlisted caller under a
+  running experiment).
+- `cd mobile && npx tsc --noEmit` → clean (symlinked
+  `.claude/worktrees/agent-a16b8c9e20f110454/mobile/node_modules` for the
+  run; remove after per the task brief).
+- `mobile/scripts/testid-lint.sh` → `testid-lint OK`.
+
+**Maestro delta — waived, same precedent as #279.** No new/extended flow
+was authored. This experiment is allowlist-gated to the operator's single
+real account exactly like `aggregate_tier_labels`; the app's Maestro QA
+account (`qa_standard`) is not on the allowlist, so a flow driving the
+`.maestro` harness could not exercise either treatment branch without
+allowlisting a QA identity — a decision for a future pass, not this one.
+`test_route_byte_identical_for_non_allowlisted_caller` is the equivalent
+regression guard for everyone the harness's account represents (a
+non-allowlisted caller). New testIDs added
+(`trades.home-utility-row`, `trades.home-utility.{draft,free-agents,manual-calc}`,
+`trades.trading-with-strip`, `trades.trading-with-strip.{league,team}`,
+`trades.build-canvas`, `trades.build-canvas.suggestion.<trade_id>`) are
+unreferenced by any existing flow, so `testid-lint.sh` has nothing to check
+against them yet — they're ready for that future flow.
+
+### Docs updated
+
+- `docs/config-reference.md` — new row documenting `trades_home_inline.strip`
+  / `.canvas` as experiment-overlay-only flags (never in
+  `config/features.json`, unlike every other row in that table) + the
+  `FTF_TESTER_ALLOWLIST` row's example list.
+- This status doc.
+
+Not touched (n/a): `docs/api-reference.md` — `/api/feature-flags`'s
+`{flags, experiments, configs}` contract is unchanged; this experiment
+populates the same already-documented generic `experiments`/`configs`
+objects with a new key, not a new field or shape. `docs/data-dictionary.md`
+— no schema change (experiments already have a table, no new column).
+
+### Feature-scope gate note
+
+Same posture as `aggregate_tier_labels`: **express-adjacent**, not a
+from-scratch feature-scope block. The task brief itself supplied the
+equivalent of that block's answers — rollout mechanism specified up front
+(mirroring two shipped precedents), variant scope pre-drawn in the mockup
+lab above, and the A→B switch requirement stated explicitly as binding. It
+touches an API-adjacent surface (a new experiment, a bright-line item per
+root `CLAUDE.md`'s express-lane rule) and a genuinely large mobile UI
+surface, so: full gates were run (tests + typecheck + testid-lint), docs
+were updated, and this section records the rollout mechanism, the switch
+runbook, and the two scope-bounding decisions in place of a separate
+`docs/templates/feature-scope.md` copy.

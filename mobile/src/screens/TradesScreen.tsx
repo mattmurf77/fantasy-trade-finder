@@ -59,6 +59,9 @@ import OutlookBiasReceipt, {
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, { type TradeIntent } from '../components/TradeDnaSheet';
+import TradeHomeUtilityRow from '../components/TradeHomeUtilityRow';
+import TradingWithStrip from '../components/TradingWithStrip';
+import TradeBuildCanvas from '../components/TradeBuildCanvas';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
@@ -448,6 +451,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
+  // #270/#272 — experiment `trades_home_inline` (docs/feedback/items/
+  // 270-inline-trades-home/status.md). client_config.flags overlay carries
+  // exactly one of these two booleans for an assigned unit (never both);
+  // absent for everyone else, which keeps the control path byte-identical.
+  // `canvas` wins if somehow both were true — it's the strictly bigger
+  // surface, so a UI branch has to pick one, and never happens in practice
+  // (a unit is assigned exactly one variant).
+  const homeInlineStripOn = useFlag('trades_home_inline.strip');
+  const homeInlineCanvasOn = useFlag('trades_home_inline.canvas');
+  const homeInlineVariant: 'control' | 'strip' | 'canvas' = homeInlineCanvasOn
+    ? 'canvas'
+    : homeInlineStripOn
+      ? 'strip'
+      : 'control';
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -469,6 +486,11 @@ export default function TradesScreen({ navigation, route }: any) {
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
+  // #270/#272 — both `trades_home_inline` variants are scoped to the guided
+  // landing only; team/player deck modes (already rare post-#269, reachable
+  // only via a stored deep link since the mode-bar's chips are hidden) keep
+  // today's TradeFinderModeBar untouched regardless of assignment.
+  const showInlineHome = finderMode === 'guided' && homeInlineVariant !== 'control';
   // #269 — with the mode-bar's Team chip gone under `sheetTargetingOn`, the
   // scoped opponent's SOURCE moves from route params to sheet-local state
   // (`sheetOpponent`, declared below); everything downstream that already
@@ -608,6 +630,19 @@ export default function TradesScreen({ navigation, route }: any) {
       setReturnToSheetAfterPicker(null);
       setDnaSheetOpen(true);
     }
+  }
+  // #270 — TradingWithStrip's pills open the SAME pickers as the sheet's
+  // League/Trade-with rows, but directly: `returnToSheetAfterPicker` stays
+  // null, so `closeTeamPicker`/`closeLeaguePicker` just close on selection
+  // instead of popping the full sheet back open (the strip's whole point is
+  // staying off the sheet).
+  function openTeamPickerFromStrip() {
+    haptics.selection();
+    setTeamPickerOpen(true);
+  }
+  function openLeaguePickerFromStrip() {
+    haptics.selection();
+    setLeaguePickerOpen(true);
   }
 
   // S4 PRD-01 — "How trades are priced" sheet next to the fairness toggle.
@@ -3335,32 +3370,65 @@ export default function TradesScreen({ navigation, route }: any) {
             Portfolio/Calculator subnav below for finder launches. The
             hint line renders only in the cold start (no deck yet, mock
             B2) — dropped once a deck exists. */}
+        {/* #270/#272 — experiment `trades_home_inline`. `showInlineHome`
+            (guided landing + an assigned variant) swaps the mode-bar's row
+            for the bigger-icon utility row (Draft/Free agents/Manual calc,
+            no league or player reference on the button itself, #272
+            verbatim) and adds the League/Trading-with pill strip (#270
+            verbatim, second sentence). Control (or any non-guided mode)
+            renders `TradeFinderModeBar` exactly as before — byte-identical. */}
         {finderMode ? (
-          <TradeFinderModeBar
-            mode={finderMode}
-            teamName={scopedOpponentName}
-            onSwitch={switchFinderMode}
-            onCalculator={() => navigation?.navigate?.('TradeCalculator')}
-            onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
-            // rookie-draft placement, option B (operator decision
-            // 2026-08-06): the Draft chip is the draft's PERMANENT home and
-            // LEADS the strip. Passing the handler is what creates the chip,
-            // so `draft.room` off ⇒ five chips exactly as today.
-            onDraft={
-              draftRoomOn
-                ? () => navigation?.navigate?.('DraftRoom')
-                : undefined
-            }
-            showHint={deck.length === 0}
-            // #269 — Team and Player selection moved into the full sheet;
-            // only hide the chips when that sheet actually exists (also
-            // requires `consolidateOn`) so there's always a way to reach
-            // them.
-            hideTeamAndPlayer={sheetTargetingOn && consolidateOn}
+          showInlineHome ? (
+            <TradeHomeUtilityRow
+              onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+              onManualCalc={() => navigation?.navigate?.('TradeCalculator')}
+              onDraft={
+                draftRoomOn
+                  ? () => navigation?.navigate?.('DraftRoom')
+                  : undefined
+              }
+            />
+          ) : (
+            <TradeFinderModeBar
+              mode={finderMode}
+              teamName={scopedOpponentName}
+              onSwitch={switchFinderMode}
+              onCalculator={() => navigation?.navigate?.('TradeCalculator')}
+              onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+              // rookie-draft placement, option B (operator decision
+              // 2026-08-06): the Draft chip is the draft's PERMANENT home and
+              // LEADS the strip. Passing the handler is what creates the chip,
+              // so `draft.room` off ⇒ five chips exactly as today.
+              onDraft={
+                draftRoomOn
+                  ? () => navigation?.navigate?.('DraftRoom')
+                  : undefined
+              }
+              showHint={deck.length === 0}
+              // #269 — Team and Player selection moved into the full sheet;
+              // only hide the chips when that sheet actually exists (also
+              // requires `consolidateOn`) so there's always a way to reach
+              // them.
+              hideTeamAndPlayer={sheetTargetingOn && consolidateOn}
+            />
+          )
+        ) : null}
+        {showInlineHome ? (
+          <TradingWithStrip
+            leagueName={league?.league_name ?? null}
+            opponentName={scopedOpponentName ?? null}
+            onOpenLeaguePicker={openLeaguePickerFromStrip}
+            onOpenTeamPicker={openTeamPickerFromStrip}
           />
         ) : null}
         {/* #231 — outlook bias receipt (self-contained; single-line mount).
-            #246: Change opens the DNA sheet over the deck. */}
+            #246: Change opens the DNA sheet over the deck. Also stands in
+            as variant B's "prefs summary line" (canvas mock frames) — the
+            page has no existing single string combining outlook + chasing/
+            shopping positions + trade-idea lane, and building one just for
+            this experiment would duplicate state TradeDnaSheet already owns
+            privately; this receipt is the closest existing analog (same
+            "Change" affordance, same data source) — see status doc. */}
         {finderMode ? (
           <OutlookBiasReceipt onChange={() => setDnaSheetOpen(true)} />
         ) : null}
@@ -4141,6 +4209,28 @@ export default function TradesScreen({ navigation, route }: any) {
         )}
         </>
         )}
+
+        {/* #270 — variant `canvas`: the hand-built two-column trade canvas,
+            fed by the guided deck's own suggestion rail (see
+            TradeBuildCanvas). Scoped to the guided landing's mainline path
+            only — excluded in first-run (still finding its onboarding pace)
+            and single-pin featured mode (which already IS a build-canvas-
+            like surface; layering a second one would be confusing, not
+            additive). Deliberately additive, not a replacement: the swipe
+            deck below still renders untouched — see TradeBuildCanvas's file
+            header and the status doc for why. */}
+        {homeInlineVariant === 'canvas' &&
+        finderMode === 'guided' &&
+        !firstRun &&
+        !singlePin &&
+        leagueId ? (
+          <TradeBuildCanvas
+            leagueId={leagueId}
+            userId={userId}
+            opponentUserId={scopedOpponent ?? null}
+            suggestions={deck}
+          />
+        ) : null}
 
         {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
             the FEATURED TRADE window leads (best idea as a full trade card
