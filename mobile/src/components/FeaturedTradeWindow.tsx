@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { ink, ice, space, radii, type } from '../theme/chalkline';
 import { Icon, TickLabel } from './chalkline';
 import TradeCardComp from './TradeCard';
+import InLeagueCalculator from './InLeagueCalculator';
 import type { AssetIdea } from '../api/trades';
 import type { TradeCard as TradeCardData } from '../shared/types';
 
@@ -33,8 +34,17 @@ interface Props {
   leagueId: string;
   /** Renders the ‹ Previous trade chip (Variant A row) when set. */
   onBack?: () => void;
-  /** #190 — the featured card keeps the calculator hand-off. */
+  /** #190 — the featured card keeps the calculator hand-off. Ignored when
+   *  `calc` is set (the card already IS the calculator — no separate
+   *  hand-off needed). */
   onEditInCalculator?: () => void;
+  /** #287 (flag `trades.player_offers_calc`) — when set, renders the idea
+   *  as an editable InLeagueCalculator (TradeBuildCanvas prefill
+   *  technique: remounted per idea via its assetIdeaKey, with
+   *  initialOpponentId/initialGiveIds/initialReceiveIds) instead of the
+   *  read-only TradeCard. `userId` is required for the calculator's
+   *  rosters query. Omitted (undefined) ⇒ byte-identical read-only path. */
+  calc?: { userId: string };
 }
 
 // AssetIdea → the TradeCard shape, presentation-only (never persisted,
@@ -68,6 +78,7 @@ export default function FeaturedTradeWindow({
   leagueId,
   onBack,
   onEditInCalculator,
+  calc,
 }: Props) {
   return (
     <View testID="featured-trade.window" style={styles.wrap}>
@@ -91,11 +102,25 @@ export default function FeaturedTradeWindow({
         </View>
       ) : null}
       <TickLabel>Featured trade</TickLabel>
-      <TradeCardComp
-        data={ideaToCard(idea, leagueId)}
-        hideMatchStrength
-        onEditInCalculator={onEditInCalculator}
-      />
+      {calc ? (
+        // #287 — remount per idea (same TradeBuildCanvas prefill
+        // technique): InLeagueCalculator "owns all state after mount", so
+        // a new idea needs a fresh instance, not a prop update.
+        <InLeagueCalculator
+          key={assetIdeaKey(idea)}
+          leagueId={leagueId}
+          userId={calc.userId}
+          initialOpponentId={idea.counterparty_user_id}
+          initialGiveIds={idea.give_player_ids}
+          initialReceiveIds={idea.receive_player_ids}
+        />
+      ) : (
+        <TradeCardComp
+          data={ideaToCard(idea, leagueId)}
+          hideMatchStrength
+          onEditInCalculator={onEditInCalculator}
+        />
+      )}
     </View>
   );
 }

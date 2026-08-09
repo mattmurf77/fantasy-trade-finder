@@ -26,6 +26,7 @@ Route: POST /api/trades/asset-ideas — 404 when the flag is off.
 
 Elo→value refresher (defaults): value = 1000 * exp(0.005 * (elo - 1500)).
 """
+import math
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -592,3 +593,158 @@ def test_route_validation(route_client):
     assert _post(route_client,
                  {"asset_id": "P", "direction": "sideways"}).status_code == 400
     assert _post(route_client, {"asset_id": "zzz"}).status_code == 404
+
+
+# ── #286 — balanced mix under the PRODUCTION-DEFAULT stud-tax mode ────────
+#
+# Every test above runs under the module's autouse `_isolate` fixture, which
+# deliberately PINS stud_tax_override("heavy") — the pre-#214 legacy math
+# these tests were authored against. Production defaults to 'market' mode
+# (stud_tax_mode_for_user), and the two modes price multi-piece packages
+# very differently: 'market' benchmarks a package's depth-discount against
+# its OWN best asset (not a trade-wide max) and only grants a crown premium
+# when a received single asset clears crown_elite_value (an ultra-elite
+# absolute threshold, ~6000). The upshot: a lone sweetener is a blunt
+# instrument — under 'market' math there is often a real gv window between
+# "still underpaying" (fails the fairness floor) and "now overpaying"
+# (fails the never-relaxed #108 gain gate at trade_service.py `_eval`) that
+# no single available roster piece lands inside, even though the pin has
+# genuine upgrade/tier-up candidates. The Downgrade branch already searches
+# 2-3-piece combinations (`combinations(down, r)` for r in (2, 3)), so it
+# reliably finds a passing package; the give-direction Upgrade branch and
+# the receive-direction Tier-UP branch tried only ONE extra piece at a
+# time, so they silently emptied out — the operator's "alt trade options
+# are only trade down ideas" report. The fix widens both Upgrade branches
+# to also search 2-sweetener combinations (bounded to the top _POOL, same
+# breadth Downgrade already gets). These tests reproduce a pin whose
+# candidate opponent asset is priced far enough above the pin that closing
+# the fairness gap needs more than any single roster piece provides, but a
+# pair of them clears it — asserting the returned mix is genuinely
+# balanced (all three classes populated) rather than skewed to Downgrade.
+def _v_for_elo(elo: float) -> float:
+    return 1000.0 * math.exp(0.005 * (elo - 1500.0))
+
+
+def _elo_for_value(value: float) -> float:
+    return 1500.0 + math.log(value / 1000.0) / 0.005
+
+
+def test_give_direction_balanced_mix_under_market_mode():
+    """#286 — direction='give', production-default 'market' stud-tax mode.
+    The pin (P, v≈1000) has a same-position upgrade target (C, v=3000) far
+    outside the lateral band; no single sweetener in the user's roster
+    lands gv inside the [fairness floor, epsilon ceiling] window, but a
+    pair of them does. Lateral (L) and Downgrade (D1/D2) candidates exist
+    too — the returned mix must not collapse to Downgrade-only."""
+    elos = {
+        "P":  _elo_for_value(1000.0),   # the pin
+        "C":  _elo_for_value(3000.0),   # opponent's upgrade target
+        "L":  _elo_for_value(1050.0),   # opponent's in-band lateral swap
+        "D1": _elo_for_value(700.0),    # opponent's downgrade pieces
+        "D2": _elo_for_value(650.0),
+    }
+    sweeteners = [f"S{i}" for i in range(1, 5)]
+    for s in sweeteners:
+        # Each alone (P + one) undershoots the fairness floor against C;
+        # each individually clears the #141 filler floor (asset_floor_abs).
+        elos[s] = _elo_for_value(470.0)
+
+    players = {pid: _Player(pid) for pid in elos}
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["C", "L", "D1", "D2"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+
+    with ts.stud_tax_override("market"):
+        groups = svc.generate_asset_ideas(
+            user_id="user",
+            user_roster=["P"] + sweeteners,
+            league_id="L1",
+            seed_elo=elos,
+            asset_id="P",
+            direction="give",
+            raw_user_elo=elos,
+            fairness_threshold=0.50,
+        )
+
+    assert groups["upgrade"], "upgrade group must not be empty when a passing combo exists"
+    assert groups["lateral"], "lateral group must not be empty"
+    assert groups["downgrade"], "downgrade group must not be empty"
+    up = groups["upgrade"][0]
+    assert up["receive_player_ids"] == ["C"]
+    # The winning package needed TWO sweeteners — a single one never clears
+    # the window (see test_give_direction_upgrade_needs_paired_sweetener).
+    assert len(up["give_player_ids"]) == 3
+    assert "P" in up["give_player_ids"]
+
+
+def test_give_direction_upgrade_needs_paired_sweetener():
+    """Same fixture as above, isolating the single-sweetener search: no
+    ONE available sweetener clears the window alone (regression guard for
+    the #286 fix — proves the paired search is load-bearing, not a no-op)."""
+    elos = {
+        "P": _elo_for_value(1000.0),
+        "C": _elo_for_value(3000.0),
+    }
+    for i in range(1, 5):
+        elos[f"S{i}"] = _elo_for_value(470.0)
+    players = {pid: _Player(pid) for pid in elos}
+    opp = LeagueMember(user_id="opp", username="OppTeam", roster=["C"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo", members=[opp]))
+
+    with ts.stud_tax_override("market"):
+        for s in ("S1", "S2", "S3", "S4"):
+            groups = svc.generate_asset_ideas(
+                user_id="user", user_roster=["P", s], league_id="L1",
+                seed_elo=elos, asset_id="P", direction="give",
+                raw_user_elo=elos, fairness_threshold=0.50,
+            )
+            assert groups["upgrade"] == [], (
+                f"single sweetener {s} should NOT alone clear the window")
+
+
+def test_receive_direction_balanced_mix_under_market_mode():
+    """#286 mirror — direction='receive'. The pin (PIN, v=3000) is owned by
+    an opponent; the user's tier-up headliner (G, v≈1000) needs a paired
+    sweetener to close the gap, same as the give-direction case. Lateral
+    (LAT) and tier-down (GD + owner extras) candidates exist too."""
+    elos = {
+        "PIN": _elo_for_value(3000.0),
+        "G":   _elo_for_value(1000.0),   # user's tier-up headliner
+        "LAT": _elo_for_value(2950.0),   # user's in-band lateral asset
+        "GD":  _elo_for_value(3600.0),   # user's tier-down asset
+        "E1":  _elo_for_value(950.0),    # owner's tier-down sweeteners
+        "E2":  _elo_for_value(900.0),
+    }
+    sweeteners = [f"S{i}" for i in range(1, 5)]
+    for s in sweeteners:
+        elos[s] = _elo_for_value(470.0)
+
+    players = {pid: _Player(pid) for pid in elos}
+    owner = LeagueMember(user_id="opp", username="OppTeam",
+                         roster=["PIN", "E1", "E2"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[owner]))
+
+    with ts.stud_tax_override("market"):
+        groups = svc.generate_asset_ideas(
+            user_id="user",
+            user_roster=["G", "LAT", "GD"] + sweeteners,
+            league_id="L1",
+            seed_elo=elos,
+            asset_id="PIN",
+            direction="receive",
+            raw_user_elo=elos,
+            fairness_threshold=0.50,
+        )
+
+    assert groups["upgrade"], "upgrade group must not be empty when a passing combo exists"
+    assert groups["lateral"], "lateral group must not be empty"
+    assert groups["downgrade"], "downgrade group must not be empty"
+    up = groups["upgrade"][0]
+    assert up["receive_player_ids"] == ["PIN"]
+    assert len(up["give_player_ids"]) == 3
+    assert "G" in up["give_player_ids"]
