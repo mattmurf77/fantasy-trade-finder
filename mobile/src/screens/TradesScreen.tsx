@@ -5015,6 +5015,9 @@ export default function TradesScreen({ navigation, route }: any) {
           (p) => p.id,
         )}
         ownerBoardValue={(p) => p.base}
+        // #277 — target-picker rows show the tier label, not the numeric
+        // (deferred here because the tier-pass agent didn't own this file).
+        tierOf={(p) => (p.pos === 'PICK' ? null : valueById.get(p.id)?.tier ?? null)}
         badgeFor={
           targetDirection === 'acquire'
             ? (p) => {
