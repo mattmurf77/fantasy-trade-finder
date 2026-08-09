@@ -11,8 +11,31 @@
 ---
 
 ## Table of Contents
+- [2026-08-09 — Current State (feedback pipeline drained; builds 91–94 shipped)](#2026-08-09--current-state-feedback-pipeline-drained-builds-9194-shipped)
 - [2026-08-08 — Current State (branch 62 behind origin/main; conflicting ESPN pick designs)](#2026-08-08--current-state-branch-62-behind-originmain-conflicting-espn-pick-designs)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-09 — Current State (feedback pipeline drained; builds 91–94 shipped)
+
+### Where I stopped
+- Builds 91–94 all uploaded to App Store Connect from the integration worktree (`.claude/worktrees/agent-a16b8c9e20f110454`), each commit-verified against `origin/main` before submit. Latest: build 94 @ `1d28847`.
+- Feedback queue drained: 20+ items fixed/shipped across three waves (see CHANGELOG 08-08/08-09 entries); open items are only #205 (design-tenets interview) and the untestable ESPN sign-in / auto-order validations.
+- Experiments RUNNING in prod, operator-only via tester allowlist: `aggregate_tier_labels` (League-tab "≈X firsts" labels) and `trades_home_inline` (operator on `strip`; switch to `canvas` = weight revise + transition, runbook in docs/feedback/items/270-inline-trades-home/status.md).
+- Two flags shipped ON today: `trade.position_impact`, `trades.sheet_targeting` (plus 08-08's `trades.edit_full_sheet`, `trades.intent_modes`).
+- All agent worktrees swept through docs/recovery/2026-08-08-branch-deletions.md; suite at 2072 passed / 1 skipped on `origin/main`.
+
+### In flight
+- (none — all waves merged and shipped)
+
+### Blocked on
+- Operator validation of builds 93/94 on TestFlight (tier labels everywhere, sheet targeting, pick-grid future-years, position-impact chips, strip variant).
+- The 11-flow Maestro smoke suite still doesn't exist — every mobile push uses the standing `FTF_SKIP_SIM_GATE=1` operator bypass. Build the flows or re-tier the gate.
+
+### Don't repeat
+- #258 took two passes: MFL names were dirty from COLOR MARKUP (fixed via `_clean_text` tag allowlist, #282), not just entities — boot backfill re-cleans on every deploy.
+- PickAssignment PUT must target `/api/league/pick-assignments/<pick_id>` (the bare-path PUT 405s — #268 was broken since first ship because client and server never agreed on URL shape).
 
 ---
 
