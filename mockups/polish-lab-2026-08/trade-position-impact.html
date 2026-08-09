@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Position Impact (#169)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1060px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:8px 0;font-style:italic}
+
+.notesbar{max-width:1060px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:5}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1060px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:4px}
+.rowlbl::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.caption{font-size:12px;line-height:1.5;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+.phone{width:393px;height:852px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.status{height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px;flex:1;overflow-y:auto}
+
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+.tabbar{flex:0 0 auto;display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+
+/* ═══ trade-summary card (TradeCard.tsx / InLeagueCalculator.tsx verdict) ═══ */
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+
+.strength{display:flex;flex-direction:column;gap:4px}
+.strength .row{display:flex;justify-content:space-between;align-items:baseline}
+.strength .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.strength .val{font-family:var(--f-mono);font-size:13px}
+.strength .track{height:4px;background:var(--ink3);border-radius:2px}
+.strength .fill{height:4px;background:var(--rb);border-radius:2px}
+
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+
+.boardrow{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+.boardrow .val{font-family:var(--f-mono);font-size:13px;color:var(--chalk)}
+
+/* shipped #238 lineup table */
+.lineupmod{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.slotname{width:36px;flex:0 0 auto;font-family:var(--f-mono);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}
+.lineuphead{display:grid;grid-template-columns:36px 1fr 16px 1fr 58px;gap:8px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:0 0 2px}
+.slotrow2{display:grid;grid-template-columns:36px 1fr 16px 1fr 58px;gap:8px;align-items:center;min-height:26px}
+.slotrow2.dim{opacity:.5}
+.slotrow2.hot{background:rgba(168,85,247,.08);border-radius:4px;margin:0 -6px;padding:0 6px}
+.slotrow2 .arrow{color:var(--faint)}
+.pname{min-width:0;display:flex;align-items:center;gap:5px;font-size:12.5px;overflow:hidden}
+.oldp{color:var(--faint);text-decoration:line-through;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.newp{color:var(--chalk);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.delta{font-family:var(--f-mono);font-size:12px;padding:2px 7px;border-radius:2px;border:1px solid rgba(34,197,94,.4);color:var(--pos);text-align:right;justify-self:end}
+.delta.neg{border-color:rgba(239,68,68,.4);color:var(--neg)}
+.delta.flat{border-color:var(--line);color:var(--faint);background:transparent;text-align:right;justify-self:end}
+.netline{display:flex;justify-content:space-between;align-items:baseline;padding-top:8px;border-top:1px dashed var(--line);margin-top:2px}
+.netline .lbl{font-size:12px;color:var(--dim)}
+.netline .val{font-family:var(--f-mono);font-weight:700;font-size:16px;color:var(--pos)}
+
+/* ═══ NEW #169 — position-impact framing ═══ */
+.badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;border-radius:2px;flex:0 0 auto;white-space:nowrap}
+.badge.ok{border:1px solid rgba(86,217,236,.4);color:var(--ice)}
+.badge.no{border:1px solid rgba(245,158,11,.5);color:var(--warn)}
+
+.posline{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:6px;background:var(--ink2);border:1px solid var(--line);border-left:3px solid var(--te)}
+.posline .txt{flex:1;font-size:12.5px;line-height:1.4;color:var(--chalk)}
+.posline .txt b{color:var(--te);font-family:var(--f-mono)}
+
+.ghostline{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;background:transparent;border:1px dashed rgba(245,158,11,.45)}
+.ghostline .txt{flex:1;font-size:11.5px;line-height:1.4;color:var(--dim)}
+.ghostline .txt b{color:var(--warn);font-family:var(--f-mono)}
+
+.hookstrip{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:6px;background:var(--ink2);border:1px solid var(--line)}
+.hookstrip .dot{width:6px;height:6px;border-radius:50%;background:var(--te);flex:0 0 auto}
+.hookstrip .txt{flex:1;font-size:13px;line-height:1.35;color:var(--chalk)}
+.hookstrip .txt b{color:var(--te)}
+
+.deckhook{font-size:11.5px;line-height:1.4;color:var(--dim);margin-top:-2px}
+.deckhook b{color:var(--te);font-family:var(--f-mono)}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Position Impact — trade-summary addition (#169)</h1>
+  <p><b>Operator ask (verbatim):</b></p>
+  <p class="q">"But it's also nice if this is a bit objective and says hey you are a contender and only have 10 ppg in your TE position and we found a way to get that to 17 in your starting lineup etc. This ups your championship odds to X … This trade makes your playoff / champion odds in 2026 at ? 2027 @ _ 2028 @ _"</p>
+  <p><b>Scope for this lab (operator direction):</b> the <b>position-specific improvement framing only</b> — "TE 10&nbsp;→&nbsp;17 in your starting lineup." The championship/playoff-odds half of the ask is explicitly <b>out of scope</b> here; no odds numbers appear in any frame below.</p>
+  <p>Grounded in the shipped <b>#238 lineup before/after table</b> (<code>mockups/polish-lab-2026-08/lineup-before-after.html</code> frame C1 → <code>InLeagueCalculator.tsx</code>'s <code>LineupImpactTable</code>, live since 2026-08-03). That table already returns, per starting slot, <code>{slot, before:{name,position,value}, after:{...}, delta}</code> from <code>POST /api/trade/evaluate</code> Mode B. Everything below either (a) reads that payload a different way — client-side only, ships today — or (b) is explicitly flagged as needing new backend computation. See the data-notes block at the bottom for the full audit; short version: <b>dynasty-value framing ("TE: 380 → 810 value") is real and shippable now; points-per-game framing ("TE: 10.2 → 17.1 ppg") is not — the app has no fantasy-points data source at all today.</b></p>
+  <p><b>Example trade used in the A/B/C variants below</b> (a cleaner story for position framing than #238's Cook/Waddle example, which touched three slots at once): you send <b>Rome Odunze</b> (WR, bench — not a starter) + a <b>2026 4th</b>, you receive <b>Sam LaPorta</b> (TE). Your incumbent starting TE, <b>Cade Otton</b>, gets benched; every other starting slot is untouched. Starting-lineup total moves <b>5,650 → 6,080 (+430)</b>, entirely from the TE slot (380 → 810) — the trade's whole lineup impact is legible as "your TE spot."</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════ ROW 0 — CURRENT ═══════════════════════ -->
+<div class="rowlbl">Current — today's calculator lineup table<span class="fb">faithful recreation, no position framing — shipped 2026-08-03 (#238)</span></div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">0 — InLeagueCalculator verdict, today (real strings)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Trade calculator · In league</div>
+          <div class="opp">@league_mate</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">James Cook</div><div class="meta">RB · BUF</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 4th (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Jaylen Waddle</div><div class="meta">WR · MIA</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+123</b> &nbsp;·&nbsp; <span class="pick">a Late 4th</span> (≈ 0.09 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:4.5%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+          <div class="boardrow"><span class="lbl">Consensus</span><span class="val">702 vs 825</span></div>
+          <div class="lineupmod">
+            <div class="ticklbl">Your lineup — before → after</div>
+            <div class="lineuphead"><span>Slot</span><span>Before</span><span></span><span>After</span><span></span></div>
+            <div class="slotrow2 dim">
+              <span class="slotname">QB</span><span class="pname"><span class="newp">Josh Allen</span></span><span></span>
+              <span class="pname"><span class="newp">Josh Allen</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">RB1</span><span class="pname"><span class="newp">Bijan Robinson</span></span><span></span>
+              <span class="pname"><span class="newp">Bijan Robinson</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2">
+              <span class="slotname">RB2</span><span class="pname"><span class="newp">James Cook</span></span>
+              <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
+              <span class="pname"><span class="newp">Tyjae Spears</span></span><span class="delta neg">−325</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">WR1</span><span class="pname"><span class="newp">Ja'Marr Chase</span></span><span></span>
+              <span class="pname"><span class="newp">Ja'Marr Chase</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2">
+              <span class="slotname">WR2</span><span class="pname"><span class="newp">DeVonta Smith</span></span>
+              <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
+              <span class="pname"><span class="newp">Jaylen Waddle</span></span><span class="delta">+285</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">TE</span><span class="pname"><span class="newp">Trey McBride</span></span><span></span>
+              <span class="pname"><span class="newp">Trey McBride</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2">
+              <span class="slotname">FLEX</span><span class="pname"><span class="newp">Tony Pollard</span></span>
+              <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
+              <span class="pname"><span class="newp">DeVonta Smith</span></span><span class="delta">+330</span>
+            </div>
+            <div class="netline"><span class="lbl">Starting lineup total</span><span class="val">5,422 → 5,712 (+290)</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Exact reproduction of <code>LineupImpactTable</code> in <code>InLeagueCalculator.tsx</code> as it ships today, real strings from the #238 status doc. Position value moves (WR2 +285, FLEX +330) are visible per-slot but never rolled up or narrated — the user has to read all 7 rows and do the position math themselves. This is the base every variant below builds from.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — 0<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="0 — Current calculator table" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW A — REQUIRED: fold-in ═══════════════════════ -->
+<div class="rowlbl">Variant A (required) — folded into the lineup-changes table<span class="fb">position line lives inside the shipped #238 module</span></div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">A1 — calculator verdict, TE-upgrade trade</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Trade calculator · In league</div>
+          <div class="opp">@league_mate</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Rome Odunze</div><div class="meta">WR · CHI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 4th (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow" style="border-left-color:var(--te)"><div><div class="nm">Sam LaPorta</div><div class="meta">TE · DET</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+140</b> &nbsp;·&nbsp; <span class="pick">a Late 4th</span> (≈ 0.10 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:5.1%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+          <div class="boardrow"><span class="lbl">Consensus</span><span class="val">670 vs 810</span></div>
+          <div class="lineupmod">
+            <div class="ticklbl">Your lineup — before → after</div>
+            <div class="lineuphead"><span>Slot</span><span>Before</span><span></span><span>After</span><span></span></div>
+            <div class="slotrow2 dim">
+              <span class="slotname">QB</span><span class="pname"><span class="newp">Josh Allen</span></span><span></span>
+              <span class="pname"><span class="newp">Josh Allen</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">RB1</span><span class="pname"><span class="newp">Bijan Robinson</span></span><span></span>
+              <span class="pname"><span class="newp">Bijan Robinson</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">RB2</span><span class="pname"><span class="newp">James Cook</span></span><span></span>
+              <span class="pname"><span class="newp">James Cook</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">WR1</span><span class="pname"><span class="newp">Ja'Marr Chase</span></span><span></span>
+              <span class="pname"><span class="newp">Ja'Marr Chase</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">WR2</span><span class="pname"><span class="newp">DeVonta Smith</span></span><span></span>
+              <span class="pname"><span class="newp">DeVonta Smith</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 hot">
+              <span class="slotname">TE</span><span class="pname"><span class="oldp">Cade Otton</span></span>
+              <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
+              <span class="pname"><span class="newp">Sam LaPorta</span></span><span class="delta">+430</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">FLEX</span><span class="pname"><span class="newp">Tony Pollard</span></span><span></span>
+              <span class="pname"><span class="newp">Tony Pollard</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="netline"><span class="lbl">Starting lineup total</span><span class="val">5,650 → 6,080 (+430)</span></div>
+            <!-- NEW: position-impact line folded into the same module -->
+            <div class="posline" style="margin-top:2px">
+              <span class="txt">Your starting <b>TE</b> value goes <b>380 → 810</b> — the biggest single-slot upgrade in this deal, and the only slot that moves.</span>
+              <span class="badge ok">SHIPS TODAY</span>
+            </div>
+            <div class="ghostline">
+              <span class="txt">Illustrative only, not built: <b>≈ TE 10.2 → 17.1 ppg</b> in your starting lineup — the app has no points-per-game data to compute this from.</span>
+              <span class="badge no">NEEDS NEW DATA</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>This is the required fold-in.</b> The TE row is highlighted (subtle purple wash, no new color introduced — reuses the existing <code>--te</code> position hex per <code>docs/cross-client-invariants.md</code>) and a one-line sentence renders directly under the existing net line, inside the same <code>lineupmod</code> container — no new card, no new section header. The sentence is pure client-side arithmetic over the <b>already-shipped</b> <code>starter_impact.slots</code> array: find the slot with the largest <code>|delta|</code>, read its <code>position</code> field, state before/after <code>value</code>. Zero new backend calls. The dashed amber line directly beneath it shows the operator's literal "10.2 → 17.1 ppg" phrasing so the shape of the ask is visible — clearly marked as illustrative, not live.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — A1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1 — Fold-in (calculator)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW B — standalone strip ═══════════════════════ -->
+<div class="rowlbl">Variant B — standalone "Why this trade" strip<span class="fb">new module at the top of the summary, above give/receive</span></div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">B1 — calculator verdict, strip leads the card</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Trade calculator · In league</div>
+          <div class="opp">@league_mate</div>
+          <!-- NEW: leads the card, before give/receive -->
+          <div class="hookstrip">
+            <span class="dot"></span>
+            <span class="txt">Why this trade — your <b>TE</b> jumps <b>380 → 810</b> value (+430), your biggest starter upgrade available right now.</span>
+          </div>
+          <div class="ghostline">
+            <span class="txt">Illustrative: <b>≈ TE 10.2 → 17.1 ppg</b> — needs new points-per-game backend, not built.</span>
+            <span class="badge no">NEEDS NEW DATA</span>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Rome Odunze</div><div class="meta">WR · CHI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 4th (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow" style="border-left-color:var(--te)"><div><div class="nm">Sam LaPorta</div><div class="meta">TE · DET</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+140</b> &nbsp;·&nbsp; <span class="pick">a Late 4th</span> (≈ 0.10 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:5.1%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+          <div class="boardrow"><span class="lbl">Consensus</span><span class="val">670 vs 810</span></div>
+          <div class="lineupmod">
+            <div class="ticklbl">Your lineup — before → after</div>
+            <div class="lineuphead"><span>Slot</span><span>Before</span><span></span><span>After</span><span></span></div>
+            <div class="slotrow2 dim"><span class="slotname">QB</span><span class="pname"><span class="newp">Josh Allen</span></span><span></span><span class="pname"><span class="newp">Josh Allen</span></span><span class="delta flat">—</span></div>
+            <div class="slotrow2 hot">
+              <span class="slotname">TE</span><span class="pname"><span class="oldp">Cade Otton</span></span>
+              <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
+              <span class="pname"><span class="newp">Sam LaPorta</span></span><span class="delta">+430</span>
+            </div>
+            <div class="slotrow2 dim"><span class="slotname">FLEX</span><span class="pname"><span class="newp">Tony Pollard</span></span><span></span><span class="pname"><span class="newp">Tony Pollard</span></span><span class="delta flat">—</span></div>
+            <div class="netline"><span class="lbl">Starting lineup total</span><span class="val">5,650 → 6,080 (+430)</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Own module ahead of the give/receive split — the summary opens with the headline instead of ending with it. Middle rows of the lineup table are omitted here for space (full table shown in A1); a real build keeps all 7 rows. Costs ~44pt more than A1 (a whole new mounted block vs. one line inside an existing one) for a "lead with the punchline" ordering the operator's phrasing implies ("hey you are a contender and…").  Same data source as A1 — one client-side line, no new backend.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="B1 — Standalone strip (calculator)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW C — deck hook ═══════════════════════ -->
+<div class="rowlbl">Variant C — deck card's one-line hook<span class="fb">before the user opens the full summary — biggest data gap of the three</span></div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">C1 — swipe deck / Featured trade card</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@league_mate</div>
+          <!-- NEW: one-line hook under opponent name, before match strength -->
+          <div class="deckhook">Upgrades your weakest starter: <b>TE +430 value</b></div>
+          <div class="strength">
+            <div class="row"><span class="lbl">Match strength</span><span class="val">82</span></div>
+            <div class="track"><div class="fill" style="width:82%"></div></div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Rome Odunze</div><div class="meta">WR · CHI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 4th (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow" style="border-left-color:var(--te)"><div><div class="nm">Sam LaPorta</div><div class="meta">TE · DET</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+140</b> &nbsp;·&nbsp; <span class="pick">a Late 4th</span> (≈ 0.10 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:5.1%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b style="color:var(--warn)">Illustrative layout only — this one is NOT computable today, at all, for this surface.</b> Per the #238 status doc, <code>starter_impact</code> is Mode B (In-league calculator) only: it needs the caller's AND opponent's known rosters plus the league's slot template, evaluated on-demand for one trade. The deck (<code>/api/trades/generate</code>) and asset-ideas feed generate tens of candidate cards per sweep — computing a full before/after optimal lineup for every card is a materially different cost that #238 explicitly deferred to "phase 2." The hook line shown here is placeholder text at the position the module would occupy, not a working feature.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C1 — Deck hook (illustrative only)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Data-availability audit — computable today vs. needs new work</h2>
+  <ul>
+    <li><b>Ships today, zero new backend (used in A1 and B1's <span class="badge ok" style="vertical-align:1px">SHIPS TODAY</span> line):</b> the per-slot <code>{position, value}</code> before/after breakdown already returned by <code>POST /api/trade/evaluate</code> Mode B (<code>backend/server.py</code> <code>_starter_impact()</code> → <code>backend/power_rankings.py</code> <code>optimal_starter_slots()</code>, shipped 2026-08-03, #238). "Biggest single-slot mover" is a client-side <code>max(abs(delta))</code> over an array the client already receives — no new route, no new field, no schema change. This is the only tier the required fold-in (Variant A) needs.</li>
+    <li><b>Computable today, but needs light integration (not built into any variant above, flagged here for completeness):</b> "your TE is below the league average / your weakest position" needs a second, already-live endpoint — <code>GET /api/league/power-rankings</code> (<code>backend/power_rankings.py</code> <code>compute_power_rankings()</code>) returns every team's <code>positions: {QB|RB|WR|TE: {count, value}}</code>. Joining that with the evaluate call's <code>starter_impact.slots</code> gives a real "weakest starting position vs. the league" claim — no new computation, but it is a second network call the trade-summary flow doesn't currently make, and reconciling whole-roster <code>positions_value</code> against a single STARTING slot's value needs a defined comparison (starters-only vs. full roster are different denominators). Worth a scope block if pursued.</li>
+    <li><b>NOT computable today, needs new backend work (flagged <span class="badge no" style="vertical-align:1px">NEEDS NEW DATA</span> everywhere it appears):</b> points-per-game framing ("TE: 10.2 → 17.1 ppg"). <code>git grep -n "ppg\|points_per_game\|per_game" backend/*.py</code> returns nothing outside test files — <b>the app has no fantasy-scoring data source anywhere.</b> The one place weekly points DO exist is <code>backend/outlook/</code> (dark behind the unwired <code>outlook.odds</code> flag): <code>league_state.py</code> pulls real Sleeper matchup <code>points_for</code>/<code>points_against</code>, and <code>strength.py</code>'s <code>RosterValueStrength</code> provider maps a team's TOTAL roster value to a WHOLE-TEAM weekly-points estimate via a documented, unvalidated heuristic (<code>mu = 110 + 12 × z(starting_lineup_value)</code>). Neither is position-level — there is no per-slot or per-position points model anywhere in the codebase, real or heuristic. Building "TE ppg before/after" would mean inventing a new position-level scoring model from scratch (own projections, or an nflverse-style per-position points source), which is a real backend research/design effort, not a mockup follow-on.</li>
+    <li><b>Deck/featured-card mounting (Variant C) is its own gap, independent of PPG vs. value:</b> even the value-based framing that A1/B1 ship today doesn't reach the deck. <code>starter_impact</code> is computed on-demand for one Mode-B evaluate call; the deck generates many candidate cards per sweep and would need per-card optimal-lineup computation at deck-generation cost — the same "phase 2" gap #238's status doc already called out for its own before/after table. Variant C above is a layout illustration only.</li>
+    <li><b>Recommendation:</b> ship Variant A (required fold-in) first — it's additive to an already-shipped payload, one new client-side line, no backend PR. Variant B is the same data with a heavier mount; pick it only if the operator wants the headline to lead the card rather than live inside the lineup table. Leave PPG framing and the deck mount out of the near-term build; both need dedicated scope blocks (new points-per-game data source; deck-scale lineup computation) before any code gets written.</li>
+  </ul>
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-169-position-impact-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>
