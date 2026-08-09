@@ -236,8 +236,14 @@ def _fetch_ktc_html(timeout: int = 15) -> str:
     if os.environ.get("FTF_TEST_MODE") == "1" or os.environ.get("FTF_DP_VALUES_FILE"):
         raise RuntimeError("hermetic run without FTF_KTC_VALUES_FILE — KTC off")
     req = urllib.request.Request(KTC_RANKINGS_URL, headers=_KTC_BROWSER_HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8")
+    # obs.api_events — KTC is a separate external call surface from DP (same
+    # module, different host; unsanctioned HTML scrape — dynastyprocess.md §6).
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("ktc", "rankings_html") as _ob:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
+    return raw
 
 
 def _crosswalk_id_maps() -> tuple[dict, dict]:
@@ -526,8 +532,15 @@ def _fetch_dynasty_process(
                 VALUES_URL,
                 headers={"User-Agent": "FantasyTradeFinder/1.0"},
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
+            # obs.api_events — public CSV, nothing to redact; the Elo-seed
+            # pipeline's only staleness/latency signal (dynastyprocess.md §7).
+            from . import api_observability as _api_obs
+            with _api_obs.observe_call("dynastyprocess", "values_players",
+                                       format=scoring) as _ob:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+                _ob.ok(status=getattr(resp, "status", 200),
+                       response_bytes=len(raw))
         except Exception as e:
             print(f"⚠️  DynastyProcess fetch failed ({e}) — using flat Elo baseline")
             return {}, {}, {}
@@ -635,8 +648,13 @@ def _fetch_pick_values_csv(timeout: int = 10) -> str:
         return pathlib.Path(_pick_file).read_text()  # missing file = loud, by design
     req = urllib.request.Request(
         PICK_VALUES_URL, headers={"User-Agent": "FantasyTradeFinder/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8")
+    # obs.api_events — DP's SECOND file (values.csv PICK rows), separate egress.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("dynastyprocess", "values_picks") as _ob:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
+    return raw
 
 
 def _parse_pick_values(raw: str) -> dict[str, dict[str, float]]:

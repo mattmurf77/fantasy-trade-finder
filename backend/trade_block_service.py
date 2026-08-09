@@ -79,10 +79,19 @@ def fetch_league_players(league_id: str, *, _opener=None, timeout: int = 15) -> 
         request.add_header(k, v)
     request.add_header("x-sleeper-graphql-op", op)
     opener = _opener or urllib.request.urlopen
-    with opener(request, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if payload.get("errors"):
-        raise RuntimeError(f"Sleeper GraphQL error: {payload['errors'][:1]}")
+    # obs.api_events — this is one of the documented `_sleeper_get` bypass
+    # sites (docs/integrations/sleeper.md §6.3); routed through the shared
+    # wrapper idiom here. Real network path only (`_opener` = tests).
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("sleeper", "graphql.league_players",
+                               method="POST", active=_opener is None,
+                               league_id=league_id) as _ob:
+        with opener(request, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        payload = json.loads(raw)
+        if payload.get("errors"):
+            raise RuntimeError(f"Sleeper GraphQL error: {payload['errors'][:1]}")
+        _ob.ok(status=200, response_bytes=len(raw))
     rows = (payload.get("data") or {}).get("league_players")
     return rows if isinstance(rows, list) else []
 
@@ -94,8 +103,15 @@ def _fetch_rosters(league_id: str, *, _opener=None, timeout: int = 15) -> list[d
         headers={"User-Agent": "FTF/1.0"},
     )
     opener = _opener or urllib.request.urlopen
-    with opener(request, timeout=timeout) as resp:
-        rows = json.loads(resp.read().decode("utf-8"))
+    # obs.api_events — `_sleeper_get` bypass site #2 (sleeper.md §6.3).
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("sleeper", "league.rosters",
+                               active=_opener is None,
+                               league_id=league_id) as _ob:
+        with opener(request, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        rows = json.loads(raw)
+        _ob.ok(status=200, response_bytes=len(raw))
     return rows if isinstance(rows, list) else []
 
 

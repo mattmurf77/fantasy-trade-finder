@@ -54,9 +54,12 @@ WAT_DARK = frozenset({"sleeper_send_attempted", "sleeper_send_succeeded",
 WAT_EVENTS = WAT_LIVE | WAT_DARK
 
 # Pure lifecycle/impression noise — excluded from DAU/WAU/MAU, churn, retention.
+# api_call/api_request are API-observability plumbing (obs.api_events,
+# backend/api_observability.py; rows carry user_id='system:api') — they must
+# never read as user intent.
 NON_INTENT_EVENTS = frozenset({
     "app_opened", "app_backgrounded", "app_open", "screen_viewed",
-    "push_sent", "client_error",
+    "push_sent", "client_error", "api_call", "api_request",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
@@ -94,7 +97,8 @@ FEATURE_VERTICALS = {
 
 VALID_REPORTS = ("overview", "waterfall", "time", "bottlenecks", "churn",
                  "releases", "adoption", "engagement", "pfo", "onepager",
-                 "journeys", "retention", "segments", "rankquality")
+                 "journeys", "retention", "segments", "rankquality",
+                 "apihealth")
 WINDOW_MAX_DAYS = 90
 N_MIN = 20
 ROW_CAP_JSON = 5000
@@ -1340,6 +1344,134 @@ def _integrity_flag(mean_abs, spearman, bias, n):
 
 
 # ---------------------------------------------------------------------------
+# R-API — API observability (flag obs.api_events, backend/api_observability.py)
+# ---------------------------------------------------------------------------
+
+def report_apihealth(conn, start_day, end_day, include_demo, row_cap,
+                     service=None, **_):
+    """API observability over api_call (outbound) / api_request (inbound) rows.
+
+    rows    = per (day, direction, service, endpoint) aggregates: recorded
+              event count, error count, est_calls (Σ sample_n on sampled
+              successes + 1 per error row — the honest rescale), failure
+              rate, p50/p95 latency.
+    summary = per-service totals + recent_failures (newest 100) + slowest
+              (top 20 recorded calls by ms).
+
+    `service` filters to ONE outbound service (e.g. 'espn' — "all failed
+    ESPN calls today" is ?start=<today>&end=<today>&service=espn); inbound
+    rows are excluded while the filter is active. Aggregation happens in
+    Python (rows are bounded by retention + sampling + row_cap) so no
+    cross-dialect JSON extraction is needed.
+    """
+    q = text(
+        "SELECT occurred_at, event_type, props FROM user_events "
+        "WHERE event_type IN ('api_call', 'api_request') "
+        "AND user_id = 'system:api' "
+        "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
+        "ORDER BY occurred_at DESC LIMIT :cap")
+    db_rows = conn.execute(
+        q, {"s": start_day, "e": end_day, "cap": row_cap}).fetchall()
+
+    caveats = []
+    if not db_rows:
+        caveats.append(_dark_caveat(
+            "report:apihealth",
+            "no api_call/api_request rows in window — flag obs.api_events "
+            "off, capture not yet deployed, or rows aged out (retention)"))
+        return [], caveats, {"services": {}, "recent_failures": [],
+                             "slowest": []}
+    if len(db_rows) >= row_cap:
+        caveats.append({"code": "row_cap", "scope": "report:apihealth",
+                        "detail": f"window truncated to the newest {row_cap} "
+                                  "rows — narrow the date range"})
+    caveats.append({
+        "code": "sampled", "scope": "report:apihealth",
+        "detail": "successes are 1-in-N sampled (model_config "
+                  "obs_success_sample_n); est_calls rescales via each row's "
+                  "sample_n — errors are always recorded in full"})
+
+    buckets: dict = {}     # (day, direction, service, endpoint) → agg
+    svc_tot: dict = {}     # service → totals
+    failures: list = []
+    slowest: list = []
+    for occurred_at, etype, props_json in db_rows:
+        try:
+            p = json.loads(props_json) if props_json else {}
+        except Exception:
+            p = {}
+        direction = "outbound" if etype == "api_call" else "inbound"
+        svc = p.get("service", "unknown") if direction == "outbound" else "ftf_api"
+        if service:
+            if direction == "inbound" or svc != service:
+                continue
+        endpoint = (p.get("endpoint") if direction == "outbound"
+                    else p.get("route")) or "unknown"
+        ok = bool(p.get("ok", True))
+        ms = p.get("ms") if isinstance(p.get("ms"), (int, float)) else None
+        weight = int(p.get("sample_n") or 1) if ok else 1
+        day = occurred_at[:10]
+
+        b = buckets.setdefault((day, direction, svc, endpoint),
+                               {"recorded": 0, "errors": 0, "est_calls": 0,
+                                "ms": []})
+        b["recorded"] += 1
+        b["est_calls"] += weight
+        if ms is not None:
+            b["ms"].append(ms)
+        t = svc_tot.setdefault(svc, {"direction": direction, "recorded": 0,
+                                     "errors": 0, "est_calls": 0, "ms": []})
+        t["recorded"] += 1
+        t["est_calls"] += weight
+        if ms is not None:
+            t["ms"].append(ms)
+        if not ok:
+            b["errors"] += 1
+            t["errors"] += 1
+            if len(failures) < 100:
+                failures.append({
+                    "occurred_at": occurred_at, "direction": direction,
+                    "service": svc, "endpoint": endpoint,
+                    "status": p.get("status"),
+                    "error_class": p.get("error_class"),
+                    "error_kind": p.get("error_kind"),
+                    "error_code": p.get("error_code"),
+                    "ms": ms, "league_id": p.get("league_id"),
+                })
+        if ms is not None:
+            slowest.append({"occurred_at": occurred_at, "service": svc,
+                            "endpoint": endpoint, "ms": ms,
+                            "status": p.get("status"), "ok": ok})
+
+    rows = []
+    for (day, direction, svc, endpoint), b in sorted(buckets.items()):
+        rows.append({
+            "day": day, "direction": direction, "service": svc,
+            "endpoint": endpoint, "recorded": b["recorded"],
+            "errors": b["errors"], "est_calls": b["est_calls"],
+            "failure_rate": (b["errors"] / b["est_calls"])
+                            if b["est_calls"] else None,
+            "p50_ms": percentile(b["ms"], 0.5),
+            "p95_ms": percentile(b["ms"], 0.95),
+        })
+    summary = {
+        "services": {
+            svc: {
+                "direction": t["direction"], "recorded": t["recorded"],
+                "errors": t["errors"], "est_calls": t["est_calls"],
+                "failure_rate": (t["errors"] / t["est_calls"])
+                                if t["est_calls"] else None,
+                "p50_ms": percentile(t["ms"], 0.5),
+                "p95_ms": percentile(t["ms"], 0.95),
+            } for svc, t in sorted(svc_tot.items())
+        },
+        "recent_failures": failures,
+        "slowest": sorted(slowest, key=lambda r: r["ms"], reverse=True)[:20],
+    }
+    return rows, caveats, summary
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1358,6 +1490,7 @@ _BUILDERS = {
     "engagement": report_engagement,
     "pfo": report_pfo,
     "onepager": report_onepager,
+    "apihealth": report_apihealth,
 }
 
 
@@ -1376,9 +1509,10 @@ def _parse_window(start, end):
 
 
 def run_report(report, *, start=None, end=None, include_demo=False,
-               fmt="json", segment=None, anchor=None):
+               fmt="json", segment=None, anchor=None, service=None):
     """Compute a report on the read-only engine. Returns (envelope_dict, None)
-    for json, or (csv_str, 'text/csv') for csv. Raises BadParam on bad input."""
+    for json, or (csv_str, 'text/csv') for csv. Raises BadParam on bad input.
+    `service` is consumed by apihealth only (outbound-service filter)."""
     if report not in VALID_REPORTS:
         raise BadParam("unknown_report")
     start_day, end_day = _parse_window(start, end)
@@ -1387,9 +1521,9 @@ def run_report(report, *, start=None, end=None, include_demo=False,
     with db.ro_engine.connect() as conn:
         rows, caveats, summary = builder(
             conn, start_day, end_day, include_demo, row_cap,
-            segment=segment, anchor=anchor)
+            segment=segment, anchor=anchor, service=service)
     params_echo = {"segment": segment, "include_demo": include_demo,
-                   "format": fmt, "anchor": anchor}
+                   "format": fmt, "anchor": anchor, "service": service}
     env = _envelope(report, start_day, end_day, rows, caveats, params_echo)
     if summary is not None:
         env["summary"] = summary

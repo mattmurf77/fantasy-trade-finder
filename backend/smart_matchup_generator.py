@@ -259,22 +259,32 @@ Respond with JSON only — no markdown, no explanation outside the JSON:
   "reasoning": "<1–2 sentences explaining why this matchup is most informative for dynasty rankings>"
 }}"""
 
-        message = self.client.messages.create(
-            model=self.MODEL,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        # obs.api_events — token counts + prompt CLASS only (anthropic.md §8):
+        # never the rendered prompt or Claude's reasoning text.
+        from . import api_observability as _api_obs
+        with _api_obs.observe_call("anthropic", "messages.pair", method="POST",
+                                   prompt_class="pair_select",
+                                   candidate_count=len(candidates)) as _ob:
+            message = self.client.messages.create(
+                model=self.MODEL,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
 
-        raw = message.content[0].text.strip()
+            raw = message.content[0].text.strip()
 
-        # Strip markdown code fences if present
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.split("```")[0]
+            # Strip markdown code fences if present
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.split("```")[0]
 
-        result = json.loads(raw.strip())
+            result = json.loads(raw.strip())
+            _usage = getattr(message, "usage", None)
+            _ob.ok(status=200,
+                   input_tokens=getattr(_usage, "input_tokens", None),
+                   output_tokens=getattr(_usage, "output_tokens", None))
         idx = int(result["selected_index"]) - 1  # to 0-based
         idx = max(0, min(idx, len(candidates) - 1))  # clamp
 
@@ -384,20 +394,29 @@ Respond with JSON only:
   "reasoning": "<1-2 sentences why this trio is most informative>"
 }}"""
 
-        message = self.client.messages.create(
-            model=self.MODEL,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        # obs.api_events — token counts + prompt CLASS only (anthropic.md §8).
+        from . import api_observability as _api_obs
+        with _api_obs.observe_call("anthropic", "messages.trio", method="POST",
+                                   prompt_class="trio_select",
+                                   candidate_count=len(candidates)) as _ob:
+            message = self.client.messages.create(
+                model=self.MODEL,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
 
-        raw = message.content[0].text.strip()
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.split("```")[0]
+            raw = message.content[0].text.strip()
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.split("```")[0]
 
-        result = __import__("json").loads(raw.strip())
+            result = __import__("json").loads(raw.strip())
+            _usage = getattr(message, "usage", None)
+            _ob.ok(status=200,
+                   input_tokens=getattr(_usage, "input_tokens", None),
+                   output_tokens=getattr(_usage, "output_tokens", None))
         idx    = max(0, min(int(result["selected_index"]) - 1, len(candidates) - 1))
         p1, p2, p3 = candidates[idx]
         return Trio(player_a=p1, player_b=p2, player_c=p3, reasoning=result["reasoning"])

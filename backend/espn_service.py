@@ -166,22 +166,37 @@ def fetch_league(
 
     req = urllib.request.Request(league_url(league_id, season), headers=headers)
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise EspnAuthError() from e
-        if e.code == 404:
-            raise EspnError(
-                f"league {league_id} not found for season {season}", kind="not_found"
-            ) from e
-        raise EspnError(f"ESPN HTTP {e.code}", kind="http") from e
+    # obs.api_events — the one ESPN endpoint (docs/integrations/espn.md §6.1).
+    # Cookie SHAPE booleans only (s2_encoded / swid_braced — exactly the
+    # fingerprint that would have caught the 2026-08-09 encoding mismatch);
+    # the cookie VALUES never reach an event in any form.
+    from . import api_observability as _api_obs
+    _has_cookie = bool(espn_s2 and swid)
+    with _api_obs.observe_call(
+            "espn", "league_read", active=_opener is None,
+            league_id=str(league_id), season=season,
+            auth_mode="cookie" if _has_cookie else "public",
+            s2_encoded=("%" in espn_s2) if _has_cookie else None,
+            swid_braced=(swid.strip().startswith("{")
+                         and swid.strip().endswith("}")) if _has_cookie else None,
+    ) as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+            _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise EspnAuthError() from e
+            if e.code == 404:
+                raise EspnError(
+                    f"league {league_id} not found for season {season}", kind="not_found"
+                ) from e
+            raise EspnError(f"ESPN HTTP {e.code}", kind="http") from e
 
-    try:
-        return json.loads(raw)
-    except ValueError as e:
-        raise EspnError("ESPN returned non-JSON", kind="parse") from e
+        try:
+            return json.loads(raw)
+        except ValueError as e:
+            raise EspnError("ESPN returned non-JSON", kind="parse") from e
 
 
 # ---------------------------------------------------------------------------
@@ -518,9 +533,17 @@ def fetch_crosswalk(timeout: int = 15, _opener=None) -> Crosswalk:
         PLAYERIDS_URL, headers={"User-Agent": "FantasyTradeFinder/1.0"}
     )
     opener = _opener or urllib.request.urlopen
-    with opener(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8")
-    return _parse_crosswalk_rows(csv.DictReader(io.StringIO(raw)))
+    # obs.api_events — GitHub egress, tagged source dynastyprocess NOT espn
+    # (docs/integrations/espn.md §6.5). Public CSV: nothing to redact; the
+    # row count is the cheapest schema-drift signal available.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("dynastyprocess", "db_playerids",
+                               active=_opener is None) as _ob:
+        with opener(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        xwalk = _parse_crosswalk_rows(csv.DictReader(io.StringIO(raw)))
+        _ob.ok(status=200, response_bytes=len(raw), rows=len(xwalk.by_espn_id))
+    return xwalk
 
 
 def get_crosswalk(_opener=None) -> Crosswalk:

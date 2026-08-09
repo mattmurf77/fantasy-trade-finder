@@ -28,6 +28,7 @@ import random
 import re
 import secrets
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -206,6 +207,7 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
+from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 
@@ -543,40 +545,45 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
         _ts.counters["sleeper_live_egress_attempts"] += 1
     log.info("→ Sleeper GET  %s", url)
     req = urllib.request.Request(url, headers={"User-Agent": "FantasyTradeFinder/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
-            status = r.status
-            raw    = r.read()
-        preview = raw[:200].decode("utf-8", errors="replace")
-        log.info("← Sleeper %s  body_preview=%r  body_len=%d", status, preview, len(raw))
-        data = json.loads(raw)
-        log.debug("   parsed type=%s", type(data).__name__)
-        if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
-            _sleeper_record(url, data)
-        return data
-    except ssl.SSLCertVerificationError as e:
-        # Verified context failed at runtime — retry once with unverified
-        log.warning("SSL verification failed (%s) — retrying without verification", e)
-        _SSL_CTX = ssl._create_unverified_context()
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
-            status = r.status
-            raw    = r.read()
-        preview = raw[:200].decode("utf-8", errors="replace")
-        log.info("← Sleeper (unverified) %s  body_preview=%r  body_len=%d", status, preview, len(raw))
-        data = json.loads(raw)
-        if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
-            _sleeper_record(url, data)
-        return data
-    except urllib.error.HTTPError as e:
-        body_preview = e.read(200).decode("utf-8", errors="replace")
-        log.warning("← Sleeper HTTPError %s %s  body=%r", e.code, e.reason, body_preview)
-        raise
-    except urllib.error.URLError as e:
-        log.error("← Sleeper URLError: %s", e.reason)
-        raise
-    except Exception as e:
-        log.error("← Sleeper unexpected error: %s", e)
-        raise
+    _ep_class, _ep_league = _api_obs.sleeper_endpoint_class(url)
+    with _api_obs.observe_call("sleeper", _ep_class, league_id=_ep_league) as _ob:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
+                status = r.status
+                raw    = r.read()
+            preview = raw[:200].decode("utf-8", errors="replace")
+            log.info("← Sleeper %s  body_preview=%r  body_len=%d", status, preview, len(raw))
+            data = json.loads(raw)
+            _ob.ok(status=status, response_bytes=len(raw))
+            log.debug("   parsed type=%s", type(data).__name__)
+            if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
+                _sleeper_record(url, data)
+            return data
+        except ssl.SSLCertVerificationError as e:
+            # Verified context failed at runtime — retry once with unverified
+            log.warning("SSL verification failed (%s) — retrying without verification", e)
+            _SSL_CTX = ssl._create_unverified_context()
+            _ob.note(retry=True)
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
+                status = r.status
+                raw    = r.read()
+            preview = raw[:200].decode("utf-8", errors="replace")
+            log.info("← Sleeper (unverified) %s  body_preview=%r  body_len=%d", status, preview, len(raw))
+            data = json.loads(raw)
+            _ob.ok(status=status, response_bytes=len(raw))
+            if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
+                _sleeper_record(url, data)
+            return data
+        except urllib.error.HTTPError as e:
+            body_preview = e.read(200).decode("utf-8", errors="replace")
+            log.warning("← Sleeper HTTPError %s %s  body=%r", e.code, e.reason, body_preview)
+            raise
+        except urllib.error.URLError as e:
+            log.error("← Sleeper URLError: %s", e.reason)
+            raise
+        except Exception as e:
+            log.error("← Sleeper unexpected error: %s", e)
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -2493,6 +2500,16 @@ def _cleanup_loop() -> None:
         except Exception as e:
             log.warning("persisted-session purge failed: %s", e)
 
+        # API-observability retention (obs.api_events): age out api_call/
+        # api_request rows past FTF_OBS_RETENTION_DAYS (default 30). The
+        # helper self-throttles to one DELETE per 6 h and never raises.
+        try:
+            purged = _api_obs.purge_observability_events()
+            if purged:
+                log.info("Purged %d expired API-observability event row(s)", purged)
+        except Exception as e:
+            log.warning("api-observability purge failed: %s", e)
+
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
         #       the frontend stops polling
@@ -2599,6 +2616,76 @@ def _stash_device_and_touch_activity() -> None:
     # missing row for a session verified before the flag flipped on.
     _persist_session_if_eligible(token, sess)
 
+
+# ---------------------------------------------------------------------------
+# Inbound API observability (flag obs.api_events, backend/api_observability.py)
+# ---------------------------------------------------------------------------
+# Records our OWN /api/* requests as `api_request` events: route PATTERN (the
+# Flask url_rule, never the raw path — no ids/PII in URLs), method, status,
+# latency, resolved session user, and the JSON error code on 4xx/5xx.
+# Excluded: anything outside /api/ (static assets/web pages) and the
+# analytics ingest route itself (api_observability.EXCLUDED_ROUTES).
+# Failure isolation: every capture path is wrapped — an analytics failure
+# logs to stderr and the response passes through byte-identical.
+
+@app.before_request
+def _obs_request_start() -> None:
+    g._obs_t0 = time.perf_counter()
+
+
+def _obs_capture_inbound(status: int, response=None, exc=None) -> None:
+    """Shared capture for after_request (normal) + teardown (unhandled exc)."""
+    try:
+        path = request.path or ""
+        if not path.startswith("/api/"):
+            return
+        rule = request.url_rule.rule if request.url_rule else "(unmatched)"
+        g._obs_done = True
+        t0 = getattr(g, "_obs_t0", None)
+        ms = int((time.perf_counter() - t0) * 1000) if t0 is not None else None
+        user_id = None
+        token = request.headers.get("X-Session-Token", "")
+        if token:
+            with _sessions_lock:
+                sess = _sessions.get(token)
+            if sess:
+                user_id = sess.get("user_id")
+        error_code = None
+        response_bytes = None
+        if response is not None:
+            try:
+                response_bytes = response.calculate_content_length()
+            except Exception:
+                response_bytes = None
+            if status >= 400 and response.is_json:
+                try:
+                    error_code = (response.get_json(silent=True) or {}).get("error")
+                except Exception:
+                    error_code = None
+        _api_obs.record_inbound(
+            route=rule, method=request.method, status=status, ms=ms,
+            user=user_id, error_code=error_code,
+            error_class=(type(exc).__name__ if exc is not None else None),
+            response_bytes=response_bytes)
+    except Exception as e:
+        print(f"[api_observability] inbound hook failed (non-fatal): {e}",
+              file=sys.stderr)
+
+
+@app.after_request
+def _obs_request_end(response):
+    if _api_obs.is_enabled(_api_obs.FLAG):
+        _obs_capture_inbound(response.status_code, response=response)
+    return response
+
+
+@app.teardown_request
+def _obs_request_teardown(exc) -> None:
+    # after_request is skipped on an unhandled exception — record the 500
+    # here instead (once: _obs_done guards the normal path's double-record).
+    if exc is not None and not getattr(g, "_obs_done", False) \
+            and _api_obs.is_enabled(_api_obs.FLAG):
+        _obs_capture_inbound(500, exc=exc)
 
 
 # ─── Trade-job helpers (streaming + pre-gen) ─────────────────────────────
@@ -6918,11 +7005,14 @@ def analytics_report_route(report):
     SQL in backend/analytics_queries.py, computed on the read-only engine).
 
     Operator-only (X-Cron-Secret). `report` ∈ waterfall|time|bottlenecks|churn|
-    releases|adoption|engagement|pfo|onepager. `health` is a SEPARATE static
-    route above (Flask matches it before this dynamic rule), never in this enum.
+    releases|adoption|engagement|pfo|onepager|apihealth. `health` is a SEPARATE
+    static route above (Flask matches it before this dynamic rule), never in
+    this enum.
 
     Query params: start,end (ISO date; default trailing 28d, window ≤90d),
-    format=json|csv, include_demo=0|1, segment=<dim>. Insufficiency renders as
+    format=json|csv, include_demo=0|1, segment=<dim>, service=<name>
+    (apihealth only — filters outbound rows to one service, e.g.
+    ?service=espn for "all failed ESPN calls today"). Insufficiency renders as
     null cells + caveats, never fabricated zeros; a bad param → 400, never 500.
     """
     _require_cron_auth()
@@ -6937,6 +7027,7 @@ def analytics_report_route(report):
             fmt=fmt,
             segment=request.args.get("segment"),
             anchor=request.args.get("anchor"),
+            service=request.args.get("service"),
         )
     except aq.BadParam as e:
         code = "unknown_report" if str(e) == "unknown_report" else "bad_param"
@@ -15047,12 +15138,15 @@ def _send_expo_push(messages: list) -> None:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as r:
-                status = r.status
-                if status >= 300:
-                    log.warning("Expo push non-2xx: status=%s", status)
-                else:
-                    log.info("Expo push delivered: %d message(s)", len(chunk))
+            with _api_obs.observe_call("expo_push", "send", method="POST",
+                                       batch_size=len(chunk)) as _ob:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    status = r.status
+                _ob.ok(status=status)
+            if status >= 300:
+                log.warning("Expo push non-2xx: status=%s", status)
+            else:
+                log.info("Expo push delivered: %d message(s)", len(chunk))
     except Exception as e:
         log.warning("_send_expo_push failed (non-fatal): %s", e)
 

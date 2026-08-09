@@ -581,6 +581,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # a pickable rail beneath it. OFF (default) = FeaturedTradeWindow.tsx
     # renders byte-identical to today.
     "trades.player_offers_calc",
+    # ── API observability (operator-directed, 2026-08-09) ────────────────
+    # backend/api_observability.py: inbound (/api/* Flask hooks) + outbound
+    # (every external egress chokepoint) API event capture into user_events
+    # as server-fired `api_call`/`api_request` rows, with error-always +
+    # success-sampled volume policy and a 30d retention purge. Ships ON in
+    # config/features.json — this key is the kill switch. OFF ⇒ zero event
+    # writes, zero overhead beyond the flag check, byte-identical responses
+    # (the hooks/wrappers no-op before doing any work).
+    "obs.api_events",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
