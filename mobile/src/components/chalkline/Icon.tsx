@@ -27,7 +27,8 @@ export type IconName =
   | 'plus'
   | 'swap'
   | 'flag'
-  | 'upload';
+  | 'upload'
+  | 'reload';
 
 interface Props {
   name: IconName;
@@ -95,4 +96,9 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   // #232 rankings import — arrow UP out of the tray ("the user is giving us
   // their rankings"; the v3 mock corrected v2's download-direction arrow).
   upload: <Path d="M10 12V3M6 7l4-4 4 4M4 14v3h12v-3" />,
+  // ESPN Connect field failure (2026-08-09) — the manual RELOAD control on a
+  // wedged WebView. Single arc + arrowhead read as "reload" at 14-16px;
+  // mobile-only (no web ESPN-login surface exists to mirror this glyph in
+  // web/style-guide.html).
+  reload: <Path d="M16 5v4h-4M16.2 9a6.3 6.3 0 10-1.6 6.4" />,
 };

@@ -143,3 +143,120 @@ inference.
    is private".
 7. **Re-sync path:** League tab → Re-sync after cookie expiry still routes to
    the sheet with the sign-in recovery.
+
+---
+
+## 2026-08-09 iteration — build 95 field report + league picker
+
+**New report (operator, verbatim):** "The browser did not work on the sign in
+page that I was directed towards. I had to go to the log in page a second
+time within the browser session and then it worked. I think we're directing
+to an old/legacy log in page." Distinct from the two bugs above (this one is
+about the WebView never reaching a usable login state at all on first load,
+not a Safari escape or a rejected-cookie loop).
+
+### 1. Login-page cold-load fix
+
+**Investigation (this session, no WKWebView available — curl + DNS only):**
+evaluated the candidates the task raised against `https://www.espn.com/login`
+(current):
+
+- `fan.espn.com/espn/login` — **DNS `SERVFAIL`, the host does not resolve at
+  all.** Ruled out outright.
+- `fantasy.espn.com/football/` (unauth) — 404s directly; hitting a specific
+  league path unauth 302s to `www.espn.com/fantasy/football/` (the
+  signed-out fantasy landing), never to a full-page login form. Not a login
+  entry point.
+- `www.espn.com/login` (kept) — every curl (with/without a redirect query
+  param) hit AWS WAF's JS challenge (`202`, `x-amzn-waf-action: challenge`,
+  empty body) rather than a real page — confirming this is the CURRENT,
+  edge-protected entry ESPN serves (a stale/legacy page would not be behind
+  the same active WAF as the rest of espn.com), but also meaning the
+  iframe-bootstrap behavior itself could not be directly inspected from curl
+  (a bot signature can't pass the JS challenge; a real WKWebView is needed).
+
+**Grounding update from the coordinator (recovered browser evidence):** in
+the operator's own successful Chrome session, login ALSO only worked on the
+**second** load of this exact URL (loaded once, reloaded, then succeeded) —
+matching the field report. Combined with this screen deliberately clearing
+all ESPN cookies/storage on mount (`clearEspnCookies`, by design — every
+capture must be a fresh login), every attempt on this screen IS a cold load,
+which is exactly the condition that trips Disney OneID's iframe bootstrap.
+
+**Decision:** keep `https://www.espn.com/login` — it is the correct, current
+entry point, not a wrong/legacy destination — and fix the cold-load bootstrap
+directly:
+
+- **One automatic warm-up reload**, fired once right after the FIRST load
+  completes (`onLoadEnd`), mirroring the empirical fix (second load worked in
+  both the field report and the recovered browser session). Deterministic,
+  single-shot — not a retry loop (`autoReloadedRef` guard,
+  `EspnConnectScreen.tsx`).
+- **Manual RELOAD control** (Chalkline, `testID="espn-connect.reload"`, new
+  `Icon name="reload"` glyph) always visible in the banner — resilience net
+  regardless of the URL decision, one tap recovers a wedged page.
+- **Wedge-detection hint:** a single timer (`WEDGE_HINT_TIMEOUT_MS = 10s`)
+  armed after any load past the automatic warm-up; if neither a cookie
+  capture nor the OTP step has been seen by the time it fires, a
+  `testID="espn-connect.wedge-hint"` banner suggests tapping reload. One
+  timer, checked once — no state machine.
+
+**Honest limits:** none of this could be device-verified from this session
+(no WKWebView available; curl cannot pass ESPN's WAF challenge or execute the
+OneID iframe bootstrap). **Needs a TestFlight run** — see the checklist
+addendum below.
+
+### 2. League picker — `GET /api/espn/my-leagues` (flag `espn.league_picker`)
+
+Operator: "Do we need the league ID if we have the user log in? Can't we
+fetch all of their ESPN leagues and prompt them to select the league they
+want to import from there?" Built as a discovery layer in front of the
+existing link flow (`backend/espn_service.fetch_fan_leagues` +
+`_parse_fan_leagues`, `docs/integrations/espn.md` §1.7/§6.7,
+`docs/api-reference.md`), surfaced in `EspnLinkSheet` as a league SELECTION
+list that replaces the league-id text field once the account's ESPN cookies
+are known (freshly captured earlier in the session and already linked once,
+or previously linked — the fan-profile call reads the session user's STORED
+`espn_credentials` row, same as every other espn.py route; a brand-new
+capture that hasn't linked anything yet 403s harmlessly on its first attempt
+and succeeds from the second link onward). Manual league-id entry is always
+one tap away (`espn-link.manual-entry-toggle` / `espn-link.picker-toggle`)
+and is untouched for public leagues, which need no login at all.
+
+**Honest limits — the fan API's real shape is UNVERIFIED from this session.**
+`fan.api.espn.com/apis/v2/fans/{SWID}` is confirmed LIVE (an unauthenticated
+curl with a syntactically-valid unknown SWID returns `404
+{"message":"fan not found"}` — the host resolves and answers JSON), but its
+AUTHENTICATED response shape for a real fan is not publicly documented and
+this session had no live ESPN cookies to test against. `_parse_fan_leagues`
+follows the best-known community-reverse-engineered shape (`preferences[].
+metaData.entry.groups[]`, filtered to football via `entry.abbrev == "ffl"`)
+and is written to degrade to an empty/partial list on any shape drift rather
+than raise — so a wrong guess fails safe (empty picker, manual entry still
+works), but the picker won't actually populate until the real shape is
+confirmed. **Needs a TestFlight run against a real ESPN account** to confirm
+or correct the parse.
+
+### Operator TestFlight checklist — this iteration's additions
+
+8. **Login reaches a usable page:** open the ESPN Connect screen fresh (first
+   time this session) — the login page should load without a manual reload
+   being necessary (the automatic warm-up reload should have already handled
+   the cold-load issue). If it's still blank/wedged, confirm the
+   `espn-connect.wedge-hint` banner appears after ~10s and that tapping the
+   reload icon (`espn-connect.reload`, top-right of the banner) recovers it.
+2. **Manual reload always works:** tap the reload icon at any point during
+   login — the page reloads in place, nothing crashes, capture still
+   completes normally afterward.
+9. **League picker appears:** with an ESPN account that has fantasy football
+   leagues, open "Private league?" → "Sign in to ESPN" and complete login
+   WITHOUT typing a league id first — after capture, a list of leagues
+   ("Pick your ESPN league:") should appear instead of (or the next time you
+   open the private section) the plain text field. If it doesn't appear (the
+   fan-API shape may not match what's parsed), "Enter a league ID instead"
+   is always available as a fallback — note whether the picker was empty vs.
+   absent vs. correct, since that's the signal for whether `_parse_fan_leagues`
+   needs a shape fix.
+10. **Second league, no re-sign-in:** after linking one ESPN league, open the
+    sheet again for a second league — the picker should appear immediately
+    (from stored cookies) without needing to sign in to ESPN again.

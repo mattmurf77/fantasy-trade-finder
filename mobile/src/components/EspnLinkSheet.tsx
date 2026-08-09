@@ -12,7 +12,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import { useFlag } from '../state/useFeatureFlags';
 import { ApiError } from '../api/client';
@@ -22,8 +22,10 @@ import {
   linkEspnLeague,
   isEspnPreview,
   parseEspnLeagueInput,
+  getMyEspnLeagues,
   EspnLinkPreview,
   EspnImportSummary,
+  EspnMyLeague,
 } from '../api/espn';
 
 interface Props {
@@ -69,6 +71,15 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<EspnLinkPreview | null>(null);
   const [summary, setSummary] = useState<EspnImportSummary | null>(null);
+  // League picker state. `myLeagues`: null = not fetched (or the fetch
+  // failed — e.g. no stored ESPN cookies yet, which is the ordinary case
+  // for a brand-new capture that hasn't linked anything before); an array
+  // (possibly empty) = a successful fetch. `useManualEntry` lets the user
+  // fall back to the text field even when a picker is available (their
+  // league isn't listed, or they'd rather type it).
+  const [myLeagues, setMyLeagues] = useState<EspnMyLeague[] | null>(null);
+  const [myLeaguesBusy, setMyLeaguesBusy] = useState(false);
+  const [useManualEntry, setUseManualEntry] = useState(false);
 
   // Teardown PRD 01-01 (S1B-04), flag `ux.sheet_guard`:
   //   OFF — every close resets, so a stray backdrop tap wipes the league ID
@@ -83,6 +94,11 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   // byte-identical to before. Requires the sheet itself (gated by
   // `espn.link`) to be visible at all.
   const webviewCapture = useFlag('espn.webview_capture');
+  // League picker (2026-08-09, feedback: "fetch all their ESPN leagues and
+  // let them pick, instead of asking for a league ID"). Off ⇒ myLeagues
+  // stays null forever (fetchMyLeagues no-ops) and the input step is
+  // byte-identical to before — plain league-id text field only.
+  const leaguePicker = useFlag('espn.league_picker');
   // While the ESPN Connect WebView is pushed we HIDE this Modal: a
   // native-stack push lands on the navigator behind an open RN Modal, so we
   // reveal it by dropping our own Modal, then restore it when the cookies
@@ -94,6 +110,10 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   const dirty =
     step === 'team' ||
     (step === 'input' && !!(input.trim() || espnS2.trim() || swid.trim()));
+  // The picker replaces the text field (and its Continue button — picking a
+  // row already calls fetchPreview directly) whenever it has rows to show
+  // and the user hasn't asked for manual entry instead.
+  const showingPicker = leaguePicker && !useManualEntry && !!myLeagues && myLeagues.length > 0;
 
   function reset() {
     setStep('input');
@@ -107,6 +127,37 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     setPreview(null);
     setSummary(null);
     setHiddenForWebView(false);
+    setMyLeagues(null);
+    setMyLeaguesBusy(false);
+    setUseManualEntry(false);
+  }
+
+  // Optimistic league-discovery fetch — never surfaces an error. A 403
+  // (no stored ESPN cookies yet, the ordinary case for a brand-new capture
+  // that hasn't linked anything before) or any other failure just leaves
+  // `myLeagues` null, which is exactly "no picker available, show the text
+  // field" (see the render logic below). Guarded by the flag so it's a
+  // true no-op with `espn.league_picker` off.
+  async function fetchMyLeagues() {
+    if (!leaguePicker) return;
+    setMyLeaguesBusy(true);
+    try {
+      const leagues = await getMyEspnLeagues();
+      setMyLeagues(leagues);
+      if (leagues.length > 0) setUseManualEntry(false);
+    } catch {
+      setMyLeagues(null);
+    } finally {
+      setMyLeaguesBusy(false);
+    }
+  }
+
+  // Picking a league from the list proceeds through the SAME preview flow
+  // manual entry uses — just with the id supplied directly instead of
+  // parsed from the text field.
+  function selectMyLeague(lg: EspnMyLeague) {
+    setInput(lg.league_id);
+    void fetchPreview({ leagueId: lg.league_id });
   }
 
   // Launch the ESPN Connect WebView (flag-gated button). Hide our Modal for
@@ -132,6 +183,13 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
       setSwid(pair.swid);
       if (parseEspnLeagueInput(input)) {
         void fetchPreview({ espnS2: pair.espnS2, swid: pair.swid });
+      } else {
+        // No league id typed yet — this is exactly the case the picker is
+        // for. A capture only fills local state; cookies aren't stored
+        // server-side until a link actually happens, so this call 403s
+        // (harmlessly) on a user's FIRST-ever ESPN link and succeeds from
+        // their second onward (or immediately if they'd linked before).
+        void fetchMyLeagues();
       }
     });
     return off;
@@ -174,9 +232,15 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   }
 
   // `override` lets the WebView-capture path pass freshly-delivered cookies
-  // without waiting for the espnS2/swid state to flush (setState is async).
-  async function fetchPreview(override?: { espnS2: string; swid: string }) {
-    const leagueId = parseEspnLeagueInput(input);
+  // (without waiting for the espnS2/swid state to flush — setState is
+  // async) and the league-picker path pass the picked id directly instead
+  // of parsing it back out of the text field.
+  async function fetchPreview(override?: {
+    espnS2?: string;
+    swid?: string;
+    leagueId?: string;
+  }) {
+    const leagueId = override?.leagueId ?? parseEspnLeagueInput(input);
     if (!leagueId) {
       setError('Enter a numeric ESPN league ID or a fantasy.espn.com league URL.');
       return;
@@ -307,22 +371,101 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
               Read-only import: we read team names and rosters — we never post
               or change anything in ESPN.
             </Text>
-            <TextInput
-              testID="espn-link.input"
-              accessibilityLabel="ESPN league ID or league URL"
-              style={styles.field}
-              value={input}
-              onChangeText={setInput}
-              placeholder="ESPN league ID or league URL"
-              placeholderTextColor={chalk.dim}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="default"
-              editable={!busy}
-            />
+            {/* League picker (flag `espn.league_picker`): once we know the
+                account's ESPN cookies (WebView capture, or already stored
+                from a prior link), skip asking for a league id entirely —
+                list what the account actually has. Manual entry is always
+                one tap away (below), and is what renders here with the
+                flag off or before any leagues are known. */}
+            {showingPicker && myLeagues ? (
+              <View testID="espn-link.my-leagues">
+                <Text style={[type.bodySm, styles.sub]}>Pick your ESPN league:</Text>
+                <ScrollView style={styles.teamList}>
+                  {myLeagues.map((lg, idx) => (
+                    <Pressable
+                      key={lg.league_id}
+                      testID={`espn-link.my-league.${lg.league_id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${lg.league_name}${lg.season ? `, ${lg.season}` : ''}${lg.team_name ? `, ${lg.team_name}` : ''}`}
+                      onPress={() => selectMyLeague(lg)}
+                      disabled={busy}
+                      style={({ pressed }) => [
+                        styles.teamRow,
+                        idx === myLeagues.length - 1 && styles.teamRowLast,
+                        busy && styles.rowDim,
+                        pressed && !busy && styles.rowPressed,
+                      ]}
+                    >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={type.title} numberOfLines={1}>{lg.league_name}</Text>
+                        <Text style={[type.bodySm, styles.rowMeta]}>
+                          {lg.season ? `${lg.season}` : ''}
+                          {lg.team_name ? `${lg.season ? ' · ' : ''}${lg.team_name}` : ''}
+                        </Text>
+                      </View>
+                      <Icon name="chevron-right" size={16} color={chalk.dim} />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <Pressable
+                  testID="espn-link.manual-entry-toggle"
+                  onPress={() => setUseManualEntry(true)}
+                  style={styles.cookieToggle}
+                  accessibilityRole="button"
+                >
+                  <Text style={[type.bodySm, styles.learnMoreText]}>
+                    Don’t see it? Enter a league ID instead
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  testID="espn-link.input"
+                  accessibilityLabel="ESPN league ID or league URL"
+                  style={styles.field}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="ESPN league ID or league URL"
+                  placeholderTextColor={chalk.dim}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="default"
+                  editable={!busy}
+                />
+                {leaguePicker && myLeagues && myLeagues.length === 0 ? (
+                  <Text testID="espn-link.my-leagues-empty" style={[type.bodySm, styles.cookieHint]}>
+                    No fantasy football leagues found on this ESPN account.
+                  </Text>
+                ) : null}
+                {leaguePicker && useManualEntry && myLeagues && myLeagues.length > 0 ? (
+                  <Pressable
+                    testID="espn-link.picker-toggle"
+                    onPress={() => setUseManualEntry(false)}
+                    style={styles.cookieToggle}
+                    accessibilityRole="button"
+                  >
+                    <Text style={[type.bodySm, styles.learnMoreText]}>
+                      Back to my leagues
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {leaguePicker && myLeaguesBusy ? (
+                  <ActivityIndicator testID="espn-link.my-leagues-busy" color={chalk.dim} />
+                ) : null}
+              </>
+            )}
             <Pressable
               testID="espn-link.private-toggle"
-              onPress={() => setShowCookies((v) => !v)}
+              onPress={() => {
+                setShowCookies((v) => !v);
+                // Opening the private section is also the "stored creds
+                // exist" trigger (a user who linked ESPN before, or
+                // captured earlier this session) — try the picker without
+                // requiring another WebView round-trip. No-ops past the
+                // first successful/attempted fetch.
+                if (!showCookies && myLeagues === null) void fetchMyLeagues();
+              }}
               style={styles.cookieToggle}
               accessibilityRole="button"
               accessibilityState={{ expanded: showCookies }}
@@ -384,13 +527,15 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
             {error ? (
               <Text testID="espn-link.error" style={styles.error}>{error}</Text>
             ) : null}
-            <Button
-              testID="espn-link.continue"
-              label={busy ? 'Fetching league…' : 'Continue'}
-              onPress={() => fetchPreview()}
-              disabled={busy}
-              style={styles.cta}
-            />
+            {!showingPicker ? (
+              <Button
+                testID="espn-link.continue"
+                label={busy ? 'Fetching league…' : 'Continue'}
+                onPress={() => fetchPreview()}
+                disabled={busy}
+                style={styles.cta}
+              />
+            ) : null}
           </>
         ) : null}
 
@@ -524,6 +669,8 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
   },
   cookieHint: { color: chalk.dim },
+  // League-picker ↔ manual-entry toggle links — ice = action color (Chalkline).
+  learnMoreText: { color: ice.base },
   error: { ...type.bodySm, color: semantic.neg },
   cta: { marginTop: space.sm },
   cancel: { marginTop: space.xs },

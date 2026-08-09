@@ -58,6 +58,7 @@
   "auth.email_capture": false,
   "espn.link": true,
   "espn.webview_capture": true,
+  "espn.league_picker": true,
   "mfl.link": true,
   "mfl.auth_link": true,
   "fleaflicker.link": false,

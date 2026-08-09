@@ -18668,6 +18668,66 @@ def espn_leagues():
     return jsonify({"leagues": leagues})
 
 
+@app.route("/api/espn/my-leagues")
+def espn_my_leagues():
+    """Discover the ESPN fantasy football leagues the session user's ESPN
+    account belongs to, via the fan-profile endpoint — so the client can
+    offer a league PICKER instead of asking for a league ID (feedback:
+    "can't we fetch all their ESPN leagues and let them pick?").
+
+    Uses the session user's STORED espn_credentials row (the same cookies
+    captured by the WebView sign-in or a prior manual paste that was sent to
+    /api/espn/link) — there is no body, and this route never accepts pasted
+    cookies itself; it is a read-only convenience layer in front of the
+    existing link flow. Public leagues are unaffected — manual league-id
+    entry (which needs no login) stays the fallback path this route doesn't
+    touch.
+
+    404 while `espn.league_picker` is off. 403 `espn_auth_required` when no
+    ESPN session is stored yet, or ESPN rejects the stored one (sign in
+    again — same recovery UX as the existing link-flow 403). 503
+    `espn_unconfigured` if the stored cookie can't be decrypted (fail-closed,
+    mirrors espn_import). 200 `{"leagues": []}` when the account genuinely
+    has none — never fabricated. A fan-API shape surprise degrades to a
+    partial/empty list, never a 500 (espn_service._parse_fan_leagues).
+    """
+    if not is_enabled("espn.league_picker"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import espn_service as _espn
+    from .database import get_espn_credential
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    cred = get_espn_credential(user_id)
+    if not cred:
+        return jsonify({
+            "error": "espn_auth_required",
+            "message": "Sign in to ESPN first so we can see your leagues.",
+        }), 403
+    try:
+        espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+        swid = cred.get("swid")
+    except _sleeper_write.SleeperWriteError as e:
+        log.warning("espn_my_leagues: stored cookie undecryptable for %s: %s",
+                    user_id, e)
+        return jsonify({"error": "espn_unconfigured"}), 503
+    if not espn_s2 or not swid:
+        return jsonify({
+            "error": "espn_auth_required",
+            "message": "Sign in to ESPN first so we can see your leagues.",
+        }), 403
+
+    try:
+        leagues = _espn.fetch_fan_leagues(espn_s2, swid)
+    except _espn.EspnError as e:
+        return _espn_error_response(e)
+
+    return jsonify({"leagues": leagues})
+
+
 @app.route("/api/espn/import", methods=["POST"])
 @_gate_unverified_write
 def espn_import():
