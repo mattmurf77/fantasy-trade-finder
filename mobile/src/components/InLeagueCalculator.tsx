@@ -33,7 +33,7 @@ import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
-import type { ScoringFormat, StarterImpactSlot } from '../shared/types';
+import type { ScoringFormat, StarterImpactSlot, Tier } from '../shared/types';
 
 // In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).
 // The FTF differentiator applied to a hand-built trade: pick a real opponent,
@@ -229,6 +229,18 @@ export default function InLeagueCalculator({
       ...Object.fromEntries(Object.values(pickById).map((p) => [p.id, p.base])),
     }),
     [valuesQ.data, pickById],
+  );
+  // #263 — pick-value ladder tier per row, server-computed off the RAW seed
+  // Elo (see api/calc.ts CalcValueRow.tier) — reused as-is, never re-derived
+  // from `board` above (elo_to_value scale, not the tier bands' Elo scale).
+  // Owned picks have no tier of their own (a pick already IS a tier rung);
+  // absent here, so callers fall back to their numeric board value.
+  const tierById = useMemo<Record<string, Tier>>(
+    () =>
+      Object.fromEntries(
+        (valuesQ.data?.players ?? []).map((r) => [r.id, r.tier]),
+      ) as Record<string, Tier>,
+    [valuesQ.data],
   );
   const playerById = useMemo(() => {
     const m: Record<string, CalcPlayer> = {};
@@ -659,6 +671,7 @@ export default function InLeagueCalculator({
         teamName="your roster"
         players={giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
+        tierOf={(p) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
         accent={semantic.neg}
         addTestID="calc.league-give-add"
         leagueId={leagueId}
@@ -680,6 +693,7 @@ export default function InLeagueCalculator({
         teamName={opponent ? `@${opponent.username}` : 'their roster'}
         players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
+        tierOf={(p) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
         accent={semantic.pos}
         addTestID="calc.league-receive-add"
         leagueId={leagueId}
@@ -789,6 +803,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
+        tierOf={(p: CalcPlayer) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
         leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();
@@ -803,6 +818,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
+        tierOf={(p: CalcPlayer) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
         leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();

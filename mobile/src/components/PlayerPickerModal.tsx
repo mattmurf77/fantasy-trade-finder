@@ -16,8 +16,11 @@ import MemberEnteredMarker, {
   usePicksTradeable,
 } from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Badge, Button, TickLabel } from './chalkline';
+import { TIER_LABEL } from '../utils/tierBands'; // tier name in the composed a11y label
 import { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
+import type { Tier } from '../shared/types';
 import {
   ink,
   chalk,
@@ -49,6 +52,10 @@ interface Props {
   selectedIds: string[];
   /** Value on the roster owner's board (what it costs them / what they'd demand). */
   ownerBoardValue: (p: CalcPlayer) => number;
+  /** #263 — pick-value ladder tier for the row (replaces `ownerBoardValue`'s
+   *  number for players; picks keep their numeric value). Omitted/null per
+   *  row falls back to the numeric value. */
+  tierOf?: (p: CalcPlayer) => Tier | null | undefined;
   /** Second board's value shown under the primary (e.g. what it's worth to you). */
   secondaryValue?: (p: CalcPlayer) => number;
   /** Prefix for the secondary value line, e.g. "you" or "them". */
@@ -74,6 +81,7 @@ export default function PlayerPickerModal({
   suggested,
   selectedIds,
   ownerBoardValue,
+  tierOf,
   secondaryValue,
   secondaryPrefix = 'you',
   badgeFor,
@@ -109,13 +117,17 @@ export default function PlayerPickerModal({
   const renderRow = (item: CalcPlayer, testID: string, need = false) => {
     const marked =
       picksTradeable && isMemberEntered(item.pickSource) && !!item.id && !!leagueId;
+    const itemTier = tierOf?.(item);
+    const valuePhrase = itemTier
+      ? `tier ${TIER_LABEL[itemTier]}`
+      : `value ${ownerBoardValue(item).toLocaleString()}`;
     return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={`${item.name}, ${item.pos}, ${
         item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
-      }, value ${ownerBoardValue(item).toLocaleString()}${
+      }, ${valuePhrase}${
         need ? ', fills a roster need for the receiving team' : ''
       }${marked ? `. ${MEMBER_ENTERED_COPY}` : ''}`}
       accessibilityHint="Adds this player to the trade"
@@ -159,7 +171,15 @@ export default function PlayerPickerModal({
         />
       </View>
       <View style={styles.values}>
-        <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
+        {itemTier ? (
+          // TierBadge hardcodes alignSelf:'flex-start'; this column
+          // right-aligns its children, so re-align the badge itself.
+          <View style={styles.tierSlot}>
+            <TierBadge tier={itemTier} />
+          </View>
+        ) : (
+          <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
+        )}
         {secondaryValue ? (
           <Text style={styles.yourValue}>
             {secondaryPrefix}: {secondaryValue(item).toLocaleString()}
@@ -302,5 +322,6 @@ const styles = StyleSheet.create({
   info: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   values: { alignItems: 'flex-end' },
+  tierSlot: { alignSelf: 'flex-end' },
   yourValue: { ...type.data, color: chalk.dim },
 });

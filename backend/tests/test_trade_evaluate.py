@@ -721,7 +721,13 @@ def test_values_endpoint_shape_and_etag():
         # value-desc (#214: pool gained 'elite' 7389.1 > 'stud' 4481.7 >
         # 'good2' 4055.2 > 'good')
         assert [p["id"] for p in rows[:4]] == ["elite", "stud", "good2", "good"]
-        assert set(rows[0]) == {"id", "name", "position", "team", "age", "value"}
+        assert set(rows[0]) == {"id", "name", "position", "team", "age", "value", "tier"}
+        # #263 — tier is walked off the RAW seed Elo (not the transformed
+        # `value`), via the same RankingService.tier_for_elo the extension/
+        # anchor wizard use.
+        by_id = {p["id"]: p["tier"] for p in rows}
+        assert by_id["elite"] == srv.RankingService.tier_for_elo(_SEED["elite"], "WR", "1qb_ppr")
+        assert by_id["bench"] == srv.RankingService.tier_for_elo(_SEED["bench"], "RB", "1qb_ppr")
         etag = r.headers["ETag"]
         r2 = c.get("/api/trade/values?scoring_format=1qb_ppr",
                    headers={"If-None-Match": etag})

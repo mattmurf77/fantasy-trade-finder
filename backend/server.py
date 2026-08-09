@@ -8009,6 +8009,13 @@ def trade_calc_values_route():
     elo_to_value over the pool's seed Elo, the exact per-player numbers the
     trade engine prices with. Open endpoint; ETag/Cache-Control like
     /api/players (values change at most daily).
+
+    #263 — `tier` is the pick-value ladder tier (see /api/tier-config) the
+    player's RAW seed Elo lands in, via the same RankingService.tier_for_elo
+    band-walk the extension/anchor wizard use (never a second mapping).
+    `value` above is elo_to_value-transformed and NOT on the same scale as
+    the tier bands, so `tier` is computed from the pre-transform seed Elo,
+    not derived from `value`.
     """
     fmt = _calc_scoring_format(request.args.get("scoring_format"))
     try:
@@ -8021,6 +8028,7 @@ def trade_calc_values_route():
             "team":     getattr(p, "team", None),
             "age":      getattr(p, "age", None),
             "value":    round(e2v(seed.get(p.id, 1500.0)), 1),
+            "tier":     RankingService.tier_for_elo(seed.get(p.id, 1500.0), p.position, fmt),
         } for p in pool_players]
         rows.sort(key=lambda r: r["value"], reverse=True)
         payload = json.dumps({"scoring_format": fmt, "players": rows})
