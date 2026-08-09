@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-08-08 (context-overload remediation shipped — PR #101)
+
+- **Session-boot cost cut ~70–80%** (`e907c93`): zero-read boot contract (4-slice SessionStart hook: HANDOFF + NEXT + CHANGELOG top-2 + GOTCHAS index), living-memory retention policy (CHANGELOG keep-10 + quarterly [archive/](archive/), caps, FORMAT.md §Retention), 30 role-skill descriptions trimmed (5 retired), mobile screens/components CLAUDE.mds rewritten as maps (167KB→15.5KB), backend/web/extension orientation files added, TOCs on the 4 big reference docs, `docs/feedback/items/INDEX.md` (118 rows). Audit + measurements: [`../docs/reviews/2026-08-08-context-overload-audit.md`](../docs/reviews/2026-08-08-context-overload-audit.md). Deferred items in that report §Deferred. Boot measured after: ~5.4k tok vs 19–32k before.
+
 ## 2026-08-08 (feature gates + CI shipped as PR #100; express lane)
 
 - **PR #100 squash-merged to main (`4b60440`)**: feature gates (scope block via [`../docs/templates/feature-scope.md`](../docs/templates/feature-scope.md) → Maestro delta → HLD/LLD/api-reference docs table → pre-ship sim gate w/ `githooks/pre-push`), **first real CI** (backend pytest — 1995 passed on base — + mobile tsc + testid-lint), recovery ledger (`docs/recovery/`), branch-triage report, `.gitignore` `scripts/` over-match fix (guard/ops scripts now tracked; testid-lint fixed for BSD + allowlist), feedback skill wired to the gates. **Express lane:** operator may declare "quick fix" to skip gates 1–3 + use `FTF_SKIP_SIM_GATE=1` with a one-line TEST_LEDGER note; agents never self-select; schema/API/flag/analytics changes get an are-you-sure. Operator follow-ups: branch ruleset on `main` requiring the 3 checks; `git config core.hooksPath githooks` per clone.

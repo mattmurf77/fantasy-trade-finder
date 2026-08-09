@@ -28,6 +28,13 @@ window they may be unrecoverable).
 | `468df39` | `feat/feedback-backend-sync-plan` |
 | `241f223` | `feat/wave2-init07` |
 
+## Merged-branch deletions (verified by merge itself)
+
+| Tip sha | Branch | Note |
+|---|---|---|
+| `35deb70` | `process/feature-gates-ci-2026-08-08` (6 commits) | Squash-merged via PR #100 (`4b60440`, CI green); branch deleted post-merge |
+| `4a381f7` | `context-slim-2026-08-08` (7 commits) | Squash-merged via PR #101 (`e907c93`, CI green); worktree removed + branch deleted post-merge |
+
 ## Group 2 — worktree-pinned DELETE branches (29), NOT yet deleted
 
 Pending `git worktree remove` first; when executed, append their tip shas here
