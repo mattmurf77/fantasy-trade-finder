@@ -505,10 +505,13 @@ def test_mc_09c_provenance_disappears_entirely_with_the_flag_off(
     for e in eveners:
         assert "source" not in e and "season" not in e
 
-    # 4 — power-rankings items
+    # 4 — power-rankings items. `round` (#285) is unconditional — it's not
+    # a W3 M-C provenance field, just the #285 pick-sum label math's input,
+    # so it stays present with the flag off; only pick_id/season/source are
+    # gated by this flag.
     powered = server._power_picks_by_owner(LEAGUE, "1qb_ppr")
     for item in (i for its in powered.values() for i in its):
-        assert set(item) == {"label", "value"}
+        assert set(item) == {"label", "value", "round"}
 
 
 # ---------------------------------------------------------------------------

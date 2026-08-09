@@ -14,6 +14,22 @@ experiment. Everyone else's numbers are unchanged; per-player values are
 untouched (#277/#278 tier badges already ship there — this item is
 aggregates only).
 
+## §Rule change (#285, 2026-08-09)
+
+The operator filed a bug against this exact experiment: "Draft picks should
+be summed into the league/team values. Keep it simple. 1sts equal firsts,
+3-4 2nds equal a 1st. No other picks included." The team TOTAL label
+(`total_value_label`) changed as a result — full detail, rationale, and the
+numeric-`total_value`-stays-unchanged decision live in
+`docs/feedback/items/285-pick-sums/status.md`. Short version: the label's
+base switched from `total_value` (positions + DOLLAR-priced picks) to
+`positions_value` (players only) PLUS a new literal pick-count term
+(`_pick_firsts_equivalent`: 1st = 1.0 firsts, 2nd = 1/3.5 firsts, 3rd+ = 0),
+so picks stop being double-priced through two different formulas at once.
+The `_aggregate_pick_label(value)` snippet below is now
+`_aggregate_pick_label(value, pick_firsts=0.0)` — the positional labels
+(this doc's whole subject otherwise) call it exactly as shown, unaffected.
+
 ## Formula reused (not invented)
 
 The label reuses `backend/server.py`'s `_pick_gap_equivalent` — the SAME
