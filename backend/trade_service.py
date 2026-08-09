@@ -2077,6 +2077,82 @@ class League:
 
 
 # ---------------------------------------------------------------------------
+# #172 — trade intent modes (flag trades.intent_modes)
+# ---------------------------------------------------------------------------
+# The user declares the SHAPE of trade they want off the deck and the finder
+# respects it. Semantics are grounded in the pick-value tier ladder
+# (RankingService.tier_for_elo / ORDERED_TIERS, best→worst) via each side's
+# BEST (highest-tier) asset — the same "top asset per side" comparison
+# star_tax_adjustment already makes.
+#
+#   consolidate — user sends MORE pieces than they receive, AND the best
+#                 incoming asset is a genuine quality upgrade (strictly
+#                 better tier than the best outgoing asset).
+#   tier_up     — best incoming asset's tier is strictly better than the
+#                 best outgoing asset's tier. Piece counts don't matter.
+#   tier_down   — inverse of consolidate: user receives MORE pieces than
+#                 they send (trading their best piece away for a package),
+#                 AND the best outgoing asset is strictly better tier than
+#                 the best incoming asset.
+#
+# None/unknown intent is a no-op (every card kept) — the historical,
+# byte-identical default.
+
+def _best_tier_idx(
+    ids: list[str],
+    seed_elo: dict[str, float],
+    player_db: dict,
+    scoring_format: str,
+) -> int:
+    """Index into ORDERED_TIERS of the BEST (lowest-index) tier among
+    `ids`, via each asset's seed ELO. Unranked/empty sinks to
+    len(ORDERED_TIERS) — below every real tier — mirroring
+    star_tax_adjustment's _top_tier_idx."""
+    from .ranking_service import ORDERED_TIERS, RankingService
+    best = len(ORDERED_TIERS)
+    for pid in ids:
+        elo = _seed_of(pid, seed_elo)
+        pos = _position_of(pid, player_db)
+        t = RankingService.tier_for_elo(elo, pos, scoring_format)
+        idx = ORDERED_TIERS.index(t) if t is not None else len(ORDERED_TIERS)
+        if idx < best:
+            best = idx
+    return best
+
+
+def _filter_by_trade_intent(
+    cards: list[TradeCard],
+    intent: str | None,
+    seed_elo: dict[str, float],
+    player_db: dict,
+    scoring_format: str,
+) -> list[TradeCard]:
+    """#172 post-generation filter over an already-generated card list.
+    `intent` must already be flag-resolved by the caller (None when the
+    flag `trades.intent_modes` is off) — this function trusts it, so it
+    stays a pure filter with no flag lookups of its own."""
+    if not intent:
+        return cards
+
+    def _keep(c: TradeCard) -> bool:
+        give_idx = _best_tier_idx(c.give_player_ids, seed_elo, player_db, scoring_format)
+        recv_idx = _best_tier_idx(c.receive_player_ids, seed_elo, player_db, scoring_format)
+        upgrade   = recv_idx < give_idx   # lower ORDERED_TIERS index = better tier
+        downgrade = give_idx < recv_idx
+        n_give = len(c.give_player_ids)
+        n_recv = len(c.receive_player_ids)
+        if intent == "consolidate":
+            return n_give > n_recv and upgrade
+        if intent == "tier_up":
+            return upgrade
+        if intent == "tier_down":
+            return n_recv > n_give and downgrade
+        return True   # unknown value — no-op, never a silent empty deck
+
+    return [c for c in cards if _keep(c)]
+
+
+# ---------------------------------------------------------------------------
 # Trade Service
 # ---------------------------------------------------------------------------
 
@@ -2155,6 +2231,10 @@ class TradeService:
         untouchable_ids: set | None = None,    # never trade these away (#2)
         target_ids: set | None = None,         # bias toward acquiring these (#2)
         not_interested_ids: set | None = None, # never offer these TO the user (#163)
+        trade_intent: str | None = None,       # #172 (flag trades.intent_modes):
+                                                # "consolidate" | "tier_up" |
+                                                # "tier_down" | None — post-
+                                                # generation shape filter
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -2177,6 +2257,11 @@ class TradeService:
         league = self._leagues.get(league_id)
         if not league:
             raise ValueError(f"Unknown league: {league_id!r}")
+
+        # #172 — resolve the flag once so both paths below share one check;
+        # off ⇒ trade_intent is never read, so flag-off responses stay
+        # byte-identical to today regardless of what the caller passed.
+        _intent = trade_intent if FLAGS.trades_intent_modes else None
 
         # Trade engine v2 — entirely separate scoring path so the legacy
         # branch below stays byte-for-byte identical when the flag is off.
@@ -2217,6 +2302,9 @@ class TradeService:
                             or acquire_positions or trade_away_positions)
             if targeted and not cards:
                 cards = self._relaxed_targeted_pass(_v2_kwargs)
+            # #172 — pure post-generation filter, applied last so it never
+            # interferes with the #189 relaxed retry above.
+            cards = _filter_by_trade_intent(cards, _intent, seed_elo, self._players, scoring_format)
             return cards
 
         new_cards: list[TradeCard] = []
@@ -2292,6 +2380,11 @@ class TradeService:
         # Filter out trades the user has already swiped on (within memory window)
         # and dedup, then sort by composite score
         new_cards = self._dedup_and_sort(new_cards)
+
+        # #172 — pure post-generation filter (see the flag-off note at the
+        # top of this method). Applied before storage: a filtered-out card
+        # was never surfaced to this job's caller.
+        new_cards = _filter_by_trade_intent(new_cards, _intent, seed_elo, self._players, scoring_format)
 
         # Store
         for card in new_cards:

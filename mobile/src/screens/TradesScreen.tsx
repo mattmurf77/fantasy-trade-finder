@@ -58,7 +58,7 @@ import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
-import TradeDnaSheet from '../components/TradeDnaSheet';
+import TradeDnaSheet, { type TradeIntent } from '../components/TradeDnaSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
@@ -351,6 +351,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // to that lane; tapping the active pill again clears back to All. The
   // pill row only renders when at least one deck card carries a lane.
   const [laneFilter, setLaneFilter] = useState<'window' | 'value' | null>(null);
+  // #172 — trade intent modes ("I want to consolidate / tier up / tier
+  // down"), a single-select shape filter sent to /api/trades/generate.
+  // Chip UI lives only in the #257 full sheet (trades.edit_full_sheet);
+  // this state exists regardless of that flag so it's always defined for
+  // the mutation body, but nothing ever sets it when the chips don't render.
+  const [tradeIntent, setTradeIntent] = useState<TradeIntent>(null);
   // #107/#110 — measured layout height of the TOP card. The behind-card
   // peek is clipped to this so a taller next card (e.g. 2 player tiles
   // behind a 1-player top) can't leak its extra tile out from under the
@@ -428,6 +434,8 @@ export default function TradesScreen({ navigation, route }: any) {
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
   // #257 — Controls Card → full edit sheet consolidation (variant C).
   const fullSheetOn = useFlag('trades.edit_full_sheet');
+  // #172 — trade intent modes chip row (full sheet only).
+  const intentModesOn = useFlag('trades.intent_modes');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -614,6 +622,18 @@ export default function TradesScreen({ navigation, route }: any) {
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
+  }
+
+  // #172 — trade intent modes. Tapping the active chip clears it (single-
+  // select, tap-again-to-clear). Unlike fairness/lane this does NOT reset
+  // the deck outright — it autosaves like the sheet's other DNA prefs and
+  // marks the #257 "Preferences changed" refresh strip (the same
+  // prefsChangedSinceGenerateRef machinery outlook/positions use) so the
+  // user opts into regenerating rather than losing the current deck.
+  function handleTradeIntent(next: TradeIntent) {
+    haptics.selection();
+    setTradeIntent((prev) => (prev === next ? null : next));
+    prefsChangedSinceGenerateRef.current = true;
   }
 
   // Preferences — open outlook sheet the first time the user lands here
@@ -1034,6 +1054,10 @@ export default function TradesScreen({ navigation, route }: any) {
         // FB #156 Specific Team — scope the sweep to one league-mate. Omitted
         // (not null) when unset so untargeted payloads stay byte-identical.
         opponent_user_id: scopedOpponent || undefined,
+        // #172 — trade intent modes. Omitted (not null) when unset so
+        // byte-identical payloads hold for every user who never touches
+        // the chips (flag off, or flag on but no selection made).
+        trade_intent: tradeIntent ?? undefined,
       });
     },
     onSuccess: (snapshot) => {
@@ -1042,10 +1066,21 @@ export default function TradesScreen({ navigation, route }: any) {
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
       if (snapshot.status === 'complete' && snapshot.cards.length === 0) {
+        // #172 — an active intent gets its own honest empty-state copy
+        // (same mechanism as the existing fairness-aware message, not a
+        // new one) so "no results" reads as "no results for THIS shape",
+        // not "the finder is broken".
+        const intentCopy: Record<NonNullable<TradeIntent>, string> = {
+          consolidate: 'No consolidation trades found right now.',
+          tier_up: 'No tier-up trades found right now.',
+          tier_down: 'No tier-down trades found right now.',
+        };
         setToast({
-          msg: fairnessOn
-            ? 'No fair trades found. Try turning Trade fairness off.'
-            : 'No trades found. Rank more players or try again later.',
+          msg: tradeIntent
+            ? intentCopy[tradeIntent]
+            : fairnessOn
+              ? 'No fair trades found. Try turning Trade fairness off.'
+              : 'No trades found. Rank more players or try again later.',
           tone: 'warn',
         });
       }
@@ -1179,6 +1214,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
+    setTradeIntent(null); // #172 — a declared shape is league-specific
     setJob(null);
     setEdits({});
     setSwapTarget(null);
@@ -3149,6 +3185,10 @@ export default function TradesScreen({ navigation, route }: any) {
                 onAnyChange: () => {
                   prefsChangedSinceGenerateRef.current = true;
                 },
+                // #172 — omitted entirely when the flag is off, which is
+                // what keeps the chip row from rendering at all.
+                tradeIntent: intentModesOn ? tradeIntent : undefined,
+                onTradeIntent: intentModesOn ? handleTradeIntent : undefined,
               }
             : undefined
         }
