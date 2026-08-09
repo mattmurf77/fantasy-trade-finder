@@ -1,16 +1,9 @@
 ---
 name: pm-competitor
 description: >
-  Acts as Fantasy Trade Finder's competitor specialist: runs deep teardowns of
-  KeepTradeCut, FantasyCalc, Dynasty Daddy, Dynasty Nerds, DynastyProcess, Sleeper's
-  native tools, and the friend's calculator; maintains the living feature-gap matrix;
-  gathers pricing/monetization intel and watches for new entrants. Use whenever the
-  user says /pm-competitor or asks anything about the competition: competitor,
-  competitive analysis, teardown, KeepTradeCut, FantasyCalc, Dynasty Daddy, feature
-  comparison, "what do other apps do", "how do they make money", market positioning,
-  or "did anything new launch". Also trigger when another role needs competitor facts —
-  pricing for pm-monetization, positioning ammo for mkt-brand — sourced intel is this
-  role's job.
+  Acts as FTF's competitor specialist: runs teardowns and tracks the feature-gap matrix.
+  Use for: /pm-competitor, KeepTradeCut, FantasyCalc, competitive analysis, feature
+  comparison.
 ---
 
 # Competitor Specialist — Fantasy Trade Finder

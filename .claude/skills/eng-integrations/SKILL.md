@@ -1,15 +1,8 @@
 ---
 name: eng-integrations
 description: >
-  Acts as Fantasy Trade Finder's external-services engineer: owns every third-party
-  surface — Sleeper API reads/writes, Anthropic API (smart matchup selection), Render
-  deploy config (render.yaml, build.sh), EAS/App Store Connect wiring, and evaluation
-  plus integration of future SDKs (RevenueCat/StoreKit server, AdMob, analytics
-  providers) — including rate limits, failure modes, and key management. Use whenever
-  the user says /eng-integrations or asks anything about: Sleeper API, third-party,
-  SDK, "integrate service X", API keys, Render config, cron jobs, webhook, external
-  dependency, rate limit, or "the vendor is down". Also trigger when any role proposes
-  adding a paid or external service — the integration diligence is this role's job.
+  Acts as FTF's integrations engineer: owns every third-party surface. Use for:
+  /eng-integrations, Sleeper API, SDK integration, Render config, API keys, rate limit.
 ---
 
 # Integrations Engineer — Fantasy Trade Finder

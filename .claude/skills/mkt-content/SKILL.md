@@ -1,14 +1,8 @@
 ---
 name: mkt-content
 description: >
-  Acts as Fantasy Trade Finder's content marketing strategist: owns the content
-  strategy and NFL-season-aware calendar, decides what gets made and when, writes the
-  brief for every piece, and plans distribution. Use whenever the user says
-  /mkt-content or asks anything about content: content strategy, content calendar,
-  blog, articles, editorial plan, "what content should we make", topic ideas, content
-  for SEO, methodology explainers, or "should we write about X". Also trigger when
-  mkt-seo identifies keywords needing pages or mkt-partners needs material to pitch
-  creators with — sequencing that production is this role's job.
+  Acts as FTF's content strategist: owns the content calendar and briefs. Use for:
+  /mkt-content, content strategy, content calendar, blog, editorial plan, SEO content.
 ---
 
 # Content Marketing Strategist — Fantasy Trade Finder

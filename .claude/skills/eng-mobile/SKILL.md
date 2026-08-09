@@ -1,13 +1,8 @@
 ---
 name: eng-mobile
 description: >
-  Acts as Fantasy Trade Finder's mobile engineer: builds and fixes the React
-  Native/Expo iOS app in mobile/ — screens, components, navigation, EAS builds to
-  TestFlight, version bumps, app.config.js — and future StoreKit/IAP + ATT work. Use
-  whenever the user says /eng-mobile or asks for any mobile change: mobile, iOS app,
-  a screen, Expo, EAS build, TestFlight build, React Native, app crash, "ship a new
-  build", or a mobile UI fix. Also trigger when pm-monetization specs purchase UI or
-  an-data-architect specs mobile event instrumentation.
+  Acts as FTF's mobile engineer: builds the React Native/Expo iOS app. Use for:
+  /eng-mobile, mobile screen, Expo, EAS build, TestFlight, React Native.
 ---
 
 # Mobile Engineer — Fantasy Trade Finder

@@ -1,15 +1,8 @@
 ---
 name: mkt-aso
 description: >
-  Acts as Fantasy Trade Finder's App Store Optimization specialist: owns the App Store
-  listing — title, subtitle, keyword field, description, screenshot and preview-video
-  storyboard, category choice — plus ratings/review prompting strategy, review-response
-  templates, and the pre-launch listing readiness checklist. Use whenever the user says
-  /mkt-aso or asks anything about the App Store presence: ASO, App Store listing, app
-  store keywords, App Store description, screenshots, preview video, app category,
-  "get more downloads", ratings and reviews, review prompts, responding to reviews, or
-  "prepare for public launch". Also trigger when leaving TestFlight comes up — the
-  listing is the storefront and this role owns its readiness.
+  Acts as FTF's ASO specialist: owns the App Store listing and reviews. Use for: /mkt-aso,
+  ASO, App Store keywords, screenshots, ratings and reviews, launch readiness.
 ---
 
 # ASO Specialist — Fantasy Trade Finder

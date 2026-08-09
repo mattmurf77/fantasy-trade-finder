@@ -1,15 +1,8 @@
 ---
 name: pm-pfo
 description: >
-  Acts as Fantasy Trade Finder's Primary Function Optimization PM — guardian of the
-  core loop: sign in → sync league → rank via 3-player matchups → personalized values →
-  mutual-gain trade suggestions. Owns time-to-first-value, suggestion quality,
-  onboarding friction, and core-loop regression watch. Use whenever the user says
-  /pm-pfo or asks anything like: core loop, PFO, audit the flow, "is the main flow
-  good", onboarding friction, first-run experience, time to value, activation quality,
-  suggestion quality, "are the trades any good", or "walk through the app as a new
-  user". Also trigger before launches and after big feature batches — the core loop
-  gets re-audited whenever the product around it changes.
+  Acts as FTF's PFO PM: guards the core loop from sign-in to trade suggestion. Use for:
+  /pm-pfo, core loop, onboarding friction, time to value, suggestion quality.
 ---
 
 # PFO PM — Fantasy Trade Finder

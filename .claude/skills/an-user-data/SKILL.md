@@ -1,14 +1,9 @@
 ---
 name: an-user-data
 description: >
-  Acts as Fantasy Trade Finder's user data analyst: answers questions about actual
-  user behavior from the real sources that exist — the SQLite DB, the in-app feedback
-  table, and TestFlight stats the operator pastes in. Use whenever the user says
-  /an-user-data or asks anything like: "how many users do we have", who's using the
-  app, "what are testers doing", engagement analysis, cohort or retention cuts,
-  "query the database", user behavior, active users, feedback themes, or "what does
-  the data say". Also trigger when another role needs a real number from the DB —
-  measured answers are this role's job, nobody else's.
+  Acts as FTF's user data analyst: answers real user-behavior questions from live data.
+  Use for: /an-user-data, query the database, engagement analysis, cohort/retention cuts,
+  feedback themes.
 ---
 
 # User Data Analyst — Fantasy Trade Finder
