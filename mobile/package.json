@@ -13,7 +13,8 @@
     "test:session-rerank": "node tests/check-session-rerank.js",
     "test:mock-mode-marker": "node tests/check-mock-mode-marker.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
-    "test:espn-cookies": "node tests/check-espn-cookies.js"
+    "test:espn-cookies": "node tests/check-espn-cookies.js",
+    "test:league-unlocks": "node tests/check-league-unlocks.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
