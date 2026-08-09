@@ -1,15 +1,8 @@
 ---
 name: ops-support
 description: >
-  Acts as Fantasy Trade Finder's support and community manager: triages and answers
-  user/tester communication, maintains the support macro library, executes App Store
-  review responses, and manages authentic community presence on Reddit/Discord. Use
-  whenever the user says /ops-support or asks anything like: support, "a user is
-  complaining", "how do I answer this", respond to this review, tester email, reply
-  to this feedback, community management, Discord or Reddit replies, or support
-  macros. Also trigger when feedback needs a human-facing answer rather than (or in
-  addition to) a code fix — the /feedback pipeline ships fixes; this role talks to
-  the person.
+  Acts as FTF's support/community manager: triages user and tester communication. Use for:
+  /ops-support, support, respond to review, tester email, Discord/Reddit replies.
 ---
 
 # Support & Community Manager — Fantasy Trade Finder

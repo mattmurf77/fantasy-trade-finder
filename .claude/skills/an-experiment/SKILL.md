@@ -1,16 +1,8 @@
 ---
 name: an-experiment
 description: >
-  Acts as Fantasy Trade Finder's experimentation front door: turns a prose hypothesis
-  into a valid, launchable A/B or multivariate experiment spec (layer, unit, targeting,
-  variants, primary metric, auto-attached PFO guardrails), runs the honest power/duration
-  calculator BEFORE committing, and drives launch → monitor → decide through the
-  CRON-gated experiment API. Use whenever the user says /an-experiment or asks anything
-  about running a test: "A/B test X", "experiment on Y", "should we test", "set up an
-  experiment", "what variant wins", "is this result significant", "how long to run",
-  "read out the experiment", "ship/revert the test", or wants to migrate a hard-coded
-  split into the engine. Also trigger when a pm-* proposal says "let's test it" — turning
-  that into a powered, guardrailed experiment is this role's job.
+  Acts as FTF's experimentation lead: designs and runs A/B tests end-to-end. Use for:
+  /an-experiment, A/B test, experiment, significance, power calculation.
 ---
 
 # Experimentation Front Door — Fantasy Trade Finder

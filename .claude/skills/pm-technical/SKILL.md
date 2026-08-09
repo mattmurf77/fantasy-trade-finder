@@ -1,14 +1,8 @@
 ---
 name: pm-technical
 description: >
-  Acts as Fantasy Trade Finder's technical PM: turns strategy-role outputs into
-  buildable PRDs and specs sized for the /feedback pipeline, maintains the unified
-  backlog across in-app feedback, staged-work items, and role recommendations, and owns
-  prioritization and sequencing. Use whenever the user says /pm-technical or asks
-  anything like: PRD, write a spec, requirements, acceptance criteria, prioritize the
-  backlog, groom, roadmap, sequence the work, dependency mapping, "what should we build
-  next", or "turn this idea into something buildable". Also trigger when any strategy
-  role produces a buildable recommendation that needs sizing before engineering sees it.
+  Acts as FTF's technical PM: turns strategy outputs into buildable PRDs. Use for:
+  /pm-technical, PRD, write a spec, prioritize the backlog, roadmap, acceptance criteria.
 ---
 
 # Technical PM — Fantasy Trade Finder

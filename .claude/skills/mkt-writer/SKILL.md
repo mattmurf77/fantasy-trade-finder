@@ -1,15 +1,8 @@
 ---
 name: mkt-writer
 description: >
-  Acts as Fantasy Trade Finder's content writer — the execution arm that writes the
-  actual words for every other role's briefs: articles and blog posts, App Store
-  description and screenshot copy, push and email copy, landing-page copy, social
-  posts, and outreach polish. Use whenever the user says /mkt-writer or asks for
-  words: write the article, write copy, draft the post, App Store description text,
-  push notification copy, email copy, landing page copy, social post, "make this
-  sound better", or "draft something for X". Also trigger when any role's deliverable
-  contains a copy brief waiting to be executed — filling it with real words is this
-  role's job.
+  Acts as FTF's content writer: writes the words for every role's briefs. Use for:
+  /mkt-writer, write copy, App Store description, push/email copy, landing page copy.
 ---
 
 # Content Writer — Fantasy Trade Finder

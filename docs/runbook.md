@@ -1,6 +1,54 @@
 # Runbook
 
+*Jump via the TOC — read sections, not the file.*
+
 Operational procedures. Add to this as you learn things.
+
+
+## Table of Contents
+
+- [Local dev](#local-dev)
+- [Deploy (Render)](#deploy-render)
+- [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
+  - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
+  - [Evidence](#evidence)
+  - [Enforcement](#enforcement)
+  - [Failure symptom / lever](#failure-symptom-lever)
+- [Database](#database)
+- [Feature flags](#feature-flags)
+- [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
+- [Runtime tuning](#runtime-tuning)
+- [Debug log](#debug-log)
+- [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
+- [Common failure modes](#common-failure-modes)
+- [Cron schedule](#cron-schedule)
+- [Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)](#weekly-deck-replenishment-f10-flag-deckreplenishment-2026-07-26)
+- [Reset / wipe](#reset-wipe)
+- [HTTP compression / encoding (OBS-API-02)](#http-compression-encoding-obs-api-02)
+- [Mobile UI-test harness (partial — pre-Maestro state, 2026-07-11)](#mobile-ui-test-harness-partial-pre-maestro-state-2026-07-11)
+  - [Harness build gotchas (2026-07-11)](#harness-build-gotchas-2026-07-11)
+  - [Draft replay corpora (rookie-draft M1, 2026-08-06)](#draft-replay-corpora-rookie-draft-m1-2026-08-06)
+- [Sign in with Apple — App Store Connect / Apple Developer setup (account-auth P2, 2026-07-11)](#sign-in-with-apple-app-store-connect-apple-developer-setup-account-auth-p2-2026-07-11)
+- [Pick-value tier ladder migration (2026-07-11)](#pick-value-tier-ladder-migration-2026-07-11)
+- [8-tier ladder + consensus seed recalibration (2026-07-12, feedback #117/#118)](#8-tier-ladder-consensus-seed-recalibration-2026-07-12-feedback-117118)
+- [ESPN league linking — API fragility monitoring (`espn.link`, 2026-07-12)](#espn-league-linking-api-fragility-monitoring-espnlink-2026-07-12)
+- [MFL + Fleaflicker league linking — monitoring (`mfl.link` / `fleaflicker.link`, 2026-07-18)](#mfl-fleaflicker-league-linking-monitoring-mfllink-fleaflickerlink-2026-07-18)
+- [Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)](#bare-workflow-appjson-ios-config-is-silently-ignored-feedback-131-2026-07-12)
+- [Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)](#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02)
+- [Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)](#render-cold-starts-keep-warm-cron-onboarding-item-3-2026-07-17)
+- [KTC consensus blend — source fragility + kill switch (#145/#148, 2026-07-17)](#ktc-consensus-blend-source-fragility-kill-switch-145148-2026-07-17)
+- [Analytics platform P0 — WAL, wrapped cutover, kill switches (2026-07-17)](#analytics-platform-p0-wal-wrapped-cutover-kill-switches-2026-07-17)
+- [Reading REAL analytics (prod, not dev) — 2026-08-05](#reading-real-analytics-prod-not-dev-2026-08-05)
+- [Analytics platform P1 — ingestion pipeline + kill-switch latency (2026-07-18)](#analytics-platform-p1-ingestion-pipeline-kill-switch-latency-2026-07-18)
+- [Render ignores render.yaml envVars on the dashboard-created web service (2026-07-19)](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19)
+- [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
+- [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
+- [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
+- [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
+- [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
+- [Pick-assignment recovery (draft-extensions W3 M-A, 2026-08-08)](#pick-assignment-recovery-draft-extensions-w3-m-a-2026-08-08)
+- [Pick-recording queue integrity (draft-extensions W3 M-D, 2026-08-08)](#pick-recording-queue-integrity-draft-extensions-w3-m-d-2026-08-08)
 
 ---
 

@@ -1,14 +1,8 @@
 ---
 name: pm-retention
 description: >
-  Acts as Fantasy Trade Finder's retention PM: owns the engagement loops that bring
-  users back weekly, notification/re-engagement strategy, churn hypotheses and
-  counter-moves, and seasonality-aware retention through the dynasty offseason. Use
-  whenever the user says /pm-retention or asks anything about keeping users: retention,
-  churn, "users stopped using it", "keep users coming back", re-engagement,
-  notifications strategy, push/email cadence, habit loops, streaks, weekly active use,
-  or "why would anyone open this in March". Also trigger when a new feature raises
-  "will this bring people back?" — that's a retention call this role owns.
+  Acts as FTF's retention PM: owns engagement loops and churn counter-moves. Use for:
+  /pm-retention, retention, churn, re-engagement, notifications strategy, habit loops.
 ---
 
 # Retention PM — Fantasy Trade Finder

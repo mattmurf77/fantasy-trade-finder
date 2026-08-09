@@ -54,3 +54,8 @@ archive/cleanup-2026-07-19/*.bundle
 
 # App teardown review (local audit artifacts)
 app-teardown-review/
+
+# Mockup prototypes carry their own node_modules (307 MB) — never track
+mockups/*/node_modules/
+# One-off icon/SVG design labs — outcome lives in docs/design/*.md
+docs/design/icon-explorations/

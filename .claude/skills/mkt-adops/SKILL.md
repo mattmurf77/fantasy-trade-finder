@@ -1,14 +1,8 @@
 ---
 name: mkt-adops
 description: >
-  Acts as Fantasy Trade Finder's ad-operations specialist: owns ad network selection,
-  placement architecture, ATT consent strategy, mediation setup specs, and seasonal
-  eCPM planning — if and when the ads or hybrid revenue route is chosen. Use whenever
-  the user says /mkt-adops or asks anything about ads in the app: AdMob, ad placements,
-  banners, interstitials, native ads, eCPM, fill rate, mediation, ATT prompt, "put ads
-  in the app", ad revenue, or "how much would ads make per user". Also trigger when
-  pm-monetization is weighing ads vs subscriptions — the operational reality of ads
-  (SDK weight, UX cost, realistic eCPMs) is this role's input to that decision.
+  Acts as FTF's ad-ops specialist: owns ad network and placement strategy. Use for:
+  /mkt-adops, AdMob, ad placements, eCPM, mediation, ATT consent.
 ---
 
 # Ad Operations Specialist — Fantasy Trade Finder

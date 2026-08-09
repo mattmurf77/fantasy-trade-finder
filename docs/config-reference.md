@@ -1,6 +1,47 @@
 # Config Reference
 
+*Jump via the TOC — read sections, not the file.*
+
 Environment variables, feature flags, and `model_config` keys. Keep in sync when adding any of the three (see [docs/CLAUDE.md](CLAUDE.md)).
+
+
+## Table of Contents
+
+- [Environment variables](#environment-variables)
+- [Feature flags](#feature-flags)
+- [Flags — Player profiles (#17)](#flags-player-profiles-17)
+- [Flags — Trade engine flags (Tier 1–2, landed — all currently **true** in `config/features.json`)](#flags-trade-engine-flags-tier-12-landed-all-currently-true-in-configfeaturesjson)
+- [Flags — Trade engine flags (Tier 3, flag-gated — landing imminently, default **false**)](#flags-trade-engine-flags-tier-3-flag-gated-landing-imminently-default-false)
+- [Flags — Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)](#flags-owned-draft-picks-in-calculator-suggestions-158170171-ship-dark)
+- [Flags — Directional outlook weighting (feedback #175 — ships dark)](#flags-directional-outlook-weighting-feedback-175-ships-dark)
+- [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
+- [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
+- [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
+- [Flags — Multi-platform league linking — MFL / Fleaflicker (Phase 1 — ships dark; [plan](plans/multi-platform-linking-plan-2026-07-17.md))](#flags-multi-platform-league-linking-mfl-fleaflicker-phase-1-ships-dark-plan)
+- [Flags — Onboarding & conversion redesign (ships dark; [plan](plans/onboarding-conversion/plan.md) v2.1)](#flags-onboarding-conversion-redesign-ships-dark-plan-v21)
+- [Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))](#flags-monetization-platform-ships-dark-foundation-plan-index)
+- [Flags — App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)](#flags-app-teardown-remediation-2026-07-branch-teardown-remediation-all-dark)
+- [Flags — TikTok-discovery deck engine (2026-07-26)](#flags-tiktok-discovery-deck-engine-2026-07-26)
+- [Flags — Rookie draft + Draft Room (2026-08-06)](#flags-rookie-draft-draft-room-2026-08-06)
+- [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
+- [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
+- [`model_config` keys](#model_config-keys)
+  - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
+  - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
+  - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
+  - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
+  - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
+  - [Tier 2 — deck ordering, diversification, fuzzy matching](#tier-2-deck-ordering-diversification-fuzzy-matching)
+  - [F3 — fatigue & durable suppression (flag `deck.fatigue`)](#f3-fatigue-durable-suppression-flag-deckfatigue)
+  - [F5 — trade-taste vectors (flag `deck.taste_vectors`)](#f5-trade-taste-vectors-flag-decktaste_vectors)
+  - [F7 — exploration slots & archetype audition (flag `deck.exploration`)](#f7-exploration-slots-archetype-audition-flag-deckexploration)
+  - [F9 — first-session win engineering (flag `deck.first_session`)](#f9-first-session-win-engineering-flag-deckfirst_session)
+  - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
+  - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
+  - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
+  - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
+  - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
+- [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
 ---
 
@@ -43,13 +84,13 @@ Source of truth: `config/features.json`. Every key defaults to **false** in `bac
 
 Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly — they are self-describing (`swipe.*`, `tiers.*`, `trades.*`, `league.*`, `invite.*`, `mobile.*`, `profiles.*`, `landing.*`, `trade_math.*`).
 
-### Player profiles (#17)
+## Flags — Player profiles (#17)
 
 | Flag | Default | Gates |
 |---|---|---|
 | `players.profile_pages` | false | `GET /api/players/<id>/profile` (404 when off) and web player-name linkification (`playerLink` in `web/js/app.js` → `web/player.html`). The daily `POST /api/cron/value-snapshot` job that feeds the profiles runs **unflagged** — it is data retention and must collect history before the UI ships. |
 
-### Trade engine flags (Tier 1–2, landed — all currently **true** in `config/features.json`)
+## Flags — Trade engine flags (Tier 1–2, landed — all currently **true** in `config/features.json`)
 
 | Flag | Tier | Gates |
 |---|---|---|
@@ -61,7 +102,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `trade.thompson_deck` | 2 (A5) | Thompson-sampled deck ordering: one Beta(1+likes, 2+passes) draw per card *shape* (e.g. `2x1`), bounded (0.5, 1.5) multiplier on the ordering key (`server._order_deck`) |
 | `trade.deck_diversity` | 2 (A6) | League-wide diversification: penalize cards whose top receive asset saturates other members' recent decks; intra-deck cap `deck_max_per_target` |
 
-### Trade engine flags (Tier 3, flag-gated — landing imminently, default **false**)
+## Flags — Trade engine flags (Tier 3, flag-gated — landing imminently, default **false**)
 
 | Flag | Gates |
 |---|---|
@@ -80,7 +121,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `trade.aggression_ab` | Interview phase 2 ("test all three"): stable per-user opening-offer bucket — `light` / `fair` / `generous` via md5(user_id) % 3 — that reweights which ACCEPTABLE offers lead the deck: light boosts consensus-tilt-toward-user offers, generous the reverse, fair prefers balance (`composite ×= 1 ± aggression_weight · tilt`, applied after all gates). Cards carry `aggression_variant`; swipe events log it (plus `lane` and `fit_premium`) so acceptance rates can be compared per bucket. Default **false**; **enabled 2026-07-17**. `model_config` key: `aggression_weight` (0.20). |
 | `calc.open_calculator` | Backlog #27 ([prd](../staged-work/backlog-21-30/prds/27-open-trade-calculator.md)): gates the **public, no-session** open-trade-calculator compute routes `POST /api/calc/score` + `GET /api/calc/values` (both 404 when off). The static `web/calculator.html` SEO page ships **unflagged** (like `faq.html`); when the flag is off its Score button degrades to a "coming soon" state via the self-fetched `/api/feature-flags`. No new endpoint config keys — reuses the backlog #6 `verdict_*` `model_config` keys for band thresholds so the public calc and in-app trade cards agree on the same trade. Default **false**. |
 
-### Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)
+## Flags — Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)
 
 | Flag | Default | Gates |
 |---|---|---|
@@ -92,19 +133,19 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `trade.asset_ideas` | **true** | **#172/#189 follow-up** — gates `POST /api/trades/asset-ideas` (asset-centric Upgrade / Lateral / Downgrade idea groups for one pinned asset, `TradeService.generate_asset_ideas`) + the mobile grouped-ideas panel on TradesScreen (rendered when exactly ONE finder target is pinned; the deck flow is untouched). Off ⇒ the route 404s and the panel never renders. Default ON (operator ask); this flag is the kill switch. `model_config`: `asset_ideas_lateral_band` (0.10), `asset_ideas_group_cap` (6). |
 | `outlook.odds` | false | **#169** — gates `GET /api/league/outlook` (playoff/championship odds pipeline, `backend/outlook/`). Off ⇒ the route 404s and nothing else changes. Source selection via `FTF_OUTLOOK_STRENGTH_SOURCE`; numeric knobs under `model_config` (`outlook_*`). Preseason payloads are flagged `beta`. |
 
-### Directional outlook weighting (feedback #175 — ships dark)
+## Flags — Directional outlook weighting (feedback #175 — ships dark)
 
 | Flag | Default | Gates |
 |---|---|---|
 | `trade.outlook_direction` | false | **#175** — steers the deck by the USER's resolved outlook (declared `team_outlook` → #8 seed → None), via `outlook_direction_mult` applied in `_generate_trades_v2` AFTER all gates to every v2-orchestrated card (divergence v2/v3 + consensus). Reuses the lane machinery: the card's value-weighted now-lean shift (received − given, `classify_lane`'s exact shift, on CONSENSUS values). Rebuild-side (`rebuilder`/`jets`): shift > 0 (acquiring win-now/older production) ⇒ composite `×= max(0.05, 1 − outlook_dir_penalty·shift)`; shift < 0 (acquiring future capital — younger players, picks) ⇒ `×= 1 + outlook_dir_boost·(−shift)`. Plus the **~1-year-gap rule**: primary (highest-consensus-value) give is a player and the primary return is an older player beyond `outlook_dir_age_tolerance` years, with no pick / tolerance-younger return component worth ≥ `outlook_dir_rescue_frac` of the primary give ⇒ `×= outlook_dir_age_gap_mult` (**near-exclusion by penalty, not a hard filter** — a genuinely lopsided-value win can still surface). Contend-side (`championship`/`contender`): ONLY the mild symmetric mirror `×= 1 + outlook_dir_contend_weight·shift`, no age-gap rule. `not_sure`/None ⇒ no effect. Cards carry the in-process `outlook_dir` multiplier (QA record, not serialized). Off ⇒ composites byte-identical. `model_config` keys: `outlook_dir_penalty` (3.0), `outlook_dir_boost` (1.0), `outlook_dir_contend_weight` (0.5), `outlook_dir_age_tolerance` (1.0), `outlook_dir_age_gap_mult` (0.15), `outlook_dir_rescue_frac` (0.5). |
 
-### Send in Sleeper (flagged beta)
+## Flags — Send in Sleeper (flagged beta)
 
 | Flag | Default | Gates |
 |---|---|---|
 | `trade.send_in_sleeper` | false | ⚠️ **ToS-adverse.** `POST/GET/DELETE /api/sleeper/link` + `POST /api/trades/propose` (all 404 when off) — sends trades through Sleeper's *undocumented* private write API (`propose_trade` GraphQL mutation). Requires `SLEEPER_TOKEN_KEY`. Adapter: `backend/sleeper_write.py`; token store: `sleeper_credentials`. Capture + ToS/risk (C4): [runbook](plans/sleeper-write-capture-runbook.md). |
 
-### Account auth (account-auth plan P2 — ships dark)
+## Flags — Account auth (account-auth plan P2 — ships dark)
 
 | Flag | Default | Gates |
 |---|---|---|
@@ -112,14 +153,14 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `auth.email_capture` | false | Plaintext email storage on `accounts` ([spec](business/product/2026-07-17-email-capture-spec.md)). **Off (default)** = pre-spec behavior: Apple's first-auth email is SHA-256-hashed (`linked_identities.email_hash`), plaintext discarded. **On** = Apple first-auth email + the future Settings capture field store to `accounts.email` with `email_consent_at`. **Flip only in the same release as the capture UI + `web/privacy.html` update** — the policy currently states no email addresses are stored. Logic: `backend/accounts.py` (`_email_capture_enabled`, `set_account_email`, `find_or_create_account`). |
 | `auth.enforce_verified_writes` | false | Account-auth P1→P3 write-gate mode ([plan](plans/account-auth-plan-2026-07-11.md) §3). **false = GRACE**: unverified sessions' mutating requests are allowed but each logs one `AUTH-GRACE` line (funnel instrumentation — see [runbook](runbook.md)). **true = P3 enforcement**: unverified writes → 403 `verification_required`. Independent of grace, a user_id with a verified controller (`users.verified_via` set) always denies unverified writes, and the hard routes (`POST /api/sleeper/link`, `POST /api/trades/propose`, `POST /api/account/reset-rankings`) always require proof. Flip to true only after the P1 verification funnel looks healthy (plan §2d: ~2–4 weeks). |
 
-### ESPN league linking (Phase 1 — ships dark)
+## Flags — ESPN league linking (Phase 1 — ships dark)
 
 | Flag | Default | Gates |
 |---|---|---|
 | `espn.link` | false | Read-only ESPN league import via the **unofficial** v3 API ([plan](plans/espn-league-linking-plan-2026-07-11.md)): `POST /api/espn/link`, `GET /api/espn/leagues`, `POST /api/espn/import` (all 404 when off) + the mobile "Link an ESPN league" affordance (LeaguePicker + League tab re-sync). Adapter: `backend/espn_service.py` (crosswalks rosters to Sleeper ids via DynastyProcess `db_playerids.csv`, 24h-TTL in-memory cache, snapshot fallback). Private-league cookie store: `espn_credentials` (Fernet — **reuses `SLEEPER_TOKEN_KEY`**; public leagues need no auth or key). Doubles as the **kill switch**: ESPN blocking reads or an App Store objection → flip off, feature goes fully dark (imported data stays inert in the DB). Before flipping ON: run the live public-league smoke via `python3 -m backend.espn_service <league_id> [season]` (plan §5 — the fixture tests can't see endpoint churn). |
 | `espn.webview_capture` | false | **Phase 1b** ([scope](plans/espn-connect-webview/scope.md)) — the mobile in-app **WebView cookie-capture** path. Gates the "Sign in to ESPN" primary button in `EspnLinkSheet`'s private-league section: it pushes `EspnConnectScreen`, which loads ESPN's own login in a WebView and reads the `espn_s2` + `SWID` cookies from the **native cookie store** (`@react-native-cookies/cookies` / WKHTTPCookieStore — `espn_s2` can be HttpOnly, so injected `document.cookie` can't see it), then feeds them back into the sheet's existing paste fields. Manual paste stays as the fallback. Also gates the League tab's re-sync recovery button (`league.espn-resync-signin`, shown on a 403 `espn_auth_required`) — the sheet's auth-error auto-expand itself is unflagged (flag off it reveals the paste fields instead). **Client-only gate** — no backend route reads it (`POST /api/espn/link` already accepts the cookies); requires `espn.link` also ON to have any effect. Ships OFF: the flag flips only after a TestFlight build carrying the new native dependency validates against a real private league. Rollback lever: flip off ⇒ the sheet renders exactly as before (manual paste only), no client update. |
 
-### Multi-platform league linking — MFL / Fleaflicker (Phase 1 — ships dark; [plan](plans/multi-platform-linking-plan-2026-07-17.md))
+## Flags — Multi-platform league linking — MFL / Fleaflicker (Phase 1 — ships dark; [plan](plans/multi-platform-linking-plan-2026-07-17.md))
 
 Both are **zero-auth** public-read imports; no credentials table, no encryption key. Rosters crosswalk to Sleeper ids through the **same** DynastyProcess `db_playerids.csv` cache as ESPN (`espn_service.get_crosswalk`, now exposing per-platform id maps). Each flag gates its own `/api/{platform}/*` routes + the mobile link option and is the vendor/App-Store **kill switch** (imported data stays inert when off).
 
@@ -133,7 +174,7 @@ Both are **zero-auth** public-read imports; no credentials table, no encryption 
 - MFL: `python3 -m backend.mfl_service <league_id_or_url> [year]` (host auto-resolves; e.g. `python3 -m backend.mfl_service 10005 2026` → 100% by id)
 - Fleaflicker: `python3 -m backend.fleaflicker_service <league_id>` (or an email to list leagues; e.g. `python3 -m backend.fleaflicker_service 312861` → 99.7% by id)
 
-### Onboarding & conversion redesign (ships dark; [plan](plans/onboarding-conversion/plan.md) v2.1)
+## Flags — Onboarding & conversion redesign (ships dark; [plan](plans/onboarding-conversion/plan.md) v2.1)
 
 **Master/individual semantics:** every `onboarding.*` feature is live iff **`onboarding.v2` AND its own flag**. `onboarding.v2` false = whole redesign dark regardless of individual flags (kill switch). Individual flags allow feature-by-feature enablement/rollback. `analytics.client_events` is deliberately **outside** the master — it gates instrumentation only (tracking plan v2 §S2) and must run against the *current* flow first to capture the pre-redesign baseline.
 
@@ -152,7 +193,7 @@ Both are **zero-auth** public-read imports; no credentials table, no encryption 
 | `onboarding.guided_layer` | false | v2.1 guided layer — swipe-gesture hint (card 1), ≤4 coach marks, celebration beats (first like / first QuickSet save). |
 | `onboarding.keep_warm` | false | Item 3 — server-side keep-warm affordances for the Render cold-start cron ping. |
 
-### Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
+## Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
 
 One flag per monetization strategy — each independently flippable, ALL default false. **Rollout order** (foundation §1): `monetize.entitlements` first in observe mode (logs `ENTITLE-OBSERVE`, never blocks — enforcement needs `monetize.paywall` too), then `monetize.founder` + `monetize.paywall` for the TestFlight window, `monetize.pro`/`monetize.season_pass` at launch, `growth.*` after, ads last. The manual-grant admin routes (`/api/admin/entitlements/*`) and billing webhooks are deliberately **unflagged** — operator surface + provider traffic; grants written while dark sit dormant.
 
@@ -176,7 +217,7 @@ One flag per monetization strategy — each independently flippable, ALL default
 | `marketplace.contributor_sales` | false | Contributor credit-priced sales (phase 4). |
 | `marketplace.cash_payouts` | false | Stripe Connect cash-out rung (phase 5). |
 
-### App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)
+## Flags — App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)
 
 Registered under the `_comment_teardown` block in `config/features.json`; source PRDs live in the gitignored `app-teardown-review/` (per-section `prds/` folders; see [ADR-008](adr/adr-008-teardown-remediation-wave.md)). ALL default false pending operator review; implementations land flag-gated on branch `teardown-remediation`. Deliberate unflagged exceptions (per the features.json comment): the league-prefs authz fix (security), doc/legal-copy corrections, and inert accessibility annotations (labels/roles/traits).
 
@@ -214,7 +255,7 @@ Registered under the `_comment_teardown` block in `config/features.json`; source
 | `league.rookie_board_entry` | false | Mounts the fully-built-but-orphaned RookieDraftBoardSheet as a League Explore row during draft season (07/prd-04 item 2). |
 | `rankings.cross_format_derive` | false (true in `features.json`) | **FB-191** — read-time cross-format board derivation: a member with rankings only in the OTHER scoring format gets a value-mapped (#124 math) board for reads that need this format (`/api/trade/evaluate` Mode B — the in-league calculator). Explicit rankings always win; nothing materialized; responses carry additive `*_derived` markers (the calculator's R* badge, FB-192). Off ⇒ pre-#191 consensus fallback for format-unranked members. |
 
-### TikTok-discovery deck engine (2026-07-26)
+## Flags — TikTok-discovery deck engine (2026-07-26)
 
 Registered under the `_comment_tiktok_discovery` block in `config/features.json`; source PRDs in
 [docs/plans/tiktok-discovery/prds/](plans/tiktok-discovery/prds/). Built wave-by-wave, each wave's
@@ -232,7 +273,7 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.first_session` | false | F9 first-session win: confidence-weighted top-5 + 8–10-card clamp on a user's FIRST deck per league, the honest mid-deck adaptation moment (client), the "Built from your updated board" header on every board-refreshed deck (2026-07-26 amendment; needs `deck.signal_v2` for the previous-deck timestamp), and the `first_session_*` activation events. Off ⇒ byte-identical payloads/ordering/UI. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
 
-### Rookie draft + Draft Room (2026-08-06)
+## Flags — Rookie draft + Draft Room (2026-08-06)
 
 Registered under the `_comment_rookie_draft` block in `config/features.json`; plan/HLD/LLD in
 [docs/plans/rookie-draft/](plans/rookie-draft/). All flags land OFF and flip at each milestone's
@@ -249,7 +290,7 @@ release gate. M0 (the player-cache refresh) is deliberately **not** flag-gated �
 | `draft.mfl` | false | M5 MFL parity. Gates the **MFL binding** inside `GET /api/draft/board` — the renderer itself already ships and is fixture-tested. ON ⇒ an MFL league's board is built from `TYPE=draftResults` ([api-reference § MFL league linking](api-reference.md#mfl-league-linking)), whose pre-populated grid carries a franchise on **every** pick, made or not, so MFL's pre-draft ownership is strictly better than Sleeper's (D8); an expired MFL cookie serves the stored snapshot with `notice.mfl_reconnect` + `stale:true`, **never stale-as-live**. **Off ⇒ an MFL league gets the byte-identical `platform_unsupported` payload M3 shipped and ZERO MFL reads are attempted** — no league-row lookup, no crosswalk load, no export call. Sleeper responses are unchanged either way (D10). **Live mode is release-gated separately:** a drafting MFL league reports `state:"live"` honestly, but MFL's mid-draft update latency is UNVERIFIED — recurring refresh stays behind `draft.live_poll` until the timed probe in [build-m5](plans/rookie-draft/build-m5.md#the-live-probe) passes. Flipping `draft.mfl` on starts no poll. |
 | `draft.rank_inline` | false | **draft-extensions W1** — per-player ACTIONS on the Draft Room's undrafted rows ([plan §4](plans/draft-extensions/plan.md), [lld §4.1](plans/draft-extensions/lld.md)). ON ⇒ a **long-press** plus an `accessibilityActions` custom action (the shipped `TradeCard` vocabulary — there is no visible overflow glyph anywhere in `mobile/src/`, and adding one would need a `docs/design/components.md` spec under ADR-004/005) opens the shared `PlayerContextMenu`: **Set my value** → the new `AnchorSheet` on the shipped `POST /api/anchor/save` lane (carrying `via:'draft_room'`), **Rank the rookies** (the existing bridge, now two-way via a return route), **Add to targets** (the shipped asset-pref write); the coverage nudge ("N of the top 25 have no value on your board") renders too. **HARD CONSTRAINT — the anchor lane ONLY:** nothing this flag opens may reach `save_tiers_position` or the merged-band path, pinned by AST + runtime + source tests in `backend/tests/test_draft_extensions_w1.py`. **Off ⇒ undrafted rows are the inert `View`s they are today** — no long-press handler, no a11y action, no menu, no sheet, no nudge. The per-player testIDs (`draft-room.undrafted-row.<pid>`, `.order-row.<round>-<slot>`, `.pick-row.<pick_no>`) and the four new client analytics events ship **unflagged**: the ids are inert and are what makes the flag testable at all, and the events are what makes the surface measurable (the room shipped with zero `track()` calls). |
 
-### Draft-surface extensions (2026-08-06)
+## Flags — Draft-surface extensions (2026-08-06)
 
 Registered under the `_comment_draft_extensions` block in `config/features.json`; plan/HLD/LLD in
 [docs/plans/draft-extensions/](plans/draft-extensions/).
@@ -266,7 +307,7 @@ Registered under the `_comment_draft_extensions` block in `config/features.json`
 
 Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.
 
-### QA / testing surfaces
+## Flags — QA / testing surfaces
 
 | Flag | Default | Gates |
 |---|---|---|

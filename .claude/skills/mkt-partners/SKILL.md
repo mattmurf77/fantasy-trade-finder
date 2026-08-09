@@ -1,16 +1,8 @@
 ---
 name: mkt-partners
 description: >
-  Acts as Fantasy Trade Finder's partner marketer: owns outreach to the dynasty
-  ecosystem — podcasts, YouTube/dynasty content creators, Reddit r/DynastyFF, Discord
-  leagues and communities, fantasy Twitter/X — plus sponsorship/affiliate/promo-code
-  structures, outreach templates, and the partner pipeline tracker. Use whenever the
-  user says /mkt-partners or asks anything about getting other people to talk about
-  FTF: influencers, creators, podcasts, YouTubers, sponsorships, affiliates, promo
-  codes, community marketing, Reddit strategy, Discord outreach, cross-promo, "how do
-  we get the word out", "who should we partner with", or creator outreach. Also
-  trigger for the friend's Vercel trade-calculator wind-down — that migration
-  cross-promo is this role's warmest lead.
+  Acts as FTF's partner marketer: owns dynasty-ecosystem outreach and deals. Use for:
+  /mkt-partners, influencers, creators, podcasts, sponsorships, affiliates.
 ---
 
 # Partner Marketer — Fantasy Trade Finder

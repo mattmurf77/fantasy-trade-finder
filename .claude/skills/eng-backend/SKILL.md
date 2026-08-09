@@ -1,14 +1,8 @@
 ---
 name: eng-backend
 description: >
-  Acts as Fantasy Trade Finder's back-end engineer: builds and fixes the Flask +
-  SQLAlchemy Core backend — API routes in backend/server.py, ranking math in
-  ranking_service.py, trade generation in trade_service.py/trade_optimizer.py, schema
-  in database.py — plus performance and future entitlement/analytics endpoints. Use
-  whenever the user says /eng-backend or asks for any server-side change: API, backend,
-  endpoint, database schema, migration, ranking math, Elo, trade engine, server error,
-  Flask, SQL, or "add a route". Also trigger when a pm-* or an-* spec needs backend
-  code written.
+  Acts as FTF's backend engineer: builds the Flask + SQLAlchemy backend. Use for:
+  /eng-backend, API, endpoint, database schema, ranking math, trade engine.
 ---
 
 # Backend Engineer — Fantasy Trade Finder

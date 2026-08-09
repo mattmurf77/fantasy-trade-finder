@@ -33,26 +33,32 @@ Bias toward caution over speed; use judgment for trivial tasks.
 
 `living-memory/` is the cross-session state layer. `docs/` is reference (what the system *is*); living-memory is motion (what changed, what's next, what bit us). **If the two ever conflict, `docs/` wins — and update both.**
 
-**At session start, read these four** (2 minutes, no exceptions):
+**Session start requires zero reads.** The `SessionStart` hook already injects HANDOFF, NEXT, the CHANGELOG top-2 entries, and the GOTCHAS index into context automatically. That injection is complete for orienting a session — never re-read HANDOFF.md, NEXT.md, or CHANGELOG.md at boot; you already have them.
 
-| File | Why |
+**Pull on demand — read only when a specific need arises:**
+
+| File | Read when… |
 |---|---|
-| [living-memory/HANDOFF.md](living-memory/HANDOFF.md) | Where the last session stopped, what's half-done, what's blocking |
-| [living-memory/NEXT.md](living-memory/NEXT.md) | The live priority queue |
-| [living-memory/CHANGELOG.md](living-memory/CHANGELOG.md) | Top 2–3 entries only — recent shipped work |
-| [living-memory/GOTCHAS.md](living-memory/GOTCHAS.md) | Skim before debugging anything weird |
+| [living-memory/GOTCHAS.md](living-memory/GOTCHAS.md) (full entry) | The injected index has a row matching your symptom — grep the file by ID |
+| [living-memory/CHANGELOG.md](living-memory/CHANGELOG.md) (older entries) / `living-memory/archive/` | You need history past the injected top 2 |
+| [living-memory/DECISIONS.md](living-memory/DECISIONS.md) | Before overturning a design choice |
+| [living-memory/MISTAKES.md](living-memory/MISTAKES.md) | Before retrying an approach that may have been abandoned |
+| [living-memory/OPEN_QUESTIONS.md](living-memory/OPEN_QUESTIONS.md) | Before asking the operator something — check it isn't already logged |
+| [living-memory/TEST_LEDGER.md](living-memory/TEST_LEDGER.md) | Before claiming test posture (pass counts, coverage) |
+| [living-memory/DEPENDENCIES.md](living-memory/DEPENDENCIES.md) | Before adding, bumping, or removing a dependency |
+| [living-memory/HLD.md](living-memory/HLD.md) / [living-memory/LLD.md](living-memory/LLD.md) | Before architecture, schema, or route work — both also have `docs/` counterparts |
 
-**At session end, write back.** A session that changed code and left living-memory untouched is an incomplete session:
+**At session end, write back.** A session that changed code and left living-memory untouched is an incomplete session. For ID'd files (D-/G-/M-/Q-), next ID = max existing + 1 — grep first:
 
 | If this happened… | Update… |
 |---|---|
 | You shipped, merged, or deployed anything | [CHANGELOG.md](living-memory/CHANGELOG.md) — new dated H2 at the top |
 | You are stopping with work in flight | [HANDOFF.md](living-memory/HANDOFF.md) — **overwrite**, don't accumulate |
 | Priorities moved, or you finished a queue item | [NEXT.md](living-memory/NEXT.md) — cap 7 active items |
-| You made a non-obvious design choice | [DECISIONS.md](living-memory/DECISIONS.md) — next ID `D-011` |
-| You lost >30 min to a quirk | [GOTCHAS.md](living-memory/GOTCHAS.md) — next ID `G-013` |
-| You abandoned an approach | [MISTAKES.md](living-memory/MISTAKES.md) — next ID `M-005` |
-| You hit something you can't resolve alone | [OPEN_QUESTIONS.md](living-memory/OPEN_QUESTIONS.md) — next ID `Q-016` |
+| You made a non-obvious design choice | [DECISIONS.md](living-memory/DECISIONS.md) |
+| You lost >30 min to a quirk | [GOTCHAS.md](living-memory/GOTCHAS.md) |
+| You abandoned an approach | [MISTAKES.md](living-memory/MISTAKES.md) |
+| You hit something you can't resolve alone | [OPEN_QUESTIONS.md](living-memory/OPEN_QUESTIONS.md) |
 | You ran the suite or a manual QA pass | [TEST_LEDGER.md](living-memory/TEST_LEDGER.md) |
 | You added/bumped/removed a dependency | [DEPENDENCIES.md](living-memory/DEPENDENCIES.md) |
 
@@ -60,7 +66,7 @@ Format is specified in [living-memory/FORMAT.md](living-memory/FORMAT.md) — ev
 
 **Long sessions:** don't bank the whole write-back for the end. After any merge, deploy, or hard-won debug, log it then — context runs out before sessions do.
 
-**Two hooks in `.claude/settings.json` back this up.** A `SessionStart` hook injects HANDOFF + NEXT into context automatically, so the read half happens whether or not anyone remembers. A `Stop` hook warns once per session if any code file is newer than every file in `living-memory/` — it stays silent when memory is current. Neither blocks; they nudge. Review or disable via `/hooks`.
+**Two hooks in `.claude/settings.json` back this up.** A `SessionStart` hook injects four capped slices — HANDOFF (up to the template), NEXT (up to the hygiene rules), the CHANGELOG top-2 entries, and the GOTCHAS index — into context automatically, so the read half happens whether or not anyone remembers. A `Stop` hook warns once per session if any code file is newer than every file in `living-memory/` — it stays silent when memory is current. Neither blocks; they nudge. Review or disable via `/hooks`.
 
 ## Reference docs (keep current)
 
@@ -100,6 +106,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
   - **Agents never self-select express.** No operator declaration → full gates. Genuinely ambiguous → ask.
   - **Bright line:** a change touching schema, API contracts, feature-flag surfaces, or analytics events is not a "quick fix" — if the operator declares express on one of those, say so explicitly and get a confirming yes before proceeding; the operator's confirmed call stands.
 - **Branch/worktree deletion goes through the recovery ledger** (2026-08-08): before deleting any branch or removing any worktree, record its tip sha in a dated file in `docs/recovery/` per [docs/recovery/CLAUDE.md](docs/recovery/CLAUDE.md) — capture, then delete, never the reverse. Verification must be **by content** against `origin/main` (this repo squash-merges, so `git branch -d` refusals and ahead-counts are not evidence); cite the evidence doc in the ledger entry. At the end of any session that shipped work from a worktree, sweep it: once the branch's content is verified on `origin/main`, ledger the sha, `git worktree remove` it (a `--force` refusal means uncommitted files — inspect before discarding), and delete the branch. Don't leave merged worktrees behind — 91 of them (8.6 GB) once broke an EAS upload. Current backlog + verdicts: `docs/reviews/2026-08-08-branch-triage.md`.
+- **Search tracked files only:** use `git grep -n "pattern"` (1,188 tracked files) or constrain Glob/Grep to specific dirs — never bare `grep -r` or repo-wide Glob from root. The filesystem holds 400k+ files of worktree/`node_modules` noise. Use `git grep --untracked` when new files matter.
 
 ## Common tasks
 

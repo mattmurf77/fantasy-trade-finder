@@ -17,6 +17,13 @@ Reference docs for the project. **Treat these as part of the codebase — keep t
 | `references/<site>/<api-name>/` | You reverse-engineer or verify the shape of an **external** API FTF calls (Sleeper, ESPN, MFL, Anthropic, …) — see `references/README.md` (human) / `references/CLAUDE.md` (agent instructions) |
 | `recovery/` | You delete a branch or remove a worktree — record tip sha + evidence link in a dated file **before** deleting; procedure in `recovery/CLAUDE.md` |
 | `templates/feature-scope.md` (copy, don't edit) | You start ANY feature/change touching user-visible behavior, data collection, schema, or API — copy into the feature's home and fill every section (answer or explicit waiver); mandates the HLD/LLD/api-reference rows and the Maestro + sim-gate declarations (root `CLAUDE.md` §Conventions "Feature gates") |
+| `business/` | Not code work — company-ops strategy from the role skills (`/mkt-*`, `/pm-*`, `/an-*`, …); see `business/CLAUDE.md`. Skip unless you're running a role skill. |
+| `design/` | Any UI change — read `design-system.md` + `components.md` FIRST, before writing markup/styles; see `design/CLAUDE.md`. |
+| `reviews/` | Point-in-time audit snapshots, not current truth — read for context, don't treat as reference; see `reviews/CLAUDE.md`. |
+| `plans/` | Active multi-session initiative docs (HLD/LLD/PRD per thread) — see `plans/CLAUDE.md`. Completed plans get archived, not deleted. |
+| `code-audit/` | Legacy — one orphaned thread (`trade-calc-improve/`) predating `plans/`; don't add new work here. |
+
+Loose root files: `competitor-teardown-*.md` (4 files) are competitor intel captures — see also `business/product/` for the strategy writeups built on them. `agent-collab-protocol.md` defines how primary/subagent sessions hand off work inside `plans/`.
 
 If you can't tell whether a doc needs updating, scan the table above against your diff. If your change touches `backend/database.py`, the data dictionary is in scope; if it touches routes in `backend/server.py`, the API reference is in scope; etc.
 

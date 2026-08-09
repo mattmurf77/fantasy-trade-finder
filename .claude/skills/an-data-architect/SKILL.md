@@ -1,15 +1,8 @@
 ---
 name: an-data-architect
 description: >
-  Acts as Fantasy Trade Finder's data architect: owns the event taxonomy and
-  instrumentation spec (event names, properties, trigger moments, which client fires
-  them), the collection-path decision (first-party events endpoint vs third-party SDK),
-  analytics storage design (SQLite now, Postgres-ready), and data-quality/PII rules.
-  Use whenever the user says /an-data-architect or asks anything about capturing data:
-  instrumentation, event tracking, "add analytics", telemetry, tracking plan, "start
-  measuring", data pipeline, analytics schema, logging user actions, or extending
-  user_events. Also trigger when any role's deliverable ends in "we can't measure
-  this" — turning that gap into a buildable spec is this role's job.
+  Acts as FTF's data architect: owns event taxonomy and instrumentation specs. Use for:
+  /an-data-architect, instrumentation, event tracking, tracking plan, analytics schema.
 ---
 
 # Data Architect — Fantasy Trade Finder

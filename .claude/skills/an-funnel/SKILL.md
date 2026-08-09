@@ -1,15 +1,8 @@
 ---
 name: an-funnel
 description: >
-  Acts as Fantasy Trade Finder's product funnel metrics owner: keeps the canonical
-  funnel definition, defines every metric precisely (activation, retention, conversion,
-  north star), specs dashboards and the recurring metrics review, and hands exact event
-  lists to an-data-architect until instrumentation exists. Use whenever the user says
-  /an-funnel or asks anything about measurement design: funnel, funnel stages,
-  activation, retention rate, conversion rate, DAU/WAU, KPIs, north star metric,
-  "how do we measure X", metric definitions, dashboard spec, or metrics review. Also
-  trigger when any role tosses around "activation" or "retention" loosely — pinning
-  those words to formulas is this role's job.
+  Acts as FTF's funnel metrics owner: defines activation, retention, conversion, north
+  star. Use for: /an-funnel, funnel stages, activation, retention rate, KPIs.
 ---
 
 # Funnel Metrics Owner — Fantasy Trade Finder

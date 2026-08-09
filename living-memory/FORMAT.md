@@ -18,6 +18,7 @@
 - [Cross-References](#cross-references)
 - [Per-File Required Sections](#per-file-required-sections)
 - [TOC Generation Rules](#toc-generation-rules)
+- [Retention & Rotation](#retention--rotation)
 - [Drift Indicators](#drift-indicators)
 
 ---
@@ -153,6 +154,27 @@ Beyond the universal header, these sections are required:
 3. **Exclude H2s inside code blocks.** Templates are examples, not navigable sections.
 4. **Group long ID lists.** >10 IDs → single TOC line linking to the first.
 5. Always end TOC with `Outstanding / Known Gaps` when the section exists.
+
+---
+
+## Retention & Rotation
+
+Files that accumulate entries without bound eventually blow the context budget of anyone who has to read them at session start. Each accumulator file has a stated retention policy:
+
+| File | Max live entries/age | Per-entry cap | Archive target | Index style |
+|---|---|---|---|---|
+| `CHANGELOG.md` | 10 most recent dated entries | ~1,200 bytes | `archive/CHANGELOG-<year>Q<quarter>.md` | Bottom "Archive index" (one line per quarter file); no top TOC |
+| `GOTCHAS.md` | unbounded for now; rotate once it exceeds ~20KB | — | `archive/GOTCHAS-<range>.md` when rotated | Top marker-delimited index (`<!-- GOTCHAS-INDEX:START/END -->`), ID + symptom + area table, newest first |
+| `DECISIONS.md` | unbounded (ADR-style; decisions are never deleted, only superseded in place) | — | not archived | Bottom "Decision index" table (ID, title, date); no top TOC |
+| `TEST_LEDGER.md` | last 2 months of dated run entries, plus standing sections (Manual Verification History, Custom-Skill Benchmarks, Tests Planned, Verification Discipline) | — | `archive/TEST_LEDGER-pre-<cutoff-date>.md` | Top dated TOC, with an archive link in place of the moved dates |
+| `HANDOFF.md` | 1 live "Current State" entry, overwritten each session | 2,000 bytes total, across 4 capped buckets (Where I stopped ≤5 / In flight ≤3 / Blocked on ≤3 / Don't repeat ≤2) | none — history lives in `CHANGELOG.md` | Top TOC (single entry + template) |
+| `NEXT.md` | 7 active items | 1.5KB total for the queue section | none — completed items move to `CHANGELOG.md` with date + outcome | none; flat list under time-horizon headers |
+| `MISTAKES.md`, `DEPENDENCIES.md`, `THIRD_PARTY.md`, `SOURCES.md`, `GLOSSARY.md`, `OPEN_QUESTIONS.md`, `PRACTICES.md` | rotate once the file exceeds ~15KB | — | `archive/<FILE>-<range>.md` when rotated | Top dated TOC until rotated, then grouped or bottom index per the rules below |
+
+Rules:
+- **Append-only files use grouped or bottom indexes, never per-entry top TOCs.** A TOC that grows by one line per entry forever is itself the problem this section exists to prevent. `CHANGELOG.md` groups by quarter; `DECISIONS.md` and `GOTCHAS.md` use a single bottom or marker-delimited table instead of one TOC line per ID.
+- **Recency-first files put newest content before all navigation.** `CHANGELOG.md`, `HANDOFF.md`, `TEST_LEDGER.md`, and `NEXT.md` are read for their freshest fact, not browsed — the newest entry (or the current-state section) comes immediately after the purpose blockquote, ahead of any TOC. This is also what the `SessionStart` hook depends on: it extracts the top matches of `^## 20` from `CHANGELOG.md`.
+- **Archive files live in `living-memory/archive/` and are immutable.** Once an entry moves to an archive file, don't edit it in place — corrections happen as a new entry in the live file, cross-referencing the archived one if needed. Each archive file carries a 3-line header (purpose, span, entry count) and, where useful, a short summary of what the span covers.
 
 ---
 
