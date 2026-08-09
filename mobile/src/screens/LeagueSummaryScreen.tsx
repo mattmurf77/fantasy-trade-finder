@@ -921,7 +921,12 @@ export default function LeagueSummaryScreen() {
                   : ''
               } · ${
                 selected.active > 0
-                  ? Math.round(selected.active).toLocaleString('en-US')
+                  ? // #279 — pick-equivalent label, valid only when `active`
+                    // equals the server's authoritative total_value (subset
+                    // 'all', no position filter); numeric fallback otherwise.
+                    (subset === 'all' && posFilter.size === 0 &&
+                      selected.tc.team.total_value_label) ||
+                    Math.round(selected.active).toLocaleString('en-US')
                   : '—'
               }${subset === 'all' ? '' : subset === 'starters' ? ' starter' : ' bench'} value`}
             </Text>
@@ -948,6 +953,15 @@ export default function LeagueSummaryScreen() {
                 const rank = isCore
                   ? teamPosRank[g.pos as CorePos].get(selected.tc.team.user_id) ?? 0
                   : 0;
+                // #279 — pick-equivalent label for this position's subtotal,
+                // valid only in the 'all' subset (there `g.value` is a
+                // client-side resum of the SAME rows the server priced its
+                // per-position `value` from, so the two numbers agree;
+                // starters/bench recompute a different, unpriced subtotal).
+                const posLabel =
+                  isCore && subset === 'all'
+                    ? selected.tc.team.positions?.[g.pos as CorePos]?.value_label
+                    : undefined;
                 return (
                   <View key={g.pos}>
                     <View style={styles.groupHead}>
@@ -956,7 +970,7 @@ export default function LeagueSummaryScreen() {
                       </Text>
                       <View style={styles.groupMetaRow}>
                         <Text style={[type.data, styles.groupMeta]}>
-                          {`${g.rows.length} · ${fmtK(g.value)}`}
+                          {`${g.rows.length} · ${posLabel ?? fmtK(g.value)}`}
                         </Text>
                         {isCore && rank > 0 ? (
                           <View
@@ -1044,6 +1058,11 @@ export default function LeagueSummaryScreen() {
                 team={r.tc.team}
                 rank={idx + 1}
                 active={r.active}
+                totalLabel={
+                  subset === 'all' && posFilter.size === 0
+                    ? r.tc.team.total_value_label
+                    : undefined
+                }
                 onPress={() => setSelectedId(r.tc.team.user_id)}
               />
             ))}
@@ -1344,10 +1363,15 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
 // One team as a ranked list row under the chart: rank numeral, name + You
 // badge, active value, chevron. The caller's row is surface+border
 // highlighted (state via border and surface color, per Chalkline).
-function TeamRow({ team, rank, active, onPress }: {
+function TeamRow({ team, rank, active, totalLabel, onPress }: {
   team: PowerRankedTeam;
   rank: number;
   active: number;
+  /** #279 — pick-equivalent label for `active`, passed only when it's known
+   *  to equal the server's authoritative `total_value` (subset 'all', no
+   *  position filter) AND the caller is targeted by `aggregate_tier_labels`.
+   *  Undefined ⇒ render the numeric total exactly as before. */
+  totalLabel?: string;
   onPress: () => void;
 }) {
   return (
@@ -1370,7 +1394,9 @@ function TeamRow({ team, rank, active, onPress }: {
         {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
       </View>
       <View style={styles.listRight}>
-        <Text style={type.data}>{active > 0 ? Math.round(active).toLocaleString('en-US') : '—'}</Text>
+        <Text style={type.data}>
+          {active > 0 ? (totalLabel ?? Math.round(active).toLocaleString('en-US')) : '—'}
+        </Text>
         <Icon name="chevron-right" size={14} color={chalk.dim} />
       </View>
     </Pressable>

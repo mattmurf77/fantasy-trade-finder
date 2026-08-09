@@ -820,6 +820,24 @@ def _pick_gap_equivalent(gap_value: float) -> dict:
     return {"firsts": firsts, "pick_equivalent": pick}
 
 
+def _aggregate_pick_label(value: float) -> str:
+    """Express a raw AGGREGATE value (a team total or positional subtotal —
+    a SUM across many assets, not one asset's value) as a pick-equivalent
+    label, e.g. "≈14 firsts" (#279, docs/feedback/items/
+    279-aggregate-tier-labels/status.md). Reuses `_pick_gap_equivalent`'s
+    `firsts` unit — the SAME generic-Mid-1st denomination already shown as
+    "a Late 2nd" on trade cards — applied to a raw total instead of a value
+    delta, rather than inventing a second value scale. Deliberately does
+    NOT reuse the 8-bucket `TIER_LABEL` ladder: that table is a per-asset
+    classification whose top bucket (`4+ 1sts`) is an open-ended catch-all,
+    not a countable multiple, and a roster-scale aggregate blows past it
+    immediately. Rounded to the nearest half-first so small positional
+    subtotals don't collapse to a bare "0 firsts"."""
+    firsts = _pick_gap_equivalent(max(value, 0.0))["firsts"]
+    half = round(firsts * 2) / 2
+    return f"≈{half:g} firsts"
+
+
 def _value_verdict_payload(give_value: float, receive_value: float,
                            even: bool) -> dict:
     """Shared value-verdict shape for the pick-denominated TradeValueBar.
@@ -18765,6 +18783,25 @@ def league_power_rankings_route():
                      RankingService.tier_for_elo(elo, pos, fmt)))
         for t in teams:
             t["is_you"] = (t["user_id"] == g_user_id)
+        # #279 — aggregate_tier_labels experiment (operator-only rollout;
+        # docs/feedback/items/279-aggregate-tier-labels/status.md, mirrors
+        # the onboarding_v2_rollout precedent: an account-unit experiment
+        # targeted via `is_tester_allowlist`, weighted 0/10000 so a captured
+        # unit is always `treatment`). Only the RESOLVING caller's own
+        # assignment matters here — this is per-request labeling of a
+        # league-shared aggregate, not a per-league toggle. When targeted,
+        # each team additionally carries `total_value_label` and a
+        # `value_label` per core position (the SAME value→pick-equivalent
+        # formula already live as "a Late 2nd" on trade cards, applied to a
+        # raw aggregate instead of a gap — see _aggregate_pick_label).
+        # Non-targeted callers (everyone but the allowlisted operator today)
+        # get no new keys at all — byte-identical to pre-#279.
+        from . import experiments as _experiments_mod
+        if _experiments_mod.variant_for(g_user_id, "aggregate_tier_labels") == "treatment":
+            for t in teams:
+                t["total_value_label"] = _aggregate_pick_label(t["total_value"])
+                for _pv in t["positions"].values():
+                    _pv["value_label"] = _aggregate_pick_label(_pv["value"])
         # League Analyzer replication (2026-07-26): per-team `starters` is
         # the DERIVED value-optimal lineup (optimal_starters over the
         # league's slot template — no per-week lineup data). The client's

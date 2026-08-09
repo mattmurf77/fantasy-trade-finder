@@ -145,6 +145,7 @@
 | 265 | mutual-match-threshold | in-progress | 2026-08-08 | worktree-agent-a5c5a806d0d32845e |
 | 266 | espn-link-buttons | in-progress | 2026-08-08 | worktree-agent (from origin/main @ 6c30dd2) |
 | 277 | tier-labels-appwide | in-progress | 2026-08-09 | worktree agent-a398ef6c79029326f (covers #277/#278/#280/#281 + #263 remainder) |
+| 279 | aggregate-tier-labels | built-dark | 2026-08-09 | branch worktree-agent-a1e9ac18717f11781, experiment `aggregate_tier_labels` |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | in-progress | 2026-07-26 | teardown-remediation (worktree) |

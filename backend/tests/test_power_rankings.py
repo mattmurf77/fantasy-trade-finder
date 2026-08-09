@@ -16,14 +16,19 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine, insert
 
+import backend.database as db
+import backend.experiments as ex
 import backend.server as server
+from backend.database import metadata
 from backend.pick_values import pick_pool_value
 from backend.power_rankings import (
     compute_power_rankings,
     optimal_starter_slots,
     optimal_starters,
 )
+from backend.server import _aggregate_pick_label, _pick_gap_equivalent
 from backend.trade_service import elo_to_value
 
 
@@ -744,3 +749,128 @@ def test_route_roster_rows_carry_canonical_tier(client):
     assert rows["rb1"]["tier"] == server.RankingService.tier_for_elo(
         SEED["rb1"], "RB", "1qb_ppr")
     assert rows["k1"]["tier"] is None             # out of pool → no tier
+
+
+# ---------------------------------------------------------------------------
+# #279 — aggregate_tier_labels experiment: operator-only pick-equivalent
+# labels on TEAM/POSITIONAL aggregates (docs/feedback/items/
+# 279-aggregate-tier-labels/status.md). Mirrors the onboarding_v2_rollout
+# precedent — an account-unit experiment targeted via `is_tester_allowlist`,
+# weighted 0/10000 control/treatment so a captured unit is always
+# `treatment`. DB isolation for the experiment row mirrors
+# test_analytics_p3.py's in-memory-sqlite pattern; this file's own `client`
+# fixture deliberately does NOT patch db.engine, because the route's
+# experiments call is fail-open by design and untargeted/no-experiment reads
+# must never touch the real db.
+# ---------------------------------------------------------------------------
+
+def _mk_aggregate_experiment(engine):
+    """Seed a running `aggregate_tier_labels` experiment on the exact shape
+    the operator would launch in prod: layer 'ranking', account unit,
+    is_tester_allowlist targeting, 0bp control / 10000bp treatment."""
+    with engine.begin() as c:
+        c.execute(insert(db.experiments_table).values(
+            key="aggregate_tier_labels", version=1, layer="ranking",
+            status="running", unit_type="account",
+            bucket_start=0, bucket_end=10000,
+            targeting_json=json.dumps({"is_tester_allowlist": True}),
+            variants_json=json.dumps([
+                {"name": "control", "weight_bp": 0},
+                {"name": "treatment", "weight_bp": 10000},
+            ]),
+            primary_metric="wat", guardrails_json="[]",
+            exposure_surface="league_summary", scope_json="{}",
+            created_at="2026-08-09T00:00:00+00:00"))
+
+
+@pytest.fixture()
+def exp_engine():
+    """Isolated in-memory experiments DB — patches db.engine/ro_engine
+    (shared module object, so backend.experiments sees the same patch)."""
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    metadata.create_all(eng)
+    with patch.object(db, "engine", eng), patch.object(db, "ro_engine", eng):
+        db._seed_experiment_layers()
+        ex.invalidate_cache()
+        yield eng
+    ex.invalidate_cache()
+
+
+def test_aggregate_labels_assignment_is_operator_only(exp_engine, monkeypatch):
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")
+    _mk_aggregate_experiment(exp_engine)
+    ex.invalidate_cache()
+    # Allowlisted account unit → always treatment (0bp control makes it
+    # certain); a non-listed unit is excluded by TARGETING, not bucketing.
+    assert ex.variant_for("u_a", "aggregate_tier_labels") == "treatment"
+    assert ex.variant_for("u_b", "aggregate_tier_labels") is None
+    assert ex.variant_for("someone_else", "aggregate_tier_labels") is None
+
+
+def test_route_labels_present_for_allowlisted_caller_only(client, exp_engine, monkeypatch):
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")
+    _mk_aggregate_experiment(exp_engine)
+    ex.invalidate_cache()
+    _install_sess(_mk_sess(user_id="u_a"))
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    b = next(t for t in body["teams"] if t["user_id"] == "u_b")
+
+    # Allowlisted caller's OWN request carries labels on every team in the
+    # payload (per-request labeling of a league-shared aggregate, not a
+    # per-team toggle) — conversion correctness vs the reused formula.
+    assert a["total_value_label"] == _aggregate_pick_label(a["total_value"])
+    assert b["total_value_label"] == _aggregate_pick_label(b["total_value"])
+    for team in (a, b):
+        for pos, pv in team["positions"].items():
+            assert pv["value_label"] == _aggregate_pick_label(pv["value"])
+
+
+def test_route_byte_identical_for_non_allowlisted_caller(client, exp_engine, monkeypatch):
+    """A non-allowlisted caller reading under a RUNNING experiment gets a
+    response byte-identical (same JSON, no new keys anywhere) to the same
+    request with no experiment running at all — the #279 binding guarantee."""
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")   # u_b is NOT listed
+    _mk_aggregate_experiment(exp_engine)
+    ex.invalidate_cache()
+    _install_sess(_mk_sess(user_id="u_b"))
+    code_running, body_running = _get(
+        client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code_running == 200
+    assert all("total_value_label" not in t for t in body_running["teams"])
+    assert all("value_label" not in pv
+               for t in body_running["teams"] for pv in t["positions"].values())
+
+    # Baseline: identical request, fresh empty experiments DB (no row at
+    # all) — proves the payload is byte-identical either way.
+    eng2 = create_engine("sqlite:///:memory:",
+                         connect_args={"check_same_thread": False})
+    metadata.create_all(eng2)
+    with patch.object(db, "engine", eng2), patch.object(db, "ro_engine", eng2):
+        db._seed_experiment_layers()
+        ex.invalidate_cache()
+        _install_sess(_mk_sess(user_id="u_b"))
+        code_base, body_base = _get(
+            client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    ex.invalidate_cache()
+    assert code_base == 200
+    # `updated_at` is a fresh compute timestamp each call (unrelated to
+    # #279) — compare everything else byte-for-byte.
+    body_running.pop("updated_at", None)
+    body_base.pop("updated_at", None)
+    assert body_running == body_base
+
+
+def test_aggregate_pick_label_reuses_pick_gap_equivalent_firsts():
+    """Conversion correctness: the aggregate label's number IS
+    _pick_gap_equivalent's `firsts` (the SAME generic-Mid-1st denomination
+    already shown as "a Late 2nd" on trade cards), rounded to the nearest
+    half-first and phrased — never a second, independently-computed scale."""
+    for value in (0.0, 60.0, 250.0, 4200.7, 14820.0):
+        firsts = _pick_gap_equivalent(value)["firsts"]
+        half = round(firsts * 2) / 2
+        assert _aggregate_pick_label(value) == f"≈{half:g} firsts"
+    # Monotonic: a bigger aggregate never yields a smaller label value.
+    assert _pick_gap_equivalent(14820.0)["firsts"] > _pick_gap_equivalent(250.0)["firsts"]
