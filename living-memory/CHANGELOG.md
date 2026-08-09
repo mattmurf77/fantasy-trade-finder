@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-09 (ESPN linking round 2: cold-load login fix, league picker — field-validated)
+
+- **Field validation of the round-1 fixes:** operator successfully linked the private league on build 95 — events show cookie-authed league_read 200 (2.3MB) at 22:44 UTC after the wrong-account 401s. The observability layer diagnosed the whole arc without a debug session (correct cookie shapes + 401 = valid-but-non-member session).
+- **Cold-load login fix:** `www.espn.com/login`'s Disney OneID iframe fails to bootstrap on a cold (cookie-cleared) load — empirically confirmed in BOTH the app and the operator's Chrome session (login only worked on second load). EspnConnectScreen now does a single-shot automatic warm-up reload after first load, plus an always-visible reload control and a 10s wedge hint.
+- **League picker (flag `espn.league_picker` ON):** after sign-in the link sheet lists the account's actual FFL leagues (new `GET /api/espn/my-leagues` → `fan.api.espn.com/apis/v2/fans/{SWID}`) instead of demanding a league id — also converts the wrong-account failure into visible UX. **Fan-API shape LIVE-VERIFIED** via an authenticated fetch on the operator's real session: football rows are typeId 9 with UPPERCASE `abbrev:"FFL"` (the agent's community-shape lowercase filter would have returned empty for everyone — caught and fixed pre-merge), groups carry groupId/groupName, season on entry.seasonId. Manual id entry stays as fallback; public-league lane untouched.
+- Gates: 2136 passed / 1 skipped (+27); tsc clean; testid-lint OK; Maestro flow extended (reload control).
+
 ## 2026-08-09 (ESPN link fixes, morning feedback batch, API observability program)
 
 - **ESPN private-league linking (field failure, chat-reported):** two coupled root causes fixed. (1) Safari escape mid-login: react-native-webview's originWhitelist fallback OPENS failed navigations externally (`Linking.openURL`) instead of blocking — `https://*` punted any http hop/iframe/popup in the Disney SSO chain to Safari; now `originWhitelist ['*']` + pure `espnNavPolicy` gate keeps all http(s) in-WebView, swallows scheme/store hops. (2) Captured `espn_s2` rejected: iOS's native store returns it percent-DECODED, backend forwarded verbatim, ESPN 401s — live Chrome capture of the operator's real session pinned the canonical encoded shape; `canonical_espn_s2`/`canonical_swid` now normalize either form at the single Cookie-header choke point (also fixes decoded pastes). Auth-error copy no longer tells a just-signed-in user to sign in. Operator re-test checklist: `docs/feedback/items/espn-webview-escape/status.md`.
