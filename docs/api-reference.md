@@ -1,8 +1,53 @@
 # API Reference
 
+*Jump via the TOC — read sections, not the file.*
+
 All routes live in `backend/server.py`. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
 Auth: session cookie via `/api/session/init`. Extension uses a bearer token from `/api/extension/auth`.
+
+
+## Table of Contents
+
+- [Session / Auth](#session-auth)
+  - [Persistent sessions (teardown 06-03 P3, flag `auth.persistent_sessions` — W3B)](#persistent-sessions-teardown-06-03-p3-flag-authpersistent_sessions-w3b)
+  - [Verified sessions & the write gate (account-auth P1)](#verified-sessions-the-write-gate-account-auth-p1)
+  - [The read gate (account-auth P2.5 — read privacy)](#the-read-gate-account-auth-p25-read-privacy)
+- [Account auth (identity anchors — `auth.accounts` flag, ships dark)](#account-auth-identity-anchors-authaccounts-flag-ships-dark)
+- [Sleeper passthrough](#sleeper-passthrough)
+- [Players](#players)
+- [Ranking — Trio](#ranking-trio)
+- [Progress / method](#progress-method)
+- [Tiers](#tiers)
+- [Trades](#trades)
+  - [Trade card object](#trade-card-object)
+- [Open trade calculator (public — no auth)](#open-trade-calculator-public-no-auth)
+- [Manual trade calculator (public — no auth) — LIVE](#manual-trade-calculator-public-no-auth-live)
+- [Send in Sleeper (flagged beta)](#send-in-sleeper-flagged-beta)
+- [League](#league)
+  - [Pick assignment (flag `picks.assign`, ships dark — W3 M-A, [ADR-010](adr/adr-010-user-asserted-pick-ownership.md))](#pick-assignment-flag-picksassign-ships-dark-w3-m-a-adr-010)
+  - [Live offline pick recording (flag `draft.manual_picks`, W3 M-D)](#live-offline-pick-recording-flag-draftmanual_picks-w3-m-d)
+- [Draft room (flag `draft.room`)](#draft-room-flag-draftroom)
+- [Mock draft (flag `draft.mock`)](#mock-draft-flag-draftmock)
+- [ESPN league linking (flag `espn.link`)](#espn-league-linking-flag-espnlink)
+- [MFL league linking (flag `mfl.link`)](#mfl-league-linking-flag-mfllink)
+  - [MFL authenticated linking (#177, flag `mfl.auth_link`)](#mfl-authenticated-linking-177-flag-mflauth_link)
+- [Fleaflicker league linking (flag `fleaflicker.link`)](#fleaflicker-league-linking-flag-fleaflickerlink)
+- [Notifications](#notifications)
+- [Cron ticks](#cron-ticks)
+- [Trends](#trends)
+- [Market](#market)
+- [Profiles + Sharing](#profiles-sharing)
+- [Extension](#extension)
+- [Feature flags](#feature-flags)
+- [Admin](#admin)
+- [Misc](#misc)
+- [In-app feedback](#in-app-feedback)
+- [Analytics events (flag `analytics.client_events`, ships dark)](#analytics-events-flag-analyticsclient_events-ships-dark)
+  - [Analytics admin](#analytics-admin)
+- [Monetization foundation (docs/plans/monetization/00-platform-foundation.md — always mounted, behavior flag-aware)](#monetization-foundation-docsplansmonetization00-platform-foundationmd-always-mounted-behavior-flag-aware)
+- [Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)](#test-support-ftf_test_mode1-only-never-mounted-in-normal-operation)
+- [Test users (QA — flag `testing.stage_users`, ships dark)](#test-users-qa-flag-testingstage_users-ships-dark)
 
 ---
 
