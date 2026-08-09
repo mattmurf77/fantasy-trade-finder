@@ -4,6 +4,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { ink, chalk, ice, space, type, fonts } from '../theme/chalkline';
 import { Button, Card, Text } from './chalkline';
+import { matchesUnlockRemaining } from '../utils/leagueUnlocks';
 
 // League progress module (#229/#230/#234 — approved mock
 // mockups/polish-lab-2026-08/empty-states-progress-v3.html). ONE card owns
@@ -14,14 +15,15 @@ import { Button, Card, Text } from './chalkline';
 // point at. The Matches empty state mounts the `compact` variant (bar +
 // unlock line only) so the two surfaces can never tell different stories.
 //
-// Thresholds (documented in docs/feedback/items/229-empty-states-progress/):
-// - Mutual matches "unlock" at MATCH_UNLOCK_MATES ranked leaguemates
-//   (mock-anchored: "2 more ranked leaguemates unlocks mutual matches").
+// Thresholds (documented in docs/feedback/items/229-empty-states-progress/
+// and docs/feedback/items/265-mutual-match-threshold/):
+// - Mutual matches "unlock" once `matchesUnlockRemaining` (utils/
+//   leagueUnlocks.ts) hits 0 — see that module for the #265 threshold fix.
 // - Leaderboards + contrarian ranks return at 3 ranked members total —
 //   the backend /api/league/contrarian threshold; the fold-line copy is
 //   static because the host folds those sections on the server's own
-//   `insufficient_data` flag, not on a client-side recount.
-const MATCH_UNLOCK_MATES = 2;
+//   `insufficient_data` flag, not on a client-side recount. This is a
+//   DIFFERENT unlock from mutual matches — don't conflate the two again.
 
 interface Props {
   /** Positions the caller has fully ranked (0–4); null while unknown. */
@@ -112,7 +114,7 @@ export default function LeagueProgressModule({
 
   // You occupy one slot (labeled "(you)"); ranked leaguemates fill the rest.
   const rankedShown = Math.min(rankedMates + 1, totalTeams);
-  const remaining = Math.max(0, MATCH_UNLOCK_MATES - rankedMates);
+  const remaining = matchesUnlockRemaining(rankedMates);
 
   // #243 (league-home fold V1, approved mock league-home-fold.html): the
   // full variant's invite affordance is an inline text link appended to the
