@@ -668,6 +668,61 @@ def test_w3_09d_unknown_pick_and_non_member_owner(client, flag_on, mem_db):
     assert r.get_json()["error"] == "owner_not_in_league"
 
 
+def test_268_client_shaped_put_matches_the_server_route(client, flag_on, mem_db):
+    """#268 repro — mimics the mobile client's REAL request, byte-for-byte.
+
+    `mobile/src/api/pickAssignment.ts`'s `assignPick()` calls
+    `api.put('/api/league/pick-assignments', {league_id, pick_id,
+    owner_user_id, if_assigned_at})` — `pick_id` travels in the BODY, and the
+    URL never gets a path segment appended. The route is registered at
+    `/api/league/pick-assignments/<pick_id>` (see `_put()`'s helper above,
+    and every other test in this file), so the client's literal request
+    doesn't match ANY rule bound to that method: Flask 405s. The client's
+    `pickAssignmentErrorCode()`/`staleAssignment()` narrowers both require a
+    JSON body shaped like `{error: <code>}`, which a 405 response doesn't
+    have, so the screen's `onError` falls through to its generic branch —
+    exactly the "Couldn't save that pick. Try again." toast the bug reports.
+    This has been broken since the route's very first commit (791a6df); it
+    is not specific to the newer suggested_order prefill.
+    """
+    _seed(client, rounds=1)
+    # GET the grid — what the screen does on mount.
+    slots = [s for season in _get(client).get_json()["seasons"]
+             for s in season["slots"]]
+    slot = slots[0]
+
+    # PUT exactly what `assignPick()` sends: pick_id in the BODY, and the
+    # URL is the bare collection path — no `/<pick_id>` segment.
+    r = client.put(
+        "/api/league/pick-assignments",
+        headers=_hdr(),
+        data=json.dumps({
+            "league_id": LEAGUE,
+            "pick_id": slot["pick_id"],
+            "owner_user_id": "u2",
+            "if_assigned_at": slot["assigned_at"],
+        }),
+    )
+
+    # The bug: this is not a 200, and it is not even a typed rejection the
+    # client's error narrowers recognize (a real `stale_assignment` 409 or
+    # any of `pickAssignmentErrorCode`'s known codes). It is a bare
+    # method-not-allowed with no `error` field the client parses.
+    assert r.status_code != 200
+    assert r.status_code == 405
+    body = r.get_json(silent=True)
+    assert body is None or "error" not in body or body.get("error") not in {
+        "stale_assignment", "pick_not_found", "owner_not_in_league",
+        "values_not_accepted", "feature_disabled",
+    }
+
+    # And the pick-shaped URL the server actually expects works fine with
+    # the identical body/token — proving the fix is "put pick_id in the
+    # URL", not a server-side change.
+    assert _put(client, slot["pick_id"], owner_user_id="u2",
+                if_assigned_at=slot["assigned_at"]).status_code == 200
+
+
 def test_w3_11_every_write_emits_the_audit_event(client, flag_on, mem_db):
     """D16 — `user_events` IS the audit trail (contested derives from it and
     the runbook reconstructs a grid from it), so a write without an event is a

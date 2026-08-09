@@ -101,6 +101,7 @@ import {
   seedPickGrid,
   staleAssignment,
   type PickAssignments,
+  type PickAssignmentSeason,
   type PickOrderType,
   type PickSlot,
 } from '../api/pickAssignment';
@@ -171,10 +172,39 @@ function isDeviation(slot: PickSlot): boolean {
   return slot.is_traded || slot.owner_user_id !== slot.original_user_id;
 }
 
+/** #267 — recomputes `progress` from the LOCAL slot list, mirroring the
+ *  server's own counting (`backend/server.py`'s `_assignment_payload`):
+ *  `assigned` is every slot present, `traded`/`contested`/`orphaned` are
+ *  counts of the matching per-slot flags, cross-season (progress is a
+ *  whole-board figure, not a per-season one — same scope as `tradedSlots`
+ *  above). `total` never changes from a reassignment, so it is carried
+ *  through rather than re-derived. Used for the OPTIMISTIC update on every
+ *  move, so the progress line and round headers read live instead of
+ *  waiting on the round trip. */
+function recomputeProgress(
+  seasons: PickAssignmentSeason[],
+  total: number,
+): PickAssignments['progress'] {
+  let assigned = 0;
+  let traded = 0;
+  let contested = 0;
+  let orphaned = 0;
+  for (const s of seasons) {
+    for (const slot of s.slots) {
+      assigned += 1;
+      if (isDeviation(slot)) traded += 1;
+      if (slot.contested) contested += 1;
+      if (slot.orphaned) orphaned += 1;
+    }
+  }
+  return { assigned, total, traded, contested, orphaned };
+}
+
 export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   const paramLeagueId: string | undefined = route?.params?.leagueId;
   const sessionLeagueId = useSession((s) => s.league?.league_id);
   const leagueId = paramLeagueId ?? sessionLeagueId ?? null;
+  const sessionUserId = useSession((s) => s.user?.user_id) ?? null;
   /** M-C's one-action correction deep link lands here with the slot to fix. */
   const focusPickId: string | undefined = route?.params?.focusPickId;
   /** …and the slot's season, so a link whose `pick_id` no longer exists (a
@@ -371,6 +401,47 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
         ownerUserId: args.ownerUserId,
         ifAssignedAt: args.ifAssignedAt,
       }),
+    // #267 — recompute the progress line / round headers / traded summary
+    // from LOCAL state the moment a tile moves, rather than waiting on the
+    // round trip. `onSuccess` still applies the server's authoritative
+    // slot + progress once it lands (normally a no-op over this guess);
+    // `onError` rolls the guess back for anything that ISN'T the CAS
+    // conflict, which already renders the server's real row.
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: assignmentsKey });
+      const previous = queryClient.getQueryData<PickAssignments>(assignmentsKey);
+      if (previous) {
+        const optimisticSlot: PickSlot = {
+          ...vars.slot,
+          owner_user_id: vars.ownerUserId,
+          owner_username: teamNameOf(vars.ownerUserId) ?? vars.slot.owner_username,
+          is_traded: vars.ownerUserId !== vars.slot.original_user_id,
+          source: 'user',
+          assigned_by: sessionUserId ?? vars.slot.assigned_by,
+          // Tapping an owner SETTLES a contested/orphaned slot (the sheet
+          // says so). `assigned_at` stays the value this PUT's CAS token is
+          // built from — the server's real timestamp lands in onSuccess.
+          contested: false,
+          orphaned: false,
+        };
+        const seasons = previous.seasons.map((s) =>
+          s.season === optimisticSlot.season
+            ? {
+                ...s,
+                slots: s.slots.map((sl) =>
+                  sl.pick_id === optimisticSlot.pick_id ? optimisticSlot : sl,
+                ),
+              }
+            : s,
+        );
+        queryClient.setQueryData<PickAssignments>(assignmentsKey, {
+          ...previous,
+          seasons,
+          progress: recomputeProgress(seasons, previous.progress.total),
+        });
+      }
+      return { previous };
+    },
     onSuccess: (res) => {
       applySlot(res.slot, res.progress);
       setPicking(null);
@@ -379,7 +450,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       haptics.success();
       setToast({ msg: 'Pick updated', tone: 'success' });
     },
-    onError: (err, vars) => {
+    onError: (err, vars, context) => {
       // The CAS conflict is the ONE failure with a real choice behind it,
       // so it gets a prompt rather than a toast — and the 409 body already
       // carries the other person's row, so no second request is needed.
@@ -391,6 +462,12 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
         applySlot(current, data?.progress ?? { assigned: 0, total: 0, traded: 0, contested: 0, orphaned: 0 });
         haptics.warning();
         return;
+      }
+      // Anything else (network, 4xx/5xx, timeout) — the optimistic guess
+      // from `onMutate` didn't happen, so undo it rather than leave a move
+      // on screen that never actually saved.
+      if (context?.previous) {
+        queryClient.setQueryData(assignmentsKey, context.previous);
       }
       const code = pickAssignmentErrorCode(err);
       setToast({
