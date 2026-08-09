@@ -4,6 +4,39 @@
 `mockups/polish-lab-2026-08/trades-home-inline.html` (current + baseline +
 4 variants + 1 extra `#279` frame, 393×852pt, Chalkline tokens).
 
+## 2026-08-09 revision — two operator directives on the lab
+
+After reviewing the first pass, the operator gave two revision directives
+against the same mockup file (no new frames added beyond what's described
+below; all other rows/frames left untouched):
+
+1. **B1 (calculator canvas, empty state):** *"I don't know why you've
+   removed the find a trade button. Re-gen with find a trade. Move the
+   change pre section up to the top where it is in other mocks."*
+   Fixed: `btnPrimary` "Find more trades" is restored in B1 (it drives the
+   suggestion rail below the build columns — it was never meant to be
+   removed, just under-drawn in the first pass). The frame's element order
+   now matches A1's exactly for its first four blocks: utility row → League/
+   Trading-with pills → prefs `editEntry` → CTA — only what renders below
+   the CTA differs (build columns + suggestion rail vs. a swipe deck). B2
+   (the populated calculator frame) was left untouched — the directive was
+   B1-specific.
+2. **D (accordion):** *"I like this layout when a user hits 'Change'...
+   Re-do the mock so the default state is still that these are hidden
+   behind the 'change' button."* Reworked: variant (d)'s default state
+   (D1) is now byte-for-byte identical to baseline (BASE-1) — one `Change
+   ›` line, full deck, nothing accordion-shaped visible on first paint.
+   The accordion itself (the five collapsed section rows) is now what
+   **opens** when Change is tapped (D2), replacing the `editEntry` line in
+   place and pushing the deck down — instead of the earlier draft's
+   full-height modal sheet. This flips what the accordion is being
+   compared against: previously it competed with (c) for real estate on
+   the default page (both always-on); now it's a strict presentation
+   swap for the existing "Change" gate — same one-tap entry point every
+   other variant uses, just a different destination (in-place accordion,
+   not `TradeDnaSheet`'s `<Modal>`). See "Recommendation" below for how
+   this changes the ship call.
+
 ## The three asks, verbatim
 
 **#270 (core ask), TradesHome:**
@@ -86,13 +119,18 @@ moves out of the modal and onto the page.**
 | **(a) Minimal** | League + Team only (2-pill strip) | Outlook, Positions, Trade idea, Specific players, Fairness, Lanes | Modal (shorter) |
 | **(b) Calculator-style** | League + Team (header row) + the specific-players section, reshaped into a real add/remove two-column build canvas (`TradeSide.tsx` reused) | Outlook, Positions, Trade idea, Fairness, Lanes | Modal (shorter) — but the deck itself is replaced by the canvas |
 | **(c) Maximal inline** | Everything — League, Team, Outlook, Positions, Trade idea, Specific players, Fairness, Lanes | Nothing (sheet deleted); Untouchables keeps its own second-layer Manage sheet | No modal at all |
-| **(d) Accordion** | Everything, same as (c) — but each section collapses to a one-line summary by default and expands **in place** (pushes the deck down) rather than rendering always-open | Nothing (sheet deleted) | No modal; in-page expand/collapse |
+| **(d) Accordion** *(repositioned 2026-08-09)* | Nothing by default — page is identical to baseline. Tapping "Change" reveals everything as five collapsed accordion rows in place; each still expands its own body on a further tap | Nothing in a `<Modal>` — Change now opens an in-place accordion instead of `TradeDnaSheet`'s full-screen sheet | In-place accordion, gated by the same one-tap "Change" entry every other variant uses (not always-on) |
 
-(a) and (b) both keep a shorter version of the modal; (c) and (d) both
-retire it entirely and differ only in whether the inline controls are
-always-expanded or collapsible. This is the "genuinely distinct fourth
-point" the brief allowed for — (d) is not a restyle of (a) or (c), it's a
-different disclosure mechanism (accordion vs. modal vs. always-on).
+(a) and (b) both keep a shorter version of the modal, gated by "Change."
+(c) removes the modal *and* the Change gate entirely for an always-on
+inline panel. (d), after the 2026-08-09 repositioning, keeps the Change
+gate exactly like (a)/(b)/baseline — the default page is unchanged — but
+replaces what's *behind* it: a full-screen modal sheet becomes an
+in-place accordion instead. This is still the "genuinely distinct fourth
+point" the brief allowed for, just not in the way originally drawn: (d)
+is no longer a denser cousin of (c) (always-on, no gate) — it's a
+same-gate, different-destination cousin of (a)/(b) (one-tap Change, but
+the reveal is an accordion instead of a modal).
 
 Every frame in every row also carries the three #272/#277 requirements
 unconditionally: bigger Draft/Free-agents icons + Manual-calc-as-button in
@@ -121,12 +159,16 @@ a utility row, and `TierBadge` chips instead of numeric player values.
   flag), but every control it held gets re-laid-out as a permanent card on
   an already-long screen (`TradesScreen.tsx` is 5,861 lines today). Directly
   re-opens the height problem #257 was built to close — see Tradeoffs.
-- **(d) Accordion** — moderate. A genuinely new shell component (a
-  collapsible list, not a repurposed `<Card>` or `<Modal>`), but every
-  expanded body reuses the exact inner JSX `TradeDnaSheet` already renders
-  per section — the change is the container, not the controls. No existing
+- **(d) Accordion** *(repositioned 2026-08-09)* — moderate, and now lower
+  on the page side specifically: the default landing render (D1) needs
+  zero new components — it's the exact `editEntry` + Change gate baseline
+  already ships. All the cost is in the destination: swapping
+  `TradeDnaSheet`'s `full`-branch `<Modal>` for a collapsible in-place
+  list. That list is still a genuinely new shell component (no existing
   accordion pattern anywhere else in the app to reuse styling/behavior
-  from, so this is also the least precedented of the four in the codebase.
+  from — least precedented of the four in the codebase), but every
+  expanded body reuses the exact inner JSX `TradeDnaSheet` already renders
+  per section — the change is the container, not the controls.
 
 ## Tradeoffs (condensed — full rationale is in each frame's caption)
 
@@ -143,10 +185,19 @@ a utility row, and `TierBadge` chips instead of numeric player values.
   exact height problem #257's own PRD explicitly rejected even in its most
   conservative option (Variant A, "least risky, least brave" — this goes
   further than that).
-- **(d)** Best of (a)'s density and (c)'s directness — reclaims space when
-  collapsed, avoids a modal hop for edits — but is the most novel pattern
-  in the app and leaves an open question this mock doesn't resolve:
-  accordion-exclusive (one section open at a time) vs. multi-open.
+- **(d)** *(repositioned 2026-08-09)* No longer competes with (c) for
+  re-inflating the height problem #257 fixed — its default page is now
+  byte-for-byte (a)/baseline's footprint, not an always-on panel. What's
+  left reads close to a strict upgrade over today's shipped sheet: same
+  one-tap Change gate as every other variant, but the reveal is an
+  in-place accordion instead of a full-screen modal hop. Still the most
+  novel interaction pattern in the app (no existing accordion component to
+  borrow from) and still leaves the accordion-exclusive-vs-multi-open
+  question unresolved. Repositioning raises one new question: since
+  content is still gated behind a single "Change" tap, is this
+  meaningfully "presenting back outside the change link" per #270's
+  literal ask, or is it closer in spirit to (a)/(b) — same gate, nicer
+  destination — than to (c)'s always-on inline?
 
 ## #279 frame (E1) — what was and wasn't attempted
 
@@ -179,19 +230,30 @@ Explicitly **not** attempted, flagged as open:
 
 ## Recommendation
 
-**(a) Minimal**, as the default ship candidate — cheapest, safest, and it
-is the more literal, lower-risk reading of #270's own two sentences taken
-separately (League/Team surfaced now; player selection can follow later).
-If the operator's priority is specifically the "add/remove players
-directly" experience over League/Team surfacing, **(b)** is the one that
+**Updated 2026-08-09** to reflect the D repositioning above. Before the
+revision, (d) was scored as the "longer-term" option specifically because
+it competed with (c) for the same always-on-inline territory — both
+re-inflated the height problem #257 fixed, just to different degrees. That
+conflict is gone now: (d)'s default page (D1) is byte-for-byte the same
+as (a)/baseline, so it costs nothing extra on first paint. What (d) buys
+over (a) is what happens *after* the one tap on Change — every sheet
+section, not just League/Team, and no full-screen modal hop to get there.
+
+**(d) Accordion** is now the recommended default ship candidate, ahead of
+(a) — it strictly dominates (a) on scope (all sheet content reachable, not
+just League/Team) at the same default-page cost, and it's a real upgrade
+over today's shipped `TradeDnaSheet` modal (same gate, lighter reveal).
+The one real risk against it: it's the least precedented pattern in the
+codebase (no existing accordion component to build from), so if the
+operator wants the safest, most boring possible ship, **(a) Minimal**
+remains the fallback — cheapest, safest, and still the more literal
+reading of #270's second sentence taken alone. If the operator's priority
+is specifically the "add/remove players directly" experience over
+League/Team-and-everything-else surfacing, **(b)** is the one that
 actually delivers it, but it should go through its own scope block first —
 it's an architecture decision (does the swipe deck survive?), not a
 styling one, and the PFO regression risk needs a real answer before build,
-not just a mockup caption. **(d) Accordion** is the strongest longer-term
-direction if the operator wants ALL sheet content inline eventually
-without re-opening #257's height problem — but it's also the least
-precedented pattern in the codebase and would benefit from a small
-standalone spike before committing it to this screen.
+not just a mockup caption.
 
 ## Open questions for the operator
 
