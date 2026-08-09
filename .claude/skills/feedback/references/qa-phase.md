@@ -65,6 +65,20 @@ also classify: app bug vs. brittle test vs. environment issue. Only **app
 bugs and wrong tests** enter Phase 4; environment issues you fix and rerun.
 Both agents PASS everything → skip Phase 4, go to Phase 5.
 
+### Sim-gate evidence (on the batch's final fully-green round)
+
+The passing round IS the pre-ship simulator gate (CLAUDE.md §Conventions
+"Feature gates"; matrix in `docs/runbook.md` § Pre-ship simulator gate). Record
+it, or `githooks/pre-push` will block the Phase 5 push:
+
+1. Append the round to `living-memory/TEST_LEDGER.md` (flows, sim device, SHA).
+2. Write `qa/sim-runs/last-sim-run.json`:
+   `{"date": "<ISO>", "sha": "<merged-branch SHA the sim ran>", "tier": <n>,
+     "flows": [...], "result": "pass"}`
+   If Phase 5's merge produces a new SHA, the tested SHA is its ancestor — the
+   hook accepts that; only a post-QA code change invalidates the evidence (then
+   re-run QA — that's the point).
+
 ## Phase 4 — QA resolution (loop until clean)
 
 1. Group confirmed findings by owning platform; spawn resolution agents with

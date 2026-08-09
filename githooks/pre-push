@@ -1,0 +1,50 @@
+#!/bin/sh
+# Pre-ship simulator gate (docs/runbook.md § Pre-ship simulator gate).
+# Blocks a push to main containing mobile/src changes unless qa/sim-runs/last-sim-run.json
+# records a passing Maestro run on an ancestor of the pushed commit.
+# Install: git config core.hooksPath githooks
+# Escape hatch (operator decision, logged loudly): FTF_SKIP_SIM_GATE=1 git push ...
+
+MARKER="qa/sim-runs/last-sim-run.json"
+Z40="0000000000000000000000000000000000000000"
+
+if [ -n "$FTF_SKIP_SIM_GATE" ]; then
+    echo "⚠️  FTF_SKIP_SIM_GATE set — simulator gate SKIPPED. Record why in living-memory/TEST_LEDGER.md." >&2
+    exit 0
+fi
+
+fail() {
+    echo "✋ pre-push: simulator gate — $1" >&2
+    echo "   Run the required Maestro tier (docs/runbook.md § Pre-ship simulator gate)," >&2
+    echo "   write $MARKER, then push again. Operator override: FTF_SKIP_SIM_GATE=1" >&2
+    exit 1
+}
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    case "$_remote_ref" in
+        refs/heads/main) ;;
+        *) continue ;;
+    esac
+    [ "$local_sha" = "$Z40" ] && continue  # branch deletion
+
+    # Range being pushed; on a brand-new remote branch compare against nothing pushable.
+    if [ "$remote_sha" = "$Z40" ]; then
+        range="$local_sha"
+    else
+        range="$remote_sha..$local_sha"
+    fi
+
+    if git diff --name-only "$range" 2>/dev/null | grep -q '^mobile/src/'; then
+        [ -f "$MARKER" ] || fail "no $MARKER found and this push changes mobile/src."
+
+        result=$(sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MARKER")
+        tested_sha=$(sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MARKER")
+
+        [ "$result" = "pass" ] || fail "last recorded sim run is '$result', not 'pass'."
+        [ -n "$tested_sha" ] || fail "marker has no \"sha\" field."
+        git merge-base --is-ancestor "$tested_sha" "$local_sha" 2>/dev/null \
+            || fail "sim run was on $tested_sha, which is not an ancestor of the push — rerun on current code."
+    fi
+done
+
+exit 0
