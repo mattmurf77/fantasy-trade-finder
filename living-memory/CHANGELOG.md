@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-08-08 (feedback wave: 6 fixes/features + 2 mockup labs, operator-reviewed batch)
+
+- **#268/#267 (PickAssignment):** saves had NEVER worked — client PUT the bare route while the server registered `/<pick_id>`, 405 on every save, masked by the generic toast; fixed client-side + repro test pinning old-fail/new-pass. Grid numbers now update optimistically on move (react-query onMutate + local progress recompute, rollback on error, CAS path untouched).
+- **#265:** League-home "X more needed" used a mock-anchored threshold of 2 borrowed from the contrarian leaderboard; trade engine needs ONE ranked opponent. Extracted `mobile/src/utils/leagueUnlocks.ts` (=1) + node test.
+- **#263:** Trade Calculator player rows show pick-tier labels, not raw values. `GET /api/trade/values` gains additive `tier` (canonical `RankingService.tier_for_elo` on raw seed Elo — NOT derivable from the transformed `value`); demo mode maps client-side via `tierForElo`.
+- **#260:** League-summary legend explains the ▲/▼N rank-swing chips (#248).
+- **#257:** Controls Card consolidated into full-height TradeDnaSheet, variant C, flag `trades.edit_full_sheet` ON (off = byte-identical). Dismiss shows "Preferences changed — refresh" strip; player mode keeps its board; legacy OutlookSheet entry gated off.
+- **#172:** trade intent modes — Consolidate / Tier up / Tier down chips in the full sheet, flag `trades.intent_modes` ON. Post-generation filter on best-tier-per-side (star-tax precedent), intent in job freshness key, honest intent-named empty states. Reconciles #168's PRD objection (see `docs/feedback/items/172-trade-intents/status.md`).
+- **Mockup labs (design-only):** #211 player-first trades (3 directions, rec: full merge of pin board above deck) and #169 position-impact (3 variants; ppg framing NEEDS NEW DATA — no points source exists; value framing computable today). Operator to pick variants.
+- Closed: #113/#156/#168 (done), #155 (declined), #160 (declined → `docs/feedback/backlog.md`).
+- Gates: 2053 passed / 1 skipped; tsc clean; per-branch review + sequential merges (all true merges, #172 built on the merged #257 base).
+
 ## 2026-08-08 (context-overload remediation shipped — PR #101)
 
 - **Session-boot cost cut ~70–80%** (`e907c93`): zero-read boot contract (4-slice SessionStart hook: HANDOFF + NEXT + CHANGELOG top-2 + GOTCHAS index), living-memory retention policy (CHANGELOG keep-10 + quarterly [archive/](archive/), caps, FORMAT.md §Retention), 30 role-skill descriptions trimmed (5 retired), mobile screens/components CLAUDE.mds rewritten as maps (167KB→15.5KB), backend/web/extension orientation files added, TOCs on the 4 big reference docs, `docs/feedback/items/INDEX.md` (118 rows). Audit + measurements: [`../docs/reviews/2026-08-08-context-overload-audit.md`](../docs/reviews/2026-08-08-context-overload-audit.md). Deferred items in that report §Deferred. Boot measured after: ~5.4k tok vs 19–32k before.
