@@ -53,7 +53,8 @@ import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
-import type { ScoringFormat } from '../shared/types';
+import { tierForElo } from '../utils/tierBands';
+import type { Position, ScoringFormat, Tier } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
 // snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
@@ -224,6 +225,18 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       >,
     [valuesQuery.data],
   );
+  // #263 — server-computed pick-value tier per player (RankingService.
+  // tier_for_elo over the RAW seed Elo — see api/calc.ts CalcValueRow.tier).
+  // Reused as-is for row display; never re-derived from `liveBoard` above,
+  // which is on the elo_to_value scale, not the tier bands' Elo scale.
+  const liveTierById = useMemo(
+    () =>
+      Object.fromEntries((valuesQuery.data?.players ?? []).map((r) => [r.id, r.tier])) as Record<
+        string,
+        Tier
+      >,
+    [valuesQuery.data],
+  );
   const livePlayers = useMemo<CalcPlayer[]>(
     () =>
       (valuesQuery.data?.players ?? []).map((r) => ({
@@ -379,6 +392,20 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const activeBoard = isLive ? liveBoard : MY_BOARD;
   const activeOtherBoard = isLive ? liveBoard : theirBoard;
   const activePlayerById = isLive ? livePlayerById : CALC_PLAYER_BY_ID;
+
+  // #263 — pick-value tier for a player row, keyed off the SAME board a
+  // given TradeSide/picker column already reads its number from. Live mode
+  // reads the server-computed tier (liveTierById); demo mode's mock boards
+  // are already on the raw-Elo scale (data/tradeCalcMock.ts `base`), so
+  // they run straight through the existing tierForElo/TIER_LABEL util — the
+  // one client-side mapping every other rank screen already uses. Picks
+  // (pos 'PICK') have no tier of their own; callers fall back to the
+  // numeric value for them.
+  const tierFor = (board: Record<string, number>, p: CalcPlayer): Tier | null => {
+    if (p.pos === 'PICK') return null;
+    if (isLive) return liveTierById[p.id] ?? null;
+    return tierForElo(board[p.id] ?? p.base, p.pos as Position, '1qb_ppr');
+  };
 
   const demoEvaluation = useMemo(
     () => evaluateTradeLocal(sendIds, receiveIds, MY_BOARD, theirBoard),
@@ -683,6 +710,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           teamName={isLive ? 'any player' : CALC_MY_TEAM.teamName}
           players={activeSendIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
+          tierOf={(p) => tierFor(activeBoard, p)}
           accent={semantic.neg}
           addTestID="calc.side-a-add"
           onAdd={() => setPicker('send')}
@@ -703,6 +731,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           teamName={isLive ? 'any player' : partner.teamName}
           players={activeReceiveIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
+          tierOf={(p) => tierFor(activeBoard, p)}
           accent={semantic.pos}
           addTestID="calc.side-b-add"
           onAdd={() => setPicker('receive')}
@@ -893,6 +922,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         }
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
         ownerBoardValue={(p: CalcPlayer) => activeBoard[p.id] ?? 0}
+        tierOf={(p: CalcPlayer) => tierFor(activeBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => theirBoard[p.id]}
         secondaryPrefix="them"
         badgeFor={
@@ -916,6 +946,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         players={isLive ? livePlayers : partner.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
         ownerBoardValue={(p: CalcPlayer) => activeOtherBoard[p.id] ?? 0}
+        tierOf={(p: CalcPlayer) => tierFor(activeOtherBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => MY_BOARD[p.id]}
         secondaryPrefix="you"
         badgeFor={

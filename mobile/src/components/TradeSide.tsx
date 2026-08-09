@@ -2,9 +2,11 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Button, Card, Icon, TickLabel } from './chalkline';
 import { CalcPlayer } from '../data/tradeCalcMock';
 import { ink, type, space, radii } from '../theme/chalkline';
+import type { Tier } from '../shared/types';
 
 interface Props {
   title: string;
@@ -12,6 +14,12 @@ interface Props {
   players: CalcPlayer[];
   /** Value of each selected player on the viewer-relevant board. */
   valueOf: (p: CalcPlayer) => number;
+  /** #263 — pick-value ladder tier for the row's display (replaces the raw
+   *  `valueOf` number for players; picks keep their numeric value since a
+   *  pick effectively already IS a tier rung). Omitted or null for a given
+   *  row falls back to the numeric value — e.g. picks, or a caller that
+   *  hasn't wired tier data. */
+  tierOf?: (p: CalcPlayer) => Tier | null | undefined;
   accent: string;
   onAdd: () => void;
   onRemove: (id: string) => void;
@@ -24,8 +32,8 @@ interface Props {
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
-// Calculator: selected players with their board values + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, accent, onAdd, onRemove, addTestID, leagueId }: Props) {
+// Calculator: selected players with their pick-value tier + an add button.
+export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
@@ -58,7 +66,20 @@ export default function TradeSide({ title, teamName, players, valueOf, accent, o
                   testID={`calc.member-entered.${p.id}`}
                 />
               </View>
-              <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+              {(() => {
+                const t = tierOf?.(p);
+                return t ? (
+                  // TierBadge hardcodes alignSelf:'flex-start' (fine in its
+                  // usual flex-wrap header contexts); this row centers its
+                  // children, so re-center the badge itself rather than
+                  // let it fight the row's alignItems.
+                  <View style={styles.tierSlot}>
+                    <TierBadge tier={t} />
+                  </View>
+                ) : (
+                  <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+                );
+              })()}
               <Pressable
                 onPress={() => onRemove(p.id)}
                 hitSlop={6}
@@ -104,4 +125,5 @@ const styles = StyleSheet.create({
   },
   removePressed: { backgroundColor: ink.ink3 },
   addBtn: { marginTop: space.xs },
+  tierSlot: { alignSelf: 'center' },
 });

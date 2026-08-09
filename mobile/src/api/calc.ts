@@ -5,7 +5,7 @@
 
 import { apiRequest } from './client';
 import type { PickSource } from './pickAssignment';
-import type { ScoringFormat, StarterImpactSlot } from '../shared/types';
+import type { ScoringFormat, StarterImpactSlot, Tier } from '../shared/types';
 
 export interface CalcValueRow {
   id: string;
@@ -15,6 +15,13 @@ export interface CalcValueRow {
   age: number | null;
   /** Consensus dynasty value (elo_to_value over the pool's seed Elo). */
   value: number;
+  /** #263 — pick-value ladder tier (docs/cross-client-invariants.md) the
+   *  player's RAW seed Elo lands in, via the backend's canonical
+   *  RankingService.tier_for_elo. NOT derived from `value` above — `value`
+   *  is elo_to_value-transformed and on a different scale than the tier
+   *  bands. Reuse this field for tier display; never re-derive a tier from
+   *  `value` client-side. */
+  tier: Tier;
 }
 
 export type CalcVerdict = 'even' | 'fair' | 'unfair';
