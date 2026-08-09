@@ -145,12 +145,14 @@ export default function AnchorSheet({
               Save failed — check your connection and tap again.
             </Text>
           ) : placed ? (
+            // #277 — the tier label IS the value confirmation; the old
+            // "· ≈ 1,234" numeric tail duplicated it on a different scale
+            // and was removed (tier labels app-wide).
             <Text testID="anchor-sheet.result" style={styles.result}>
               Set to{' '}
               {placed.tier
                 ? (TIER_LABEL[placed.tier as Tier] ?? placed.tier)
                 : 'No value'}
-              {' · '}≈ {Math.round(placed.value).toLocaleString()}
               {'\n'}
               <Text style={styles.resultHint}>
                 Tap another rung to change it.

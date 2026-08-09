@@ -138,6 +138,7 @@ def compute_power_rankings(
     board_elo: dict[str, float] | None = None,
     picks_by_owner: dict[str, list[dict]] | None = None,
     lineup_slots: list[str] | None = None,
+    tier_fn=None,
 ) -> list[dict]:
     """
     Rank league teams by summed roster value (players + draft capital).
@@ -161,6 +162,13 @@ def compute_power_rankings(
                personal-basis board reshapes the split too). None → every
                team's `starters` is None and clients hide the filter
                (2026-07-26 League Analyzer replication).
+    tier_fn:   optional (elo, position) -> tier-key callable (#277/#278 —
+               the route passes RankingService.tier_for_elo bound to the
+               active format). When given, each roster row additionally
+               carries `tier`, walked off the SAME raw Elo (board or seed)
+               its `value` was priced from — never derived from the
+               transformed `value`. None (unit tests) omits the key. Rows
+               with no Elo on either board (value 0.0) carry `tier: None`.
 
     Returns teams in rank order (total_value desc, user_id asc tiebreak —
     deterministic), each:
@@ -177,12 +185,16 @@ def compute_power_rankings(
     the roster listing (#183) — they hold zero value, so totals don't move.
     """
 
-    def value_of(pid: str) -> float:
+    def elo_of(pid: str) -> float | None:
         if board_elo is not None and pid in board_elo:
-            return elo_to_value(board_elo[pid])
+            return float(board_elo[pid])
         if pid in seed_elo:
-            return elo_to_value(seed_elo[pid])
-        return 0.0
+            return float(seed_elo[pid])
+        return None
+
+    def value_of(pid: str) -> float:
+        elo = elo_of(pid)
+        return elo_to_value(elo) if elo is not None else 0.0
 
     teams: list[dict] = []
     for m in members:
@@ -210,14 +222,20 @@ def compute_power_rankings(
             if pos in pos_totals:
                 pos_totals[pos]["count"] += 1
                 pos_totals[pos]["value"] += val
-            roster.append({
+            row = {
                 "player_id": pid,
                 "name":      getattr(p, "name", None) or pid,
                 "position":  pos,
                 "team":      getattr(p, "team", None),
                 "age":       getattr(p, "age", None),
                 "value":     val,
-            })
+            }
+            if tier_fn is not None:
+                # #277/#278 — tier from the SAME raw Elo `val` was priced
+                # from (board or consensus seed); None when unpriceable.
+                elo = elo_of(pid)
+                row["tier"] = tier_fn(elo, pos) if elo is not None else None
+            roster.append(row)
         roster.sort(key=lambda r: (
             _POSITION_ORDER.get(r["position"], len(CORE_POSITIONS)),
             r["position"],

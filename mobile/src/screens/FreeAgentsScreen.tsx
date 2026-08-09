@@ -33,6 +33,7 @@ import { Button, TickLabel } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import PositionChip from '../components/PositionChip';
+import TierBadge from '../components/TierBadge';
 import {
   getFreeAgents,
   type FreeAgentDropCandidates,
@@ -346,9 +347,19 @@ function ClaimSheet({
                     {row.team ?? 'FA'} · FA {row.position}
                     {row.pos_rank}
                   </Text>
-                  <Text style={sheetStyles.headerValue}>
-                    {Math.round(row.value).toLocaleString('en-US')}
-                  </Text>
+                  {/* #277 — tier label instead of the numeric board value;
+                      numeric fallback only for old-server payloads. */}
+                  {row.tier ? (
+                    // TierBadge hardcodes alignSelf:'flex-start'; re-center
+                    // it in this vertically-centered row.
+                    <View style={sheetStyles.tierSlot}>
+                      <TierBadge tier={row.tier} size="sm" />
+                    </View>
+                  ) : (
+                    <Text style={sheetStyles.headerValue}>
+                      {Math.round(row.value).toLocaleString('en-US')}
+                    </Text>
+                  )}
                 </View>
               </View>
               <Button label="Cancel" variant="ghost" compact onPress={onClose} />
@@ -437,9 +448,18 @@ function ClaimSheet({
                         <Text style={sheetStyles.dropName} numberOfLines={1}>
                           {c.name}
                         </Text>
-                        <Text style={type.data}>
-                          {Math.round(c.value).toLocaleString('en-US')}
-                        </Text>
+                        {/* #277 — tier label per drop candidate; numeric
+                            fallback for old-server payloads. The list stays
+                            value-ASCENDING (server order — unchanged). */}
+                        {c.tier ? (
+                          <View style={sheetStyles.tierSlot}>
+                            <TierBadge tier={c.tier} size="sm" />
+                          </View>
+                        ) : (
+                          <Text style={type.data}>
+                            {Math.round(c.value).toLocaleString('en-US')}
+                          </Text>
+                        )}
                       </Pressable>
                     );
                   })}
@@ -509,7 +529,10 @@ function FreeAgentRowCard({
           age: row.age,
         }}
         posRank={`${row.position}${row.pos_rank}`}
-        value={row.value}
+        // #277 — the caller-board numeric is replaced by the server-walked
+        // pick-tier label (FreeAgentRow.tier; renders as the dense card's
+        // line-2 TierChalkBadge). Old servers omit it → no badge, no number.
+        tier={row.tier ?? null}
         rightSlot={
           <Button
             testID={`free-agents.add.${row.player_id}`}
@@ -677,6 +700,8 @@ const sheetStyles = StyleSheet.create({
     gap: space.sm,
   },
   headerValue: { ...type.data, color: chalk.base },
+  // TierBadge hardcodes alignSelf:'flex-start'; these rows center children.
+  tierSlot: { alignSelf: 'center' },
 
   section: { gap: space.sm },
   sectionHint: { ...type.bodySm, color: chalk.dim },

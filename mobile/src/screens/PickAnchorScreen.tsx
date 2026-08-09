@@ -385,12 +385,14 @@ export default function PickAnchorScreen() {
       )}
 
       {lastPlaced ? (
+        // #277 — the tier label IS the value confirmation; the "· ≈ N"
+        // numeric tail duplicated it on a different scale and was removed
+        // (tier labels app-wide).
         <Text style={styles.consequence}>
           {lastPlaced.name} →{' '}
           {lastPlaced.res.tier
             ? TIER_LABEL[lastPlaced.res.tier as Tier] ?? lastPlaced.res.tier
             : 'No value'}
-          {' · '}≈ {Math.round(lastPlaced.res.value).toLocaleString()}
         </Text>
       ) : (
         <Text style={styles.hint}>

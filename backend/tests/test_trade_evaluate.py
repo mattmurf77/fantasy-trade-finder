@@ -403,6 +403,33 @@ def test_mode_b_one_sided_eveners_absent_without_param(monkeypatch):
     assert "eveners" not in d
 
 
+def test_mode_b_evener_players_carry_tier_picks_and_packages_do_not(monkeypatch):
+    # #277 — evener PLAYER rows gain an additive `tier`, walked off the RAW
+    # seed Elo via the canonical RankingService.tier_for_elo band-walk (the
+    # same convention as /api/trade/values' #263 field — never derived from
+    # the elo_to_value-transformed `value`). Picks and 2-piece packages
+    # carry no tier: a pick's label already reads as a ladder rung, and a
+    # package sum has no single tier.
+    gap = _consensus_gap(["mid"], ["good"])
+    pick = {"pick_id": "L1_2027_1_3", "owner_user_id": CALLER, "season": 2027,
+            "round": 1, "pool_value": round(gap * 0.9, 1), "is_traded": 0,
+            "original_username": None}
+    _install_evener_world(monkeypatch, CALLER, gap, picks=[pick],
+                          untouchables=["ev_untouch"])
+    # Recover the injected seed the world installed (extended pool).
+    seed = srv.g_universal_by_format["1qb_ppr"]["seed"]
+    d = _post_authed({
+        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    for e in d["eveners"]:
+        if e.get("is_package") or e.get("is_pick"):
+            assert "tier" not in e
+        else:
+            assert e["tier"] == srv.RankingService.tier_for_elo(
+                seed[e["id"]], e["position"], "1qb_ppr")
+
+
 def test_mode_b_one_sided_eveners_param_ignored_on_two_sided_read(monkeypatch):
     # With both sides present the normal gap machinery owns eveners — the
     # param must not change a two-sided response.

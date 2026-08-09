@@ -7,6 +7,7 @@ import type {
   NewPartnerEntry,
   PortfolioRow,
   PortfolioTier,
+  Tier,
 } from '../shared/types';
 
 // ── League preferences (team outlook + positional prefs) ─────────
@@ -530,6 +531,12 @@ export interface PowerRankedPlayer {
   team: string | null;
   age: number | null;
   value: number;
+  /** #277/#278 — pick-value ladder tier walked off the SAME raw Elo (board
+   *  or consensus seed) `value` was priced from, via the backend's
+   *  canonical RankingService.tier_for_elo. Never re-derive a tier from
+   *  `value` (elo_to_value scale ≠ the tier bands' Elo scale). Null for
+   *  unpriceable rows (out-of-pool K/DEF); absent on old servers. */
+  tier?: Tier | null;
 }
 
 export interface PowerRankedTeam {
@@ -715,6 +722,8 @@ export interface FreeAgentDropSuggestion {
   position: string;
   value: number;
   delta: number;
+  /** #277 — see FreeAgentRow.tier. Absent on old servers. */
+  tier?: Tier | null;
 }
 export interface FreeAgentRow {
   player_id: string;
@@ -725,6 +734,10 @@ export interface FreeAgentRow {
   value: number;
   pos_rank: number;
   drop_suggestion: FreeAgentDropSuggestion | null;
+  /** #277 — pick-value ladder tier walked off the SAME raw board Elo
+   *  `value` was priced from (backend RankingService.tier_for_elo). Never
+   *  re-derive a tier from `value` client-side. Absent on old servers. */
+  tier?: Tier | null;
 }
 // #179 — roster-capacity context for the claim sheet. Sleeper leagues
 // only (null for platform/demo leagues); all fields best-effort — null
@@ -758,6 +771,8 @@ export interface FreeAgentDropCandidate {
   name: string;
   position: string;
   value: number;
+  /** #277 — see FreeAgentRow.tier. Absent on old servers. */
+  tier?: Tier | null;
 }
 export interface FreeAgentDropCandidates {
   players: FreeAgentDropCandidate[];

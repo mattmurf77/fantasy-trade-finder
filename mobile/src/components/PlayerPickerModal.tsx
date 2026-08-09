@@ -58,6 +58,12 @@ interface Props {
   tierOf?: (p: CalcPlayer) => Tier | null | undefined;
   /** Second board's value shown under the primary (e.g. what it's worth to you). */
   secondaryValue?: (p: CalcPlayer) => number;
+  /** #277 — pick-value ladder tier for the secondary board's line (the
+   *  dual-board demo comparison). When it resolves, the line reads
+   *  `them: 2nd` instead of `them: 950` — a cross-tier disagreement still
+   *  shows two different labels. Falls back to the numeric secondaryValue
+   *  when omitted/null (picks, unwired callers). */
+  secondaryTierOf?: (p: CalcPlayer) => Tier | null | undefined;
   /** Prefix for the secondary value line, e.g. "you" or "them". */
   secondaryPrefix?: string;
   /** Optional arbitrage badge per row (e.g. TARGET / SELL HIGH). */
@@ -83,6 +89,7 @@ export default function PlayerPickerModal({
   ownerBoardValue,
   tierOf,
   secondaryValue,
+  secondaryTierOf,
   secondaryPrefix = 'you',
   badgeFor,
   leagueId,
@@ -181,9 +188,17 @@ export default function PlayerPickerModal({
           <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
         )}
         {secondaryValue ? (
-          <Text style={styles.yourValue}>
-            {secondaryPrefix}: {secondaryValue(item).toLocaleString()}
-          </Text>
+          (() => {
+            // #277 — the other board's read as a tier label; numeric only
+            // when no tier resolves (picks, unwired callers).
+            const st = secondaryTierOf?.(item);
+            return (
+              <Text style={styles.yourValue}>
+                {secondaryPrefix}:{' '}
+                {st ? TIER_LABEL[st] : secondaryValue(item).toLocaleString()}
+              </Text>
+            );
+          })()
         ) : null}
       </View>
     </Pressable>

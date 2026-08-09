@@ -426,3 +426,35 @@ def test_drop_candidates_ascending_untouchables_excluded_capped(sleeper_client):
     values = [row["value"] for row in dc["players"]]
     assert values == sorted(values)
     assert dc["untouchables_excluded"] == 1
+
+
+# ── #277 — additive per-row `tier` (tier labels app-wide) ───────────────────
+# Every priced row (FA list + claim-sheet drop candidates) carries the
+# pick-value ladder tier via the canonical RankingService.tier_for_elo over
+# the SAME raw board Elo the row's value was priced from (consensus seed
+# here — the stub service has ranked nothing). Never derived from `value`.
+
+
+def test_free_agent_rows_carry_canonical_tier(client):
+    r = _get(client, RAW_ROWS)
+    assert r.status_code == 200, r.get_json()
+    rows = r.get_json()["free_agents"]
+    assert rows
+    for row in rows:
+        assert row["tier"] == server.RankingService.tier_for_elo(
+            SF_SEED[row["player_id"]], row["position"], "sf_tep")
+
+
+def test_drop_candidate_rows_carry_canonical_tier(sleeper_client):
+    live = [
+        {"roster_id": 1, "owner_id": UID,
+         "players": [f"d{i}" for i in range(1, 11)]},
+        {"roster_id": 2, "owner_id": "opp1", "players": ["rb1"]},
+    ]
+    r, _ = _get_live(sleeper_client, SNAPSHOT_ROWS, live,
+                     league_meta=_meta(),
+                     pool=DROP_POOL, seed=DROP_SEED)
+    assert r.status_code == 200, r.get_json()
+    for row in r.get_json()["drop_candidates"]["players"]:
+        assert row["tier"] == server.RankingService.tier_for_elo(
+            DROP_SEED[row["id"]], row["position"], "sf_tep")

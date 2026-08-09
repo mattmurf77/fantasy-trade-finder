@@ -150,6 +150,9 @@ export const draftRow = StyleSheet.create({
   playerMeta: { ...type.bodySm, fontSize: 11, color: chalk.faint },
   valueCell: { ...type.data, color: chalk.base },
   noValueCell: { ...type.bodySm, fontSize: 11, color: chalk.faint },
+  // #277 — the undrafted row's value column is a TierBadge now; the badge
+  // hardcodes alignSelf:'flex-start', so re-center it in the row.
+  tierSlot: { alignSelf: 'center' },
   rowAction: {
     ...type.label,
     color: ice.base,

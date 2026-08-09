@@ -33,11 +33,12 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
+import TierBadge from '../components/TierBadge';
 import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
 import { useRookieScope } from '../state/rookieScope';
 import { getRankings, reorderRankings, splitRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
-import { valueForElo } from '../utils/playerValue';
+import { TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { readErrorCopy } from '../utils/verification';
 import { startSpan } from '../observability/sentry';
 import { useSession } from '../state/useSession';
@@ -390,13 +391,19 @@ export default function ManualRanksScreen() {
       const rankNum = visIdx != null ? visIdx + 1 : 0;
       const isEditing = editingPid === item.id;
       const ageStr = item.age != null ? `${item.age} yo` : null;
-      // #53/#54 — right cluster: positional rank prominent (mono, position
-      // color), 0–10k value secondary. Raw Elo is no longer shown.
+      // #53 — right cluster: positional rank prominent (mono, position
+      // color). #277: the 0–10k numeric (#54) is replaced by the pick-tier
+      // label, walked client-side off the row's RAW Elo — the same
+      // tierForElo/TIER_LABEL mapping every rank surface uses.
       const posRankNum = posRanks.get(item.id);
       const posRank = posRankNum != null ? `${item.position}${posRankNum}` : 'NR';
       const posColor =
         position[String(item.position).toLowerCase() as keyof typeof position];
-      const value = valueForElo(item.elo);
+      const rowTier = tierForElo(
+        item.elo,
+        item.position as Position,
+        activeFormat ?? '1qb_ppr',
+      );
 
       // ux.board_search — locate cue for the matched row (same ink-2 well
       // as the active-drag state; cleared when the query clears).
@@ -411,7 +418,7 @@ export default function ManualRanksScreen() {
         item.team || 'FA',
         `rank ${rankNum}`,
         posRank,
-        value != null ? `value ${value.toLocaleString('en-US')}` : null,
+        rowTier ? `tier ${TIER_LABEL[rowTier]}` : null,
         item.injury_status ? `injury ${item.injury_status}` : null,
       ]
         .filter(Boolean)
@@ -498,9 +505,12 @@ export default function ManualRanksScreen() {
             <Text style={[styles.posRank, posColor ? { color: posColor } : null]}>
               {posRank}
             </Text>
-            {value != null ? (
-              <Text style={styles.valueNum}>{value.toLocaleString('en-US')}</Text>
-            ) : null}
+            {/* #277 — pick-tier label instead of the 0–10k numeric.
+                TierBadge hardcodes alignSelf:'flex-start'; the wrapper
+                keeps it on the cluster's right edge. */}
+            <View style={styles.tierSlot}>
+              <TierBadge tier={rowTier} size="sm" />
+            </View>
           </View>
           <View
             style={styles.grip}
@@ -853,21 +863,15 @@ const styles = StyleSheet.create({
 
   name: { ...type.title },
   meta: { ...type.bodySm, marginTop: 2 },
-  // #53/#54 right cluster — mirrors PlayerCard dense (posRank prominent in
-  // the position color, 0–10k value secondary chalk-dim, both Plex Mono).
-  valueWrap: { alignItems: 'flex-end', minWidth: 56 },
+  // #53 right cluster — posRank prominent in the position color; #277
+  // replaced the 0–10k numeric under it with the pick-tier badge.
+  valueWrap: { alignItems: 'flex-end', minWidth: 56, gap: 2 },
+  tierSlot: { alignSelf: 'flex-end' },
   posRank: {
     fontFamily: fonts.dataSemi,
     fontSize: 14,
     fontVariant: ['tabular-nums'],
     color: chalk.base,
-  },
-  valueNum: {
-    fontFamily: fonts.data,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-    color: chalk.dim,
-    marginTop: 1,
   },
 
   // Drag affordance — decorative lineStrong grip bars (no emoji, no icon glyph).

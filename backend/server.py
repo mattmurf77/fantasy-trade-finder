@@ -926,7 +926,7 @@ _EVENER_PAIR_POOL = 15        # top-N sub-gap assets scanned pairwise for the co
 
 def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
                     exclude_ids: set, pool_players: list,
-                    seed_value) -> list[dict]:
+                    seed_value, tier_of=None) -> list[dict]:
     """Evener candidates from one owner's roster + owned picks (Mode B).
 
     Up to _EVENER_MAX single assets whose consensus value falls inside the
@@ -935,6 +935,12 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     add) built from the same pool. The owner's untouchables are never
     recommended — asset preferences are keyed (user_id, league_id), so this
     holds for the caller AND the counterparty alike.
+
+    #277 — `tier_of` is an optional (player_id, position) -> tier-key
+    callable (the evaluate route binds RankingService.tier_for_elo over the
+    RAW seed Elo + active format). When given, each PLAYER row additionally
+    carries `tier`; picks and 2-piece packages never do (a pick's own label
+    already reads as a ladder rung, and a package sum has no single tier).
     """
     lo, hi = gap_value * _EVENER_WINDOW[0], gap_value * _EVENER_WINDOW[1]
     try:
@@ -964,6 +970,8 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
             "team":     getattr(p, "team", None),
             "value":    round(seed_value(pid), 1),
             "is_pick":  False,
+            # #277 — additive tier for player rows only (see docstring).
+            **({"tier": tier_of(pid, p.position)} if tier_of else {}),
         })
     # W3 M-C (S4) — the highest-blast-radius site: a one-tap "add their 2027
     # 1st" sweetener may name an ASSERTED pick when `picks.assign_tradeable`
@@ -8359,6 +8367,11 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # (Mode B); rosterless Mode A falls back to the nearest generic pick
         # (already a calculator-addable pool id — never a fabricated one).
         # Build failures omit the field; they never fail the route.
+        # #277 — evener player rows carry an additive `tier`, walked off the
+        # RAW seed Elo via the canonical band-walk (same convention as
+        # /api/trade/values; never derived from the transformed value).
+        _evener_tier = (lambda pid, pos:
+                        RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
         if favors is not None and favors != "even" and gap and gap.get("add_to"):
             try:
                 in_trade = set(give_raw) | set(recv_raw)
@@ -8367,7 +8380,7 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                              else opponent_user_id)
                     result["eveners"] = _roster_eveners(
                         league_id, owner, gap["value"], in_trade,
-                        _pool_players, seed_value)
+                        _pool_players, seed_value, tier_of=_evener_tier)
                 else:
                     pe = gap.get("pick_equivalent")
                     result["eveners"] = (
@@ -8395,7 +8408,7 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                     result["eveners"] = _roster_eveners(
                         league_id, _os_owner, _os_gap,
                         set(give_raw) | set(recv_raw),
-                        _pool_players, seed_value)
+                        _pool_players, seed_value, tier_of=_evener_tier)
             except Exception as evn_err:
                 log.warning("evaluate: one-sided evener build failed (omitted): %s",
                             evn_err)
@@ -18745,7 +18758,11 @@ def league_power_rankings_route():
         teams = compute_power_rankings(
             members, seed, players_meta, board_elo=board_elo,
             picks_by_owner=_power_picks_by_owner(league_id, fmt),
-            lineup_slots=_sleeper_lineup_slots(league_id))
+            lineup_slots=_sleeper_lineup_slots(league_id),
+            # #277/#278 — additive `tier` per roster row (canonical
+            # band-walk over the raw board/seed Elo; never from `value`).
+            tier_fn=(lambda elo, pos:
+                     RankingService.tier_for_elo(elo, pos, fmt)))
         for t in teams:
             t["is_you"] = (t["user_id"] == g_user_id)
         # League Analyzer replication (2026-07-26): per-team `starters` is
@@ -19138,9 +19155,13 @@ def league_free_agents_route():
         "free_agents": [
           {"player_id", "name", "position", "team", "age",
            "value": float,          # caller-board dynasty value
+           "tier": str|null,        # #277 — pick-value ladder tier from the
+                                    # SAME raw board Elo `value` was priced
+                                    # from (RankingService.tier_for_elo;
+                                    # never derived from `value`)
            "pos_rank": int,         # 1-based rank within position among FAs
            "drop_suggestion": {"player_id", "name", "position",
-                               "value", "delta"} | null}, ...
+                               "value", "delta", "tier"} | null}, ...
         ],  # top 50 after the position filter
         "roster_capacity": {"my_count": int|null, "limit": int|null,
                             "open_slots": int|null} | null
@@ -19152,7 +19173,8 @@ def league_free_agents_route():
           # #179 claim sheet — Sleeper leagues only. faab is the CALLER'S
           # budget line (league waiver_budget / their roster's
           # waiver_budget_used) and is null for non-FAAB waiver types.
-        "drop_candidates": {"players": [{"id","name","position","value"},...],
+        "drop_candidates": {"players": [{"id","name","position","value",
+                                         "tier"},...],
                             "untouchables_excluded": int} | null
           # #179 claim sheet — Sleeper leagues only. The caller's roster
           # priced on their board, value-ASCENDING (least valuable first),
@@ -19189,6 +19211,10 @@ def league_free_agents_route():
         service  = sess["service"]
         user_elo = {rp.player.id: rp.elo
                     for rp in service.get_rankings(position=None).rankings}
+        # #277 — additive `tier` per priced row, via the canonical band-walk
+        # over the SAME raw board Elo the row's value came from.
+        fa_tier_fn = (lambda elo, pos:
+                      RankingService.tier_for_elo(elo, pos, fmt))
 
         # ── Roster exclusion set (#151 / #178) — sources, UNIONED: ─────────
         #  1. In-session league rosters when league_id matches the session
@@ -19315,6 +19341,7 @@ def league_free_agents_route():
                 user_roster  = (my_roster_ids if my_roster_ids is not None
                                 else user_roster),
                 exclude_ids  = untouchable_ids,
+                tier_fn      = fa_tier_fn,
             )
             drop_candidates = {
                 "players":                cand_rows,
@@ -19328,6 +19355,7 @@ def league_free_agents_route():
             rostered_ids = rostered,
             user_roster  = user_roster,
             position     = position,
+            tier_fn      = fa_tier_fn,
         )
         return jsonify({
             "league_id":         league_id,

@@ -27,8 +27,7 @@ import { useScoringFormat } from '../hooks/useScoringFormat';
 import { useRookieScope } from '../state/rookieScope';
 import { startSpan } from '../observability/sentry';
 import { readErrorCopy } from '../utils/verification';
-import { tierForElo } from '../utils/tierBands';
-import { valueForElo } from '../utils/playerValue';
+import { TIER_LABEL, tierForElo } from '../utils/tierBands';
 import {
   chalk,
   ice,
@@ -317,8 +316,9 @@ export default function RookieRanksScreen({ route, navigation }: any = {}) {
 
   const renderItem = useCallback(
     ({ item, drag, isActive, getIndex }: RenderItemParams<RankedPlayer>) => {
+      // #277 — the tier badge IS the value display now; the 0–10k numeric
+      // that rendered under it was removed (tier labels app-wide).
       const tier = tierForElo(item.elo, item.position as Position, fmt) as Tier | null;
-      const value = valueForElo(item.elo);
       const overallRank = ranks.overall.get(item.id) ?? 0;
       const posRank = ranks.pos.get(item.id) ?? 0;
       const visIdx = getIndex();
@@ -332,7 +332,7 @@ export default function RookieRanksScreen({ route, navigation }: any = {}) {
         item.team || 'FA',
         `rookie rank ${overallRank}`,
         `${item.position}${posRank} rookie`,
-        value != null ? `value ${value.toLocaleString('en-US')}` : null,
+        tier ? `tier ${TIER_LABEL[tier]}` : null,
       ]
         .filter(Boolean)
         .join(', ');
@@ -382,9 +382,6 @@ export default function RookieRanksScreen({ route, navigation }: any = {}) {
             importantForAccessibility="no-hide-descendants"
           >
             <TierBadge tier={tier} size="sm" />
-            {value != null ? (
-              <Text style={styles.value}>{value.toLocaleString()}</Text>
-            ) : null}
           </View>
           {/* Drag affordance — decorative lineStrong grip bars (no emoji, no
               icon glyph), the shipped Overall-ranks construction. */}
@@ -669,7 +666,6 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   meta: { ...type.bodySm, color: chalk.dim, flexShrink: 1 },
   rowRight: { alignItems: 'flex-end', gap: 2 },
-  value: { ...type.data, color: chalk.dim },
   grip: { gap: 3 },
   gripBar: { width: 14, height: 2, backgroundColor: ink.lineStrong },
 

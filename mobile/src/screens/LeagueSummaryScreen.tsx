@@ -770,16 +770,17 @@ export default function LeagueSummaryScreen() {
               </Text>
             </View>
           )}
+          {/* #281 — the ticksOn branch used to narrate the chart encodings
+              here ("Bar height = … Dashed line = … Arrows mark …"), which
+              duplicated the below-graph key row (#248 tick swatch + #260
+              ▲▼N entry). Operator: keep only the below-graph key — this
+              hint now always states the ranking basis. */}
           <Text style={[type.bodySm, styles.hint, selected ? styles.hintTight : null]}>
             {`${subset === 'starters' ? 'Best starting lineup only. ' : subset === 'bench' ? 'Bench only. ' : ''}${
               posFilter.size === 0
-                ? ticksOn
-                  ? basis === 'personal'
-                    ? 'Bar height = your board. Dashed line = consensus. Arrows mark a 2+ rank swing.'
-                    : 'Bar height = consensus. Dashed line = your board. Arrows mark a 2+ rank swing.'
-                  : basis === 'consensus'
-                    ? 'Ranked by roster value on community consensus.'
-                    : 'Ranked by roster value on YOUR board — unranked players use consensus.'
+                ? basis === 'consensus'
+                  ? 'Ranked by roster value on community consensus.'
+                  : 'Ranked by roster value on YOUR board — unranked players use consensus.'
                 : `Ranked by ${[...posFilter].join(' + ')} value only — chart reordered.`
             }`}
           </Text>
@@ -983,7 +984,11 @@ export default function LeagueSummaryScreen() {
                             team: r.team,
                             age: r.age,
                           }}
-                          value={Math.round(r.value)}
+                          // #277/#278 — the numeric board value is replaced
+                          // by the server-walked pick-tier label
+                          // (PowerRankedPlayer.tier). Old servers /
+                          // unpriceable rows (K/DEF) → no badge, no number.
+                          tier={r.tier ?? null}
                           posRank={playerPosRank.get(r.player_id) ?? 'NR'}
                         />
                       </View>
@@ -1716,7 +1721,10 @@ const styles = StyleSheet.create({
     borderColor: ice.base,
   },
 
-  legend: { flexDirection: 'row', gap: space.lg, flexWrap: 'wrap', marginTop: space.md },
+  // #281 — the surviving (below-graph) key row sits one bodySm line-height
+  // (18) lower now that the duplicate descriptive key text above the chart
+  // is gone: operator's "move them together a line down".
+  legend: { flexDirection: 'row', gap: space.lg, flexWrap: 'wrap', marginTop: space.md + 18 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   legendSwatch: { width: 9, height: 9, borderRadius: radii.xs },
   legendLabel: { ...type.bodySm, color: chalk.dim },

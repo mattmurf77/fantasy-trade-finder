@@ -44,16 +44,26 @@ DEFAULT_LIMIT = 50
 DROP_CANDIDATE_LIMIT = 8
 
 
-def board_value(player_id: str,
-                user_elo: dict[str, float],
-                seed_elo: dict[str, float]) -> float:
-    """The caller's dynasty value for a player: personal Elo when the board
-    has one, consensus seed otherwise (1500 floor for a pool player somehow
-    absent from both — same default every other pricing path uses)."""
+def board_elo(player_id: str,
+              user_elo: dict[str, float],
+              seed_elo: dict[str, float]) -> float:
+    """The caller's RAW Elo for a player: personal Elo when the board has
+    one, consensus seed otherwise (1500 floor for a pool player somehow
+    absent from both — same default every other pricing path uses). The
+    tier bands are defined over THIS scale, not the elo_to_value transform
+    below (#263/#277: never derive a tier from `value`)."""
     elo = user_elo.get(player_id)
     if elo is None:
         elo = seed_elo.get(player_id, 1500.0)
-    return round(elo_to_value(float(elo)), 1)
+    return float(elo)
+
+
+def board_value(player_id: str,
+                user_elo: dict[str, float],
+                seed_elo: dict[str, float]) -> float:
+    """The caller's dynasty value for a player — elo_to_value over
+    `board_elo` (see above)."""
+    return round(elo_to_value(board_elo(player_id, user_elo, seed_elo)), 1)
 
 
 def board_is_personalized(user_elo: dict[str, float],
@@ -73,7 +83,8 @@ def compute_free_agents(pool_players: list,
                         rostered_ids: Iterable[str],
                         user_roster: Iterable[str],
                         position: str | None = None,
-                        limit: int = DEFAULT_LIMIT) -> list[dict]:
+                        limit: int = DEFAULT_LIMIT,
+                        tier_fn=None) -> list[dict]:
     """Rank the league's free agents by the caller's board value.
 
     pool_players : universal pool for the active format (ranking_service
@@ -86,6 +97,12 @@ def compute_free_agents(pool_players: list,
                    the drop-suggestion candidates come from here).
     position     : optional 'QB'|'RB'|'WR'|'TE' filter.
     limit        : max rows returned (after the position filter).
+    tier_fn      : optional (elo, position) -> tier-key callable (#277 —
+                   the route passes RankingService.tier_for_elo bound to
+                   the active format). When given, each row and each
+                   drop_suggestion additionally carries `tier`, walked off
+                   the SAME raw board Elo the value was priced from. None
+                   (unit tests, old callers) omits the key entirely.
 
     Returns dicts: {player_id, name, position, team, age, value, pos_rank,
     drop_suggestion: {player_id, name, position, value, delta} | None}.
@@ -139,6 +156,9 @@ def compute_free_agents(pool_players: list,
                 "position":  worst[0].position,
                 "value":     worst[1],
                 "delta":     round(v - worst[1], 1),
+                **({"tier": tier_fn(board_elo(worst[0].id, user_elo, seed_elo),
+                                    worst[0].position)}
+                   if tier_fn else {}),
             }
         rows.append({
             "player_id":       p.id,
@@ -149,6 +169,10 @@ def compute_free_agents(pool_players: list,
             "value":           v,
             "pos_rank":        pos_rank[p.id],
             "drop_suggestion": drop,
+            # #277 — tier from the SAME board Elo `v` was priced from.
+            **({"tier": tier_fn(board_elo(p.id, user_elo, seed_elo),
+                                p.position)}
+               if tier_fn else {}),
         })
     return rows
 
@@ -159,6 +183,7 @@ def compute_drop_candidates(pool_players: list,
                             user_roster: Iterable[str],
                             exclude_ids: Iterable[str] = (),
                             limit: int = DROP_CANDIDATE_LIMIT,
+                            tier_fn=None,
                             ) -> tuple[list[dict], int]:
     """Claim-sheet drop list (#179 upgrade): the caller's rostered players
     priced on their board, sorted value-ASCENDING (least valuable first —
@@ -171,7 +196,8 @@ def compute_drop_candidates(pool_players: list,
     skipped. Roster entries outside the universal pool (unpriceable) are
     silently skipped, same as compute_free_agents' drop rule.
 
-    Rows: {id, name, position, value}.
+    Rows: {id, name, position, value} (+ `tier` when `tier_fn` is given —
+    same convention as compute_free_agents, #277).
     """
     players_by_id = {p.id: p for p in pool_players}
     exclude = {str(x) for x in exclude_ids}
@@ -189,6 +215,9 @@ def compute_drop_candidates(pool_players: list,
             "name":     p.name,
             "position": p.position,
             "value":    board_value(pid, user_elo, seed_elo),
+            **({"tier": tier_fn(board_elo(pid, user_elo, seed_elo),
+                                p.position)}
+               if tier_fn else {}),
         })
     rows.sort(key=lambda r: r["value"])
     return rows[:limit], excluded_count
