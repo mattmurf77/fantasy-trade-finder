@@ -2,12 +2,18 @@
 
 > **Purpose:** authoritative record of what's been tested, what shipped, what was measured, and on what version of the stack. Prevents "works on my machine / claimed earlier without evidence" failure modes.
 >
+> Retention: entries dated within the last 2 months (2026-06-08 onward) plus standing sections live here; older run entries are archived in [`archive/TEST_LEDGER-pre-2026-06.md`](archive/TEST_LEDGER-pre-2026-06.md).
+>
 > **Read at:** before claiming a result, before proposing a new test that may duplicate a prior one, before shipping a feature.
 > **Write at:** immediately after running a test, regardless of outcome.
 >
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+
+## 2026-08-08 — Context-slim batch (sim gate SKIP, express-class: docs/config only)
+
+- express: context-overload remediation (branch `context-slim-2026-08-08`) — gates skipped by operator direction. Diff touches `mobile/src/**/CLAUDE.md` (docs), living-memory, docs/, skills, hook config — zero app code. `FTF_SKIP_SIM_GATE=1` used for the push; CI (pytest + tsc + testid-lint) is the verification gate.
 
 ## 2026-08-08 — Feedback #266/#258 fixes (sim gate DEVIATION, standing operator bypass)
 
@@ -34,7 +40,7 @@
 - [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)
 - [2026-06-11](#2026-06-11)
-- [2026-05-21](#2026-05-21)
+- [Archive: pre-2026-06 entries](archive/TEST_LEDGER-pre-2026-06.md)
 - [Manual Verification History](#manual-verification-history)
 - [Custom-Skill Benchmarks](#custom-skill-benchmarks)
 - [Tests Planned but Not Yet Run](#tests-planned-but-not-yet-run)
@@ -85,7 +91,7 @@
 
 ### TC-ENG-004 — 3-team cycle clearing (find_three_team_cycles)
 - **Test:** 4 pytest goldens for the dark/uncovered kidney-exchange 3-team cycle clearer — Pareto A→B→C→A detection, no-benefit→empty, <3 members→empty, lineup-feasibility blocks a roster-breaking handoff.
-- **Result:** **PASS 4/4**, in CI ([backend/tests/test_three_team_cycles.py](../backend/tests/test_three_team_cycles.py)).
+- **Result:** **PASS 4/4** ([backend/tests/test_three_team_cycles.py](../backend/tests/test_three_team_cycles.py)) — written before CI existed (added 2026-08-08); now covered by CI's `backend-tests` job since the file lives under `backend/tests/`.
 - **Findings:** **F-1 (P3 dead code)** `find_three_team_cycles` is implemented + exported but **never called** (no caller; trade.three_team flag only in a comment). Correct + now tested — a product decision away from wiring on.
 - **Artifacts:** [`qa/results/TC-ENG-004.md`](../qa/results/TC-ENG-004.md).
 
@@ -115,7 +121,7 @@
 
 ### TC-ENG-003 — engine gate config-responsiveness (admin tuning surface)
 - **Test:** 4 pytest goldens proving the tuning knobs are monotone/predictable — min_side_surplus (↑→fewer cards), trade_elo_gap_max knife-edge, waiver_slot_cost erodes extra-player side, tier_mult_elite scales composite.
-- **Result:** **PASS 4/4**, in CI ([backend/tests/test_engine_gates_config.py](../backend/tests/test_engine_gates_config.py)).
+- **Result:** **PASS 4/4** ([backend/tests/test_engine_gates_config.py](../backend/tests/test_engine_gates_config.py)) — written before CI existed (added 2026-08-08); now covered by CI's `backend-tests` job since the file lives under `backend/tests/`.
 - **Observation:** the legacy parity fixture yields 4 cards legacy / 0 v2 — v2 correctly rejects one-sided trades legacy surfaced (reinforces "kill-switch is a real downgrade").
 - **Artifacts:** [`qa/results/TC-ENG-003.md`](../qa/results/TC-ENG-003.md).
 
@@ -133,7 +139,7 @@
 
 ### TC-RNK-001 — Elo math golden fixtures (engine input quality)
 - **Test:** 6 pytest goldens for the Elo update — exact pairwise math (K=32 → ±16), K-factor by decision type (rank 32 / like 8 / pass 4, linear), zero-sum conservation, 3-player decomposition + order preservation, override pinning, replay determinism.
-- **Result:** **PASS 6/6**, in CI ([backend/tests/test_rnk_elo_golden.py](../backend/tests/test_rnk_elo_golden.py)).
+- **Result:** **PASS 6/6** ([backend/tests/test_rnk_elo_golden.py](../backend/tests/test_rnk_elo_golden.py)) — written before CI existed (added 2026-08-08); now covered by CI's `backend-tests` job since the file lives under `backend/tests/`.
 - **Observation:** displayed Elo is rounded to 1 decimal in `get_rankings`, and that rounded value is what's published to member_rankings + fed to `elo_to_value` — whole valuation pipeline runs at 0.1-Elo precision. Zero-sum only holds without tier overrides.
 - **Artifacts:** [`qa/results/TC-RNK-001.md`](../qa/results/TC-RNK-001.md).
 
@@ -174,7 +180,7 @@
 
 ### TC-ENG-002 — fairness-gate golden fixtures (1-for-1 gate + package-discount watch item)
 - **Test:** 8 pytest golden fixtures in `backend/tests/` covering `package_value_v2` discount math (exact + monotone in `package_adj_gamma`), 1-for-1 gate config-driven knife-edge, discount→`fairness_score` propagation, FR8 outlook market-neutrality, and v2↔v3 fairness-floor parity + monotonicity. Self-calibrating where exact propagation is hard to hand-predict.
-- **Result:** **PASS 8/8**, stable ×3; full backend suite now **178 passed** with the new file (no pollution). Graduated into the pytest suite (runs in CI).
+- **Result:** **PASS 8/8**, stable ×3; full backend suite now **178 passed** with the new file (no pollution). Graduated into the pytest suite — written before CI existed (added 2026-08-08); now covered by CI's `backend-tests` job.
 - **Findings:** **F-1 (P3)** `_fairness_v3` is a hand-copied mirror of v2 `_fairness` (standing TODO) — drift risk; this test now guards parity, but a shared `score_trade` extraction is the real fix (already planned in competitor-top20/03).
 - **Key observation:** v3 lineup-feasibility is all-or-nothing — a roster that can't field a full QB1/RB2/WR2/TE1 lineup gets ZERO v3 cards (v2 still serves). Sharp edge worth a runbook note for "no trades" diagnosis.
 - **Artifacts:** [`backend/tests/test_fairness_gate_golden.py`](../backend/tests/test_fairness_gate_golden.py), [`qa/results/TC-ENG-002.md`](../qa/results/TC-ENG-002.md).
@@ -192,16 +198,9 @@
 - **Artifacts:** harness [`qa/e2e/tc_e2e_001.py`](../qa/e2e/tc_e2e_001.py), report [`qa/results/TC-E2E-001.md`](../qa/results/TC-E2E-001.md), machine-readable run `qa/e2e/scratch/TC-E2E-001-run.json`.
 - **Planned variants:** TC-E2E-002 restart-resilience, TC-E2E-003 sf_tep format, TC-E2E-004 Postgres parity.
 
-## 2026-05-21
-
-### Living-memory layer adoption
-- **Test:** verify all 18 living-memory files exist and pass the `living-memory-format-check` skill.
-- **Status:** pending — skill created same session; run after files settle.
-- **Doc:** this ledger.
-
 ## Manual Verification History
 
-The project does not currently have a `pytest` suite. Verification has been ad-hoc via:
+*Historical — predates the pytest suite. As of 2026-08-08 the project has a pytest suite of ~2000 tests (`backend/tests/`, run in CI's `backend-tests` job per `.github/workflows/ci.yml`); the ad-hoc methods below were the verification approach before that suite existed and are largely superseded. The 2026-05-21 entry that used to open this file (living-memory layer adoption, status pending) is archived in [`archive/TEST_LEDGER-pre-2026-06.md`](archive/TEST_LEDGER-pre-2026-06.md).*
 
 | Verification artifact | What it tests |
 |---|---|
@@ -212,7 +211,7 @@ The project does not currently have a `pytest` suite. Verification has been ad-h
 | `GET /api/debug/log?n=100` | In-memory ring-buffer log (last 200 entries) for forensic checks |
 | Manual smoke: `python3 run.py` → web client login → roster import → swipe → trade card | End-to-end happy-path verification |
 
-**Caveat:** no automated regression suite. A change that breaks one of these flows is detectable only by manual re-run. See [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-002.
+**Caveat (historical):** at the time this table was written there was no automated regression suite, so a change that broke one of these flows was detectable only by manual re-run. That gap is closed — see the pytest suite note above. [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-002 (pytest adoption) is resolved.
 
 ## Custom-Skill Benchmarks
 

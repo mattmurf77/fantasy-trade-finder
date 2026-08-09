@@ -2,35 +2,11 @@
 
 > **Purpose:** day-to-day Architecture Decision Record (ADR) log. Each significant choice with: context → decision → alternatives → consequences. Formal ADRs (one-decision-per-file with author, date, and full context) live in [`../docs/adr/`](../docs/adr/); this file is the terser, cumulative version. Reference ADRs explicitly when applicable.
 >
+> The index is at the bottom of this file; newest content stays at the top.
+>
 > **Read at:** before changing a major design choice. **Write at:** when you make one.
 >
 > Companion files: [`../docs/adr/`](../docs/adr/), [`MISTAKES.md`](MISTAKES.md), [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md).
-
----
-
-## Table of Contents
-- [D-001 — Sleeper as the Sole Identity Provider](#d-001--sleeper-as-the-sole-identity-provider)
-- [D-002 — 3-Player Matchups Over 2-Player](#d-002--3-player-matchups-over-2-player)
-- [D-003 — Elo Decomposition for 3-Player Rankings](#d-003--elo-decomposition-for-3-player-rankings)
-- [D-004 — DynastyProcess CSV as Initial Elo Seed](#d-004--dynastyprocess-csv-as-initial-elo-seed)
-- [D-005 — Anthropic Claude API as Optional Enhancement](#d-005--anthropic-claude-api-as-optional-enhancement)
-- [D-006 — Vanilla Stack for Web Client](#d-006--vanilla-stack-for-web-client)
-- [D-007 — SQLite First, Postgres-Swappable](#d-007--sqlite-first-postgres-swappable)
-- [D-008 — In-Memory Ring Buffer Logger (No Log Files)](#d-008--in-memory-ring-buffer-logger-no-log-files)
-- [D-009 — `docs/` as Source of Truth; Living-Memory Cross-References](#d-009--docs-as-source-of-truth-living-memory-cross-references)
-- [D-010 — Karpathy Four Principles as Coding Discipline](#d-010--karpathy-four-principles-as-coding-discipline)
-- [D-011 — Fix the Selector, Not the Elo Math](#d-011--fix-the-selector-not-the-elo-math)
-- [D-012 — Affine Mapping of the DynastyProcess Scale onto Trade Value](#d-012--affine-mapping-of-the-dynastyprocess-scale-onto-trade-value)
-- [D-013 — Blend External Value Sources onto the DP Curve, Never Replace It](#d-013--blend-external-value-sources-onto-the-dp-curve-never-replace-it)
-- [D-014 — Two-Stage Layered Experiment Bucketing](#d-014--two-stage-layered-experiment-bucketing)
-- [D-015 — Derive Model State on Read Rather Than Materializing It](#d-015--derive-model-state-on-read-rather-than-materializing-it)
-- [D-016 — A Model Ships Dark Until It Passes an Explicit Numeric Gate](#d-016--a-model-ships-dark-until-it-passes-an-explicit-numeric-gate)
-- [D-017 — Fail Loud Rather Than Serve a Plausible Wrong Answer](#d-017--fail-loud-rather-than-serve-a-plausible-wrong-answer)
-- [D-018 — Unverified Sessions Keep the Short Expiry](#d-018--unverified-sessions-keep-the-short-expiry)
-- [D-019 — Prepare the Trade, Never Fabricate the Execute Path](#d-019--prepare-the-trade-never-fabricate-the-execute-path)
-- [D-020 — Analytics Omits Untrustworthy Data Rather Than Reporting It](#d-020--analytics-omits-untrustworthy-data-rather-than-reporting-it)
-- [D-021 — Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS](#d-021--capture-espns-httponly-cookie-from-the-native-store-not-injected-js)
-- [Decision Template (for new entries)](#decision-template-for-new-entries)
 
 ---
 
@@ -205,6 +181,34 @@
 **Consequences:** Adds a native dependency (`@react-native-cookies/cookies`), so the flag can only be validated in a real build — it ships **OFF** and flips after a TestFlight build validates against a real private league (friend's league 493554). Caveat: the package is **deprecated upstream** (6.2.1's npm notice names `@preeternal/react-native-cookie-manager` / `react-native-nitro-cookies` as successors); kept because the used surface is two calls wrapped in one utils module — see [`DEPENDENCIES.md`](DEPENDENCIES.md) §2026-08-08 for the migration path. Manual paste stays as the fallback; flag off ⇒ the sheet is byte-identical. The pure extractor (`mobile/src/utils/espnCookies.ts` `pickEspnCookies`) is unit-tested; the in-WebView login leg is un-automatable and is covered by manual TestFlight QA. Establishes the mobile pattern for any future HttpOnly third-party credential capture (recorded in `LLD.md` §Specific patterns).
 **Status:** Active.
 **Related ADR:** — (rides the ESPN linking plan `docs/plans/espn-league-linking-plan-2026-07-11.md` §4 + scope `docs/plans/espn-connect-webview/scope.md`)
+
+---
+
+## Decision index
+
+| ID | Title | Date |
+|---|---|---|
+| D-001 | Sleeper as the Sole Identity Provider | Pre-changelog |
+| D-002 | 3-Player Matchups Over 2-Player | Pre-changelog |
+| D-003 | Elo Decomposition for 3-Player Rankings | Pre-changelog |
+| D-004 | DynastyProcess CSV as Initial Elo Seed | Pre-changelog |
+| D-005 | Anthropic Claude API as Optional Enhancement | Pre-changelog |
+| D-006 | Vanilla Stack for Web Client | Pre-changelog |
+| D-007 | SQLite First, Postgres-Swappable | Pre-changelog |
+| D-008 | In-Memory Ring Buffer Logger (No Log Files) | Pre-changelog |
+| D-009 | `docs/` as Source of Truth; Living-Memory Cross-References | 2026-05-21 |
+| D-010 | Karpathy Four Principles as Coding Discipline | Pre-changelog |
+| D-011 | Fix the Selector, Not the Elo Math | 2026-07-09 |
+| D-012 | Affine Mapping of the DynastyProcess Scale onto Trade Value | 2026-07-12 |
+| D-013 | Blend External Value Sources onto the DP Curve, Never Replace It | 2026-07-18 |
+| D-014 | Two-Stage Layered Experiment Bucketing | 2026-07-18 |
+| D-015 | Derive Model State on Read Rather Than Materializing It | 2026-07-26 |
+| D-016 | A Model Ships Dark Until It Passes an Explicit Numeric Gate | 2026-07-26 |
+| D-017 | Fail Loud Rather Than Serve a Plausible Wrong Answer | 2026-07-25 |
+| D-018 | Unverified Sessions Keep the Short Expiry | 2026-07-20 |
+| D-019 | Prepare the Trade, Never Fabricate the Execute Path | 2026-07-25 |
+| D-020 | Analytics Omits Untrustworthy Data Rather Than Reporting It | 2026-08-06 |
+| D-021 | Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS | 2026-08-08 |
 
 ---
 
