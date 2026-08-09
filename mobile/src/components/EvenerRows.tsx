@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Icon, TickLabel } from './chalkline';
 import type { CalcEvener } from '../api/calc';
 import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
@@ -55,9 +56,20 @@ export default function EvenerRows({ eveners, title, onAdd, leagueId }: Props) {
               testID={`calc.evener.member-entered.${e.id}`}
             />
           </View>
-          <Text style={[type.data, styles.value]}>
-            {Math.round(e.value).toLocaleString()}
-          </Text>
+          {/* #277 (operator overrule of #263's scope-out): player eveners
+              show their pick-tier label like every other player row. Picks
+              (their name IS a ladder rung) and 2-piece PKG combos (a sum
+              has no single tier) keep the numeric value, as do old-server
+              payloads without the field. */}
+          {e.tier ? (
+            <View style={styles.tierSlot}>
+              <TierBadge tier={e.tier} size="sm" />
+            </View>
+          ) : (
+            <Text style={[type.data, styles.value]}>
+              {Math.round(e.value).toLocaleString()}
+            </Text>
+          )}
           <Pressable
             testID={`calc.evener-add.${e.id}`}
             style={({ pressed }) => [styles.addBtn, pressed && styles.addBtnPressed]}
@@ -93,6 +105,9 @@ const styles = StyleSheet.create({
   body: { flex: 1, gap: space.xs },
   name: { ...type.bodySm, color: chalk.base },
   value: { minWidth: 56, textAlign: 'right' },
+  // TierBadge hardcodes alignSelf:'flex-start'; this row centers its
+  // children, so re-center the badge itself (TradeSide precedent).
+  tierSlot: { alignSelf: 'center' },
   addBtn: {
     minWidth: 32,
     minHeight: 32,

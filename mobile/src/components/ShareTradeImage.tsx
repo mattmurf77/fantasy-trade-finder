@@ -3,9 +3,11 @@ import { Platform, Share, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Button } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { chalk, fonts, ink, space, type } from '../theme/chalkline';
+import type { Tier } from '../shared/types';
 
 // Share-as-image (DynastyDealer teardown 2026-07-26, polish item 5): render
 // a clean Chalkline share card of the trade — caption + both sides with
@@ -23,6 +25,10 @@ export interface ShareAsset {
   name: string;
   position: string;
   value: number;
+  /** #277/#280 — pick-value ladder tier for PLAYER rows (same source as
+   *  the calculator's TradeSide badges). Null/absent (picks, old data)
+   *  falls back to the numeric value. */
+  tier?: Tier | null;
 }
 
 interface Props {
@@ -75,7 +81,19 @@ export default function ShareTradeImage(props: Props) {
           <Text style={styles.assetName} numberOfLines={1}>
             {a.name}
           </Text>
-          <Text style={styles.assetValue}>{Math.round(a.value).toLocaleString()}</Text>
+          {/* #277/#280 — per-player rows carry the tier label; picks keep
+              the numeric value (a pick's name already reads as a rung).
+              Package TOTALS below stay numeric — a sum of tiers is
+              meaningless. */}
+          {a.tier ? (
+            // TierBadge hardcodes alignSelf:'flex-start'; re-center it in
+            // this vertically-centered row.
+            <View style={styles.tierSlot}>
+              <TierBadge tier={a.tier} size="sm" />
+            </View>
+          ) : (
+            <Text style={styles.assetValue}>{Math.round(a.value).toLocaleString()}</Text>
+          )}
         </View>
       ))}
       <View style={styles.totalRow}>
@@ -124,6 +142,7 @@ const styles = StyleSheet.create({
   assetRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   assetName: { ...type.bodySm, color: chalk.base, flex: 1 },
   assetValue: { ...type.data, color: chalk.base },
+  tierSlot: { alignSelf: 'center' },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -16,6 +16,7 @@ import MemberEnteredMarker, {
   usePicksTradeable,
 } from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Button, TickLabel } from './chalkline';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import type { CalcEvener } from '../api/calc';
@@ -168,9 +169,18 @@ export default function SwapSuggestSheet({
                       testID={`trade-card.swap-option.member-entered.${e.id}`}
                     />
                   </View>
-                  <Text style={[type.data, styles.rowValue]}>
-                    {Math.round(e.value).toLocaleString()}
-                  </Text>
+                  {/* #277 — player rows show their pick-tier label (same
+                      rule as EvenerRows: picks/PKG combos and old-server
+                      payloads keep the numeric value). */}
+                  {e.tier ? (
+                    <View style={styles.tierSlot}>
+                      <TierBadge tier={e.tier} size="sm" />
+                    </View>
+                  ) : (
+                    <Text style={[type.data, styles.rowValue]}>
+                      {Math.round(e.value).toLocaleString()}
+                    </Text>
+                  )}
                 </Pressable>
                 );
               })}
@@ -249,5 +259,7 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: space.xs },
   rowName: { ...type.title, color: chalk.base },
   rowValue: { minWidth: 56, textAlign: 'right' },
+  // TierBadge hardcodes alignSelf:'flex-start'; the row centers children.
+  tierSlot: { alignSelf: 'center' },
   browseBtn: { marginTop: space.sm },
 });

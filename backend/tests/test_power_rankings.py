@@ -704,3 +704,43 @@ def test_rank_chip_espn_league_no_picks(client):
     assert code2 == 200
     for t in full["teams"]:
         assert t["picks"] == {"count": 0, "value": 0.0, "items": []}
+
+
+# ── #277/#278 — additive per-player `tier` on roster rows ───────────────────
+# Tier labels app-wide: each roster row carries the pick-value ladder tier
+# walked off the SAME raw Elo (board first, seed fallback) its `value` was
+# priced from. Never derived from the transformed `value`; absent entirely
+# when no tier_fn is injected (pure additive — old callers byte-identical).
+
+
+def test_tier_fn_stamps_tier_from_priced_elo():
+    def tier_fn(elo, pos):
+        return f"t:{int(elo)}:{pos}"
+
+    board = {"qb1": 1400.0}   # caller tanks qb1 → board elo must win
+    teams = compute_power_rankings(MEMBERS, SEED, PLAYERS,
+                                   board_elo=board, tier_fn=tier_fn)
+    rows = {r["player_id"]: r for r in _team(teams, "u_a")["roster"]}
+    assert rows["qb1"]["tier"] == "t:1400:QB"     # board elo, not seed 1800
+    assert rows["rb1"]["tier"] == "t:1700:RB"     # consensus-seed fallback
+    assert rows["k1"]["tier"] is None             # unpriceable → honest null
+
+
+def test_no_tier_fn_omits_key_entirely():
+    teams = compute_power_rankings(MEMBERS, SEED, PLAYERS)
+    assert all("tier" not in r for t in teams for r in t["roster"])
+
+
+def test_route_roster_rows_carry_canonical_tier(client):
+    # Route-level: `tier` equals the canonical RankingService band-walk over
+    # the RAW consensus seed (consensus basis, 1qb_ppr session).
+    _install_sess(_mk_sess())
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    rows = {r["player_id"]: r for r in a["roster"]}
+    assert rows["qb1"]["tier"] == server.RankingService.tier_for_elo(
+        SEED["qb1"], "QB", "1qb_ppr")
+    assert rows["rb1"]["tier"] == server.RankingService.tier_for_elo(
+        SEED["rb1"], "RB", "1qb_ppr")
+    assert rows["k1"]["tier"] is None             # out of pool → no tier

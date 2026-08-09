@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import PositionChip from './PositionChip';
+import TierBadge from './TierBadge';
 import { Button, TickLabel } from './chalkline';
 import type { CalcValueRow } from '../api/calc';
 import {
@@ -214,7 +215,20 @@ export default function SwapPlayerSheet({
                       </Text>
                     </View>
                     <View style={styles.values}>
-                      <Text style={type.data}>{Math.round(item.value).toLocaleString()}</Text>
+                      {/* #277 — the row's value reads as its pick-tier
+                          label (CalcValueRow.tier, #263's server field);
+                          numeric fallback only for old-server payloads.
+                          The suggested-section delta stays numeric — it is
+                          a comparison figure, not a per-asset value. */}
+                      {item.tier ? (
+                        // TierBadge hardcodes alignSelf:'flex-start'; this
+                        // column right-aligns, so re-align the badge.
+                        <View style={styles.tierSlot}>
+                          <TierBadge tier={item.tier} size="sm" />
+                        </View>
+                      ) : (
+                        <Text style={type.data}>{Math.round(item.value).toLocaleString()}</Text>
+                      )}
                       {showDelta ? (
                         <Text style={styles.delta}>
                           {delta >= 0 ? '+' : ''}{Math.round(delta).toLocaleString()}
@@ -294,5 +308,6 @@ const styles = StyleSheet.create({
   rowPressed: { backgroundColor: ink.ink3 },
   info: { flex: 1 },
   values: { alignItems: 'flex-end' },
+  tierSlot: { alignSelf: 'flex-end' },
   delta: { ...type.data, color: chalk.dim },
 });

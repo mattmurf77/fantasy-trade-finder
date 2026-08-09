@@ -907,7 +907,10 @@ export default function TiersScreen() {
       // it client-side (the unfiltered payload's rank is overall).
       const posRankN = allPosRanks ? allPosRanks.get(item.player.id) : item.player.rank;
       const posRank = posRankN != null ? `${item.player.position}${posRankN}` : undefined;
-      const tileValue = valueForElo(item.player.elo);
+      // #277 — the per-tile 0–10k numeric (#54's `tileValue`) is gone: the
+      // tile's zone-derived TierChalkBadge IS the value display. The tier
+      // header sum below still uses valueForElo (package totals stay
+      // numeric — a sum of tiers is meaningless).
 
       if (multiSelect) {
         return (
@@ -939,7 +942,6 @@ export default function TiersScreen() {
                 tier={zoneTier}
                 selected={isSelected}
                 posRank={posRank}
-                value={tileValue}
                 statsSlot={<TileStats {...stats} />}
                 rightSlot={
                   isSelected ? (
@@ -986,7 +988,6 @@ export default function TiersScreen() {
               // or the query is empty).
               selected={isActive || item.player.id === highlightPid}
               posRank={posRank}
-              value={tileValue}
               statsSlot={<TileStats {...stats} />}
               accessibilityActions={TIER_A11Y_ACTIONS}
               onAccessibilityAction={({ nativeEvent }: AccessibilityActionEvent) => {

@@ -144,6 +144,7 @@
 | 264 | manual-calc-trade-options | in-progress | 2026-08-08 | teardown-remediation (worktree) |
 | 265 | mutual-match-threshold | in-progress | 2026-08-08 | worktree-agent-a5c5a806d0d32845e |
 | 266 | espn-link-buttons | in-progress | 2026-08-08 | worktree-agent (from origin/main @ 6c30dd2) |
+| 277 | tier-labels-appwide | in-progress | 2026-08-09 | worktree agent-a398ef6c79029326f (covers #277/#278/#280/#281 + #263 remainder) |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | in-progress | 2026-07-26 | teardown-remediation (worktree) |
@@ -151,13 +152,13 @@
 | — | 2026-07-27-deck-player-changer | in-progress | 2026-07-27 | teardown-remediation (worktree) |
 | — | 2026-08-02-rankings-import | in-progress | 2026-08-02 | teardown-remediation (worktree) |
 
-## Status distribution (119 rows)
+## Status distribution (120 rows)
 
 | Status | Count |
 |---|---|
 | shipped | 19 |
 | built-dark | 3 |
-| in-progress | 92 |
+| in-progress | 93 |
 | mockup-only | 0 |
 | research-only | 1 |
 | open | 3 |

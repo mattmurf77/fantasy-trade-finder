@@ -49,12 +49,15 @@ export interface PlayerCardProps {
   // #58 (cozy) — dense 60px two-line row, used ONLY by the Tiers board.
   // Renders a separate layout branch: line 1 = name + team + RK/injury
   // micro-tags, line 2 = TierChalkBadge + `statsSlot`, right cluster =
-  // posRank (position-colored mono, #53) over `value` (#54). Drops the
-  // PositionBadge and age/experience meta (redundant with the rail +
-  // posRank at this density). All other callers render the classic card.
+  // posRank (position-colored mono, #53). Drops the PositionBadge and
+  // age/experience meta (redundant with the rail + posRank at this
+  // density). All other callers render the classic card.
+  // #277/#280 — the former `value` prop (0–10k numeric, #54) is GONE:
+  // per-player numeric values were replaced app-wide by the pick-tier
+  // label, which dense rows already render via `tier` (TierChalkBadge on
+  // line 2). Don't reintroduce a numeric here.
   dense?: boolean;
   statsSlot?: React.ReactNode;     // dense line 2 — the TileStats strip
-  value?: number | null;           // dense right cluster — 0–10k seed-scale value
   // Teardown S8 PRD-01/-02 (inert a11y): the card is a composite tile —
   // VoiceOver reads it as ONE utterance (Pressable groups children by
   // default). When no override is passed, a label is composed from the
@@ -102,7 +105,6 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     showInjury = true,
     dense = false,
     statsSlot,
-    value,
     accessibilityLabel,
     accessibilityHint,
     accessibilityState,
@@ -166,7 +168,6 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       rank != null ? `ranked ${rank} of 3` : null,
       tier ? `tier ${TIER_LABEL[tier]}` : null,
       posRank ?? null,
-      value != null ? `value ${value.toLocaleString('en-US')}` : null,
       isRookie ? 'rookie' : null,
       injury ? `injury ${injCode ?? injury}` : null,
     ]
@@ -247,17 +248,14 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
             {statsSlot}
           </View>
         </View>
-        {/* #53/#54 — positional rank prominent, 0–10k value secondary */}
-        {posRank || value != null ? (
+        {/* #53 — positional rank prominent. #277: the 0–10k numeric value
+            that sat under it (#54) is gone — the pick-tier label on line 2
+            (`tier` → TierChalkBadge) is the value display now. */}
+        {posRank ? (
           <View style={styles.denseNums}>
-            {posRank ? (
-              <Text scale="dense" style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
-                {posRank}
-              </Text>
-            ) : null}
-            {value != null ? (
-              <Text scale="dense" style={styles.denseValue}>{value.toLocaleString('en-US')}</Text>
-            ) : null}
+            <Text scale="dense" style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
+              {posRank}
+            </Text>
           </View>
         ) : null}
         {rightSlot ? <View style={styles.denseRightSlot}>{rightSlot}</View> : null}
@@ -478,8 +476,9 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginTop: 3,
   },
-  // Right cluster (#53/#54): positional rank prominent (mono, position
-  // color) stacked over the 0–10k value (mono, chalk-dim).
+  // Right cluster (#53): positional rank (mono, position color). The 0–10k
+  // numeric value that stacked under it (#54) was removed by #277 — the
+  // tier label on line 2 is the value display.
   denseNums: {
     alignItems: 'flex-end',
     marginRight: space.sm,
@@ -489,13 +488,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontVariant: ['tabular-nums'],
     color: chalk.base,
-  },
-  denseValue: {
-    fontFamily: fonts.data,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-    color: chalk.dim,
-    marginTop: 1,
   },
   denseRightSlot: {
     marginRight: space.sm,

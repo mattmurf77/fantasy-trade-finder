@@ -494,12 +494,15 @@ export default function InLeagueCalculator({
 
   // Share-as-image inputs: names/positions/values from the merged
   // player+pick map (picks share the same map, so they render too).
+  // #277/#280 — player rows carry their tier so the share card matches the
+  // on-screen TradeSide labels; picks stay numeric (tier null).
   const shareAssets = (ids: string[]): ShareAsset[] =>
     (ids.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]).map((p) => ({
       id: p.id,
       name: p.name,
       position: p.pos,
       value: board[p.id] ?? 0,
+      tier: p.pos === 'PICK' ? null : tierById[p.id] ?? null,
     }));
 
   const bothSides = giveIds.length > 0 && receiveIds.length > 0;

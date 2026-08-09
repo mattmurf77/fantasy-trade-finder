@@ -74,6 +74,11 @@ export interface CalcEvener {
   source?: PickSource | null;
   pick_id?: string | null;
   season?: number | null;
+  /** #277 — pick-value ladder tier for PLAYER eveners only, walked off the
+   *  RAW seed Elo via the backend's canonical RankingService.tier_for_elo
+   *  (same convention as CalcValueRow.tier). Absent on picks, packages and
+   *  old servers — those rows fall back to the numeric value. */
+  tier?: Tier | null;
 }
 
 // Itemized value adjustments (DynastyDealer teardown 2026-07-26): why a

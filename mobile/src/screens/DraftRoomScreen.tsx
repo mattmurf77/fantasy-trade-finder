@@ -99,6 +99,7 @@ import PlayerContextMenu, {
   type PlayerMenuAction,
 } from '../components/PlayerContextMenu';
 import AnchorSheet, { type AnchorTarget } from '../components/AnchorSheet';
+import TierBadge from '../components/TierBadge';
 import Toast from '../components/Toast';
 import {
   BasisChip,
@@ -134,10 +135,11 @@ import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment
 import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
+import { tierForElo } from '../utils/tierBands';
 import { useAppActive } from '../hooks/useAppActive';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
-import type { Player } from '../shared/types';
+import type { Player, Position } from '../shared/types';
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -1303,6 +1305,9 @@ export function UndraftedRowView({
   // which is why this flow was untestable; the qualifier is the stable
   // domain id per mobile/src/components/CLAUDE.md — never a list index.
   const testID = testIDOverride ?? `draft-room.undrafted-row.${row.player_id}`;
+  // #277 — the tier walk is format-scoped; the room prices in the
+  // session's active format (same map the board's Elo values came from).
+  const rowFormat = useSession((s) => s.activeFormat);
   const body = (
     <>
       <Text style={draftRow.rankCell}>{row.rank}</Text>
@@ -1319,10 +1324,22 @@ export function UndraftedRowView({
       </View>
       {actionLabel && selected ? (
         <Text style={draftRow.rowAction}>{actionLabel}</Text>
+      ) : row.valued ? (
+        // #277 — the board's raw-Elo `value` renders as its pick-tier
+        // label (client tierForElo walk — the payload's value IS on the
+        // raw Elo scale, both bases). Unvalued rows keep the honest text.
+        <View style={draftRow.tierSlot}>
+          <TierBadge
+            tier={tierForElo(
+              row.value as number,
+              row.position as Position,
+              rowFormat ?? '1qb_ppr',
+            )}
+            size="sm"
+          />
+        </View>
       ) : (
-        <Text style={row.valued ? draftRow.valueCell : draftRow.noValueCell}>
-          {row.valued ? Math.round(row.value as number) : 'No value'}
-        </Text>
+        <Text style={draftRow.noValueCell}>No value</Text>
       )}
     </>
   );

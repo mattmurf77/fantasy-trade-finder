@@ -547,7 +547,14 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     ids
       .map((id) => livePlayerById[id])
       .filter(Boolean)
-      .map((p) => ({ id: p.id, name: p.name, position: p.pos, value: liveBoard[p.id] ?? 0 }));
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        position: p.pos,
+        value: liveBoard[p.id] ?? 0,
+        // #277/#280 — share card matches the on-screen TradeSide labels.
+        tier: tierFor(liveBoard, p),
+      }));
   const liveVerdictLine = (d: { verdict: string | null; favors: string | null }) =>
     d.verdict
       ? `Verdict: ${d.verdict}` +
@@ -924,6 +931,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         ownerBoardValue={(p: CalcPlayer) => activeBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => theirBoard[p.id]}
+        // #277 — the demo's dual-board secondary line reads as a tier label
+        // too (theirBoard is on the raw-Elo scale, so tierFor applies).
+        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(theirBoard, p)}
         secondaryPrefix="them"
         badgeFor={
           isLive
@@ -948,6 +958,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         ownerBoardValue={(p: CalcPlayer) => activeOtherBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeOtherBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => MY_BOARD[p.id]}
+        // #277 — same tier-label treatment for the "you" secondary line.
+        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(MY_BOARD, p)}
         secondaryPrefix="you"
         badgeFor={
           isLive
