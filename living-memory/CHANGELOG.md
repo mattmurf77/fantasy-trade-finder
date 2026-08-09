@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-08 (feedback #266 + #258 fixes, build 91)](#2026-08-08-feedback-266--258-fixes-build-91)
 - [2026-08-08 (ESPN Connect WebView cookie capture — Phase 1b, flag ON)](#2026-08-08-espn-connect-webview-cookie-capture--phase-1b-flag-on)
 - [2026-08-08 (living-memory revival, session-memory contract wired into CLAUDE.md)](#2026-08-08-living-memory-revival-session-memory-contract-wired-into-claudemd)
 - [2026-08-06 (analytics dashboard rebuild, three client fixes from prod data)](#2026-08-06-analytics-dashboard-rebuild-three-client-fixes-from-prod-data)
@@ -39,6 +40,14 @@
 - [2026-05-21](#2026-05-21)
 - [Earlier (pre-changelog)](#earlier-pre-changelog)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
+
+---
+
+## 2026-08-08 (feedback #266 + #258 fixes, build 91)
+
+- **#266 — ESPN-path link buttons dead on LeaguePicker:** Settings' ESPN row (`espnLink: true`) triggered a synchronous mount-time `setEspnOpen(true)` while the Settings native modal was still dismissing (settings_v2's coalesced goBack+navigate), wedging the RN `<Modal>` half-presented — ESPN button became a state no-op, and the stuck Modal host blocked the sibling MFL `PlatformLinkSheet` too (iOS won't stack sibling RN Modals). Fix: auto-open deferred to the screen's `transitionEnd` (skipping `closing:true`) with an 800ms fallback for non-animating arrivals. #130 contract preserved. [`../docs/feedback/items/266-espn-link-buttons/status.md`](../docs/feedback/items/266-espn-link-buttons/status.md)
+- **#258 — MFL team names with HTML entities:** all ingest paths were already clean since #210 (2026-08-01); the dirty names were rows stored *before* #210, never self-healed because MFL has no automatic re-import. Fix: idempotent startup backfill `_backfill_mfl_name_entities()` in `_migrate_db()` decodes `leagues.name`, `league_members.username/display_name`, and `draft_picks.owner_username/original_username`, scoped strictly to `platform='mfl'`. First Render boot fixed prod without re-linking. 4 tests, failing-first. [`../docs/feedback/items/258-mfl-name-entities/status.md`](../docs/feedback/items/258-mfl-name-entities/status.md)
+- **Ship:** merge `b682ee2` → `main` @ `8c3c742`; suite 2041 passed / 1 skipped; tsc clean; sim gate bypassed under standing operator authority (TEST_LEDGER deviation entry). EAS build 91 (commit-verified `8c3c742`) submitted to App Store Connect — first submission FINISHED (two local retries errored as duplicates after a DNS blip killed the first watcher; harmless).
 
 ---
 
