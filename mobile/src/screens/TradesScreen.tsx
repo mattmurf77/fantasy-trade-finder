@@ -426,6 +426,8 @@ export default function TradesScreen({ navigation, route }: any) {
   const outlookDirectionOn = useFlag('trade.outlook_direction'); // #231/#254
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
+  // #257 — Controls Card → full edit sheet consolidation (variant C).
+  const fullSheetOn = useFlag('trades.edit_full_sheet');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -445,6 +447,13 @@ export default function TradesScreen({ navigation, route }: any) {
     finderMode === 'team' ? route?.params?.opponentUserId : undefined;
   const scopedOpponentName: string | undefined =
     finderMode === 'team' ? route?.params?.opponentName : undefined;
+  // #257 — the consolidation only replaces the Controls Card on the
+  // finder-mode landing, where OutlookBiasReceipt exists as the entry
+  // point. The classic flag-off home (no finderMode, `trades.finder_hub`
+  // off) has no receipt, so it keeps the legacy Controls Card +
+  // OutlookSheet regardless of `fullSheetOn` — there'd be nothing else to
+  // reach fairness/lane/targeting from.
+  const consolidateOn = fullSheetOn && !!finderMode;
 
   // Lateral switch handlers. All three deck modes switch IN PLACE
   // (setParams keeps this instance mounted, so pinned targets persist);
@@ -459,6 +468,33 @@ export default function TradesScreen({ navigation, route }: any) {
   // legacy `editDna:true` route param — old deep links / stored routes
   // that used to auto-expand the hub's panel — opens the same sheet.
   const [dnaSheetOpen, setDnaSheetOpen] = useState(false);
+  // #257 — "Preferences changed" refresh strip. Fairness/lane/targeting
+  // edits already reset or re-filter the deck themselves; the only stale-
+  // deck case is a DNA edit (outlook/chasing/shopping/untouchables), which
+  // TradeDnaSheet reports via `full.onAnyChange`. Tracked since the last
+  // generate (not since the sheet last opened) so an add-target hand-off
+  // to PlayerPickerModal — which briefly closes this sheet, see
+  // `pickerReturnsToSheet` below — can't lose the signal.
+  const prefsChangedSinceGenerateRef = useRef(false);
+  const [showPrefsChangedStrip, setShowPrefsChangedStrip] = useState(false);
+  // The full sheet's "Add someone to get/send" closes this Modal before
+  // opening PlayerPickerModal (iOS won't stack sibling Modals) and reopens
+  // it when the picker closes — only when the picker was opened THIS way.
+  const [pickerReturnsToSheet, setPickerReturnsToSheet] = useState(false);
+  function handleEditSheetClose() {
+    setDnaSheetOpen(false);
+    // Only worth a nudge if there's an existing deck to go stale and no
+    // search is already in flight (that search will land under whatever
+    // prefs are current by the time it started).
+    if (
+      consolidateOn &&
+      prefsChangedSinceGenerateRef.current &&
+      deck.length > 0 &&
+      job?.status !== 'running'
+    ) {
+      setShowPrefsChangedStrip(true);
+    }
+  }
   useEffect(() => {
     if (route?.params?.editDna) {
       if (finderHubOn) setDnaSheetOpen(true);
@@ -552,6 +588,16 @@ export default function TradesScreen({ navigation, route }: any) {
     return () => { cancelled = true; };
   }, []);
 
+  // #257 — shared Find-a-Trade entry point so every trigger (the on-screen
+  // button in both flag states, and the "Preferences changed" strip)
+  // clears the refresh nudge the same way.
+  function handleFindTrades(source?: string) {
+    track('find_trades_tapped', source ? { source } : undefined, 'Trades');
+    prefsChangedSinceGenerateRef.current = false;
+    setShowPrefsChangedStrip(false);
+    generateMutation.mutate({});
+  }
+
   function handleToggleFairness(next: boolean) {
     setFairnessOn(next);
     // Fire-and-forget persistence; a write failure shouldn't block the UI.
@@ -593,8 +639,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // the inline banner below is the universal first-visit path on every
   // flag configuration; the sheet opens only from an explicit Edit/Change/
   // Set-outlook tap.
+  // #257 (operator decision Q5): the full sheet must never auto-open
+  // either — `ux.outlook_inline_default` already suppresses this legacy
+  // path in production (it ships true), but `consolidateOn` bails here too
+  // so a future flip of that flag can't resurrect a force-opened sheet.
   useEffect(() => {
-    if (firstRun || outlookInlineOn) return;
+    if (firstRun || outlookInlineOn || consolidateOn) return;
     if (
       prefsQuery.data &&
       !prefsQuery.data.team_outlook &&
@@ -602,7 +652,7 @@ export default function TradesScreen({ navigation, route }: any) {
     ) {
       setOutlookOpen(true);
     }
-  }, [prefsQuery.data, firstRun, outlookInlineOn]);
+  }, [prefsQuery.data, firstRun, outlookInlineOn, consolidateOn]);
 
   // Phase-2 inferred outlook — set only while no outlook is declared;
   // drives the one-tap confirm banner and the sheet's preselection.
@@ -3049,22 +3099,59 @@ export default function TradesScreen({ navigation, route }: any) {
         onDismiss={() => setToast(null)}
       />
 
-      <OutlookSheet
-        visible={outlookOpen}
-        // Phase-2: with no saved outlook, preselect the backend's
-        // roster-inferred guess so "Change" opens on the right option.
-        initial={prefsQuery.data?.team_outlook ?? inferredOutlook}
-        onClose={() => setOutlookOpen(false)}
-        onSubmit={handleOutlookSubmit}
-      />
+      {/* #257 — cut entirely when the full sheet consolidates the Controls
+          Card: its only entry point (the card's Outlook "Edit" row) no
+          longer renders, and the inferred-outlook banner opens the full
+          sheet instead (see its onPress below). */}
+      {!consolidateOn ? (
+        <OutlookSheet
+          visible={outlookOpen}
+          // Phase-2: with no saved outlook, preselect the backend's
+          // roster-inferred guess so "Change" opens on the right option.
+          initial={prefsQuery.data?.team_outlook ?? inferredOutlook}
+          onClose={() => setOutlookOpen(false)}
+          onSubmit={handleOutlookSubmit}
+        />
+      ) : null}
 
       {/* #246 — the hub's Trade DNA editor as a sheet over the deck
           (receipt "Change" / legacy editDna param). #236 autosave means
           Done is a pure dismiss; the #173 untouchables management sheet
-          stays reachable inside it via Manage. */}
+          stays reachable inside it via Manage.
+          #257: under `consolidateOn` this becomes the full sheet — the
+          `full` prop is the only difference; omitting it (flag off, or any
+          other DNA-only caller) keeps this byte-identical to before. */}
       <TradeDnaSheet
         visible={dnaSheetOpen}
-        onClose={() => setDnaSheetOpen(false)}
+        onClose={handleEditSheetClose}
+        full={
+          consolidateOn
+            ? {
+                fairnessOn,
+                onToggleFairness: handleToggleFairness,
+                deckHasLanes,
+                laneFilter,
+                onLaneFilter: handleLaneFilter,
+                targeting:
+                  targetingEnabled && finderMode !== 'player'
+                    ? {
+                        pinnedGive,
+                        pinnedReceive,
+                        onAdd: (dir: 'trade_away' | 'acquire') => {
+                          setTargetDirection(dir);
+                          setDnaSheetOpen(false);
+                          setPickerReturnsToSheet(true);
+                          setTargetPickerOpen(true);
+                        },
+                        onRemove: handleRemoveTarget,
+                      }
+                    : null,
+                onAnyChange: () => {
+                  prefsChangedSinceGenerateRef.current = true;
+                },
+              }
+            : undefined
+        }
       />
 
       {/* #223 — league switching moved to the global TopBar (single sheet
@@ -3124,6 +3211,29 @@ export default function TradesScreen({ navigation, route }: any) {
             #246: Change opens the DNA sheet over the deck. */}
         {finderMode ? (
           <OutlookBiasReceipt onChange={() => setDnaSheetOpen(true)} />
+        ) : null}
+
+        {/* #257 (operator decision Q2) — dismissing the full sheet does NOT
+            auto-regenerate the deck. If a DNA preference (outlook/chasing/
+            shopping/untouchables) changed while it was open, this one-line
+            strip offers the refresh instead of silently leaving a stale
+            deck on screen. */}
+        {consolidateOn && showPrefsChangedStrip ? (
+          <Pressable
+            testID="trades.prefs-changed-strip"
+            accessibilityRole="button"
+            accessibilityLabel="Preferences changed — tap to refresh trades"
+            onPress={() => handleFindTrades('prefs_changed_strip')}
+            style={({ pressed }) => [
+              styles.prefsChangedStrip,
+              pressed && { backgroundColor: ink.ink3 },
+            ]}
+          >
+            <View style={styles.prefsChangedTick} />
+            <Text style={styles.prefsChangedText}>
+              Preferences changed — tap to refresh
+            </Text>
+          </Pressable>
         ) : null}
 
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
@@ -3237,6 +3347,14 @@ export default function TradesScreen({ navigation, route }: any) {
             gone in this mode per #241 — only the editable chrome remained).
             Edit expands the exact full card below in place; every other
             mode renders the full card unconditionally, exactly as before. */}
+        {/* #257 — flag off (or the classic non-finder-mode home) renders
+            this exact block, unchanged. Flag on replaces it below: the
+            receipt is the sole entry point into the (now full) sheet, and
+            only the on-screen remnants that don't belong in any sheet —
+            the player-mode board (Q4), Find a Trade, the progress strip,
+            the liked-trades count — render directly here. */}
+        {!consolidateOn ? (
+        <>
         {!firstRun && singlePin && !pinEditOpen ? (
           <View style={styles.pinSummaryCard} testID="trades.pin-summary">
             <View
@@ -3699,6 +3817,178 @@ export default function TradesScreen({ navigation, route }: any) {
           </View>
         </Card>
         )}
+        </>
+        ) : (
+        <>
+        {/* #257 — player mode keeps its on-screen TRADE AWAY/TRADE FOR
+            board (operator decision Q4): the full sheet does not absorb
+            it, so it renders here exactly as it did inside the old
+            Controls Card, just no longer wrapped in that card. */}
+        {!firstRun && targetingEnabled && finderMode === 'player' ? (
+          <View style={styles.targetSection}>
+            <View style={styles.playerBoard}>
+              <View style={[styles.boardCol, styles.boardColAway]}>
+                <Text style={[styles.boardColH, styles.boardColHAway]}>
+                  TRADE AWAY
+                </Text>
+                {pinnedGive.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    testID={`trades.board.away.${p.id}`}
+                    onPress={() => handleRemoveTarget(p.id, 'trade_away')}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${p.name} from trade-away targets`}
+                    style={({ pressed }) => [
+                      styles.boardMini,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    {p.position ? (
+                      <View
+                        style={[
+                          styles.boardPosDot,
+                          { backgroundColor: posColor(p.position as any) },
+                        ]}
+                      />
+                    ) : null}
+                    <Text style={styles.boardMiniText} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    <Icon name="x" size={12} color={chalk.faint} />
+                  </Pressable>
+                ))}
+                <Pressable
+                  testID="trades.board.add-away"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a player to trade away"
+                  onPress={() => {
+                    setTargetDirection('trade_away');
+                    setTargetPickerOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.boardAddBtn,
+                    pressed && styles.subnavPillPressed,
+                  ]}
+                >
+                  <Text style={styles.boardAddText}>+ Add asset</Text>
+                </Pressable>
+              </View>
+              <View style={[styles.boardCol, styles.boardColFor]}>
+                <Text style={[styles.boardColH, styles.boardColHFor]}>
+                  TRADE FOR
+                </Text>
+                {pinnedReceive.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    testID={`trades.board.for.${p.id}`}
+                    onPress={() => handleRemoveTarget(p.id, 'acquire')}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${p.name} from trade-for targets`}
+                    style={({ pressed }) => [
+                      styles.boardMini,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    {p.position ? (
+                      <View
+                        style={[
+                          styles.boardPosDot,
+                          { backgroundColor: posColor(p.position as any) },
+                        ]}
+                      />
+                    ) : null}
+                    <Text style={styles.boardMiniText} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    <Icon name="x" size={12} color={chalk.faint} />
+                  </Pressable>
+                ))}
+                <Pressable
+                  testID="trades.board.add-for"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a player to trade for"
+                  onPress={() => {
+                    setTargetDirection('acquire');
+                    setTargetPickerOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.boardAddBtn,
+                    pressed && styles.subnavPillPressed,
+                  ]}
+                >
+                  <Text style={styles.boardAddText}>+ Add target</Text>
+                </Pressable>
+              </View>
+            </View>
+            {pinnedGive.length >= 2 ? (
+              <PackageToggle
+                on={packageMode}
+                onToggle={() => {
+                  haptics.selection();
+                  setPackageMode(!packageMode);
+                  resetDeckForNewTargets();
+                }}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Find-a-Trade — bare button (no Card): the mockup's "after"
+            screen shows the landing as a trade, not a control panel.
+            Same gating as before: hidden in single-pin featured mode,
+            where the featured window + idea list replace the deck. */}
+        {!firstRun && singlePin ? null : (
+          <Button
+            variant="primary"
+            testID="trades.find-btn"
+            label={
+              deck.length > 0 && job?.status === 'complete'
+                ? 'Find more trades'
+                : 'Find a Trade'
+            }
+            disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
+            onPress={() => handleFindTrades()}
+            style={styles.findBtn}
+          />
+        )}
+
+        {!(!firstRun && singlePin) && job?.status === 'running' && (
+          <View testID="trades.progress-strip" style={styles.progressStrip}>
+            <View style={styles.progressInfo}>
+              <ActivityIndicator color={chalk.dim} size="small" />
+              <Text style={styles.progressText}>
+                {'Searching… '}
+                <Text style={type.data}>
+                  {`${job.opponents_done}/${job.opponents_total || '?'}`}
+                </Text>
+                {' opponents'}
+                {job.cards.length > 0 ? '  ·  ' : ''}
+                {job.cards.length > 0 ? (
+                  <Text style={type.data}>{job.cards.length}</Text>
+                ) : null}
+                {job.cards.length > 0 ? ` trade${job.cards.length === 1 ? '' : 's'}` : ''}
+              </Text>
+              <Button
+                variant="ghost"
+                compact
+                label="Hide"
+                onPress={() => setJob(null)}
+              />
+            </View>
+            <Meter
+              value={(job.opponents_done ?? 0) / Math.max(job.opponents_total || 0, 1)}
+            />
+          </View>
+        )}
+
+        {!firstRun && likedQuery.data && likedQuery.data.liked_count > 0 && (
+          <Text style={styles.likedCount}>
+            <Text style={type.data}>{likedQuery.data.liked_count}</Text>
+            {` liked trade${likedQuery.data.liked_count === 1 ? '' : 's'} awaiting their swipe`}
+          </Text>
+        )}
+        </>
+        )}
 
         {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
             the FEATURED TRADE window leads (best idea as a full trade card
@@ -3758,7 +4048,9 @@ export default function TradesScreen({ navigation, route }: any) {
                 compact
                 label="Change"
                 disabled={confirmOutlookMutation.isPending}
-                onPress={() => setOutlookOpen(true)}
+                onPress={() =>
+                  consolidateOn ? setDnaSheetOpen(true) : setOutlookOpen(true)
+                }
               />
             </View>
           </View>
@@ -3775,7 +4067,9 @@ export default function TradesScreen({ navigation, route }: any) {
                 variant="secondary"
                 compact
                 label="Set outlook"
-                onPress={() => setOutlookOpen(true)}
+                onPress={() =>
+                  consolidateOn ? setDnaSheetOpen(true) : setOutlookOpen(true)
+                }
               />
             </View>
           </View>
@@ -4560,7 +4854,16 @@ export default function TradesScreen({ navigation, route }: any) {
             : undefined
         }
         onPick={handleAddTarget}
-        onClose={() => setTargetPickerOpen(false)}
+        onClose={() => {
+          setTargetPickerOpen(false);
+          // #257 — hand back to the full sheet if that's where this
+          // picker was opened from (see the `full.targeting.onAdd`
+          // wrapper above the Modal mounts).
+          if (pickerReturnsToSheet) {
+            setPickerReturnsToSheet(false);
+            setDnaSheetOpen(true);
+          }
+        }}
       />
 
       {/* Item 8 — save-moment Apple ask (ADR-006 honest framing). */}
@@ -5102,6 +5405,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
   },
+  // #257 — "Preferences changed" refresh strip. Mirrors OutlookBiasReceipt's
+  // tick + text construction; ice (not flare) since tapping it is an
+  // action, not just information.
+  prefsChangedStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: space.sm,
+    marginBottom: space.md,
+  },
+  prefsChangedTick: { width: 3, height: 12, backgroundColor: ice.base },
+  prefsChangedText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   progressStrip: {
     marginTop: space.sm,
     paddingHorizontal: space.md,
