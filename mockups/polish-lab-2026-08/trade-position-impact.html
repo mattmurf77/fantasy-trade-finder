@@ -117,18 +117,14 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
 .badge.ok{border:1px solid rgba(86,217,236,.4);color:var(--ice)}
 .badge.no{border:1px solid rgba(245,158,11,.5);color:var(--warn)}
 
+/* ── tier chip — real 8-tier ladder colors/labels, docs/cross-client-invariants.md ── */
+.tierchip{display:inline-flex;align-items:center;font-family:var(--f-mono);font-weight:600;font-size:10.5px;padding:1px 6px;border-radius:3px;white-space:nowrap}
+.tierchip.t-fourth{color:#a3e635;background:rgba(163,230,53,.14);border:1px solid rgba(163,230,53,.4)}
+.tierchip.t-first1{color:#2dd4bf;background:rgba(45,212,191,.14);border:1px solid rgba(45,212,191,.4)}
+
 .posline{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:6px;background:var(--ink2);border:1px solid var(--line);border-left:3px solid var(--te)}
 .posline .txt{flex:1;font-size:12.5px;line-height:1.4;color:var(--chalk)}
 .posline .txt b{color:var(--te);font-family:var(--f-mono)}
-
-.ghostline{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;background:transparent;border:1px dashed rgba(245,158,11,.45)}
-.ghostline .txt{flex:1;font-size:11.5px;line-height:1.4;color:var(--dim)}
-.ghostline .txt b{color:var(--warn);font-family:var(--f-mono)}
-
-.hookstrip{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:6px;background:var(--ink2);border:1px solid var(--line)}
-.hookstrip .dot{width:6px;height:6px;border-radius:50%;background:var(--te);flex:0 0 auto}
-.hookstrip .txt{flex:1;font-size:13px;line-height:1.35;color:var(--chalk)}
-.hookstrip .txt b{color:var(--te)}
 
 .deckhook{font-size:11.5px;line-height:1.4;color:var(--dim);margin-top:-2px}
 .deckhook b{color:var(--te);font-family:var(--f-mono)}
@@ -148,11 +144,13 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
 
 <div class="note">
   <h1>Polish Lab · Position Impact — trade-summary addition (#169)</h1>
-  <p><b>Operator ask (verbatim):</b></p>
+  <p><b>Operator ask (verbatim, original pass):</b></p>
   <p class="q">"But it's also nice if this is a bit objective and says hey you are a contender and only have 10 ppg in your TE position and we found a way to get that to 17 in your starting lineup etc. This ups your championship odds to X … This trade makes your playoff / champion odds in 2026 at ? 2027 @ _ 2028 @ _"</p>
-  <p><b>Scope for this lab (operator direction):</b> the <b>position-specific improvement framing only</b> — "TE 10&nbsp;→&nbsp;17 in your starting lineup." The championship/playoff-odds half of the ask is explicitly <b>out of scope</b> here; no odds numbers appear in any frame below.</p>
-  <p>Grounded in the shipped <b>#238 lineup before/after table</b> (<code>mockups/polish-lab-2026-08/lineup-before-after.html</code> frame C1 → <code>InLeagueCalculator.tsx</code>'s <code>LineupImpactTable</code>, live since 2026-08-03). That table already returns, per starting slot, <code>{slot, before:{name,position,value}, after:{...}, delta}</code> from <code>POST /api/trade/evaluate</code> Mode B. Everything below either (a) reads that payload a different way — client-side only, ships today — or (b) is explicitly flagged as needing new backend computation. See the data-notes block at the bottom for the full audit; short version: <b>dynasty-value framing ("TE: 380 → 810 value") is real and shippable now; points-per-game framing ("TE: 10.2 → 17.1 ppg") is not — the app has no fantasy-points data source at all today.</b></p>
-  <p><b>Example trade used in the A/B/C variants below</b> (a cleaner story for position framing than #238's Cook/Waddle example, which touched three slots at once): you send <b>Rome Odunze</b> (WR, bench — not a starter) + a <b>2026 4th</b>, you receive <b>Sam LaPorta</b> (TE). Your incumbent starting TE, <b>Cade Otton</b>, gets benched; every other starting slot is untouched. Starting-lineup total moves <b>5,650 → 6,080 (+430)</b>, entirely from the TE slot (380 → 810) — the trade's whole lineup impact is legible as "your TE spot."</p>
+  <p><b>Operator review of the first pass (A1 fold-in / B1 standalone strip / C1 deck hook) — verbatim directives:</b></p>
+  <p class="q">B1: "Nope. Abandon." &nbsp;·&nbsp; A1: "Should be from TE&nbsp;x to TE&nbsp;x OR from Tier&nbsp;x to Tier&nbsp;x. Mock up both versions." &nbsp;·&nbsp; C1: "Same feedback as A. Mock up both versions."</p>
+  <p><b>What changed in this pass:</b> <b>B1 is removed</b> — the standalone "Why this trade" strip frame and its writeup are gone, folded value narration stays inside the shipped #238 table (A) or the deck hook (C) only, never a new mounted module. <b>A1 and C1 are each split into two framings</b> in place of the single raw-value sentence they shipped before ("your TE value goes 380&nbsp;→&nbsp;810"): a <b>positional-rank</b> version ("TE21&nbsp;→&nbsp;TE4") and a <b>tier</b> version using the real shipped 8-tier pick-value ladder labels (<code>docs/cross-client-invariants.md</code> — "FA / 4th / 3rd / 2nd / 1&nbsp;1st / 2&nbsp;1sts / 3&nbsp;1sts / 4+&nbsp;1sts", not invented "Tier N" numerals). This is a <b>UX-framing</b> decision, distinct from the ppg-data-availability question below: raw dynasty value ("380 → 810") was and still is computable with zero new backend, the operator just doesn't want that unit shown to users — rank and tier are the two alternatives worth mocking.</p>
+  <p>Grounded in the shipped <b>#238 lineup before/after table</b> (<code>mockups/polish-lab-2026-08/lineup-before-after.html</code> frame C1 → <code>InLeagueCalculator.tsx</code>'s <code>LineupImpactTable</code>, live since 2026-08-03). That table returns, per starting slot, <code>{slot, before:{name,position,value}, after:{...}, delta}</code> from <code>POST /api/trade/evaluate</code> Mode B's <code>_starter_impact()</code> (<code>backend/server.py</code>). Neither <code>tier</code> nor positional rank is on that payload today, so — unlike the old raw-value sentence, which really was zero-backend client arithmetic — both new framings need one small additive change to <code>_starter_impact()</code>'s <code>slot_entry()</code> builder: attach a <code>tier</code> field (walked off the raw seed Elo via <code>RankingService.tier_for_elo</code> — the exact call the route already makes elsewhere in this same function for evener rows, #277's <code>_evener_tier</code> closure) and/or a positional-rank index (sort the route's already-loaded <code>_pool_players</code> by position + value once, look up each slot player's index). Both read data the route already has in memory — no new endpoint, no new network call, no schema change, no new data source — but they are not literally zero-code the way the raw-value delta was. See the data-notes block at the bottom for the full audit, including why <b>points-per-game framing ("TE: 10.2 → 17.1 ppg") remains not computable at all — the app has no fantasy-points data source anywhere</b> — that gap is unrelated to and unaffected by the rank-vs-tier framing choice.</p>
+  <p><b>Example trade used in every variant below</b> (a cleaner story for position framing than #238's Cook/Waddle example, which touched three slots at once): you send <b>Rome Odunze</b> (WR, bench — not a starter) + a <b>2026 4th</b>, you receive <b>Sam LaPorta</b> (TE). Your incumbent starting TE, <b>Cade Otton</b>, gets benched; every other starting slot is untouched. Starting-lineup total moves <b>5,650 → 6,080 (+430)</b>, entirely from the TE slot — the trade's whole lineup impact is legible as "your TE spot." Illustrative positional-rank and tier numbers for the two players: Otton ≈ dynasty <b>TE21</b>, tier <b>4th</b> (fringe-starter/waiver-adjacent); LaPorta ≈ dynasty <b>TE4</b>, tier <b>1&nbsp;1st</b> (true top-of-position asset).</p>
 </div>
 
 <div class="notesbar">
@@ -247,12 +245,12 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
 
 </div>
 
-<!-- ═══════════════════════ ROW A — REQUIRED: fold-in ═══════════════════════ -->
-<div class="rowlbl">Variant A (required) — folded into the lineup-changes table<span class="fb">position line lives inside the shipped #238 module</span></div>
+<!-- ═══════════════════════ ROW A — REQUIRED: fold-in, two framings ═══════════════════════ -->
+<div class="rowlbl">Variant A (required) — folded into the lineup-changes table<span class="fb">operator: "TE x → TE x OR Tier x → Tier x" — both mocked below</span></div>
 <div class="pairwrap">
 
   <div class="slot">
-    <div class="slotlbl">A1 — calculator verdict, TE-upgrade trade</div>
+    <div class="slotlbl">A1a — positional-rank framing</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>100%</span></div>
       <div class="scroll">
@@ -312,14 +310,10 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
               <span class="pname"><span class="newp">Tony Pollard</span></span><span class="delta flat">—</span>
             </div>
             <div class="netline"><span class="lbl">Starting lineup total</span><span class="val">5,650 → 6,080 (+430)</span></div>
-            <!-- NEW: position-impact line folded into the same module -->
+            <!-- NEW: position-impact line, rank framing -->
             <div class="posline" style="margin-top:2px">
-              <span class="txt">Your starting <b>TE</b> value goes <b>380 → 810</b> — the biggest single-slot upgrade in this deal, and the only slot that moves.</span>
-              <span class="badge ok">SHIPS TODAY</span>
-            </div>
-            <div class="ghostline">
-              <span class="txt">Illustrative only, not built: <b>≈ TE 10.2 → 17.1 ppg</b> in your starting lineup — the app has no points-per-game data to compute this from.</span>
-              <span class="badge no">NEEDS NEW DATA</span>
+              <span class="txt">Your starting <b>TE</b> jumps <b>TE21 → TE4</b> — the steepest rank climb in this deal, and the only slot that moves.</span>
+              <span class="badge ok">COMPUTABLE TODAY</span>
             </div>
           </div>
         </div>
@@ -331,36 +325,21 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
         <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
       </div>
     </div>
-    <div class="caption"><b>This is the required fold-in.</b> The TE row is highlighted (subtle purple wash, no new color introduced — reuses the existing <code>--te</code> position hex per <code>docs/cross-client-invariants.md</code>) and a one-line sentence renders directly under the existing net line, inside the same <code>lineupmod</code> container — no new card, no new section header. The sentence is pure client-side arithmetic over the <b>already-shipped</b> <code>starter_impact.slots</code> array: find the slot with the largest <code>|delta|</code>, read its <code>position</code> field, state before/after <code>value</code>. Zero new backend calls. The dashed amber line directly beneath it shows the operator's literal "10.2 → 17.1 ppg" phrasing so the shape of the ask is visible — clearly marked as illustrative, not live.</div>
+    <div class="caption"><b>Rank framing.</b> Same fold-in location as before — one sentence inside the existing <code>lineupmod</code> container, under the net line, TE row still gets the subtle <code>--te</code> wash. "TE21 → TE4" reads like the start-sit rankings language dynasty players already use elsewhere (KTC, FantasyCalc, Sleeper's own tools). Source: <code>GET /api/trade/values</code> already returns every pool player's <code>{position, value}</code> sorted by value — the rank is that player's 1-based index within a <code>position</code> filter of that same list. Not on the evaluate payload today, so this needs a small addition to <code>_starter_impact()</code>'s slot builder (sort <code>_pool_players</code> by position once, attach each slot player's index) — no new endpoint, no new data source.</div>
     <div class="notewrap">
-      <div class="notelbl">Notes — A1<span class="dot"></span></div>
-      <textarea class="pagenote" data-key="A1 — Fold-in (calculator)" placeholder="Notes on this frame…"></textarea>
+      <div class="notelbl">Notes — A1a<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1a — Fold-in, positional-rank framing" placeholder="Notes on this frame…"></textarea>
     </div>
   </div>
 
-</div>
-
-<!-- ═══════════════════════ ROW B — standalone strip ═══════════════════════ -->
-<div class="rowlbl">Variant B — standalone "Why this trade" strip<span class="fb">new module at the top of the summary, above give/receive</span></div>
-<div class="pairwrap">
-
   <div class="slot">
-    <div class="slotlbl">B1 — calculator verdict, strip leads the card</div>
+    <div class="slotlbl">A1b — tier framing (real 8-tier ladder)</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>100%</span></div>
       <div class="scroll">
         <div class="tcard">
           <div class="ticklbl">Trade calculator · In league</div>
           <div class="opp">@league_mate</div>
-          <!-- NEW: leads the card, before give/receive -->
-          <div class="hookstrip">
-            <span class="dot"></span>
-            <span class="txt">Why this trade — your <b>TE</b> jumps <b>380 → 810</b> value (+430), your biggest starter upgrade available right now.</span>
-          </div>
-          <div class="ghostline">
-            <span class="txt">Illustrative: <b>≈ TE 10.2 → 17.1 ppg</b> — needs new points-per-game backend, not built.</span>
-            <span class="badge no">NEEDS NEW DATA</span>
-          </div>
           <div class="split">
             <div class="side">
               <div class="ticklbl">You send</div>
@@ -384,14 +363,41 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
           <div class="lineupmod">
             <div class="ticklbl">Your lineup — before → after</div>
             <div class="lineuphead"><span>Slot</span><span>Before</span><span></span><span>After</span><span></span></div>
-            <div class="slotrow2 dim"><span class="slotname">QB</span><span class="pname"><span class="newp">Josh Allen</span></span><span></span><span class="pname"><span class="newp">Josh Allen</span></span><span class="delta flat">—</span></div>
+            <div class="slotrow2 dim">
+              <span class="slotname">QB</span><span class="pname"><span class="newp">Josh Allen</span></span><span></span>
+              <span class="pname"><span class="newp">Josh Allen</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">RB1</span><span class="pname"><span class="newp">Bijan Robinson</span></span><span></span>
+              <span class="pname"><span class="newp">Bijan Robinson</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">RB2</span><span class="pname"><span class="newp">James Cook</span></span><span></span>
+              <span class="pname"><span class="newp">James Cook</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">WR1</span><span class="pname"><span class="newp">Ja'Marr Chase</span></span><span></span>
+              <span class="pname"><span class="newp">Ja'Marr Chase</span></span><span class="delta flat">—</span>
+            </div>
+            <div class="slotrow2 dim">
+              <span class="slotname">WR2</span><span class="pname"><span class="newp">DeVonta Smith</span></span><span></span>
+              <span class="pname"><span class="newp">DeVonta Smith</span></span><span class="delta flat">—</span>
+            </div>
             <div class="slotrow2 hot">
               <span class="slotname">TE</span><span class="pname"><span class="oldp">Cade Otton</span></span>
               <svg class="ic arrow" width="12" height="12" viewBox="0 0 20 20"><path d="M4 10h11m0 0-4-4m4 4-4 4"/></svg>
               <span class="pname"><span class="newp">Sam LaPorta</span></span><span class="delta">+430</span>
             </div>
-            <div class="slotrow2 dim"><span class="slotname">FLEX</span><span class="pname"><span class="newp">Tony Pollard</span></span><span></span><span class="pname"><span class="newp">Tony Pollard</span></span><span class="delta flat">—</span></div>
+            <div class="slotrow2 dim">
+              <span class="slotname">FLEX</span><span class="pname"><span class="newp">Tony Pollard</span></span><span></span>
+              <span class="pname"><span class="newp">Tony Pollard</span></span><span class="delta flat">—</span>
+            </div>
             <div class="netline"><span class="lbl">Starting lineup total</span><span class="val">5,650 → 6,080 (+430)</span></div>
+            <!-- NEW: position-impact line, tier framing -->
+            <div class="posline" style="margin-top:2px">
+              <span class="txt">Your starting <b>TE</b> moves <span class="tierchip t-fourth">4th</span> → <span class="tierchip t-first1">1 1st</span> — the steepest tier climb in this deal, and the only slot that moves.</span>
+              <span class="badge ok">COMPUTABLE TODAY</span>
+            </div>
           </div>
         </div>
       </div>
@@ -402,21 +408,21 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
         <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
       </div>
     </div>
-    <div class="caption">Own module ahead of the give/receive split — the summary opens with the headline instead of ending with it. Middle rows of the lineup table are omitted here for space (full table shown in A1); a real build keeps all 7 rows. Costs ~44pt more than A1 (a whole new mounted block vs. one line inside an existing one) for a "lead with the punchline" ordering the operator's phrasing implies ("hey you are a contender and…").  Same data source as A1 — one client-side line, no new backend.</div>
+    <div class="caption"><b>Tier framing — recommended (see recommendation below).</b> Same fold-in location and TE-row wash as A1a. The chips are the app's own real 8-tier pick-value ladder labels and canonical colors verbatim (<code>docs/cross-client-invariants.md</code> — lime <code>fourth</code> "4th" #a3e635, teal <code>first_1</code> "1 1st" #2dd4bf), the exact vocabulary the Pick Anchor wizard and every <code>TierBadge</code> chip elsewhere in the app already teach the user — no new mental model. Source: <code>tier</code> is walked off the player's raw seed Elo via <code>RankingService.tier_for_elo(elo, position, format)</code>, the identical call <code>_starter_impact()</code>'s neighbor code already makes for evener rows (#277's <code>_evener_tier</code> closure, same function file, same scope). Threading that same call into the slot builder is a smaller, more precedented addition than A1a's rank sort — no new endpoint, no new data source, no new pattern.</div>
     <div class="notewrap">
-      <div class="notelbl">Notes — B1<span class="dot"></span></div>
-      <textarea class="pagenote" data-key="B1 — Standalone strip (calculator)" placeholder="Notes on this frame…"></textarea>
+      <div class="notelbl">Notes — A1b<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1b — Fold-in, tier framing" placeholder="Notes on this frame…"></textarea>
     </div>
   </div>
 
 </div>
 
-<!-- ═══════════════════════ ROW C — deck hook ═══════════════════════ -->
-<div class="rowlbl">Variant C — deck card's one-line hook<span class="fb">before the user opens the full summary — biggest data gap of the three</span></div>
+<!-- ═══════════════════════ ROW C — deck hook, two framings ═══════════════════════ -->
+<div class="rowlbl">Variant C — deck card's one-line hook<span class="fb">operator: same as A — both framings mocked; still not computable for THIS surface either way</span></div>
 <div class="pairwrap">
 
   <div class="slot">
-    <div class="slotlbl">C1 — swipe deck / Featured trade card</div>
+    <div class="slotlbl">C1a — positional-rank framing</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>100%</span></div>
       <div class="scroll">
@@ -424,7 +430,7 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
           <div class="ticklbl">Featured trade</div>
           <div class="opp">@league_mate</div>
           <!-- NEW: one-line hook under opponent name, before match strength -->
-          <div class="deckhook">Upgrades your weakest starter: <b>TE +430 value</b></div>
+          <div class="deckhook">Upgrades your weakest starter: <b>TE21 → TE4</b></div>
           <div class="strength">
             <div class="row"><span class="lbl">Match strength</span><span class="val">82</span></div>
             <div class="track"><div class="fill" style="width:82%"></div></div>
@@ -457,10 +463,59 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
         <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
       </div>
     </div>
-    <div class="caption"><b style="color:var(--warn)">Illustrative layout only — this one is NOT computable today, at all, for this surface.</b> Per the #238 status doc, <code>starter_impact</code> is Mode B (In-league calculator) only: it needs the caller's AND opponent's known rosters plus the league's slot template, evaluated on-demand for one trade. The deck (<code>/api/trades/generate</code>) and asset-ideas feed generate tens of candidate cards per sweep — computing a full before/after optimal lineup for every card is a materially different cost that #238 explicitly deferred to "phase 2." The hook line shown here is placeholder text at the position the module would occupy, not a working feature.</div>
+    <div class="caption"><b style="color:var(--warn)">Illustrative layout only — NOT computable today, for this surface, regardless of framing.</b> Per the #238 status doc, <code>starter_impact</code> is Mode B (In-league calculator) only: it needs the caller's AND opponent's known rosters plus the league's slot template, evaluated on-demand for one trade. The deck (<code>/api/trades/generate</code>) and asset-ideas feed generate tens of candidate cards per sweep — computing a full before/after optimal lineup (and then, for this framing, a positional-rank lookup) for every card is a materially different cost that #238 explicitly deferred to "phase 2." The hook line shown here is placeholder text at the position the module would occupy, not a working feature.</div>
     <div class="notewrap">
-      <div class="notelbl">Notes — C1<span class="dot"></span></div>
-      <textarea class="pagenote" data-key="C1 — Deck hook (illustrative only)" placeholder="Notes on this frame…"></textarea>
+      <div class="notelbl">Notes — C1a<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C1a — Deck hook, positional-rank (illustrative only)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">C1b — tier framing (real 8-tier ladder)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@league_mate</div>
+          <!-- NEW: one-line hook under opponent name, before match strength -->
+          <div class="deckhook">Upgrades your weakest starter: TE <span class="tierchip t-fourth" style="font-size:9.5px;padding:0 5px">4th</span> → <span class="tierchip t-first1" style="font-size:9.5px;padding:0 5px">1 1st</span></div>
+          <div class="strength">
+            <div class="row"><span class="lbl">Match strength</span><span class="val">82</span></div>
+            <div class="track"><div class="fill" style="width:82%"></div></div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Rome Odunze</div><div class="meta">WR · CHI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 4th (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow" style="border-left-color:var(--te)"><div><div class="nm">Sam LaPorta</div><div class="meta">TE · DET</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+140</b> &nbsp;·&nbsp; <span class="pick">a Late 4th</span> (≈ 0.10 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:5.1%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b style="color:var(--warn)">Illustrative layout only — NOT computable today, for this surface, regardless of framing.</b> Same phase-2 gap as C1a — the deck doesn't run per-card optimal-lineup computation at all today, so neither a rank nor a tier lookup can be derived for it. Tier chips reused verbatim from A1b (real ladder labels/colors). If the deck-mount gap ever closes, this framing is the cheaper of the two to add here too, for the same reason it's cheaper in A1b: <code>tier</code> reuses an existing call pattern (#277), a positional-rank index does not.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C1b<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C1b — Deck hook, tier framing (illustrative only)" placeholder="Notes on this frame…"></textarea>
     </div>
   </div>
 
@@ -469,11 +524,12 @@ svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
 <div class="note">
   <h2>Data-availability audit — computable today vs. needs new work</h2>
   <ul>
-    <li><b>Ships today, zero new backend (used in A1 and B1's <span class="badge ok" style="vertical-align:1px">SHIPS TODAY</span> line):</b> the per-slot <code>{position, value}</code> before/after breakdown already returned by <code>POST /api/trade/evaluate</code> Mode B (<code>backend/server.py</code> <code>_starter_impact()</code> → <code>backend/power_rankings.py</code> <code>optimal_starter_slots()</code>, shipped 2026-08-03, #238). "Biggest single-slot mover" is a client-side <code>max(abs(delta))</code> over an array the client already receives — no new route, no new field, no schema change. This is the only tier the required fold-in (Variant A) needs.</li>
+    <li><b>Rank and tier framing (used in A1a/C1a and A1b/C1b's <span class="badge ok" style="vertical-align:1px">COMPUTABLE TODAY</span> lines):</b> both derive from data the app already computes and serves — no new data source, no schema change, no new route. <b>Tier</b> is walked off a player's raw seed Elo via <code>RankingService.tier_for_elo(elo, position, format)</code> — the identical call already made inside this exact function for evener rows (<code>backend/server.py</code>, #277's <code>_evener_tier</code> closure). <b>Positional rank</b> is a 1-based index into <code>GET /api/trade/values</code>' pool, sorted and filtered to one <code>position</code> — the same pool <code>_starter_impact()</code> already has loaded in memory as <code>_pool_players</code>. Neither field is on the evaluate payload's <code>starter_impact.slots</code> rows today, though — unlike the old raw-value delta (which really was zero-backend client arithmetic over an already-shipped field), both need one small additive change to <code>_starter_impact()</code>'s <code>slot_entry()</code> builder in <code>backend/server.py</code>. Tier is the cheaper of the two: it reuses an existing call verbatim; rank needs a new sort/index step with no precedent elsewhere in the codebase for this purpose.</li>
+    <li><b>Raw dynasty-value framing ("TE: 380 → 810 value") — still literally computable with zero backend changes, but out of scope per operator review:</b> the per-slot <code>{position, value}</code> before/after breakdown is already on <code>POST /api/trade/evaluate</code> Mode B's response (<code>_starter_impact()</code> → <code>backend/power_rankings.py</code> <code>optimal_starter_slots()</code>, shipped 2026-08-03, #238). This was the framing in the original A1/B1/C1 pass; the operator's review directed rank/tier framing instead, so it no longer appears in any frame above. Recorded here only so the data-availability picture stays complete — this is a UX-framing call, not a capability gap.</li>
     <li><b>Computable today, but needs light integration (not built into any variant above, flagged here for completeness):</b> "your TE is below the league average / your weakest position" needs a second, already-live endpoint — <code>GET /api/league/power-rankings</code> (<code>backend/power_rankings.py</code> <code>compute_power_rankings()</code>) returns every team's <code>positions: {QB|RB|WR|TE: {count, value}}</code>. Joining that with the evaluate call's <code>starter_impact.slots</code> gives a real "weakest starting position vs. the league" claim — no new computation, but it is a second network call the trade-summary flow doesn't currently make, and reconciling whole-roster <code>positions_value</code> against a single STARTING slot's value needs a defined comparison (starters-only vs. full roster are different denominators). Worth a scope block if pursued.</li>
-    <li><b>NOT computable today, needs new backend work (flagged <span class="badge no" style="vertical-align:1px">NEEDS NEW DATA</span> everywhere it appears):</b> points-per-game framing ("TE: 10.2 → 17.1 ppg"). <code>git grep -n "ppg\|points_per_game\|per_game" backend/*.py</code> returns nothing outside test files — <b>the app has no fantasy-scoring data source anywhere.</b> The one place weekly points DO exist is <code>backend/outlook/</code> (dark behind the unwired <code>outlook.odds</code> flag): <code>league_state.py</code> pulls real Sleeper matchup <code>points_for</code>/<code>points_against</code>, and <code>strength.py</code>'s <code>RosterValueStrength</code> provider maps a team's TOTAL roster value to a WHOLE-TEAM weekly-points estimate via a documented, unvalidated heuristic (<code>mu = 110 + 12 × z(starting_lineup_value)</code>). Neither is position-level — there is no per-slot or per-position points model anywhere in the codebase, real or heuristic. Building "TE ppg before/after" would mean inventing a new position-level scoring model from scratch (own projections, or an nflverse-style per-position points source), which is a real backend research/design effort, not a mockup follow-on.</li>
-    <li><b>Deck/featured-card mounting (Variant C) is its own gap, independent of PPG vs. value:</b> even the value-based framing that A1/B1 ship today doesn't reach the deck. <code>starter_impact</code> is computed on-demand for one Mode-B evaluate call; the deck generates many candidate cards per sweep and would need per-card optimal-lineup computation at deck-generation cost — the same "phase 2" gap #238's status doc already called out for its own before/after table. Variant C above is a layout illustration only.</li>
-    <li><b>Recommendation:</b> ship Variant A (required fold-in) first — it's additive to an already-shipped payload, one new client-side line, no backend PR. Variant B is the same data with a heavier mount; pick it only if the operator wants the headline to lead the card rather than live inside the lineup table. Leave PPG framing and the deck mount out of the near-term build; both need dedicated scope blocks (new points-per-game data source; deck-scale lineup computation) before any code gets written.</li>
+    <li><b>NOT computable today, needs new backend work (flagged <span class="badge no" style="vertical-align:1px">NEEDS NEW DATA</span> everywhere it appears):</b> points-per-game framing ("TE: 10.2 → 17.1 ppg"), the operator's original literal phrasing. <code>git grep -n "ppg\|points_per_game\|per_game" backend/*.py</code> returns nothing outside test files — <b>the app has no fantasy-scoring data source anywhere.</b> The one place weekly points DO exist is <code>backend/outlook/</code> (dark behind the unwired <code>outlook.odds</code> flag): <code>league_state.py</code> pulls real Sleeper matchup <code>points_for</code>/<code>points_against</code>, and <code>strength.py</code>'s <code>RosterValueStrength</code> provider maps a team's TOTAL roster value to a WHOLE-TEAM weekly-points estimate via a documented, unvalidated heuristic (<code>mu = 110 + 12 × z(starting_lineup_value)</code>). Neither is position-level — there is no per-slot or per-position points model anywhere in the codebase, real or heuristic. Building "TE ppg before/after" would mean inventing a new position-level scoring model from scratch (own projections, or an nflverse-style per-position points source), which is a real backend research/design effort, not a mockup follow-on. This gap is orthogonal to the rank-vs-tier framing question — it was never in play as a build option for this pass.</li>
+    <li><b>Deck/featured-card mounting (Variant C) is its own gap, independent of framing:</b> neither C1a's rank nor C1b's tier reaches the deck today. <code>starter_impact</code> is computed on-demand for one Mode-B evaluate call; the deck generates many candidate cards per sweep and would need per-card optimal-lineup computation (plus, for these framings, a rank or tier lookup on top) at deck-generation cost — the same "phase 2" gap #238's status doc already called out for its own before/after table. Both C1a and C1b above are layout illustrations only.</li>
+    <li><b>Recommendation — tier framing over positional rank:</b> ship <b>A1b (tier)</b> first if/when Variant A moves off mockup. Three reasons. (1) <b>Cheaper, more precedented build:</b> tier reuses an existing call in this exact function (#277's <code>_evener_tier</code> pattern) verbatim; positional rank needs a new sort/index step nothing else in the codebase does yet. (2) <b>Vocabulary the app already teaches:</b> the 8-tier pick-value ladder is the mental model the Pick Anchor wizard, every <code>TierBadge</code> chip, and the tier-consolidation work elsewhere in this same polish batch (#277, `trades-home-inline.html`) already train the user on — tier framing extends a concept the user has seen, rank framing introduces a second one. (3) <b>Less noisy:</b> a tier only changes when a player crosses a real qualitative threshold on the ladder; a positional-rank number can swing by several slots on small value wobbles near a crowded position band, which risks reading as jittery or inconsistent week to week. Positional rank's own case is real — "TE12" reads instantly to anyone who's used KTC/FantasyCalc/Sleeper's own rankings, and it's more granular than an 8-bucket ladder — so it's the fallback if user testing shows the tier chips read as too coarse or unfamiliar outside this app. Either way: leave the deck mount (Variant C) and PPG framing out of the near-term build; both need dedicated scope blocks (deck-scale lineup computation; a new points-per-game data source) before any code gets written.</li>
   </ul>
 </div>
 
