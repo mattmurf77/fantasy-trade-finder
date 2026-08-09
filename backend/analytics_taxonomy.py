@@ -116,6 +116,14 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",
+    # API observability (flag obs.api_events, backend/api_observability.py) —
+    # server-fired capture of outbound external HTTP calls (api_call) and
+    # inbound /api/* requests (api_request). Rows carry user_id="system:api"
+    # (never a real user) and are NON_INTENT in analytics_queries so they can
+    # never leak into DAU/retention. Property specs: OBS_EVENT_PROPS below —
+    # enforced by api_observability._scrub_props (unknown props stripped,
+    # credential-shaped keys/values redacted).
+    "api_call", "api_request",
     # draft-extensions W3 M-A (ADR-010) — the pick-assignment AUDIT TRAIL.
     # `user_events` IS the audit trail for asserted pick ownership: it is what
     # `database.contested_pick_ids` derives disagreement from, and what
@@ -244,6 +252,46 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),
     "espn_connect_abandoned": frozenset({"saw_otp"}),
+}
+
+
+# ---------------------------------------------------------------------------
+# API-observability server event prop specs (api_call / api_request).
+# Enforced at write time by api_observability._scrub_props — a prop key not
+# listed here is STRIPPED before storage (same default-deny posture as
+# CLIENT_EVENT_PROPS; the NULL-`platform` incident is why specs exist).
+# Per-service safe-context props follow docs/integrations/ instrumentation
+# guidance: booleans/counts/enums only, never credential values.
+# ---------------------------------------------------------------------------
+
+OBS_EVENT_PROPS: dict[str, frozenset[str]] = {
+    # One outbound HTTP call. `endpoint` is a route-template CLASS (e.g.
+    # "league.rosters", "graphql.propose_trade", "export.rosters") — never a
+    # raw URL. `error_kind` is the service's closed error enum (EspnError /
+    # MflError / FleaflickerError / SleeperWriteError .kind). `sample_n` is
+    # present on sampled success rows only (rescale: Σ sample_n + errors).
+    "api_call": frozenset({
+        "service", "endpoint", "method", "status", "ok", "ms",
+        "response_bytes", "error_class", "error_kind", "retry", "fallback",
+        "sample_n",
+        # per-service safe context (docs/integrations/ §instrumentation)
+        "league_id", "season", "host", "auth_mode",       # espn/mfl/sleeper
+        "s2_encoded", "swid_braced",                       # espn cookie SHAPE booleans
+        "week", "rows", "format",                          # sleeper sweeps / DP row counts
+        "input_tokens", "output_tokens", "prompt_class",   # anthropic cost visibility
+        "candidate_count",                                 # anthropic prompt size class
+        "batch_size", "kind",                              # expo push
+    }),
+    # One inbound request to our own /api/* surface. `route` is the Flask
+    # url_rule PATTERN ("/api/sleeper/rosters/<league_id>") — never the raw
+    # path, so no user identifiers ride in the event. `user` is the resolved
+    # session user/account id when authenticated (diagnosis only — the row's
+    # user_id column stays "system:api"). `error_code` is the JSON `error`
+    # field of a 4xx/5xx payload (closed enums like "feature_disabled").
+    "api_request": frozenset({
+        "route", "method", "status", "ok", "ms", "response_bytes",
+        "error_code", "error_class", "user", "sample_n",
+    }),
 }
 
 

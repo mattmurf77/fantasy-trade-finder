@@ -99,12 +99,19 @@ _jwks_lock = threading.Lock()
 def _fetch_jwks(url: str) -> list[dict]:
     """Network fetch of a provider JWKS. Monkeypatched in tests."""
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10,
-                                context=ssl.create_default_context()) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-    keys = body.get("keys")
-    if not isinstance(keys, list):
-        raise TokenVerificationError("jwks_unavailable", f"malformed JWKS from {url}")
+    # obs.api_events — Apple/Google sign-in verification egress. Public keys
+    # only; no credential ever flows through this call.
+    from . import api_observability as _api_obs
+    _service = "apple" if "apple.com" in url else "google"
+    with _api_obs.observe_call(_service, "jwks") as _ob:
+        with urllib.request.urlopen(req, timeout=10,
+                                    context=ssl.create_default_context()) as resp:
+            raw = resp.read().decode("utf-8")
+        body = json.loads(raw)
+        keys = body.get("keys")
+        if not isinstance(keys, list):
+            raise TokenVerificationError("jwks_unavailable", f"malformed JWKS from {url}")
+        _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
     return keys
 
 
@@ -902,10 +909,17 @@ def _apple_form_post(url: str, fields: dict) -> tuple[int, dict]:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    with urllib.request.urlopen(
-        req, timeout=10, context=ssl.create_default_context()
-    ) as resp:
-        raw = resp.read().decode("utf-8", "replace")
+    # obs.api_events — the form fields (client_secret / authorization_code /
+    # tokens) are never event properties; endpoint class from the URL path.
+    from . import api_observability as _api_obs
+    _endpoint = "auth." + (urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
+                           or "token")
+    with _api_obs.observe_call("apple", _endpoint, method="POST") as _ob:
+        with urllib.request.urlopen(
+            req, timeout=10, context=ssl.create_default_context()
+        ) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+        _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
     try:
         return resp.status, (json.loads(raw) if raw else {})
     except Exception:

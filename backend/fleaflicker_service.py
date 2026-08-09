@@ -75,25 +75,33 @@ def _api_url(endpoint: str, **params) -> str:
 def _get(url: str, timeout: int, _opener) -> dict:
     req = urllib.request.Request(url, headers=dict(BROWSER_HEADERS))
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise FleaflickerError("Fleaflicker rejected the request", kind="auth") from e
-        if e.code == 404:
-            raise FleaflickerError("Fleaflicker resource not found", kind="not_found") from e
-        raise FleaflickerError(f"Fleaflicker HTTP {e.code}", kind="http") from e
-    except urllib.error.URLError as e:
-        raise FleaflickerError(f"Fleaflicker request failed: {e}", kind="http") from e
-    try:
-        data = json.loads(raw)
-    except ValueError as e:
-        raise FleaflickerError("Fleaflicker returned non-JSON", kind="parse") from e
-    # Fleaflicker signals errors in-band via an `error` object.
-    if isinstance(data, dict) and data.get("error"):
-        msg = (data["error"] or {}).get("message") or "Fleaflicker error"
-        raise FleaflickerError(msg, kind="not_found")
+    # obs.api_events — endpoint class = the API method name from the path
+    # (FetchLeagueRosters etc.), never the query string (league ids ride in
+    # params, not the class).
+    from . import api_observability as _api_obs
+    _endpoint = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1] or "other"
+    with _api_obs.observe_call("fleaflicker", _endpoint,
+                               active=_opener is None) as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise FleaflickerError("Fleaflicker rejected the request", kind="auth") from e
+            if e.code == 404:
+                raise FleaflickerError("Fleaflicker resource not found", kind="not_found") from e
+            raise FleaflickerError(f"Fleaflicker HTTP {e.code}", kind="http") from e
+        except urllib.error.URLError as e:
+            raise FleaflickerError(f"Fleaflicker request failed: {e}", kind="http") from e
+        try:
+            data = json.loads(raw)
+        except ValueError as e:
+            raise FleaflickerError("Fleaflicker returned non-JSON", kind="parse") from e
+        # Fleaflicker signals errors in-band via an `error` object.
+        if isinstance(data, dict) and data.get("error"):
+            msg = (data["error"] or {}).get("message") or "Fleaflicker error"
+            raise FleaflickerError(msg, kind="not_found")
+        _ob.ok(status=200, response_bytes=len(raw))
     return data
 
 

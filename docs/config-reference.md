@@ -25,6 +25,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Rookie draft + Draft Room (2026-08-06)](#flags-rookie-draft-draft-room-2026-08-06)
 - [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
+- [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
   - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
@@ -64,6 +65,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 | `FTF_PLAYERS_REFRESH` | `backend/server.py` `_refresh_players_cache_async` | **Kill switch for the M0 player-cache refresh.** `0` → the daemon never starts (`POST /api/cron/players-refresh` still 202s with `started: false`); anything else (default) → enabled. Exists because M0 is deliberately **not** flag-gated — there is no user-visible surface to gate — so this is the only lever that stops the refresh without a code deploy. Mirrors the KTC kill-switch precedent |
 | `FTF_DP_VALUES_FILE` | `backend/data_loader.py` | Test seam: serve the DynastyProcess values CSV from this local path instead of the live GitHub egress (identical parse path). Under `FTF_TEST_MODE=1` it is **mandatory** (the silent flat-Elo fallback would otherwise reshape the pool mid-test) |
 | `FTF_DP_PICK_VALUES_FILE` | `backend/data_loader.py` | Test seam: serve DynastyProcess's **combined** `files/values.csv` (read only for its `pos == "PICK"` rows — the M6 draft-pick slot values) from this local path instead of the live GitHub egress. This is a **second** remote DP file, so it has its own override; under `FTF_TEST_MODE=1` it is **mandatory** and the backend startup-aborts without it (T-M6-01) |
+| `FTF_OBS_RETENTION_DAYS` | `backend/api_observability.py` | Retention window (days) for `api_call`/`api_request` observability rows in `user_events` (flag `obs.api_events`). Default **30**; `0` = keep forever. The purge rides `server._cleanup_loop` (5-min tick, internally throttled to one DELETE per 6 h) and runs regardless of the flag state so old rows age out even while capture is off |
 | `FTF_KTC_VALUES_FILE` | `backend/data_loader.py` | Test seam: serve the KeepTradeCut dynasty-rankings **HTML** from this local path instead of the live fetch (#145). When unset under `FTF_TEST_MODE=1` (or when `FTF_DP_VALUES_FILE` is set), KTC is simply **off** — never a live egress from a hermetic run |
 | `FTF_TEST_PROFILE` | `backend/test_support.py` | Fixture profile name reported by `GET /__test__/whoami` (set by the seeder's `--print-env`) |
 | `FTF_ENV` / `FTF_API_BASE_URL` | `mobile/app.config.js` (build time) | `FTF_ENV=test` nulls the Sentry DSN + sets `extra.testMode`; `FTF_API_BASE_URL` overrides `extra.apiBaseUrl` (test builds → local Flask). Unset → identical to `app.json` |
@@ -321,6 +323,14 @@ Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recor
 
 ---
 
+## Flags — API observability (2026-08-09, ships **ON**)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `obs.api_events` | **true** in `config/features.json` (registered default false) | `backend/api_observability.py` — inbound + outbound API event capture into `user_events` as server-fired `api_call`/`api_request` rows (taxonomy: `OBS_EVENT_PROPS` in `backend/analytics_taxonomy.py`; query surface: `GET /api/admin/analytics/apihealth`). Outbound: every external egress chokepoint (Sleeper REST + GraphQL incl. the trade-block/trade-capture bypass sites, ESPN, MFL, Fleaflicker, DynastyProcess CSVs, KTC scrape, Anthropic, Expo push, Apple/Google sign-in verification). Inbound: Flask hooks recording route PATTERN/method/status/latency for `/api/*` (static assets and `/api/events` excluded). Volume policy: errors always, successes 1-in-N (`obs_success_sample_n`); retention `FTF_OBS_RETENTION_DAYS` (30 d). This key is the **kill switch**: OFF ⇒ zero event writes, zero overhead beyond a flag check, byte-identical responses. Per-service redaction rules in `docs/integrations/` are enforced structurally (key denylist + value-shape scrub + prop-spec strip). |
+
+---
+
 ## `model_config` keys
 
 Two layers, both read through `trade_service._cfg` at runtime:
@@ -335,6 +345,7 @@ Legacy keys (Elo K-factors, KTC curve, package weights, outlook multipliers, tie
 | Key | Default | Meaning |
 |---|---|---|
 | `analytics.wrapped_cutover_at` | *(stamped at first P0 boot)* | **Not a tunable** — the epoch-seconds instant of the `wrapped_events` → `user_events` writer cutover (LLD §6.4). Seeded once by `_migrate_db()` (INSERT-or-ignore; `model_config.value` is Float, hence epoch seconds rather than ISO text — `database.get_wrapped_cutover_iso()` converts). `load_league_activity()` splits its union read on it. Never edit after deploy: moving it double-counts or hides narrative rows. |
+| `obs_success_sample_n` | 10 | API observability (flag `obs.api_events`, `backend/api_observability.py`): record **1-in-N successful** `api_call`/`api_request` events (deterministic per-endpoint counter; each sampled row carries `props.sample_n` so call volumes rescale honestly). **Errors are always recorded** regardless of N. `1` = record every call (full firehose — debugging only). Cached 60 s; tune live via `PUT /api/admin/config/obs_success_sample_n`. |
 
 ### Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded
 

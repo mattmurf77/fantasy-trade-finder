@@ -140,13 +140,20 @@ def resolve_host(league_id: str, year: int, timeout: int = 15, _opener=None) -> 
                 return None
         opener = urllib.request.build_opener(_NoRedirect)
         location = None
-        try:
-            with opener.open(req, timeout=timeout) as resp:
-                location = resp.headers.get("Location")
-        except urllib.error.HTTPError as e:
-            location = e.headers.get("Location")
-        except urllib.error.URLError as e:
-            raise MflError(f"MFL host resolution failed: {e}", kind="http") from e
+        # obs.api_events — host-resolution regressions are exactly what the
+        # `host` prop on export.* calls is compared against.
+        from . import api_observability as _api_obs
+        with _api_obs.observe_call("mfl", "resolve_host",
+                                   league_id=league_id) as _ob:
+            try:
+                with opener.open(req, timeout=timeout) as resp:
+                    location = resp.headers.get("Location")
+                _ob.ok(status=getattr(resp, "status", 200))
+            except urllib.error.HTTPError as e:
+                location = e.headers.get("Location")
+                _ob.ok(status=e.code)   # the 302 IS the success shape here
+            except urllib.error.URLError as e:
+                raise MflError(f"MFL host resolution failed: {e}", kind="http") from e
 
     host = parse_host_from_url(location or "")
     if not host:
@@ -192,21 +199,28 @@ def login(username: str, password: str, year: int, timeout: int = 15,
                "Content-Type": "application/x-www-form-urlencoded"}
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise MflAuthError("MFL rejected the username/password") from e
-        raise MflError(f"MFL login HTTP {e.code}", kind="http") from e
-    except urllib.error.URLError as e:
-        raise MflError(f"MFL login failed: {e}", kind="http") from e
+    # obs.api_events — status/latency/error kind ONLY. The POST body
+    # (USERNAME/PASSWORD) and the returned MFL_USER_ID cookie are never
+    # event properties (docs/integrations/mfl.md §6 must-redact).
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("mfl", "login", method="POST",
+                               active=_opener is None) as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise MflAuthError("MFL rejected the username/password") from e
+            raise MflError(f"MFL login HTTP {e.code}", kind="http") from e
+        except urllib.error.URLError as e:
+            raise MflError(f"MFL login failed: {e}", kind="http") from e
 
-    import re
-    m = re.search(r'MFL_USER_ID\s*=\s*"([^"]+)"', raw)
-    if not m:
-        # <error>…</error> body, or any response without a cookie — bad creds.
-        raise MflAuthError("MFL rejected the username/password")
+        import re
+        m = re.search(r'MFL_USER_ID\s*=\s*"([^"]+)"', raw)
+        if not m:
+            # <error>…</error> body, or any response without a cookie — bad creds.
+            raise MflAuthError("MFL rejected the username/password")
+        _ob.ok(status=200)
     value = m.group(1)
     return {"cookie": f"MFL_USER_ID={value}", "mfl_user_id": value}
 
@@ -230,22 +244,27 @@ def fetch_my_leagues(cookie: str, year: int, timeout: int = 15,
     headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise MflAuthError() from e
-        raise MflError(f"MFL myleagues HTTP {e.code}", kind="http") from e
-    except urllib.error.URLError as e:
-        raise MflError(f"MFL myleagues failed: {e}", kind="http") from e
-    try:
-        data = json.loads(raw)
-    except ValueError as e:
-        raise MflError("MFL returned non-JSON", kind="parse") from e
-    if isinstance(data, dict) and data.get("error"):
-        # e.g. {"error": "...cookie..."} — treat as an auth problem.
-        raise MflAuthError(str(data.get("error"))[:200])
+    # obs.api_events — the Cookie header value is never an event property.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("mfl", "export.myleagues",
+                               active=_opener is None) as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise MflAuthError() from e
+            raise MflError(f"MFL myleagues HTTP {e.code}", kind="http") from e
+        except urllib.error.URLError as e:
+            raise MflError(f"MFL myleagues failed: {e}", kind="http") from e
+        try:
+            data = json.loads(raw)
+        except ValueError as e:
+            raise MflError("MFL returned non-JSON", kind="parse") from e
+        if isinstance(data, dict) and data.get("error"):
+            # e.g. {"error": "...cookie..."} — treat as an auth problem.
+            raise MflAuthError(str(data.get("error"))[:200])
+        _ob.ok(status=200, response_bytes=len(raw))
 
     out: list[dict] = []
     for lg in _as_list((data.get("leagues") or {}).get("league")):
@@ -285,21 +304,31 @@ def _fetch_one(host: str, year: int, type_: str, league_id: str,
         headers["Cookie"] = cookie
     req = urllib.request.Request(export_url(host, year, type_, league_id), headers=headers)
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise MflAuthError() from e
-        if e.code == 404:
-            raise MflError(f"MFL {type_} not found for league {league_id}", kind="not_found") from e
-        raise MflError(f"MFL HTTP {e.code}", kind="http") from e
-    except urllib.error.URLError as e:
-        raise MflError(f"MFL request failed: {e}", kind="http") from e
-    try:
-        return json.loads(raw)
-    except ValueError as e:
-        raise MflError("MFL returned non-JSON", kind="parse") from e
+    # obs.api_events — the shared single-export chokepoint (endpoints #4-#9,
+    # docs/integrations/mfl.md §1). Host + export type are safe context; the
+    # Cookie header value is never an event property.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("mfl", f"export.{type_}",
+                               active=_opener is None,
+                               league_id=league_id, host=host,
+                               auth_mode="cookie" if cookie else "public") as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise MflAuthError() from e
+            if e.code == 404:
+                raise MflError(f"MFL {type_} not found for league {league_id}", kind="not_found") from e
+            raise MflError(f"MFL HTTP {e.code}", kind="http") from e
+        except urllib.error.URLError as e:
+            raise MflError(f"MFL request failed: {e}", kind="http") from e
+        try:
+            parsed = json.loads(raw)
+        except ValueError as e:
+            raise MflError("MFL returned non-JSON", kind="parse") from e
+        _ob.ok(status=200, response_bytes=len(raw))
+        return parsed
 
 
 def fetch_league_bundle(league_id: str, year: int, host: str,

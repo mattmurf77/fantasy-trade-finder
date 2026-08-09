@@ -296,36 +296,43 @@ def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
         request.add_header(_hk, _hv)
 
     opener = _opener or urllib.request.urlopen
-    try:
-        with opener(request, timeout=_HTTP_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
+    # obs.api_events — instrument the REAL network path only (`_opener` is
+    # test-injected). The token/authorization header is NEVER a prop; only
+    # the op class, status, latency and SleeperWriteError.kind are captured.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("sleeper", f"graphql.{op}", method="POST",
+                               active=_opener is None) as _ob:
         try:
-            raw = e.read().decode("utf-8")
+            with opener(request, timeout=_HTTP_TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            try:
+                raw = e.read().decode("utf-8")
+            except Exception:
+                raw = ""
+            if e.code in (401, 403):
+                raise SleeperAuthError(f"Sleeper rejected the token (HTTP {e.code})", detail=raw[:500])
+            raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", detail=raw[:500])
+        except urllib.error.URLError as e:
+            raise SleeperWriteError("network error contacting Sleeper", kind="network", detail=str(e))
+
+        try:
+            parsed = json.loads(raw)
         except Exception:
-            raw = ""
-        if e.code in (401, 403):
-            raise SleeperAuthError(f"Sleeper rejected the token (HTTP {e.code})", detail=raw[:500])
-        raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", detail=raw[:500])
-    except urllib.error.URLError as e:
-        raise SleeperWriteError("network error contacting Sleeper", kind="network", detail=str(e))
+            raise SleeperWriteError("non-JSON response from Sleeper", detail=raw[:500])
 
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        raise SleeperWriteError("non-JSON response from Sleeper", detail=raw[:500])
+        # GraphQL surfaces errors as HTTP 200 with an "errors" array.
+        errors = parsed.get("errors") if isinstance(parsed, dict) else None
+        if errors:
+            msg = json.dumps(errors)[:500]
+            low = msg.lower()
+            if any(w in low for w in ("auth", "unauth", "token", "forbidden", "login")):
+                raise SleeperAuthError("Sleeper auth error", detail=msg)
+            raise SleeperWriteError("Sleeper GraphQL error", detail=msg)
 
-    # GraphQL surfaces errors as HTTP 200 with an "errors" array.
-    errors = parsed.get("errors") if isinstance(parsed, dict) else None
-    if errors:
-        msg = json.dumps(errors)[:500]
-        low = msg.lower()
-        if any(w in low for w in ("auth", "unauth", "token", "forbidden", "login")):
-            raise SleeperAuthError("Sleeper auth error", detail=msg)
-        raise SleeperWriteError("Sleeper GraphQL error", detail=msg)
-
-    node = ((parsed.get("data") or {}) if isinstance(parsed, dict) else {}).get(op) or {}
-    return {"transaction_id": node.get("transaction_id"), "status": node.get("status"), "raw": node}
+        _ob.ok(status=200, response_bytes=len(raw))
+        node = ((parsed.get("data") or {}) if isinstance(parsed, dict) else {}).get(op) or {}
+        return {"transaction_id": node.get("transaction_id"), "status": node.get("status"), "raw": node}
 
 
 def propose_trade(token: str, req: ProposeTradeRequest, *, _opener=None) -> dict:

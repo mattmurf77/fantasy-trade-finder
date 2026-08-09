@@ -1806,6 +1806,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_dir_rescue_frac",  0.5,   "#175: min fraction of the primary give's consensus value a pick/younger return component needs to rescue the age-gap rule"),
     # ── Analytics platform P1 (docs/plans/analytics-platform/lld.md §3.4) ─
     ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
+    ("obs_success_sample_n",     10.0,  "API observability (obs.api_events): record 1-in-N SUCCESSFUL api_call/api_request events (errors always recorded); 1 = record every call; cached 60s in api_observability"),
     # ── Deck-eval 2026-07-17 — consensus consolidation sanity gate ───────
     ("consolidation_raw_loss_frac", 0.15, "deck-eval: max RAW consensus loss on a user-give-side consolidation as a fraction of the raw give total (consensus path); 0 disables"),
     # ── #169 Outlook odds pipeline (backend/outlook/) — numeric knobs ─────

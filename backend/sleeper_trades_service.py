@@ -63,8 +63,17 @@ def fetch_week_transactions(
     for k, v in _HEADERS.items():
         request.add_header(k, v)
     opener = _opener or urllib.request.urlopen
-    with opener(request, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    # obs.api_events — `_sleeper_get` bypass site #3 (sleeper.md §6.3). The
+    # 18-week sweep makes this the highest-frequency Sleeper class; success
+    # sampling (obs_success_sample_n) keeps its volume bounded.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call("sleeper", "league.transactions",
+                               active=_opener is None,
+                               league_id=league_id, week=week) as _ob:
+        with opener(request, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+        payload = json.loads(raw)
+        _ob.ok(status=200, response_bytes=len(raw))
     return payload if isinstance(payload, list) else []
 
 
