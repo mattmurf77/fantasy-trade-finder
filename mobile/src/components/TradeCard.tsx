@@ -426,9 +426,10 @@ function TradeCardComp({
 
       {/* Match strength was computed for the ORIGINAL package; after a
           player swap it's stale, so edited cards hide it and lean on the
-          re-priced value bar below. */}
+          re-priced value bar below. #276 — `compact` (existing prop) trims
+          its internal gap; the meter itself is unchanged. */}
       {!data.edited && !hideMatchStrength && (
-        <StrengthBar value={matchPct} label="Match strength" />
+        <StrengthBar value={matchPct} label="Match strength" compact />
       )}
 
       <View style={styles.split}>
@@ -601,13 +602,17 @@ function TradeCardComp({
 export default React.memo(TradeCardComp);
 
 const styles = StyleSheet.create({
+  // #276 — vertical-cost audit (typical 2-for-2 must fit an 852pt viewport
+  // alongside the pick-valuation line): padding lg→md and the outer stack
+  // gap md→sm trim ~28pt across a typical card's ~6 sections without
+  // dropping any content. No information removed.
   card: {
     backgroundColor: ink.ink1,
     borderWidth: 1,
     borderColor: ink.line,
     borderRadius: radii.md,
-    padding: space.lg,
-    gap: space.md,
+    padding: space.md,
+    gap: space.sm,
   },
   header: {
     flexDirection: 'row',

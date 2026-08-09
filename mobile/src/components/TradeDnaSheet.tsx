@@ -172,6 +172,17 @@ export interface TradeDnaSheetFullProps {
    * off, which is what keeps the chip row from rendering at all. */
   tradeIntent?: TradeIntent;
   onTradeIntent?: (intent: TradeIntent) => void;
+  /** #269 (flag trades.sheet_targeting) — league picker + single-select
+   * "Trade with" team targeting, rendered above the primary questions.
+   * Absent entirely when the flag is off (mode-bar Team/Player chips stay
+   * the entry point instead). */
+  teamTargeting?: {
+    leagueName: string | null;
+    onOpenLeaguePicker: () => void;
+    opponentName: string | null;
+    onOpenPicker: () => void;
+    onClear: () => void;
+  };
 }
 
 // #172 — trade intent modes ("I want to consolidate / tier up / tier
@@ -502,6 +513,83 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
         </View>
 
         <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.body}>
+          {/* #269 (flag trades.sheet_targeting) — league picker + specific-
+              team targeting, ahead of the primary questions (this is the
+              only place either lives now that the mode-bar's Team/Player
+              chips are gone). League picker opens the SAME global
+              LeagueSwitcherSheet instance TopBar uses (close this sheet
+              first, reopen when it closes — iOS won't stack sibling
+              Modals, same pattern the "Specific players" add flow below
+              uses for PlayerPickerModal). Team targeting reuses the
+              existing "Pick a manager" list Modal and its
+              opponent_user_id wiring verbatim; tapping the active manager
+              again clears the selection. */}
+          {full?.teamTargeting ? (
+            <>
+              <Text style={styles.dnaGroupHdr}>League</Text>
+              <Pressable
+                testID="dna.league-picker"
+                accessibilityRole="button"
+                accessibilityLabel={`League: ${full.teamTargeting.leagueName ?? 'none selected'}`}
+                accessibilityHint="Opens the league switcher"
+                onPress={full.teamTargeting.onOpenLeaguePicker}
+                style={({ pressed }) => [
+                  styles.leaguePickerRow,
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <Text style={styles.leaguePickerName} numberOfLines={1}>
+                  {full.teamTargeting.leagueName ?? 'Choose a league'}
+                </Text>
+                <Icon name="chevron-down" size={14} color={ice.base} />
+              </Pressable>
+
+              <Text style={styles.dnaGroupHdr}>
+                Trade with <Text style={styles.dnaSub}>optional</Text>
+              </Text>
+              {full.teamTargeting.opponentName ? (
+                <View style={styles.chipsWrap}>
+                  <Pressable
+                    testID="dna.team-target.chip"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Stop limiting trades to ${full.teamTargeting.opponentName}`}
+                    onPress={full.teamTargeting.onClear}
+                    style={({ pressed }) => [
+                      styles.targetChip,
+                      pressed && { backgroundColor: ink.ink3 },
+                    ]}
+                  >
+                    <Text style={styles.targetChipDir}>ONLY</Text>
+                    <Text style={styles.targetChipName}>
+                      {full.teamTargeting.opponentName}
+                    </Text>
+                    <Icon name="x" size={12} color={chalk.dim} />
+                  </Pressable>
+                </View>
+              ) : null}
+              <Pressable
+                testID="dna.team-target.pick"
+                accessibilityRole="button"
+                accessibilityLabel={
+                  full.teamTargeting.opponentName
+                    ? 'Change trade partner'
+                    : 'Pick a team to trade with'
+                }
+                onPress={full.teamTargeting.onOpenPicker}
+                style={({ pressed }) => [
+                  styles.addBtn,
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <Text style={styles.addBtnText}>
+                  {full.teamTargeting.opponentName
+                    ? '+ Change team'
+                    : '+ Pick a specific team'}
+                </Text>
+              </Pressable>
+            </>
+          ) : null}
+
           <Text style={styles.dnaGroupHdr}>My team is…</Text>
           <View style={styles.outGrid}>
             {OUTLOOK_CARDS.map((o) => {
@@ -1200,6 +1288,21 @@ const styles = StyleSheet.create({
   manageLink: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   dnaEmpty: { ...type.bodySm, color: chalk.faint },
   untOverflow: { ...type.bodySm, color: chalk.dim },
+
+  // #269 — league picker row, same row construction as a picker-modal
+  // trigger (name + ice chevron, ink-1 fill, hairline border).
+  leaguePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: space.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink1,
+  },
+  leaguePickerName: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi, flex: 1 },
 
   // #257 — full-sheet-only additions (variant C). Positions: a label +
   // sublabel to the left of the same toggleRow, instead of a header line

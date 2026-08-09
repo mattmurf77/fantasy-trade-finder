@@ -74,6 +74,11 @@ interface Props {
   teamName?: string | null;
   /** Render the one-line mode hint (cold start only, #246 mock B2). */
   showHint?: boolean;
+  /** #269 (flag `trades.sheet_targeting`) — Team and Player selection moved
+   *  into the #257 full sheet (a league picker + single-select "Trade with"
+   *  block), so their chips here are redundant and go away. Omit entirely
+   *  (flag off) to render today's five/six chips exactly. */
+  hideTeamAndPlayer?: boolean;
 }
 
 export default function TradeFinderModeBar({
@@ -84,11 +89,15 @@ export default function TradeFinderModeBar({
   onDraft,
   teamName,
   showHint = false,
+  hideTeamAndPlayer = false,
 }: Props) {
   const copy = COPY[mode];
+  const baseChips = hideTeamAndPlayer
+    ? CHIPS.filter((c) => c.key !== 'team' && c.key !== 'player')
+    : CHIPS;
   // Draft LEADS when present (see DRAFT_CHIP); absent ⇒ the array is the
   // shipped five, identical object identity and order.
-  const chips = onDraft ? [DRAFT_CHIP, ...CHIPS] : CHIPS;
+  const chips = onDraft ? [DRAFT_CHIP, ...baseChips] : baseChips;
   const hint =
     mode === 'team' && teamName
       ? `Only mutual-gain deals with ${teamName}.`
