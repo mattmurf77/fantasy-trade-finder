@@ -498,12 +498,12 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
 </div>
 
 <!-- ═══════════════════════ ROW B — Variant (b) Calculator-style ═══════════════════════ -->
-<div class="rowlbl">Variant (b) — Calculator-style: the page IS a manual-calc canvas, deck suggestions feed it<span class="fb">directly answers #270's first sentence</span></div>
-<div class="rowsub">Two inline columns — You send / You get — with real Add/Remove rows, exactly like <code>TradeSide.tsx</code>'s existing calculator pattern (reused, not reinvented — same component, same <code>tierOf</code> tier-badge treatment). League + Team also pulled inline as a header row (a calculator needs to know who it's building against). Tapping a suggestion card below loads its two sides straight into the columns. Outlook/Positions/Intent/Fairness/Lanes stay behind a (shorter) Change — they're deck-generation preferences, not part of a hand-built trade.</div>
+<div class="rowlbl">Variant (b) — Calculator-style: the page IS a manual-calc canvas, deck suggestions feed it<span class="fb">directly answers #270's first sentence — CTA + prefs repositioned 2026-08-09</span></div>
+<div class="rowsub">Operator, 2026-08-09: keep the explicit "Find a Trade" CTA — it still drives the suggestion rail below, this was never meant to remove it — and move the prefs/Change entry back to the top of the frame, in the same spot every other variant uses it. Two inline columns — You send / You get — with real Add/Remove rows, exactly like <code>TradeSide.tsx</code>'s existing calculator pattern (reused, not reinvented — same component, same <code>tierOf</code> tier-badge treatment). League + Team pulled inline as a header row just above the Change entry (a calculator needs to know who it's building against). Tapping a suggestion card below loads its two sides straight into the columns. Outlook/Positions/Intent/Fairness/Lanes stay behind a (shorter) Change — they're deck-generation preferences, not part of a hand-built trade.</div>
 <div class="pairwrap">
 
   <div class="slot">
-    <div class="slotlbl">B1 — empty canvas seeded by a tapped suggestion</div>
+    <div class="slotlbl">B1 — empty canvas: Find a Trade + prefs restored to the top (repositioned 2026-08-09)</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>100%</span></div>
       <div class="topbar">
@@ -520,6 +520,8 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
           <div class="twPill"><span class="lbl">League</span><span class="val">Dynasty Degens <svg class="i" width="10" height="10" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
           <div class="twPill"><span class="lbl">Trading with</span><span class="val">@league_mate <svg class="i" width="10" height="10" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
         </div>
+        <div class="editEntry"><span class="lbl">Contend · Chasing WR · Value moves</span><span class="go">Change ›</span></div>
+        <button class="btnPrimary">Find more trades</button>
         <div class="ticklbl" style="margin:2px 0 -2px">Build a trade</div>
         <div class="calcCols">
           <div class="calcCol">
@@ -531,7 +533,6 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
             <div class="calcAdd"><span>+ Add player</span></div>
           </div>
         </div>
-        <div class="editEntry"><span class="lbl">Contend · Chasing WR · Value moves</span><span class="go">Change ›</span></div>
         <div class="ticklbl" style="margin:6px 0 -4px">Or tap a suggestion to load it →</div>
         <div class="suggestRow">
           <div class="suggestCard"><span class="who">@league_mate</span><span class="swap">Smith → Chase</span><span class="tag">a Late 2nd</span><span class="tap">Tap to load</span></div>
@@ -548,8 +549,8 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
       </div>
       <div class="tabbarpad"></div>
     </div>
-    <div class="caption">"Blank calc" in the utility row is deliberately distinct from this canvas: this canvas is ALWAYS league+opponent-scoped (real rosters); #272's Manual calc must stay context-free ("remove any league or player references"), so it's kept as its own escape hatch to the true demo-mode calculator, not this view. "Trading with" here defaults to a specific league-mate (not "Any," unlike variant a) because a two-column build needs a counterparty from the first tap.</div>
-    <div class="notewrap"><div class="notelbl">Notes — B1<span class="dot2"></span></div><textarea class="pagenote" data-key="B1 calculator canvas, empty" placeholder="Notes on this frame…"></textarea></div>
+    <div class="caption">Operator, 2026-08-09: <i>"I don't know why you've removed the find a trade button. Re-gen with find a trade. Move the change pre section up to the top where it is in other mocks."</i> Both restored: <code>btnPrimary</code> "Find more trades" is back, and the utilRow → twRow → editEntry → btnPrimary sequence now matches A1's exact order — the first four elements on this page are identical to A1's, only the content below the CTA differs (build columns + suggestion rail instead of a swipe deck). Tapping "Find more trades" (re)populates the suggestion rail below; tapping a suggestion card loads it into the columns — two parallel paths into the same canvas, not a fork. "Blank calc" in the utility row is still deliberately distinct from this canvas: this canvas is ALWAYS league+opponent-scoped (real rosters); #272's Manual calc must stay context-free ("remove any league or player references"), so it's kept as its own escape hatch to the true demo-mode calculator, not this view. "Trading with" here still defaults to a specific league-mate (not "Any," unlike variant a) because a two-column build needs a counterparty from the first tap.</div>
+    <div class="notewrap"><div class="notelbl">Notes — B1<span class="dot2"></span></div><textarea class="pagenote" data-key="B1 calculator canvas, empty (CTA + prefs restored to top)" placeholder="Notes on this frame…"></textarea></div>
   </div>
 
   <div class="slot">
@@ -604,7 +605,7 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
 
 </div>
 <div class="note" style="max-width:1280px">
-  <p><b>Cost:</b> largest of the four. Reuses existing components (<code>TradeSide</code>, <code>VerdictPanel</code>/<code>ConsensusVerdictCard</code>, <code>PlayerPickerModal</code>) but requires a real architectural decision: does the swipe deck still exist underneath, or does the home screen fork into two rendering modes? This mock assumes the deck is fully replaced by canvas + suggestion rail — a bigger behavioral change than "add a strip," closer to promoting <code>InLeagueCalculator</code> to be the screen rather than a sub-route. Needs its own scope block before build. <b>Pro:</b> the only variant that actually delivers #270's literal first sentence — "add and remove players directly from the UI." <b>Con:</b> loses the zero-effort swipe discovery loop that's the app's core PFO surface (<code>pm-pfo</code>'s territory) — a brand-new user with no target in mind now faces two empty columns instead of an auto-populated card, the same regression flagged in the #211 lab's direction (a).</p>
+  <p><b>Cost:</b> largest of the four. Reuses existing components (<code>TradeSide</code>, <code>VerdictPanel</code>/<code>ConsensusVerdictCard</code>, <code>PlayerPickerModal</code>) but requires a real architectural decision: does the swipe deck still exist underneath, or does the home screen fork into two rendering modes? This mock assumes the deck is fully replaced by canvas + suggestion rail — a bigger behavioral change than "add a strip," closer to promoting <code>InLeagueCalculator</code> to be the screen rather than a sub-route. Needs its own scope block before build. Repositioned 2026-08-09: the CTA and prefs entry now sit at the top of the frame, matching baseline's layout — this doesn't change the cost above, it just corrects the earlier draft's implication that "Find a Trade" was being retired. <code>btnPrimary</code>/"Find more trades" already exists in every other variant; here it's confirmed as a parallel path into the suggestion rail, alongside (not instead of) the hand-built columns. <b>Pro:</b> the only variant that actually delivers #270's literal first sentence — "add and remove players directly from the UI" — while still keeping the one-tap CTA path #270's second directive asked to preserve. <b>Con:</b> loses the zero-effort swipe discovery loop that's the app's core PFO surface (<code>pm-pfo</code>'s territory) — a brand-new user with no target in mind now faces two empty columns instead of an auto-populated card, the same regression flagged in the #211 lab's direction (a).</p>
 </div>
 
 <!-- ═══════════════════════ ROW C — Variant (c) Maximal inline ═══════════════════════ -->
@@ -664,12 +665,56 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
 </div>
 
 <!-- ═══════════════════════ ROW D — Variant (d) Accordion ═══════════════════════ -->
-<div class="rowlbl">Variant (d) — Accordion: no modal, sections expand in place instead of always-on<span class="fb">the fourth, distinct point on the spectrum</span></div>
-<div class="rowsub">Collapsed by default (as dense as variant a's compact rows), but tapping ANY row expands it inline — pushing the deck down rather than opening an overlay. Reclaims the space (c) permanently spends, without (a)/(base)'s full-screen modal hop. Genuinely different disclosure mechanism, not just a layout variant of the others.</div>
+<div class="rowlbl">Variant (d) — Accordion: Change still gates the page, but now opens an in-place accordion instead of a full-screen sheet<span class="fb">repositioned 2026-08-09 — accordion replaces the SHEET, not the page</span></div>
+<div class="rowsub">Operator, 2026-08-09: <i>"I like this layout when a user hits 'Change'... Re-do the mock so the default state is still that these are hidden behind the 'change' button."</i> Default state (D1) is now byte-for-byte the same as baseline/BASE-1 — one <code>editEntry</code> line reading "Change ›", full deck visible below, nothing accordion-shaped on first paint. Tapping Change no longer opens <code>TradeDnaSheet</code>'s full-screen <code>&lt;Modal&gt;</code>; instead the same five sections expand in place as collapsed accordion rows (D2), pushing the deck down rather than covering it. Each row still opens its own body on a further tap — same per-section content as (c)'s always-on version, just gated behind one "Change" tap first instead of rendering permanently.</div>
 <div class="pairwrap">
 
   <div class="slot">
-    <div class="slotlbl">D1 — collapsed: five compact rows, deck right below</div>
+    <div class="slotlbl">D1 — default: hidden behind Change, identical to baseline until tapped</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="utilRow">
+          <div class="utilBtn"><svg class="i" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg><span class="lbl">Draft</span></div>
+          <div class="utilBtn"><svg class="i" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></svg><span class="lbl">Free agents</span></div>
+          <div class="utilBtn manual"><svg class="i" viewBox="0 0 20 20"><path d="M4 7h12M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Manual calc</span></div>
+        </div>
+        <div class="editEntry"><span class="lbl">Contend · Chasing WR · Value moves</span><span class="go">Change ›</span></div>
+        <button class="btnPrimary">Find more trades</button>
+        <div class="ticklbl" style="margin:2px 0 -4px">Featured swipe card</div>
+        <div class="stackedCard">
+          <div class="peek"></div>
+          <div class="tcard top">
+            <div style="font-size:16px;font-weight:600">@league_mate</div>
+            <div class="split">
+              <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div class="txt"><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div><span class="tierbadge" style="border-color:var(--tSecond);color:var(--tSecond)">2nd</span></div></div>
+              <div class="vrule"></div>
+              <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div class="txt"><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div><span class="tierbadge" style="border-color:var(--tFirsts4);color:var(--tFirsts4)">4+ 1sts</span></div></div>
+            </div>
+            <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <span class="pick">a Late 2nd</span></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          </div>
+        </div>
+        <div class="dispRow"><div class="dispBtn pass">✕</div><div class="dispBtn like">✓</div></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg>Draft</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">Pixel-for-pixel the same render as BASE-1: one "Change ›" line, full swipe deck with dispositions, nothing accordion-shaped visible anywhere. This is the frame that directly answers the operator's directive — default state keeps every control hidden behind Change, exactly like today's shipped app. The only thing this variant changes vs. today is what opens when Change is tapped — see D2, not this frame.</div>
+    <div class="notewrap"><div class="notelbl">Notes — D1<span class="dot2"></span></div><textarea class="pagenote" data-key="D1 accordion — default, hidden behind Change" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">D2 — post-Change: in-place accordion replaces the editEntry line, deck pushed down</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>100%</span></div>
       <div class="topbar">
@@ -707,49 +752,13 @@ svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stro
       </div>
       <div class="tabbarpad"></div>
     </div>
-    <div class="caption">Five rows, ~44pt each — close to variant (a)'s footprint, but every one of the sheet's sections is represented on-page (not just League+Team), each collapsed to a summary line. Specific-player targeting folds into "Trading with" here (a target IS who you're trading with, at the limit). Untouchables omitted from this row list — still reached via the featured-trade window's existing entry point, unchanged.</div>
-    <div class="notewrap"><div class="notelbl">Notes — D1<span class="dot2"></span></div><textarea class="pagenote" data-key="D1 accordion collapsed" placeholder="Notes on this frame…"></textarea></div>
-  </div>
-
-  <div class="slot">
-    <div class="slotlbl">D2 — "Positions" expanded in place; deck pushed down, no overlay</div>
-    <div class="phone">
-      <div class="status"><span>9:41</span><span>100%</span></div>
-      <div class="topbar">
-        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
-        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg></div>
-      </div>
-      <div class="content"><div class="stack">
-        <div class="accItem"><div class="accHead"><span class="lbl">Trading with <b>Any league-mate</b> · <b>Dynasty Degens</b></span><span class="car">⌄</span></div></div>
-        <div class="accItem"><div class="accHead"><span class="lbl">Outlook <b>Contend</b></span><span class="car">⌄</span></div></div>
-        <div class="accItem open">
-          <div class="accHead"><span class="lbl">Positions <b>Chasing WR</b></span><span class="car">⌃</span></div>
-          <div class="accBody">
-            <div><div class="miniHdr" style="color:var(--pos)">Chasing</div><div class="posToggleRow"><span class="posToggle chase">QB</span><span class="posToggle">RB</span><span class="posToggle chase">WR</span><span class="posToggle">TE</span></div></div>
-            <div><div class="miniHdr" style="color:var(--flare)">Shopping</div><div class="posToggleRow"><span class="posToggle">QB</span><span class="posToggle shop">RB</span><span class="posToggle">WR</span><span class="posToggle">TE</span></div></div>
-          </div>
-        </div>
-        <div class="accItem"><div class="accHead"><span class="lbl">Trade idea <b>Consolidate</b></span><span class="car">⌄</span></div></div>
-        <div class="accItem"><div class="accHead"><span class="lbl">Fine tuning <b>Value moves</b></span><span class="car">⌄</span></div></div>
-        <button class="btnPrimary" style="opacity:.5">Find more trades</button>
-        <div class="ticklbl" style="margin:2px 0 -4px;opacity:.4">Featured swipe card ↓ (pushed down, still on-screen)</div>
-      </div></div>
-      <div class="tabbar">
-        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
-        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Acquire</div>
-        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg>Draft</div>
-        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
-        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
-      </div>
-      <div class="tabbarpad"></div>
-    </div>
-    <div class="caption">Autosave-on-tap (#236) still applies — no Done button needed, tapping the header again (or another row) collapses it back. On a real device the deck scrolls fully off-screen while a section is open; this frame shows it clipped at the fold rather than cropping it from the mock entirely, to keep the "pushed down, not hidden" distinction honest.</div>
-    <div class="notewrap"><div class="notelbl">Notes — D2<span class="dot2"></span></div><textarea class="pagenote" data-key="D2 accordion expanded" placeholder="Notes on this frame…"></textarea></div>
+    <div class="caption">Tapping "Change ›" on D1 replaces that single line with these five collapsed rows in place — no overlay, no dimming; the utility row, CTA, and deck below all just shift down to make room, same as they would for any inline content growth. Specific-player targeting still folds into "Trading with" (a target IS who you're trading with, at the limit). Each row can still expand its own body on a further tap (Positions' toggle grid, Fine tuning's slider+pills, etc. — same inner JSX as (c) and the shipped sheet, just in a collapsible shell instead of an always-on card or a <code>&lt;Modal&gt;</code>) — that second-layer expansion isn't drawn as its own frame here since it's identical to what (c) already shows section-by-section. Tapping "Change" again collapses back to D1. Untouchables stays reached via the featured-trade window's existing entry point, unchanged.</div>
+    <div class="notewrap"><div class="notelbl">Notes — D2<span class="dot2"></span></div><textarea class="pagenote" data-key="D2 accordion — post-Change, expanded in place" placeholder="Notes on this frame…"></textarea></div>
   </div>
 
 </div>
 <div class="note" style="max-width:1280px">
-  <p><b>Cost:</b> moderate — genuinely new component (an accordion list, not a repurposed sheet or card), but each expanded body reuses the exact same inner JSX the sheet already renders per section (Positions' toggle grid, Fine tuning's slider+pills, etc.) — the change is the outer shell (collapsible `<View>` rows instead of a `<Modal>`), not the controls themselves. <b>Pro:</b> the only variant that reclaims space when collapsed AND avoids a full-screen modal hop for every edit — arguably the best of (a)'s density and (c)'s directness. <b>Con:</b> most novel interaction pattern of the four (no existing precedent elsewhere in the app to reuse styling/behavior from), and multiple expanded sections at once needs a design decision (accordion-exclusive vs. multi-open) this mock doesn't resolve.</p>
+  <p><b>Cost:</b> lower on the page side than the original draft — the default render (D1) needs zero new components; it's the exact <code>editEntry</code> + Change gate baseline already ships. The remaining cost is entirely in the destination: swapping <code>TradeDnaSheet</code>'s <code>full</code>-branch <code>&lt;Modal&gt;</code> for a collapsible in-place list — still genuinely new (no accordion precedent elsewhere in the app to reuse styling/behavior from) — but every expanded body reuses the exact inner JSX the sheet already renders per section (Positions' toggle grid, Fine tuning's slider+pills, etc.), so the change is the outer shell, not the controls. <b>Pro:</b> repositioning removes the height-budget conflict this row used to carry — since the default page (D1) is byte-for-byte (a)/baseline's footprint rather than an always-on panel like (c), it no longer competes with (c) for re-inflating the space problem #257 fixed. What's left reads close to a strict upgrade over today's shipped sheet: same one-tap gate as every other variant, but the reveal no longer covers the whole screen. <b>Con:</b> still the most novel interaction pattern of the four (no existing accordion component in the app to borrow from), and the accordion-exclusive-vs-multi-open question from the original mock is unchanged. Repositioning also raises a new one: since content is still gated behind a single "Change" tap, is this meaningfully "presenting back outside the change link" per #270's literal ask, or is it closer in spirit to (a)/(b) — same gate, nicer destination — than to (c)'s always-on inline?</p>
 </div>
 
 <!-- ═══════════════════════ ROW E — #279 extra frame ═══════════════════════ -->
