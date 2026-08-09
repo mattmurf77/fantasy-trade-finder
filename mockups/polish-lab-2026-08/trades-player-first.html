@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Player-First Trades? (#211)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1240px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--flare);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk)}
+
+.notesbar{max-width:1240px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:20}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1240px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:16px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.rowlbl::before{content:"";width:3px;height:15px;background:var(--ice);flex:0 0 auto}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+.rowsub{max-width:1240px;width:100%;font-size:12.5px;line-height:1.55;color:var(--dim);margin-top:-8px}
+.rowsub b{color:var(--chalk)}
+
+.pairwrap{max-width:1240px;width:100%;display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start;line-height:1.4}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:0 0 auto}
+.slotlbl.cur{color:var(--dim)}
+.slotlbl.cur::before{background:var(--lineStrong)}
+.caption{font-size:12px;line-height:1.55;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+.phone{width:393px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.status{height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:52px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 14px}
+.tbLeague{display:flex;flex-direction:column;gap:1px}
+.tbLeague .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:600}
+.tbLeague .nm{display:flex;align-items:center;gap:5px;font-size:14px;font-weight:600}
+.tbIcons{display:flex;gap:10px}
+svg.i{stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+
+.content{position:relative}
+.stack{display:flex;flex-direction:column;padding:12px 14px 20px;gap:10px;min-height:560px}
+
+.tabbar{height:49px;flex:0 0 auto;display:flex;border-top:1px solid var(--line);background:var(--ink0)}
+.tabbarpad{height:34px;background:var(--ink0);border-top:0}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:18px;height:18px}
+.tab.on{color:var(--ice)}
+
+/* mode strip (TradeFinderModeBar.tsx) */
+.modebar{display:flex;flex-direction:column;gap:6px;padding-bottom:6px}
+.modeRow{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.modechip{padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap;flex:0 0 auto}
+.modechip.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk);font-weight:600}
+.modetitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:19px;margin-top:2px}
+.modehint{font-size:12px;color:var(--dim)}
+
+/* Chalkline primitives */
+.card{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:16px;display:flex;flex-direction:column;gap:14px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.controlRow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.controlValue{font-size:15px;font-weight:600;margin-top:2px}
+.btn{font-family:var(--f-display);font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;border-radius:6px;padding:7px 12px;border:1px solid var(--lineStrong);color:var(--chalk);background:var(--ink2)}
+.btnPrimary{background:var(--ice);color:var(--onIce);border-radius:6px;padding:12px;text-align:center;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.4px;font-size:13px}
+.fairnessHint{font-size:12px;color:var(--dim);margin-top:2px}
+.fairnessTrack{width:36px;height:4px;border-radius:2px;background:var(--ink3);position:relative}
+.fairnessThumb{position:absolute;top:-6px;width:16px;height:16px;border-radius:2px;background:var(--ice)}
+.fairnessThumb.on{left:20px}
+.fairnessThumb.off{left:0;background:var(--faint)}
+
+/* pin board */
+.playerBoard{display:flex;gap:10px}
+.boardCol{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.boardColAway{border-top:2px solid var(--flare);padding-top:8px}
+.boardColFor{border-top:2px solid var(--pos);padding-top:8px}
+.boardColH{font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--faint)}
+.boardColH.away{color:var(--flare)}
+.boardColH.for{color:var(--pos)}
+.boardMini{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;background:var(--ink2);padding:7px 8px;min-height:36px}
+.boardPosDot{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+.boardMiniText{flex:1;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.boardAddBtn{border:1px dashed var(--lineStrong);border-radius:6px;padding:7px 8px;min-height:36px;display:flex;align-items:center;justify-content:center}
+.boardAddText{font-size:11.5px;color:var(--dim)}
+
+/* flat classic target section (shipped in Guided/Team modes today) */
+.targetDirRow{display:flex;gap:8px}
+.targetDirPill{padding:7px 14px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--dim)}
+.targetDirPill.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk);font-weight:600}
+.targetChipsWrap{display:flex;flex-wrap:wrap;gap:6px}
+.targetChip{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;background:var(--ink2);padding:6px 8px}
+.targetChip .dir{font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+.targetChip .nm{font-size:12px;font-weight:600}
+
+/* package toggle (#174) */
+.pkgToggle{display:flex;align-items:center;gap:8px;padding-top:2px}
+.pkgToggle .track{width:32px;height:18px;border-radius:999px;background:var(--ink3);position:relative}
+.pkgToggle .thumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:999px;background:var(--faint)}
+.pkgToggle .thumb.on{left:16px;background:var(--ice)}
+.pkgToggle .lbl{font-size:12.5px}
+
+/* collapsed pin summary row (shipped #243) */
+.pinSummary{display:flex;align-items:center;gap:8px;min-height:44px;padding:2px 2px}
+.pinSummary .dot{width:8px;height:8px;border-radius:2px;background:var(--wr);flex:0 0 auto}
+.pinSummary .txt{flex:1;font-size:13px;color:var(--chalk)}
+.pinSummary .txt b{font-weight:600}
+.pinSummary .edit{font-size:13px;font-weight:600;color:var(--ice);font-family:var(--f-ui)}
+.pinRowCard{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:2px 12px}
+
+/* #257-safe generic "edit sheet" entry — replaces the old inline
+   Outlook/Fairness/lane-filter card in every proposed direction below.
+   Exact contents are #257's to design; this is a stand-in entry point. */
+.editEntry{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:11px 12px}
+.editEntry .lbl{flex:1;font-size:12.5px;color:var(--dim)}
+.editEntry .lbl b{color:var(--chalk);font-weight:600}
+.editEntry .go{font-size:12px;font-weight:600;color:var(--ice)}
+
+/* dashed ghost prompt row (new-direction affordances) */
+.ghostRow{display:flex;align-items:center;gap:8px;border:1px dashed var(--lineStrong);border-radius:8px;padding:12px;background:transparent}
+.ghostRow .txt{flex:1;font-size:12.5px;color:var(--dim)}
+.ghostRow .cta{font-size:12px;font-weight:600;color:var(--ice);white-space:nowrap}
+
+/* ═══ trade-summary card (TradeCard.tsx / FeaturedTradeWindow.tsx) ═══ */
+.backRow{display:flex}
+.backChip{display:flex;align-items:center;gap:5px;min-height:28px;padding:4px 10px 4px 6px;border-radius:4px;border:1px solid var(--lineStrong);background:var(--ink2)}
+.backChip span{font-size:12px;font-weight:600;color:var(--ice)}
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+.editcalc{font-size:12px;color:var(--ice);font-weight:600;align-self:flex-start}
+
+/* asset ideas panel */
+.ideasPanel{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:14px;display:flex;flex-direction:column;gap:10px}
+.ideaGroup{display:flex;flex-direction:column;gap:6px}
+.ideaGroupH{font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--faint)}
+.ideaRow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--ink2)}
+.ideaRow.inwin{border-color:var(--ice);opacity:.65}
+.ideaRow .nm{flex:1;font-size:12.5px;min-width:0}
+.ideaRow .nm .give{color:var(--dim)}
+.ideaRow .nm .arrow{color:var(--faint);margin:0 3px}
+.ideaRow .diff{font-family:var(--f-mono);font-size:11px;color:var(--pos);flex:0 0 auto}
+.ideaRow .tag{font-size:9px;color:var(--ice);border:1px solid var(--ice);border-radius:2px;padding:1px 4px;flex:0 0 auto}
+
+/* swipe deck disposition row */
+.dispRow{display:flex;justify-content:center;gap:22px;margin-top:2px}
+.dispBtn{width:50px;height:50px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;background:var(--ink2)}
+.dispBtn.pass{border-color:var(--neg)}
+.dispBtn.like{border-color:var(--pos)}
+.deckHint{font-size:11px;color:var(--faint);text-align:center}
+.stackedCard{position:relative}
+.stackedCard .peek{position:absolute;left:6px;right:6px;top:8px;bottom:-8px;background:var(--ink2);border:1px solid var(--line);border-radius:8px;z-index:0}
+.stackedCard .top{position:relative;z-index:1}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot2{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot2{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Player-First Trades? — is the specific-player page better than find-a-trade? (#211)</h1>
+  <p><b>Operator note, verbatim (#211):</b></p>
+  <p class="q">"I think the specific player trade page is better than the current find a trade page. No action needed as I'm interviewing some other testers first. So just a note."</p>
+  <p>No build requested — this lab is mockups only, exploring what "player-first" could mean if the tester interviews confirm the preference. Full code-level comparison and open questions: <code>docs/feedback/items/211-player-first-trades/status.md</code>.</p>
+  <h2>The honest finding</h2>
+  <p>Both pages are <b>the same screen</b> (<code>TradesScreen</code>) in a different <code>finderMode</code> (<code>guided</code>/<code>team</code>/<code>player</code>, switched in place by <code>TradeFinderModeBar</code>), sharing one pin store (<code>useFinderTargets</code>). Guided mode already has a targeting mechanism — a flat SEND/GET chip list buried under Outlook and Fairness in the Controls Card (TradesScreen.tsx:3537-3634). What's actually different is (1) player mode's two-column <b>TRADE AWAY / TRADE FOR</b> board <i>leads</i> instead of hiding behind other controls, and (2) it's a spatial, direct-manipulation board instead of a flat chip list. Once either mode reaches exactly one pin, <b>they already converge</b> on the same collapsed pin summary → Featured Trade window → idea list (#216/#209/#243, all shipped).</p>
+  <h2>Interplay with #257</h2>
+  <p>#257 (controls card → full edit sheet) is in flight this same release but not on <code>origin/main</code> as of this lab. None of the 3 directions below resurrect the old inline Outlook/Fairness/lane-filter card — wherever those controls are needed, the mocks route through a generic <b>"Edit trade setup"</b> entry (dashed box below) standing in for whatever #257 ships. The two-column pin board is treated as its own primary surface, not folded into that sheet — see status.md's open question on whether #257 should own it too.</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — persists in this browser (localStorage), not the file. <b style="color:var(--chalk)">Copy all notes</b> pulls everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════ ROW 0 — CURRENT ═══════════════════════ -->
+<div class="rowlbl">Current — both surfaces as shipped today<span class="fb">faithful recreation of TradesScreen.tsx on origin/main</span></div>
+<div class="rowsub">Reference only, not a proposal. All 3 frames are the exact same <code>TradesScreen</code> component; only <code>finderMode</code> and pin count differ.</div>
+<div class="pairwrap">
+
+  <!-- CUR-1: Guided deck -->
+  <div class="slot">
+    <div class="slotlbl cur">CUR-1 — Guided (default landing): deck leads, targeting is buried</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip on">Guided</span><span class="modechip">Team</span><span class="modechip">Player</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Fully Guided</span>
+          <span class="modehint">We read your roster &amp; league and walk you to the best deals.</span>
+        </div>
+        <div class="card" style="gap:12px">
+          <div class="controlRow"><div style="flex:1"><div class="ticklbl">Outlook</div><div class="controlValue">Contend</div></div><div class="btn">Edit</div></div>
+          <div class="controlRow">
+            <div style="flex:1"><div class="ticklbl">Trade fairness</div><div class="fairnessHint">Recommend balanced trades</div></div>
+            <div class="fairnessTrack"><div class="fairnessThumb on"></div></div>
+          </div>
+          <div style="opacity:.55">
+            <div class="ticklbl" style="margin-bottom:2px">Target players</div>
+            <div class="fairnessHint" style="margin-bottom:8px">Trades will get you a targeted player</div>
+            <div class="targetDirRow" style="margin-bottom:8px"><span class="targetDirPill">Trade away</span><span class="targetDirPill on">Acquire</span></div>
+            <div class="targetChipsWrap"><div class="targetChip"><span class="dir">GET</span><span class="nm">Ja'Marr Chase</span></div></div>
+          </div>
+        </div>
+        <button class="btnPrimary">Find more trades</button>
+        <div class="ticklbl" style="margin:2px 0 -4px">Featured swipe card</div>
+        <div class="stackedCard">
+          <div class="peek"></div>
+          <div class="tcard top">
+            <div style="font-size:16px;font-weight:600">@league_mate</div>
+            <div class="split">
+              <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+              <div class="vrule"></div>
+              <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+            </div>
+            <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b> &nbsp;·&nbsp; <span class="pick">a Late 2nd</span></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          </div>
+        </div>
+        <div class="dispRow"><div class="dispBtn pass">✕</div><div class="dispBtn like">✓</div></div>
+        <div class="deckHint">Swipe right to like · Swipe left to pass</div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">Zero-effort discovery: cards stream in with no input required. Targeting exists (dimmed strip above, TradesScreen.tsx:3537-3634 — Trade-away/Acquire toggle + chips) but is the <b>3rd</b> row inside the Controls Card, below Outlook and Fairness — easy to never notice.</div>
+    <div class="notewrap"><div class="notelbl">Notes — CUR-1<span class="dot2"></span></div><textarea class="pagenote" data-key="CUR-1 Guided deck (current)" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <!-- CUR-2: Player mode, 0 pins -->
+  <div class="slot">
+    <div class="slotlbl cur">CUR-2 — Player mode, nothing pinned yet: board leads</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip">Guided</span><span class="modechip">Team</span><span class="modechip on">Player</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Specific Player</span>
+          <span class="modehint">Name players to trade for, away, or both — the engine fills the rest.</span>
+        </div>
+        <div class="card" style="gap:12px">
+          <div class="controlRow"><div style="flex:1"><div class="ticklbl">Outlook</div><div class="controlValue">Contend</div></div><div class="btn">Edit</div></div>
+          <div class="controlRow">
+            <div style="flex:1"><div class="ticklbl">Trade fairness</div><div class="fairnessHint">Recommend balanced trades</div></div>
+            <div class="fairnessTrack"><div class="fairnessThumb on"></div></div>
+          </div>
+          <div class="playerBoard">
+            <div class="boardCol boardColAway"><span class="boardColH away">Trade Away</span><div class="boardAddBtn"><span class="boardAddText">+ Add asset</span></div></div>
+            <div class="boardCol boardColFor"><span class="boardColH for">Trade For</span><div class="boardAddBtn"><span class="boardAddText">+ Add target</span></div></div>
+          </div>
+        </div>
+        <button class="btnPrimary">Find a Trade</button>
+        <div class="ticklbl" style="margin:2px 0 -4px;opacity:.5">Deck (empty until pinned or generated)</div>
+        <div class="card" style="align-items:center;justify-content:center;padding:28px 16px;opacity:.5">
+          <div style="font-size:12.5px;color:var(--faint);text-align:center">No trades yet — tap Find a Trade, or name a player above</div>
+        </div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">The two-column board (#209 give-left/get-right order, position-color top borders) leads immediately below Outlook/Fairness — direct manipulation, "build a trade" framing. But with 0 pins it doesn't gate anything: Find a Trade + the deck still render underneath (TradesScreen.tsx:3643, 3960) — this is the same engine as CUR-1, dressed differently.</div>
+    <div class="notewrap"><div class="notelbl">Notes — CUR-2<span class="dot2"></span></div><textarea class="pagenote" data-key="CUR-2 Player mode 0 pins (current)" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <!-- CUR-3: 1 pin, either mode -->
+  <div class="slot">
+    <div class="slotlbl cur">CUR-3 — exactly 1 pin (either mode): both converge here</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip">Guided</span><span class="modechip">Team</span><span class="modechip on">Player</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Specific Player</span>
+        </div>
+        <div class="pinRowCard"><div class="pinSummary"><span class="dot" style="background:var(--wr)"></span><span class="txt">Pinned: <b>Ja'Marr Chase</b></span><span class="edit">Edit</span></div></div>
+        <div class="ticklbl" style="margin:2px 0 -2px">Featured trade</div>
+        <div class="tcard">
+          <div style="font-size:16px;font-weight:600">@league_mate</div>
+          <div class="split">
+            <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div><div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd (early)</div><div class="meta">PICK</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+          </div>
+          <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b> &nbsp;·&nbsp; <span class="pick">a Late 2nd</span></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          <span class="editcalc">Edit in calculator</span>
+        </div>
+        <div class="ideasPanel">
+          <div class="ticklbl">More trades for Ja'Marr Chase</div>
+          <div class="ideaGroup"><span class="ideaGroupH">Upgrade at WR</span><div class="ideaRow inwin"><span class="nm"><span class="give">DeVonta Smith + 2nd</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">+410</span><span class="tag">IN WINDOW</span></div></div>
+          <div class="ideaGroup"><span class="ideaGroupH">Lateral moves at WR</span><div class="ideaRow"><span class="nm"><span class="give">Tee Higgins</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">+85</span></div></div>
+          <div class="ideaGroup"><span class="ideaGroupH">Downgrade ideas</span><div class="ideaRow"><span class="nm"><span class="give">2 firsts</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">−120</span></div></div>
+        </div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption"><code>singlePin</code> (TradesScreen.tsx:834) fires off pin <b>count</b> alone — mode-independent. Controls collapse to the one-liner (shipped #243), the deck disappears, <code>FeaturedTradeWindow</code> + <code>AssetIdeasPanel</code> take over (#216/#209). Guided mode reaches this exact screen too, once a chip in CUR-1's dimmed target strip gets used down to 1 pin.</div>
+    <div class="notewrap"><div class="notelbl">Notes — CUR-3<span class="dot2"></span></div><textarea class="pagenote" data-key="CUR-3 Single-pin convergence (current)" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW A — Direction (a) ═══════════════════════ -->
+<div class="rowlbl">Direction (a) — Player-first as the DEFAULT landing<span class="fb">deck demoted to a secondary entry</span></div>
+<div class="rowsub"><code>TradeFinderModeBar</code> lands on <code>'player'</code> instead of <code>'guided'</code>; Guided becomes a "show me everything" fallback, not the default chip. Smallest code change of the three: flip the default <code>mode</code> param, relabel/reorder one chip.</div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">A1 — landing: board leads, no Outlook/Fairness card, Guided demoted</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip on">Player</span><span class="modechip">Team</span><span class="modechip">Guided</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Specific Player</span>
+          <span class="modehint">Name players to trade for, away, or both — the engine fills the rest.</span>
+        </div>
+        <div class="editEntry"><span class="lbl">Outlook <b>Contend</b> · Fairness <b>Balanced</b></span><span class="go">Edit trade setup ›</span></div>
+        <div class="playerBoard">
+          <div class="boardCol boardColAway"><span class="boardColH away">Trade Away</span><div class="boardAddBtn"><span class="boardAddText">+ Add asset</span></div></div>
+          <div class="boardCol boardColFor"><span class="boardColH for">Trade For</span><div class="boardAddBtn"><span class="boardAddText">+ Add target</span></div></div>
+        </div>
+        <button class="btnPrimary">Find a Trade</button>
+        <div style="text-align:center;padding-top:2px"><span style="font-size:12px;color:var(--dim)">Don't have anyone in mind? <span style="color:var(--ice);font-weight:600">Show me everything →</span></span></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">Mode bar's active chip is <b>Player</b>, not Guided, on first landing. Outlook/Fairness collapse to the generic "Edit trade setup" entry (#257-safe, see intro note) so the board is the very first interactive thing on screen. "Show me everything" is the escape hatch to Guided's deck — a link, not a chip, so it doesn't compete for default attention.</div>
+    <div class="notewrap"><div class="notelbl">Notes — A1<span class="dot2"></span></div><textarea class="pagenote" data-key="A1 Player-first landing" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">A2 — 1 pin: unchanged convergence (same as CUR-3)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip on">Player</span><span class="modechip">Team</span><span class="modechip">Guided</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Specific Player</span>
+        </div>
+        <div class="pinRowCard"><div class="pinSummary"><span class="dot" style="background:var(--wr)"></span><span class="txt">Pinned: <b>Ja'Marr Chase</b></span><span class="edit">Edit</span></div></div>
+        <div class="ticklbl" style="margin:2px 0 -2px">Featured trade</div>
+        <div class="tcard">
+          <div style="font-size:16px;font-weight:600">@league_mate</div>
+          <div class="split">
+            <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+          </div>
+          <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+        </div>
+        <div class="ideasPanel" style="opacity:.6"><div class="ticklbl">More trades for Ja'Marr Chase</div><div class="ideaGroup"><span class="ideaGroupH">Upgrade at WR</span><div class="ideaRow inwin"><span class="nm"><span class="give">DeVonta Smith</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">+410</span></div></div></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">No change here vs. shipped behavior — direction (a) only touches the 0/2+-pin landing state. The payoff screen is identical to CUR-3.</div>
+    <div class="notewrap"><div class="notelbl">Notes — A2<span class="dot2"></span></div><textarea class="pagenote" data-key="A2 Player-first single-pin" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+</div>
+<div class="note" style="max-width:1240px">
+  <p><b>Pro:</b> directly matches the operator's stated preference; cheapest possible change (flip a default param, reorder a chip). <b>Con:</b> removes the zero-input path from the front door — a brand-new user with no target in mind hits two empty columns before any suggestion appears, regressing exactly the time-to-first-value the guided deck protects. The operator's own reaction is a power-user read on an already-familiar tool; needs a cohort split (new vs. returning) before trusting it for everyone, not just this one preference.</p>
+</div>
+
+<!-- ═══════════════════════ ROW B — Direction (b) ═══════════════════════ -->
+<div class="rowlbl">Direction (b) — Hybrid: deck stays primary, seeded by the (already-shipped) intent picker<span class="fb">promotes existing chrome, doesn't invent new mechanism</span></div>
+<div class="rowsub">Guided's flat target section (today buried under Outlook/Fairness, TradesScreen.tsx:3537-3634) moves to a visible strip above the deck. Adding one player falls straight into the existing <code>singlePin</code> convergence — no <code>finderMode</code> switch needed.</div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">B1 — deck default, intent strip promoted above it (0 pins)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip on">Guided</span><span class="modechip">Team</span><span class="modechip">Player</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Fully Guided</span>
+        </div>
+        <div class="editEntry"><span class="lbl">Outlook <b>Contend</b> · Fairness <b>Balanced</b></span><span class="go">Edit trade setup ›</span></div>
+        <div class="ghostRow"><span class="txt">Trading for anyone right now.</span><span class="cta">+ Target a player</span></div>
+        <div class="ticklbl" style="margin:2px 0 -4px">Suggested for you</div>
+        <div class="stackedCard">
+          <div class="peek"></div>
+          <div class="tcard top">
+            <div style="font-size:16px;font-weight:600">@league_mate</div>
+            <div class="split">
+              <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+              <div class="vrule"></div>
+              <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+            </div>
+            <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          </div>
+        </div>
+        <div class="dispRow"><div class="dispBtn pass">✕</div><div class="dispBtn like">✓</div></div>
+        <div class="deckHint">Swipe right to like · Swipe left to pass</div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">The deck stays the primary, zero-input surface — nothing about CUR-1's default behavior changes. The dashed ghost row replaces the buried 3rd-row target section, always visible instead of scrolled-past. Tapping it opens the same <code>targetPickerOpen</code> picker that both modes already share.</div>
+    <div class="notewrap"><div class="notelbl">Notes — B1<span class="dot2"></span></div><textarea class="pagenote" data-key="B1 Hybrid deck-primary" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">B2 — after "+ Target a player": falls into the shipped singlePin screen</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip on">Guided</span><span class="modechip">Team</span><span class="modechip">Player</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Fully Guided</span>
+        </div>
+        <div class="pinRowCard"><div class="pinSummary"><span class="dot" style="background:var(--wr)"></span><span class="txt">Targeting: <b>Ja'Marr Chase</b></span><span class="edit">Change</span></div></div>
+        <div class="ticklbl" style="margin:2px 0 -2px">Featured trade</div>
+        <div class="tcard">
+          <div style="font-size:16px;font-weight:600">@league_mate</div>
+          <div class="split">
+            <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+          </div>
+          <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+        </div>
+        <div class="ideasPanel"><div class="ticklbl">More trades for Ja'Marr Chase</div><div class="ideaGroup"><span class="ideaGroupH">Upgrade at WR</span><div class="ideaRow inwin"><span class="nm"><span class="give">DeVonta Smith</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">+410</span><span class="tag">IN WINDOW</span></div></div></div>
+        <div style="text-align:center"><span style="font-size:12px;color:var(--ice);font-weight:600">← back to browsing everything</span></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">No new engine work: this is exactly CUR-3's screen, reached from Guided mode without ever touching the Player chip. "← back to browsing everything" clears the pin and returns to B1's deck — a path that doesn't exist today (leaving player mode currently means switching the mode chip).</div>
+    <div class="notewrap"><div class="notelbl">Notes — B2<span class="dot2"></span></div><textarea class="pagenote" data-key="B2 Hybrid single-pin reached from deck" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+</div>
+<div class="note" style="max-width:1240px">
+  <p><b>Pro:</b> almost no new mechanism — reuses the existing flat target section and the existing <code>singlePin</code> convergence; the zero-effort deck stays the default in every state. <b>Con:</b> doesn't deliver the thing the operator actually praised — the two-column board's spatial, direct-manipulation feel — it's still the flatter single-add affordance, just promoted in position. Also adds a permanent row to a screen #243 already audited for excess height.</p>
+</div>
+
+<!-- ═══════════════════════ ROW C — Direction (c) ═══════════════════════ -->
+<div class="rowlbl">Direction (c) — Full merge: one page, pins progressively narrow the deck<span class="fb">retires the Guided/Player mode split</span></div>
+<div class="rowsub">The two-column board sits permanently above the deck on every visit — collapsed when unedited, exactly like today's pin summary. 0 pins → today's full deck; 1 pin → today's featured-window/idea-list (unchanged); 2+ pins → deck stays but regenerates scoped to the package (existing pinned-give/receive machinery, unchanged).</div>
+<div class="pairwrap">
+
+  <div class="slot">
+    <div class="slotlbl">C1 — 0 pins: board collapsed to a thin optional prompt, full deck underneath</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip">Team</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Find a Trade</span>
+          <span class="modehint">Target players below, or scroll — we always have suggestions ready.</span>
+        </div>
+        <div class="editEntry"><span class="lbl">Outlook <b>Contend</b> · Fairness <b>Balanced</b></span><span class="go">Edit trade setup ›</span></div>
+        <div class="ghostRow"><span class="txt">+ Add players to target — optional</span><span class="cta">Away / For</span></div>
+        <div class="ticklbl" style="margin:2px 0 -4px">Suggested for you</div>
+        <div class="stackedCard">
+          <div class="peek"></div>
+          <div class="tcard top">
+            <div style="font-size:16px;font-weight:600">@league_mate</div>
+            <div class="split">
+              <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+              <div class="vrule"></div>
+              <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+            </div>
+            <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          </div>
+        </div>
+        <div class="dispRow"><div class="dispBtn pass">✕</div><div class="dispBtn like">✓</div></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">The mode bar loses its Guided/Player chips entirely — Team stays (a genuinely different scope: one league-mate) alongside Calc/Free agents. "Away / For" on the ghost row opens the full two-column board sheet directly, without a mode switch first.</div>
+    <div class="notewrap"><div class="notelbl">Notes — C1<span class="dot2"></span></div><textarea class="pagenote" data-key="C1 Merge 0 pins" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">C2 — 1 pin: same shipped featured-window screen, no page change</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip">Team</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Find a Trade</span>
+        </div>
+        <div class="pinRowCard"><div class="pinSummary"><span class="dot" style="background:var(--wr)"></span><span class="txt">Pinned: <b>Ja'Marr Chase</b></span><span class="edit">Edit</span></div></div>
+        <div class="ticklbl" style="margin:2px 0 -2px">Featured trade</div>
+        <div class="tcard">
+          <div style="font-size:16px;font-weight:600">@league_mate</div>
+          <div class="split">
+            <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+          </div>
+          <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+        </div>
+        <div class="ideasPanel"><div class="ticklbl">More trades for Ja'Marr Chase</div><div class="ideaGroup"><span class="ideaGroupH">Upgrade at WR</span><div class="ideaRow inwin"><span class="nm"><span class="give">DeVonta Smith</span><span class="arrow">→</span>Ja'Marr Chase</span><span class="diff">+410</span><span class="tag">IN WINDOW</span></div></div></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">Byte-identical to CUR-3 and A2/B2 — every direction converges here because <code>singlePin</code> is untouched. The only difference across all 3 directions is how you arrive at this screen, not what it looks like once you have.</div>
+    <div class="notewrap"><div class="notelbl">Notes — C2<span class="dot2"></span></div><textarea class="pagenote" data-key="C2 Merge 1 pin" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+  <div class="slot">
+    <div class="slotlbl">C3 — 2+ pins (package): board expands, deck regenerates scoped</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens Superflex <svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/></svg><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content"><div class="stack">
+        <div class="modebar">
+          <div class="modeRow"><span class="modechip">Team</span><span class="modechip">Calc</span><span class="modechip">Free agents</span></div>
+          <span class="modetitle">Find a Trade</span>
+        </div>
+        <div class="editEntry"><span class="lbl">Outlook <b>Contend</b> · Fairness <b>Balanced</b></span><span class="go">Edit trade setup ›</span></div>
+        <div class="card" style="gap:10px">
+          <div class="playerBoard">
+            <div class="boardCol boardColAway">
+              <span class="boardColH away">Trade Away</span>
+              <div class="boardMini"><span class="boardPosDot" style="background:var(--wr)"></span><span class="boardMiniText">DeVonta Smith</span><span style="color:var(--faint);font-size:11px">✕</span></div>
+              <div class="boardMini"><span class="boardPosDot" style="background:var(--first1)"></span><span class="boardMiniText">2026 2nd</span><span style="color:var(--faint);font-size:11px">✕</span></div>
+              <div class="boardAddBtn"><span class="boardAddText">+ Add asset</span></div>
+            </div>
+            <div class="boardCol boardColFor">
+              <span class="boardColH for">Trade For</span>
+              <div class="boardMini"><span class="boardPosDot" style="background:var(--wr)"></span><span class="boardMiniText">Ja'Marr Chase</span><span style="color:var(--faint);font-size:11px">✕</span></div>
+              <div class="boardAddBtn"><span class="boardAddText">+ Add target</span></div>
+            </div>
+          </div>
+          <div class="pkgToggle"><div class="track"><div class="thumb on"></div></div><span class="lbl">Trade as one package</span></div>
+        </div>
+        <div class="ticklbl" style="margin:2px 0 -4px">Scoped to your package</div>
+        <div class="stackedCard">
+          <div class="peek"></div>
+          <div class="tcard top">
+            <div style="font-size:16px;font-weight:600">@league_mate</div>
+            <div class="split">
+              <div class="side"><div class="ticklbl">You send</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div><div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd</div><div class="meta">PICK</div></div></div></div>
+              <div class="vrule"></div>
+              <div class="side"><div class="ticklbl">You get</div><div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div></div>
+            </div>
+            <div class="vbar"><span class="ticklbl" style="margin:0">Dynasty value swing</span><div class="who">You win</div><div class="margin">by <b>+410</b></div><div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:14%"></div><div class="cen"></div></div></div>
+          </div>
+        </div>
+        <div class="dispRow"><div class="dispBtn pass">✕</div><div class="dispBtn like">✓</div></div>
+      </div></div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+      <div class="tabbarpad"></div>
+    </div>
+    <div class="caption">2+ pins keeps today's existing behavior unchanged (multi-pin never triggers <code>singlePin</code>) — the deck stays, filtered/regenerated around the package, <code>PackageToggle</code> (#174) appears exactly as it does in today's Player mode. Nothing new to build here beyond making the board itself unconditional.</div>
+    <div class="notewrap"><div class="notelbl">Notes — C3<span class="dot2"></span></div><textarea class="pagenote" data-key="C3 Merge 2+ pins package" placeholder="Notes on this frame…"></textarea></div>
+  </div>
+
+</div>
+<div class="note" style="max-width:1240px">
+  <p><b>Pro:</b> no mode to choose wrong — one page, continuously as "player-first" as the user wants it, from 0 to N pins. Most faithfully resolves "the player page is better" without sacrificing the deck's zero-input case. <b>Con:</b> the biggest real change of the three — <code>finderMode === 'player'</code> currently gates the two-column board vs. the flat list (TradesScreen.tsx:3427); merging removes that condition and makes the board unconditional, which raises the open question of whether #257's edit sheet should own it too. Also flattens Team mode's distinct identity unless kept as an orthogonal filter rather than a mode (not mocked here — out of scope for this lab).</p>
+</div>
+
+<div class="note">
+  <h2>Recommendation</h2>
+  <p><b>(c)</b> is the most honest fix for what the operator responded to, but it should be sequenced <b>behind #257 landing first</b> — building the merge before the edit-sheet consolidation exists means re-deciding the inline-vs-sheet boundary twice. If something needs to ship before #257 lands, <b>(b)</b> is the safe interim step: cheapest, smallest surface area, reuses shipped mechanism end to end, and doesn't foreclose (c) later. <b>(a)</b> isn't recommended as a real change — it trades away the deck's core value prop for a single power-user's preference with no cohort read — but it's included because it's the cheapest possible mock of "what if we just believed the operator's note verbatim." Full writeup + open questions: <code>docs/feedback/items/211-player-first-trades/status.md</code>.</p>
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-trades-player-first-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>

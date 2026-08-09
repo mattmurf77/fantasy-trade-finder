@@ -39,3 +39,9 @@ Master viewer: `index-round2.html` (one tab per page, srcdoc-embedded).
 | [`lineup-before-after.html`](lineup-before-after.html) | #238 | Starting-lineup impact on the trade summary: V1 changed-slots delta strip, V2 full 7-slot before/after table (calculator only), V3 collapsed one-liner expanding in place; data notes (slot-level backend work needed, deck cards lack starter data) |
 | [`acquire-landing-guided-first.html`](acquire-landing-guided-first.html) | #246 (Opus) | Should the hub exist? 9 frames: current Acquire hub vs V1 guided-first landing + chip strip (recommended, FA as tail section), V2 hub-as-sheet, V3 smart last-used landing (with honest state-requirements panel) |
 | [`combined-rank-bars.html`](combined-rank-bars.html) | #248 | One graph for consensus + my board: V1 paired bars, V2 ghost-tick + delta arrows (recommended), V3 delta chip only; "color per team" rendered but argued against (breaks position-color invariant) |
+
+## Round 3 — 2026-08-08 (#211 player-first trades)
+
+| Page | Feedback | What it shows |
+|---|---|---|
+| [`trades-player-first.html`](trades-player-first.html) | #211 (operator note, mockup-only) | Should the specific-player pin board lead over the guided deck? Current-state reference (3 frames: guided deck, empty player board, shipped single-pin convergence) + 3 directions: (a) player mode as default landing, deck demoted (b) hybrid — existing flat target section promoted above the deck, no mode switch (c, recommended) full merge — the two-column board sits permanently above the deck, pins progressively narrow it. Routes Outlook/Fairness through a generic "Edit trade setup" stand-in per #257 (controls card → edit sheet, in flight, not yet on `origin/main`). Companion doc: `docs/feedback/items/211-player-first-trades/status.md` |
