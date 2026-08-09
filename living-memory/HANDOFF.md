@@ -11,31 +11,31 @@
 ---
 
 ## Table of Contents
-- [2026-08-09 — Current State (feedback pipeline drained; builds 91–94 shipped)](#2026-08-09--current-state-feedback-pipeline-drained-builds-9194-shipped)
+- [2026-08-09 — Current State (builds 91–96 shipped; ESPN linking field-validated)](#2026-08-09--current-state-builds-9196-shipped-espn-linking-field-validated)
 - [2026-08-08 — Current State (branch 62 behind origin/main; conflicting ESPN pick designs)](#2026-08-08--current-state-branch-62-behind-originmain-conflicting-espn-pick-designs)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 ---
 
-## 2026-08-09 — Current State (feedback pipeline drained; builds 91–94 shipped)
+## 2026-08-09 — Current State (builds 91–96 shipped; ESPN linking field-validated)
 
 ### Where I stopped
-- Builds 91–94 all uploaded to App Store Connect from the integration worktree (`.claude/worktrees/agent-a16b8c9e20f110454`), each commit-verified against `origin/main` before submit. Latest: build 94 @ `1d28847`.
-- Feedback queue drained: 20+ items fixed/shipped across three waves (see CHANGELOG 08-08/08-09 entries); open items are only #205 (design-tenets interview) and the untestable ESPN sign-in / auto-order validations.
-- Experiments RUNNING in prod, operator-only via tester allowlist: `aggregate_tier_labels` (League-tab "≈X firsts" labels) and `trades_home_inline` (operator on `strip`; switch to `canvas` = weight revise + transition, runbook in docs/feedback/items/270-inline-trades-home/status.md).
-- Two flags shipped ON today: `trade.position_impact`, `trades.sheet_targeting` (plus 08-08's `trades.edit_full_sheet`, `trades.intent_modes`).
-- All agent worktrees swept through docs/recovery/2026-08-08-branch-deletions.md; suite at 2072 passed / 1 skipped on `origin/main`.
+- Build 96 uploaded to App Store Connect (commit-verified `2991456`): ESPN cold-load login fix (auto warm-up reload + reload control), league picker (`espn.league_picker` ON, fan-API shape LIVE-verified — abbrev is UPPERCASE "FFL"), on top of builds 91–95 (full day's feedback waves, tier labels, sheet targeting, experiments, API observability).
+- ESPN private-league linking WORKS end-to-end, field-validated by operator (league_read 200 in events 22:44 UTC). Earlier 401s were a wrong-account session — league picker now makes that failure visible UX.
+- API observability LIVE (`obs.api_events`): all outbound egress + inbound routes → `user_events`, report `GET /api/admin/analytics/apihealth`. Used successfully for same-day diagnosis. `RENDER_API_KEY` now in secrets.local.env (deploy status/logs self-serve).
+- Experiments running, operator-only: `aggregate_tier_labels` (now with pick sums, #285), `trades_home_inline` (operator on `strip`; canvas switch = weight revise, runbook in docs/feedback/items/270-inline-trades-home/status.md).
+- Suite: 2136 passed / 1 skipped on `origin/main`.
 
 ### In flight
-- (none — all waves merged and shipped)
+- (none)
 
 ### Blocked on
-- Operator validation of builds 93/94 on TestFlight (tier labels everywhere, sheet targeting, pick-grid future-years, position-impact chips, strip variant).
-- The 11-flow Maestro smoke suite still doesn't exist — every mobile push uses the standing `FTF_SKIP_SIM_GATE=1` operator bypass. Build the flows or re-tier the gate.
+- Operator QA of build 96 (ESPN login first-try + league picker; user re-link of private league).
+- Operator decisions: strip vs canvas; aggregate-labels graduation; #205 design-tenets interview scheduling.
 
 ### Don't repeat
-- #258 took two passes: MFL names were dirty from COLOR MARKUP (fixed via `_clean_text` tag allowlist, #282), not just entities — boot backfill re-cleans on every deploy.
-- PickAssignment PUT must target `/api/league/pick-assignments/<pick_id>` (the bare-path PUT 405s — #268 was broken since first ship because client and server never agreed on URL shape).
+- ESPN fan API: football rows are typeId 9, abbrev "FFL" UPPERCASE — community docs say lowercase and are wrong; shape pinned in test_espn_service.py from a live authenticated fetch.
+- `www.espn.com/login` fails on COLD loads (Disney iframe bootstrap) — the warm-up reload in EspnConnectScreen is deliberate; don't "simplify" it away.
 
 ---
 
