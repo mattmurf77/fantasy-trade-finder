@@ -19,10 +19,25 @@ type Subscriber = (pair: EspnCookiePair | null) => void;
 
 let subscriber: Subscriber | null = null;
 
+// Mailbox for a capture delivered while NO sheet is subscribed (host screen
+// remounting across a background/foreground cycle, sheet torn down mid-
+// delivery). The WebView side treats delivery as done and pops immediately,
+// so a dropped pair would strand the user on an empty sheet with their login
+// spent. Park it and flush to the next subscriber. Abandon (null) is NOT
+// parked: its only job is un-hiding a live sheet, and a sheet that mounts
+// later starts un-hidden anyway.
+let pending: EspnCookiePair | null = null;
+
 /** EspnLinkSheet registers its receiver. Returns an unsubscribe. Last writer
- *  wins — only one sheet is ever open at a time. */
+ *  wins — only one sheet is ever open at a time. A pair delivered while no
+ *  receiver was mounted is flushed (once) to the new receiver immediately. */
 export function onEspnCookiesCaptured(cb: Subscriber): () => void {
   subscriber = cb;
+  if (pending) {
+    const pair = pending;
+    pending = null;
+    cb(pair);
+  }
   return () => {
     if (subscriber === cb) subscriber = null;
   };
@@ -31,5 +46,9 @@ export function onEspnCookiesCaptured(cb: Subscriber): () => void {
 /** EspnConnectScreen calls this exactly once with the pair on capture, or
  *  with null when it leaves without capturing (so the sheet un-hides). */
 export function deliverEspnCookies(pair: EspnCookiePair | null): void {
-  subscriber?.(pair);
+  if (subscriber) {
+    subscriber(pair);
+    return;
+  }
+  if (pair) pending = pair;
 }

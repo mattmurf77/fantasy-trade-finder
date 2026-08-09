@@ -14,9 +14,13 @@ Design notes
 - Pure/offline-testable: the HTTP call is injected via `_opener`, mirroring
   `backend/sleeper_write.py`. Tests use recorded fixtures, never the network.
 - Public leagues need no auth. Private leagues need the `espn_s2` + `SWID`
-  cookies captured from a logged-in espn.com session; both are passed through
-  verbatim in a Cookie header (espn_s2 must keep the exact encoding it was
-  captured with).
+  cookies captured from a logged-in espn.com session. ESPN's API expects the
+  exact wire shapes a browser jar holds: espn_s2 percent-ENCODED and SWID with
+  its literal braces. Sources differ — browser paste is already encoded, but
+  iOS's native cookie store (the in-app WebView capture, Phase 1b) surfaces
+  espn_s2 percent-DECODED — so `canonical_espn_s2` / `canonical_swid`
+  normalize either form before the Cookie header is built (2026-08-09 field
+  failure: replaying the decoded form fails ESPN auth).
 - Browser-signature headers, same lesson as the Sleeper write path
   (Cloudflare/edge filters ban the default urllib signature).
 - Crosswalk: DynastyProcess `db_playerids.csv` (`espn_id` ↔ `sleeper_id`),
@@ -91,6 +95,47 @@ def league_url(league_id: str, season: int) -> str:
     )
 
 
+def canonical_espn_s2(value: str) -> str:
+    """espn_s2 exactly as ESPN's API expects it: the percent-ENCODED form.
+
+    Ground truth from a live browser session (2026-08-09): a working jar holds
+    espn_s2 percent-encoded (~350 chars with %XX escapes) — the form users
+    paste from devtools and the only form ESPN's servers accept. iOS's native
+    cookie store surfaces the SAME cookie percent-DECODED (the in-app WebView
+    capture reads NSHTTPCookie.value via @react-native-cookies), and replaying
+    the decoded form fails ESPN auth with a 401/403 — the "captured cookies in
+    the fields but the league still says private" field failure.
+
+    Accept either form. A value that unquotes differently than itself carries
+    %XX escapes and IS the wire form — pass it through byte-identical, never
+    double-encode. A value with no escapes is the decoded form — re-encode
+    with safe='' so the base64 alphabet's '+', '/', '=' become %2B/%2F/%3D.
+    (The decoded value space is base64-ish and never contains a bare '%', so
+    the unquote check cleanly separates the two forms.)
+    """
+    v = (value or "").strip()
+    if not v:
+        return v
+    if urllib.parse.unquote(v) != v:
+        return v
+    return urllib.parse.quote(v, safe="")
+
+
+def canonical_swid(value: str) -> str:
+    """SWID with its literal braces — '{…}' is the wire form ESPN expects.
+
+    A braced value (what the native store and a devtools paste both yield)
+    passes through byte-identical; braces are added only when missing
+    entirely (a user pasting the bare GUID). No case or encoding changes.
+    """
+    v = (value or "").strip()
+    if not v:
+        return v
+    if v.startswith("{") and v.endswith("}"):
+        return v
+    return "{" + v.strip("{}") + "}"
+
+
 def fetch_league(
     league_id: str,
     season: int,
@@ -110,9 +155,14 @@ def fetch_league(
 
     headers = dict(BROWSER_HEADERS)
     if espn_s2 and swid:
-        # Pass both through VERBATIM — espn_s2 is URL-encoded as captured and
-        # re-encoding it breaks auth; SWID keeps its braces.
-        headers["Cookie"] = f"espn_s2={espn_s2}; SWID={swid}"
+        # Canonicalize to the wire forms ESPN accepts (see the functions
+        # above): an already-encoded/browser-pasted espn_s2 passes through
+        # byte-identical; a native-store (decoded) capture is re-encoded.
+        # SWID gains braces only if pasted bare. This is the single choke
+        # point for both first links and stored-cookie replays.
+        headers["Cookie"] = (
+            f"espn_s2={canonical_espn_s2(espn_s2)}; SWID={canonical_swid(swid)}"
+        )
 
     req = urllib.request.Request(league_url(league_id, season), headers=headers)
     opener = _opener or urllib.request.urlopen
