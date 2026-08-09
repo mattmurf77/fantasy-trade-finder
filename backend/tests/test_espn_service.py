@@ -83,8 +83,9 @@ def test_fetch_sends_browser_headers_and_no_cookie_for_public():
     assert "view=mRoster" in captured["url"]
 
 
-def test_fetch_passes_cookies_verbatim_for_private():
-    # espn_s2 is URL-encoded as captured — it must NOT be re-encoded.
+def test_fetch_passes_encoded_cookies_byte_identical_for_private():
+    # An already-percent-encoded espn_s2 (browser paste) must NOT be
+    # re-encoded — double-encoding breaks auth just like the decoded form.
     s2 = "AEB%2FvS0me%2Bencoded%3Dvalue"
     swid = "{ABCD-1234}"
     captured = {}
@@ -95,6 +96,60 @@ def test_fetch_passes_cookies_verbatim_for_private():
 
     es.fetch_league("1", 2026, espn_s2=s2, swid=swid, _opener=_capturing_opener)
     assert captured["cookie"] == f"espn_s2={s2}; SWID={swid}"
+
+
+def test_fetch_reencodes_decoded_native_store_cookies():
+    # 2026-08-09 field failure: the iOS native cookie store surfaces espn_s2
+    # percent-DECODED; ESPN only accepts the encoded wire form. fetch_league
+    # must canonicalize before building the Cookie header.
+    s2_decoded = "AEB/vS0me+decoded=value"
+    swid = "{ABCD-1234}"
+    captured = {}
+
+    def _capturing_opener(request, timeout=None):
+        captured["cookie"] = request.get_header("Cookie")
+        return _FakeResp(json.dumps({"id": 1}))
+
+    es.fetch_league(
+        "1", 2026, espn_s2=s2_decoded, swid=swid, _opener=_capturing_opener
+    )
+    assert captured["cookie"] == "espn_s2=AEB%2FvS0me%2Bdecoded%3Dvalue; SWID={ABCD-1234}"
+
+
+# ---------------------------------------------------------------------------
+# 1b. cookie canonicalizers (2026-08-09 — decoded-capture field failure)
+# ---------------------------------------------------------------------------
+
+def test_canonical_espn_s2_encoded_form_passes_byte_identical():
+    # A realistic browser-jar shape: long, %XX escapes present. Must be
+    # returned unchanged — never double-encoded.
+    v = "AEBx%2Fabc%2Bdef%3D%3D" + "Qw9" * 100
+    assert es.canonical_espn_s2(v) == v
+
+
+def test_canonical_espn_s2_decoded_form_is_reencoded():
+    import urllib.parse
+
+    decoded = "AEBx/abc+def==" + "Qw9" * 100
+    out = es.canonical_espn_s2(decoded)
+    assert "%2F" in out and "%2B" in out and "%3D" in out
+    # Round-trip: the encoded output decodes back to the original value.
+    assert urllib.parse.unquote(out) == decoded
+
+
+def test_canonical_espn_s2_plain_and_empty_values_are_stable():
+    # Pure-alphanumeric values are the same in both forms — identity.
+    assert es.canonical_espn_s2("ABCdef123") == "ABCdef123"
+    assert es.canonical_espn_s2("  ABCdef123  ") == "ABCdef123"
+    assert es.canonical_espn_s2("") == ""
+
+
+def test_canonical_swid_braced_passes_and_bare_gains_braces():
+    assert es.canonical_swid("{ABCD-1234-EF}") == "{ABCD-1234-EF}"
+    assert es.canonical_swid("ABCD-1234-EF") == "{ABCD-1234-EF}"
+    # Half-braced paste still normalizes to one brace pair.
+    assert es.canonical_swid("{ABCD-1234-EF") == "{ABCD-1234-EF}"
+    assert es.canonical_swid("") == ""
 
 
 @pytest.mark.parametrize("code,exc,kind", [

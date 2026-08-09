@@ -4,6 +4,7 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
+import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
 import { track } from '../api/events';
 
@@ -195,7 +196,25 @@ export default function EspnConnectScreen() {
         domStorageEnabled
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
-        originWhitelist={['https://*']}
+        // ── Keep the whole login IN the app (2026-08-09 field failure) ──
+        // originWhitelist is NOT just a filter: any navigation failing it is
+        // handed to Linking.openURL by react-native-webview — i.e. punted to
+        // Safari (http/https) or a native app (espn:// etc.). The previous
+        // ['https://*'] whitelist is exactly how a user got bounced into
+        // Safari mid-login (the gate sees subframe + popup navigations too).
+        // So: pass EVERYTHING ('*') and make allowEspnNavigation the single
+        // gate — it keeps http(s) inside the WebView (Disney SSO's iframe
+        // hops between espn.com and registerdisney/disneyid domains included)
+        // and SWALLOWS app-scheme/App-Store/deep-link-router hops. Nothing is
+        // ever opened externally from this screen's WebView.
+        originWhitelist={['*']}
+        onShouldStartLoadWithRequest={(req) => allowEspnNavigation(req.url)}
+        // Android: window.open/target=_blank navigates this same WebView (and
+        // therefore through the gate above) instead of spawning a window the
+        // OS would route to the browser. iOS ignores this prop; with no
+        // onOpenWindow handler set, RNCWebView already loads popup requests
+        // back into this WebView, where the same gate applies.
+        setSupportMultipleWindows={false}
         style={styles.web}
       />
     </View>

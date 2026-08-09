@@ -92,6 +92,49 @@ and replays `espn_s2`/`swid`.
 - Smoke-suite impact: none while flag is off; league-link smoke unaffected.
 - Backend: no pytest delta (no backend change); existing `espn.link` tests stand.
 
+### Field failures (2026-08-09, operator-reported from a live TestFlight user) — FIXED
+
+Two coupled failures on a real private-league link attempt, diagnosed in code
+(no device repro available to the fixing session — see the re-test list in
+`docs/feedback/items/espn-webview-escape/status.md`):
+
+1. **Mid-login Safari escape.** The screen shipped `originWhitelist={['https://*']}`
+   with no `onShouldStartLoadWithRequest`. react-native-webview's whitelist
+   fallback hands ANY navigation failing the whitelist to `Linking.openURL` —
+   Safari for http(s), a native app for schemes — and the gate sees subframe
+   and popup navigations too (Disney SSO is an embedded iframe; iOS routes
+   `window.open`/`target=_blank` back into the same WebView). Any `http://`
+   hop, ad-iframe request, or popup in the login chain bounced the user into
+   Safari mid-login. **Fix:** `originWhitelist={['*']}` (fallback unreachable)
+   + `onShouldStartLoadWithRequest` backed by the pure, node-tested
+   `allowEspnNavigation()` (`src/utils/espnNavPolicy.ts`,
+   `tests/check-espn-nav-policy.js`): http(s)/about/data/blob load inside the
+   WebView (all Disney SSO domains allowed); app schemes (`espn://`,
+   `itms-appss://`, …) and app-bouncing hosts (`apps.apple.com`,
+   `*.app.link`, …) are swallowed — nothing is ever opened externally.
+   `setSupportMultipleWindows={false}` routes Android popups through the same
+   gate.
+2. **Captured cookies rejected by ESPN ("fetching league" → private-league
+   error with both fields correctly prefilled).** Capture → bus → prefill →
+   `POST /api/espn/link` all worked; ESPN rejected the VALUES. Ground truth
+   from a live browser jar: espn_s2's wire form is percent-ENCODED (~350
+   chars, %XX escapes) and SWID carries literal braces. iOS's native cookie
+   store surfaces espn_s2 percent-DECODED (`NSHTTPCookie.value` via
+   @react-native-cookies), and the backend forwarded it verbatim
+   (`espn_service.fetch_league` Cookie header), so ESPN 401/403'd → mapped to
+   `espn_auth_required` → the sheet told a just-signed-in user to sign in
+   again. **Fix:** backend canonicalizers `canonical_espn_s2` /
+   `canonical_swid` in `backend/espn_service.py` at the single Cookie-header
+   choke point (covers WebView capture, decoded pastes, and stored-cookie
+   replays): a %XX-bearing value passes byte-identical (never double-encoded);
+   an escape-free value is re-encoded (`quote(safe='')`); SWID gains braces
+   only if pasted bare. Pinned by `backend/tests/test_espn_service.py`
+   (§1/§1b). The sheet's `espn_auth_required` copy now branches on whether
+   cookies were actually sent, so a rejected sign-in is named as such instead
+   of re-prompting "this league is private". The bus additionally parks a
+   pair delivered while no sheet is subscribed (remount gap) and flushes it
+   to the next subscriber, so a spent login can't be dropped.
+
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
 | Doc | Updated? | Section / reason n/a |

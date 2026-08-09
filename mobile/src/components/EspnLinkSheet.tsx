@@ -34,6 +34,23 @@ interface Props {
   onLinked: (league: { league_id: string; name: string; total_rosters: number }) => void;
 }
 
+// Copy for the backend's `espn_auth_required` 403. Two honest variants
+// (2026-08-09): when cookies were actually SENT and rejected, saying "this
+// league is private, sign in" gaslights a user who just signed in — name the
+// rejection and offer the retry; only a cookie-less attempt gets the plain
+// "it's private" explanation. `webviewCapture` picks sign-in vs paste as the
+// primary fix.
+function espnAuthErrorCopy(webviewCapture: boolean, cookiesWereSent: boolean): string {
+  if (cookiesWereSent) {
+    return webviewCapture
+      ? "ESPN didn't accept that sign-in — it may have expired. Sign in to ESPN again below and we'll retry, or paste the two cookies yourself."
+      : "ESPN didn't accept those cookies — they may have expired. Paste fresh espn_s2 and SWID values from a logged-in espn.com session.";
+  }
+  return webviewCapture
+    ? "This league is private. Sign in to ESPN below and we'll fetch it."
+    : 'This league is private — paste your espn_s2 and SWID cookies below.';
+}
+
 // Flag-gated (`espn.link`) three-step link flow, Chalkline sheet construction:
 //   1. input  — ESPN league ID (or fantasy.espn.com URL); optional
 //               espn_s2/SWID paste for private leagues (WebView capture is
@@ -194,17 +211,14 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
       if (e instanceof ApiError && e.isVerificationRequired) {
         setError('Verify your account to link a league.');
       } else if (e instanceof ApiError && e.isEspnAuthRequired) {
-        // Private league (or expired cookies): self-serve instead of a
-        // dead-end message — auto-expand the private section so the fix
-        // (sign-in button flag-on, paste fields flag-off) is on screen,
-        // and point the copy at it rather than echoing the backend's raw
-        // paste-centric message.
+        // Private league (or rejected/expired cookies): self-serve instead
+        // of a dead-end message — auto-expand the private section so the fix
+        // (sign-in button flag-on, paste fields flag-off) is on screen. The
+        // copy branches on whether cookies were actually sent (see
+        // espnAuthErrorCopy) so a user who just signed in isn't told to
+        // "sign in" as if nothing happened.
         setShowCookies(true);
-        setError(
-          webviewCapture
-            ? "This league is private. Sign in to ESPN below and we'll fetch it."
-            : 'This league is private — paste your espn_s2 and SWID cookies below.',
-        );
+        setError(espnAuthErrorCopy(webviewCapture, !!(s2 && sw)));
       } else {
         setError(e?.message || "Couldn't reach ESPN — try again shortly.");
       }
@@ -240,9 +254,7 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
         setStep('input');
         setShowCookies(true);
         setError(
-          webviewCapture
-            ? "This league is private. Sign in to ESPN below and we'll fetch it."
-            : 'This league is private — paste your espn_s2 and SWID cookies below.',
+          espnAuthErrorCopy(webviewCapture, !!(espnS2.trim() && swid.trim())),
         );
       } else {
         setError(e?.message || 'Import failed — try again.');
