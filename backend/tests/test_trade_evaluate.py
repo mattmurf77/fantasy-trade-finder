@@ -739,6 +739,102 @@ def test_starter_impact_slots_numbered_labels_and_null_after(monkeypatch):
     assert rb2["delta"] == pytest.approx(-v("bench"), abs=0.15)
 
 
+# ── Starter impact `slots[].tier`/`rank` (#169, flag trade.position_impact) ──
+# Additive on the #238 slot rows: `tier` (RankingService.tier_for_elo over
+# the RAW seed Elo, the same call #277's evener rows make) and `rank` (this
+# player's 1-based positional rank within the universal pool). Both bound
+# behind the SAME internal `tier_of` param, so they appear together or not
+# at all. Flag off → byte-identical to pre-#169 (no new keys).
+
+
+def test_starter_impact_slots_tier_and_rank_when_flag_on(monkeypatch):
+    monkeypatch.setattr(srv, "is_enabled", lambda k: k == "trade.position_impact")
+    seed = _install_starter_world(monkeypatch)
+    fmt = "1qb_ppr"
+    tier = lambda pid, pos: srv.RankingService.tier_for_elo(seed[pid], pos, fmt)
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    slots = d["starter_impact"]["slots"]
+    rb, wr = slots
+    # Pool RBs by seed elo desc: good2 (1780) > good (1650) > bench (1350).
+    assert rb["before"]["player_id"] == "good" and rb["before"]["rank"] == 2
+    assert rb["after"]["player_id"] == "bench" and rb["after"]["rank"] == 3
+    assert rb["before"]["tier"] == tier("good", "RB")
+    assert rb["after"]["tier"] == tier("bench", "RB")
+    # Pool WRs by seed elo desc: elite (1900) > stud (1800) > wr_low (1400).
+    assert wr["before"]["player_id"] == "wr_low" and wr["before"]["rank"] == 3
+    assert wr["after"]["player_id"] == "stud" and wr["after"]["rank"] == 2
+    assert wr["before"]["tier"] == tier("wr_low", "WR")
+    assert wr["after"]["tier"] == tier("stud", "WR")
+
+
+def test_starter_impact_slots_tier_and_rank_absent_when_flag_off(monkeypatch):
+    monkeypatch.setattr(srv, "is_enabled", lambda k: False)
+    _install_starter_world(monkeypatch)
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    slots = d["starter_impact"]["slots"]
+    for s in slots:
+        for side in ("before", "after"):
+            entry = s[side]
+            if entry is not None:
+                assert set(entry) == {"player_id", "name", "position", "value"}
+
+
+def test_starter_impact_slots_rank_ties_broken_by_player_id(monkeypatch):
+    # Two RBs at the identical seed elo — the ranker must break the tie
+    # deterministically (lower player_id sorts first) rather than raising
+    # or ordering arbitrarily.
+    monkeypatch.setattr(srv, "is_enabled", lambda k: k == "trade.position_impact")
+    players = _POOL_PLAYERS + [
+        _P("rb_tie_a", "Tie A", "RB", "LAR", 25),
+        _P("rb_tie_b", "Tie B", "RB", "SEA", 25),
+    ]
+    seed = dict(_SEED, rb_tie_a=1700.0, rb_tie_b=1700.0)
+    monkeypatch.setitem(
+        srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
+    monkeypatch.setattr(srv, "_sleeper_lineup_slots", lambda league_id: ["RB"])
+    monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
+        {"user_id": CALLER, "player_ids": ["rb_tie_a"]},
+        {"user_id": OPP,    "player_ids": ["rb_tie_b"]},
+    ])
+    monkeypatch.setattr(srv, "load_draft_picks", lambda *a, **k: [])
+    monkeypatch.setattr(
+        srv, "load_asset_preferences",
+        lambda user_id=None, league_id=None: {"untouchables": [], "targets": [],
+                                              "not_interested": []},
+    )
+    d = _post_authed({
+        "give_player_ids": ["rb_tie_a"], "receive_player_ids": ["rb_tie_b"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    rb = d["starter_impact"]["slots"][0]
+    # good2 (1780) still outranks both ties at 1700; between the tied pair,
+    # the lower id (rb_tie_a) sorts first.
+    assert rb["before"]["player_id"] == "rb_tie_a" and rb["before"]["rank"] == 2
+    assert rb["after"]["player_id"] == "rb_tie_b" and rb["after"]["rank"] == 3
+
+
+def test_starter_impact_slots_null_after_carries_no_tier_or_rank(monkeypatch):
+    # Flag on, but the slot's `after` is null (unfillable) — no crash, and
+    # there's simply no entry to attach tier/rank to.
+    monkeypatch.setattr(srv, "is_enabled", lambda k: k == "trade.position_impact")
+    _install_starter_world(monkeypatch, slots=("RB", "RB", "WR"))
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    rb2 = d["starter_impact"]["slots"][1]
+    assert rb2["before"]["player_id"] == "bench"
+    assert rb2["before"]["tier"] is not None
+    assert rb2["before"]["rank"] is not None
+    assert rb2["after"] is None
+
+
 def test_values_endpoint_shape_and_etag():
     with srv.app.test_client() as c:
         r = c.get("/api/trade/values?scoring_format=1qb_ppr")

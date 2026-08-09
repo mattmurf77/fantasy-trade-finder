@@ -128,6 +128,13 @@ export interface StarterSlotPlayer {
   name: string;
   position: string;
   value: number;
+  // #169 (flag `trade.position_impact`, additive) — the pick-value ladder
+  // tier walked off the RAW seed Elo (same RankingService.tier_for_elo
+  // call #277's evener rows use) and this player's 1-based positional
+  // rank within the universal pool. Both absent when the flag is off, or
+  // on an old server.
+  tier?: Tier | null;
+  rank?: number | null;
 }
 export interface StarterImpactSlot {
   slot: string;
