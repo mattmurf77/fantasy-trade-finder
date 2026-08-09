@@ -532,6 +532,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # board (the sheet does not absorb it). OFF (default) ⇒ TradesScreen.tsx
     # and TradeDnaSheet.tsx render byte-identical to today.
     "trades.edit_full_sheet",
+    # #172 - trade intent modes. A single-select "Consolidate / Tier up /
+    # Tier down" chip row in the #257 full sheet lets the user declare the
+    # SHAPE of trade they want; the backend applies it as a post-generation
+    # filter in trade_service.generate_trades (see the #172 comment block
+    # above TradeService). Gates BOTH the chip UI (full sheet only - the
+    # flag-off legacy card never gets chips) and the server-side filter.
+    # OFF => trade_intent is never read, so responses (and the mobile UI)
+    # are byte-identical to today.
+    "trades.intent_modes",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

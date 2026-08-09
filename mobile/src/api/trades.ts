@@ -23,6 +23,12 @@ export interface GenerateBody {
   // Set save changes the board but not the cache key). Running jobs are
   // still shared server-side.
   force?: boolean;
+  // #172 (flag trades.intent_modes): the SHAPE of trade the user wants —
+  // "I want to consolidate / tier up / tier down". Honored by the backend
+  // only when the flag is on; a post-generation filter over the deck. Also
+  // part of the server's cache-freshness key, so a changed intent always
+  // regenerates rather than serving a deck filtered for a different shape.
+  trade_intent?: 'consolidate' | 'tier_up' | 'tier_down';
 }
 
 // NOTE: backend returns BARE ARRAYS for the trade endpoints — not

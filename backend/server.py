@@ -2547,7 +2547,8 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
-def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value) -> bool:
+def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
+                        trade_intent: str | None = None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters."""
     if job.get("status") != "complete":
@@ -2560,6 +2561,10 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value) -> 
     if abs((job.get("fairness_threshold") or 0) - fairness_threshold) > 0.01:
         return False
     if (job.get("outlook_value") or None) != (outlook_value or None):
+        return False
+    # #172 — a changed intent must always regenerate rather than serve a
+    # deck filtered for a different (or no) shape.
+    if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
     return True
 
@@ -4468,6 +4473,7 @@ def _run_trade_job(
     pinned_receive: list | None = None,
     opponent_user_id: str | None = None,
     pinned_give_mode: str = "any",
+    trade_intent: str | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
@@ -4672,6 +4678,7 @@ def _run_trade_job(
             untouchable_ids      = untouchable_ids or None,
             target_ids           = target_ids or None,
             not_interested_ids   = not_interested_ids or None,
+            trade_intent         = trade_intent,
             **gen_kwargs,
         )
 
@@ -5106,6 +5113,7 @@ def _kickoff_trade_job(
     opponents_total: int | None = None,
     source: str | None = None,
     synchronous: bool = False,
+    trade_intent: str | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -5120,6 +5128,10 @@ def _kickoff_trade_job(
       synchronous — run the worker inline instead of spawning a thread.
                     Used by the replenishment cron, which processes
                     user-leagues one at a time inside the tick handler.
+
+    trade_intent — #172 (flag trades.intent_modes): "consolidate" |
+                    "tier_up" | "tier_down" | None. Stored on the job so
+                    _trade_job_is_fresh can key the shared cache on it.
     """
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -5139,6 +5151,7 @@ def _kickoff_trade_job(
         "fairness_threshold": fairness_threshold,
         "outlook_value":      None,    # populated when the worker reads prefs
         "is_pinned":          is_pinned,
+        "trade_intent":       trade_intent,
     }
     if source:
         job["source"] = source
@@ -5151,7 +5164,8 @@ def _kickoff_trade_job(
     if synchronous:
         _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
                        pinned_give or [], pinned_receive or [],
-                       opponent_user_id, pinned_give_mode)
+                       opponent_user_id, pinned_give_mode,
+                       trade_intent=trade_intent)
         return job_id
 
     threading.Thread(
@@ -5159,6 +5173,7 @@ def _kickoff_trade_job(
         args=(job_id, sess_token, league_id, fairness_threshold,
               pinned_give or [], pinned_receive or [], opponent_user_id,
               pinned_give_mode),
+        kwargs={"trade_intent": trade_intent},
         daemon=True,
     ).start()
     return job_id
@@ -9300,6 +9315,15 @@ def generate_trades():
     pinned_give_mode   = ("all" if (pinned_give
                                     and body.get("pinned_give_mode") == "all")
                           else "any")
+    # #172 — trade intent modes ("I want to consolidate / tier up / tier
+    # down"). Honored only when trades.intent_modes is on, mirroring the
+    # finder-targeting flag check above; an unknown value normalizes to
+    # None rather than erroring, same as pinned_give_mode's junk handling.
+    _trade_intent_raw  = body.get("trade_intent")
+    trade_intent       = (_trade_intent_raw
+                          if is_enabled("trades.intent_modes")
+                             and _trade_intent_raw in ("consolidate", "tier_up", "tier_down")
+                          else None)
     # FB #156 (Trade-Finding Hub, "Specific Team" mode) — scope generation to
     # a single league-mate. Additive: absent ⇒ the full league-wide sweep,
     # byte-identical to before. An opponent-scoped job answers a specific
@@ -9361,7 +9385,7 @@ def generate_trades():
 
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
-            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
+            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent):
                 return jsonify(_trade_job_public_view(existing))
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
@@ -9385,6 +9409,7 @@ def generate_trades():
         pinned_give_mode   = pinned_give_mode,
         opponent_user_id   = opponent_user_id,
         opponents_total    = opponents_total,
+        trade_intent       = trade_intent,
     )
     with _trade_jobs_lock:
         snapshot = _trade_job_public_view(_trade_jobs[job_id])

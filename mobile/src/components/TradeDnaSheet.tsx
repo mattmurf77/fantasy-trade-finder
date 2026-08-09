@@ -167,7 +167,23 @@ export interface TradeDnaSheetFullProps {
     onRemove: (id: string, direction: 'trade_away' | 'acquire') => void;
   } | null;
   onAnyChange?: () => void;
+  /** #172 (flag trades.intent_modes) — single-select trade SHAPE: null =
+   * no preference (today's behavior). Absent entirely when the flag is
+   * off, which is what keeps the chip row from rendering at all. */
+  tradeIntent?: TradeIntent;
+  onTradeIntent?: (intent: TradeIntent) => void;
 }
+
+// #172 — trade intent modes ("I want to consolidate / tier up / tier
+// down"). Kept local to this file (only the full sheet renders the chips)
+// but exported so TradesScreen can type its own state the same way.
+export type TradeIntent = 'consolidate' | 'tier_up' | 'tier_down' | null;
+
+const TRADE_INTENTS: { key: NonNullable<TradeIntent>; label: string; tid: string }[] = [
+  { key: 'consolidate', label: 'Consolidate', tid: 'consolidate' },
+  { key: 'tier_up', label: 'Tier up', tid: 'tier-up' },
+  { key: 'tier_down', label: 'Tier down', tid: 'tier-down' },
+];
 
 interface Props {
   visible: boolean;
@@ -560,6 +576,45 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
                   ))}
                 </View>
               </View>
+
+              {/* #172 — trade intent modes, its own primary question
+                  (it IS a primary question, per the operator ask) placed
+                  with outlook/positions, above the demoted "Fine tuning"
+                  strip. Single-select; tapping the active chip clears it. */}
+              {full.onTradeIntent ? (
+                <>
+                  <Text style={styles.dnaGroupHdr}>Trade idea</Text>
+                  <View style={styles.toggleRow}>
+                    {TRADE_INTENTS.map((it) => {
+                      const selected = full.tradeIntent === it.key;
+                      return (
+                        <Pressable
+                          key={it.key}
+                          testID={`dna.intent.${it.tid}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={it.label}
+                          onPress={() => full.onTradeIntent!(it.key)}
+                          style={({ pressed }) => [
+                            styles.ptb,
+                            selected
+                              ? styles.intentChipSel
+                              : pressed
+                                ? { backgroundColor: ink.ink3 }
+                                : null,
+                          ]}
+                        >
+                          <Text
+                            style={[styles.ptbText, selected && styles.ptbTextSel]}
+                          >
+                            {it.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -1128,6 +1183,9 @@ const styles = StyleSheet.create({
   ptbDot: { width: 7, height: 7, borderRadius: radii.xs },
   ptbText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   ptbTextSel: { color: ice.on, fontFamily: fonts.uiBold },
+  // #172 — trade intent chips reuse the ptb (position-toggle) shape but
+  // fill with the ice action accent (no per-item color like positions).
+  intentChipSel: { backgroundColor: ice.base, borderColor: ice.base },
   dnaHint: {
     ...type.bodySm,
     fontSize: 11,
