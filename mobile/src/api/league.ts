@@ -546,13 +546,16 @@ export interface PowerRankedTeam {
   display_name: string;
   is_you: boolean;
   total_value: number;
-  /** #279 — pick-equivalent label for `total_value` ("≈14 firsts"), the SAME
-   *  value→pick-equivalent formula already live as "a Late 2nd" on trade
-   *  cards, applied to the raw team total. Present ONLY when the caller is
-   *  targeted by the operator-only `aggregate_tier_labels` experiment
-   *  (docs/feedback/items/279-aggregate-tier-labels/status.md); absent for
-   *  everyone else and on old servers — clients must fall back to the
-   *  numeric `total_value`. */
+  /** #279 — pick-equivalent label ("≈14 firsts") for the team total. Present
+   *  ONLY when the caller is targeted by the operator-only
+   *  `aggregate_tier_labels` experiment (docs/feedback/items/
+   *  279-aggregate-tier-labels/status.md); absent for everyone else and on
+   *  old servers — clients must fall back to the numeric `total_value`.
+   *  #285 (docs/feedback/items/285-pick-sums/status.md): the number is
+   *  `positions_value`'s value→pick-equivalent firsts (same formula as "a
+   *  Late 2nd" on trade cards) PLUS a literal count of the team's owned
+   *  picks (1st = 1.0, 2nd = 1/3.5, 3rd+ = 0) — NOT `total_value`, which
+   *  prices picks in dollar space and would double-count if added here. */
   total_value_label?: string;
   positions: Record<'QB' | 'RB' | 'WR' | 'TE', {
     count: number;

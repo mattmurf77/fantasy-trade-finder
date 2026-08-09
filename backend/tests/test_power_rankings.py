@@ -821,9 +821,16 @@ def test_route_labels_present_for_allowlisted_caller_only(client, exp_engine, mo
     # Allowlisted caller's OWN request carries labels on every team in the
     # payload (per-request labeling of a league-shared aggregate, not a
     # per-team toggle) — conversion correctness vs the reused formula.
-    assert a["total_value_label"] == _aggregate_pick_label(a["total_value"])
-    assert b["total_value_label"] == _aggregate_pick_label(b["total_value"])
+    # #285: the team TOTAL label is positions_value's firsts PLUS the
+    # operator's literal pick count (u_a owns a 2026 1st + a 2027 2nd →
+    # 1.0 + 1/3.5 firsts; u_b owns only a 2026 3rd → 0 firsts), never
+    # `total_value` (which prices those same picks in dollar space).
+    assert a["total_value_label"] == _aggregate_pick_label(
+        a["positions_value"], 1.0 + 1 / 3.5)
+    assert b["total_value_label"] == _aggregate_pick_label(
+        b["positions_value"], 0.0)
     for team in (a, b):
+        # Positional subtotals stay position-scoped — no pick contribution.
         for pos, pv in team["positions"].items():
             assert pv["value_label"] == _aggregate_pick_label(pv["value"])
 
@@ -874,3 +881,86 @@ def test_aggregate_pick_label_reuses_pick_gap_equivalent_firsts():
         assert _aggregate_pick_label(value) == f"≈{half:g} firsts"
     # Monotonic: a bigger aggregate never yields a smaller label value.
     assert _pick_gap_equivalent(14820.0)["firsts"] > _pick_gap_equivalent(250.0)["firsts"]
+
+
+# ---------------------------------------------------------------------------
+# #285 — operator bug on the aggregate_tier_labels experiment: "Draft picks
+# should be summed into the league/team values. Keep it simple. 1sts equal
+# firsts, 3-4 2nds equal a 1st. No other picks included." Covers
+# _pick_firsts_equivalent's pick-sum correctness in isolation, the
+# _aggregate_pick_label(value, pick_firsts) wiring, and the route-level
+# label math end to end (positions_value + literal pick count, never
+# total_value — see docs/feedback/items/285-pick-sums/status.md).
+# ---------------------------------------------------------------------------
+
+def test_pick_firsts_equivalent_counts_1sts_and_2nds_ignores_3rds_plus():
+    items = [
+        {"round": 1, "value": 999.0}, {"round": 1, "value": 1.0},
+        {"round": 2, "value": 999.0},
+        {"round": 3, "value": 999.0},
+        {"round": 4, "value": 999.0},
+    ]
+    # 2 firsts (1.0 each) + 1 second (1/3.5) — dollar `value` plays no part;
+    # 3rd/4th round picks contribute exactly nothing regardless of value.
+    assert server._pick_firsts_equivalent(items) == pytest.approx(2.0 + 1 / 3.5)
+
+
+def test_pick_firsts_equivalent_empty_and_unrecognized_round():
+    assert server._pick_firsts_equivalent([]) == 0.0
+    # Missing/None `round` (e.g. a pre-#285 caller's item shape) contributes
+    # nothing, same as round >= 3 — never raises.
+    assert server._pick_firsts_equivalent([{"value": 5.0}]) == 0.0
+    assert server._pick_firsts_equivalent([{"round": None, "value": 5.0}]) == 0.0
+
+
+def test_aggregate_pick_label_pick_firsts_defaults_to_zero_backward_compatible():
+    # Every pre-#285 call site omits `pick_firsts` — must be byte-identical.
+    for value in (0.0, 250.0, 4200.7):
+        assert _aggregate_pick_label(value) == _aggregate_pick_label(value, 0.0)
+
+
+def test_aggregate_pick_label_adds_pick_firsts_before_rounding():
+    base_firsts = _pick_gap_equivalent(250.0)["firsts"]
+    combined = round((base_firsts + 1.2857142857142856) * 2) / 2
+    assert _aggregate_pick_label(250.0, 1.2857142857142856) == f"≈{combined:g} firsts"
+
+
+def test_power_picks_by_owner_carries_round_for_pick_sum_math(client):
+    # Source of truth for #285: _power_picks_by_owner already loads the
+    # draft-capital rows the picks group renders from — round rides along
+    # as an additive field (compute_power_rankings still serializes only
+    # label/value, so the general payload is unaffected — see the byte-
+    # identical test above and the byte-identical assertion below).
+    picks = server._power_picks_by_owner(LEAGUE, "1qb_ppr")
+    assert [i["round"] for i in picks["u_a"]] == [1, 2]
+    assert [i["round"] for i in picks["u_b"]] == [3]
+
+
+def test_route_total_label_sums_owned_picks_1sts_and_2nds_ignores_3rd(
+        client, exp_engine, monkeypatch):
+    """End-to-end #285: the allowlisted caller's team TOTAL label folds in
+    owned picks via the operator's literal count, sourced from the SAME
+    draft-capital data the picks group already renders (PICK_ROWS: u_a
+    owns a 2026 1st + a 2027 2nd; u_b owns only a 2026 3rd)."""
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")
+    _mk_aggregate_experiment(exp_engine)
+    ex.invalidate_cache()
+    _install_sess(_mk_sess(user_id="u_a"))
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    b = next(t for t in body["teams"] if t["user_id"] == "u_b")
+
+    a_firsts = _pick_gap_equivalent(a["positions_value"])["firsts"] + 1.0 + 1 / 3.5
+    a_half = round(a_firsts * 2) / 2
+    assert a["total_value_label"] == f"≈{a_half:g} firsts"
+
+    # u_b's lone owned pick is a 3rd — the label is identical to having no
+    # picks at all, even though `positions_value`/`total_value` differ.
+    assert b["total_value_label"] == _aggregate_pick_label(b["positions_value"])
+    assert b["total_value_label"] == _aggregate_pick_label(b["positions_value"], 0.0)
+
+    # `total_value` itself is untouched by #285 — still positions + the
+    # DOLLAR-priced picks.value (unrelated to the label's literal count).
+    assert a["total_value"] == round(a["positions_value"] + a["picks"]["value"], 1)
+    assert b["total_value"] == round(b["positions_value"] + b["picks"]["value"], 1)

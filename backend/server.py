@@ -820,7 +820,7 @@ def _pick_gap_equivalent(gap_value: float) -> dict:
     return {"firsts": firsts, "pick_equivalent": pick}
 
 
-def _aggregate_pick_label(value: float) -> str:
+def _aggregate_pick_label(value: float, pick_firsts: float = 0.0) -> str:
     """Express a raw AGGREGATE value (a team total or positional subtotal —
     a SUM across many assets, not one asset's value) as a pick-equivalent
     label, e.g. "≈14 firsts" (#279, docs/feedback/items/
@@ -832,10 +832,51 @@ def _aggregate_pick_label(value: float) -> str:
     classification whose top bucket (`4+ 1sts`) is an open-ended catch-all,
     not a countable multiple, and a roster-scale aggregate blows past it
     immediately. Rounded to the nearest half-first so small positional
-    subtotals don't collapse to a bare "0 firsts"."""
-    firsts = _pick_gap_equivalent(max(value, 0.0))["firsts"]
+    subtotals don't collapse to a bare "0 firsts".
+
+    `pick_firsts` (#285, docs/feedback/items/285-pick-sums/status.md;
+    default 0.0 — every pre-#285 call site is unaffected) is an ADDITIONAL
+    literal draft-pick-count contribution (see `_pick_firsts_equivalent`)
+    added to `value`'s computed firsts BEFORE rounding. Callers pass this
+    only for the team TOTAL label, with `value` = `positions_value` (never
+    `total_value`, which already prices owned picks in dollar space —
+    adding the literal count on top of that would double-count draft
+    capital). Positional subtotals never receive it — picks aren't
+    position-scoped, so they don't belong in a positional label."""
+    firsts = _pick_gap_equivalent(max(value, 0.0))["firsts"] + pick_firsts
     half = round(firsts * 2) / 2
     return f"≈{half:g} firsts"
+
+
+# #285 — "3-4 2nds equal a 1st" (operator's bug report on the aggregate_tier_
+# labels experiment): 3.5 is the documented midpoint of that range, used to
+# convert a 2nd-round pick into firsts for _pick_firsts_equivalent below.
+_PICK_2ND_ROUND_PER_FIRST = 3.5
+
+
+def _pick_firsts_equivalent(pick_items: list[dict]) -> float:
+    """#285 — literal draft-PICK-COUNT contribution to the aggregate
+    pick-equivalent team-total LABEL (docs/feedback/items/285-pick-sums/
+    status.md). Operator's rule, applied exactly, "keep it simple": every
+    1st-round pick = 1.0 firsts; every 2nd-round pick =
+    1 / _PICK_2ND_ROUND_PER_FIRST firsts; 3rd round and later contribute
+    NOTHING. No dollar pricing, no year discount — a pure count over
+    `round`, unlike the existing dollar-priced `pick_pool_value` pick
+    valuation this deliberately does NOT reuse (that formula is what the
+    operator is asking to bypass for this label).
+
+    `pick_items` is the SAME per-owner list `_power_picks_by_owner` builds
+    (each item's `round` field, additive there for exactly this reader) —
+    reused rather than re-queried. Items without a recognized `round`
+    (missing/None) contribute nothing, same as round >= 3."""
+    total = 0.0
+    for item in pick_items:
+        rnd = item.get("round")
+        if rnd == 1:
+            total += 1.0
+        elif rnd == 2:
+            total += 1.0 / _PICK_2ND_ROUND_PER_FIRST
+    return total
 
 
 def _value_verdict_payload(give_value: float, receive_value: float,
@@ -18679,7 +18720,7 @@ def _power_ranking_inputs(sess: dict, league_id: str):
 
 def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     """Owned-pick items per owner_user_id for the power-rankings picks group
-    (#14 FR1): {owner_user_id: [{label, value}, ...]}.
+    (#14 FR1): {owner_user_id: [{label, value, round}, ...]}.
 
     Same source as /api/league/picks (load_draft_picks + _owned_pick_label).
     ESPN leagues carry no pick ownership (#158) and demo leagues have no
@@ -18689,6 +18730,13 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     existed are re-priced via pick_pool_value directly, years_out relative
     to the earliest synced season (sync writes seasons starting at the
     league's current season, so min(season) recovers it).
+
+    `round` (#285, docs/feedback/items/285-pick-sums/status.md) rides each
+    item purely for `_pick_firsts_equivalent`'s literal pick-count label
+    math — `compute_power_rankings` builds its serialized `picks.items`
+    from only `label`/`value`, so this extra key is inert for every caller
+    that doesn't read it directly off this dict (i.e. everyone but the
+    #285 experiment-gated branch in league_power_rankings_route).
     """
     if not league_id or league_id == "league_demo":
         return {}
@@ -18716,6 +18764,9 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
         out.setdefault(owner, []).append({
             "label": _owned_pick_label(p),
             "value": round(float(val), 1),
+            # #285 — round for _pick_firsts_equivalent's literal pick-count
+            # label math; never serialized on its own (see docstring above).
+            "round": int(p.get("round") or 0),
             # W3 M-C (S2) — provenance + the deep-link coordinates. The items
             # carried neither before, so `pick_id`/`season` ride the same flag.
             **({"pick_id": str(p.get("pick_id") or "")} if tradeable else {}),
@@ -18811,9 +18862,10 @@ def league_power_rankings_route():
         if members is None:
             return jsonify({"error": "league_not_found"}), 404
 
+        picks_by_owner = _power_picks_by_owner(league_id, fmt)
         teams = compute_power_rankings(
             members, seed, players_meta, board_elo=board_elo,
-            picks_by_owner=_power_picks_by_owner(league_id, fmt),
+            picks_by_owner=picks_by_owner,
             lineup_slots=_sleeper_lineup_slots(league_id),
             # #277/#278 — additive `tier` per roster row (canonical
             # band-walk over the raw board/seed Elo; never from `value`).
@@ -18834,10 +18886,28 @@ def league_power_rankings_route():
         # raw aggregate instead of a gap — see _aggregate_pick_label).
         # Non-targeted callers (everyone but the allowlisted operator today)
         # get no new keys at all — byte-identical to pre-#279.
+        #
+        # #285 (docs/feedback/items/285-pick-sums/status.md) — the operator's
+        # bug against this same experiment: `total_value_label` now folds in
+        # each team's owned picks via a literal count (1st = 1.0 firsts,
+        # 2nd = 1/3.5 firsts, 3rd+ = 0), NOT their dollar-priced pool_value.
+        # The base is `positions_value` (players only), never `total_value`
+        # (which already includes picks' dollar value) — adding the literal
+        # count on top of that would double-count draft capital. `total_value`
+        # itself is UNCHANGED: it drives `teams.sort` inside
+        # compute_power_rankings (rank order), the drill-in's raw-number
+        # fallback, and every non-experiment consumer, so touching it would
+        # both leak the experiment to non-treatment callers and reshuffle
+        # rank for the treatment caller too. Positional `value_label`s stay
+        # position-scoped and never receive a pick contribution — picks
+        # aren't tied to a position.
         from . import experiments as _experiments_mod
         if _experiments_mod.variant_for(g_user_id, "aggregate_tier_labels") == "treatment":
             for t in teams:
-                t["total_value_label"] = _aggregate_pick_label(t["total_value"])
+                pick_firsts = _pick_firsts_equivalent(
+                    picks_by_owner.get(t["user_id"]) or [])
+                t["total_value_label"] = _aggregate_pick_label(
+                    t["positions_value"], pick_firsts)
                 for _pv in t["positions"].values():
                     _pv["value_label"] = _aggregate_pick_label(_pv["value"])
         # League Analyzer replication (2026-07-26): per-team `starters` is
