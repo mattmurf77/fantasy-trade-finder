@@ -2697,6 +2697,18 @@ class TradeService:
                             res = _eval([asset_id, s], [c])
                             if res:
                                 variants.append(([asset_id, s], [c], res))
+                        # #286 — a single sweetener is a blunt instrument: the
+                        # window between "still underpaying" (fails fairness)
+                        # and "now overpaying" (fails the #108 gain gate) can
+                        # be narrower than any one available piece. Two
+                        # SMALLER pieces can land inside it where one big one
+                        # overshoots — the same combinatorial breadth the
+                        # Downgrade search below already gets. Bounded to the
+                        # top _POOL sweeteners (value-sorted) to cap cost.
+                        for s1, s2 in combinations(sweeteners[:_POOL], 2):
+                            res = _eval([asset_id, s1, s2], [c])
+                            if res:
+                                variants.append(([asset_id, s1, s2], [c], res))
                         _emit_best(member, variants, "upgrade")
                 # Downgrade: 2-3 lesser pieces back for the pin. Best 2
                 # combos per opponent with DISTINCT headliners (recombining
@@ -2770,6 +2782,14 @@ class TradeService:
                         res = _eval([g, s], [asset_id])
                         if res:
                             variants.append(([g, s], [asset_id], res))
+                    # #286 mirror of the give-direction widening above: two
+                    # smaller own pieces can land inside the accept window a
+                    # single piece overshoots. Bounded pool caps cost.
+                    pool2 = [p for p in give_pool[:_POOL] if p != g]
+                    for s1, s2 in combinations(pool2, 2):
+                        res = _eval([g, s1, s2], [asset_id])
+                        if res:
+                            variants.append(([g, s1, s2], [asset_id], res))
                     _emit_best(owner, variants, "upgrade")
                 else:
                     # Tier DOWN: give the better own asset, receive the pin

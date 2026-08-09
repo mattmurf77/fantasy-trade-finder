@@ -567,6 +567,20 @@ FLAG_KEYS: tuple[str, ...] = (
     # `tier_of` is never bound, so `slots` carries no new keys and the
     # table renders the legacy numeric delta chip, byte-identical to today.
     "trade.position_impact",
+    # ── #287 — player-offers surface becomes an editable calculator ──────
+    # Client-only; no route reads it. Single-pin find-a-trade's featured
+    # window (FeaturedTradeWindow, mounted from TradesScreen when exactly
+    # one asset is pinned) currently renders the pinned idea as a READ-ONLY
+    # TradeCard — the operator's complaint: routing from a found trade to
+    # "other options for that player" lands on a tile you can't edit. ON =
+    # the window renders the idea as an editable InLeagueCalculator instead
+    # (the TradeBuildCanvas prefill technique: initialOpponentId/
+    # initialGiveIds/initialReceiveIds, remounted per idea via its
+    # assetIdeaKey) so add/remove/eveners/lineup-impact all work in place;
+    # the Upgrade/Lateral/Downgrade alternates list (AssetIdeasPanel) stays
+    # a pickable rail beneath it. OFF (default) = FeaturedTradeWindow.tsx
+    # renders byte-identical to today.
+    "trades.player_offers_calc",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

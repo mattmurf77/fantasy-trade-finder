@@ -351,6 +351,20 @@ export default function TradesScreen({ navigation, route }: any) {
   const [fairnessOn, setFairnessOn] = useState(true);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
+  // #288 — the deck snapshot from the moment a "Keep · more offers" tap
+  // pins a single player and enters single-pin featured mode (the found-
+  // trade-card → "other options for that player" flow). resetDeckForNew-
+  // Targets wipes deck/deckIdx/job on every pin change, so without this
+  // there's no way back to the original found trade once pinned. Captured
+  // ONLY at that one entry point (not every pin path — e.g. the player-
+  // mode target board pins from an empty deck already) so "back" always
+  // means "the deck this player's card came from," never a stale unrelated
+  // snapshot.
+  const preSinglePinSnapshotRef = useRef<{
+    deck: TradeCard[];
+    deckIdx: number;
+    job: TradeJobSnapshot | null;
+  } | null>(null);
   // Phase-2 lane filter: null = All. Tapping a lane pill filters the deck
   // to that lane; tapping the active pill again clears back to All. The
   // pill row only renders when at least one deck card carries a lane.
@@ -1018,6 +1032,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
+  // #287 — the featured window renders the pinned idea as an editable
+  // InLeagueCalculator instead of a read-only TradeCard tile.
+  const playerOffersCalcOn = useFlag('trades.player_offers_calc');
   const singlePin =
     targetingEnabled &&
     assetIdeasOn &&
@@ -1938,6 +1955,15 @@ export default function TradesScreen({ navigation, route }: any) {
   // receive pins the get side (cards must return ≥1 of them).
   function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
     haptics.selection();
+    // #288 — snapshot the deck before resetDeckForNewTargets wipes it, so
+    // the found-trade-card → "other options for that player" flow this
+    // action enters can be undone. Captured only from a clean, unpinned
+    // deck (this action's actual entry point) so a later re-pin from an
+    // already-pinned state never clobbers the ORIGINAL context with a
+    // stale in-between one.
+    if (pinnedGive.length + pinnedReceive.length === 0) {
+      preSinglePinSnapshotRef.current = { deck, deckIdx, job };
+    }
     // F1 (deck.signal_v2): a keep-side tap is deeper-than-glance engagement.
     if (signalV2On) engagementRef.current.detailExpanded = true;
     useFinderTargets
@@ -1946,6 +1972,36 @@ export default function TradesScreen({ navigation, route }: any) {
     track('trade_keep_side_tapped', { side }, 'Trades');
     resetDeckForNewTargets();
     generateMutation.mutate({});
+  }
+
+  // #288 — the pin-summary row's clear/back affordance: unpin and, when
+  // the pin was entered via "Keep · more offers" on a clean deck (the
+  // found-trade-card → "other options" flow), restore that ORIGINAL deck
+  // position + card exactly rather than leaving an empty deck behind. Pins
+  // entered any other way (e.g. the player-mode target board) have no
+  // snapshot to restore — clearing still unpins and leaves the ordinary
+  // empty-deck state, where "Find a Trade" is always the recovery path, so
+  // the user is never stranded either way.
+  function handleClearPin() {
+    haptics.selection();
+    const snap = preSinglePinSnapshotRef.current;
+    flushPendingPassRef.current();
+    lastDispositionedRef.current = null;
+    clearTargets();
+    setLaneFilter(null);
+    setEdits({});
+    setSwapTarget(null);
+    if (snap) {
+      setDeck(snap.deck);
+      setDeckIdx(snap.deckIdx);
+      setJob(snap.job);
+    } else {
+      setDeck([]);
+      setDeckIdx(0);
+      setJob(null);
+    }
+    preSinglePinSnapshotRef.current = null;
+    track('trade_pin_cleared', { restored: !!snap }, 'Trades');
   }
 
   // F3 (deck.fatigue) — deck-note "Undo": lift the newest decline
@@ -3603,6 +3659,22 @@ export default function TradesScreen({ navigation, route }: any) {
             >
               <Text style={styles.pinSummaryEdit}>Edit</Text>
             </Pressable>
+            {/* #288 — always-visible clear/back affordance: unpins and
+                (when this pin came from a "Keep · more offers" tap on a
+                clean deck) restores the ORIGINAL found-trade deck position
+                exactly; otherwise leaves the ordinary empty-deck state
+                where "Find a Trade" is the recovery path. Either way the
+                user is never stranded in single-pin mode without a way out. */}
+            <Pressable
+              testID="trades.pin-summary.clear"
+              accessibilityRole="button"
+              accessibilityLabel={`Clear pinned player ${singlePin.player.name} and go back`}
+              onPress={handleClearPin}
+              hitSlop={8}
+              style={styles.pinSummaryEditTap}
+            >
+              <Icon name="x" size={14} color={chalk.dim} />
+            </Pressable>
           </View>
         ) : (
         <Card>
@@ -4252,6 +4324,7 @@ export default function TradesScreen({ navigation, route }: any) {
                   leagueId={leagueId ?? ''}
                   onBack={ideaHistory.length > 0 ? handleFeaturedBack : undefined}
                   onEditInCalculator={() => handleOpenAssetIdea(featuredShown)}
+                  calc={playerOffersCalcOn ? { userId } : undefined}
                 />
               </View>
             ) : null}
