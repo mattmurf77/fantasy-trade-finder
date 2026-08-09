@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-09 (design-decision batch: inline-home A/B, position impact, aggregate labels)
+
+- **#270/#272 — inline trades home, BOTH variants as an A/B (operator couldn't pick):** experiment `trades_home_inline` (layer trades_ui, account unit, tester-allowlist targeting; overlay-only flags `trades_home_inline.strip`/`.canvas`, never in features.json). `strip` = 28pt utility row (`TradeHomeUtilityRow`, manual-calc as button per #272) + League/"Trading with" pills (`TradingWithStrip`) above the deck. `canvas` = same plus `TradeBuildCanvas` (wraps `InLeagueCalculator` wholesale) above the intact deck, fed by a tap-to-prefill suggestion rail. Operator starts on `strip`; A→B switch is a pure weight revise + transition (runbook in `docs/feedback/items/270-inline-trades-home/status.md`). Control byte-identical.
+- **#169 — position-impact fold-in (A1a + operator mods):** `starter_impact.slots` gains additive `tier` (reuses #277's `_evener_tier` call) + `rank` (reuses `trends_service.compute_consensus_pos_ranks`); `LineupImpactTable` renders TierBadge chips both sides in place of the numeric delta, rank movement folded in ("4th · TE21" → "1 1st · TE4"). Flag `trade.position_impact` ON.
+- **#279 — aggregate pick-equivalent labels (operator-only experiment `aggregate_tier_labels`):** LeagueSummary team totals + positional subtotals render "≈14 firsts" via the existing `_pick_gap_equivalent` formula; gated by field presence on /api/league/power-rankings for allowlisted accounts only. Deliberately NOT the per-asset tier ladder.
+- **Mock revisions per operator review:** #270 lab B1 (find-a-trade restored, prefs to top) + D repositioned behind Change (accordion = sheet replacement; new lead recommendation); #169 lab B abandoned, A/C split into positional-rank + tier framings. #211 closed ("nothing more to explore").
+- Gates: 2072 passed / 1 skipped; tsc clean; batched ship held until operator resolved both design decisions, then pushed as one.
+
 ## 2026-08-09 (feedback wave 3: validation follow-ups, tier labels app-wide, sheet targeting)
 
 - **#277/#278/#280/#281 (fable deep pass):** tier labels replace per-player numerics on every surface (28 files) — swap sheet, eveners, share image, league-summary drill-in, free agents, draft rows, rank boards; additive `tier` on /api/trade/evaluate eveners, /api/league/power-rankings, /api/league/free-agents (canonical band-walk, never derived from transformed value). Totals/deltas/FAAB stay numeric. Enumeration table: `docs/feedback/items/277-tier-labels-appwide/status.md`. League-summary key deduped (below-graph only, one line lower).
