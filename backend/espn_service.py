@@ -238,17 +238,14 @@ def fetch_fan_leagues(espn_s2: str, swid: str, timeout: int = 15,
     isn't JSON, EspnError(kind='input') if either cookie is missing.
 
     UNVERIFIED SHAPE (2026-08-09): this fan-profile endpoint is not
-    documented by ESPN. The parse below (`_parse_fan_leagues`) follows the
-    best-known community-reverse-engineered shape — a top-level
-    `preferences` array, each entry's `metaData.entry` carrying `groups[]`
-    (one row per league/group the fan belongs to across ALL ESPN fantasy
-    games), filtered to football via `entry.abbrev == "ffl"` (the same game
-    slug FTF already uses at `apis/v3/games/ffl`, §1.1). This has NOT been
-    confirmed against a live account from this build session — flagged for
-    TestFlight verification (docs/feedback/items/espn-webview-escape/
-    status.md). If the real shape differs, `_parse_fan_leagues` degrades to
-    an empty/partial list rather than raising (never a 500) — see its
-    docstring.
+    documented by ESPN. The parse below (`_parse_fan_leagues`) targets the
+    shape LIVE-VERIFIED 2026-08-09 against an authenticated fan fetch on
+    the operator's real account: a top-level `preferences` array; football
+    rows are `typeId` 9 whose `metaData.entry` carries `abbrev: "FFL"`
+    (UPPERCASE — matched case-insensitively), `seasonId`, `entryMetadata.
+    teamName`, and `groups[]` with `groupId`/`groupName` per league. If
+    the shape drifts, `_parse_fan_leagues` degrades to an empty/partial
+    list rather than raising (never a 500) — see its docstring.
     """
     if not espn_s2 or not swid:
         raise EspnError("espn_s2 and swid are required", kind="input")
@@ -311,8 +308,12 @@ def _parse_fan_leagues(data) -> list[dict]:
             # basketball, ...) — keep only football. A row with no `abbrev`
             # at all is kept rather than dropped (better a possibly-wrong
             # row surfaces than a real league silently vanishes).
+            # LIVE-VERIFIED 2026-08-09 (authenticated fan fetch, operator's
+            # real account): football rows are typeId 9 with abbrev "FFL" —
+            # UPPERCASE, unlike the v3 game slug — so the compare must be
+            # case-insensitive or every league is silently filtered out.
             abbrev = entry.get("abbrev")
-            if abbrev and abbrev != "ffl":
+            if abbrev and str(abbrev).lower() != "ffl":
                 continue
             groups = entry.get("groups")
             if not isinstance(groups, list) or not groups:

@@ -181,23 +181,41 @@ def test_fetch_non_json_raises_parse():
 # ---------------------------------------------------------------------------
 # 1b. fetch_fan_leagues / _parse_fan_leagues — league-picker fan-profile call
 # (2026-08-09, feedback: "fetch all their ESPN leagues and let them pick").
-# UNVERIFIED SHAPE — see espn_service.fetch_fan_leagues docstring +
-# docs/integrations/espn.md §1.7. These fixtures pin the best-known
-# community shape and the defensive-parse contract, not ESPN's real payload.
+# SHAPE LIVE-VERIFIED 2026-08-09 against an authenticated fan fetch on the
+# operator's real account: football rows are typeId 9, `entry.abbrev` is
+# UPPERCASE "FFL" (unlike the v3 game slug), season lives on
+# `entry.seasonId` (groups carry none), league id/name at
+# `groups[].groupId/groupName`, team name at `entryMetadata.teamName`.
+# The first preference block below mirrors that verified shape verbatim;
+# the drift fixtures keep the defensive-parse contract honest.
 # ---------------------------------------------------------------------------
 
 FAN_PAYLOAD = {
     "preferences": [
         {
+            "typeId": 9,
             "metaData": {
                 "entry": {
-                    "abbrev": "ffl",
+                    "abbrev": "FFL",
+                    "seasonId": 2026,
+                    "entryId": 5,
                     "entryMetadata": {"teamName": "The Dynasty Dominators"},
                     "groups": [
-                        {"groupId": "987654321", "groupName": "Recorded Shape Dynasty",
-                         "seasonId": 2026},
-                        {"groupId": "111222333", "groupName": "Old League",
-                         "seasonId": 2024},
+                        {"groupId": 987654321, "groupName": "Recorded Shape Dynasty",
+                         "groupSize": 12, "leagueStatus": "active"},
+                    ],
+                }
+            }
+        },
+        {
+            "typeId": 9,
+            "metaData": {
+                "entry": {
+                    "abbrev": "FFL",
+                    "seasonId": 2024,
+                    "entryMetadata": {"teamName": "The Dynasty Dominators"},
+                    "groups": [
+                        {"groupId": 111222333, "groupName": "Old League"},
                     ],
                 }
             }
