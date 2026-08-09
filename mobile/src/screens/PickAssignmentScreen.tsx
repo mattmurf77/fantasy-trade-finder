@@ -63,6 +63,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -127,6 +128,15 @@ const OPEN_ROUNDS_BY_DEFAULT = 1;
  *  Small on purpose — the summary is a glance, not a second grid. */
 const TRADED_SUMMARY_PREVIEW = 6;
 
+/** #274 — the owner sheet's list grows to fit every team before it
+ *  scrolls. `PICKER_ROW_HEIGHT` matches `styles.pickerRow.minHeight`;
+ *  `PICKER_SHEET_CHROME` is everything else in the sheet (grabber, heading,
+ *  subline, the sheet's own padding, the bottom safe area) reserved off the
+ *  window height so the list's cap still leaves the sheet reading as a
+ *  sheet, not a full-screen takeover. */
+const PICKER_ROW_HEIGHT = 48;
+const PICKER_SHEET_CHROME = 260;
+
 /** A team, as the picker and the setup list need it. */
 interface TeamRef {
   user_id: string;
@@ -163,6 +173,41 @@ function draftPosition(
 
 function slotLabel(round: number, position: number): string {
   return `${round}.${position < 10 ? `0${position}` : position}`;
+}
+
+/** #273 — a future season has no real draft order (ESPN never ran one, and
+ *  neither has this league yet), so a slot/overall number there is fiction.
+ *  "2nd", not "2.07". */
+function roundOrdinal(round: number): string {
+  const mod100 = round % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${round}th`;
+  switch (round % 10) {
+    case 1: return `${round}st`;
+    case 2: return `${round}nd`;
+    case 3: return `${round}rd`;
+    default: return `${round}th`;
+  }
+}
+
+/** The ONE label formatter for a slot, current or future season. A future
+ *  slot (season past `currentSeason`) never renders a position — there is
+ *  no order to derive one from, just a round and the original team, so a
+ *  round ordinal is all that is honest. `withSeason` prefixes the year for
+ *  contexts that span seasons (the cross-season traded summary); season
+ *  tabs already say the year, so in-season rows omit it. */
+function slotDisplayLabel(
+  slot: PickSlot,
+  currentSeason: number | null,
+  order: string[],
+  orderType: PickOrderType,
+  teams: number,
+  withSeason = false,
+): string {
+  const prefix = withSeason ? `${slot.season} ` : '';
+  if (currentSeason != null && slot.season > currentSeason) {
+    return `${prefix}${roundOrdinal(slot.round)}`;
+  }
+  return `${prefix}${slotLabel(slot.round, draftPosition(slot, order, orderType, teams))}`;
 }
 
 /** True when the slot deviates from the pristine seed. Trusts the server's
@@ -214,6 +259,9 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
 
   const enabled = useFlag('picks.assign');
   const queryClient = useQueryClient();
+  /** #274 — the owner sheet opens tall enough to show every team when they
+   *  fit, scrolling only when they genuinely can't. */
+  const { height: windowHeight } = useWindowDimensions();
 
   const [activeSeason, setActiveSeason] = useState<number | null>(null);
   const [openRounds, setOpenRounds] = useState<Record<number, boolean>>({});
@@ -607,6 +655,12 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   const activeSeasonKey = season ? String(season.season) : '';
   const seasonConfirmedAt = confirmed[activeSeasonKey];
   const visibleTraded = showAllTraded ? tradedSlots : tradedSlots.slice(0, TRADED_SUMMARY_PREVIEW);
+  // #273 — `seasons` is always current+3 ascending (the payload's own
+  // contract; see `pickAssignment.ts`), so the FIRST season is current. A
+  // future tab has no real draft order: no drag-order/linear-snake control
+  // and no slot numbers, just "round + original team" to reassign.
+  const currentSeason = data.seasons[0]?.season ?? null;
+  const isFutureSeasonTab = !!season && currentSeason != null && season.season > currentSeason;
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']} testID="pick-assignment.screen">
@@ -638,17 +692,24 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
               {' — priced as unknown until someone settles them.'}
             </Text>
           ) : null}
-          <Pressable
-            testID="pick-assignment.edit-order"
-            onPress={() => setSetupOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Edit draft order and rounds"
-            style={({ pressed }) => [styles.inlineLink, pressed && { opacity: 0.6 }]}
-          >
-            <Text style={styles.inlineLinkText}>
-              {data.settings.rounds} rounds · {data.settings.order_type === 'snake' ? 'Snake' : 'Linear'} order — change
-            </Text>
-          </Pressable>
+          {/* #273 — the order/rounds setter is ONE global setting for the
+              whole board (no season it can be scoped to), so its entry
+              point only appears on the current-season tab; offering it
+              from a future tab would read as "set THIS year's order" when
+              there is no such thing to set. */}
+          {!isFutureSeasonTab ? (
+            <Pressable
+              testID="pick-assignment.edit-order"
+              onPress={() => setSetupOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Edit draft order and rounds"
+              style={({ pressed }) => [styles.inlineLink, pressed && { opacity: 0.6 }]}
+            >
+              <Text style={styles.inlineLinkText}>
+                {data.settings.rounds} rounds · {data.settings.order_type === 'snake' ? 'Snake' : 'Linear'} order — change
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* The review summary. Cross-season on purpose: a traded 2029 first
@@ -665,7 +726,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
               <SlotRow
                 key={`sum-${slot.pick_id}`}
                 slot={slot}
-                label={`${slot.season} ${slotLabel(slot.round, draftPosition(slot, orderIds, data.settings.order_type, teamCount))}`}
+                label={slotDisplayLabel(slot, currentSeason, orderIds, data.settings.order_type, teamCount, true)}
                 testID={`pick-assignment.traded-row.${slot.pick_id}`}
                 highlighted={slot.pick_id === focusPickId}
                 onPress={() => setPicking(slot)}
@@ -725,12 +786,19 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
             default means most rounds hold nothing worth reading. */}
         {season
           ? rounds.map((round) => {
+              // #273 — a future season has no draft order to sort by, so its
+              // rounds are an UNORDERED set of picks to reassign. Sorted by
+              // the opaque original-team label instead, purely for a stable
+              // render order — it implies nothing about draft position.
               const roundSlots = season.slots
                 .filter((s) => s.round === round)
                 .sort(
                   (a, b) =>
-                    draftPosition(a, orderIds, data.settings.order_type, teamCount) -
-                    draftPosition(b, orderIds, data.settings.order_type, teamCount),
+                    isFutureSeasonTab
+                      ? (parseInt(a.original_roster_id, 10) || 0) -
+                        (parseInt(b.original_roster_id, 10) || 0)
+                      : draftPosition(a, orderIds, data.settings.order_type, teamCount) -
+                        draftPosition(b, orderIds, data.settings.order_type, teamCount),
                 );
               const deviations = roundSlots.filter(
                 (s) => isDeviation(s) || s.contested || s.orphaned,
@@ -763,10 +831,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
                         <SlotRow
                           key={slot.pick_id}
                           slot={slot}
-                          label={slotLabel(
-                            slot.round,
-                            draftPosition(slot, orderIds, data.settings.order_type, teamCount),
-                          )}
+                          label={slotDisplayLabel(slot, currentSeason, orderIds, data.settings.order_type, teamCount)}
                           testID={`pick-assignment.slot.${slot.pick_id}`}
                           highlighted={slot.pick_id === focusPickId}
                           onPress={() => setPicking(slot)}
@@ -806,7 +871,11 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       </ScrollView>
 
       {/* Owner picker — the same manager-sheet construction the Acquire
-          surfaces use, scoped to this league's teams. */}
+          surfaces use, scoped to this league's teams. #274 — the list grows
+          to fit every team (a 12-team league on a standard phone) and only
+          scrolls past that, so `PICKER_SHEET_CHROME` is the sheet's other
+          content (grabber, heading, subline, padding, safe area) reserved
+          off the window height before the list gets what's left. */}
       <Modal
         visible={!!picking}
         transparent
@@ -825,10 +894,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
             <>
               <Text style={type.heading} accessibilityRole="header">
                 Who owns{' '}
-                {slotLabel(
-                  picking.round,
-                  draftPosition(picking, orderIds, data.settings.order_type, teamCount),
-                )}
+                {slotDisplayLabel(picking, currentSeason, orderIds, data.settings.order_type, teamCount)}
                 ?
               </Text>
               <Text style={styles.bodyDim}>
@@ -840,7 +906,17 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
                   now. Setting it here settles it.
                 </Text>
               ) : null}
-              <ScrollView style={styles.sheetScroll}>
+              <ScrollView
+                style={[
+                  styles.sheetScroll,
+                  {
+                    maxHeight: Math.max(
+                      PICKER_ROW_HEIGHT * 3,
+                      Math.min(teams.length * PICKER_ROW_HEIGHT, windowHeight - PICKER_SHEET_CHROME),
+                    ),
+                  },
+                ]}
+              >
                 {teams.map((t) => {
                   const isOwner = t.user_id === picking.owner_user_id;
                   const isOriginal = t.user_id === picking.original_user_id;
@@ -851,8 +927,15 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
                       accessibilityRole="button"
                       accessibilityState={{ selected: isOwner }}
                       accessibilityLabel={t.name}
-                      disabled={assignMutation.isPending}
-                      onPress={() => commitOwner(picking, t.user_id)}
+                      onPress={() => {
+                        // #275 — close on tap; #267's optimistic update
+                        // already paints the grid, so the save finishing is
+                        // not what the sheet was ever waiting on. Capture
+                        // `picking` before clearing it — the state setter
+                        // doesn't invalidate this closure.
+                        setPicking(null);
+                        commitOwner(picking, t.user_id);
+                      }}
                       style={({ pressed }) => [
                         styles.pickerRow,
                         pressed && { backgroundColor: ink.ink3 },
@@ -897,10 +980,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
               </Text>
               <View style={styles.conflictRow} testID="pick-assignment.conflict-current">
                 <Text style={styles.slotLabel}>
-                  {slotLabel(
-                    conflict.current.round,
-                    draftPosition(conflict.current, orderIds, data.settings.order_type, teamCount),
-                  )}
+                  {slotDisplayLabel(conflict.current, currentSeason, orderIds, data.settings.order_type, teamCount)}
                 </Text>
                 <View style={styles.slotBody}>
                   <Text style={styles.slotOwner}>Theirs: {conflict.current.owner_username}</Text>
