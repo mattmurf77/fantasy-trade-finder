@@ -6,7 +6,8 @@ appId: com.fantasytradefinder.app
 #        --flags). The in-WebView Disney SSO login + cookie landing are WAIVED
 #        (a live third-party page the hermetic harness can't drive); this flow
 #        covers the app-side chrome only: the flag-on entry appears, the
-#        connect screen mounts with its consent copy, back-out restores the
+#        connect screen mounts with its consent copy, the reload control
+#        (build-95 field fix) is present and tappable, back-out restores the
 #        sheet, and the manual-paste fallback is still present.
 tags: [espn, webview, flag-on]
 ---
@@ -66,6 +67,16 @@ tags: [espn, webview, flag-on]
 - assertVisible:
     id: "espn-connect.banner"
 - takeScreenshot: espn-connect-mounted
+
+# Reload control (build-95 field fix): always present in the chrome, one
+# tap recovers a wedged page. Tap it and confirm the WebView is still there
+# (the in-WebView Disney SSO content itself is waived — see the header note).
+- assertVisible:
+    id: "espn-connect.reload"
+- tapOn:
+    id: "espn-connect.reload"
+- assertVisible:
+    id: "espn-connect.webview"
 
 # Back out without capturing — the sheet's Modal restores and the manual-paste
 # fallback is still usable (capture path is additive, paste never removed).

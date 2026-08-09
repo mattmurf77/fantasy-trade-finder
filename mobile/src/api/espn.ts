@@ -106,6 +106,28 @@ export async function getEspnLeagues(): Promise<EspnLeague[]> {
   return res?.leagues || [];
 }
 
+// ── League picker (flag `espn.league_picker`, 2026-08-09) ────────────────
+// Discovery, not linking: lists the ESPN fantasy football leagues the
+// session user's STORED espn_credentials cookies belong to (WebView capture
+// or a prior paste that was already sent through /api/espn/link), so
+// EspnLinkSheet can offer a SELECTION list instead of a bare league-id text
+// field. Manual entry stays the fallback — this call is allowed to fail
+// (403 espn_auth_required with no stored cookies yet is the common case for
+// a brand-new capture that hasn't linked anything yet) and callers should
+// treat any rejection as "no picker available", not an error to surface.
+
+export interface EspnMyLeague {
+  league_id: string;
+  league_name: string;
+  season: number | null;
+  team_name: string | null;
+}
+
+export async function getMyEspnLeagues(): Promise<EspnMyLeague[]> {
+  const res = await api.get<{ leagues: EspnMyLeague[] }>('/api/espn/my-leagues');
+  return res?.leagues || [];
+}
+
 export async function importEspnLeague(leagueId: string): Promise<EspnImportSummary> {
   return api.post<EspnImportSummary>('/api/espn/import', { league_id: leagueId });
 }

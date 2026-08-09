@@ -200,6 +200,149 @@ def fetch_league(
 
 
 # ---------------------------------------------------------------------------
+# Fan profile — "my leagues" (feedback: "can't we fetch all their ESPN
+# leagues and let them pick, instead of asking for a league ID?")
+# ---------------------------------------------------------------------------
+
+# fan.api.espn.com is a SEPARATE host from the fantasy read API (§1 above) —
+# ESPN's cross-sport "fan profile" service, keyed by SWID rather than a
+# league id. Confirmed live (2026-08-09): an unauthenticated GET with a
+# syntactically-valid-but-unknown SWID returns 404 {"message":"fan not
+# found"} — the host resolves and answers JSON, so this is a real endpoint,
+# not a guess. What the AUTHENTICATED shape looks like for a real fan is
+# UNVERIFIED from this session (no live cookies available, and the endpoint
+# is essentially undocumented outside community reverse-engineering) — see
+# the UNVERIFIED SHAPE note on fetch_fan_leagues and
+# docs/integrations/espn.md §1.7. Needs TestFlight confirmation against a
+# real ESPN account before shipping the flag on in production.
+FAN_API_BASE = "https://fan.api.espn.com/apis/v2/fans"
+
+
+def fan_leagues_url(swid: str) -> str:
+    return (
+        f"{FAN_API_BASE}/{urllib.parse.quote(canonical_swid(swid))}"
+        f"?showAirings=true&showFantasy=true"
+    )
+
+
+def fetch_fan_leagues(espn_s2: str, swid: str, timeout: int = 15,
+                      _opener=None) -> list[dict]:
+    """List every ESPN fantasy FOOTBALL league the signed-in fan belongs to.
+
+    Returns `[{"league_id", "league_name", "season", "team_name"}]`, newest
+    season first. Requires both cookies (this is inherently an
+    authenticated-fan lookup — there is no "public" fan profile). Raises
+    EspnAuthError on 401/403/404 (ESPN has no record for this SWID — the
+    same practical failure as a rejected/expired session from FTF's point of
+    view: paste/sign in again), EspnError(kind='parse') if the response
+    isn't JSON, EspnError(kind='input') if either cookie is missing.
+
+    UNVERIFIED SHAPE (2026-08-09): this fan-profile endpoint is not
+    documented by ESPN. The parse below (`_parse_fan_leagues`) follows the
+    best-known community-reverse-engineered shape — a top-level
+    `preferences` array, each entry's `metaData.entry` carrying `groups[]`
+    (one row per league/group the fan belongs to across ALL ESPN fantasy
+    games), filtered to football via `entry.abbrev == "ffl"` (the same game
+    slug FTF already uses at `apis/v3/games/ffl`, §1.1). This has NOT been
+    confirmed against a live account from this build session — flagged for
+    TestFlight verification (docs/feedback/items/espn-webview-escape/
+    status.md). If the real shape differs, `_parse_fan_leagues` degrades to
+    an empty/partial list rather than raising (never a 500) — see its
+    docstring.
+    """
+    if not espn_s2 or not swid:
+        raise EspnError("espn_s2 and swid are required", kind="input")
+
+    headers = dict(BROWSER_HEADERS)
+    headers["Cookie"] = (
+        f"espn_s2={canonical_espn_s2(espn_s2)}; SWID={canonical_swid(swid)}"
+    )
+    req = urllib.request.Request(fan_leagues_url(swid), headers=headers)
+    opener = _opener or urllib.request.urlopen
+
+    # obs.api_events — same cookie-SHAPE-only booleans as league_read (§6.1);
+    # the cookie values never reach an event in any form.
+    from . import api_observability as _api_obs
+    with _api_obs.observe_call(
+            "espn", "fan_profile", active=_opener is None,
+            auth_mode="cookie",
+            s2_encoded=("%" in espn_s2),
+            swid_braced=(swid.strip().startswith("{")
+                         and swid.strip().endswith("}")),
+    ) as _ob:
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+            _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403, 404):
+                # 404 here means "no fan record for this SWID" — from a
+                # captured/pasted cookie pair that should always resolve to
+                # a real fan, that's the same practical failure as a
+                # rejected/expired session.
+                raise EspnAuthError() from e
+            raise EspnError(f"ESPN fan API HTTP {e.code}", kind="http") from e
+
+        try:
+            data = json.loads(raw)
+        except ValueError as e:
+            raise EspnError("ESPN fan API returned non-JSON", kind="parse") from e
+
+    return _parse_fan_leagues(data)
+
+
+def _parse_fan_leagues(data) -> list[dict]:
+    """Defensive parse of the fan-profile payload — NEVER raises. An
+    unrecognized shape (or a shape that only partially matches) returns
+    whatever could be extracted, degrading toward an empty list rather than
+    guessing or fabricating a row. See fetch_fan_leagues's UNVERIFIED SHAPE
+    note — this is the one function that absorbs that risk."""
+    out: list[dict] = []
+    if not isinstance(data, dict):
+        return out
+    try:
+        for pref in data.get("preferences") or []:
+            if not isinstance(pref, dict):
+                continue
+            entry = ((pref.get("metaData") or {}).get("entry")) or {}
+            if not isinstance(entry, dict):
+                continue
+            # Fan profiles span every ESPN fantasy game (baseball, hockey,
+            # basketball, ...) — keep only football. A row with no `abbrev`
+            # at all is kept rather than dropped (better a possibly-wrong
+            # row surfaces than a real league silently vanishes).
+            abbrev = entry.get("abbrev")
+            if abbrev and abbrev != "ffl":
+                continue
+            groups = entry.get("groups")
+            if not isinstance(groups, list) or not groups:
+                continue
+            team_name = ((entry.get("entryMetadata") or {}).get("teamName")
+                         or entry.get("teamName") or "")
+            for g in groups:
+                if not isinstance(g, dict):
+                    continue
+                league_id = str(g.get("groupId") or "").strip()
+                if not league_id.isdigit():
+                    continue
+                season = _int_or_none(g.get("seasonId") or entry.get("seasonId"))
+                out.append({
+                    "league_id": league_id,
+                    "league_name": str(g.get("groupName") or "").strip()
+                                   or f"ESPN league {league_id}",
+                    "season": season,
+                    "team_name": str(team_name).strip() or None,
+                })
+    except Exception:
+        # Shape drift beyond what the checks above already tolerate — never
+        # let a fan-API surprise become a 500. Whatever was successfully
+        # extracted before the failure is still returned.
+        pass
+    out.sort(key=lambda r: r["season"] or 0, reverse=True)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Parse
 # ---------------------------------------------------------------------------
 

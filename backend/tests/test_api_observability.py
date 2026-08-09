@@ -222,6 +222,43 @@ def test_espn_auth_failure_cookie_shape_no_cookie_value(obs_env, monkeypatch):
     assert "AAAA-BBBB-CCCC" not in dumped
 
 
+def test_espn_fan_profile_call_redacted_and_props_correct(obs_env, monkeypatch):
+    # League-picker fan-profile lookup (2026-08-09, GET /api/espn/my-leagues,
+    # flag `espn.league_picker`) — the SAME cookie pair replayed against a
+    # SEPARATE host (fan.api.espn.com, not the league-read API). Same
+    # redaction posture, distinct endpoint class.
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _fake_urlopen({"preferences": []}))
+    espn_service.fetch_fan_leagues(S2_SECRET, "{AAAA-BBBB-CCCC}")
+    rows = _events(obs_env, "api_call")
+    assert len(rows) == 1
+    p = _props(rows[0])
+    assert p["service"] == "espn"
+    assert p["endpoint"] == "fan_profile"
+    assert p["ok"] is True
+    assert p["auth_mode"] == "cookie"
+    assert p["s2_encoded"] is True
+    assert p["swid_braced"] is True
+    dumped = json.dumps(rows)
+    assert S2_SECRET not in dumped
+    assert "AAAA-BBBB-CCCC" not in dumped
+
+
+def test_espn_fan_profile_auth_failure_recorded_and_redacted(obs_env, monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen", _http_error(401))
+    with pytest.raises(espn_service.EspnAuthError):
+        espn_service.fetch_fan_leagues(S2_SECRET, "{AAAA-BBBB-CCCC}")
+    rows = _events(obs_env, "api_call")
+    assert len(rows) == 1
+    p = _props(rows[0])
+    assert (p["service"], p["endpoint"]) == ("espn", "fan_profile")
+    assert p["ok"] is False
+    assert p["status"] == 401
+    assert p["error_kind"] == "auth"
+    dumped = json.dumps(rows)
+    assert S2_SECRET not in dumped
+
+
 def test_mfl_export_captured_with_host_and_type(obs_env, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen",
                         _fake_urlopen({"rosters": {"franchise": []}}))

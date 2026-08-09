@@ -24,9 +24,11 @@ plus every call site that imports it. Core module doc comment:
 
 ## 1. Endpoints used
 
-FTF calls exactly **one** ESPN host, for exactly **one** resource shape. There
-is no ESPN write path anywhere in the codebase (read-only integration, stated
-explicitly in the module docstring and in every route's docstring).
+FTF calls **two** ESPN hosts (as of 2026-08-09; one until then), for two
+resource shapes — the league-read API (§1.1) and, additively, a fan-profile
+lookup for league discovery (§1.7). There is no ESPN write path anywhere in
+the codebase (read-only integration, stated explicitly in the module
+docstring and in every route's docstring).
 
 ### 1.1 League read — the only ESPN endpoint
 
@@ -89,22 +91,78 @@ otherwise miss it, and because it fails-soft into ESPN-adjacent behavior (see
 | `/api/espn/link` | POST | `backend/server.py:18358` | `espn.link` |
 | `/api/espn/leagues` | GET | `backend/server.py:18510-18511` | `espn.link` |
 | `/api/espn/import` | POST | `backend/server.py:18536-18538` | `espn.link` |
+| `/api/espn/my-leagues` | GET | `backend/server.py` (`espn_my_leagues`, added 2026-08-09) | `espn.league_picker` |
 
-All three 404 (`{"error": "feature_disabled"}`) while `espn.link` is off.
-Both flags are currently **ON** in `config/features.json` (`espn.link: true`
-line 59, `espn.webview_capture: true` line 61).
+The first three 404 (`{"error": "feature_disabled"}`) while `espn.link` is
+off; `/api/espn/my-leagues` 404s the same way while `espn.league_picker` is
+off (independently of `espn.link`, though the picker is pointless without
+it — see §1.7). All three flags are **ON** in `config/features.json`
+(`espn.link: true` line 59, `espn.webview_capture: true` line 61,
+`espn.league_picker: true`).
 
 ### 1.6 Mobile client call sites (consume the routes in §1.5, never ESPN directly)
 
 | File | Role |
 |---|---|
-| `mobile/src/api/espn.ts` | Thin wrappers: `linkEspnLeague`, `getEspnLeagues`, `importEspnLeague` |
-| `mobile/src/components/EspnLinkSheet.tsx` | 3-step link UI (input → team pick → done); calls `linkEspnLeague` on Continue and on team-pick |
-| `mobile/src/screens/EspnConnectScreen.tsx` | In-app WebView to `https://www.espn.com/login` (line 35) — captures cookies from the **native store**, never calls any FTF or ESPN API itself |
+| `mobile/src/api/espn.ts` | Thin wrappers: `linkEspnLeague`, `getEspnLeagues`, `importEspnLeague`, `getMyEspnLeagues` (§1.7) |
+| `mobile/src/components/EspnLinkSheet.tsx` | 3-step link UI (input → team pick → done); calls `linkEspnLeague` on Continue and on team-pick. Step 1's league-id text field is replaced by a league-SELECTION list (`getMyEspnLeagues`, flag `espn.league_picker`) whenever the account's stored cookies resolve to ≥1 football league; manual entry stays one tap away |
+| `mobile/src/screens/EspnConnectScreen.tsx` | In-app WebView to `https://www.espn.com/login` (URL decision + cold-load fix: 2026-08-09, see the ESPN_LOGIN_URL comment) — captures cookies from the **native store**, never calls any FTF or ESPN API itself. One automatic warm-up reload after the first load completes, a manual reload control, and a wedge-detection hint (§ below) |
 | `mobile/src/utils/espnCookies.ts` | Pure cookie-store read/clear helpers backing the WebView screen |
 
-The mobile client never talks to `lm-api-reads.fantasy.espn.com` directly —
-all ESPN reads happen server-side.
+The mobile client never talks to `lm-api-reads.fantasy.espn.com` OR
+`fan.api.espn.com` directly — all ESPN reads happen server-side.
+
+### 1.7 Fan profile — league discovery (2026-08-09, flag `espn.league_picker`)
+
+A second ESPN host, added to answer the feedback "can't we fetch all their
+ESPN leagues and let them pick, instead of asking for a league ID?"
+
+| | |
+|---|---|
+| Host | `fan.api.espn.com` (**separate from** `lm-api-reads.fantasy.espn.com`, §1.1) |
+| Path | `/apis/v2/fans/{SWID}?showAirings=true&showFantasy=true` |
+| Method | `GET` |
+| URL builder | `backend/espn_service.py` (`fan_leagues_url`) |
+| Call function | `backend/espn_service.py` (`fetch_fan_leagues`) |
+| Route | `GET /api/espn/my-leagues` (`backend/server.py`, `espn_my_leagues`) — flag `espn.league_picker` |
+
+**Auth:** always cookie-mode — there is no "public" fan profile. Reads the
+session user's already-**stored** `espn_credentials` row (same
+`canonical_espn_s2`/`canonical_swid` normalizers, same decrypt path as every
+other espn.py route); this route never accepts pasted/POSTed cookies itself.
+A brand-new WebView capture that hasn't linked any league yet has NOTHING
+stored server-side (cookies only persist inside `espn_link`'s import path),
+so the mobile client's first attempt right after a capture will ordinarily
+403 — this is expected, not a bug, and the client falls back to the
+text-field flow silently. From the second link onward (or for an account
+that linked ESPN before), the stored credential is already there and this
+route works immediately.
+
+**UNVERIFIED response shape.** This endpoint is not documented by ESPN.
+Confirmed LIVE (2026-08-09): an unauthenticated request with a
+syntactically-valid but unknown SWID returns `404 {"message":"fan not
+found"}` — the host resolves and answers JSON, so this is a real endpoint,
+not a guess. The AUTHENTICATED shape for a real fan is unverified from any
+build session to date (no live cookies available, and the endpoint is
+essentially undocumented outside community reverse-engineering).
+`espn_service._parse_fan_leagues` follows the best-known shape — a
+top-level `preferences[]`, each entry's `metaData.entry` carrying `groups[]`
+(one row per league/group across ALL ESPN fantasy games), filtered to
+football via `entry.abbrev == "ffl"` (the same game slug used at
+`apis/v3/games/ffl`, §1.1) — and is written to **degrade to an
+empty/partial list on any shape mismatch, never raise**. Needs a TestFlight
+run against a real account to confirm or correct the parse
+(`docs/feedback/items/espn-webview-escape/status.md`).
+
+**Response (as parsed by FTF, not ESPN's raw shape):**
+`{"leagues": [{"league_id", "league_name", "season", "team_name"}]}`, newest
+season first. `[]` is a legitimate, honest answer (the account has no
+fantasy football leagues) — never fabricated.
+
+Errors: 404 `feature_disabled` (flag off) · 403 `espn_auth_required` (no
+stored ESPN session yet, or ESPN rejects the stored one — same code as the
+existing link-flow 403, same recovery UX: sign in again) · 503
+`espn_unconfigured` (stored cookie undecryptable).
 
 ---
 
@@ -455,3 +513,35 @@ detection of the OTP form field, never reads field values, DOM text, or the
 code itself. Any new instrumentation on this surface must preserve that
 invariant: the two cookies are the only data that ever leaves the WebView
 screen, and they go to `POST /api/espn/link`, never to analytics.
+
+The 2026-08-09 reload additions (automatic warm-up reload, manual reload
+control, wedge-detection hint) fire NO new analytics events — they're pure
+client-side WebView chrome with no server round-trip, so there's nothing to
+instrument at the `obs.api_events` layer; a future pass could add a client
+event for reload taps if the field-failure rate needs tracking, but none was
+specced for this iteration.
+
+### 6.7 `fetch_fan_leagues` (fan-profile lookup, §1.7)
+
+Same redaction posture as §6.1 — this is the SAME credential pair
+(`espn_s2`/`SWID`) replayed against a different host, so the rules don't
+change, only the endpoint class.
+
+**SAFE to log:** everything in §6.1's safe list except `league_id` (not
+meaningful here — this call discovers league ids, it doesn't take one) —
+`service`/`endpoint` (`"espn"`/`"fan_profile"`), latency, HTTP status,
+`auth_mode` (always `"cookie"`), the `s2_encoded`/`swid_braced` cookie-SHAPE
+booleans (same fingerprint as §6.1, still zero bytes of the credential
+itself), response size, `EspnError.kind` on failure. The COUNT of leagues
+returned would be a reasonable addition if a future pass wants adoption
+visibility (not currently in `OBS_EVENT_PROPS["api_call"]` — would need a
+taxonomy addition first, per `backend/analytics_taxonomy.py`'s own rule that
+new props are spec'd before they're sent).
+
+**MUST-REDACT:** identical to §6.1 — `espn_s2`/`SWID` values in any form, the
+full `Cookie` header, any `Set-Cookie` response header. Additionally: the
+PARSED league list itself (`league_name`, `team_name`) is end-user-authored
+ESPN display data — not logged by `observe_call` (which only ever sees the
+raw HTTP call, never the parsed return value), and no call site should start
+logging it either; a league/team NAME is exactly the same class of
+low-sensitivity-but-unnecessary data §6.1 already excludes for `fetch_league`.

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Linking } from 'react-native';
+import { View, Text, StyleSheet, Linking, Pressable } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
+import { Icon } from '../components/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
@@ -33,7 +34,49 @@ import { track } from '../api/events';
 // logged-in state. Both cookies land on the `.espn.com` PARENT domain
 // (domain-wide), so the plain www login host is fine — fantasy.espn.com
 // inherits the same pair, and readEspnCookies polls both hosts anyway.
+//
+// URL decision (field report, build 95, 2026-08-09): the operator reported
+// the WebView "didn't work" on first load and needed a second visit to
+// /login within the same browser session before it worked. Candidates
+// evaluated instead of this URL, from curl'ing each (redirect chains,
+// headers) plus checking what other cookie-based ESPN tools target:
+//   - fan.espn.com/espn/login — DNS SERVFAIL, the host does not resolve at
+//     all. Not a viable candidate, dead end.
+//   - fantasy.espn.com/football/ (unauth) — 404s directly; it is NOT a
+//     login redirect target, it's the fantasy home page. An unauth hit on
+//     a specific league path 302s to www.espn.com/fantasy/football/ (the
+//     signed-out fantasy landing), never to a full-page /login form — so
+//     there's no clean "hard login" entry point on this host either.
+//   - www.espn.com/login (current) — every curl against it (with or
+//     without a redirect query param) gets AWS WAF's JS challenge (202,
+//     x-amzn-waf-action: challenge, empty body) rather than a real
+//     redirect chain, confirming this is the CURRENT, edge-protected entry
+//     point ESPN serves — not a stale/legacy path (a legacy page wouldn't
+//     be sitting behind the same active WAF as everything else on
+//     espn.com). A bot-signature curl can't pass that challenge, so the
+//     iframe-bootstrap behavior itself can't be inspected from this
+//     session — a real WKWebView (which runs the challenge JS) is required,
+//     hence the TestFlight confirmation note below.
+// Conclusion: this is the right URL — the reported failure is a COLD-LOAD
+// bug in Disney OneID's iframe bootstrap, not a wrong destination. Grounding
+// (recovered browser evidence): in the operator's own successful Chrome
+// session, login ALSO only worked on the SECOND load of this exact URL
+// (loaded once, reloaded, then succeeded) — which lines up with this screen
+// deliberately clearing cookies/storage before every mount (clearEspnCookies
+// above), i.e. every capture attempt IS a cold load by construction. Fix:
+// keep this URL, and perform ONE automatic reload right after the first
+// load completes (mirrors what fixed it for the operator), plus a manual
+// RELOAD control and a wedge-detection hint as the resilience net for
+// whatever the automatic warm-up doesn't catch. NEEDS TestFlight
+// confirmation — this session cannot render a WKWebView to verify the
+// iframe bootstrap directly.
 const ESPN_LOGIN_URL = 'https://www.espn.com/login';
+
+// How long to wait, after a load that is NOT the automatic warm-up reload,
+// before assuming the page is wedged (no capture, no OTP step seen yet) and
+// surfacing the reload hint. One timer, checked once when it fires — no
+// state machine, no per-navigation resets.
+const WEDGE_HINT_TIMEOUT_MS = 10000;
 
 // Injected once per page load (guarded). OTP-STEP DETECTION ONLY. A
 // MutationObserver watches for the Disney SSO one-time-code input; when it
@@ -72,6 +115,11 @@ true;
 export default function EspnConnectScreen() {
   const navigation = useNavigation<any>();
   const [otpHint, setOtpHint] = useState(false);
+  // Wedge-detection hint (field report, build 95) — shown when a load
+  // finishes (past the one-time automatic warm-up reload) and nothing has
+  // progressed for WEDGE_HINT_TIMEOUT_MS. Purely a display flag; the actual
+  // decision logic is the single timer in onLoadEnd below.
+  const [wedgeHint, setWedgeHint] = useState(false);
   // Refs so the poll loop and the unmount handler read live values without
   // re-subscribing. `capturedRef` is the post-once guard (mirrors the
   // Sleeper screen's `capturedRef`); `unmountedRef` stops an in-flight
@@ -82,6 +130,49 @@ export default function EspnConnectScreen() {
   const sawOtpRef = useRef(false);
   const unmountedRef = useRef(false);
   const storeClearedRef = useRef(false);
+  // WebView imperative handle for the manual reload control + the one-time
+  // automatic warm-up reload (see ESPN_LOGIN_URL's URL-decision comment).
+  const webviewRef = useRef<WebView>(null);
+  // Guards the automatic warm-up reload to fire exactly ONCE per mount — a
+  // deterministic single reload, not a retry loop.
+  const autoReloadedRef = useRef(false);
+  const wedgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearWedgeTimer = useCallback(() => {
+    if (wedgeTimerRef.current) {
+      clearTimeout(wedgeTimerRef.current);
+      wedgeTimerRef.current = null;
+    }
+  }, []);
+
+  // One-time automatic warm-up reload + the wedge-hint timer. First load
+  // completing: silently reload once (the empirical fix — see the
+  // ESPN_LOGIN_URL comment) and wait for THAT load's onLoadEnd before
+  // arming anything else. Every load after the warm-up (including one
+  // triggered by the manual Reload control): arm a single wedge-hint timer
+  // that fires only if nothing has progressed by then.
+  const onLoadEnd = useCallback(() => {
+    if (unmountedRef.current) return;
+    if (!autoReloadedRef.current) {
+      autoReloadedRef.current = true;
+      webviewRef.current?.reload();
+      return;
+    }
+    clearWedgeTimer();
+    wedgeTimerRef.current = setTimeout(() => {
+      if (!unmountedRef.current && !capturedRef.current && !sawOtpRef.current) {
+        setWedgeHint(true);
+      }
+    }, WEDGE_HINT_TIMEOUT_MS);
+  }, [clearWedgeTimer]);
+
+  // Manual RELOAD control (resilience net regardless of the URL decision —
+  // one tap recovers a wedged page without leaving the screen).
+  const manualReload = useCallback(() => {
+    setWedgeHint(false);
+    clearWedgeTimer();
+    webviewRef.current?.reload();
+  }, [clearWedgeTimer]);
 
   // Deliver exactly once: read the native store, and if BOTH cookies are
   // present hand them to the sheet through the bus and pop back. The guards
@@ -108,13 +199,14 @@ export default function EspnConnectScreen() {
     track('espn_connect_opened', { source: 'link_sheet' }, 'EspnConnect');
     return () => {
       unmountedRef.current = true;
+      clearWedgeTimer();
       if (!capturedRef.current) {
         track('espn_connect_abandoned', { saw_otp: sawOtpRef.current }, 'EspnConnect');
         // Un-hide the sheet's Modal — it hid itself for the WebView push.
         deliverEspnCookies(null);
       }
     };
-  }, []);
+  }, [clearWedgeTimer]);
 
   // Fresh-login guarantee FIRST, then poll: clear any stale ESPN cookies,
   // and only once that settles start the 1s poll (login is an SPA/redirect
@@ -147,18 +239,36 @@ export default function EspnConnectScreen() {
     if (payload?.type === 'otp_step' && !sawOtpRef.current) {
       sawOtpRef.current = true;
       setOtpHint(true);
+      // Real progress — the wedge hint (if showing) no longer applies.
+      setWedgeHint(false);
+      clearWedgeTimer();
       track('espn_connect_otp_step', {}, 'EspnConnect');
     }
-  }, []);
+  }, [clearWedgeTimer]);
 
   return (
     <View style={styles.root}>
       <View style={styles.banner} testID="espn-connect.banner">
-        <Text style={type.bodySm}>
-          Log in to ESPN below. We never see your password — once you’re in,
-          we read the two cookies ESPN issues for your private league
-          (espn_s2 and SWID) so we can import it.
-        </Text>
+        <View style={styles.bannerTopRow}>
+          <Text style={[type.bodySm, styles.bannerTopText]}>
+            Log in to ESPN below. We never see your password — once you’re in,
+            we read the two cookies ESPN issues for your private league
+            (espn_s2 and SWID) so we can import it.
+          </Text>
+          {/* Always-visible resilience net (field report, build 95): one
+              tap recovers a wedged/blank ESPN login load, regardless of
+              whether the automatic warm-up reload already caught it. */}
+          <Pressable
+            testID="espn-connect.reload"
+            onPress={manualReload}
+            accessibilityRole="button"
+            accessibilityLabel="Reload the ESPN login page"
+            style={styles.reloadBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Icon name="reload" size={16} color={chalk.dim} />
+          </Pressable>
+        </View>
         <Text style={type.bodySm}>
           Those two cookies are stored encrypted and used only to read this
           league — read-only, we never post or change anything.{' '}
@@ -172,6 +282,13 @@ export default function EspnConnectScreen() {
             Learn more
           </Text>
         </Text>
+        {wedgeHint ? (
+          <View testID="espn-connect.wedge-hint" style={styles.otpHint}>
+            <Text style={[type.bodySm, styles.otpHintText]}>
+              Page didn’t load right? Tap the reload icon above.
+            </Text>
+          </View>
+        ) : null}
         {otpHint ? (
           <View testID="espn-connect.otp-hint" style={styles.otpHint}>
             <Text style={[type.bodySm, styles.otpHintText]}>
@@ -184,6 +301,8 @@ export default function EspnConnectScreen() {
 
       <WebView
         testID="espn-connect.webview"
+        ref={webviewRef}
+        onLoadEnd={onLoadEnd}
         source={{ uri: ESPN_LOGIN_URL }}
         injectedJavaScript={INJECTED_OTP_DETECT}
         // OTP detector must reach a Disney SSO iframe too — presence-only
@@ -231,6 +350,15 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
     gap: space.xs,
   },
+  bannerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+  },
+  bannerTopText: { flex: 1 },
+  // Icon-only tap target — hitSlop pads it to a 44pt effective target
+  // without inflating the visible glyph inside the banner's copy flow.
+  reloadBtn: { padding: space.xs },
   // Tappable disclosure link — ice = action color (Chalkline).
   learnMore: { color: ice.base },
   // Informational hint — flare is the informational-highlight accent

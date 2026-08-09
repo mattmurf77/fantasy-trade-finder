@@ -153,6 +153,19 @@ FLAG_KEYS: tuple[str, ...] = (
     # TestFlight build with the native cookie dependency validates against a
     # real private league (docs/plans/espn-connect-webview/scope.md).
     "espn.webview_capture",
+    # ESPN league linking — "my leagues" picker (2026-08-09, field feedback:
+    # "can't we fetch all their ESPN leagues and let them pick, instead of
+    # asking for a league ID?"). Gates GET /api/espn/my-leagues (fetches the
+    # session user's STORED ESPN cookies' fan profile, fan.api.espn.com,
+    # UNVERIFIED response shape — see espn_service.fetch_fan_leagues) AND the
+    # mobile league-SELECTION list in EspnLinkSheet that replaces the
+    # league-id text input once cookies are available. Manual league-id
+    # entry (public leagues need no login at all) stays the fallback path
+    # either way. Requires `espn.link` on to have any effect (same as
+    # `espn.webview_capture`). OFF ⇒ /api/espn/my-leagues 404s
+    # `feature_disabled` and the sheet's input step is byte-identical to
+    # today (text field only).
+    "espn.league_picker",
     # Multi-platform league linking Phase 1 — read-only import of MFL /
     # Fleaflicker leagues via their official public APIs
     # (docs/plans/multi-platform-linking-plan-2026-07-17.md). Each gates its

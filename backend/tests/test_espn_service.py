@@ -179,6 +179,129 @@ def test_fetch_non_json_raises_parse():
 
 
 # ---------------------------------------------------------------------------
+# 1b. fetch_fan_leagues / _parse_fan_leagues — league-picker fan-profile call
+# (2026-08-09, feedback: "fetch all their ESPN leagues and let them pick").
+# UNVERIFIED SHAPE — see espn_service.fetch_fan_leagues docstring +
+# docs/integrations/espn.md §1.7. These fixtures pin the best-known
+# community shape and the defensive-parse contract, not ESPN's real payload.
+# ---------------------------------------------------------------------------
+
+FAN_PAYLOAD = {
+    "preferences": [
+        {
+            "metaData": {
+                "entry": {
+                    "abbrev": "ffl",
+                    "entryMetadata": {"teamName": "The Dynasty Dominators"},
+                    "groups": [
+                        {"groupId": "987654321", "groupName": "Recorded Shape Dynasty",
+                         "seasonId": 2026},
+                        {"groupId": "111222333", "groupName": "Old League",
+                         "seasonId": 2024},
+                    ],
+                }
+            }
+        },
+        # A different game (ESPN fantasy baseball) — must be filtered out.
+        {
+            "metaData": {
+                "entry": {
+                    "abbrev": "flb",
+                    "groups": [{"groupId": "555", "groupName": "Baseball League",
+                               "seasonId": 2026}],
+                }
+            }
+        },
+    ]
+}
+
+
+def test_fetch_fan_leagues_happy_path_parses_and_sorts_newest_first():
+    captured = {}
+
+    def _opener(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["cookie"] = request.get_header("Cookie")
+        return _FakeResp(json.dumps(FAN_PAYLOAD))
+
+    out = es.fetch_fan_leagues("AEBencoded%2Fvalue", "{ABCD-1234}", _opener=_opener)
+    assert "fan.api.espn.com/apis/v2/fans/" in captured["url"]
+    assert captured["cookie"] == "espn_s2=AEBencoded%2Fvalue; SWID={ABCD-1234}"
+    assert [lg["league_id"] for lg in out] == ["987654321", "111222333"]
+    assert out[0]["season"] == 2026 and out[1]["season"] == 2024   # newest first
+    assert out[0]["league_name"] == "Recorded Shape Dynasty"
+    assert out[0]["team_name"] == "The Dynasty Dominators"
+    # The baseball ("flb") group must not leak into the football list.
+    assert "555" not in [lg["league_id"] for lg in out]
+
+
+def test_fetch_fan_leagues_reencodes_decoded_native_store_cookies():
+    # Same normalizer choke point as fetch_league — a native-store (decoded)
+    # espn_s2 must be re-encoded before it reaches the Cookie header.
+    captured = {}
+
+    def _opener(request, timeout=None):
+        captured["cookie"] = request.get_header("Cookie")
+        return _FakeResp(json.dumps({"preferences": []}))
+
+    es.fetch_fan_leagues("AEB+decoded/value=", "ABCD-1234", _opener=_opener)
+    assert captured["cookie"] == "espn_s2=AEB%2Bdecoded%2Fvalue%3D; SWID={ABCD-1234}"
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_fetch_fan_leagues_auth_failure_mapping(code):
+    with pytest.raises(es.EspnAuthError):
+        es.fetch_fan_leagues("s2value", "{SWID}", _opener=_opener_http_error(code))
+
+
+def test_fetch_fan_leagues_non_json_raises_parse():
+    def _opener(request, timeout=None):
+        return _FakeResp("<html>maintenance</html>")
+    with pytest.raises(es.EspnError) as ei:
+        es.fetch_fan_leagues("s2value", "{SWID}", _opener=_opener)
+    assert ei.value.kind == "parse"
+
+
+def test_fetch_fan_leagues_requires_both_cookies():
+    with pytest.raises(es.EspnError) as ei:
+        es.fetch_fan_leagues("", "{SWID}")
+    assert ei.value.kind == "input"
+    with pytest.raises(es.EspnError) as ei:
+        es.fetch_fan_leagues("s2value", "")
+    assert ei.value.kind == "input"
+
+
+def test_parse_fan_leagues_empty_account_returns_empty_list():
+    assert es._parse_fan_leagues({"preferences": []}) == []
+    assert es._parse_fan_leagues({}) == []
+
+
+@pytest.mark.parametrize("bad_shape", [
+    None, [], "not a dict",
+    {"preferences": "not a list"},
+    {"preferences": [{"metaData": "not a dict"}]},
+    {"preferences": [{"metaData": {"entry": {"abbrev": "ffl", "groups": "nope"}}}]},
+    {"preferences": [{"metaData": {"entry": {"abbrev": "ffl",
+                                              "groups": [{"groupId": "not-numeric"}]}}}]},
+])
+def test_parse_fan_leagues_shape_drift_never_raises(bad_shape):
+    # The defensive-parse contract: whatever ESPN's real shape turns out to
+    # be, a mismatch degrades to an empty/partial list, never an exception.
+    assert es._parse_fan_leagues(bad_shape) == []
+
+
+def test_parse_fan_leagues_entry_without_abbrev_is_kept():
+    # Missing `abbrev` entirely (vs. a non-"ffl" value) is kept rather than
+    # dropped — better a possibly-mislabeled row surfaces than a real league
+    # silently vanishes.
+    data = {"preferences": [{"metaData": {"entry": {
+        "groups": [{"groupId": "42", "groupName": "No Abbrev League", "seasonId": 2025}],
+    }}}]}
+    out = es._parse_fan_leagues(data)
+    assert [lg["league_id"] for lg in out] == ["42"]
+
+
+# ---------------------------------------------------------------------------
 # 2. parse_league — fixture shape
 # ---------------------------------------------------------------------------
 
