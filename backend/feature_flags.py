@@ -520,6 +520,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # no-league state), so an always-on tab always lands somewhere truthful.
     # The operator flips this by hand each year — it is not computed.
     "draft.tab",
+    # #257 — consolidate TradesHome's Controls Card (outlook row, trade-
+    # fairness slider, lane pills, target-players block) into TradeDnaSheet
+    # expanded to a full-height sheet (variant C: the three real questions —
+    # outlook, positions, specific players — at full weight, fairness + lane
+    # demoted to a dim "Fine tuning" strip below a hairline). Client-only: no
+    # route reads it. ON ⇒ TradesScreen drops the Controls Card, the legacy
+    # OutlookSheet entry point, and TradeDnaSheet's half-sheet DNA-only body
+    # in favor of the full sheet reached from OutlookBiasReceipt (the sole
+    # entry point); player mode keeps its on-screen TRADE AWAY/TRADE FOR
+    # board (the sheet does not absorb it). OFF (default) ⇒ TradesScreen.tsx
+    # and TradeDnaSheet.tsx render byte-identical to today.
+    "trades.edit_full_sheet",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

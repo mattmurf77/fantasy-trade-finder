@@ -39,6 +39,7 @@ import {
 } from '../api/league';
 import { getTradeValues } from '../api/calc';
 import { getLeagueRosters } from '../api/sleeper';
+import type { Player } from '../shared/types';
 
 // #246 — Trade DNA as a bottom sheet over the guided deck (approved mock
 // mockups/polish-lab-2026-08/acquire-landing-guided-first.html, frame B3).
@@ -54,6 +55,19 @@ import { getLeagueRosters } from '../api/sleeper';
 // untouchables management sheet remains reachable via the Manage link —
 // it renders as a second layer INSIDE this Modal (never a sibling Modal,
 // which iOS won't stack).
+//
+// #257 (flag trades.edit_full_sheet, variant C "Big three + one quiet
+// strip") — the optional `full` prop expands this same sheet into the
+// consolidated TradesHome edit sheet: the "tap all that apply ·
+// multi-select" header suffixes and the 3-sentence hint drop, Chasing/
+// Shopping become one "Positions" block, untouchables gain up to 2 name
+// chips (still the same Manage entry point), and two new sections appear
+// — "Specific players" (targeting chips, omitted in player mode, which
+// keeps its own on-screen board per operator decision Q4) and a demoted
+// "Fine tuning" strip (trade fairness + the #256 lane pills) below a
+// hairline. Omitting `full` entirely (flag off, or any other DNA-only
+// entry point) renders the exact legacy half-sheet body — that omission
+// is what keeps flag-off byte-identical.
 
 const DNA_POSITIONS = [
   { key: 'QB', label: 'QB', tid: 'qb' },
@@ -132,13 +146,38 @@ function DnaToggle({
   );
 }
 
+// #257 — the extra sections the full sheet needs beyond the DNA editor.
+// TradesScreen owns fairness/lane/targeting state; this component only
+// renders them and calls back. `onAnyChange` fires on any DNA edit
+// (outlook/chasing/shopping/untouchables) — the signal TradesScreen uses
+// to show its "Preferences changed" refresh strip on dismiss (fairness,
+// lane and targeting changes already reset or re-filter the deck
+// themselves, so they don't need that nudge).
+export interface TradeDnaSheetFullProps {
+  fairnessOn: boolean;
+  onToggleFairness: (next: boolean) => void;
+  deckHasLanes: boolean;
+  laneFilter: 'window' | 'value' | null;
+  onLaneFilter: (lane: 'window' | 'value') => void;
+  /** null in player mode — that mode keeps its board on-screen (Q4). */
+  targeting: {
+    pinnedGive: Player[];
+    pinnedReceive: Player[];
+    onAdd: (direction: 'trade_away' | 'acquire') => void;
+    onRemove: (id: string, direction: 'trade_away' | 'acquire') => void;
+  } | null;
+  onAnyChange?: () => void;
+}
+
 interface Props {
   visible: boolean;
   /** Pure dismiss — every edit already autosaved on tap (#236). */
   onClose: () => void;
+  /** #257 — present only under `trades.edit_full_sheet`; see file header. */
+  full?: TradeDnaSheetFullProps;
 }
 
-export default function TradeDnaSheet({ visible, onClose }: Props) {
+export default function TradeDnaSheet({ visible, onClose, full }: Props) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -182,10 +221,14 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
 
   // Resolve untouchable ids to names for the management layer — the same
   // shared ['calc-values', …] cache the hub and the deck's swap sheet use.
+  // #257 — also enabled whenever `full` is present (not just while the
+  // Manage layer is open): the full sheet's "Off the table" summary shows
+  // up to 2 name chips, so the names need to be ready before Manage is
+  // ever tapped.
   const untouchableNamesQuery = useQuery({
     queryKey: ['calc-values', '1qb_ppr'],
     queryFn: ({ signal }) => getTradeValues('1qb_ppr', signal),
-    enabled: untouchablesOpen,
+    enabled: untouchablesOpen || (!!full && untouchablesEnabled),
     staleTime: 5 * 60_000,
   });
   const untouchableRows = useMemo(() => {
@@ -206,6 +249,7 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
     mutationFn: (playerId: string) => setAssetPref(leagueId!, playerId, 'none'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['asset-prefs', leagueId] });
+      full?.onAnyChange?.();
     },
   });
 
@@ -256,6 +300,7 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
       setAssetPref(leagueId!, playerId, 'untouchable'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['asset-prefs', leagueId] });
+      full?.onAnyChange?.();
     },
   });
 
@@ -357,6 +402,7 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
     setDnaError(null);
     setDraftOutlook(key);
     queueDnaSave({ outlook: key, acquire: draftChasing, shed: draftShopping });
+    full?.onAnyChange?.();
   };
 
   // Multi-select within a row; cross-row mutual exclusion MOVES the
@@ -388,6 +434,7 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
       acquire: nextChasing,
       shed: nextShopping,
     });
+    full?.onAnyChange?.();
   };
 
   const handleDone = () => {
@@ -420,7 +467,7 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
         <View style={styles.grabber} />
         <View style={styles.sheetTop}>
           <Text style={type.heading} accessibilityRole="header">
-            Your Trade DNA
+            {full ? 'What are you after?' : 'Your Trade DNA'}
           </Text>
           <Pressable
             testID="dna.done"
@@ -472,77 +519,330 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
             })}
           </View>
 
-          <Text style={styles.dnaGroupHdr}>
-            Chasing — tap all that apply{' '}
-            <Text style={styles.dnaMs}>· multi-select</Text>
-          </Text>
-          <View style={styles.toggleRow}>
-            {DNA_POSITIONS.map((p) => (
-              <DnaToggle
-                key={`chase-${p.key}`}
-                label={p.label}
-                color={dnaPosColor(p.key)}
-                selected={draftChasing.includes(p.key)}
-                testID={`dna.chase.${p.tid}`}
-                accessibilityLabel={`Chase ${p.label}`}
-                onPress={() => toggleDnaPos('chase', p.key)}
-              />
-            ))}
-          </View>
+          {full ? (
+            <>
+              <Text style={styles.dnaGroupHdr}>Positions</Text>
+              <View style={styles.posLine}>
+                <View style={styles.posLbl}>
+                  <Text style={styles.posLblText}>Chasing</Text>
+                  <Text style={styles.posLblSub}>want more</Text>
+                </View>
+                <View style={styles.toggleRow}>
+                  {DNA_POSITIONS.map((p) => (
+                    <DnaToggle
+                      key={`chase-${p.key}`}
+                      label={p.label}
+                      color={dnaPosColor(p.key)}
+                      selected={draftChasing.includes(p.key)}
+                      testID={`dna.chase.${p.tid}`}
+                      accessibilityLabel={`Chase ${p.label}`}
+                      onPress={() => toggleDnaPos('chase', p.key)}
+                    />
+                  ))}
+                </View>
+              </View>
+              <View style={styles.posLine}>
+                <View style={styles.posLbl}>
+                  <Text style={styles.posLblText}>Shopping</Text>
+                  <Text style={styles.posLblSub}>happy to move</Text>
+                </View>
+                <View style={styles.toggleRow}>
+                  {DNA_POSITIONS.map((p) => (
+                    <DnaToggle
+                      key={`shop-${p.key}`}
+                      label={p.label}
+                      color={dnaPosColor(p.key)}
+                      selected={draftShopping.includes(p.key)}
+                      testID={`dna.shop.${p.tid}`}
+                      accessibilityLabel={`Shop ${p.label}`}
+                      onPress={() => toggleDnaPos('shop', p.key)}
+                    />
+                  ))}
+                </View>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.dnaGroupHdr}>
+                Chasing — tap all that apply{' '}
+                <Text style={styles.dnaMs}>· multi-select</Text>
+              </Text>
+              <View style={styles.toggleRow}>
+                {DNA_POSITIONS.map((p) => (
+                  <DnaToggle
+                    key={`chase-${p.key}`}
+                    label={p.label}
+                    color={dnaPosColor(p.key)}
+                    selected={draftChasing.includes(p.key)}
+                    testID={`dna.chase.${p.tid}`}
+                    accessibilityLabel={`Chase ${p.label}`}
+                    onPress={() => toggleDnaPos('chase', p.key)}
+                  />
+                ))}
+              </View>
 
-          <Text style={styles.dnaGroupHdr}>
-            Shopping — tap all that apply{' '}
-            <Text style={styles.dnaMs}>· multi-select</Text>
-          </Text>
-          <View style={styles.toggleRow}>
-            {DNA_POSITIONS.map((p) => (
-              <DnaToggle
-                key={`shop-${p.key}`}
-                label={p.label}
-                color={dnaPosColor(p.key)}
-                selected={draftShopping.includes(p.key)}
-                testID={`dna.shop.${p.tid}`}
-                accessibilityLabel={`Shop ${p.label}`}
-                onPress={() => toggleDnaPos('shop', p.key)}
-              />
-            ))}
-          </View>
+              <Text style={styles.dnaGroupHdr}>
+                Shopping — tap all that apply{' '}
+                <Text style={styles.dnaMs}>· multi-select</Text>
+              </Text>
+              <View style={styles.toggleRow}>
+                {DNA_POSITIONS.map((p) => (
+                  <DnaToggle
+                    key={`shop-${p.key}`}
+                    label={p.label}
+                    color={dnaPosColor(p.key)}
+                    selected={draftShopping.includes(p.key)}
+                    testID={`dna.shop.${p.tid}`}
+                    accessibilityLabel={`Shop ${p.label}`}
+                    onPress={() => toggleDnaPos('shop', p.key)}
+                  />
+                ))}
+              </View>
 
-          <Text style={styles.dnaHint}>
-            Pick as many per row as apply. A position can't be both chased
-            and shopped — tapping it on one row moves it there. Changes save
-            as you tap.
-          </Text>
+              <Text style={styles.dnaHint}>
+                Pick as many per row as apply. A position can't be both chased
+                and shopped — tapping it on one row moves it there. Changes save
+                as you tap.
+              </Text>
+            </>
+          )}
 
           {dnaError ? <Text style={styles.dnaErrorText}>{dnaError}</Text> : null}
 
+          {/* #257 — Specific players. Omitted in player mode (`targeting`
+              is null there) — that mode keeps its own on-screen TRADE
+              AWAY/TRADE FOR board (operator decision Q4). Opening the
+              picker closes this sheet first (setDnaSheetOpen(false) in
+              TradesScreen's onAdd) — iOS won't stack a second Modal over
+              this one — and TradesScreen reopens the sheet when the
+              picker closes. */}
+          {full?.targeting ? (
+            <>
+              <Text style={styles.dnaGroupHdr}>
+                Specific players <Text style={styles.dnaSub}>optional</Text>
+              </Text>
+              {full.targeting.pinnedGive.length > 0 ||
+              full.targeting.pinnedReceive.length > 0 ? (
+                <View style={styles.chipsWrap}>
+                  {full.targeting.pinnedGive.map((p) => (
+                    <Pressable
+                      key={`send-${p.id}`}
+                      testID={`dna.targets.chip.${p.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from trade-away targets`}
+                      onPress={() => full.targeting!.onRemove(p.id, 'trade_away')}
+                      style={({ pressed }) => [
+                        styles.targetChip,
+                        pressed && { backgroundColor: ink.ink3 },
+                      ]}
+                    >
+                      <Text style={styles.targetChipDir}>SEND</Text>
+                      <Text style={styles.targetChipName}>{p.name}</Text>
+                      <Icon name="x" size={12} color={chalk.dim} />
+                    </Pressable>
+                  ))}
+                  {full.targeting.pinnedReceive.map((p) => (
+                    <Pressable
+                      key={`get-${p.id}`}
+                      testID={`dna.targets.chip.${p.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from acquire targets`}
+                      onPress={() => full.targeting!.onRemove(p.id, 'acquire')}
+                      style={({ pressed }) => [
+                        styles.targetChip,
+                        pressed && { backgroundColor: ink.ink3 },
+                      ]}
+                    >
+                      <Text style={styles.targetChipDir}>GET</Text>
+                      <Text style={styles.targetChipName}>{p.name}</Text>
+                      <Icon name="x" size={12} color={chalk.dim} />
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+              <View style={styles.addRow}>
+                <Pressable
+                  testID="dna.targets.add-get"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add someone to get"
+                  onPress={() => full.targeting!.onAdd('acquire')}
+                  style={({ pressed }) => [
+                    styles.addBtn,
+                    pressed && { backgroundColor: ink.ink3 },
+                  ]}
+                >
+                  <Text style={styles.addBtnText}>+ Add someone to get</Text>
+                </Pressable>
+                <Pressable
+                  testID="dna.targets.add-send"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add someone to send"
+                  onPress={() => full.targeting!.onAdd('trade_away')}
+                  style={({ pressed }) => [
+                    styles.addBtn,
+                    pressed && { backgroundColor: ink.ink3 },
+                  ]}
+                >
+                  <Text style={styles.addBtnText}>+ Add someone to send</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+
           {/* #173 — count + Manage line; Manage opens the untouchables
-              management layer (inside this same Modal). */}
+              management layer (inside this same Modal). #257: the full
+              sheet upgrades this to up to 2 name chips + overflow count,
+              still the same Manage entry point. */}
           {untouchablesEnabled ? (
-            <View style={styles.untLine}>
-              <Text style={styles.sumKey}>Untouchables</Text>
-              <Text style={styles.untCount}>{untouchableCount}</Text>
-              <Text style={styles.untProtected}>protected</Text>
-              <Pressable
-                testID="finder-hub.dna.untouchables"
-                accessibilityRole="button"
-                accessibilityLabel={`Manage untouchables, ${untouchableCount}`}
-                onPress={() => {
-                  haptics.selection();
-                  setUntouchablesOpen(true);
-                }}
-                hitSlop={8}
-                style={{ marginLeft: 'auto' }}
-              >
-                {({ pressed }) => (
-                  <Text
-                    style={[styles.manageLink, pressed && { color: chalk.base }]}
+            full ? (
+              <>
+                <Text style={styles.dnaGroupHdr}>Off the table</Text>
+                <View style={styles.untLine}>
+                  {untouchableRows.slice(0, 2).map((row) => (
+                    <View key={row.id} style={styles.miniChip}>
+                      <View
+                        style={[
+                          styles.miniChipDot,
+                          { backgroundColor: dnaPosColor(row.position || '') },
+                        ]}
+                      />
+                      <Text style={styles.miniChipText} numberOfLines={1}>
+                        {row.name}
+                      </Text>
+                    </View>
+                  ))}
+                  {untouchableRows.length > 2 ? (
+                    <Text style={styles.untOverflow}>
+                      +{untouchableRows.length - 2}
+                    </Text>
+                  ) : null}
+                  {untouchableRows.length === 0 ? (
+                    <Text style={styles.untProtected}>None yet</Text>
+                  ) : null}
+                  <Pressable
+                    testID="finder-hub.dna.untouchables"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Manage untouchables, ${untouchableCount}`}
+                    onPress={() => {
+                      haptics.selection();
+                      setUntouchablesOpen(true);
+                    }}
+                    hitSlop={8}
+                    style={{ marginLeft: 'auto' }}
                   >
-                    Manage
-                  </Text>
-                )}
-              </Pressable>
-            </View>
+                    {({ pressed }) => (
+                      <Text
+                        style={[styles.manageLink, pressed && { color: chalk.base }]}
+                      >
+                        Manage
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <View style={styles.untLine}>
+                <Text style={styles.sumKey}>Untouchables</Text>
+                <Text style={styles.untCount}>{untouchableCount}</Text>
+                <Text style={styles.untProtected}>protected</Text>
+                <Pressable
+                  testID="finder-hub.dna.untouchables"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Manage untouchables, ${untouchableCount}`}
+                  onPress={() => {
+                    haptics.selection();
+                    setUntouchablesOpen(true);
+                  }}
+                  hitSlop={8}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  {({ pressed }) => (
+                    <Text
+                      style={[styles.manageLink, pressed && { color: chalk.base }]}
+                    >
+                      Manage
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            )
+          ) : null}
+
+          {/* #257 — "Fine tuning": both engine levers, demoted below a
+              hairline (variant C). Same slider/pill constructions and the
+              landed #256 lane wording — nothing new invented, just visual
+              weight moved down. */}
+          {full ? (
+            <>
+              <View style={styles.hairline} />
+              <Text style={[styles.dnaGroupHdr, styles.fineHdr]}>
+                Fine tuning
+              </Text>
+              <View style={styles.fineRow}>
+                <Text style={styles.fineLbl}>Trade fairness</Text>
+                <Pressable
+                  testID="dna.fine.fairness"
+                  onPress={() => full.onToggleFairness(!full.fairnessOn)}
+                  accessibilityRole="switch"
+                  accessibilityLabel="Trade fairness"
+                  accessibilityState={{ checked: full.fairnessOn }}
+                  style={styles.fairnessSliderTap}
+                  hitSlop={8}
+                >
+                  <View style={styles.fairnessTrack}>
+                    <View
+                      style={[
+                        styles.fairnessThumb,
+                        full.fairnessOn
+                          ? styles.fairnessThumbOn
+                          : styles.fairnessThumbOff,
+                      ]}
+                    />
+                  </View>
+                </Pressable>
+                <Text style={styles.fineCaption}>
+                  {full.fairnessOn ? 'Balanced trades' : 'Ranked by mismatch'}
+                </Text>
+              </View>
+              {full.deckHasLanes ? (
+                <View style={styles.fineRow}>
+                  <Text style={styles.fineLbl}>Focus</Text>
+                  <View style={styles.fineLaneRow}>
+                    {(
+                      [
+                        ['window', 'Team-fit moves'],
+                        ['value', 'Value moves'],
+                      ] as const
+                    ).map(([lane, label]) => {
+                      const active = full.laneFilter === lane;
+                      return (
+                        <Pressable
+                          key={lane}
+                          testID={`dna.fine.lane.${lane}`}
+                          onPress={() => full.onLaneFilter(lane)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          style={({ pressed }) => [
+                            styles.fineLanePill,
+                            active && styles.fineLanePillActive,
+                            pressed && { backgroundColor: ink.ink3 },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.fineLanePillText,
+                              active && styles.fineLanePillTextActive,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+            </>
           ) : null}
         </ScrollView>
       </View>
@@ -784,6 +1084,7 @@ const styles = StyleSheet.create({
   // Editor bits — lifted from the hub's #212 panel styles.
   dnaGroupHdr: { ...type.label, marginTop: 2 },
   dnaMs: { color: ice.base },
+  dnaSub: { color: chalk.faint, textTransform: 'none', fontWeight: '400' },
   outGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   outCard: {
     flexBasis: '48%',
@@ -840,6 +1141,102 @@ const styles = StyleSheet.create({
   untProtected: { ...type.bodySm, color: chalk.dim },
   manageLink: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   dnaEmpty: { ...type.bodySm, color: chalk.faint },
+  untOverflow: { ...type.bodySm, color: chalk.dim },
+
+  // #257 — full-sheet-only additions (variant C). Positions: a label +
+  // sublabel to the left of the same toggleRow, instead of a header line
+  // above it (mockups/polish-lab-2026-08/trades-edit-full-sheet.html).
+  posLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  posLbl: { width: 64, flex: 0 },
+  posLblText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  posLblSub: { ...type.bodySm, fontSize: 11, color: chalk.faint },
+
+  // Specific players — same chip/add-button construction as the Controls
+  // Card's targeting block, lifted here since that block is cut on this
+  // screen when the full sheet is on.
+  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  targetChip: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.sm,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink1,
+  },
+  targetChipDir: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: chalk.dim,
+  },
+  targetChipName: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  addRow: { flexDirection: 'row', gap: space.sm },
+  addBtn: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: ink.lineStrong,
+    borderRadius: radii.xs,
+  },
+  addBtnText: { ...type.bodySm, color: chalk.dim },
+
+  // Off the table — up to 2 name chips (mini position dot + name) ahead
+  // of the overflow count and Manage link, all sharing `untLine`.
+  miniChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink1,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    maxWidth: 120,
+  },
+  miniChipDot: { width: 6, height: 6, borderRadius: radii.xs },
+  miniChipText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+
+  // Fine tuning — trade fairness + lane, demoted below a hairline. Same
+  // slider construction TradesScreen's Controls Card used (4px ink-3
+  // track, 16px square ice thumb).
+  hairline: { height: 1, backgroundColor: ink.line, marginVertical: 2 },
+  fineHdr: { color: chalk.faint },
+  fineRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  fineLbl: { ...type.bodySm, width: 84, flex: 0, color: chalk.dim },
+  fineCaption: { ...type.bodySm, fontSize: 11, color: chalk.faint, flex: 1 },
+  fairnessSliderTap: { width: 56, height: 36, justifyContent: 'center' },
+  fairnessTrack: { height: 4, backgroundColor: ink.ink3 },
+  fairnessThumb: {
+    position: 'absolute',
+    top: -6,
+    width: 16,
+    height: 16,
+    borderRadius: radii.xs,
+  },
+  fairnessThumbOn: { right: 0, backgroundColor: ice.base },
+  fairnessThumbOff: { left: 0, backgroundColor: ink.lineStrong },
+  fineLaneRow: { flexDirection: 'row', gap: space.xs, flex: 1 },
+  fineLanePill: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink1,
+    paddingHorizontal: 4,
+  },
+  fineLanePillActive: { borderColor: ink.lineStrong, backgroundColor: ink.ink3 },
+  fineLanePillText: { ...type.bodySm, fontSize: 11, color: chalk.dim },
+  fineLanePillTextActive: { color: chalk.base, fontFamily: fonts.uiSemi },
 
   // Untouchables management layer list (shared row construction).
   pickerScroll: { flexGrow: 0, flexShrink: 1, marginTop: space.sm },
