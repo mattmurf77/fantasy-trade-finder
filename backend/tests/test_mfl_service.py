@@ -304,6 +304,37 @@ def test_clean_text_unescapes_entities_and_normalises_whitespace():
     assert mfl._clean_text("Plain Name") == "Plain Name"
 
 
+# ── #282 (reopens #258) — franchise name color/formatting markup, not entities ─
+# Real dirty strings captured from prod league 62846 (2026-08-09).
+
+def test_clean_text_strips_mfl_franchise_color_markup():
+    # f0001: nested <font color=...> spans plus a wrapping <b>, entity-encoded
+    # on the wire the same way any other '<'/'>' would be.
+    raw_entity_encoded = (
+        "&lt;b&gt;&lt;font color = Green&gt;Eir&lt;/font color&gt;"
+        "&lt;font color = White&gt;e Reb&lt;/font color&gt;"
+        "&lt;font color = Orange&gt;els&lt;/font color&gt;&lt;/b&gt;"
+    )
+    assert mfl._clean_text(raw_entity_encoded) == "Eire Rebels"
+
+    # Already-literal form (what old-cleaner rows have stored today, since
+    # #210's entity-decode ran but nothing stripped the markup underneath).
+    already_decoded = (
+        "<b><font color = Green>Eir</font color><font color = White>"
+        "e Reb</font color><font color = Orange>els</font color></b>"
+    )
+    assert mfl._clean_text(already_decoded) == "Eire Rebels"
+
+    # f0012: malformed markup — no closing </font>, only a trailing </b>.
+    assert (
+        mfl._clean_text("<b><font color= Green>North London Rams</b>")
+        == "North London Rams"
+    )
+
+    # Plain names (the majority) must be untouched.
+    assert mfl._clean_text("Dungourney Ducks") == "Dungourney Ducks"
+
+
 def test_parse_bundle_cleans_entity_laden_names():
     # The operator's Dependables case: MFL serving '&#201;ire Rebels'.
     raw = {
