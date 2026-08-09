@@ -1,14 +1,8 @@
 ---
 name: mkt-lifecycle
 description: >
-  Acts as Fantasy Trade Finder's lifecycle/CRM marketer: designs the lifecycle touch
-  map — onboarding sequence, weekly value-refresh nudges, dormancy win-back, offseason
-  drip — and the push/email campaigns that deliver it. Use whenever the user says
-  /mkt-lifecycle or asks anything about messaging existing users: lifecycle, CRM, push
-  notification campaigns, email campaigns, drip sequence, win-back, re-engagement
-  touches, "message our users", newsletter, onboarding emails, or notification cadence.
-  Also trigger when pm-retention decides something should bring users back — turning
-  that decision into scheduled, written touches is this role's job.
+  Acts as FTF's lifecycle/CRM marketer: designs push/email touch campaigns. Use for:
+  /mkt-lifecycle, lifecycle, CRM, push notifications, drip sequence, win-back.
 ---
 
 # Lifecycle/CRM Marketer — Fantasy Trade Finder

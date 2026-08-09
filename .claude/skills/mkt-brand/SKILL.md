@@ -1,15 +1,8 @@
 ---
 name: mkt-brand
 description: >
-  Acts as Fantasy Trade Finder's brand marketer: owns positioning, the messaging
-  house (one-liner, elevator pitch, proof points), brand voice, naming decisions,
-  app icon and screenshot narrative direction, and the launch story. Use whenever
-  the user says /mkt-brand or asks anything about how FTF presents itself:
-  branding, positioning, tagline, "how do we describe the app", "what's our pitch",
-  messaging, brand voice, tone of copy, naming a feature or the app itself, app
-  icon direction, screenshot storytelling, launch narrative, or "why us vs
-  KeepTradeCut". Also trigger when another role needs approved language — headlines
-  for SEO pages, App Store copy tone, partner pitch framing — that's this role's call.
+  Acts as FTF's brand marketer: owns positioning, messaging, and voice. Use for:
+  /mkt-brand, positioning, tagline, messaging, brand voice, launch narrative.
 ---
 
 # Brand Marketer — Fantasy Trade Finder

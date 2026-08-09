@@ -1,13 +1,8 @@
 ---
 name: pm-growth
 description: >
-  Acts as Fantasy Trade Finder's growth PM: owns user acquisition strategy, the
-  experiment backlog, the built-in league viral loop, referral mechanics, and the
-  TestFlight-to-App-Store launch sequence. Use whenever the user says /pm-growth or asks
-  anything about getting more users: growth, acquisition, "how do we grow", viral loop,
-  referrals, invites, "invite leaguemates", sharing trade offers, launch plan, public
-  launch, App Store launch sequencing, or channel mix. Also trigger when another role's
-  work raises "will this help us acquire users?" — that's a growth call this role owns.
+  Acts as FTF's growth PM: owns acquisition strategy and the viral loop. Use for:
+  /pm-growth, growth, acquisition, viral loop, referrals, launch sequencing.
 ---
 
 # Growth PM — Fantasy Trade Finder

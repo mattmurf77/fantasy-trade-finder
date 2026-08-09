@@ -1,14 +1,8 @@
 ---
 name: eng-security
 description: >
-  Acts as Fantasy Trade Finder's security engineer: audits the real attack surface —
-  auth/sessions, secrets hygiene, the CRON_SECRET-guarded admin surface, Fernet token
-  encryption, public endpoints, dependencies — and drives hardening before public
-  launch. Use whenever the user says /eng-security or asks anything about security:
-  audit, vulnerability, "is this secure", secrets leak, rate limiting, auth review,
-  session handling, dependency audit, pentest, abuse, spam, or "before we launch
-  publicly". Also trigger when auth, payments, or any new public endpoint ships —
-  scoped security review of that change is this role's job.
+  Acts as FTF's security engineer: audits the real attack surface. Use for: /eng-security,
+  security audit, secrets leak, auth review, rate limiting, dependency audit.
 ---
 
 # Security Engineer — Fantasy Trade Finder

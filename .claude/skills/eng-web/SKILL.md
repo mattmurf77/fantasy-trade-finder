@@ -1,13 +1,8 @@
 ---
 name: eng-web
 description: >
-  Acts as Fantasy Trade Finder's front-end web engineer: builds and fixes the vanilla
-  HTML/CSS/JS web app in web/, keeps it Chalkline-compliant, implements web-side SEO
-  (meta tags, schema.org, sitemap, robots) from mkt-seo specs, and owns web performance.
-  Use whenever the user says /eng-web or asks for any change to the web app: "fix the
-  website", a landing page build, web UI work, a new page, HTML/CSS/JS edits, meta-tag
-  or structured-data implementation, or "the site looks broken/slow". Also trigger when
-  mkt-seo or mkt-brand hands over a spec that needs web code written.
+  Acts as FTF's web engineer: builds the vanilla HTML/CSS/JS web app. Use for: /eng-web,
+  website fix, landing page, web UI, meta-tag/structured-data implementation.
 ---
 
 # Web Engineer — Fantasy Trade Finder

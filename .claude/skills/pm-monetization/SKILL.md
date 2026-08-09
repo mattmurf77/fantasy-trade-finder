@@ -1,14 +1,8 @@
 ---
 name: pm-monetization
 description: >
-  Acts as Fantasy Trade Finder's monetization PM: designs and iterates the revenue
-  model — subscription tiers, pricing, paywall placement, free-vs-premium packaging,
-  ads strategy — and specs purchase/entitlement work for engineering. Use whenever the
-  user says /pm-monetization or asks anything about making money from the app:
-  subscriptions, pricing, "what should we charge", paywalls, premium features, free-tier
-  limits, ads/AdMob, IAP/StoreKit/RevenueCat, conversion to paid, or "subs vs ads".
-  Also trigger when other work raises "should this feature be paid?" — that's a
-  packaging decision this role owns.
+  Acts as FTF's monetization PM: designs the revenue model and pricing. Use for:
+  /pm-monetization, subscriptions, pricing, paywalls, premium features, IAP/StoreKit.
 ---
 
 # Monetization PM — Fantasy Trade Finder

@@ -1,6 +1,93 @@
 # Data Dictionary
 
+*Jump via the TOC — read sections, not the file.*
+
 Source of truth: `backend/database.py`. Keep this file in sync when adding/changing tables or columns. DB: SQLite at `data/trade_finder.db` (overridable via `DATABASE_URL`). All tables defined as SQLAlchemy Core (`metadata`).
+
+
+## Table of Contents
+
+**Core / Users / Auth**
+
+- [`users`](#users)
+- [`leagues`](#leagues)
+- [`league_members`](#league_members)
+- [`accounts`](#accounts)
+- [`linked_identities`](#linked_identities)
+- [`sessions`](#sessions)
+- [`identity_links`](#identity_links)
+- [`device_tokens`](#device_tokens)
+- [`sleeper_credentials`](#sleeper_credentials)
+- [`espn_credentials`](#espn_credentials)
+- [`mfl_credentials`](#mfl_credentials)
+
+**Ranking / Boards**
+
+- [`member_rankings`](#member_rankings)
+- [`user_taste`](#user_taste)
+- [`archetype_auditions`](#archetype_auditions)
+- [`user_player_skips`](#user_player_skips)
+- [`elo_history`](#elo_history)
+- [`asset_preferences`](#asset_preferences)
+- [`player_value_history`](#player_value_history)
+- [`rank_sets`](#rank_sets)
+- [`rank_set_entries`](#rank_set_entries)
+- [`rank_set_adoptions`](#rank_set_adoptions)
+- [`accuracy_scores`](#accuracy_scores)
+
+**Trades / Deck**
+
+- [`swipe_decisions`](#swipe_decisions)
+- [`trade_decisions`](#trade_decisions)
+- [`trade_block`](#trade_block)
+- [`sleeper_trades`](#sleeper_trades)
+- [`trade_matches`](#trade_matches)
+- [`trade_impressions`](#trade_impressions)
+- [`deck_impressions`](#deck_impressions)
+- [`deck_outcomes`](#deck_outcomes)
+- [`deck_suppressions`](#deck_suppressions)
+- [`deck_fatigue_resets`](#deck_fatigue_resets)
+- [`deck_replenish_log`](#deck_replenish_log)
+- [`bad_trade_flags`](#bad_trade_flags)
+
+**Players / Drafts / Picks**
+
+- [`players`](#players)
+- [`league_preferences`](#league_preferences)
+- [`draft_picks`](#draft_picks)
+  - [The containment rule (W3 M-A, ADR-010) — read this before adding a reader](#the-containment-rule-w3-m-a-adr-010-read-this-before-adding-a-reader)
+- [`recorded_picks`](#recorded_picks)
+- [`mock_drafts`](#mock_drafts)
+
+**Feedback / Ops**
+
+- [`notifications`](#notifications)
+- [`notification_prefs`](#notification_prefs)
+- [`notification_events_log`](#notification_events_log)
+- [`notification_queue`](#notification_queue)
+- [`app_feedback`](#app_feedback)
+
+**Analytics / Experiments**
+
+- [`model_config`](#model_config)
+- [`wrapped_events` — **FROZEN (analytics P0 cutover)**](#wrapped_events-frozen-analytics-p0-cutover)
+- [`user_events`](#user_events)
+- [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
+  - [`experiment_layers`](#experiment_layers)
+  - [`experiments`](#experiments)
+  - [`experiment_assignments`](#experiment_assignments)
+  - [`experiment_transitions`](#experiment_transitions)
+  - [`experiment_metric_snapshots`](#experiment_metric_snapshots)
+  - [`analytics_segments`](#analytics_segments)
+
+**Monetization / Sharing**
+
+- [Monetization platform foundation](#monetization-platform-foundation)
+- [`entitlements`](#entitlements)
+- [`subscription_events`](#subscription_events)
+- [`referrals`](#referrals)
+- [`affiliate_clicks`](#affiliate_clicks)
+- [`shared_packages`](#shared_packages)
 
 ---
 

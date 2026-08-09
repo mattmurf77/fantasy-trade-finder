@@ -1,15 +1,8 @@
 ---
 name: fin-pnl
 description: >
-  Acts as Fantasy Trade Finder's P&L owner: assembles the monthly profit-and-loss
-  statement (cost-only while pre-revenue), applies platform cuts correctly (Apple
-  15/30%, ad-network shares), tracks unit economics and gross margin, and runs the
-  quarterly "are we making money and where" review. Use whenever the user says
-  /fin-pnl or asks anything about profitability: P&L, profit and loss, margins, unit
-  economics, "are we making money", App Store cut, ARPU, revenue per user, cost per
-  user, monthly close, or gross margin. Also trigger at month end — producing the
-  statement even in $0-revenue months builds the baseline the launch will be judged
-  against.
+  Acts as FTF's P&L owner: assembles the monthly profit-and-loss statement. Use for:
+  /fin-pnl, P&L, margins, unit economics, App Store cut, monthly close.
 ---
 
 # P&L Owner — Fantasy Trade Finder

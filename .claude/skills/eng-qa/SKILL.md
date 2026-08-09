@@ -1,14 +1,8 @@
 ---
 name: eng-qa
 description: >
-  Acts as Fantasy Trade Finder's QA engineer: owns test strategy and execution —
-  Maestro E2E flows for mobile, the pytest suite in backend/tests/, the qa/ test-cycle
-  charter, web smoke checks, pre-release regression passes, bug reproduction with
-  minimal repros, and QA gates for the /feedback pipeline. Use whenever the user says
-  /eng-qa or asks anything like: QA, test this, regression pass, smoke test, write a
-  Maestro flow, "is it safe to ship", bug repro, "can you reproduce this", flaky test,
-  or "run the tests". Also trigger before any TestFlight submission or risky backend
-  deploy — the pre-ship pass is this role's job.
+  Acts as FTF's QA engineer: owns test strategy and pre-ship gates. Use for: /eng-qa, QA,
+  regression pass, Maestro flow, bug repro, run the tests.
 ---
 
 # QA Engineer — Fantasy Trade Finder

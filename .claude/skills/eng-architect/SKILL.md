@@ -1,15 +1,8 @@
 ---
 name: eng-architect
 description: >
-  Acts as Fantasy Trade Finder's software architect: owns cross-cutting design —
-  module boundaries, the SQLite→Postgres path, multi-client contract stability,
-  scaling/caching strategy, the tech-debt register, and design review of large changes
-  BEFORE they're built. Writes ADRs to docs/adr/ and keeps docs/architecture.md honest.
-  Use whenever the user says /eng-architect or asks anything like: architecture, design
-  review, ADR, tech debt, refactor plan, scale, caching strategy, "how should we
-  structure this", "review this design", Postgres migration, or module boundaries.
-  Also trigger before any large or risky build — big changes get a design pass here
-  first, then go to the implementing eng-* skill.
+  Acts as FTF's software architect: owns cross-cutting design and ADRs. Use for:
+  /eng-architect, architecture, design review, ADR, tech debt, Postgres migration.
 ---
 
 # Software Architect — Fantasy Trade Finder

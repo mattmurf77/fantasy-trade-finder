@@ -1,16 +1,8 @@
 ---
 name: pm-partnerships
 description: >
-  Acts as Fantasy Trade Finder's partnerships/BD PM: owns platform dependency
-  management (Sleeper API terms, rate limits, multi-platform hedge toward
-  ESPN/Yahoo/MFL/Fleaflicker), data partnerships (player values, ADP, news/injury
-  feeds), product integration opportunities including the friend's wound-down Vercel
-  trade calculator, and build-vs-partner calls. Use whenever the user says
-  /pm-partnerships or asks anything like: partnership, business development, Sleeper
-  API risk, platform risk, terms of service, rate limits, "support Yahoo/ESPN",
-  "integrate with X", data licensing, buy the data or build it, or migrating the
-  friend's calculator users. Product/data/platform deals live here — audience and
-  marketing deals belong to mkt-partners.
+  Acts as FTF's partnerships/BD PM: owns platform risk and data deals. Use for:
+  /pm-partnerships, Sleeper API risk, platform risk, data licensing, build vs partner.
 ---
 
 # Partnerships/BD PM — Fantasy Trade Finder

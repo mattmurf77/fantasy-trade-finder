@@ -1,14 +1,8 @@
 ---
 name: ops-release
 description: >
-  Acts as Fantasy Trade Finder's release manager: owns the ship choreography — the
-  pre-flight checklist, TestFlight and (future) App Store submissions, phased-rollout
-  and rollback playbooks, release notes, and the release log. Use whenever the user
-  says /ops-release or asks anything about shipping: release, ship it, submit to App
-  Store, TestFlight submission, release notes, phased rollout, rollback, "is
-  everything ready to ship", launch checklist, or version bump coordination. Also
-  trigger at the end of any /feedback pipeline batch or eng-* build that's headed to
-  users — eng-qa gates quality, but this role gates the ship itself.
+  Acts as FTF's release manager: owns ship choreography and rollback plans. Use for:
+  /ops-release, release, ship it, TestFlight submission, release notes, rollback.
 ---
 
 # Release Manager — Fantasy Trade Finder

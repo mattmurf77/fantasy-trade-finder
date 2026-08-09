@@ -45,3 +45,28 @@ never in here.
 Work before this convention (items ≤ #63) lives in
 `docs/plans/feedback-batch-2/`, `feedback-batch-3/`, and `feedback-batch-4/`.
 Those folders stay as-is; don't migrate them.
+
+## Status line format
+
+To keep [INDEX.md](INDEX.md) generatable by reading only the first ~15 lines
+of each folder's `status.md`, every **new or updated** `status.md` must open
+with a status line as its first non-title line:
+
+```
+**Status:** <shipped|built-dark|in-progress|mockup-only|research-only|open|declined> · YYYY-MM-DD · <branch/PR/flag>
+```
+
+- Exactly one status token from the enum above.
+- Date is the date that status became true (build date, ship date, decision
+  date) — not the file's last-edit date if they differ.
+- Last field is whatever locates the work: a branch name, a PR number, a
+  flag key, or `n/a` if none applies.
+
+**INDEX.md must be updated in the same session** as any status.md change —
+new item, status flip, merge confirmed, flag flipped. A stale INDEX.md
+defeats the whole point of Phase-0 reading it instead of the folders.
+
+This format applies going forward only. The ~105 existing `status.md` files
+predate it and are **not** being rewritten — their prose stays as history.
+`INDEX.md`'s rows for those items were derived by reading their existing
+(non-conforming) first lines, not by requiring this format retroactively.

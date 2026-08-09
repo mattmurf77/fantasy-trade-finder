@@ -8,11 +8,35 @@
 
 ---
 
-## Table of Contents
-- [2026-05-21](#2026-05-21)
-- [2026-07-04](#2026-07-04) — G-011 PlayerCard gesture-swallow, G-012 iOS version source
-- [2026-08-08](#2026-08-08) — G-013 through G-023, recorded retroactively
-- [Gotcha Template](#gotcha-template)
+<!-- GOTCHAS-INDEX:START -->
+| ID | Symptom | Area |
+|---|---|---|
+| G-023 | Fixing a feedback item already fixed weeks ago | Feedback / process |
+| G-022 | Worktree agents drift, duplicate edits, blow up EAS archive | Mobile / worktrees / EAS |
+| G-021 | Native header back chevron renders but does nothing | Mobile / navigation |
+| G-020 | Local build silently talks to prod API | Mobile / iOS build |
+| G-019 | Experiment assignments wrong after setting the salt late | Backend / experiments |
+| G-018 | Render env var added, never reaches the process | Infra / Render |
+| G-017 | Analytics looked wired but zero rows landed | Backend / analytics |
+| G-016 | Flag or targeting attribute registered but inert | Backend / feature flags |
+| G-015 | Draft picks vanish with no error anywhere | Backend / draft picks |
+| G-014 | Numeric league id misrouted to Sleeper-only code | Backend / platform routing |
+| G-013 | iOS capability absent despite correct app.json config | Mobile / iOS native |
+| G-012 | TestFlight build ships with wrong marketing version | Mobile / iOS build |
+| G-011 | Wrapper's tap or long-press handler never fires | Mobile / PlayerCard |
+| G-010 | Extension DOM-scraping breaks after a Sleeper UI change | Extension |
+| G-009 | `/api/debug/log` returns empty after a restart | Backend / logging |
+| G-008 | Recently added player missing from the picker | Backend / player cache |
+| G-007 | Feature flag works on web but not mobile | Cross-client / feature flags |
+| G-006 | Sleeper username lookup shows the wrong casing | Backend / auth |
+| G-005 | KeyError or type error joining player data | Backend / data types |
+| G-004 | `None` errors iterating `roster.players` | Backend / Sleeper API |
+| G-003 | A player defaults to Elo 1500 unexpectedly | Backend / data seeding |
+| G-002 | DB writes via CLI appear nowhere in the app | Backend / database |
+| G-001 | Flask hangs or errors cryptically on start | Local dev / macOS |
+<!-- GOTCHAS-INDEX:END -->
+
+Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
 

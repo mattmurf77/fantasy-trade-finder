@@ -892,6 +892,16 @@ export default function LeagueSummaryScreen() {
                     <Text style={styles.legendLabel}>{`${otherLabel} rank`}</Text>
                   </View>
                 ) : null}
+                {/* #260 — the delta-chip encoding key (▲/▼N above a bar =
+                    that team's rank swing between the two boards, shown
+                    only once the swing is ≥2 spots — same threshold the
+                    chip itself uses). */}
+                {ticksOn ? (
+                  <View style={styles.legendItem}>
+                    <Text style={styles.legendDeltaGlyph}>{'▲▼N'}</Text>
+                    <Text style={styles.legendLabel}>{`rank swing ≥2 vs ${otherLabel}`}</Text>
+                  </View>
+                ) : null}
               </View>
             </>
           )}
@@ -1710,6 +1720,9 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   legendSwatch: { width: 9, height: 9, borderRadius: radii.xs },
   legendLabel: { ...type.bodySm, color: chalk.dim },
+  // #260 — glyph stand-in for the delta chip's swatch (no single fill color
+  // since the live chip is pos/neg-tinted; the legend entry stays neutral).
+  legendDeltaGlyph: { ...type.data, fontSize: 9, fontWeight: '700', color: chalk.dim },
 
   // Ranked team list (chart unfocused).
   list: { gap: 2 },

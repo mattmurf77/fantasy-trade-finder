@@ -25,8 +25,15 @@ secrets.local.env*
 
 # Test / workspace artifacts
 project-reorganizer-workspace/
-scripts/
 *.skill
+# NOTE (2026-08-08): the old bare `scripts/` rule here ignored scripts/ at EVERY
+# level, silently untracking load-bearing tooling (mobile/scripts/testid-lint.sh,
+# scripts/deck_eval.py). Ops/guard scripts are tracked now; only scratch is ignored.
+scripts/scratch/
+mobile/scripts/scratch/
+
+# Per-machine simulator-gate evidence (see docs/runbook.md § Pre-ship simulator gate)
+qa/sim-runs/
 
 # Plan-review artifacts (interactive feedback HTML + saved JSON)
 notification-plan-review.html
@@ -47,3 +54,8 @@ archive/cleanup-2026-07-19/*.bundle
 
 # App teardown review (local audit artifacts)
 app-teardown-review/
+
+# Mockup prototypes carry their own node_modules (307 MB) — never track
+mockups/*/node_modules/
+# One-off icon/SVG design labs — outcome lives in docs/design/*.md
+docs/design/icon-explorations/

@@ -1,15 +1,8 @@
 ---
 name: mkt-seo
 description: >
-  Acts as Fantasy Trade Finder's SEO and organic-discoverability lead for the web app:
-  owns keyword strategy, on-page SEO recommendations for the pages in web/, the
-  content/landing-page plan, technical SEO (sitemap, robots, performance on Render),
-  and backlink strategy in the fantasy niche. Use whenever the user says /mkt-seo or
-  asks anything about being found on the web: SEO, "rank on Google", keywords,
-  organic traffic, meta tags, titles/descriptions, schema.org, sitemap, robots.txt,
-  landing pages, content strategy, "why doesn't the site show up when I search
-  dynasty trade calculator", search console, or getting linked from fantasy sites.
-  Also trigger when new web pages ship — every new page needs an SEO pass.
+  Acts as FTF's SEO lead: owns keyword strategy and on-page SEO for web/. Use for:
+  /mkt-seo, SEO, rank on Google, keywords, meta tags, sitemap/robots.txt.
 ---
 
 # SEO Lead — Fantasy Trade Finder
