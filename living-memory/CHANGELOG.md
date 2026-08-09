@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-09 (feedback wave 3: validation follow-ups, tier labels app-wide, sheet targeting)
+
+- **#277/#278/#280/#281 (fable deep pass):** tier labels replace per-player numerics on every surface (28 files) — swap sheet, eveners, share image, league-summary drill-in, free agents, draft rows, rank boards; additive `tier` on /api/trade/evaluate eveners, /api/league/power-rankings, /api/league/free-agents (canonical band-walk, never derived from transformed value). Totals/deltas/FAAB stay numeric. Enumeration table: `docs/feedback/items/277-tier-labels-appwide/status.md`. League-summary key deduped (below-graph only, one line lower).
+- **#273/#274/#275 (PickAssignment):** future seasons show round-ordinal pick labels with NO order UI (order is one whole-board setting server-side — the slot numbers were fiction); owner sheet sizes to all teams; sheet closes on tap (save in flight, CAS prompt intact).
+- **#269/#276:** team targeting + league picker (reused LeagueSwitcherSheet) inside the edit sheet, Team/Player mode tabs removed — flag `trades.sheet_targeting` ON, flag-off byte-identical, downstream generate machinery untouched (only the opponent source changed). Scroll-to-generated-trade + TradeCard spacing tightened (unflagged, spacing-only).
+- **Mockup lab (#270/#272/#279):** `mockups/polish-lab-2026-08/trades-home-inline.html` — 4 inline-spectrum variants (minimal pill strip → calculator-style canvas → maximal inline → accordion) + team/positional pick-equivalent frame; rec: minimal now, calculator-style needs a scope decision.
+- **#271 answered:** solo-ranked leagues DO apply the user's board (user_gain_epsilon + junk-filler gates); divergence discovery needs a second ranked member. **#282 (MFL color markup, reopens #258) built but held for operator sign-off** — fix strips `<font color>`-style markup in `_clean_text`; branch `worktree-agent-a1dbc63e607fd3721` @ `e1144ca`, unmerged pending approval of prod-name fixtures in the commit.
+- Gates: 2059 passed / 1 skipped; tsc clean; per-branch review + sequential merges.
+
 ## 2026-08-08 (feedback wave: 6 fixes/features + 2 mockup labs, operator-reviewed batch)
 
 - **#268/#267 (PickAssignment):** saves had NEVER worked — client PUT the bare route while the server registered `/<pick_id>`, 405 on every save, masked by the generic toast; fixed client-side + repro test pinning old-fail/new-pass. Grid numbers now update optimistically on move (react-query onMutate + local progress recompute, rollback on error, CAS path untouched).
