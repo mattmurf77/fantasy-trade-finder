@@ -546,7 +546,21 @@ export interface PowerRankedTeam {
   display_name: string;
   is_you: boolean;
   total_value: number;
-  positions: Record<'QB' | 'RB' | 'WR' | 'TE', { count: number; value: number }>;
+  /** #279 — pick-equivalent label for `total_value` ("≈14 firsts"), the SAME
+   *  value→pick-equivalent formula already live as "a Late 2nd" on trade
+   *  cards, applied to the raw team total. Present ONLY when the caller is
+   *  targeted by the operator-only `aggregate_tier_labels` experiment
+   *  (docs/feedback/items/279-aggregate-tier-labels/status.md); absent for
+   *  everyone else and on old servers — clients must fall back to the
+   *  numeric `total_value`. */
+  total_value_label?: string;
+  positions: Record<'QB' | 'RB' | 'WR' | 'TE', {
+    count: number;
+    value: number;
+    /** #279 — pick-equivalent label for this position's `value`, same
+     *  gating as `total_value_label` above. */
+    value_label?: string;
+  }>;
   /** Grouped QB→RB→WR→TE→other, value-desc within each group (#144). */
   roster: PowerRankedPlayer[];
   /** #14 FR1 — draft-capital group, priced via the generic pick ladder
