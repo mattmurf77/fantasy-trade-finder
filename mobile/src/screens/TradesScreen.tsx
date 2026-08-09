@@ -59,6 +59,7 @@ import OutlookBiasReceipt, {
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, { type TradeIntent } from '../components/TradeDnaSheet';
+import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
@@ -419,6 +420,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // pops any pushed Portfolio/Calculator screen first.)
   const retapOn = useFlag('ux.retap_active_tab');
   const mainScrollRef = useRef<ScrollView>(null);
+  // #276 — auto-scroll to the generated card once Find a Trade produces
+  // one, so the user lands on the offer instead of the button they just
+  // tapped. `deckCardY` mirrors the featuredWindowY pattern below (an
+  // onLayout on the deck's wrapping View, same ScrollView coordinate
+  // space); `pendingScrollToDeckRef` is armed by handleFindTrades and
+  // consumed the first time the job reports any cards.
+  const deckCardY = useRef(0);
+  const pendingScrollToDeckRef = useRef(false);
   useEffect(
     () =>
       retapOn
@@ -436,6 +445,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const fullSheetOn = useFlag('trades.edit_full_sheet');
   // #172 — trade intent modes chip row (full sheet only).
   const intentModesOn = useFlag('trades.intent_modes');
+  // #269 — specific-team targeting + league picker move into the full
+  // sheet; the mode-bar's Team and Player chips go away.
+  const sheetTargetingOn = useFlag('trades.sheet_targeting');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -448,13 +460,32 @@ export default function TradesScreen({ navigation, route }: any) {
   // rookie-draft placement, option B — gates the mode strip's leading Draft
   // chip (the room's permanent home). Off ⇒ no chip, strip unchanged.
   const draftRoomOn = useFlag('draft.room');
+  // #269 — sheet-local team-targeting selection (declared ahead of
+  // `scopedOpponent` below, which reads it). Single-select; `null` = no
+  // opponent chosen (unscoped, today's behavior).
+  const [sheetOpponent, setSheetOpponent] = useState<
+    { userId: string; name: string } | null
+  >(null);
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
-  const scopedOpponent: string | undefined =
-    finderMode === 'team' ? route?.params?.opponentUserId : undefined;
-  const scopedOpponentName: string | undefined =
-    finderMode === 'team' ? route?.params?.opponentName : undefined;
+  // #269 — with the mode-bar's Team chip gone under `sheetTargetingOn`, the
+  // scoped opponent's SOURCE moves from route params to sheet-local state
+  // (`sheetOpponent`, declared below); everything downstream that already
+  // reads `scopedOpponent`/`scopedOpponentName` (generateMutation's
+  // opponent_user_id, the FB-47 target-picker pool, asset ideas) is
+  // untouched — only where the id comes from changes. Flag off ⇒ this is
+  // exactly the original `finderMode === 'team'` expression.
+  const scopedOpponent: string | undefined = sheetTargetingOn
+    ? sheetOpponent?.userId
+    : finderMode === 'team'
+      ? route?.params?.opponentUserId
+      : undefined;
+  const scopedOpponentName: string | undefined = sheetTargetingOn
+    ? sheetOpponent?.name
+    : finderMode === 'team'
+      ? route?.params?.opponentName
+      : undefined;
   // #257 — the consolidation only replaces the Controls Card on the
   // finder-mode landing, where OutlookBiasReceipt exists as the entry
   // point. The classic flag-off home (no finderMode, `trades.finder_hub`
@@ -489,6 +520,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // opening PlayerPickerModal (iOS won't stack sibling Modals) and reopens
   // it when the picker closes — only when the picker was opened THIS way.
   const [pickerReturnsToSheet, setPickerReturnsToSheet] = useState(false);
+  // #269 — same close-sheet/open-picker/reopen-sheet pattern as
+  // `pickerReturnsToSheet` above, shared by the sheet's League row (opens
+  // the global LeagueSwitcherSheet) and its "Trade with" row (opens the
+  // existing team-picker Modal below).
+  const [leaguePickerOpen, setLeaguePickerOpen] = useState(false);
+  const [returnToSheetAfterPicker, setReturnToSheetAfterPicker] = useState<
+    'team' | 'league' | null
+  >(null);
   function handleEditSheetClose() {
     setDnaSheetOpen(false);
     // Only worth a nudge if there's an existing deck to go stale and no
@@ -520,14 +559,56 @@ export default function TradesScreen({ navigation, route }: any) {
     },
     [navigation],
   );
-  const pickScopedTeam = useCallback(
-    (opponentUserId: string, opponentName: string) => {
-      haptics.selection();
-      setTeamPickerOpen(false);
-      navigation?.setParams?.({ mode: 'team', opponentUserId, opponentName });
-    },
-    [navigation],
-  );
+  // #269 — the team-picker Modal now closes through this single path
+  // whether it was opened from the mode-bar's Team chip (legacy) or the
+  // sheet's "Trade with" row: it hands back to TradeDnaSheet only when
+  // that's where it was opened from.
+  function closeTeamPicker() {
+    setTeamPickerOpen(false);
+    if (returnToSheetAfterPicker === 'team') {
+      setReturnToSheetAfterPicker(null);
+      setDnaSheetOpen(true);
+    }
+  }
+  function pickScopedTeam(opponentUserId: string, opponentName: string) {
+    haptics.selection();
+    closeTeamPicker();
+    navigation?.setParams?.({ mode: 'team', opponentUserId, opponentName });
+  }
+  // #269 — sheet variant: single-select, tap the active manager again to
+  // clear (unlike legacy Team mode, which always has an opponent once
+  // entered). Autosaves like the sheet's other prefs — no deck reset here,
+  // just the #257 "Preferences changed" nudge (prefsChangedSinceGenerateRef).
+  function pickSheetOpponent(userId: string, name: string) {
+    haptics.selection();
+    setSheetOpponent((prev) => (prev?.userId === userId ? null : { userId, name }));
+    prefsChangedSinceGenerateRef.current = true;
+    closeTeamPicker();
+  }
+  function clearSheetOpponent() {
+    haptics.selection();
+    setSheetOpponent(null);
+    prefsChangedSinceGenerateRef.current = true;
+  }
+  function openTeamPickerFromSheet() {
+    haptics.selection();
+    setDnaSheetOpen(false);
+    setReturnToSheetAfterPicker('team');
+    setTeamPickerOpen(true);
+  }
+  function openLeaguePickerFromSheet() {
+    haptics.selection();
+    setDnaSheetOpen(false);
+    setReturnToSheetAfterPicker('league');
+    setLeaguePickerOpen(true);
+  }
+  function closeLeaguePicker() {
+    setLeaguePickerOpen(false);
+    if (returnToSheetAfterPicker === 'league') {
+      setReturnToSheetAfterPicker(null);
+      setDnaSheetOpen(true);
+    }
+  }
 
   // S4 PRD-01 — "How trades are priced" sheet next to the fairness toggle.
   const [pricingHelpOpen, setPricingHelpOpen] = useState(false);
@@ -603,6 +684,7 @@ export default function TradesScreen({ navigation, route }: any) {
     track('find_trades_tapped', source ? { source } : undefined, 'Trades');
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
+    pendingScrollToDeckRef.current = true; // #276
     generateMutation.mutate({});
   }
 
@@ -1198,6 +1280,20 @@ export default function TradesScreen({ navigation, route }: any) {
       const fresh = job.cards.filter((c) => !seen.has(c.trade_id));
       return fresh.length === 0 ? prev : [...prev, ...fresh];
     });
+    // #276 — the generated card is now on screen (or about to be, once this
+    // render commits): scroll it fully into view. Armed by handleFindTrades,
+    // consumed the first time THIS job reports any cards at all (covers
+    // both an empty-deck first search and a "Find more trades" tap that
+    // streams fresh cards on top of an existing deck).
+    if (pendingScrollToDeckRef.current && job.cards.length > 0) {
+      pendingScrollToDeckRef.current = false;
+      requestAnimationFrame(() => {
+        mainScrollRef.current?.scrollTo({
+          y: Math.max(deckCardY.current - space.md, 0),
+          animated: true,
+        });
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cards.length, job?.status]);
 
@@ -3189,6 +3285,17 @@ export default function TradesScreen({ navigation, route }: any) {
                 // what keeps the chip row from rendering at all.
                 tradeIntent: intentModesOn ? tradeIntent : undefined,
                 onTradeIntent: intentModesOn ? handleTradeIntent : undefined,
+                // #269 — omitted entirely when the flag is off, which is
+                // what keeps the League/Trade-with block from rendering.
+                teamTargeting: sheetTargetingOn
+                  ? {
+                      leagueName: league?.league_name ?? null,
+                      onOpenLeaguePicker: openLeaguePickerFromSheet,
+                      opponentName: scopedOpponentName ?? null,
+                      onOpenPicker: openTeamPickerFromSheet,
+                      onClear: clearSheetOpponent,
+                    }
+                  : undefined,
               }
             : undefined
         }
@@ -3245,6 +3352,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 : undefined
             }
             showHint={deck.length === 0}
+            // #269 — Team and Player selection moved into the full sheet;
+            // only hide the chips when that sheet actually exists (also
+            // requires `consolidateOn`) so there's always a way to reach
+            // them.
+            hideTeamAndPlayer={sheetTargetingOn && consolidateOn}
           />
         ) : null}
         {/* #231 — outlook bias receipt (self-contained; single-line mount).
@@ -4292,7 +4404,12 @@ export default function TradesScreen({ navigation, route }: any) {
             rows. Multi-pin / no-pin / classic modes keep the deck exactly
             as before. */}
         {!firstRun && singlePin ? null : (
-        <View style={styles.deckWrap} ref={deckWrapRef} collapsable={false}>
+        <View
+          style={styles.deckWrap}
+          ref={deckWrapRef}
+          collapsable={false}
+          onLayout={(e) => { deckCardY.current = e.nativeEvent.layout.y; }}
+        >
           {quicksetPromptShown ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
             // answered; the deck resumes underneath on either action.
@@ -4759,19 +4876,22 @@ export default function TradesScreen({ navigation, route }: any) {
         </View>
       </Modal>
 
-      {/* #156 finish item 4 — in-screen manager picker for the Team chip.
-          Mirrors the hub's picker sheet, but lands via setParams so the
-          scope swaps IN PLACE (same screen instance; the scope effect
-          resets the deck and kicks a fresh team-scoped generation). */}
+      {/* #156 finish item 4 — in-screen manager picker for the Team chip;
+          #269 — ALSO the sheet's "Trade with" row opens this same Modal
+          (close-sheet/open-picker/reopen-sheet, see openTeamPickerFromSheet
+          above). Legacy flow lands via setParams so the scope swaps IN
+          PLACE; the sheet flow toggles `sheetOpponent` (tap-again-to-clear)
+          and marks the "Preferences changed" strip instead of resetting
+          the deck. Either way this closes through `closeTeamPicker`. */}
       <Modal
         visible={teamPickerOpen}
         transparent
         animationType="slide"
-        onRequestClose={() => setTeamPickerOpen(false)}
+        onRequestClose={closeTeamPicker}
       >
         <Pressable
           style={styles.teamPickerBackdrop}
-          onPress={() => setTeamPickerOpen(false)}
+          onPress={closeTeamPicker}
           accessibilityRole="button"
           accessibilityLabel="Close"
         />
@@ -4797,7 +4917,11 @@ export default function TradesScreen({ navigation, route }: any) {
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                     accessibilityLabel={name}
-                    onPress={() => pickScopedTeam(o.user_id, name)}
+                    onPress={() =>
+                      sheetTargetingOn
+                        ? pickSheetOpponent(o.user_id, name)
+                        : pickScopedTeam(o.user_id, name)
+                    }
                     style={({ pressed }) => [
                       styles.teamPickerRow,
                       pressed && { backgroundColor: ink.ink3 },
@@ -4819,6 +4943,13 @@ export default function TradesScreen({ navigation, route }: any) {
           )}
         </View>
       </Modal>
+
+      {/* #269 — league picker, reused wholesale from the global TopBar
+          instance (same component, own local visibility here). Opened only
+          from the sheet's League row; closes back into the sheet via
+          closeLeaguePicker. No onAddLeague — that flow stays reachable from
+          TopBar, which is always mounted. */}
+      <LeagueSwitcherSheet visible={leaguePickerOpen} onClose={closeLeaguePicker} />
 
       {/* Player-swap sheet (feedback #86) — replace one player on the top
           card with someone from the same roster. Suggested section = roster

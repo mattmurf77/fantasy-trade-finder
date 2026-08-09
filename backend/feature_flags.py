@@ -541,6 +541,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF => trade_intent is never read, so responses (and the mobile UI)
     # are byte-identical to today.
     "trades.intent_modes",
+    # #269 — specific-team targeting + a league picker MOVE INTO the #257
+    # full sheet (both live "with the primary questions", above the demoted
+    # "Fine tuning" strip); the mode-bar's Team and Player chips are removed
+    # (Player's on-screen board and Team's route-param scoping machinery
+    # both stay in the tree — only the chips that reach them go away).
+    # Client-only: no route reads it. ON => TradeFinderModeBar renders
+    # Guided/Calc/Free agents (+ Draft) only, and the full sheet gains a
+    # League row + a single-select "Trade with" team block that feeds the
+    # SAME `opponent_user_id` the legacy Team mode already sent to
+    # /api/trades/generate. OFF => TradesScreen.tsx, TradeDnaSheet.tsx and
+    # TradeFinderModeBar.tsx render byte-identical to today.
+    "trades.sheet_targeting",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
