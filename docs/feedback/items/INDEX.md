@@ -70,6 +70,7 @@
 | 166 | league-format-default | in-progress | 2026-07-25 | teardown-remediation (worktree) |
 | 168 | looking-for-intents | open | 2026-07-25 | n/a |
 | 169 | outlook-league-summary | built-dark | 2026-07-23 | teardown-remediation / `outlook.odds` flag |
+| 169 | position-impact | mockup-only | 2026-08-08 | teardown-remediation (worktree) — **ID COLLISION with the row above**, see `docs/feedback/items/169-position-impact/status.md`; this row covers the unrelated "TE 10→17 ppg" trade-summary position-impact ask — verify the real feedback-table ID before treating either as canonical |
 | 173 | untouchables-discoverability | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
 | 174 | package-constraint | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
 | 175 | outlook-directional-suggestions | built-dark | ~2026-07-25 | `trade.outlook_direction` flag |
