@@ -1072,7 +1072,8 @@ _STARTER_IMPACT_FRAC = 0.025      # …or 2.5% of the before-lineup total
 def _starter_impact(league_id: str, caller_user_id: str,
                     opponent_user_id: str, give: list[str], recv: list[str],
                     pool_players: list, seed_value,
-                    give_value: float, receive_value: float) -> dict | None:
+                    give_value: float, receive_value: float,
+                    tier_of=None) -> dict | None:
     """{your_delta, their_delta, note, slots} — optimal-lineup value BEFORE
     vs AFTER the trade for the caller (your_delta) and the opponent
     (their_delta), positive = that side's starting lineup gets stronger.
@@ -1087,6 +1088,16 @@ def _starter_impact(league_id: str, caller_user_id: str,
     None for an unfillable slot. Built via power_rankings.
     optimal_starter_slots (same fill as the totals above). Omitted — never
     the whole field — if the breakdown build fails.
+
+    #169 (flag trade.position_impact) — when `tier_of` is given, each
+    before/after entry additionally carries `tier` (the SAME
+    RankingService.tier_for_elo band-walk #277's evener rows use, over the
+    RAW seed Elo — never the transformed `value`) and `rank` (the
+    player's 1-based positional rank within the universal pool, via
+    trends_service.compute_consensus_pos_ranks with no baseline — ranks
+    only, no deltas). `tier_of` is None when the flag is off (the caller's
+    responsibility), so both keys are omitted entirely and the payload is
+    byte-identical to pre-#169.
     """
     from .power_rankings import optimal_starter_slots, optimal_starters
     slots = _sleeper_lineup_slots(league_id)
@@ -1140,16 +1151,30 @@ def _starter_impact(league_id: str, caller_user_id: str,
     # after, template order). Null-safe: any failure here drops only the
     # breakdown, never the summary above.
     try:
+        # #169 — positional rank map, built once over the same pool this
+        # function already has loaded (`by_id`). None when `tier_of` is
+        # None (flag off) so the sort/index work is skipped entirely.
+        _pos_ranks: dict[str, int] = {}
+        if tier_of is not None:
+            from .trends_service import compute_consensus_pos_ranks
+            _elo_map = {pid: seed_value(pid) for pid in by_id}
+            _pos_meta = {pid: {"position": pl.position} for pid, pl in by_id.items()}
+            _pos_ranks = compute_consensus_pos_ranks(_elo_map, {}, _pos_meta)["pos_rank"]
+
         def slot_entry(row: dict | None) -> dict | None:
             if row is None:
                 return None
             p = by_id.get(row["player_id"])
-            return {
+            entry = {
                 "player_id": row["player_id"],
                 "name":      getattr(p, "name", None) or row["player_id"],
                 "position":  row["position"],
                 "value":     round(row["value"], 1),
             }
+            if tier_of is not None:
+                entry["tier"] = tier_of(row["player_id"], row["position"])
+                entry["rank"] = _pos_ranks.get(row["player_id"])
+            return entry
 
         before = optimal_starter_slots(
             pool_rows(rosters[str(caller_user_id)]), slots)
@@ -8219,6 +8244,14 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                 return league_pick_vals[pid]        # already in value space
             return e2v(seed.get(pid, 1500.0))
 
+        # #277 — tier walked off the RAW seed Elo via the canonical
+        # band-walk (same convention as /api/trade/values; never derived
+        # from the transformed value). Defined here (moved up from the
+        # eveners section below, 2026-08-09 #169) so BOTH the eveners
+        # build and the #169 starter_impact slots build can share it.
+        _evener_tier = (lambda pid, pos:
+                        RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
+
         give    = [p for p in give_raw if p in seed or p in league_pick_vals]
         recv    = [p for p in recv_raw if p in seed or p in league_pick_vals]
         dropped = [p for p in give_raw + recv_raw
@@ -8367,12 +8400,19 @@ def _trade_evaluate_impl(stud_tax_mode: str):
             # read: optimal-lineup value before vs after, both sides.
             # Requires the league's slot template; absent template (or any
             # build failure) omits the field, never fails the route.
+            # #169 (flag trade.position_impact) — `tier_of` is only bound
+            # when the flag is on, so the slots' additive tier/rank keys
+            # (see _starter_impact's docstring) appear ONLY behind the
+            # flag; off ⇒ tier_of=None ⇒ byte-identical to pre-#169.
             if give or recv:
                 try:
                     _si = _starter_impact(
                         league_id, caller_user_id, opponent_user_id,
                         give, recv, _pool_players, seed_value,
-                        give_value, receive_value)
+                        give_value, receive_value,
+                        tier_of=(_evener_tier
+                                 if is_enabled("trade.position_impact")
+                                 else None))
                     if _si is not None:
                         result["starter_impact"] = _si
                 except Exception as si_err:
@@ -8385,11 +8425,9 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # (Mode B); rosterless Mode A falls back to the nearest generic pick
         # (already a calculator-addable pool id — never a fabricated one).
         # Build failures omit the field; they never fail the route.
-        # #277 — evener player rows carry an additive `tier`, walked off the
-        # RAW seed Elo via the canonical band-walk (same convention as
-        # /api/trade/values; never derived from the transformed value).
-        _evener_tier = (lambda pid, pos:
-                        RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
+        # #277 — evener player rows carry an additive `tier` (`_evener_tier`,
+        # defined above alongside `seed_value` so #169's starter_impact
+        # build can reuse it too).
         if favors is not None and favors != "even" and gap and gap.get("add_to"):
             try:
                 in_trade = set(give_raw) | set(recv_raw)

@@ -1,6 +1,27 @@
 # #169 — Position-specific trade impact framing mockup lab
 
-**Status:** mockup-only · 2026-08-09 (revised; original pass 2026-08-08) · branch `worktree-agent-ae5fc055062850773` (`mockups/polish-lab-2026-08/trade-position-impact.html`) — no code shipped, no flag exists.
+**Status:** built · 2026-08-09 · branch `worktree-agent-a16b8c9e20f110454` — mockup-only pass (below) superseded by an operator build decision; live behind flag `trade.position_impact` (ON in `config/features.json`).
+
+## Build (2026-08-09) — operator decision + what shipped
+
+Operator decision: **build A1a — the fold-in to the shipped #238 lineup-changes table with POSITIONAL-RANK framing ("TE21 → TE4") — with two modifications:**
+
+1. The pick-tier label **replaces** the "+430"-style numeric value-delta chip.
+2. The player being traded **away** also gets a tier label (A1a's mockup only labeled the incoming player).
+
+Implementation, resolved to preserve both modifications without inventing a second UI surface: `TierBadge` already carries an optional `posRank` slot (`mobile/src/components/TierBadge.tsx`, e.g. "4th · TE21") purpose-fit for exactly this — a single chip that shows both the tier label AND the rank movement. A CHANGED slot in `LineupImpactTable` now renders a second line under the row with two `TierBadge` chips (before → after), replacing the raw delta chip; unchanged rows are untouched. Reading the pair left-to-right ("4th · TE21" → "1 1st · TE4") is the "TE21 → TE4" rank-movement framing, without a separate sentence.
+
+- **Backend** (`backend/server.py`): `_starter_impact()`'s `slot_entry()` builder gains a `tier_of` param (mirrors #277's `_evener_tier` pattern). When bound, each `slots[].before`/`after` entry gets additive `tier` (`RankingService.tier_for_elo` over the RAW seed Elo — the SAME call #277's `_evener_tier` closure already makes, reused verbatim, not duplicated) and `rank` (1-based positional rank within the universal pool, via `trends_service.compute_consensus_pos_ranks(elo_map, {}, players_meta)["pos_rank"]` — reusing the EXISTING canonical rank helper the Trends tile stats already ship, rather than hand-rolling a new sort, which is a cheaper and more precedented path than the mockup lab's write-up anticipated). `tier_of` is bound at the evaluate route only when `is_enabled("trade.position_impact")`; off ⇒ `tier_of=None` ⇒ neither key is added ⇒ `slots` is byte-identical to pre-#169.
+- **Mobile** (`mobile/src/components/InLeagueCalculator.tsx`'s `LineupImpactTable`): field presence alone gates the new rendering (no separate client flag read) — a CHANGED slot with `tier` on BOTH `before` and `after` swaps the value-delta chip for the two `TierBadge` chips described above; any other case (flag off, old server, or one side unpriced) falls back to the legacy numeric delta chip untouched.
+- **Types** (`mobile/src/shared/types.ts`): `StarterSlotPlayer` gains optional `tier?: Tier | null` and `rank?: number | null`.
+- **Rank tie-break**: deterministic — descending value, then ascending `player_id` (inherited from `trends_service._pos_rank_map`, the same tie-break the Trends tile stats already ship and test).
+- **Tests**: `backend/tests/test_trade_evaluate.py` — flag-on tier/rank correctness (both slots, both sides), flag-off absence (`slots[].before/after` key set unchanged from pre-#169), rank tie-break determinism, and a null-`after` slot carrying no tier/rank on the null side.
+- **Docs**: `docs/api-reference.md` (`/api/trade/evaluate`'s `slots` description) and `docs/config-reference.md` (flag row) updated.
+- **Not built this pass**: the summary-sentence framings (A1b/C1a/C1b) and the deck-hook mount (Variant C) — out of scope for the operator's build ask, which named A1a plus its two modifications only.
+
+## Original mockup-lab pass (2026-08-08/09, superseded above)
+
+Mockup-only, no code shipped, no flag existed. Kept as the design-exploration record; the build above resolved the open A1a/A1b framing question via the operator's explicit modifications rather than either mockup frame verbatim.
 
 ## Operator ask (verbatim, original pass)
 

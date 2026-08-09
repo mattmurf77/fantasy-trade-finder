@@ -553,6 +553,20 @@ FLAG_KEYS: tuple[str, ...] = (
     # /api/trades/generate. OFF => TradesScreen.tsx, TradeDnaSheet.tsx and
     # TradeFinderModeBar.tsx render byte-identical to today.
     "trades.sheet_targeting",
+    # #169 — position-impact fold-in (operator decision, A1a + two
+    # modifications; docs/feedback/items/169-position-impact/status.md).
+    # POST /api/trade/evaluate Mode B's `starter_impact.slots[].before/after`
+    # entries gain additive `tier` (RankingService.tier_for_elo over the RAW
+    # seed Elo — the SAME call #277's `_evener_tier` closure already makes)
+    # and `rank` (1-based positional rank within the universal pool, via
+    # trends_service.compute_consensus_pos_ranks). Mobile's LineupImpactTable
+    # (InLeagueCalculator.tsx) uses both on a changed slot to swap the raw
+    # value-delta chip for a tier chip on the incoming player AND a matching
+    # chip on the outgoing player (TierBadge's `posRank` slot carries the
+    # rank movement, e.g. "4th · TE21" -> "1 1st · TE4"). OFF (default) =>
+    # `tier_of` is never bound, so `slots` carries no new keys and the
+    # table renders the legacy numeric delta chip, byte-identical to today.
+    "trade.position_impact",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

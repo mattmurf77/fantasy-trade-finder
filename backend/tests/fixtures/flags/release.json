@@ -171,5 +171,8 @@
   "trades.intent_modes": true,
 
   "_comment_trades_sheet_targeting": "2026-08-09 feedback #269 — moves specific-team targeting (and a league picker above it) INTO the #257 full sheet and removes the mode-bar's Team and Player chips. Client-only; no route reads it. See config/features.json for the full note. OFF (default) = byte-identical to today.",
-  "trades.sheet_targeting": true
+  "trades.sheet_targeting": true,
+
+  "_comment_trade_position_impact": "2026-08-09 #169 position-impact fold-in. POST /api/trade/evaluate Mode B's starter_impact.slots[].before/after entries gain additive tier + rank. See config/features.json for the full note. OFF (default off elsewhere, ON here per operator ask) = byte-identical to today.",
+  "trade.position_impact": true
 }

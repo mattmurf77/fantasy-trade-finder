@@ -25,6 +25,7 @@ import PlayerPickerModal, { type SuggestedPlayer } from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
 import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
+import TierBadge from './TierBadge';
 import SendInSleeperButton from './SendInSleeperButton';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
@@ -33,7 +34,7 @@ import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
-import type { ScoringFormat, StarterImpactSlot, Tier } from '../shared/types';
+import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '../shared/types';
 
 // In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).
 // The FTF differentiator applied to a hand-built trade: pick a real opponent,
@@ -988,6 +989,13 @@ function slotShortLabel(slot: string): string {
   return slot;
 }
 
+// #169 — "TE21" style label for TierBadge's posRank slot (position + this
+// player's 1-based positional rank). Undefined when the server didn't
+// price a rank (flag off, old server, or an unranked player).
+function posRankLabel(p: StarterSlotPlayer | null | undefined): string | undefined {
+  return p && p.rank != null ? `${p.position}${p.rank}` : undefined;
+}
+
 function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpactSlot[] }) {
   const beforeTotal = slots.reduce((t, s) => t + (s.before?.value ?? 0), 0);
   const afterTotal = slots.reduce((t, s) => t + (s.after?.value ?? 0), 0);
@@ -1012,36 +1020,64 @@ function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpact
       </View>
       {slots.map((s) => {
         const changed = (s.before?.player_id ?? null) !== (s.after?.player_id ?? null);
+        // #169 (flag trade.position_impact) — a changed slot whose before
+        // AND after both carry a server-priced tier swaps the raw
+        // value-delta chip for tier chips on both sides (operator's two
+        // modifications to A1a): the incoming player's chip takes the old
+        // delta chip's spot, and the outgoing player gains a matching
+        // chip it never had. TierBadge's posRank slot folds in the
+        // positional-rank movement (e.g. "4th · TE21" -> "1 1st · TE4"),
+        // so the pair reads as the "TE21 → TE4" framing without a second
+        // sentence. Absent tier/rank (flag off, or an old server) falls
+        // back to the legacy numeric delta chip below.
+        const showTierChips = changed && !!s.before?.tier && !!s.after?.tier;
         return (
-          <View key={s.slot} style={[styles.lineupRow, !changed && styles.lineupRowDim]}>
-            <ChalkText scale="dense" style={[styles.lineupSlotCol, styles.lineupSlotText]}>
-              {slotShortLabel(s.slot)}
-            </ChalkText>
-            <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
-              {s.before?.name ?? '—'}
-            </ChalkText>
-            <View style={styles.lineupArrowCol}>
-              {changed ? <Icon name="chevron-right" size={12} color={chalk.faint} /> : null}
+          <React.Fragment key={s.slot}>
+            <View style={[styles.lineupRow, !changed && styles.lineupRowDim]}>
+              <ChalkText scale="dense" style={[styles.lineupSlotCol, styles.lineupSlotText]}>
+                {slotShortLabel(s.slot)}
+              </ChalkText>
+              <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
+                {s.before?.name ?? '—'}
+              </ChalkText>
+              <View style={styles.lineupArrowCol}>
+                {changed ? <Icon name="chevron-right" size={12} color={chalk.faint} /> : null}
+              </View>
+              <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
+                {s.after?.name ?? '—'}
+              </ChalkText>
+              <View style={styles.lineupDeltaCol}>
+                {showTierChips ? null : changed ? (
+                  <ChalkText
+                    scale="dense"
+                    style={[
+                      styles.lineupDeltaChip,
+                      s.delta >= 0 ? styles.lineupDeltaPos : styles.lineupDeltaNeg,
+                    ]}
+                  >
+                    {signed(s.delta)}
+                  </ChalkText>
+                ) : (
+                  <ChalkText scale="dense" style={styles.lineupDeltaFlat}>—</ChalkText>
+                )}
+              </View>
             </View>
-            <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
-              {s.after?.name ?? '—'}
-            </ChalkText>
-            <View style={styles.lineupDeltaCol}>
-              {changed ? (
-                <ChalkText
-                  scale="dense"
-                  style={[
-                    styles.lineupDeltaChip,
-                    s.delta >= 0 ? styles.lineupDeltaPos : styles.lineupDeltaNeg,
-                  ]}
-                >
-                  {signed(s.delta)}
-                </ChalkText>
-              ) : (
-                <ChalkText scale="dense" style={styles.lineupDeltaFlat}>—</ChalkText>
-              )}
-            </View>
-          </View>
+            {showTierChips ? (
+              <View style={styles.lineupTierRow}>
+                <View style={styles.lineupSlotCol} />
+                <View style={styles.lineupNameCol}>
+                  <TierBadge tier={s.before?.tier} posRank={posRankLabel(s.before)} size="sm" />
+                </View>
+                <View style={styles.lineupArrowCol}>
+                  <Icon name="chevron-right" size={10} color={chalk.faint} />
+                </View>
+                <View style={styles.lineupNameCol}>
+                  <TierBadge tier={s.after?.tier} posRank={posRankLabel(s.after)} size="sm" />
+                </View>
+                <View style={styles.lineupDeltaCol} />
+              </View>
+            ) : null}
+          </React.Fragment>
         );
       })}
       <View style={styles.lineupNet}>
@@ -1135,6 +1171,15 @@ const styles = StyleSheet.create({
   },
   lineupRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 24 },
   lineupRowDim: { opacity: 0.5 },
+  // #169 — second line under a changed slot carrying before/after
+  // TierBadge chips (tier + posRank movement) in place of the delta chip.
+  lineupTierRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginTop: -2,
+    marginBottom: 4,
+  },
   lineupSlotCol: { width: 40, flexShrink: 0 },
   lineupSlotText: {
     fontFamily: fonts.data,
