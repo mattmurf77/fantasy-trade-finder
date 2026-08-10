@@ -216,6 +216,14 @@ class BoardRequest:
     #: MFL only — franchise id → our user id, and MFL player id → our player id.
     mfl_franchise_to_user: Mapping[str, str] | None = None
     mfl_player_ids: Mapping[str, str] | None = None
+    #: MFL only — our user id → franchise display name, from `league_members`
+    #: (#289). MFL's `draftResults` export carries no names; ours does, written
+    #: at link time for every franchise. Injected, never read here (I-7).
+    mfl_usernames: Mapping[str, str] | None = None
+    #: MFL only — MFL player id → (DP name, DP position). The DP crosswalk's
+    #: own name map, consulted only when the crosswalked `players` row cannot
+    #: resolve one (#289 tier 2).
+    mfl_player_names: Mapping[str, tuple[str, str]] | None = None
     #: Rostered player ids in OUR id space, for platforms whose rosters this
     #: module does not fetch (MFL). Sleeper derives them from ``rosters``.
     rostered_ids: Sequence[str] | None = None
@@ -1031,6 +1039,78 @@ def _render_sleeper(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> d
     )
 
 
+def _mfl_is_slot_sentinel(mfl_pid: str) -> bool:
+    """MFL's all-zeros player id: a slot that passed, not a player (#289 R-15).
+
+    MFL states a genuinely *unmade* pick as ``player: ""``
+    (``mfl_service.fetch_draft_results``); an all-zeros id is a distinct
+    sentinel, and it is real — ``mfl-multi-unit`` (``provenance:
+    recorded-live``) carries exactly one. ``_mfl_counts`` already counts it as
+    made, so the row is emitted either way; this only decides what it says.
+    """
+    return bool(mfl_pid) and set(mfl_pid) == {"0"}
+
+
+def _hydrate_mfl_picks(pending: list[tuple[dict, str]],
+                       pid_map: Mapping[str, str],
+                       dp_names: Mapping[str, tuple[str, str]],
+                       fetchers: Fetchers) -> None:
+    """Fill ``name``/``position``/``team`` on MFL pick rows, in place (#289).
+
+    Four tiers, total precedence, first hit wins — so the two name sources can
+    never disagree about a rendered row:
+
+      S. the all-zeros slot sentinel   -> ``"No selection"``
+      1. our own ``players`` row       -> full name, position, team
+      2. the DP crosswalk's name map   -> DP name + position, no team
+      3. nothing resolved              -> ``f"Player {mfl_pid}"``
+
+    Tier 3 mirrors the shipped ``Team <fid>`` convention: an honest
+    placeholder that names its own uncertainty, never a bare number the user
+    reads as garbage.
+
+    **The keying is load-bearing (R-7).** A pick may take tier 1 only if its
+    OWN MFL id crosswalked, and its row is read by ``pid_map[mfl_pid]`` —
+    never by ``entry["player_id"]``, which still holds the raw MFL id on a
+    miss. MFL and Sleeper ids are numeric strings from different epochs that
+    overlap densely in the rookie band (255 MFL ids in the committed DP
+    snapshot are also a *different* player's Sleeper id), and
+    ``load_players_by_ids`` returns ``{player_id: row}`` — so consuming it by
+    the raw id renders one pick's player on another pick, inside a query that
+    is itself entirely legal. Guarded by ``T-289-06``.
+
+    ONE batched read for the whole board, and none at all when nothing
+    crosswalked.
+    """
+    wanted = set()
+    for _entry, mfl_pid in pending:
+        if _mfl_is_slot_sentinel(mfl_pid):
+            continue
+        crosswalked = pid_map.get(mfl_pid)
+        if crosswalked:
+            wanted.add(crosswalked)
+    rows = (fetchers.players(sorted(wanted)) or {}) if wanted else {}
+
+    for entry, mfl_pid in pending:
+        if _mfl_is_slot_sentinel(mfl_pid):
+            entry["name"] = "No selection"
+            continue
+        crosswalked = pid_map.get(mfl_pid)
+        row = rows.get(crosswalked) if crosswalked else None
+        name = (row.get("full_name") or row.get("name") or "") if row else ""
+        if name:
+            entry["name"] = name
+            entry["position"] = str(row.get("position") or "").upper()
+            entry["team"] = row.get("team") or None
+            continue
+        dp = dp_names.get(mfl_pid)
+        if dp:
+            entry["name"] = dp[0]
+            entry["position"] = str(dp[1] or "").upper()
+            continue
+        entry["name"] = f"Player {mfl_pid}"
+
+
 def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
     raw = entry.mfl
     if not isinstance(raw, dict):
@@ -1046,9 +1126,16 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
     season = int(req.mfl_year or req.season)
 
     fr_to_user = req.mfl_franchise_to_user or {}
-    username = {}                                   # MFL has no display-name export here
+    # MFL's export carries no names, but OURS does: `league_members` holds the
+    # franchise name for every franchise, written at link and at every
+    # re-sync, already `_clean_text`-scrubbed. Injected by the route (#289).
+    username = req.mfl_usernames or {}
     order: list[dict] = []
     picks: list[dict] = []
+    #: (pick row, raw MFL player id) — the raw id is what tiers 2/3 and the
+    #: sentinel key on, and it is NOT `row["player_id"]` once the crosswalk
+    #: rewrites that. Hydrated in one batch after the grid walk.
+    pending: list[tuple[dict, str]] = []
     pid_map = req.mfl_player_ids or {}
     assigned = True
     offset = 0
@@ -1069,7 +1156,13 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
                 "round": round_no,
                 "pick_no": pick_no,
                 "owner_user_id": owner,
-                "owner_username": username.get(owner) if owner else None,
+                # The grid asserting a franchise we hold no member row for is
+                # NOT "unassigned" — `Team <fid>` is what the sibling MFL
+                # surface already emits (`server._sync_mfl_owned_picks`).
+                # `None` only when the grid states no franchise at all, which
+                # is what makes the client render `Unassigned` (#289 R-2/R-3).
+                "owner_username": (username.get(owner) if owner else None)
+                                  or (f"Team {fid}" if fid else None),
                 # MFL's grid states the CURRENT owner; provenance survives only
                 # as prose in `comments`, so the original owner is unknown.
                 "original_user_id": None,
@@ -1079,7 +1172,7 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
             mfl_pid = str(p.get("player") or "").strip()
             if mfl_pid:
                 ts = _int_or_none(p.get("timestamp"))
-                picks.append({
+                pick = {
                     "round": round_no,
                     "pick_no": pick_no or 0,
                     "slot": slot,
@@ -1090,8 +1183,12 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
                     "picked_by_user_id": owner,
                     "picked_at": (datetime.fromtimestamp(ts, timezone.utc).isoformat()
                                   if ts else None),
-                })
+                }
+                picks.append(pick)
+                pending.append((pick, mfl_pid))
         offset += len(unit_picks)
+
+    _hydrate_mfl_picks(pending, pid_map, req.mfl_player_names or {}, fetchers)
 
     order = _cap_order(order)
     picks.sort(key=lambda x: x["pick_no"])

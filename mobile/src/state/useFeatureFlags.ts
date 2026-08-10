@@ -48,6 +48,11 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // not a dark launch), so the chooser entry is visible from first paint;
   // a server `false` still hides it on the next successful revalidate.
   'ranks.import': true,
+  // #293/#294 — draft-pick value counted in every subset and position
+  // filter. Graduated to ON at ship (operator: "293/294 ship live"), so it
+  // must be visible from first paint; the flag stays a kill switch, and a
+  // server `false` still turns it off on the next successful revalidate.
+  'league.picks_always_counted': true,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

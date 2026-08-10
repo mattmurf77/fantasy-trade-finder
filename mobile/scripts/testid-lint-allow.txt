@@ -20,3 +20,23 @@ rookie-ranks.filter.*
 feedback.severity.*
 draft-room.notice.*
 draft-room.undrafted-row*
+# LeagueSummaryScreen.tsx: SubsetControl / PosFilterPills / BarColumn template
+# their ids. Deliberately NOT a bare `league-summary.*` — that would
+# blanket-exempt the static ids (roster-picks, filter-caption, roster-close,
+# avg-line, league-home) the lint currently checks for real.
+league-summary.subset.*
+league-summary.roster-subset.*
+league-summary.posfilter.*
+league-summary.roster-posfilter.*
+league-summary.bar.*
+# MockChrome.tsx: testID={`${testIDPrefix}.real`} / `${testIDPrefix}.mock`
+draft-room.mode.*
+# MockEntryPanel.tsx renders its CTAs as testID={primary.testID} /
+# {secondary.testID} / {retry.testID}. The literal strings live in
+# DraftRoomScreen.tsx's `mockEntryContent` as object VALUES (`testID: '…'`),
+# which the grep's `testID=` anchor cannot see. Listed one by one rather than
+# as a blanket `mock-entry.*`: the panel's OWN ids (mock-entry.card,
+# .loading, .error) are real `testID="…"` attributes and must stay checked.
+mock-entry.start
+mock-entry.run-it-back
+mock-entry.recap

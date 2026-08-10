@@ -57,6 +57,7 @@ export default function MockEntryPanel({
   body,
   primary,
   secondary,
+  retry,
 }: {
   loading?: boolean;
   errorText?: string | null;
@@ -68,6 +69,12 @@ export default function MockEntryPanel({
   body?: string;
   primary?: { label: string; onPress: () => void; testID: string };
   secondary?: { label: string; onPress: () => void; testID: string };
+  /** Rendered inside the `errorText` branch. No reachable state of this
+   *  panel may render zero interactive controls (#292 dead-end 2): the error
+   *  branch shipped with none, and react-query holds a mutation's `isError`
+   *  until the next `mutate`/`reset`, so one failed create replaced the card
+   *  permanently. */
+  retry?: { label: string; onPress: () => void; testID: string };
 }) {
   if (block) {
     return (
@@ -91,6 +98,18 @@ export default function MockEntryPanel({
     return (
       <View testID="mock-entry.error" style={[styles.card, styles.cardMuted]}>
         <Text style={styles.error}>{errorText}</Text>
+        {retry ? (
+          <View style={styles.btnRow}>
+            <View style={styles.btnCell}>
+              <Button
+                testID={retry.testID}
+                label={retry.label}
+                variant="primary"
+                onPress={retry.onPress}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
     );
   }

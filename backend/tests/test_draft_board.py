@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import re
 import threading
 import urllib.error
 
@@ -658,11 +659,15 @@ def test_m5_mfl_franchise_and_player_maps_are_honoured():
     man = mfl_manifest("mfl-complete")
     f = fetchers(None, mfl=mfl_opener("mfl-complete"),
                  rookie_ids={"ours-1"},
-                 players={"ours-1": _player_row("ours-1", "Still Here")})
+                 players={"ours-1": _player_row("ours-1", "Still Here"),
+                          "ours-x": _player_row("ours-x", "Cam Skattebo",
+                                                pos="rb", team="ARI")})
     payload = dbs.build_board(
         dbs.BoardRequest(league_id=man["league_id"], platform="mfl",
                          season=man["year"], mfl_host=man["host"],
+                         user_id="user-7",
                          mfl_franchise_to_user={"0007": "user-7"},
+                         mfl_usernames={"user-7": "Eire Rebels"},
                          mfl_player_ids={"17472": "ours-x"},
                          consensus_elo={"ours-1": 1500.0}), f)
     first = payload["picks"][0]
@@ -670,6 +675,256 @@ def test_m5_mfl_franchise_and_player_maps_are_honoured():
     assert first["picked_by_user_id"] == "user-7"
     assert first["picked_at"] is not None          # MFL picks DO carry timestamps
     assert [u["player_id"] for u in payload["undrafted"]] == ["ours-1"]
+
+    # ── #289 ────────────────────────────────────────────────────────────
+    # T-289-03 (R-5): the pick row is hydrated from OUR players table, with
+    # the position uppercased the way every other render path does it.
+    assert (first["name"], first["position"], first["team"]) == \
+        ("Cam Skattebo", "RB", "ARI")
+    # T-289-01 (R-1): the franchise's stored display name reaches `order[]`.
+    owned = [o for o in payload["order"] if o["owner_user_id"] == "user-7"]
+    assert owned, "franchise 0007 owns picks in this corpus"
+    assert all(o["owner_username"] == "Eire Rebels" for o in owned)
+    # T-289-02 (R-2): a franchise the grid names but we hold no member row for
+    # falls back to `Team <fid>` — never `None`, never the synthetic member id.
+    unmapped = [o for o in payload["order"] if o["owner_user_id"] is None]
+    assert unmapped, "the corpus has franchises outside the injected map"
+    assert all(re.fullmatch(r"Team \d{4}", o["owner_username"] or "")
+               for o in unmapped)
+    assert not any("mfl:" in (o["owner_username"] or "")
+                   for o in payload["order"] + payload["my_picks"])
+    # R-4: `my_picks` is sliced from `order`, so it inherits the
+    # names — asserted anyway, because it is the row the operator reads first.
+    assert payload["my_picks"]
+    assert all(o["owner_username"] == "Eire Rebels" for o in payload["my_picks"])
+
+
+# ── #289 — MFL identity: names, never ids (T-289-04..08, 14) ─────────────
+#
+# The franchise half (R-1..R-4) is asserted inside
+# `test_m5_mfl_franchise_and_player_maps_are_honoured` above, which already
+# injects the maps. Everything below is the player half plus the two cases no
+# committed corpus can drive.
+
+
+def _inline_mfl_opener(payload: dict):
+    """`mfl_opener`, but over an INLINE `draftResults` dict.
+
+    T-289-08 needs a franchise-less pick and all four committed corpora have
+    zero of them by design (every manifest pins "franchise populated on EVERY
+    pick"). Hand-editing a corpus is not an option — they carry
+    `provenance: recorded-live` — so the grid is synthesised here instead.
+    """
+    blob = json.dumps(payload).encode("utf-8")
+
+    class _Resp:
+        def read(self):
+            return blob
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _opener(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        assert "TYPE=draftResults" in url, url
+        return _Resp()
+
+    return _opener
+
+
+def _mfl_req(corpus, **kwargs):
+    man = mfl_manifest(corpus)
+    return dbs.BoardRequest(league_id=man["league_id"], platform="mfl",
+                            season=man["year"], mfl_host=man["host"], **kwargs)
+
+
+def test_t289_04_a_crosswalk_miss_falls_back_to_the_dp_name(slot_values_off):
+    """R-8 — tier 2. The DP crosswalk's own name/position map catches the ids
+    that never crosswalked to a Sleeper id (rookies, mostly — which is exactly
+    the population a rookie draft board shows). No `team` in this tier."""
+    f = fetchers(None, mfl=mfl_opener("mfl-complete"))
+    payload = dbs.build_board(
+        _mfl_req("mfl-complete", mfl_player_ids={},
+                 mfl_player_names={"17472": ("Cam Skattebo", "rb")}), f)
+    first = payload["picks"][0]
+    assert first["player_id"] == "17472"           # raw MFL id, unchanged
+    assert (first["name"], first["position"], first["team"]) == \
+        ("Cam Skattebo", "RB", None)
+
+
+def test_t289_05_an_unresolvable_pick_reads_player_id_never_a_bare_number(
+        slot_values_off):
+    """R-9 — tier 3. `Player <mfl_id>` mirrors the shipped `Team <fid>`
+    convention: an honest placeholder that names its own uncertainty and stays
+    greppable for the §9 coverage count."""
+    f = fetchers(None, mfl=mfl_opener("mfl-complete"))
+    payload = dbs.build_board(_mfl_req("mfl-complete"), f)
+    assert payload["picks"][0]["name"] == "Player 17472"
+    assert payload["picks"][0]["player_id"] == "17472"
+    assert all(re.fullmatch(r"Player \d+", p["name"]) for p in payload["picks"])
+
+
+@pytest.mark.parametrize("corpus", sorted(MFL_EXPECTED))
+def test_t289_05b_every_rendered_pick_name_contains_a_letter(
+        slot_values_off, corpus):
+    """R-9's durable global assertion, across every corpus and every map
+    configuration. "Contains a letter" is the property actually wanted: it
+    subsumes "never empty", "never a bare id", and "never the `0000`
+    sentinel's digits" in one check, which a `^Player \\d+$` regex cannot
+    (it blesses `Player 0000`)."""
+    rows = {"ours-x": _player_row("ours-x", "Cam Skattebo")}
+    configs = [
+        {},                                                    # no maps at all
+        {"mfl_player_ids": {"17472": "ours-x"}},               # tier 1 reachable
+        {"mfl_player_names": {"17472": ("Cam Skattebo", "RB")}},   # tier 2 only
+    ]
+    for cfg in configs:
+        dbs.reset_cache()
+        f = fetchers(None, mfl=mfl_opener(corpus), players=rows)
+        payload = dbs.build_board(_mfl_req(corpus, **cfg), f)
+        letterless = [p for p in payload["picks"]
+                      if not re.search(r"[A-Za-z]", p["name"] or "")]
+        assert not letterless, f"{corpus} {cfg}: {letterless[:3]}"
+
+
+def test_t289_06_an_uncrosswalked_pick_never_adopts_another_picks_player(
+        slot_values_off):
+    """R-7 — THE discriminating test. Read the PRD §4 note before touching it.
+
+    MFL and Sleeper player ids are bare numeric strings from different epochs
+    that overlap densely in the rookie band: 255 MFL ids in the committed DP
+    snapshot alone are also a *different* player's Sleeper id. So the naive
+    consumption `rows.get(pick["player_id"])` renders the WRONG PLAYER inside a
+    query that is itself entirely legal — strictly worse than the #289 bug,
+    and silent.
+
+    The collision is constructed INSIDE the returned rows, using corpus-native
+    ids: `mfl-complete`'s first two picks are MFL `17472` and `17473`, and
+    17472 is crosswalked onto 17473. This test FAILS on
+    `rows.get(pick["player_id"])` and passes only when tier 1 is gated per pick
+    and keyed by that pick's own crosswalked id.
+    """
+    calls: list[list[str]] = []
+    rows = {"17473": _player_row("17473", "WRONG")}
+
+    def players_fn(ids):
+        calls.append(list(ids))
+        return {p: rows[p] for p in ids if p in rows}
+
+    f = dbs.PlatformFetchers(sleeper_get=None,
+                             mfl_opener=mfl_opener("mfl-complete"),
+                             rookie_ids_fn=lambda season: set(),
+                             players_fn=players_fn)
+    payload = dbs.build_board(
+        _mfl_req("mfl-complete", mfl_player_ids={"17472": "17473"},
+                 mfl_player_names={}), f)
+
+    by_pick = {p["pick_no"]: p for p in payload["picks"]}
+    # Pick A (MFL 17472) crosswalked, so tier 1 is legitimate.
+    assert by_pick[1]["player_id"] == "17473" and by_pick[1]["name"] == "WRONG"
+    # Pick B (MFL 17473) never crosswalked. Its raw id collides with pick A's
+    # crosswalked id, which is already a key in the returned rows.
+    assert by_pick[2]["player_id"] == "17473"
+    assert by_pick[2]["name"] != "WRONG", \
+        "pick B adopted pick A's player — tier 1 was keyed by pick['player_id']"
+    assert by_pick[2]["name"] == "Player 17473"
+    # And pick B's raw MFL id was never queried in the first place.
+    assert calls == [["17473"]]
+
+
+def test_t289_07_pick_hydration_is_one_batched_call_over_crosswalked_ids_only(
+        slot_values_off):
+    """R-6 — one batched `players` call, whose id set is exactly the
+    crosswalked ids. That single assertion proves R-6 and R-7 together and is
+    strictly stronger than counting calls — which would be wrong anyway,
+    because `_undrafted` makes its own `players` call on the same request."""
+    calls: list[list[str]] = []
+    rows = {p: _player_row(p, p.title())
+            for p in ("ours-1", "ours-2", "ours-9")}
+
+    def players_fn(ids):
+        calls.append(list(ids))
+        return {p: rows[p] for p in ids if p in rows}
+
+    f = dbs.PlatformFetchers(sleeper_get=None,
+                             mfl_opener=mfl_opener("mfl-complete"),
+                             rookie_ids_fn=lambda season: {"ours-1", "ours-9"},
+                             players_fn=players_fn)
+    dbs.build_board(
+        _mfl_req("mfl-complete",
+                 mfl_player_ids={"17472": "ours-1", "17473": "ours-2"}), f)
+
+    assert calls, "the pick-hydration call was never made"
+    assert set(calls[0]) == {"ours-1", "ours-2"}, \
+        "hydration must query exactly the crosswalked ids"
+    # The second call is `_undrafted`'s, which is why no global `call_count`
+    # assertion is possible here.
+    assert len(calls) == 2 and set(calls[1]) == {"ours-9"}
+    taken = set(MFL_TAKEN)
+    assert not any(set(c) & taken for c in calls), \
+        "a raw MFL player id reached the players table"
+
+    # No crosswalk at all ⇒ the hydration call is not made, not made empty.
+    calls.clear()
+    dbs.reset_cache()
+    dbs.build_board(_mfl_req("mfl-complete", mfl_player_ids={}), f)
+    assert calls == []
+
+
+def test_t289_08_a_franchise_less_slot_stays_unassigned(slot_values_off):
+    """R-3 / R-11 — the distinction R-2 must not swallow.
+
+    R-2 is "the grid names a franchise we hold no member row for" ⇒
+    `Team 0003`. THIS is "the grid names no franchise at all" ⇒ both fields
+    `None`, so the client renders `Unassigned`. A fabricated `Team ` (the
+    empty-fid concatenation) is the defect this pins."""
+    grid = {"draftResults": {"draftUnit": {
+        "unit": "LEAGUE", "draftType": "SAME",
+        "draftPick": [
+            {"franchise": "0001", "player": "17472", "pick": "01", "round": "01",
+             "timestamp": "1785589226", "comments": ""},
+            {"franchise": "", "player": "", "pick": "02", "round": "01",
+             "timestamp": "", "comments": ""},
+        ]}}, "version": "1.0", "encoding": "utf-8"}
+    f = fetchers(None, mfl=_inline_mfl_opener(grid))
+    payload = dbs.build_board(
+        dbs.BoardRequest(league_id="10099", platform="mfl", season=2026,
+                         mfl_host="www48.myfantasyleague.com",
+                         mfl_franchise_to_user={"0001": "user-1"},
+                         mfl_usernames={"user-1": "Eire Rebels"}), f)
+
+    named, blank = payload["order"][0], payload["order"][1]
+    assert named["owner_username"] == "Eire Rebels"
+    assert blank["owner_user_id"] is None and blank["owner_username"] is None
+    # MFL emits `assigned`/`unknown`; `unset` is Sleeper-only (`_order_from`).
+    assert payload["order_confidence"] == "unknown"
+    # R-11 — MFL's grid states CURRENT ownership only; provenance is prose.
+    assert all(o["original_user_id"] is None and o["original_username"] is None
+               for o in payload["order"])
+
+
+def test_t289_14_the_all_zeros_slot_sentinel_reads_no_selection(slot_values_off):
+    """R-15 — the one documented exception to R-9.
+
+    `mfl-multi-unit` carries one recorded-live pick with `player: "0000"`.
+    `_render_mfl` gates emission on `if mfl_pid:` and `"0000"` is truthy, so
+    the row is already counted as made (`_mfl_counts`) and pinned into
+    `picks[]` by `test_m5_mfl_grid_states_through_the_injected_opener`.
+    Dropping it is out of scope; naming it honestly is not."""
+    man = mfl_manifest("mfl-multi-unit")
+    f = fetchers(None, mfl=mfl_opener("mfl-multi-unit"))
+    payload = dbs.build_board(_mfl_req("mfl-multi-unit"), f)
+
+    assert len(payload["picks"]) == man["made"] == 192   # inclusion unchanged
+    sentinel = [p for p in payload["picks"] if p["name"] == "No selection"]
+    assert len(sentinel) == 1
+    assert sentinel[0]["player_id"] == "0000"
+    assert sentinel[0]["position"] == "" and sentinel[0]["team"] is None
+    assert re.search(r"[A-Za-z]", sentinel[0]["name"])   # satisfies R-9
+    assert not any(p["name"] == "Player 0000" for p in payload["picks"])
 
 
 def test_m5_05_auth_failure_serves_a_notice_never_stale_as_live():
@@ -928,9 +1183,15 @@ def mfl_league(monkeypatch):
         "platform_host": MFL_HOST, "platform_season": 2026,
         "platform_my_team": "0007", "user_id": OPERATOR,
     })
+    # `username` is what the MFL link/re-sync writers actually store for every
+    # franchise, linking or not (`server.py:20188`). Without it here, #289's
+    # route assertion would pass on the `Team <fid>` fallback and prove
+    # nothing. Franchises 0001-0006/0008/0009 deliberately have NO member row,
+    # so the fallback stays covered by the same fixture.
     monkeypatch.setattr(server, "load_league_members", lambda lid: [
-        {"user_id": OPERATOR, "player_ids": []},
-        {"user_id": f"mfl:{MFL_LEAGUE}.f0010", "player_ids": ["ours-rostered"]},
+        {"user_id": OPERATOR, "username": "Eire Rebels", "player_ids": []},
+        {"user_id": f"mfl:{MFL_LEAGUE}.f0010", "username": "Kings of the Empire",
+         "player_ids": ["ours-rostered"]},
     ])
     monkeypatch.setattr(server, "_mfl_cookie_for", lambda sess, uid: None)
     monkeypatch.setattr(server, "_mfl_draft_opener",
@@ -939,9 +1200,10 @@ def mfl_league(monkeypatch):
     return calls
 
 
-def _xwalk(mapping):
+def _xwalk(mapping, names=None):
     class _X:
         by_mfl_sleeper = mapping
+        by_mfl_id = names or {}                  # #289 — the tier-2 name map
     return _X()
 
 
@@ -1019,7 +1281,23 @@ def test_m5_07_flag_on_renders_a_real_board_through_the_injected_opener(
     assert all(o["owner_user_id"] == OPERATOR for o in payload["my_picks"])
     # Exactly ONE MFL export call: nothing in this path needs the >=1s spacing
     # `_REQUEST_SPACING_SECONDS` exists for.
+    # (T-289-12 — R-13: the binding adds no upstream egress.)
     assert len(mfl_league) == 1 and "TYPE=draftResults" in mfl_league[0]
+
+    # ── T-289-09 (#289, R-1/R-4) — the BINDING resolves franchise names ──
+    # The linking user's own franchise…
+    assert all(o["owner_username"] == "Eire Rebels" for o in payload["my_picks"])
+    # …and a non-linking franchise, under its synthetic member id.
+    others = [o for o in payload["order"]
+              if o["owner_user_id"] == f"mfl:{MFL_LEAGUE}.f0010"]
+    assert others, "franchise 0010 owns picks in this corpus"
+    assert all(o["owner_username"] == "Kings of the Empire" for o in others)
+    # The reported defect, gone at the route: no synthetic id in a name cell…
+    assert not any("mfl:" in (o["owner_username"] or "")
+                   for o in payload["order"] + payload["my_picks"])
+    # …and no bare numeric id in a pick name (the crosswalk is empty here, so
+    # every pick lands in tier 3 — which is still a name, not a number).
+    assert all(re.search(r"[A-Za-z]", p["name"] or "") for p in payload["picks"])
 
 
 def test_m5_08_the_crosswalk_is_injected_so_undrafted_is_counted_not_suppressed(
