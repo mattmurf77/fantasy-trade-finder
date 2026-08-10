@@ -54,7 +54,7 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     RE-VALUE to the selected keys and RE-SORT teams — a pure client-side
 //     transform over per-position values (no refetch). Restyled to colored
 //     outline pills, selected = solid fill. Under
-//     `league.picks_always_counted` (#293/#294, default OFF) the selected
+//     `league.picks_always_counted` (#293/#294, shipped ON v1.12.0; the flag is a kill switch) the selected
 //     keys ALWAYS include draft capital unless the user explicitly
 //     deselects the Picks pill: tapping the first position pill auto-adds
 //     PICKS, so a filter never silently drops a team's pick value. With the
@@ -197,7 +197,7 @@ type CorePos = 'QB' | 'RB' | 'WR' | 'TE';
 // #14 FR1 — the filterable chart keys: the four positions plus the
 // draft-capital group ("Picks"). Picks isn't a position, so it renders in a
 // neutral ink tone, never a position hex (cross-client-invariants).
-// #293/#294 (flag `league.picks_always_counted`, default OFF): the Picks key
+// #293/#294 (flag `league.picks_always_counted`, shipped ON v1.12.0; kill switch): the Picks key
 // exists in EVERY subset — draft capital is subset-independent, so it is
 // selectable and charted in Starters and Bench too. With the flag OFF the
 // key only exists in the All subset (the shipped pre-#293 rule).
@@ -298,7 +298,7 @@ function computeSubset(team: PowerRankedTeam, subset: Subset): TeamComputed {
 // backend rank; includes draft capital). A non-empty filter = the summed
 // value of the selected groups.
 //
-// #293/#294, flag `league.picks_always_counted` (default OFF) — a REVERSAL of
+// #293/#294, flag `league.picks_always_counted` (shipped ON v1.12.0; kill switch) — a REVERSAL of
 // the shipped "picks are neither starters nor bench" rule, on the operator's
 // ruling that a team's draft-pick value contribution is subset-independent
 // and filter-independent: switching to Starters/Bench or filtering to a
@@ -466,7 +466,8 @@ export default function LeagueSummaryScreen() {
     if (!startersAvailable && subset !== 'all') setSubset('all');
   }, [startersAvailable, subset]);
 
-  // #293/#294 — the ONE read of `league.picks_always_counted` (default OFF).
+  // #293/#294 — the ONE read of `league.picks_always_counted` (shipped ON
+  // v1.12.0; the flag is a kill switch, not a dark launch).
   // Every gated expression on this screen resolves to THIS boolean within a
   // render: the flag switches the whole set atomically or not at all. Bar
   // SEGMENT heights are percentages of their own sum while a bar's HEIGHT
