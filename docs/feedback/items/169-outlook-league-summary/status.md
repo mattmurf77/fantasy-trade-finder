@@ -131,8 +131,12 @@ Outlook odds (flag `outlook.odds`, dark):
 Now BUILT (backend pipeline + mobile UI), dark behind `outlook.odds`. Still open:
 - **Empirical calibration** of the roster-value→weekly-points heuristic — tune
   via the offline backtest scaffold (current values are defaults, not fit).
-- **Live Sleeper validation** — future-week `matchup_id` pairing is assumed, not
-  validated (falls back to random re-pairing). Verify before flipping the flag on.
+- ~~**Live Sleeper validation** — future-week `matchup_id` pairing is assumed, not
+  validated (falls back to random re-pairing). Verify before flipping the flag on.~~
+  **CLOSED 2026-08-09 (BUG-2):** validated against live 2026 leagues — a
+  scheduled league publishes all 18 weeks of pairings before a game is played;
+  only `pre_draft` leagues lack them, and that is now the sole (tested)
+  random-pairing path.
 - **Real projection source** — swap `RosterValueStrength` for Sleeper projections
   or an own model in-season (Phase 2 seam: `FTF_OUTLOOK_STRENGTH_SOURCE` + 1 class).
 - **Redraft-value tab** — `basis=redraft` stays a "(soon)" chip until a redraft
@@ -198,23 +202,42 @@ operator's own leagues. Full method, numbers and verdict:
   percentage, title odds withheld, BUG-1 fixed first.** A
   Sleeper-projections cross-check still disagrees with the roster-value prior
   on half the playoff field in the superflex league.
-- **BUG-1 (severe, open):** `settings.league_average_match` (median match) is
-  ignored — the operator's Lakeview league has it ON in the live 2026 season,
-  which makes `projected_wins` read 22.29 in a 14-week season. Tracked by a
-  strict `xfail` in `backend/tests/test_outlook_calibration.py`; see also
-  `living-memory/GOTCHAS.md` G-024.
-- **Resolved:** Sleeper *does* publish future-week `matchup_id` pairings once a
-  league is scheduled (only `pre_draft` leagues lack them); the random-pairing
-  fallback costs ~5 % of playoff Brier.
+- ~~**BUG-1 (severe, open):**~~ **BUG-1 — FIXED 2026-08-09.**
+  `settings.league_average_match` (median match) was ignored — the operator's
+  Lakeview league has it ON in the live 2026 season, which made
+  `projected_wins` read 22.29 in a 14-week season. Phase 1 now carries the
+  setting through as `LeagueState.median_match` and Phase 3 books the second
+  decision each simulated week against that week's drawn median, so
+  `projected_wins` lands on the same 28-decision scale as the record Sleeper
+  displays. The strict `xfail` in `backend/tests/test_outlook_calibration.py`
+  is now a **passing** test. Re-measured on the same 6 captured seasons:
+  pooled playoff Brier **0.1113 → 0.0997** (−10.5 %; skill vs climatology
+  +55.5 % → **+60.1 %**), median-match leagues **0.1017 → 0.0666** (−34.5 %),
+  the four head-to-head leagues **bit-identical**; title Brier 1.1 % worse.
+  See `calibration-report-2026-08-09.md` §7 and `living-memory/GOTCHAS.md`
+  G-024.
+- ~~**Resolved:**~~ **BUG-2 — FIXED 2026-08-09.** Sleeper *does* publish
+  future-week `matchup_id` pairings once a league is scheduled (only
+  `pre_draft` leagues lack them), and Phase 1 was already ingesting them — so
+  there is no behaviour change on a scheduled league. What changed: the stale
+  "not validated" note in `league_state.py` is replaced by the measured
+  result, `LeagueState` carries `status` + `unscheduled_weeks()`, a
+  `pre_draft` league skips the weekly fan-out entirely instead of making 14
+  upstream calls that can only return `[]`, and `SimResult.random_paired_weeks`
+  makes the fallback observable. Both paths are now tested.
 
-**Recommendation: do not flip `outlook.odds` until BUG-1 is fixed**; then ship
-playoff odds only, gated to `completed_weeks >= 3` and `status != "pre_draft"`.
+**Recommendation: `outlook.odds` stays dark, but BUG-1 is no longer the
+reason.** Remaining blockers are BUG-3 (`playoff_seed_type` unmodelled,
+MODERATE) and the weak preseason `roster_value` source. When it does light:
+playoff odds only, gated to `completed_weeks >= 3` and
+`status != "pre_draft"`.
 
 **Flagged for operator review:** the roster-value→weekly-points calibration
 (`outlook_mean_points`/`outlook_points_per_value_sd`/`outlook_sigma_default`)
 is a documented heuristic, not empirically fit — tune via the offline backtest
-scaffold. Sleeper future-week `matchup_id` pairing stability is assumed, not
-validated against live 2025 data (falls back to random re-pairing if absent).
+scaffold. ~~Sleeper future-week `matchup_id` pairing stability is assumed, not
+validated against live 2025 data (falls back to random re-pairing if absent).~~
+*(Validated 2026-08-09 — see BUG-2 above.)*
 
 ## Productionization (2026-08-09) — hardened, still dark
 
@@ -303,8 +326,8 @@ The odds layer was typed in July; `LeagueSummaryScreen` has been rebuilt since
 
 ### 4. Lighting procedure — RECOMMENDED: plain flag flip
 
-**Not executed.** Run only after the calibration verdict passes and the
-live-Sleeper `matchup_id` pairing check clears (both still open above).
+**Not executed.** Run only after the calibration verdict passes. *(The
+live-Sleeper `matchup_id` pairing check cleared 2026-08-09 — BUG-2.)*
 
 **Recommendation: a plain flag flip, not the tester-allowlist experiment route
 (#279 / `onboarding_v2_rollout`).** Reasoning:

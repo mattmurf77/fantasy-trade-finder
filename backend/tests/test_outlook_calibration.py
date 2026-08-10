@@ -251,22 +251,134 @@ def test_as_of_rewind_reproduces_sleepers_own_final_standings(name):
 
 
 @pytestmark_fixtures
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG-1 (severe, open): SleeperLeagueState ignores settings."
-    "league_average_match, so a median-match league's /rosters W/L counters "
-    "arrive on a 2-decisions-per-week scale while simulate() adds only 1 win "
-    "per remaining week. Fix = teach Phase 1 the setting and Phase 3 the "
-    "median game; then delete this xfail. See calibration-report-2026-08-09.md"))
 def test_median_match_leagues_are_ingested_on_the_simulated_win_scale():
-    """The base standings the simulator starts from must be on the same
-    win scale it increments. Currently they are not for median-match leagues."""
+    """The base standings the simulator starts from must be on the same win
+    scale it increments.
+
+    Was a strict xfail tracking BUG-1; FIXED 2026-08-09 — Phase 1 now carries
+    `settings.league_average_match` through as `LeagueState.median_match` and
+    Phase 3 books the second (vs-median) decision each simulated week. The
+    assertion is the scale identity itself: the ingested counters must equal
+    `regular_season_weeks * decisions_per_week`, and a simulated season must
+    end on that same total."""
     import outlook_calibration_backtest as bt
     from backend.outlook.league_state import SleeperLeagueState
     fx = bt.load_fixture("lakeview-2025")          # league_average_match == 1
     assert bt.median_mode(fx), "fixture must be a median-match league"
     state = SleeperLeagueState(fetch=bt.offline_fetch(fx)).load(fx["league_id"])
+    assert state.median_match is True
+    assert state.decisions_per_week == 2
+    for t in state.teams:
+        assert t.wins + t.losses + t.ties == (
+            state.regular_season_weeks * state.decisions_per_week)
+
+    # …and the simulator increments on that scale. Total win credit per week
+    # is n/2 (head-to-head) + n/2 (vs median) = n, so a full simulated season
+    # sums to n_teams * regular_season_weeks across the league — exactly.
+    st = bt.as_of(state, 12)
+    assert st.median_match is True
+    rids = [t.roster_id for t in st.teams]
+    strengths = {r: TeamStrength(r, 120.0, 20.0) for r in rids}
+    res = _run(st, strengths, n_sims=300, config_seed=3)
+    total = sum(res.projected_wins(r) for r in rids)
+    assert total == pytest.approx(len(rids) * st.regular_season_weeks, abs=1e-6)
+
+
+@pytestmark_fixtures
+def test_head_to_head_leagues_keep_the_one_decision_per_week_scale():
+    """Guard the other side of BUG-1: a non-median league must be untouched —
+    one decision per week, ingested and simulated."""
+    import outlook_calibration_backtest as bt
+    from backend.outlook.league_state import SleeperLeagueState
+    fx = bt.load_fixture("ffv3-2023")              # league_average_match absent
+    assert not bt.median_mode(fx)
+    state = SleeperLeagueState(fetch=bt.offline_fetch(fx)).load(fx["league_id"])
+    assert state.median_match is False
+    assert state.decisions_per_week == 1
     for t in state.teams:
         assert t.wins + t.losses + t.ties == state.regular_season_weeks
+    st = bt.as_of(state, 12)
+    rids = [t.roster_id for t in st.teams]
+    strengths = {r: TeamStrength(r, 120.0, 20.0) for r in rids}
+    res = _run(st, strengths, n_sims=300, config_seed=3)
+    total = sum(res.projected_wins(r) for r in rids)
+    assert total == pytest.approx(
+        len(rids) * st.regular_season_weeks / 2.0, abs=1e-6)
+
+
+def test_median_match_adds_a_second_decision_correlated_with_strength():
+    """Turning the median game on adds between 0 and 1 extra win per remaining
+    week, and a stronger team banks more of them than a weaker one (it clears
+    the league median more often). Synthetic league so the only difference
+    between the two runs is the flag."""
+    st = _league(n_teams=12, weeks=13, playoff_slots=6)
+    rids = [t.roster_id for t in st.teams]
+    strengths = {r: TeamStrength(r, 95.0 + 4.0 * r, 20.0) for r in rids}
+    h2h = _run(st, strengths, n_sims=3000, config_seed=11)
+    st.median_match = True
+    med = _run(st, strengths, n_sims=3000, config_seed=11)
+    weeks = st.regular_season_weeks
+    gains = {r: med.projected_wins(r) - h2h.projected_wins(r) for r in rids}
+    for r in rids:
+        assert 0.0 <= gains[r] <= weeks + 1e-9
+    assert gains[rids[-1]] > gains[rids[0]] + 1.0
+    # total win credit per week is n/2 head-to-head, n with the median game
+    assert sum(med.projected_wins(r) for r in rids) == pytest.approx(
+        len(rids) * weeks, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# BUG-2 — real future pairings vs the pre-draft random-pairing fallback
+# ---------------------------------------------------------------------------
+
+@pytestmark_fixtures
+def test_scheduled_league_publishes_pairings_for_every_remaining_week():
+    """A scheduled Sleeper league exposes `matchup_id` for FUTURE weeks, so
+    Phase 1 ingests the real remaining-season pairing graph and the simulator
+    never re-pairs at random (BUG-2, validated 2026-08-09)."""
+    import outlook_calibration_backtest as bt
+    from backend.outlook.league_state import SleeperLeagueState
+    fx = bt.load_fixture("lakeview-2026")          # in_season, zero weeks played
+    state = SleeperLeagueState(fetch=bt.offline_fetch(fx)).load(fx["league_id"])
+    assert state.status == "in_season"
+    assert state.completed_weeks == 0
+    assert sorted(state.schedule) == list(range(1, state.regular_season_weeks + 1))
+    assert state.unscheduled_weeks() == []
+    rids = [t.roster_id for t in state.teams]
+    res = _run(state, {r: TeamStrength(r, 115.0, 22.0) for r in rids},
+               n_sims=200, config_seed=1)
+    assert res.random_paired_weeks == []
+
+
+@pytestmark_fixtures
+def test_pre_draft_league_is_the_only_random_pairing_path():
+    """A `pre_draft` league has no schedule at all — Phase 1 skips the weekly
+    fan-out entirely (no upstream calls that could only return []) and the
+    simulator re-pairs every remaining week at random, recording which."""
+    import outlook_calibration_backtest as bt
+    from backend.outlook.league_state import SleeperLeagueState
+    fx = bt.load_fixture("ffv3-2026")
+    inner = bt.offline_fetch(fx)
+    seen: list[str] = []
+
+    def fetch(url):
+        seen.append(url)
+        return inner(url)
+
+    state = SleeperLeagueState(fetch=fetch).load(fx["league_id"])
+    assert state.status == "pre_draft"
+    assert state.schedule == {}
+    assert not any("/matchups/" in u for u in seen), (
+        "pre-draft league must not fan out over weeks: %s" % seen)
+    weeks = list(range(1, state.regular_season_weeks + 1))
+    assert state.unscheduled_weeks() == weeks
+    rids = [t.roster_id for t in state.teams]
+    res = _run(state, {r: TeamStrength(r, 115.0, 22.0) for r in rids},
+               n_sims=200, config_seed=1)
+    assert res.random_paired_weeks == weeks
+    # the fallback still produces a valid season
+    assert sum(res.playoff_pct(r) for r in rids) == pytest.approx(
+        state.playoff_slots, abs=1e-9)
 
 
 @pytestmark_fixtures

@@ -9,6 +9,17 @@
 > **title-odds** number has **no demonstrated skill** at this sample and must
 > not ship as a headline figure. Overall: **MARGINAL PASS, conditional.**
 
+> **UPDATE — 2026-08-09: BUG-1 and BUG-2 are FIXED.** Median-match scoring is
+> now ingested (`LeagueState.median_match`) and simulated (a second decision
+> per week versus that week's drawn median), and the future-pairing question
+> is settled in code. Pooled playoff Brier improved **0.1113 → 0.0997**
+> (skill vs climatology +55.5 % → **+60.1 %**), driven entirely by the two
+> median-match league-seasons (**0.1017 → 0.0666**, −34.5 %) with the four
+> head-to-head league-seasons **bit-identical**. Title Brier is 1.1 % worse —
+> stated, not hidden. The strict `xfail` is now a passing test. Every
+> affected passage below is annotated inline; original text is left intact.
+> Full detail: [§7 BUG-1](#7-bugs-found).
+
 > **CORRECTION — 2026-08-09.** This report states in four places that the
 > preseason `RosterValueStrength` source is *not backtestable* because "FTF
 > has no dated value snapshots". **That premise was wrong.** DynastyProcess
@@ -42,7 +53,7 @@
 
 | Pipeline phase | Validated? | How |
 |---|---|---|
-| Phase 1 `LeagueStateProvider` | **Partially — and it has a severe bug** | Replayed against 6 real captured seasons; reproduces Sleeper's own final W/L exactly *only once you account for median-match scoring*, which the shipped code does not. See [BUG-1](#7-bugs-found). |
+| Phase 1 `LeagueStateProvider` | ~~**Partially — and it has a severe bug**~~ → **Yes (BUG-1 fixed 2026-08-09)** | Replayed against 6 real captured seasons; reproduces Sleeper's own final W/L exactly once you account for median-match scoring — which the shipped code now does. See [BUG-1](#7-bugs-found). |
 | Phase 2 `TrailingScoresStrength` | **Yes** | This is what `auto` resolves to at every as-of week tested (3/6/9/12). |
 | Phase 2 `RosterValueStrength` | ~~**NO — not backtestable**~~ → **YES, backtested 2026-08-09** | ~~It needs a *historical* dynasty value board. Sleeper exposes no historical rosters and FTF has no dated value snapshots, so there is no honest way to score the preseason default. This is the single biggest gap in this report.~~ **Corrected 2026-08-09:** dated boards DO exist (DynastyProcess git history), and Sleeper's `/matchups/1` serves the real week-1 roster. Scored at as-of week 0 in [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md) §3. |
 | Phase 3 `simulate()` | **Yes** | Backtest + 22 permanent invariant tests. |
@@ -54,6 +65,14 @@
 the shipped Phase-1 ingestion path, because the as-of rewind the backtest needs
 also happens to bypass BUG-1. The shipped path's separate measurement is in
 [§7](#7-bugs-found).
+
+> **Superseded 2026-08-09.** With BUG-1 fixed, the rewind and the shipped
+> ingestion path agree: `as_of()` now books the median decision whenever the
+> league's own `median_match` flag is set, which is exactly what
+> `SleeperLeagueState.load()` reports. The two are the same code path, so the
+> headline numbers *do* now score shipped Phase-1 behaviour. The pre-fix
+> engine is still reproduced in-run (`as_of(..., median=False)`) purely to
+> keep the A/B measurable.
 
 ---
 
@@ -236,6 +255,9 @@ simulator's random re-pairing fallback):
 |---|---|---|
 | With true remaining schedule | 0.1113 | 0.0725 |
 | Random re-pairing fallback | 0.1168 | 0.0727 |
+
+*(Post-BUG-1-fix, 2026-08-09: 0.0997 / 0.0733 with the true schedule vs
+0.1070 / 0.0733 with the fallback — the same ~7 % relative cost.)*
 
 **The fallback costs ~5 % of playoff Brier and nothing measurable on title.**
 Strength-of-schedule is a second-order effect in a 12-team league. This is good
@@ -422,7 +444,9 @@ comparable. Everything below is filled in except their numbers.
 ## 6. Tier 3 — internal invariants
 
 New permanent file: `backend/tests/test_outlook_calibration.py` —
-**22 passed, 1 xfailed**, runs in ~3.6 s.
+**22 passed, 1 xfailed** as written; **27 passed, 0 xfailed** after the
+2026-08-09 BUG-1/BUG-2 fixes (the `xfail` became a pass and four tests were
+added). Runs in ~5 s.
 
 | # | Invariant | Test | Result |
 |---|---|---|---|
@@ -438,7 +462,11 @@ New permanent file: `backend/tests/test_outlook_calibration.py` —
 | — | as-of rewind reproduces Sleeper's own final standings | `test_as_of_rewind_reproduces_sleepers_own_final_standings` (6 seasons) | **pass** |
 | — | as-of state carries no future information | `test_as_of_state_carries_no_future_information` | **pass** |
 | — | engine beats climatology on captured seasons | `test_engine_beats_climatology_on_captured_seasons` | **pass** (regression guard, week 9, Brier < 0.75 × climatology) |
-| — | median-match leagues ingested on the simulated win scale | `test_median_match_leagues_are_ingested_on_the_simulated_win_scale` | **xfail (strict)** — tracks BUG-1; delete the marker when fixed |
+| — | median-match leagues ingested on the simulated win scale | `test_median_match_leagues_are_ingested_on_the_simulated_win_scale` | ~~**xfail (strict)**~~ → **pass** (BUG-1 fixed 2026-08-09; the marker was removed and the assertion strengthened to the full scale identity) |
+| — | H2H leagues keep the 1-decision-per-week scale | `test_head_to_head_leagues_keep_the_one_decision_per_week_scale` | **pass** (added 2026-08-09) |
+| — | the median game is strength-correlated and conserves win credit | `test_median_match_adds_a_second_decision_correlated_with_strength` | **pass** (added 2026-08-09) |
+| — | a scheduled league needs no random pairing | `test_scheduled_league_publishes_pairings_for_every_remaining_week` | **pass** (added 2026-08-09, BUG-2) |
+| — | `pre_draft` is the only random-pairing path | `test_pre_draft_league_is_the_only_random_pairing_path` | **pass** (added 2026-08-09, BUG-2) |
 
 **The simulator was already seedable** (`simulate(config_seed=)`, plumbed
 through `run_outlook` via `model_config["outlook_seed"]`) and already uses a
@@ -451,7 +479,80 @@ SHA-256 stable hash rather than the salted builtin. No fix was needed there.
 Per the validation-first brief: documented with severity; nothing structural was
 rewritten.
 
-### BUG-1 — `league_average_match` (median scoring) is ignored — **SEVERE, affects the operator's own live league**
+### BUG-1 — `league_average_match` (median scoring) is ignored — ~~**SEVERE**~~ → **FIXED 2026-08-09**
+
+> **FIXED 2026-08-09.** Both halves landed on branch
+> `worktree-agent-a55325b76c156117e`:
+> **Phase 1** (`league_state.py`) reads `settings.league_average_match` into
+> `LeagueState.median_match` (plus a `decisions_per_week` helper), and
+> **Phase 3** (`simulator.py`) books the second decision each simulated week
+> against the **median of that week's drawn scores** — computed inside the
+> simulation loop, never from history. The strict `xfail`
+> `test_median_match_leagues_are_ingested_on_the_simulated_win_scale` is now a
+> **passing** test asserting the scale identity end-to-end (ingested counters
+> == `weeks × decisions_per_week`, and a simulated season totals
+> `n_teams × weeks` win credit across the league), joined by a non-median
+> counterpart and a synthetic both-ways test.
+>
+> **Measured effect** (same harness, same fixtures, N = 10,000; the pre-fix
+> engine is reproduced exactly in-run by forcing the H2H-only rewind and
+> clearing `median_match`, so this is a paired A/B in one process):
+>
+> | | pre-fix | fixed | delta |
+> |---|---|---|---|
+> | All 6 leagues, playoff Brier | 0.1113 | **0.0997** | **−10.5 %** |
+> | All 6 leagues, title Brier | 0.0725 | 0.0733 | +1.1 % |
+> | **Median leagues only (Lakeview 24/25), playoff** | 0.1017 | **0.0666** | **−34.5 %** |
+> | Median leagues only, title | 0.0541 | 0.0565 | +4.6 % |
+> | Playoff skill vs climatology | +55.5 % | **+60.1 %** | CI [+47.6 %, +72.2 %] |
+>
+> Cluster bootstrap of the paired playoff-Brier delta over the 6
+> league-seasons: **−0.0117, 90 % CI [−0.0234, +0.0000]** — the point estimate
+> is an improvement and the interval touches, but does not cross, zero. With
+> only 2 median league-seasons in the sample that is the honest read: the
+> direction is right, the significance is not established.
+>
+> **Per league** (pooled over as-of weeks 3/6/9/12):
+>
+> | league-season | median match | pre-fix | fixed | delta |
+> |---|---|---|---|---|
+> | lakeview-2025 | yes | 0.0729 | 0.0395 | **−0.0334** |
+> | lakeview-2024 | yes | 0.1305 | 0.0938 | **−0.0367** |
+> | ffv3-2025 | no | 0.1713 | 0.1713 | +0.0000 |
+> | ffv3-2024 | no | 0.1433 | 0.1433 | +0.0000 |
+> | ffv3-2023 | no | 0.0928 | 0.0928 | +0.0000 |
+> | ffv3-2022 | no | 0.0574 | 0.0574 | +0.0000 |
+>
+> The four H2H leagues are **bit-identical** (max |Δ| = 0.000000, asserted by
+> the backtest itself) — the median branch adds no RNG draw, so a non-median
+> league's draw sequence is unchanged. Exactly the predicted shape: the fix
+> moves the median-match leagues and nothing else.
+>
+> **Where it got slightly worse, stated plainly.** Title Brier is 1.1 % worse
+> pooled (4.6 % on the median leagues), and as-of **week 3** playoff Brier
+> ticks from 0.1972 to 0.2012. Both are inside the noise of a 6-cluster
+> sample, and both are the expected consequence of an honest model: two
+> decisions per week is genuinely less random than one, so the engine is
+> *more* confident, which costs Brier wherever the underlying strength
+> estimate is weak. Weeks 6/9/12 all improve (0.1204→0.1065, 0.0729→0.0538,
+> 0.0548→0.0372).
+>
+> **Preseason interaction** (`scripts/outlook_preseason_backtest.py`, the
+> `roster_value` source at as-of week 0): the median-league preseason playoff
+> Brier moves **0.2298 → 0.2326** and the H2H leagues stay at **0.1789**
+> exactly. Same mechanism — the median game removes luck, so the weak
+> dynasty-value prior is amplified rather than diluted. That *strengthens*,
+> not weakens, the report's existing recommendation to gate the surface to
+> `completed_weeks >= 3`.
+>
+> **Interaction with the parallel IDP fix.** FFv3 is an IDP league whose
+> DL/LB/DB/IDP_FLEX/K starting slots currently price at zero on the
+> DynastyProcess board; that defect is being fixed in a sibling branch and
+> will move the FFv3 numbers. Every figure above is measured against the
+> baseline **as it exists on this branch**; a combined re-measurement is
+> required once both land.
+
+The original finding follows.
 
 **What.** `SleeperLeagueState.load()` copies `wins`/`losses`/`ties` straight off
 `/rosters` and never reads `settings.league_average_match`. When that setting is
@@ -503,8 +604,37 @@ median game each simulated week (compute the week's median across the 12 drawn
 scores, award a second win/loss per team). Phase 4/5: `projected_wins` then
 lands on the same scale as the displayed record. Delete the `xfail` on
 `test_median_match_leagues_are_ingested_on_the_simulated_win_scale`.
+*(Implemented as sketched on 2026-08-09 — see the FIXED block above. The
+`xfail` was converted to a passing test rather than deleted.)*
 
-### BUG-2 — the "future pairings unknown" risk is real but narrower than flagged — **INFORMATIONAL, resolves an open item**
+### BUG-2 — the "future pairings unknown" risk is real but narrower than flagged — ~~**INFORMATIONAL**~~ → **FIXED 2026-08-09**
+
+> **FIXED 2026-08-09.** The recommendation in this entry is now code.
+> `league_state.py`'s stale "NOT validated against live 2025 data" note is
+> replaced by the measured result; `LeagueState` carries `status` and an
+> `unscheduled_weeks()` helper; a `pre_draft` league **short-circuits the
+> weekly fan-out entirely** instead of making `regular_weeks` upstream calls
+> that can only return `[]`; and `SimResult.random_paired_weeks` records
+> exactly which weeks took the random-pairing path, so the fallback is
+> observable rather than silent.
+>
+> **No behaviour change on a scheduled league** — Phase 1 already walked every
+> regular-season week, so the real future pairings were already being ingested
+> and used. The ~5 % of playoff Brier quoted below is therefore a cost the
+> engine was *already avoiding* on the six backtested seasons, not a saving
+> this change unlocks; the pooled no-future-schedule diagnostic still runs
+> (0.0997 with the real schedule vs 0.1070 without, post-BUG-1-fix). What the
+> change buys is that the fallback is now a **named, tested, pre-draft-only**
+> path rather than an untested silent degradation.
+>
+> Two tests pin it: `test_scheduled_league_publishes_pairings_for_every_
+> remaining_week` (lakeview-2026, `in_season`, zero weeks played → all 14
+> regular weeks scheduled, `random_paired_weeks == []`) and
+> `test_pre_draft_league_is_the_only_random_pairing_path` (ffv3-2026 →
+> `status == "pre_draft"`, empty schedule, **no `/matchups/` fetch is issued
+> at all**, every remaining week re-paired at random, odds still conserve).
+
+The original finding follows.
 
 `league_state.py` flags as unvalidated whether Sleeper exposes `matchup_id` for
 future weeks. Measured:
@@ -598,8 +728,8 @@ The bar below is proposed by this agent; the operator rules.
 | P4 | Accuracy improves with information | monotone across weeks 3→12 | 0.197 → 0.120 → 0.073 → 0.055 | **PASS** |
 | P5 | Title odds beat climatology | skill > 0 with CI excluding 0 | +5.1 %, **CI [−13.2, +22.3]** | **FAIL** |
 | P6 | Title odds not worse than climatology at any shipped week | — | **week 3 is worse** (0.0953 vs 0.0764) | **FAIL** |
-| P7 | Internal invariants hold | all pass | 22 pass, 1 xfail (tracks BUG-1) | **PASS** |
-| P8 | No severe unfixed correctness bug on a real operator league | zero | **BUG-1** (Lakeview, live) | **FAIL** |
+| P7 | Internal invariants hold | all pass | ~~22 pass, 1 xfail~~ → **27 pass, 0 xfail** (2026-08-09) | **PASS** |
+| P8 | No severe unfixed correctness bug on a real operator league | zero | ~~**BUG-1** (Lakeview, live)~~ → **BUG-1 fixed 2026-08-09**; BUG-3 (`playoff_seed_type`) remains open, MODERATE | ~~**FAIL**~~ → **PASS** |
 | P9 | Preseason default source validated | backtested | ~~**not backtestable** (no historical value board)~~ → **backtested 2026-08-09**: playoff +21.6 % (CI excludes 0) but over-confident and 4/6 league-seasons; title no skill | ~~**FAIL — untestable**~~ → **MARGINAL** ([details](dated-values-revalidation-2026-08-09.md)) |
 | P10 | Cross-source agreement | Spearman > 0.8 or explained | 0.57 (SF/TEP) / 0.93 (1QB) — explained in §5b | **MARGINAL** |
 
@@ -613,9 +743,13 @@ seasons and 2 league formats — not a "it compiles" result.
 
 **But three things block the flag as it stands:**
 
-1. **BUG-1 must be fixed first.** One of the operator's two leagues is a
-   median-match league and would render `projected_wins = 22.29` in a 14-week
-   season today. Non-negotiable.
+1. ~~**BUG-1 must be fixed first.**~~ **CLEARED 2026-08-09 — BUG-1 is fixed.**
+   One of the operator's two leagues is a median-match league and would have
+   rendered `projected_wins = 22.29` in a 14-week season. Phase 1 now carries
+   the setting and Phase 3 books the median decision, so `projected_wins`
+   lands on the same 28-decision scale as the record Sleeper displays; the
+   fix also improves playoff Brier on those leagues by 34.5 %. Details in
+   [§7 BUG-1](#7-bugs-found).
 2. **Title / championship odds have not been shown to work.** Six champion
    events is not a validation; the confidence interval spans zero, and at week 3
    the number is worse than a constant 1/12. Recommend one of: hide `title_pct`
@@ -643,6 +777,13 @@ BUG-1, (b) gates the odds surface to `completed_weeks >= 3` and
 either withheld or demoted. Re-run this backtest after (a) — the regression
 guard is already in the test suite. Do **not** flip `outlook.odds` on before
 BUG-1 lands.
+
+> **Status 2026-08-09:** (a) is **done** and the backtest was re-run —
+> pooled playoff Brier 0.1113 → 0.0997, median leagues 0.1017 → 0.0666, H2H
+> leagues bit-identical. (b) and (c) remain open operator decisions. BUG-3
+> (`playoff_seed_type`, MODERATE) is still unmodelled, and the preseason
+> `roster_value` source is still weak — so `outlook.odds` staying dark is
+> still the right posture; BUG-1 is simply no longer the reason.
 
 **What would raise confidence most, cheaply:** more leagues. The engine is
 public-API-driven, so any set of completed Sleeper dynasty leagues can be added
@@ -676,3 +817,9 @@ python3 -m pytest backend/tests/test_outlook_calibration.py -q
 Test posture: backend suite **2136 passed / 1 skipped** before this work,
 **2158 passed / 1 skipped / 1 xfailed** after. No mobile changes. The
 `outlook.odds` flag is untouched and remains dark.
+
+**2026-08-09 (BUG-1 + BUG-2 fix):** baseline on `origin/main` @ `359a0ff` was
+**2217 passed / 1 skipped / 1 xfailed**; after the fix **2222 passed /
+1 skipped / 0 xfailed** — the `xfail` became a pass and four tests were added.
+`outlook.odds` still untouched and dark; no flag, `config/features.json`, or
+mobile changes.

@@ -132,12 +132,23 @@ def truth(fx: dict, playoff_slots: int):
 # As-of rewind
 # ---------------------------------------------------------------------------
 
-def as_of(state, week: int):
+def as_of(state, week: int, median: bool | None = None):
     """Rewind a completed-season LeagueState to the end of `week`.
 
-    Mutates a deep-ish copy: standings recomputed from weeks 1..week only."""
+    Mutates a deep-ish copy: standings recomputed from weeks 1..week only.
+
+    In a median-match league (`state.median_match`, Sleeper's
+    `league_average_match`) each week books TWO decisions — head-to-head and
+    versus the league median score — so the rewind books both, which is what
+    Sleeper's own /rosters counters show at week W. Pass `median=False` to
+    force the H2H-only rewind AND clear the flag on the returned state: that
+    reproduces the pre-fix (BUG-1) engine exactly, which is how the fix is
+    A/B-scored below."""
     import copy
     st = copy.deepcopy(state)
+    if median is None:
+        median = bool(st.median_match)
+    st.median_match = median
     by_rid = {t.roster_id: t for t in st.teams}
     for t in st.teams:
         t.wins = t.losses = t.ties = 0
@@ -163,6 +174,8 @@ def as_of(state, week: int):
             else:
                 by_rid[a].ties += 1
                 by_rid[b].ties += 1
+    if median:
+        _book_median_games(st, state, week)
     for t in st.teams:
         t.points_for = round(t.points_for, 2)
         t.points_against = round(t.points_against, 2)
@@ -171,25 +184,10 @@ def as_of(state, week: int):
     return st
 
 
-def median_mode(fx: dict) -> bool:
-    """True when the league runs Sleeper's 'median match' (league_average_match)
-    — every team plays its H2H opponent AND the league median each week, so a
-    14-week season books 28 W/L decisions, not 14."""
-    return bool(((fx.get("league") or {}).get("settings") or {})
-                .get("league_average_match"))
-
-
-def as_of_shipped_ingestion(state, week: int, median: bool):
-    """What the SHIPPED Phase-1 provider would hand the simulator at week W.
-
-    `SleeperLeagueState` copies wins/losses/ties straight off /rosters. In a
-    median-match league those counters are on a 2-decisions-per-week scale
-    while `simulate()` only ever adds 1 win per remaining week — the scale
-    mismatch this variant reproduces (see BUG-1 in the calibration report)."""
-    import copy
-    st = copy.deepcopy(as_of(state, week))
-    if not median:
-        return st
+def _book_median_games(st, state, week: int):
+    """Add the second decision of each week — every team vs the league median
+    score that week. Verified to reproduce Sleeper's own reported record for
+    all 24 median-league rosters in the fixture set."""
     by_rid = {t.roster_id: t for t in st.teams}
     scores = state.weekly_scores
     for w in range(1, week + 1):
@@ -206,7 +204,26 @@ def as_of_shipped_ingestion(state, week: int, median: bool):
                 by_rid[t.roster_id].losses += 1
             else:
                 by_rid[t.roster_id].ties += 1
-    return st
+
+
+def median_mode(fx: dict) -> bool:
+    """True when the league runs Sleeper's 'median match' (league_average_match)
+    — every team plays its H2H opponent AND the league median each week, so a
+    14-week season books 28 W/L decisions, not 14."""
+    return bool(((fx.get("league") or {}).get("settings") or {})
+                .get("league_average_match"))
+
+
+def as_of_shipped_ingestion(state, week: int, median: bool):
+    """What the SHIPPED Phase-1 provider hands the simulator at week W.
+
+    `SleeperLeagueState` copies wins/losses/ties straight off /rosters, which
+    in a median-match league are on a 2-decisions-per-week scale. Since BUG-1
+    was fixed (2026-08-09) Phase 1 carries `league_average_match` through and
+    `simulate()` books the median decision too, so this is just `as_of()` with
+    the league's own median setting — kept as a named alias because the
+    round-trip test asserts against Sleeper's reported final records."""
+    return as_of(state, week, median=median)
 
 
 def strip_future_schedule(state, week: int):
@@ -520,10 +537,20 @@ def bye_variant_backtest(players_team_pos: dict, sims: int):
     return records
 
 
-def bootstrap_brier_delta(records, iters=4000, seed=20260809):
+def _identical_on_h2h_leagues(bug1_records, median_leagues) -> str:
+    """The BUG-1 fix must not touch a non-median league at all — same draw
+    sequence, same odds. Any drift here means the fix leaked."""
+    drift = max((abs(r[3] - r[2]) for r in bug1_records
+                 if r[0] not in median_leagues), default=0.0)
+    return "YES (max |delta| = %.6f)" % drift if drift == 0 else \
+        "NO — max |delta| = %.6f (INVESTIGATE)" % drift
+
+
+def bootstrap_brier_delta(records, iters=4000, seed=20260809,
+                          label="Bye-multiplier"):
     """Cluster bootstrap (over league-seasons, same rationale as
     `bootstrap_skill`) of the Brier DELTA (variant - baseline). Negative =
-    the multiplier improves calibration; positive = it hurts."""
+    the variant improves calibration; positive = it hurts."""
     import random as _r
     rng = _r.Random(seed)
     by_league = defaultdict(list)
@@ -554,7 +581,7 @@ def bootstrap_brier_delta(records, iters=4000, seed=20260809):
     obs_dp, obs_dt = delta(leagues)
     lo_p, hi_p = ci(dps)
     lo_t, hi_t = ci(dts)
-    print("\n## Bye-multiplier Brier delta — cluster bootstrap, 90%% CI\n")
+    print("\n## %s Brier delta — cluster bootstrap, 90%% CI\n" % label)
     print("  playoff Brier delta (variant - baseline): %+.4f   90%% CI [%+.4f, %+.4f]  -> %s"
           % (obs_dp, lo_p, hi_p,
              "IMPROVES (excludes 0, negative)" if hi_p < 0 else
@@ -665,13 +692,16 @@ def main():
     base_p = defaultdict(lambda: defaultdict(list))
     base_t = defaultdict(lambda: defaultdict(list))
     nosched_p, nosched_t = defaultdict(list), defaultdict(list)
-    shipped_p, shipped_t = defaultdict(list), defaultdict(list)
-    clean_med_p, clean_med_t = defaultdict(list), defaultdict(list)
+    prefix_p, prefix_t = defaultdict(list), defaultdict(list)
+    med_prefix_p, med_prefix_t = defaultdict(list), defaultdict(list)
+    med_fixed_p, med_fixed_t = defaultdict(list), defaultdict(list)
     per_league_rows = []
     sources_used = set()
     median_leagues = []
     # (league, week, p_playoff, y_playoff, p_title, y_title) for the bootstrap
     records: list[tuple] = []
+    # (league, week, prefix_p, fixed_p, y_p, prefix_t, fixed_t, y_t)
+    bug1_records: list[tuple] = []
 
     print("\n## Per-league / per-week runs\n")
     for name in PAST_SEASONS:
@@ -717,28 +747,40 @@ def main():
                 nosched_t[wk].append(
                     (team["odds"]["title_pct"], 1.0 if rid == champ else 0.0))
 
-            # BUG-1 quantification: what the SHIPPED Phase-1 ingestion feeds in
-            st3 = as_of_shipped_ingestion(full, wk, med)
+            # BUG-1 A/B: the PRE-FIX engine, reproduced exactly by forcing the
+            # H2H-only rewind and clearing median_match so simulate() books
+            # one decision per week (what shipped before 2026-08-09).
+            st3 = as_of(full, wk, median=False)
             pay3 = run_outlook(
                 st3, player_value={}, player_pos={}, model_cfg={},
                 basis="consensus", source_override="auto", n_sims=args.sims)
+            fixed_by_rid_p = {t["roster_id"]: t["odds"]["playoff_pct"]
+                              for t in payload["teams"]}
+            fixed_by_rid_t = {t["roster_id"]: t["odds"]["title_pct"]
+                              for t in payload["teams"]}
             for team in pay3["teams"]:
                 rid = team["roster_id"]
                 y_p = 1.0 if rid in field else 0.0
                 y_t = 1.0 if rid == champ else 0.0
-                shipped_p[wk].append((team["odds"]["playoff_pct"], y_p))
-                shipped_t[wk].append((team["odds"]["title_pct"], y_t))
+                prefix_p[wk].append((team["odds"]["playoff_pct"], y_p))
+                prefix_t[wk].append((team["odds"]["title_pct"], y_t))
+                bug1_records.append((name, wk,
+                                     team["odds"]["playoff_pct"],
+                                     fixed_by_rid_p[rid], y_p,
+                                     team["odds"]["title_pct"],
+                                     fixed_by_rid_t[rid], y_t))
                 if med:
-                    clean_med_p[wk].append(
-                        (dict((t["roster_id"], t["odds"]["playoff_pct"])
-                              for t in payload["teams"])[rid], y_p))
-                    clean_med_t[wk].append(
-                        (dict((t["roster_id"], t["odds"]["title_pct"])
-                              for t in payload["teams"])[rid], y_t))
+                    med_prefix_p[wk].append((team["odds"]["playoff_pct"], y_p))
+                    med_prefix_t[wk].append((team["odds"]["title_pct"], y_t))
+                    med_fixed_p[wk].append((fixed_by_rid_p[rid], y_p))
+                    med_fixed_t[wk].append((fixed_by_rid_t[rid], y_t))
 
+            n_t = len(payload["teams"])
             per_league_rows.append((name, wk,
-                                    brier(model_p[wk][-len(payload["teams"]):]),
-                                    brier(model_t[wk][-len(payload["teams"]):])))
+                                    brier(model_p[wk][-n_t:]),
+                                    brier(model_t[wk][-n_t:]),
+                                    brier(prefix_p[wk][-n_t:]),
+                                    brier(prefix_t[wk][-n_t:])))
 
     print("\n  strength sources resolved by `auto`: %s" % sorted(sources_used))
 
@@ -762,35 +804,32 @@ def main():
     print("  no-future-schedule variant: playoff Brier=%.4f  title Brier=%.4f"
           % (brier(all_np), brier(all_nt)))
 
-    print("\n## BUG-1 — shipped Phase-1 ingestion vs clean as-of standings\n")
+    print("\n## BUG-1 — pre-fix (median-blind) engine vs fixed engine\n")
     print("  median-match leagues in sample: %s" % (median_leagues or "none"))
-    all_sp = [x for wk in AS_OF_WEEKS for x in shipped_p[wk]]
-    all_st_ = [x for wk in AS_OF_WEEKS for x in shipped_t[wk]]
-    print("  ALL leagues   clean playoff Brier=%.4f -> shipped %.4f  (%+.1f%%)"
-          % (brier(all_mp), brier(all_sp),
-             100 * (brier(all_sp) / brier(all_mp) - 1)))
-    print("  ALL leagues   clean title   Brier=%.4f -> shipped %.4f  (%+.1f%%)"
-          % (brier(all_mt), brier(all_st_),
-             100 * (brier(all_st_) / brier(all_mt) - 1)))
-    cm_p = [x for wk in AS_OF_WEEKS for x in clean_med_p[wk]]
-    cm_t = [x for wk in AS_OF_WEEKS for x in clean_med_t[wk]]
-    sm_p, sm_t = [], []
-    for wk in AS_OF_WEEKS:
-        # median-league slice of the shipped run, in the same order
-        n_per = len(shipped_p[wk]) // len(PAST_SEASONS)
-        for i, nm in enumerate(PAST_SEASONS):
-            if nm in median_leagues:
-                sm_p += shipped_p[wk][i * n_per:(i + 1) * n_per]
-                sm_t += shipped_t[wk][i * n_per:(i + 1) * n_per]
-    if cm_p:
-        print("  MEDIAN-only   clean playoff Brier=%.4f -> shipped %.4f  (%+.1f%%)"
-              % (brier(cm_p), brier(sm_p),
-                 100 * (brier(sm_p) / brier(cm_p) - 1)))
-        print("  MEDIAN-only   clean title   Brier=%.4f -> shipped %.4f  (%+.1f%%)"
-              % (brier(cm_t), brier(sm_t),
-                 100 * (brier(sm_t) / brier(cm_t) - 1)))
-        print("  MEDIAN-only   shipped vs climatology playoff (0.2500): %s"
-              % ("BEATS" if brier(sm_p) < 0.25 else "LOSES"))
+    all_xp = [x for wk in AS_OF_WEEKS for x in prefix_p[wk]]
+    all_xt = [x for wk in AS_OF_WEEKS for x in prefix_t[wk]]
+    print("  ALL leagues   playoff Brier  pre-fix=%.4f -> fixed %.4f  (%+.1f%%)"
+          % (brier(all_xp), brier(all_mp),
+             100 * (brier(all_mp) / brier(all_xp) - 1)))
+    print("  ALL leagues   title   Brier  pre-fix=%.4f -> fixed %.4f  (%+.1f%%)"
+          % (brier(all_xt), brier(all_mt),
+             100 * (brier(all_mt) / brier(all_xt) - 1)))
+    mx_p = [x for wk in AS_OF_WEEKS for x in med_prefix_p[wk]]
+    mx_t = [x for wk in AS_OF_WEEKS for x in med_prefix_t[wk]]
+    mf_p = [x for wk in AS_OF_WEEKS for x in med_fixed_p[wk]]
+    mf_t = [x for wk in AS_OF_WEEKS for x in med_fixed_t[wk]]
+    if mx_p:
+        print("  MEDIAN-only   playoff Brier  pre-fix=%.4f -> fixed %.4f  (%+.1f%%)"
+              % (brier(mx_p), brier(mf_p),
+                 100 * (brier(mf_p) / brier(mx_p) - 1)))
+        print("  MEDIAN-only   title   Brier  pre-fix=%.4f -> fixed %.4f  (%+.1f%%)"
+              % (brier(mx_t), brier(mf_t),
+                 100 * (brier(mf_t) / brier(mx_t) - 1)))
+        print("  MEDIAN-only   fixed vs climatology playoff (0.2500): %s"
+              % ("BEATS" if brier(mf_p) < 0.25 else "LOSES"))
+    print("  H2H-only leagues must be BIT-IDENTICAL (no code path taken): %s"
+          % _identical_on_h2h_leagues(bug1_records, median_leagues))
+    bootstrap_brier_delta(bug1_records, label="BUG-1 fix (fixed - pre-fix)")
 
     bootstrap_skill(records, len(PAST_SEASONS))
 
@@ -813,11 +852,23 @@ def main():
     print("\n## Calibration — title odds (all weeks pooled)\n")
     print(fmt_cal(calibration_table(all_mt)))
 
-    print("\n## Per-league/week detail\n")
-    print("| league-season | week | playoff Brier | title Brier |")
-    print("|---|---|---|---|")
-    for name, wk, bp, bt in per_league_rows:
-        print("| %s | %d | %.4f | %.4f |" % (name, wk, bp, bt))
+    print("\n## Per-league/week detail (fixed engine, and pre-fix for the A/B)\n")
+    print("| league-season | week | playoff Brier | title Brier | "
+          "pre-fix playoff | pre-fix title |")
+    print("|---|---|---|---|---|---|")
+    for name, wk, bp, bt, xp, xt in per_league_rows:
+        print("| %s | %d | %.4f | %.4f | %.4f | %.4f |"
+              % (name, wk, bp, bt, xp, xt))
+
+    print("\n## Per-league pooled playoff Brier — pre-fix vs fixed\n")
+    print("| league-season | median match | pre-fix | fixed | delta |")
+    print("|---|---|---|---|---|")
+    for nm in PAST_SEASONS:
+        rows = [r for r in bug1_records if r[0] == nm]
+        xb = brier([(r[2], r[4]) for r in rows])
+        fb = brier([(r[3], r[4]) for r in rows])
+        print("| %s | %s | %.4f | %.4f | %+.4f |"
+              % (nm, "yes" if nm in median_leagues else "no", xb, fb, fb - xb))
 
     # -------------------------------------------------------------------
     # Bye-week mu multiplier — EVALUATED variant (feedback #169)

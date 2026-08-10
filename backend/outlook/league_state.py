@@ -17,17 +17,30 @@ so the seam is real and the gap is explicit.
 Sleeper endpoint shapes (per api.sleeper.app v1, verified against the shapes
 already consumed elsewhere in this backend — see server._fetch_sleeper_league_meta):
   - GET /league/{id}          → settings.playoff_week_start, settings.playoff_teams,
+                                 settings.league_average_match,
                                  roster_positions, scoring_settings, season, status
   - GET /league/{id}/rosters  → [{roster_id, owner_id, players[], starters[],
                                    settings:{wins,losses,ties,fpts,fpts_decimal,
                                    fpts_against,fpts_against_decimal,division}}]
   - GET /league/{id}/users    → [{user_id, display_name, metadata:{team_name}}]
   - GET /league/{id}/matchups/{week} → [{roster_id, matchup_id, points, ...}]
-NOTE (uncertain, flagged for operator): the exact `matchup_id` pairing semantics
-for *future* weeks are assumed stable across the season; if Sleeper only exposes
-pairings for the current/played weeks, the remaining-schedule build degrades to
-"no pairings" and the simulator falls back to random re-pairing (documented in
-simulator.py). This has NOT been validated against live 2025 data.
+
+Future pairings — VALIDATED 2026-08-09 (was flagged uncertain; BUG-2 in the
+calibration report). A league whose schedule exists publishes the FULL-season
+pairing graph up front: the 2026 Lakeview league returned `matchup_id` for
+18/18 weeks with zero points scored. The only case with no pairings at all is
+`status == "pre_draft"`, which returns no matchup rows for any week — so the
+simulator's random re-pairing fallback is a pre-draft-only path (measured cost
+on 6 real seasons: ~5 % of playoff Brier, nothing on title). We therefore skip
+the weekly fan-out entirely for a pre-draft league rather than making 14
+upstream calls that can only return `[]`.
+
+Median match — `settings.league_average_match == 1` means Sleeper books TWO
+W/L decisions per week (head-to-head AND versus the league median score), so a
+14-week season records 28 decisions on /rosters. It is carried through as
+`LeagueState.median_match` and honoured by `simulator.simulate()`; ignoring it
+puts the base standings and the simulated increments on different scales
+(BUG-1, GOTCHAS G-024).
 """
 
 from __future__ import annotations
@@ -78,14 +91,29 @@ class LeagueState:
     completed_weeks: int = 0
     # roster_id -> [score_week1, score_week2, ...] for COMPLETED weeks only
     weekly_scores: dict[int, list[float]] = field(default_factory=dict)
+    # Sleeper `settings.league_average_match`: each week books a second W/L
+    # decision against the league median score (see module docstring).
+    median_match: bool = False
+    # Platform league status ("pre_draft" / "drafting" / "in_season" / "complete").
+    status: str = ""
 
     @property
     def is_preseason(self) -> bool:
         return self.completed_weeks == 0
 
+    @property
+    def decisions_per_week(self) -> int:
+        """W/L decisions booked per week — 2 in a median-match league."""
+        return 2 if self.median_match else 1
+
     def remaining_weeks(self) -> list[int]:
         """Weeks still to be played (1-indexed), in order."""
         return [w for w in range(self.completed_weeks + 1, self.regular_season_weeks + 1)]
+
+    def unscheduled_weeks(self) -> list[int]:
+        """Remaining weeks with no known pairing — the simulator re-pairs these
+        at random. Non-empty only for a `pre_draft` league (see docstring)."""
+        return [w for w in self.remaining_weeks() if not self.schedule.get(w)]
 
 
 def compute_num_byes(playoff_slots: int) -> int:
@@ -138,6 +166,8 @@ class SleeperLeagueState:
         regular_weeks = max(1, playoff_week_start - 1)
         playoff_slots = int(settings.get("playoff_teams") or 6)
         num_divisions = int(settings.get("divisions") or 0)
+        median_match = bool(settings.get("league_average_match"))
+        status = str(meta.get("status") or "")
         roster_slots = [
             p for p in (meta.get("roster_positions") or [])
             if p not in _BENCH_SLOTS
@@ -183,7 +213,7 @@ class SleeperLeagueState:
             ))
 
         schedule, weekly_scores, completed = self._load_matchups(
-            league_id, regular_weeks, roster_ids
+            league_id, regular_weeks, roster_ids, status
         )
 
         return LeagueState(
@@ -199,12 +229,22 @@ class SleeperLeagueState:
             schedule=schedule,
             completed_weeks=completed,
             weekly_scores=weekly_scores,
+            median_match=median_match,
+            status=status,
         )
 
     def _load_matchups(self, league_id: str, regular_weeks: int,
-                       roster_ids: list[int]):
+                       roster_ids: list[int], status: str = ""):
         """Fetch every regular-season week's matchups → pairing schedule,
         completed-week scores, and completed-week count.
+
+        Once a league is scheduled Sleeper publishes `matchup_id` for FUTURE
+        weeks too (validated: 18/18 weeks on an unplayed 2026 league), so this
+        walk collects the real remaining-season pairing graph, not just the
+        played weeks. A `pre_draft` league has no schedule at all and returns
+        no rows for any week — short-circuited here so we don't make
+        `regular_weeks` upstream calls that can only return `[]`; the
+        simulator's random re-pairing fallback covers that case.
 
         A week is 'completed' when its entries carry any nonzero points. We
         stop counting completed weeks at the first empty week so a mid-season
@@ -212,6 +252,8 @@ class SleeperLeagueState:
         schedule: dict[int, list[tuple[int, int]]] = {}
         weekly_scores: dict[int, list[float]] = {rid: [] for rid in roster_ids}
         completed = 0
+        if status == "pre_draft":
+            return schedule, weekly_scores, completed
         still_completing = True
         for week in range(1, regular_weeks + 1):
             try:

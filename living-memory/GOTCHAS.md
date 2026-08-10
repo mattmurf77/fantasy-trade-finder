@@ -12,7 +12,7 @@
 | ID | Symptom | Area |
 |---|---|---|
 | G-025 | "No historical data exists" for a GitHub-hosted CSV | Research / external data |
-| G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion |
+| G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion (fixed in `backend/outlook/` 2026-08-09; still live elsewhere) |
 | G-023 | Fixing a feedback item already fixed weeks ago | Feedback / process |
 | G-022 | Worktree agents drift, duplicate edits, blow up EAS archive | Mobile / worktrees / EAS |
 | G-021 | Native header back chevron renders but does nothing | Mobile / navigation |
@@ -200,8 +200,9 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Symptom:** a 14-week Sleeper season reports a 13-15 record (28 decisions). Anything that assumes one win per week silently runs on the wrong scale — e.g. the outlook simulator emitting `projected_wins = 22.29` for a 14-week season.
 - **Cause:** `settings.league_average_match == 1` ("median match"): every team plays its head-to-head opponent **and** the league median each week, so Sleeper books two W/L decisions per week. `/rosters` reports the combined total; `/matchups/{week}` still shows only the head-to-head pairing.
 - **Fix:** read `settings.league_average_match` whenever you consume `settings.wins/losses/ties`. To reconstruct standings from weekly scores, add the median game: compare each team's week score to the league median that week. Verified to reproduce Sleeper's own totals exactly on 24 median-league rosters.
-- **Where it bites today:** the operator's **Lakeview** league has it on in 2024, 2025 and the live 2026 season; Fantasy Football V3 does not. `backend/outlook/league_state.py` still ignores it — tracked by a strict `xfail` in `backend/tests/test_outlook_calibration.py`.
-- **Related:** `settings.playoff_seed_type` (1 on Lakeview) is likewise unread by `backend/outlook/playoff_format.py`. Full writeup: `docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md`.
+- **Where it bites today:** the operator's **Lakeview** league has it on in 2024, 2025 and the live 2026 season; Fantasy Football V3 does not.
+- **RESOLVED in `backend/outlook/` on 2026-08-09.** Phase 1 reads the setting into `LeagueState.median_match` (with a `decisions_per_week` helper) and Phase 3 (`simulator.py`) books the second decision each simulated week against the **median of that week's drawn scores** — computed inside the simulation loop, not from history. The strict `xfail` is now a passing test (`test_median_match_leagues_are_ingested_on_the_simulated_win_scale`). Measured: playoff Brier on the median-match league-seasons 0.1017 → 0.0666 (−34.5 %); head-to-head leagues bit-identical. **Still a live gotcha everywhere else** — any other code path that consumes `settings.wins/losses/ties` must read `league_average_match` too.
+- **Related:** `settings.playoff_seed_type` (1 on Lakeview) is likewise unread by `backend/outlook/playoff_format.py` — still open. Full writeup: `docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md`.
 
 ---
 
