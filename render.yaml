@@ -33,43 +33,15 @@ services:
       - key: FTF_TESTER_ALLOWLIST
         value: "device:dev_loc-mrpy6qog-2t72t6,313560442465169408"
 
-  # Push notification scheduling — three cron jobs that hit the typed
-  # push system. Each authenticates with X-Cron-Secret matching the
-  # CRON_SECRET env var on the web service. Set the secret to the same
-  # value in both places via the Render dashboard.
-  - type: cron
-    name: notif-realtime-tick
-    runtime: python
-    schedule: "*/15 * * * *"     # every 15 minutes — match_expiring scan
-    buildCommand: "true"
-    startCommand: >
-      curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET"
-      https://fantasy-trade-finder.onrender.com/api/cron/realtime-tick
-    envVars:
-      - key: CRON_SECRET
-        sync: false
-
-  - type: cron
-    name: notif-hourly-tick
-    runtime: python
-    schedule: "0 * * * *"        # top of every hour — bundle drain + Tue/Wed digest
-    buildCommand: "true"
-    startCommand: >
-      curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET"
-      https://fantasy-trade-finder.onrender.com/api/cron/hourly-tick
-    envVars:
-      - key: CRON_SECRET
-        sync: false
-
-  - type: cron
-    name: notif-daily-tick
-    runtime: python
-    schedule: "30 13 * * *"      # 13:30 UTC ≈ 9:30am ET — re-engagement scan
-    buildCommand: "true"
-    startCommand: >
-      curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET"
-      https://fantasy-trade-finder.onrender.com/api/cron/daily-tick
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # Push notification / player-cache / value-snapshot scheduling used to
+  # live here as `type: cron` blueprint services (or, for players-refresh,
+  # was documented as "provision by hand in the dashboard"). Render
+  # blueprint cron is a billable resource requiring account approval,
+  # which broke blueprint sync on this account (see commit 1e50d3e,
+  # living-memory/GOTCHAS.md, and docs/runbook.md → "Cron schedule"). All
+  # five cron-gated endpoints (/api/cron/realtime-tick, /hourly-tick,
+  # /players-refresh, /value-snapshot, /daily-tick) are now scheduled
+  # externally via .github/workflows/render-cron.yml — same
+  # X-Cron-Secret auth, same schedules, GitHub Actions cron instead of
+  # Render's.
 

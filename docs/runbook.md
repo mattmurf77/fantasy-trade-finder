@@ -250,19 +250,19 @@ The grace funnel (plan §2d — how many real users would P3 block?): grep Rende
 
 ## Cron schedule
 
-External scheduler (Render cron) must hit:
+**2026-08-09: moved off Render blueprint cron.** Render blueprint `type: cron` services are a billable resource requiring account approval — this broke blueprint sync outright (not a graceful degrade) for the `notif-*-tick` jobs, the earlier `value-snapshot-daily` attempt (commit `1e50d3e`, 2026-07-26), and is why `players-refresh` was documented as "provision by hand in the dashboard, never via render.yaml" instead of blueprint-declared. All five endpoints are now scheduled via **`.github/workflows/render-cron.yml`** (same GitHub Actions cron pattern as `keep-warm.yml`), authenticated with the same `X-Cron-Secret` header — just a `CRON_SECRET` **repo secret** (Settings → Secrets and variables → Actions) instead of a Render env var. Best-effort like `keep-warm.yml`: GitHub cron can drift/skip under Actions load, and auto-disables after 60 days of repo inactivity — re-enable in the Actions UI if a long quiet stretch trips it.
 
-| Endpoint | Recommended cadence |
-|---|---|
-| `POST /api/cron/realtime-tick` | every 1–5 min |
-| `POST /api/cron/hourly-tick` | hourly (top of hour) |
-| `POST /api/cron/daily-tick` | once daily |
-| `POST /api/cron/value-snapshot` | once daily |
-| `POST /api/cron/players-refresh` | once daily (see **Player-cache refresh** below) |
+| Endpoint | Schedule | GH Actions cron |
+|---|---|---|
+| `POST /api/cron/realtime-tick` | every 15 min | `*/15 * * * *` |
+| `POST /api/cron/hourly-tick` | hourly (top of hour) | `0 * * * *` |
+| `POST /api/cron/players-refresh` | once daily, 05:00 UTC (see **Player-cache refresh** below) | `0 5 * * *` |
+| `POST /api/cron/value-snapshot` | once daily, 06:00 UTC | `0 6 * * *` |
+| `POST /api/cron/daily-tick` | once daily, 13:30 UTC | `30 13 * * *` |
 
-If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
+If these stop firing, queued pushes pile up in `notification_queue`, digests/re-engagement go silent, the player pool goes stale, and value-history snapshots stop accumulating. Check the "render-cron" workflow's run history in the Actions tab for HTTP status per tick (`players-refresh` returns 202, not 200 — it kicks a daemon thread and returns immediately by design).
 
-**`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe. **2026-07-26 (market-data readiness):** the endpoint was never provisioned in `render.yaml`. A dedicated `value-snapshot-daily` cron was added but **broke Render blueprint sync** (new blueprint cron = new billable resource needing approval) and was removed same-day. The operative mechanism is the **`hourly-tick` idempotent fallback guard**: it writes today's snapshot whenever any format is missing (response gains a `value_snapshot` key when the fallback ran), so cadence is guaranteed by the existing hourly cron alone — a lost day requires hourly-tick down ~24h. If a dedicated cron is ever wanted, create it manually in the Render dashboard rather than via blueprint.
+**`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe. The dedicated `value-snapshot` GH Actions cron above is the primary writer again as of 2026-08-09; the **`hourly-tick` idempotent fallback guard** (writes today's snapshot whenever any format is missing) remains as belt-and-suspenders — a lost day now requires both the dedicated cron *and* hourly-tick to miss.
 
 ---
 
@@ -483,7 +483,7 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 Until M0 the player pipeline had **no refresh path at all**: the only bulk fetch from `/v1/players/nfl` happened on a disk-cache MISS, the "24 h sync gate" re-synced the `players` table from that same stale file, and `_ensure_universal_pools` froze the ranking pool per-process. A new rookie class could therefore only appear via a redeploy — prod was fresh only by accident, on Render cold boots, and the dev cache was five months stale (dated Apr 11, pre-NFL-draft: 157 teamless "rookies", 2 of them with a team).
 
-- **Trigger:** `POST /api/cron/players-refresh` (X-Cron-Secret, once daily). Render "cron" is an HTTP POST into the single-worker web service, so the handler **must not** fetch inline — it starts a daemon thread and returns **202 immediately**, always, including when nothing started. `?force=1` ignores the 20 h TTL. `POST /api/cron/daily-tick` carries an idempotent fallback guard (deployed envs only) so a missed dedicated run self-heals; provision the dedicated cron **by hand in the Render dashboard**, never via `render.yaml` — a new blueprint cron breaks blueprint sync (see the `value-snapshot` note above).
+- **Trigger:** `POST /api/cron/players-refresh` (X-Cron-Secret, once daily, 05:00 UTC). Render "cron" is an HTTP POST into the single-worker web service, so the handler **must not** fetch inline — it starts a daemon thread and returns **202 immediately**, always, including when nothing started. `?force=1` ignores the 20 h TTL. `POST /api/cron/daily-tick` carries an idempotent fallback guard (deployed envs only) so a missed dedicated run self-heals. **2026-08-09:** the dedicated schedule is provisioned via `.github/workflows/render-cron.yml`, not the Render dashboard — see **Cron schedule** above.
 - **What the daemon does, in this order** (the order is load-bearing): fetch → **atomic** cache write (temp file in the SAME directory + `os.replace`; a `/tmp` staging file would silently degrade to a copy) → `_sleeper_cache` global → `sync_players` **directly**, past the 24 h gate → clear the DP value maps → rebuild the universal pools **build-new-then-rebind, never clear-in-place** → bump the pool generation. A cleared pool would hand a concurrent `session_init` an empty board; `_player_sync_lock` serialises writers but does not guard pool readers.
 - **The generation is membership-only.** A bump makes the NEXT `session_init` rebuild that user's ranking services once; every pid present both before and after **carries its prior seed Elo forward** (rule G-SEED), so re-seeding stays on the user-change cadence and nothing moves mid-session. Expect exactly one extra rebuild per active session per refresh.
 - **Everything fails soft.** A dead upstream, a DynastyProcess outage, or a build that yields no players leaves the previous cache, `players` table, pools **and generation** completely intact — the next tick retries. Last-run state is in `server._last_refresh_status` (`{at, ok, error, players, generation}`).
