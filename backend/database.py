@@ -1818,6 +1818,12 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_trailing_min_weeks",     3.0, "#169: K — min completed weeks before TrailingScoresStrength/auto switch off roster-value"),
     ("outlook_sim_count",          10000.0, "#169: Monte-Carlo season simulations per outlook request"),
     ("outlook_seed",                   0.0, "#169: config seed XORed with stable_hash(league_id) for the deterministic RNG"),
+    # ── #169 bye-week mu multiplier (backend/outlook/bye_multiplier.py) ───
+    # EVALUATED variant, NOT consulted by pipeline.py — see the ship/no-ship
+    # verdict in docs/feedback/items/169-outlook-league-summary/
+    # bye-week-multiplier-2026-08-09.md before ever reading these knobs live.
+    ("outlook_bye_multiplier_enabled", 0.0, "#169: gate for the (evaluated, unshipped) per-week bye multiplier; 0=off (default) — pipeline.py does not read this yet"),
+    ("outlook_bye_multiplier_scale",   1.0, "#169: linear scale from starting-lineup value-fraction-on-bye to mu multiplier haircut; FLAGGED heuristic, unshipped"),
 ]
 
 

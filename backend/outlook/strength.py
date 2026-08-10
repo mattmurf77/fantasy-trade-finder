@@ -88,48 +88,70 @@ def _knob(cfg: dict[str, float], key: str) -> float:
     return float(val) if val is not None else _DEFAULTS[key]
 
 
-def starting_lineup_value(
+def select_starting_lineup(
     player_ids: list[str],
     player_value: dict[str, float],
     player_pos: dict[str, str],
     roster_slots: list[str],
-) -> float:
-    """Greedy best-lineup value: fill each dedicated slot with the highest-value
-    eligible unused player, then flex slots from the remaining pool. Falls back
-    to summing the whole roster's value when the league exposes no starting
-    slots (e.g. an ESPN-imported league without roster_positions)."""
-    if not roster_slots:
-        return sum(player_value.get(str(p), 0.0) for p in player_ids)
+) -> list[str]:
+    """Greedy best-lineup SELECTION: fill each dedicated slot with the
+    highest-value eligible unused player, then flex slots from the remaining
+    pool. Returns the selected player_ids (not their values) so callers that
+    need to know WHICH players are starting — not just the lineup's total
+    value — can reuse the same selection (see `bye_multiplier.py`, feedback
+    #169, for the first such caller).
 
-    # players grouped by position, value-desc
-    by_pos: dict[str, list[float]] = {}
+    Returns `[]` when the league exposes no starting slots (e.g. an
+    ESPN-imported league without roster_positions) — `starting_lineup_value`
+    falls back to summing the whole roster in that case, so there is no
+    single "starting lineup" to enumerate."""
+    if not roster_slots:
+        return []
+
+    # players grouped by position, value-desc (ties broken by original order —
+    # `sort` is stable, matching the pre-refactor float-only sort exactly)
+    by_pos: dict[str, list[tuple[float, str]]] = {}
     for pid in player_ids:
         pid = str(pid)
         pos = player_pos.get(pid, "?")
-        by_pos.setdefault(pos, []).append(player_value.get(pid, 0.0))
-    for vals in by_pos.values():
-        vals.sort(reverse=True)
+        by_pos.setdefault(pos, []).append((player_value.get(pid, 0.0), pid))
+    for pairs in by_pos.values():
+        pairs.sort(key=lambda pv: pv[0], reverse=True)
 
-    total = 0.0
+    selected: list[str] = []
     # dedicated (non-flex) slots first so flex draws from true leftovers
     dedicated = [s for s in roster_slots if s not in _FLEX_ELIGIBLE]
     flex = [s for s in roster_slots if s in _FLEX_ELIGIBLE]
     for slot in dedicated:
         pool = by_pos.get(slot)
         if pool:
-            total += pool.pop(0)
+            selected.append(pool.pop(0)[1])
     for slot in flex:
         elig = _FLEX_ELIGIBLE[slot]
         # pick the single best available value across eligible positions
         best_pos, best_val = None, None
         for pos in elig:
             pool = by_pos.get(pos)
-            if pool and (best_val is None or pool[0] > best_val):
-                best_pos, best_val = pos, pool[0]
+            if pool and (best_val is None or pool[0][0] > best_val):
+                best_pos, best_val = pos, pool[0][0]
         if best_pos is not None:
-            by_pos[best_pos].pop(0)
-            total += best_val
-    return total
+            selected.append(by_pos[best_pos].pop(0)[1])
+    return selected
+
+
+def starting_lineup_value(
+    player_ids: list[str],
+    player_value: dict[str, float],
+    player_pos: dict[str, str],
+    roster_slots: list[str],
+) -> float:
+    """Greedy best-lineup value — see `select_starting_lineup` for the
+    selection itself. Falls back to summing the whole roster's value when the
+    league exposes no starting slots."""
+    if not roster_slots:
+        return sum(player_value.get(str(p), 0.0) for p in player_ids)
+    selected = select_starting_lineup(player_ids, player_value, player_pos, roster_slots)
+    return sum(player_value.get(pid, 0.0) for pid in selected)
 
 
 @runtime_checkable
