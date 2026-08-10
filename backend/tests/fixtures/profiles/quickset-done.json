@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "name": "quickset-done",
+  "description": "THE 4/4-BUT-LOCKED STATE (mobile UX audit P0-1, capture request #8). qa_quickset has finished Quick Set across all four positions in both formats — tiers_saved is QB/RB/WR/TE and tier_overrides holds a real 96-player board — but has ZERO trio interactions and ranking_method NULL, because the default route (Rank -> Quick Set Tiers) never visits the chooser that writes it. LeagueScreen's ring counts a position ranked when it is tier-saved, so it reads 4/4; /api/rankings/progress sees ranking_method NULL, falls to the trio branch, finds 0 of the 40 required interactions, and answers unlocked:false. Everything keyed to the unlock stays dark - most consequentially the push-permission prompt, which is gated on progress.unlocked in RootNav. Also the only profile that seeds tier_overrides, which is what the public profile page renders from, so it doubles as the populated-profile fixture under flags/profiles-on.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta":         false,
+    "landing.try_before_sync":         false,
+    "league.activity_feed":            false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages":           false,
+    "swipe.gesture_audit":             true,
+    "swipe.qc_compliments":            true,
+    "trade.finder_targeting":          true,
+    "trade.preference_lists":          true,
+    "trade.send_in_sleeper":           true,
+    "trade_math.human_explanations":   true,
+    "trades.new_partners_alerts":      false,
+    "trades.queue_2k":                 false
+  },
+  "app_user": {
+    "username": "qa_quickset",
+    "user_id": "900000000000000001",
+    "unlocked": false,
+    "ranking_method": null,
+    "rankings": null,
+    "quickset": {
+      "positions": ["QB", "RB", "WR", "TE"],
+      "formats": ["1qb_ppr", "sf_tep"],
+      "players_per_position": 12
+    },
+    "tiers": "quickset-committed",
+    "anchors": null
+  },
+  "extra_users": [],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "990000000000000001",
+      "name": "QA Quick Set League",
+      "platform": "sleeper",
+      "total_rosters": 12,
+      "format": "sf_tep",
+      "roster_size": 26,
+      "members": [
+        { "username": "qa_opp_ranked",   "user_id": "900000000000000002", "rankings": "generated", "roster": "generated:balanced" },
+        { "username": "qa_opp_unranked", "user_id": "900000000000000003", "rankings": null,        "roster": "generated:balanced" }
+      ],
+      "matches_seed": { "mutual": 0, "awaiting": 0 }
+    }
+  ],
+  "players_cache": "warm"
+}

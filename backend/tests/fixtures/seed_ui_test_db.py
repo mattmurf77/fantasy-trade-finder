@@ -132,6 +132,13 @@ DRAFT_TYPES = ("snake", "linear")
 # draft_board_service.SLEEPER_STATUS_TO_STATE; these are the four real ones.
 DRAFT_STATUSES = ("pre_draft", "drafting", "paused", "complete")
 
+# `users.ranking_method` values the app writes (mobile api/rankings.ts
+# setRankingMethod). NULL is also legal and is what the DEFAULT path leaves
+# behind — see _validate_quickset.
+RANKING_METHODS = ("trio", "manual", "tiers", "anchor", "quickset")
+# Sentinel: "the profile said nothing", distinct from an explicit null.
+_RANKING_METHOD_DEFAULT = object()
+
 # The 13 flag-gated client surfaces from app-inventory-2026-07-10.md §5.
 # Every profile must carry an EXPLICIT decision for each (PRD R-07) — a new
 # inventory flag added here forces a per-profile decision at seed time.
@@ -278,6 +285,7 @@ def _validate_profile(p: dict) -> None:
         bad_fmt = [f for f in rankings["formats"] if f not in db.SCORING_FORMATS]
         if bad_fmt:
             _refuse(f"unknown scoring formats {bad_fmt}")
+    _validate_quickset(app, _refuse)
 
     for lg in p.get("leagues", []):
         for key in ("league_id", "name", "total_rosters", "format", "roster_size"):
@@ -301,6 +309,63 @@ def _validate_profile(p: dict) -> None:
             if roster != "generated:balanced":
                 _refuse(f"roster archetype {roster!r} not implemented in MVP "
                         "(balanced only; qb-heavy/thin/deep-32 are Phase 2)")
+
+
+def _validate_quickset(app: dict, _refuse) -> None:
+    """`app_user.ranking_method` + `app_user.quickset` (audit P0-1, capture
+    request #8).
+
+    The pairing is the whole point, so it is validated as a pair. Quick Set
+    commits a board through `/api/tiers/save`, which writes `tiers_saved` +
+    `tier_overrides` and never touches the trio interaction counter; the
+    default route never visits the chooser that writes `ranking_method`. The
+    ring on LeagueScreen counts a position ranked when it is TIER-SAVED, so it
+    reads 4/4 — while `/api/rankings/progress`, seeing `ranking_method` NULL,
+    falls to the trio branch, finds 0 interactions, and answers
+    `unlocked: false`. 4/4 and locked.
+
+    That state only survives if `ranking_method` stays NULL: setting it to
+    tiers/quickset/manual makes the backend compute `unlocked: true` and the
+    fixture would quietly stop reproducing the bug it exists to show. Refused
+    rather than allowed to rot.
+    """
+    method = app.get("ranking_method", _RANKING_METHOD_DEFAULT)
+    if method is not _RANKING_METHOD_DEFAULT and method is not None \
+            and method not in RANKING_METHODS:
+        _refuse(f"app_user.ranking_method {method!r} "
+                f"(have: null, {', '.join(RANKING_METHODS)})")
+
+    qs = app.get("quickset")
+    if qs is None:
+        return
+    if not isinstance(qs, dict):
+        _refuse("app_user.quickset must be an object")
+    positions = qs.get("positions") or list(POSITIONS)
+    bad = [p for p in positions if p not in POSITIONS]
+    if bad:
+        _refuse(f"app_user.quickset unknown positions {bad}")
+    formats = qs.get("formats") or list(db.SCORING_FORMATS)
+    bad_fmt = [f for f in formats if f not in db.SCORING_FORMATS]
+    if bad_fmt:
+        _refuse(f"app_user.quickset unknown scoring formats {bad_fmt}")
+    try:
+        per_pos = int(qs.get("players_per_position", 12))
+    except (TypeError, ValueError):
+        per_pos = 0
+    if per_pos < 1:
+        _refuse("app_user.quickset players_per_position must be >= 1")
+
+    # THE guard. `server.get_rankings_progress` unlocks on tiers/quickset when
+    # every position is saved, and unconditionally on manual.
+    resolved = None if method is _RANKING_METHOD_DEFAULT else method
+    if not app.get("unlocked") and resolved in ("tiers", "quickset", "manual"):
+        if resolved == "manual" or set(positions) >= set(POSITIONS):
+            _refuse(
+                f"quickset with ranking_method {resolved!r} and unlocked:false is "
+                "incoherent — /api/rankings/progress would answer unlocked:true, "
+                "so the profile would not reproduce the 4/4-but-locked state "
+                "(audit P0-1). Use ranking_method:null, or set unlocked:true."
+            )
 
 
 def _validate_draft(lg: dict, _refuse) -> None:
@@ -590,6 +655,31 @@ class World:
 
     def app_rankings(self) -> dict | None:
         return self.profile["app_user"].get("rankings")
+
+    def ranking_method(self) -> str | None:
+        """`users.ranking_method`, or None when the profile leaves it unset.
+
+        Default preserves the pre-P0-1 behavior: a profile with a rankings
+        block ranked by trios, so it says so. A profile may override with an
+        explicit `null` — which is what the DEFAULT app route actually leaves
+        behind, and the whole point of the `quickset-done` profile.
+        """
+        app = self.profile["app_user"]
+        method = app.get("ranking_method", _RANKING_METHOD_DEFAULT)
+        if method is _RANKING_METHOD_DEFAULT:
+            return "trio" if app.get("rankings") else None
+        return method
+
+    def quickset(self) -> dict | None:
+        """Normalised `app_user.quickset` (positions / formats / per-position)."""
+        qs = self.profile["app_user"].get("quickset")
+        if not qs:
+            return None
+        return {
+            "positions": list(qs.get("positions") or POSITIONS),
+            "formats": list(qs.get("formats") or db.SCORING_FORMATS),
+            "players_per_position": int(qs.get("players_per_position", 12)),
+        }
 
     def trios_per_position(self) -> int:
         r = self.app_rankings()
@@ -913,10 +1003,34 @@ def _seed_db(world: World, eng) -> dict[str, int]:
                            display_name=u["display_name"], avatar=None)
 
     rankings = world.app_rankings()
-    if rankings:
-        db.set_ranking_method(world.app_uid, "trio")
+    method = world.ranking_method()
+    if method:
+        db.set_ranking_method(world.app_uid, method)
     for fmt in world.unlocked_formats():
         db.mark_format_unlocked(world.app_uid, fmt)
+
+    # -- Quick Set commit (tiers_saved + tier_overrides), audit P0-1 ---------
+    quickset_positions = 0
+    quickset_overrides = 0
+    qs = world.quickset()
+    if qs:
+        for fmt in qs["formats"]:
+            by_pos = _pool_by_position(world.pool, fmt)
+            overrides: dict[str, float] = {}
+            for pos in qs["positions"]:
+                for pid in by_pos[pos][: qs["players_per_position"]]:
+                    # Quick Set's commit is a REORDER of the consensus board,
+                    # so the stored Elo is the seed with a small deterministic
+                    # nudge — enough that the board is genuinely the user's
+                    # (and the public profile's contrarian takes have
+                    # something to find) without inventing a wild ranking.
+                    seed = _seed_elo(world.pool[pid][_value_key(fmt)])
+                    overrides[pid] = round(seed + rng.uniform(-25, 25), 1)
+            db.save_tier_overrides(world.app_uid, overrides, scoring_format=fmt)
+            quickset_overrides += len(overrides)
+            for pos in qs["positions"]:
+                db.save_tiers_position(world.app_uid, pos, scoring_format=fmt)
+                quickset_positions += 1
 
     # -- leagues + members ----------------------------------------------------
     pick_slots = 0
@@ -1113,6 +1227,8 @@ def _seed_db(world: World, eng) -> dict[str, int]:
         "league_members": sum(len(lg["member_order"]) for lg in world.leagues.values()),
         "pick_assignment_slots": pick_slots,
         "recorded_picks": recorded,
+        "quickset_positions_saved": quickset_positions,
+        "quickset_tier_overrides": quickset_overrides,
         "players": players_written,
         "swipe_rows": swipe_rows,
         "member_ranking_rows": mr_rows,

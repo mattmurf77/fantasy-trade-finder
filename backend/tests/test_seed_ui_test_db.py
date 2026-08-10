@@ -817,3 +817,200 @@ def test_onboarding_v2_flags_are_release_plus_the_onboarding_surface():
     # FALSE on purpose: the `fresh` profile has ONE league, and autoskip would
     # jump the picker — making onboarding scene S1.1 unreachable.
     assert onboarding["onboarding.league_autoskip"] is False
+
+
+# ---------------------------------------------------------------------------
+# (j) UX-audit capture requests (docs/business/product/2026-08-09-mobile-ux-audit/
+#     08-capture-requests.md §2). Three states the audit's findings turn on,
+#     none of which any existing profile could reach.
+# ---------------------------------------------------------------------------
+
+AUDIT_PROFILES = ("quickset-done", "draft-pre")
+
+
+@pytest.fixture(scope="module")
+def audit(tmp_path_factory):
+    out_dir = tmp_path_factory.mktemp("ui-test-audit")
+    return {name: (out_dir, seed_profile(name, out_dir=out_dir, seed=SEED,
+                                         now=FIXED_NOW))
+            for name in AUDIT_PROFILES}
+
+
+def test_audit_profiles_are_registered():
+    assert set(AUDIT_PROFILES) <= set(list_profiles())
+
+
+# -- #8 / P0-1: the 4/4-but-locked ring --------------------------------------
+
+def test_quickset_done_is_tier_saved_but_has_no_ranking_method(audit):
+    """THE fixture for audit P0-1. LeagueScreen's ring counts a position
+    ranked when `progress[p] >= threshold OR tiersSaved.includes(p)`, so four
+    tier-saved positions read 4/4. `/api/rankings/progress` branches on
+    `ranking_method`: NULL falls to the trio branch, which needs 10
+    interactions per position — and a tier save writes Elo overrides without
+    ever touching the interaction counter. 4/4 and locked."""
+    out_dir, _ = audit["quickset-done"]
+    with _connect(out_dir, "quickset-done") as con:
+        row = con.execute(
+            "SELECT username, ranking_method, unlocked_formats, tiers_saved, "
+            "       tier_overrides FROM users WHERE sleeper_user_id = ?",
+            (APP_UID,)).fetchone()
+        swipes = con.execute(
+            "SELECT COUNT(*) c FROM swipe_decisions WHERE user_id = ?",
+            (APP_UID,)).fetchone()["c"]
+
+    assert row["username"] == "qa_quickset"
+    # The one field the whole finding rests on.
+    assert row["ranking_method"] is None
+    # …and the two that would each independently unlock the user anyway.
+    # NULL is the never-written state (mark_format_unlocked was never called);
+    # the monotonic floor in get_rankings_progress reads it as "no formats".
+    assert json.loads(row["unlocked_formats"] or "[]") == []
+    assert swipes == 0
+
+    saved = json.loads(row["tiers_saved"])
+    for fmt in ("1qb_ppr", "sf_tep"):
+        assert sorted(saved[fmt]) == ["QB", "RB", "TE", "WR"], fmt
+    overrides = json.loads(row["tier_overrides"])
+    for fmt in ("1qb_ppr", "sf_tep"):
+        assert len(overrides[fmt]) == 48        # 4 positions x 12 players
+
+
+def test_quickset_done_overrides_are_the_public_profile_source(audit):
+    """`/api/profile/<username>` builds tiers_snapshot from
+    `load_tier_overrides` — so this is also the only profile against which the
+    flag-on profile page renders anything (capture request #11)."""
+    out_dir, manifest = audit["quickset-done"]
+    assert manifest["counts"]["quickset_tier_overrides"] == 96   # 48 x 2 formats
+    assert manifest["counts"]["quickset_positions_saved"] == 8   # 4 x 2 formats
+    with _connect(out_dir, "quickset-done") as con:
+        overrides = json.loads(con.execute(
+            "SELECT tier_overrides FROM users WHERE sleeper_user_id = ?",
+            (APP_UID,)).fetchone()[0])["sf_tep"]
+        known = {r["player_id"] for r in con.execute(
+            "SELECT player_id FROM players").fetchall()}
+    # Every override must name a real player or the snapshot silently drops it
+    # (the route buckets by `player_positions.get(pid)` and skips misses).
+    assert set(overrides) <= known
+    assert all(isinstance(v, (int, float)) for v in overrides.values())
+
+
+@pytest.mark.parametrize("method", ["tiers", "quickset", "manual"])
+def test_quickset_with_an_unlocking_method_is_refused(tmp_path, method):
+    """The fixture is only honest while ranking_method stays NULL: any of
+    these makes `/api/rankings/progress` answer unlocked:true, and the profile
+    would quietly stop reproducing the bug it exists to demonstrate."""
+    with pytest.raises(SeederError) as e:
+        seed_profile(
+            _mutated_profile(tmp_path, "quickset-done",
+                             lambda d: d["app_user"].update(ranking_method=method)),
+            out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
+    assert e.value.code == EXIT_REFUSED
+    assert "unlocked:true" in str(e.value)
+
+
+def test_unknown_ranking_method_is_refused(tmp_path):
+    with pytest.raises(SeederError) as e:
+        seed_profile(
+            _mutated_profile(tmp_path, "quickset-done",
+                             lambda d: d["app_user"].update(ranking_method="vibes")),
+            out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
+    assert e.value.code == EXIT_REFUSED
+
+
+def test_existing_profiles_keep_their_trio_method(seeded):
+    """`ranking_method` defaults to 'trio' when a rankings block is present,
+    so adding the key changed nothing for the profiles that predate it."""
+    out_dir, _ = seeded["standard"]
+    with _connect(out_dir, "standard") as con:
+        assert con.execute(
+            "SELECT ranking_method FROM users WHERE sleeper_user_id = ?",
+            (APP_UID,)).fetchone()[0] == "trio"
+
+
+# -- #9 / P0-6: a trade match inside the ESPN league -------------------------
+
+def test_espn_profile_seeds_a_match_in_the_espn_league(cblock):
+    """audit P0-6 / capture request #9. `trade_matches` is league-scoped with
+    no platform column and `load_matches` resolves both names from
+    `league_members`, so an ESPN match rides the ordinary MatchesScreen path —
+    which is the finding: SendInSleeperButton returns null for an ESPN league
+    (#146), so the card offers Dismiss and never says why."""
+    out_dir, manifest = cblock["espn"]
+    with _connect(out_dir, "espn") as con:
+        matches = con.execute(
+            "SELECT * FROM trade_matches WHERE league_id = ?",
+            (ESPN_LEAGUE_ID,)).fetchall()
+        members = {r["user_id"] for r in con.execute(
+            "SELECT user_id FROM league_members WHERE league_id = ?",
+            (ESPN_LEAGUE_ID,)).fetchall()}
+    assert len(matches) == 1
+    m = matches[0]
+    assert APP_UID in (m["user_a_id"], m["user_b_id"])
+    # Both parties must be league members or load_matches renders a raw id
+    # where the partner's name belongs.
+    assert {m["user_a_id"], m["user_b_id"]} <= members
+    assert json.loads(m["user_a_give"]) and json.loads(m["user_a_receive"])
+    assert manifest["counts"]["trade_matches"] == 1
+    assert manifest["counts"]["awaiting_likes"] == 1
+
+
+# -- mock-draft reachability: the pre-draft twin -----------------------------
+
+def test_draft_pre_is_upcoming_with_no_picks_and_a_real_order(audit):
+    """DraftRoomScreen refuses the mock with `mock-entry.blocked.live` whenever
+    `board.state === 'live'` — a client-side gate the server's own
+    `capability.can_start` does not override. `draft` is status drafting, so
+    only an upcoming board leaves `mock-entry.start` tappable."""
+    out_dir, _ = audit["draft-pre"]
+    drafts = _cassette(out_dir, "draft-pre", f"league/{DRAFT_LEAGUE_ID}/drafts")
+    assert len(drafts) == 1
+    d = drafts[0]
+    assert d["status"] == "pre_draft"
+    assert d["start_time"] is None
+    assert d["last_picked"] is None
+    # Order still ASSIGNED — the mock resolves a real order rather than
+    # falling back to the seeded shuffle labelled `randomized`.
+    assert d["draft_order"] is not None and len(d["draft_order"]) == 12
+    assert _cassette(out_dir, "draft-pre", f"draft/{DRAFT_ID}/picks") == []
+    # Rookie-shaped and big enough: the other two mock refusals.
+    assert d["settings"]["rounds"] == 4
+    assert d["settings"]["teams"] == 12
+
+
+def test_draft_pre_leaves_the_whole_rookie_class_undrafted(audit):
+    out_dir, _ = audit["draft-pre"]
+    rosters = _cassette(out_dir, "draft-pre", f"league/{DRAFT_LEAGUE_ID}/rosters")
+    rostered = set().union(*[set(r["players"]) for r in rosters])
+    with _connect(out_dir, "draft-pre") as con:
+        rookie_ids = {r["player_id"] for r in con.execute(
+            "SELECT player_id FROM players WHERE rookie_year = '2026' "
+            "OR (rookie_year IS NULL AND years_exp = 0 "
+            "    AND team IS NOT NULL AND team != '')").fetchall()}
+    # Nothing drafted ⇒ no rookie on any roster ⇒ the board shows all 56.
+    assert rookie_ids & rostered == set()
+    assert len(rookie_ids) == 56
+
+
+@pytest.mark.parametrize("name", AUDIT_PROFILES)
+def test_audit_profile_seeding_is_deterministic(tmp_path, name):
+    a = seed_profile(name, out_dir=tmp_path / "a", seed=SEED, now=FIXED_NOW)
+    b = seed_profile(name, out_dir=tmp_path / "b", seed=SEED, now=FIXED_NOW)
+    assert a["db_content_hash"] == b["db_content_hash"]
+    assert a["counts"] == b["counts"]
+
+
+# -- #11: the profiles-on flag fixture ---------------------------------------
+
+def test_profiles_on_flags_turn_on_public_pages_only():
+    """capture request #11. `profiles.user_toggle` must stay FALSE: with it on,
+    `server._profile_opt_in_denied` additionally requires the user's own
+    `profile_public` marker, which no fixture sets — so both /u/<username> and
+    /api/profile/<username> 404 and the screen renders its error state. Turning
+    it on would BREAK this capture, not strengthen it."""
+    release, profiles_on = _flags("release"), _flags("profiles-on")
+    assert set(release) == set(profiles_on)
+    differing = {k for k in release if release[k] != profiles_on[k]}
+    assert differing == {"profiles.public_pages"}
+    assert profiles_on["profiles.public_pages"] is True
+    assert profiles_on["profiles.user_toggle"] is False
