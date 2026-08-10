@@ -679,7 +679,9 @@ export interface OutlookTeam {
   losses: number;
   ties: number;
   points_for: number;
-  strength: { mu: number; sigma: number };
+  // Null when the strength provider produced no estimate for the team
+  // (backend/outlook/serialize.py emits null rather than a fake number).
+  strength: { mu: number | null; sigma: number | null };
   odds: {
     playoff_pct: number; // 0..1
     bye_pct: number;     // 0..1
@@ -693,7 +695,8 @@ export interface LeagueOutlookResponse {
   league_id: string;
   platform: string;
   basis: OutlookBasis;
-  scoring_format: string;
+  // Null when the session has no active scoring format attached to the run.
+  scoring_format: string | null;
   meta: OutlookMeta;
   teams: OutlookTeam[];
 }

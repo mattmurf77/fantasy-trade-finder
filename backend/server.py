@@ -19246,6 +19246,151 @@ def market_movers_route():
 # pipeline in backend/outlook/. Dark behind the `outlook.odds` flag (404 off).
 # ---------------------------------------------------------------------------
 
+# ── Sleeper fan-out cache for the outlook route ─────────────────────────────
+# Phase 1 (backend/outlook/league_state.py) walks EVERY regular-season week and
+# calls `league/{id}/matchups/{week}` for each one — up to 14 upstream calls per
+# request, the worst uncached surface in the app (docs/integrations/sleeper.md
+# §5.4). This cache sits in the `fetch=` seam the provider already injects, so
+# backend/outlook/ is untouched and every MISS still goes through `_sleeper_get`
+# — the instrumented egress chokepoint (`_api_obs.observe_call`, endpoint class
+# `league.matchups`). A cache hit therefore shows up in apihealth as the ABSENCE
+# of an api_call event, which is exactly the signal we want.
+#
+# Tiering follows the grain of the data, keyed (league_id, season, week):
+#   • week  < scored high-water  → SETTLED. A later week has already scored, so
+#     this week's rows can never change again → cached with NO TTL.
+#   • week == scored high-water (or week 1 preseason) → the current/in-progress
+#     week; scores move during it → short TTL (15 min).
+#   • week  > that → future weeks; the rows are pairings only (schedule data,
+#     mutable in principle via a commissioner edit, but slow) → 1 h TTL.
+# Steady state per league: one short-TTL call for the live week, a handful of
+# hourly schedule calls, and exactly ONE upstream call for each new week that
+# completes — permanently free thereafter.
+#
+# Idiom: the per-key `(timestamp, value)` dict of `_SUGGESTED_ORDER_CACHE` /
+# `_FA_LEAGUE_META_CACHE`, not the single-object refresh of espn_service's
+# `_xwalk_cache` (that one caches ONE global blob; this is per league+week).
+# In-process, like every other cache here — completed-week rows are cheaply
+# re-derivable from Sleeper, so a DB table would buy durability across restarts
+# at the cost of schema + a data-dictionary entry the payload doesn't need.
+# Bounded by entry count (matchup rows carry per-player point maps).
+_OUTLOOK_WEEK_TTL_SECONDS     = 900.0    # current/in-progress week
+_OUTLOOK_SCHEDULE_TTL_SECONDS = 3600.0   # unplayed future weeks (pairings only)
+_OUTLOOK_WEEK_CACHE_MAX       = 250      # (league, season, week) entries per tier
+
+_OUTLOOK_WEEK_SETTLED: dict[tuple[str, str, int], list] = {}
+_OUTLOOK_WEEK_LIVE: dict[tuple[str, str, int], tuple[float, list]] = {}
+_OUTLOOK_WEEK_HIGHWATER: dict[tuple[str, str], int] = {}
+_OUTLOOK_SEASON_BY_LEAGUE: dict[str, str] = {}
+_outlook_cache_lock = threading.Lock()
+# Hit/miss counters — asserted by tests, handy in a debug read.
+_OUTLOOK_CACHE_STATS = {"settled_hits": 0, "live_hits": 0, "upstream": 0}
+
+_OUTLOOK_MATCHUPS_RE = re.compile(r"/league/([^/?]+)/matchups/(\d+)/?$")
+_OUTLOOK_LEAGUE_META_RE = re.compile(r"/league/([^/?]+)/?$")
+
+
+def _outlook_cache_clear() -> None:
+    """Drop every outlook fan-out cache entry (tests, league re-sync)."""
+    with _outlook_cache_lock:
+        _OUTLOOK_WEEK_SETTLED.clear()
+        _OUTLOOK_WEEK_LIVE.clear()
+        _OUTLOOK_WEEK_HIGHWATER.clear()
+        _OUTLOOK_SEASON_BY_LEAGUE.clear()
+        for k in _OUTLOOK_CACHE_STATS:
+            _OUTLOOK_CACHE_STATS[k] = 0
+
+
+def _outlook_evict(store: dict) -> None:
+    """Bound a tier by entry count, oldest-inserted first (caller holds lock)."""
+    while len(store) > _OUTLOOK_WEEK_CACHE_MAX:
+        store.pop(next(iter(store)), None)
+
+
+def _outlook_week_is_settled(key: tuple[str, str, int]) -> bool:
+    """True when a LATER week has already scored ⇒ this week is immutable.
+    Never settled without a season in the key — a seasonless key could collide
+    across years. (Caller holds the lock.)"""
+    league_id, season, week = key
+    if not season:
+        return False
+    return week < _OUTLOOK_WEEK_HIGHWATER.get((league_id, season), 0)
+
+
+def _outlook_store_week(key: tuple[str, str, int], rows: list) -> None:
+    """File a freshly-fetched week into the right tier and promote any weeks
+    the new high-water mark just settled. (Takes the lock.)"""
+    league_id, season, week = key
+    scored = any(
+        float(r.get("points") or 0.0)
+        for r in rows if isinstance(r, dict)
+    )
+    with _outlook_cache_lock:
+        lk = (league_id, season)
+        if scored and week > _OUTLOOK_WEEK_HIGHWATER.get(lk, 0):
+            _OUTLOOK_WEEK_HIGHWATER[lk] = week
+        _OUTLOOK_WEEK_LIVE[key] = (time.time(), rows)
+        # Any cached week now below the high-water mark is settled for good.
+        for k in [k for k in _OUTLOOK_WEEK_LIVE if k[0] == league_id
+                  and k[1] == season and _outlook_week_is_settled(k)]:
+            _OUTLOOK_WEEK_SETTLED[k] = _OUTLOOK_WEEK_LIVE.pop(k)[1]
+        _outlook_evict(_OUTLOOK_WEEK_SETTLED)
+        _outlook_evict(_OUTLOOK_WEEK_LIVE)
+
+
+def _outlook_week_ttl(key: tuple[str, str, int]) -> float:
+    """TTL for a non-settled week: short for the live week, longer for the
+    not-yet-played remainder (pairings only). (Caller holds the lock.)"""
+    league_id, season, week = key
+    live_week = max(_OUTLOOK_WEEK_HIGHWATER.get((league_id, season), 0), 1)
+    return (_OUTLOOK_WEEK_TTL_SECONDS if week <= live_week
+            else _OUTLOOK_SCHEDULE_TTL_SECONDS)
+
+
+def _outlook_sleeper_fetch():
+    """Return a `fetch(url)` for `build_league_state` that caches the weekly
+    matchups fan-out and passes everything else straight to `_sleeper_get`.
+
+    The league/rosters/users reads stay live on purpose: rosters carry the W/L/
+    points-for standings the odds are computed FROM, and stale standings would
+    be a wrong answer, not a slow one. Only the immutable-by-nature weekly
+    scores are cached.
+    """
+    def fetch(url: str):
+        m = _OUTLOOK_MATCHUPS_RE.search(url)
+        if not m:
+            data = _sleeper_get(url)
+            # Learn the season from the league-meta read (fetched first by the
+            # provider) so week keys are season-scoped.
+            meta_m = _OUTLOOK_LEAGUE_META_RE.search(url)
+            if meta_m and isinstance(data, dict) and data.get("season"):
+                with _outlook_cache_lock:
+                    _OUTLOOK_SEASON_BY_LEAGUE[meta_m.group(1)] = str(data["season"])
+            return data
+
+        league_id, week = m.group(1), int(m.group(2))
+        with _outlook_cache_lock:
+            season = _OUTLOOK_SEASON_BY_LEAGUE.get(league_id, "")
+            key = (league_id, season, week)
+            rows = _OUTLOOK_WEEK_SETTLED.get(key)
+            if rows is not None:
+                _OUTLOOK_CACHE_STATS["settled_hits"] += 1
+                return rows
+            hit = _OUTLOOK_WEEK_LIVE.get(key)
+            if hit is not None and (time.time() - hit[0]) < _outlook_week_ttl(key):
+                _OUTLOOK_CACHE_STATS["live_hits"] += 1
+                return hit[1]
+
+        rows = _sleeper_get(url)          # MISS → instrumented upstream call
+        with _outlook_cache_lock:
+            _OUTLOOK_CACHE_STATS["upstream"] += 1
+        if isinstance(rows, list):
+            _outlook_store_week(key, rows)
+        return rows
+
+    return fetch
+
+
 @app.route("/api/league/outlook")
 def league_outlook_route():
     """GET /api/league/outlook?league_id=...&basis=consensus|personal
@@ -19262,6 +19407,12 @@ def league_outlook_route():
 
     Dark by default: 404 while the `outlook.odds` flag is off. Preseason
     payloads (completed_weeks==0) carry meta.is_preseason / meta.beta = true.
+
+    Phase 1's weekly fan-out goes through `_outlook_sleeper_fetch()` (see
+    above): completed weeks are cached with no TTL, the live week for 15 min,
+    unplayed weeks for an hour. Misses still route through `_sleeper_get`, so
+    the cache's effect is visible in apihealth as fewer `league.matchups`
+    api_call events.
     """
     if not is_enabled("outlook.odds"):
         return jsonify({"error": "not_found"}), 404
@@ -19300,7 +19451,7 @@ def league_outlook_route():
     try:
         from . import outlook as outlook_pkg
         state = outlook_pkg.build_league_state(
-            league_id, platform=platform, fetch=_sleeper_get)
+            league_id, platform=platform, fetch=_outlook_sleeper_fetch())
         if not state.teams:
             return jsonify({"error": "league_not_found"}), 404
 
