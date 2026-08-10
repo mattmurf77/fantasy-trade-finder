@@ -1,0 +1,150 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-QUICKSETDONE
+# profile: quickset-done
+# flags: release
+# captures: progress-ring--4-4-locked
+# source: mobile/src/screens/LeagueScreen.tsx, mobile/src/components/LeagueProgressModule.tsx
+# interactive-stop: progress-ring--4-4-locked
+#
+# CAPTURE REQUEST #8 (mobile UX audit 2026-08-09, §2) — "the finding is that a
+# Quick Set user reaches 4/4 and is still locked — I can describe it from code
+# but have never seen it." Every other league capture shows the ring at 0/4.
+#
+# WHY THIS PROFILE AND NO OTHER. The 4/4-but-locked contradiction is not a
+# render bug we can fake with an injection; it is two backend answers that
+# disagree, and only `quickset-done` produces both:
+#
+#   • /api/tiers/status  → saved: [QB, RB, WR, TE]      (Quick Set committed
+#     tiers for all four positions in both formats)
+#   • /api/rankings/progress → unlocked: false           (ranking_method is
+#     NULL, so the endpoint falls to the trio branch and finds 0 of the 40
+#     required interactions — the default Rank route never visits the chooser
+#     that would have written a method)
+#
+# LeagueScreen.tsx:328 counts a position ranked when its trio count clears the
+# threshold OR `tiersSaved.includes(p)`, so positionsRanked === 4; and
+# `progress.unlocked` is false, so nothing keyed to the unlock lights up. The
+# seeder REFUSES a profile that would un-reproduce this (app_user.unlocked
+# true without a rankings block, a ranking_method that isn't explicitly null),
+# so the fixture cannot silently drift out from under this capture.
+#
+# WHY THE MODULE IS ON SCREEN AT ALL AT 4/4. `moduleVisible`
+# (LeagueScreen.tsx:358) is an OR: ring incomplete, OR no matches, OR
+# contrarian insufficient. The ring is COMPLETE here, so it is the second
+# clause carrying it — `quickset-done` seeds matches_seed {mutual: 0,
+# awaiting: 0}. That is exactly the user the finding describes: board done,
+# ring full, nothing unlocked.
+#
+# ENTRY is the ordinary pushed path (League tab → league-summary.league-home →
+# LeagueHome), matching capture/league.yaml and capture/league@near-unlock
+# .yaml. No launch argument is needed or wanted — the finding is about what a
+# real Quick Set user sees.
+#
+# NO INJECTIONS. Every state this file photographs is the fixture's own
+# resting answer; arming latency or a failure would photograph a different
+# claim than the one the audit is checking.
+tags: [capture, league, quickset-done]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble (see capture/rank-home.yaml for the finding).
+# The username ASSERTION before Continue is the rails fix from
+# capture/pick-assignment@espn.yaml: a raced inputText that lands half a name
+# submits a partial username and books a vcr miss, which fails the cell's
+# rails audit even though the retry self-heals the flow.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_quickset"
+      - assertVisible:
+          text: ".*qa_quickset.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — the tab BAR paints long before #244's launch
+# routing finishes resetting the Rank stack, and a tab tap fired into that
+# window gets stolen back. `rank.more-ways` is the Rank surface's own header
+# control (TabNav.tsx:148), so its presence proves the routing already ran.
+# Full finding in capture/league.yaml.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+
+# ── progress-ring--4-4-locked ────────────────────────────────────────────
+# The module needs BOTH the summary and the coverage query resolved
+# (`moduleVisible` is `!!summary && !!coverage && …`), so it can never be on
+# the first frame; waiting on the module id rather than the hero is what keeps
+# this out of the half-painted window.
+#
+# FORCED SCROLL, not a bare scrollUntilVisible: iOS keeps off-screen
+# ScrollView children in the hierarchy, so Maestro would call the module
+# "visible" while it sits below the fold and the shutter would photograph the
+# hero. visibilityPercentage: 100 + centerElement: true forces a real scroll
+# and parks the ring mid-screen. (rank-home.yaml RUN-1 finding.)
+# RUN-2 FIX: `centerElement: true` OVERSHOT. The module is a tall card, and
+# centring it drove the scroll past the point where it fit, cropping the ring
+# and the "League progress" tick label off the top of the frame. Centring is
+# the right tool before a TAP (rank-home.yaml) — for a SHUTTER the requirement
+# is 100% visibility, and stopping the moment that is satisfied is what frames
+# the whole card. visibilityPercentage: 100 is still mandatory: iOS keeps
+# off-screen ScrollView children in the hierarchy, so without it Maestro would
+# call the module visible from the hero and never scroll at all.
+- scrollUntilVisible:
+    element:
+      id: "league.progress-module"
+    direction: DOWN
+    visibilityPercentage: 100
+    timeout: 30000
+# THE ASSERTION THAT MAKES THIS CAPTURE MEAN SOMETHING: the ring reading FULL
+# while the account is locked — the exact frame the audit has never seen.
+#
+# RUN-1 FIX: this asserted ".*4/4.*", the literal the ring paints
+# (LeagueProgressModule.tsx:84), and went red on a screen whose ring plainly
+# read 4/4. PositionsRing's wrapper is `accessible` with an
+# accessibilityLabel (:57-64), which COLLAPSES the subtree on iOS — the "4/4"
+# Text is not exposed to the hierarchy at all, only the label is. So the
+# assertion has to match the label's phrasing, which is also the more stable
+# string (it survives any restyle of the in-ring numeral). Full-match regex;
+# ASSERTION, never a tap.
+- assertVisible:
+    text: ".*4 of 4 positions ranked.*"
+# …and the other half of the contradiction: `league.works-now` renders only
+# while mutual matches are zero, i.e. the ring is full and the payoff is still
+# dark. Asserting it here pins the frame to the locked reading rather than to
+# a coincidentally-full ring on an unlocked account.
+- assertVisible:
+    id: "league.works-now"
+- waitForAnimationToEnd
+- takeScreenshot: league__progress-ring--4-4-locked

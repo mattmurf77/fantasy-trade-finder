@@ -26,6 +26,31 @@ appId: com.fantasytradefinder.app
 #
 # Row 170 (`format-gate--copy-alert`) is a native Alert — EXCLUDED from v1 per
 # ruling B; recorded in the matrix as `excluded--native-alert`.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# THIS IS THE ONLY GATE TRADES HAS — `trades/locked-gate.png` DELETED
+# 2026-08-10 (matrix row 155, capture/trades@near-unlock.yaml, removed).
+#
+# The mobile UX audit (2026-08-09 §3) reported locked-gate.png as showing "no
+# lock UI of any kind — visually identical to empty.png. Enabled CTA, no
+# padlock, no gate copy." Re-read of the source confirms the audit and
+# confirms the previous author's own header note: TradesScreen has NO locked
+# branch. FormatGate (:3606) is its single gate, and the condition at :929-937
+# requires the league's format to be ABSENT from `unlocked_formats` while the
+# OTHER format is PRESENT. On `near-unlock` the user is unlocked in NEITHER
+# format, so `gateState` is null by the explicit "neither set — cold start,
+# not this gate" clause and the ordinary controls + empty deck render. The
+# lock lives entirely on the Rank surfaces' progress payoff, never on Acquire.
+#
+# So the file was not a state-miss to re-shoot: the state does not exist, and
+# the frame it produced was `trades/empty.png` under a name promising a gate.
+# The one real gate this screen can render is the frame below, already
+# captured — keeping a second, mislabelled copy of the empty deck taught the
+# reader something false. Pruned rather than renamed; `near-unlock`'s Acquire
+# landing is pixel-equivalent to the `standard` empty deck and earns no row.
+# Reproducing a genuine lock would need a fixture unlocked in exactly one
+# format, which is what `single-format` already is.
+# ─────────────────────────────────────────────────────────────────────────
 tags: [capture, trades, single-format]
 ---
 - launchApp:

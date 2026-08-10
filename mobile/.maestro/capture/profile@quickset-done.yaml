@@ -1,0 +1,145 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-PROFILE-QUICKSETDONE
+# profile: quickset-done
+# flags: profiles-on
+# captures: populated--hero, populated
+# source: mobile/src/screens/ProfileScreen.tsx
+# interactive-stop: populated
+#
+# CAPTURE REQUEST #11 (mobile UX audit 2026-08-09, §2) — "only flag-off.png
+# exists ('Public profiles are coming soon'). Nobody has seen the real
+# profile, which is a P2 growth candidate."
+#
+# THE PROFILE AND THE FLAGS FIXTURE ARE A MATCHED PAIR — neither works alone:
+#
+#   • `# flags: profiles-on` resolves to backend/tests/fixtures/flags/
+#     profiles-on.json, which is release.json with `profiles.public_pages`
+#     TRUE and nothing else changed (verified: that key is the only diff).
+#     Without it ProfileScreen's first branch (:103) returns the "Profile not
+#     available" gate before the username check and before the query is even
+#     enabled — that frame is already captured as profile/flag-off.png.
+#     `profiles.user_toggle` is deliberately left FALSE: turning it on makes
+#     server._profile_opt_in_denied additionally require a per-user
+#     `profile_public` marker that no fixture sets, and both /u/<username>
+#     and the API 404 — the screen would render its error state instead.
+#   • `# profile: quickset-done` is the ONLY fixture that seeds
+#     tier_overrides, and /api/profile/<username> builds `tiers_snapshot`
+#     from load_tier_overrides. Against any other profile the flag is on, the
+#     page renders, and the Tiers section is empty — a populated capture with
+#     the interesting half missing.
+#
+# FIXTURE PRECEDENCE, since it is not obvious: sim-run.sh sources the seeder's
+# env block FIRST and then `export FTF_FLAGS="$FLAGS"` from the --flags
+# fixture (sim-run.sh:55-56), so the fixture WINS over the profile's own
+# `flag_overrides` — which is why quickset-done.json can carry
+# profiles.public_pages:false and this flow still gets the page.
+#
+# `# flags:` is a bare fixture NAME on purpose: screen-capture.sh both
+# resolves it to a file and uses it as a sim-cell grouping key, so prose there
+# silently falls back to the seeder defaults and splits the profile into an
+# extra cell. This flow therefore runs in its own (quickset-done, profiles-on)
+# cell — the only member.
+#
+# ENTRY is the launch argument. The screen's only in-app path is the
+# /u/<username> deep link, and `openLink dtf://…` raises an undismissable
+# SpringBoard "Open in DTF?" confirm on iOS 18 (proven warm and cold).
+# `FTFTestRouteParams` is a QUERY STRING, never JSON — NSUserDefaults'
+# argument-domain parser treats a value starting with `{` as an old-style
+# property list, so a JSON blob is dropped before the app sees it and the
+# header renders "@profile". Both findings: capture/profile.yaml.
+#
+# The username is the seeded one, verified against
+# backend/tests/fixtures/profiles/quickset-done.json → app_user.username =
+# "qa_quickset". The screen has ZERO testIDs, so every anchor below is a
+# full-match regex text matcher.
+tags: [capture, profile, quickset-done]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_quickset"
+      - assertVisible:
+          text: ".*qa_quickset.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+
+# ── populated ────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: Profile
+      FTFTestRouteParams: "username=qa_quickset"
+# The stack header renders "@<username>" from route.params, so this proves the
+# params arrived — not merely that some screen mounted.
+- extendedWaitUntil:
+    visible:
+      text: ".*@qa_quickset.*"
+    timeout: 60000
+# The flag-off gate must be GONE. Without this the flow would happily shoot
+# flag-off.png's content under the name `populated` if the fixture ever
+# stopped resolving.
+- assertNotVisible:
+    text: ".*Public profiles are coming soon.*"
+# Settle proof that the QUERY resolved, not merely that the shell painted:
+# the "Ranks" section is inside the `profile` branch, below the loading and
+# error returns, so it cannot render before the payload lands.
+#
+# RUN-2 FIX: this waited on the page FOOTER ("Built from @qa_quickset's
+# rankings across 1 league.") and went red against a fully-rendered profile.
+# That footer is a nested <Text> with interpolated <Text> children
+# (ProfileScreen.tsx:266-270), so iOS does not expose it as the one
+# contiguous string the regex assumed. Section labels are single text nodes
+# and are the stabler anchor.
+- extendedWaitUntil:
+    visible:
+      text: ".*Ranks.*"
+    timeout: 60000
+
+# ── populated--hero ──────────────────────────────────────────────────────
+# The identity block (avatar initial, display name, @handle, league count and
+# scoring-format badges) plus the Ranks card, at the page's resting scroll
+# position — i.e. what a visitor actually lands on. It is a separate frame
+# because the page is ~2.5 viewports tall: `populated` below has to scroll to
+# put the Tiers section in shot, and a mockup's "current" pane needs the top
+# of the page as much as the middle.
+- waitForAnimationToEnd
+- takeScreenshot: profile__populated--hero
+# THE SUBJECT HAS TO BE IN FRAME. The Tiers section is the half of this page
+# the request is actually about, and it sits below the hero and the Ranks card
+# on a ScrollView — a green assert is NOT proof of framing, because iOS keeps
+# off-screen ScrollView children in the hierarchy. visibilityPercentage: 100 +
+# centerElement: true forces a real scroll and parks the section mid-screen
+# (rank-home.yaml RUN-1 finding). The "Tiers" TickLabel only mounts when
+# tiers_snapshot is non-empty (ProfileScreen.tsx:204), so reaching it is also
+# the proof that quickset-done's tier_overrides made it through the API.
+- scrollUntilVisible:
+    element:
+      text: ".*Tiers.*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: profile__populated

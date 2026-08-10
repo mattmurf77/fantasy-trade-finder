@@ -12,7 +12,8 @@ appId: com.fantasytradefinder.app
 #   idle          → clean launch, keychain cleared so no "Continue as" row
 #   error         → fail_next 404 on the auth endpoint (count self-decrements)
 #   busy          → latency on the auth endpoint, screenshot while the button
-#                   spinner is up, then let the real sign-in land
+#                   spinner is up (NO waitForAnimationToEnd — see the section
+#                   below), then let the real sign-in land
 #   hint-prefill  → relaunch WITHOUT clearKeychain: getLastUsername() repopulates
 #                   the field and renders signin.hint-btn
 tags: [capture, signin]
@@ -53,18 +54,41 @@ tags: [capture, signin]
 - takeScreenshot: signin__error
 
 # ── busy ─────────────────────────────────────────────────────────────────
-# 4 s of injected latency on the auth POST holds the in-button spinner long
-# enough to photograph; the request then completes normally.
+# WRONG-CONTENT FIX (mobile UX audit 2026-08-09 §3: "signin/busy.png — the
+# Choose-a-League screen, fully loaded. No spinner or busy indicator.").
+# Two independent causes, both addressed here:
+#
+#   1. `waitForAnimationToEnd` BETWEEN THE TAP AND THE SHUTTER. It polls for a
+#      visually stable screen — and this state's entire content is a spinning
+#      ActivityIndicator (SignInScreen.tsx:482), which never stabilises. So it
+#      did not "let the spinner settle": it waited OUT the request, the
+#      navigation to the picker, and that screen's paint, and the shutter
+#      fired on the first still frame available — the loaded picker. DELETED,
+#      not shortened. (Inverse of capture/sheets/sheets-feedback.yaml, where
+#      the sheet slides to a genuine rest and the wait is correct.)
+#   2. 4000 ms was too thin a window to survive hierarchy polling plus
+#      screenshot overhead once cause 1 was gone — the pilot's trades__loading
+#      finding put the floor at 6000. 9000 buys a wide, boring margin; the
+#      request then completes normally and the 40 s wait below absorbs it.
 - runScript:
     file: helpers/inject.js
     env:
       INJECT_KIND: latency
       INJECT_PATH: "/api/extension/auth"
-      INJECT_MS: "4000"
+      INJECT_MS: "9000"
 - assertTrue: ${output.inject.ok}
 - tapOn:
     id: "signin.continue-btn"
-- waitForAnimationToEnd
+# THE ANCHOR THAT PROVES WE ARE INSIDE THE WINDOW. `busy` swaps the button's
+# label Text for the ActivityIndicator, so the label's ABSENCE is the
+# spinner's presence — the spinner carries no testID and no text of its own.
+# The arrow is part of the match on purpose: the screen also renders a
+# lowercase "or continue with Sleeper" divider, which a case-insensitive
+# matcher would otherwise hit. This assert is what makes the shot
+# self-verifying — if the latency ever stops arming, the label is still up and
+# the flow goes RED instead of quietly re-photographing the picker.
+- assertNotVisible:
+    text: ".*Continue with Sleeper →.*"
 - takeScreenshot: signin__busy
 - extendedWaitUntil:
     visible:

@@ -21,6 +21,47 @@ appId: com.fantasytradefinder.app
 # `matches.progress-module` (MatchesScreen.tsx:554) renders under the empty
 # headline once the summary + coverage queries resolve; both ids are awaited so
 # the frame is never half-painted.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# WHY progress-module.png LOOKS EMPTY — NOT A STATE-MISS. A LAYOUT DEFECT.
+# (Investigated 2026-08-10 against the mobile UX audit 2026-08-09 §3, which
+# read the delivered frame as "the empty Mutual Matches state. No progress
+# ring or module visible anywhere on screen.")
+#
+# The flow DOES reach the state. `matches.progress-module` is mounted — the
+# assert below is real, and the delivered PNG shows the module's first row
+# ("LEAGUEMATES RANKED 2/12 (you)") sliced by the tab bar at the very bottom
+# edge. What is wrong is the SCREEN, not the flow: the empty branch is a plain
+# `<View style={styles.centered}>` (flex: 1, justifyContent: 'center',
+# MatchesScreen.tsx:997-1003) with NO scroll container anywhere in its
+# ancestry — the only ScrollView on this screen is the horizontal chip row,
+# and the FlatList belongs to the populated branch (the only three occurrences
+# in the file are lines 464, 586 and 678). Read off the delivered frame on the
+# canonical device, that column is taller than the visible area: it is
+# centre-justified, sits under a ~280 pt blank band below the chip row, and
+# runs off the bottom of the screen. Everything after "Find a trade" is
+# therefore unreachable to a user AND to a camera — the progress module, the
+# "Refresh" ghost button, and the "How matching works" help link
+# (`matches.matching-help`, S4 PRD-01) are all clipped away.
+#
+# NOT FIXABLE FROM THIS FILE, and it was not faked:
+#   · scrollUntilVisible cannot help — nothing scrolls. (And a bare one would
+#     have "succeeded" anyway: off-screen children stay in the hierarchy.)
+#   · The forced-scroll construction (visibilityPercentage: 100 +
+#     centerElement) needs a scrollable ancestor and has none here.
+#   · Coordinate swipes are banned, and would do nothing regardless.
+#   · Selecting the league filter chip instead of "All" makes it WORSE: the
+#     headline grows to "No matches in <league name> yet" and pushes the
+#     column further down.
+#   · Content BELOW the module is what would pull it up under centre
+#     justification, and this file cannot add any.
+# The one fix is in MatchesScreen: give the empty branch a ScrollView (or
+# anchor the column to the top instead of centring it). That is a source
+# change, outside this agent's ownership — filed to the audit as a layout
+# defect of the same class as A-34 (the FAB overlap), with THIS capture as its
+# evidence. The frame is kept for exactly that reason: it is not a mislabelled
+# state, it is a photograph of the bug.
+# ─────────────────────────────────────────────────────────────────────────
 tags: [capture, matches, near-unlock]
 ---
 - launchApp:
