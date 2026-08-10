@@ -59,3 +59,6 @@ app-teardown-review/
 mockups/*/node_modules/
 # One-off icon/SVG design labs — outcome lives in docs/design/*.md
 docs/design/icon-explorations/
+
+# Maestro ad-hoc screenshot output (screen-library captures live in /screens; run artifacts in mobile/test-artifacts)
+mobile/.maestro/screenshots/

@@ -39,3 +39,11 @@ window they may be unrecoverable).
 
 Pending `git worktree remove` first; when executed, append their tip shas here
 (or in a new dated file) before deletion. List and worktree paths in the triage doc.
+
+## Untracked (not deleted): stale Maestro screenshots (2026-08-09)
+
+24 PNGs under `mobile/.maestro/screenshots/` (5.7 MB, one-off 2026-07-12 debug
+session) removed from tracking via `git rm --cached` on branch
+`screen-library-2026-08-09`; dir is now gitignored. Files remain on disk in any
+checkout that had them; historical blobs remain in git history. Replacement:
+the `screens/` library (see `screens/CLAUDE.md`).
