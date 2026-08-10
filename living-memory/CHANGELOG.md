@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-10 (definitive post-fix calibration — both operator decisions now evidence-backed)
+
+- **Combined re-measurement after the four-bug wave** (`calibration-combined-2026-08-10.md`): in-season playoff **Brier 0.0997, +60.1 % skill, CI [+47.6, +72.2]**, improving .2012 → .1065 → .0538 → .0372 across weeks 3/6/9/12. Preseason playoff **0.1968, +21.3 %, CI [+2.9, +39.1]**. Title odds **+4.2 %, CI spans zero, and 3 of 6 leagues lose to climatology** — unshippable at any week.
+- **DECISION 1 — bands, not percentages. Verdict stands, now better supported.** Both pillars moved the wrong way after the fixes: over-confidence **survived** (preseason top bucket 0.947 predicted → 0.778 realized; one middle bucket materially worse) and the preseason skill floor slipped **+4.1 % → +2.9 %**. A 5 %-rounded playoff percentage from week 6 is defensible on pooled in-season calibration but is an operator risk call, not a validated result. Title odds: never a percentage.
+- **DECISION 2 — gate at week 6; bands from week 0; never week 3.** Week 3 is dominated by both neighbours: preseason is statistically indistinguishable and nominally better (paired Δ −0.0043), and week 3 is the ONLY week the engine loses to a standings baseline (0.2012 vs 0.1875) and has title odds worse than a constant 1/12. Week 6 nearly halves Brier and already equals `_BETA_UNTIL_COMPLETED_WEEKS` — **`meta.beta` clearing IS the gate**, no new mechanism. BUG-1's preseason regression argues FOR this: it diagnoses a weak roster-value prior, not a bad fix.
+- **BUG-3 bracket fix was a measurable NULL** — pooled title Brier 0.0733 → 0.0732, playoff unchanged (max |Δ| = 0.000000): the playoff field is settled before bracket structure matters. Correct to have fixed (it was wrong for 4 of 6 seasons); it just buys nothing. An **AST guard** now fails the suite if any future call site drops `playoff_seed_type`.
+- **`meta.priced_slot_coverage` shipped** (`{fraction, total_slots, priced_slots, unpriced_slots[], affects_strength}`) — FFv3 reads 0.4667 with its 8 unpriced slots named; `affects_strength` false for `trailing_scores` so a payload never implies dependence on a board it didn't read. Prediction-neutral, test-pinned. This was the precondition for ever lighting odds on an IDP league.
+- Re-confirmed unchanged: bye multiplier still NO-SHIP (Δ +0.0031, CI spans 0); random-re-pairing fallback ~7 % of playoff Brier.
+- **Still unvalidated** (deliverable §9): title odds, IDP pricing, `playoff_seed_type: 1` semantics (doc-corroborated, never fixture-proven), per-week calibration stratification, and the 2-league sample.
+- Gates: **2297 passed / 1 skipped**, exit 0; tsc clean. `outlook.odds` still dark — nothing user-visible shipped in the entire program.
+
 ## 2026-08-10 (outlook odds: four bugs fixed, engine measurably better — still dark)
 
 - **BUG-1 median-match win booking FIXED (G-024 resolved).** Sleeper's `league_average_match` books TWO W/L decisions per week (H2H + vs league median); the sim booked one, yielding 22 projected wins in a 14-week season. Median opponent now computed inside the sim loop from that week's drawn scores (no extra randomness — non-median leagues keep an identical draw sequence). **In-season playoff Brier 0.1113 → 0.0997 (−10.5%); median leagues 0.1017 → 0.0666 (−34.5%); skill +55.5% → +60.1%.** Per-league signature exactly as predicted: both Lakeview seasons improved, all four FFv3 seasons bit-identical (max |Δ| = 0.000000, asserted). The tracking xfail now PASSES; suite has zero xfails.
