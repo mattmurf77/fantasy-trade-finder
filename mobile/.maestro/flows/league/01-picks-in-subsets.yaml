@@ -1,0 +1,106 @@
+appId: com.fantasytradefinder.app
+# tc: T1 + T2 (feedback #293 — Starters and Bench tabs don't have the pick values)
+# profile: standard
+# flags: release+league.picks_always_counted
+#
+# TIER B — AUTHORED BUT NOT RUNNABLE YET. The hermetic QA world has NO
+# draft-pick rows at all: seed_ui_test_db.py writes zero `draft_picks`,
+# build_cassettes emits no `traded_picks`, and profiles/standard.json has no
+# picks key. So `hasPicks` is false in league 990000000000000001 and every
+# surface under test here is invisible — this flow would pass against a
+# ZERO-LINE implementation. Operator decision D-11 (prd.md §7.2 Option B):
+# author it now, skip it in the gate (`--exclude-tags picks`), verify §3.1
+# rows 2/3/5/9 manually against a real Sleeper dynasty league (T-S6), and
+# seed draft picks as an immediate follow-up. When that follow-up lands,
+# repoint the league id below if it seeds a separate `picks` profile rather
+# than adding picks to `standard`.
+#
+# FLAG FORCING — two verified sim-run.sh traps (prd.md §7.6). `--flags`
+# REPLACES the seeded map rather than merging, so build the payload from the
+# profile's <out>/<name>.manifest.json `flags` object with this one key
+# flipped to true — never a one-key object. And `--flags @file` is documented
+# but unimplemented and fails OPEN to config/features.json (i.e. flag OFF,
+# asserting old behavior, exit 0): use inline JSON only. Paste
+# report-dir/flags.json into the TEST_LEDGER entry as proof of the flag state.
+#
+# WHAT THIS PROVES. With league.picks_always_counted ON, the Picks pill and
+# the neutral Picks legend swatch render in ALL THREE subsets, and the
+# drill-in "Draft capital" group renders under Starters and Bench. On
+# origin/main @ 7cea1fa both are absent in two of the three subsets — that
+# absence IS the bug, so each assertVisible below fails on unfixed code.
+tags: [league, picks]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+
+# ── T1: the Picks pill survives every subset switch ──────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.subset.all"
+    timeout: 20000
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-01-subset-all
+- tapOn:
+    id: "league-summary.subset.starters"
+# origin/main hides the pill here (showPicksKey required subset === 'all').
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-01-subset-starters
+- tapOn:
+    id: "league-summary.subset.bench"
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-01-subset-bench
+- tapOn:
+    id: "league-summary.subset.all"
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+
+# ── T2: the drill-in Draft-capital group survives every subset switch ────
+# The drill panel mirrors the chart card's filters (#237, one shared state),
+# so its subset control drives the same `subset` the bars use.
+- tapOn:
+    id: "league-summary.bar..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.roster-close"
+    timeout: 20000
+- assertVisible:
+    id: "league-summary.roster-picks"
+- tapOn:
+    id: "league-summary.roster-subset.starters"
+# origin/main drops the group here (the JSX condition led with subset === 'all').
+- assertVisible:
+    id: "league-summary.roster-picks"
+- takeScreenshot: league-01-drill-starters
+- tapOn:
+    id: "league-summary.roster-subset.bench"
+- assertVisible:
+    id: "league-summary.roster-picks"
+- takeScreenshot: league-01-drill-bench
+- tapOn:
+    id: "league-summary.roster-close"

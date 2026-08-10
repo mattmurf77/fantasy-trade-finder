@@ -282,6 +282,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # unflagged (open-by-design consensus aggregates, docs/api-reference.md)
     # and mobile's silent-fail chip is likewise unflagged.
     "league.power_rankings",
+    # #293/#294 — mobile LeagueRankings chart counts a team's draft-pick value
+    # in EVERY subset (All/Starters/Bench) and under every position filter.
+    # Kill switch for a reversal of shipped behavior; OFF (default) = the
+    # pre-#293 rule where picks count only in All with no filter. Client-only:
+    # no backend behavior rides this key.
+    "league.picks_always_counted",
     # ── QA / testing surfaces ──
     # Kin of FTF_TEST_MODE, but runtime-flagged (not env-gated) so the
     # operator's phone can exercise a prod-shaped build. Every consumer must
