@@ -195,6 +195,17 @@
 
 ---
 
+## D-023 — Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch
+**Date:** 2026-08-10 (feedback #293/#294, flag `league.picks_always_counted`, default OFF)
+**Context:** The League rankings chart counted a team's draft capital only in the All subset with no position filter. Tapping Starters, Bench, or any position pill silently dropped it, so a rebuilding team holding four 1sts ranked like a team holding none. This was *deliberate* and documented in eight comment sites — "Picks are neither starters nor bench" — and it became visible only after #285 summed picks into team values, which created the expectation that pick value is part of a team's worth everywhere. Operator ruling: *"I'm talking about picks for value."*
+**Decision:** Pick value is **subset-independent and filter-independent** — the team total includes the full `picks.value` in All, Starters and Bench, and whenever `PICKS` is in the position filter, with the first position tap auto-adding `PICKS` as a visibly lit pill that one tap removes. Shipped behind `league.picks_always_counted` (default OFF, byte-identical to 1.11.0) at operator direction, overriding the orchestrator's unflagged recommendation: this reverses live behavior on a surface the operator uses daily, and a config flip is a cheaper rollback than a TestFlight round-trip.
+**Alternatives considered:** Caption-only ("+X from picks" without counting) — rejected, the operator asked for the value *counted*, and it leaves bars, sort order and rank numerals wrong. Proportional allocation of pick value across positions — rejected as fabrication (`cross-client-invariants.md`). Keeping picks out of position filters on the "a position filter shows one position" reading — rejected: it re-creates the reported defect for the filter half.
+**Consequences:** **Starters + Bench no longer partition All** — pick value is counted in both. That is intrinsic to the ruling, not a bug; the UI states it rather than letting the user discover it by arithmetic, and the two are never summed on screen. The flag gates **fourteen** expressions and must switch them **atomically**: bar segment heights are percentages of their own sum while a bar's height comes from the team total, so a partially-gated build grows the bar by the pick value while silently stretching the four position segments to fill it — right-looking and wrong, and invisible to a screenshot diff. Two module-scope consumers therefore take the flag as a **required, undefaulted** binding (`activeTotal`'s 4th param, threaded at BOTH call sites; `BarColumn`'s prop), so `tsc` catches an unthreaded caller. Threading only the bars would leave the #248 other-basis overlay short by exactly the pick value, flipping `boardsDifferInView` true and drawing a fabricated tick and rank-swing chip on every column — #208's reported symptom, reintroduced by the fix for #293. Pulling the switch mid-session needed its own reconciliation (R-0.4): flag ON makes `(subset != all AND PICKS in posFilter)` routine, and that state under OFF strands an invisible, unremovable filter member that renders **no bars at all**. Guarded by a 71-assertion AST check (`mobile/tests/check-picks-subset-invariance.js`) whose assertions 13 and 14 were each verified to fail on a sabotaged build that still compiled clean. Graduating the flag to `true` must add the key to `LAUNCHED_FLAG_DEFAULTS` in the same change.
+**Status:** Active (dark — flag OFF pending operator flip).
+**Related ADR:** — (feedback item `docs/feedback/items/293-picks-in-subsets/`)
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -221,6 +232,7 @@
 | D-020 | Analytics Omits Untrustworthy Data Rather Than Reporting It | 2026-08-06 |
 | D-021 | Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS | 2026-08-08 |
 | D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
+| D-023 | Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch | 2026-08-10 |
 
 ---
 

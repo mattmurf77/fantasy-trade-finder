@@ -188,9 +188,25 @@ unvalued cases) **and** T-290-02 (the AST test `test_w2_14` at
 **R-2 — runs are NOT size-clamped, and the gap rule is checked against the
 operator's 4-5 target rather than forced to it (D-9).**
 *Pass:* T-290-03 — on the pinned 2026 board, for **both** `1qb_ppr` and `sf_tep`,
-the **median run size is 4 or 5**. Asserted as a range, not a point, and
-recomputed from the fixture so a consensus refresh moves the test rather than
-silently invalidating the parameter.
+the **median run size is 4 or 5** under the one-pass partition (§7.3). Asserted as
+a range, recomputed from the fixture.
+
+**R-2b — the run rule may never truncate the candidate set to a single player.**
+`MOCK_RUN_MIN_OFFSET` floors the run's contribution to the cap, so a genuine value
+cliff narrows the field but can never make a pick deterministic. The floor sits
+**inside** the `min()`, so it can never loosen the operator's W2e cap; and it must
+be **strictly less than `round_reach_cap(1) = 3`**, or round 1 silently reverts to
+the shipped engine.
+*Pass:* T-290-14 (structural, seedless, both formats), T-290-15 (the `< 3`
+boundary), T-290-06 (the two-sided cap invariant).
+
+*Why a floor and not a different `m`:* 27 `(m, W)` configurations were swept on
+both boards and **none** clears `run_offset >= 1` on both while holding a 4-5
+median run on both — `m = 2.5` gives `run_offset = 0` on `sf_tep`, forcing pick
+1.01 in every superflex/TE-premium league. The floor separates the two jobs `m`
+was doing at once: `m` defines *where the runs are* (R-2, a data property), the
+floor decides *how tight a wall may be* (R-11/R-12, a behavioural property). Full
+sweep: [`reconciliation-log.md` §M–N](./reconciliation-log.md#round-3--author-incorporation).
 
 **R-3 — a run boundary is a HARD wall in rounds 1-2 (D-6).**
 Over N ≥ 200 seeds on the pinned board, **no** round-1 or round-2 CPU pick is a
@@ -222,14 +238,26 @@ replay of a fixed sequence produces reach depths bounded by the same rule.
 
 ### #290 — need-conditional reaching (D-5)
 
-**R-7 — the mixture weight is need-conditional; `bpa_prob` becomes the value at
-maximal need.** `effective_bpa_prob(bpa_prob, needs)` returns exactly `bpa_prob`
-when `max(needs) == 1.0`.
-*Pass:* T-290-08 — endpoint assertions at severity 0.0, 0.5 and 1.0 against the
-closed form; monotonic non-increasing in severity.
+**R-7 — the mixture weight is need-conditional, and the need aggregate is
+DENOMINATOR-WEIGHTED, not a max.** `effective_bpa_prob` returns exactly
+`bpa_prob` at pressure 1.0. Pressure is
+`Σ severity_p·(S_p+B_p) / Σ (S_p+B_p)` via `need_pressure`.
+*Why not `max`:* `slot_targets` gives TE `(S,B) = (1,0)`, so **any** roster
+without a 1280+ TE scores `max = 1.0` → `bpa_effective == bpa_prob` → today's
+behaviour exactly. Measured on a roster full at QB/RB/WR with no viable TE:
+`max` = 1.000 (P(reach) 0.900, unchanged), `mean` = 0.250, **weighted = 0.111**
+(P(reach) 0.300). Under `max` the whole change is a no-op on ordinary rosters.
+*Pass:* T-290-08 — `need_pressure` endpoints (all-filled → 0.0; TE-only hole →
+0.111 on a standard lineup; all-empty → 1.0; monotone), plus
+`effective_bpa_prob` against the closed form at 0.0 / 0.5 / 1.0.
+
+**R-7b — both engine call sites pass the pressure.**
+*Pass:* T-290-16 — AST: `need_pressure(` appears inside **both** `advance_cpu`
+and `simulate_reaches`. The optional parameter exists only so the shipped
+single-position unit tests keep working.
 
 **R-8 — a bot with NO positional need still reaches sometimes (D-5:
-"idiosyncrasy survives").** At severity 0 and the shipped `bpa_prob = 0.10`, the
+"idiosyncrasy survives").** At pressure 0 and the shipped `bpa_prob = 0.10`, the
 reach rate is `(1 − bpa_prob) × MOCK_IDIOSYNCRASY_FLOOR = 22.5 %`, materially
 above zero and materially below today's 90 %.
 *Pass:* T-290-09 — over M ≥ 4000 draws on a need-free board, the observed reach
@@ -252,20 +280,34 @@ an assertion change).
 
 ### #290 — the acceptance case (see §4)
 
-**R-11 — top-of-board integrity.** On the pinned board, N ≥ 500 seeds, 12-team
-linear:
-1. `P(consensus #1 taken at pick 1) >= 0.95`× its current value **and**
-   `P(consensus #1 falls past pick 3) <= 0.05` (shipped: 0.158);
-2. `P(Carnell Tate falls past pick 4) == 0` (shipped: 0.165);
-3. `P(consensus #7 taken at pick <= 4) <= 0.02` (shipped: ~0.11).
-*Pass:* T-290-10, with all four shipped values in the test's docstring so the fix
-is falsifiable in both directions.
+**R-11 — top-of-board integrity. Every clause is TWO-SIDED and named per
+format.** Pinned `N = 1500`, seeds `range(N)`, 12-team linear, on **both**
+`1qb_ppr` and `sf_tep`:
 
-**R-12 — the board is still varied.** The same N seeds produce **≥ 12** distinct
-round-1 top-4 orderings (shipped: 173; measured under the chosen parameters: 18;
-at the rejected `m = 2.0`: 5).
-*Pass:* T-290-11. This is the guard against "fixed" silently meaning
-"deterministic BPA", and it is what makes the D-6 wall falsifiable.
+| Clause | Bound | shipped (both fmt) | measured after (1qb / sf) |
+|---|---|---|---|
+| 1a `P(#1 at pick 1)` | `0.43 <= p <= 0.75` | 0.455 | 0.455 / 0.638 |
+| 1b `P(#1 falls past 3)` | `0.02 <= p <= 0.11` | 0.155 | 0.089 / 0.042 |
+| 2 `P(Tate falls past 4)` | `p <= 0.10` | 0.171 | 0.073 / 0.073 |
+| 3 `P(#7 taken at pick <= 4)` | `p <= 0.02` | 0.1147 | 0.0000 / 0.0000 |
+
+*The upper bounds are the point.* Round 1's floor-only clause 1
+(`>= 0.43`) **passed on the collapsed sf_tep board** (1.000 ≥ 0.43) — a test that
+passed on the very bug it existed to catch. Clause 1b's *lower* bound catches the
+same collapse from the other side (0.000 < 0.02). Clause 2's `== 0` was measured
+false at any floor ≥ 1 and is now a bound. Clause 3 is unchanged and is the only
+clause identical on both formats.
+*Pass:* T-290-10, per format, with the shipped values in the docstring.
+**T-290-14 is the primary collapse guard** — these distributional bounds are a
+generously-set smoke alarm, not a fitted threshold.
+
+**R-12 — the board is still varied, and the run rule actually applied.**
+At the pinned `N = 1500`, distinct round-1 top-4 orderings must be
+`25 <= n <= 120`, per format (shipped **171** — fails the upper bound, so this
+test is failing-first-capable; MIN = 0 collapse gives 18 / 24 — fails the lower).
+⚠ This statistic **scales with N**, so N is pinned exactly rather than bounded
+below.
+*Pass:* T-290-11.
 
 ### #291 — the affordance (D-7)
 
@@ -282,14 +324,19 @@ observation against `docs/design/components.md` recorded in `status.md`.
 
 ### #292 — the lifecycle (D-8, all three)
 
-**R-14 — a completed mock can be dismissed, and the room's complete state leads
-with "start another".**
+**R-14 — ONE dismissal clears the mock surface, however many completed mocks
+have accumulated.**
 The recap screen exposes a header action that abandons the completed row; the
 Mock card's complete state has **primary = "Start a new mock"**, secondary =
-"View recap".
-*Pass:* T-292-01 (backend: abandoning a `complete` row succeeds, is owner-scoped
-and idempotent, and `GET` then returns `no_active_mock`) + T-291-03 (Maestro:
-complete → back to room → second mock reaches `mock-draft.on-the-clock`).
+"View recap". Because `create_mock_draft` abandons only *active* rows
+(`database.py:10739`) and the complete-fallback is `ORDER BY id DESC LIMIT 1`,
+completed rows accumulate forever — so dismissing a completed mock must abandon
+**every** completed row for that (user, league), not just the named one. Older
+completed rows are unreachable from any UI, so nothing observable is destroyed.
+*Pass:* **T-292-01 seeds THREE completed mocks** and asserts that after **one**
+`POST /api/mock-draft/abandon`, `GET` returns `no_active_mock` — owner-scoped
+(another user's rows untouched) and idempotent. Round 1's single-row version
+passed while the defect stood. Plus T-291-03 (Maestro).
 
 **R-15 — no reachable state of the Mock card renders zero interactive controls.**
 The `errorText` branch gains a retry that calls `createMock.reset()` and refetches.
@@ -383,8 +430,11 @@ The plan asked the right question and expected "model form". The honest answer i
   a #2 can be 4th, why a #1 can be 4th, and why a #7 can be 4th. R-11 kills it.
 - **Pricing — possible, and this PRD cannot fix it.** The operator's stated
   reason ("value gaps between him and the other WRs") does not match the board:
-  Tate → Tyson is 46.1 Elo and Tyson → Lemon is 25.0, the three tightest gaps at
-  the top. **They are one run.** Under a value-gap-driven tier rule — precisely
+  Tate → Tyson is 46.1 Elo and Tyson → Lemon is 24.9. (Round 1 called these "the
+  two tightest gaps at the top" — 24.9 is indeed the tightest, but 46.1 ranks 5th
+  of the first eight; the superlative is withdrawn and the conclusion does not
+  need it.) **They are one run**, confirmed structurally: the first run at
+  `m = 2.5` on 1qb_ppr is {Love, Tate, Tyson, Lemon}. Under a value-gap-driven tier rule — precisely
   what the operator asked for in the same sentence — Tate at pick 4 is
   *legitimate*: it means only that the two WRs he is genuinely tied with went
   first.
@@ -413,6 +463,42 @@ pick 4 would require either a size clamp (D-9 forbids it) or a hard wall between
 players 46 Elo apart (which would mean walling off almost every adjacent pair on
 this board). The plan's secondary assertion is therefore **rejected and replaced**
 — recorded in [`reconciliation-log.md`](./reconciliation-log.md).
+
+### 4.6 What D-5 does and does not change — measured
+
+The Planner objected that the spec changes *how often* a bot reaches, never *what*
+it reaches for, and that D-5 asks the second question. **Measured, that premise is
+wrong — and the objection's conclusion is still right, for a different reason.**
+
+A `championship` bot with `severity[RB] = 1.0` and zero elsewhere, real board head,
+N = 6000 seeded `cpu_pick` calls:
+
+| Round / config | cap | P(picks an RB) | RB share of the reachable window | lift |
+|---|---|---|---|---|
+| r1, **shipped** | 3 | **0.693** | 0.250 | **2.77×** |
+| r1, run rule + floor | 3 | 0.693 | 0.250 | 2.77× |
+| r3, shipped | 15 | 0.685 | 0.250 | 2.74× |
+| r3, run rule + floor | 10 | 0.683 | 0.182 | 3.75× |
+
+**When severity is non-zero the shipped engine already steers hard toward need.**
+So the plan's *"reaching today is ~entirely random"* is overstated, and this PRD
+withdraws its Round-1 adoption of it. What is inert is **severity itself** — zero
+for most (team, position) pairs in August — and when severity is zero there is no
+direction to have.
+
+That is what D-5 is really asking for. *"Reaching should more so be to fill a
+position of need than just random"* is a statement about the **composition of the
+reach population**: of all the deviations from BPA on a board, most should be
+need-fills. `effective_bpa_prob` delivers exactly that — needy teams keep reaching
+at 90 %, satisfied teams drop to ~30 % — **but only with R-7's denominator-weighted
+aggregate.** Under a `max()` every ordinary roster scores 1.0 and the composition
+never shifts.
+
+**Stated for the operator (O-7): per-pick direction is unchanged at 2.77×; D-5 is
+answered by re-weighting *who* reaches, not by changing what a reaching bot
+prefers.** If the operator wants the per-pick lift itself raised, that is a change
+to `mock_max_reach_slots` — a `model_config` product cap W2e deliberately narrowed
+— and a separate item.
 
 ### 4.5 The board moves; the test must not silently rot
 
@@ -522,24 +608,36 @@ measurements were skewed by a randomised order until it was pinned.
 |---|---|---|---|
 | T-290-01 | unit | R-1 | `run_offset` over a hand-built board: an ordinary gap sequence; a boundary at index 0; a boundary at the last gap; an all-tied block (no boundary); an all-`None` head (returns `n-1`); a valued→unvalued frontier (boundary); `n == 0` and `n == 1` (return 0); `allow_cross=1` skips exactly one boundary |
 | T-290-02 | AST | R-1 | `test_w2_14` (`:708`) still finds zero `sorted`/`.sort` — unmodified, re-run |
-| T-290-03 | data | R-2 | On the pinned board, for `1qb_ppr` **and** `sf_tep`, `4 <= median(run sizes) <= 5`. Docstring records the measured `5.0 / 5.0` and names `m = 2.5, W = 9` |
+| T-290-03 | data | R-2 | On the pinned board, for `1qb_ppr` **and** `sf_tep`, `4 <= median(run sizes) <= 5`, where the partition is the **ONE-PASS** walk: scan the full pool once, cut at every boundary, measure the resulting block sizes. ⚠ The alternative reading — sequential `run_offset(pool[start:])` re-scans — gives 4.0 / **3.0** and fails this bar on sf_tep, so the definition is pinned here or the test is unimplementable. Docstring records the measured `5.0 / 5.0` at `m = 2.5, W = 9` |
 | T-290-04 | behavioural | R-3 | N ≥ 200 seeds, 12-team linear, rounds 1-2: for every CPU pick, its 0-based position in the remaining pool `<= run_offset(head, allow_cross=0)`. **Exact** |
 | T-290-05 | behavioural | R-4 | Same, rounds 3+: position `<= run_offset(head, allow_cross=1)`; **and** at least one sampled pick has position `> run_offset(head, allow_cross=0)` |
 | T-290-06 | property | R-5 | For every round 1..8 and a synthetic head, `effective_cap <= round_reach_cap(round)`; budget spent ⇒ `effective_cap == 0` |
 | T-290-07 | structural + behavioural | R-6 | AST over `mock_draft_service.py`: a `run_offset(` call appears inside **both** `advance_cpu` and `simulate_reaches`. Plus: a `simulate_reaches` replay's depths obey the same bound |
-| T-290-08 | unit | R-7 | `effective_bpa_prob(0.10, {})` == `1 − 0.9×0.25`; `…, {"RB": 1.0})` == `0.10`; `…, {"RB": 0.5})` == `1 − 0.9×0.625`; monotone non-increasing over `0.0 … 1.0` |
+| T-290-08 | unit | R-7 | **`need_pressure` first:** all positions filled → `0.0`; a standard lineup with only TE unfilled → `≈0.111` (**not** 1.0 — this is the assertion that would have caught the `max()` defect); all unfilled → `1.0`; a WR-corps hole scores strictly higher than a TE-only hole. **Then `effective_bpa_prob`:** `(0.10, {}, 0.0)` == `1 − 0.9×0.25`; `(0.10, {}, 1.0)` == `0.10`; `(0.10, {}, 0.5)` == `1 − 0.9×0.625`; monotone non-increasing in pressure |
 | T-290-09 | statistical | R-8 | M ≥ 4000 draws, need-free board: reach rate in `[0.18, 0.27]`, and `> 0.02` asserted separately with a message naming D-5 |
-| T-290-10 | behavioural | R-11 | N ≥ 500 seeds on the pinned board: `P(pool[0] at pick 1) >= 0.43`; `P(pool[0] past pick 3) <= 0.05`; `P(Tate past pick 4) == 0`; `P(pool[6] at pick <= 4) <= 0.02`. Docstring carries shipped `0.451 / 0.158 / 0.165 / ~0.11`. Separate one-line assertion that `pool[1]` is named "Carnell Tate" with a message pointing at §4.5 |
-| T-290-11 | behavioural | R-12 | Same N seeds ⇒ `>= 12` distinct round-1 top-4 orderings (shipped 173; measured 18; rejected `m=2.0` gives 5) |
+| T-290-10 | behavioural | R-11 | **Both formats, named explicitly.** Pinned `N = 1500`, seeds `range(N)`: `0.43 <= P(pool[0] at 1) <= 0.75`; `0.02 <= P(pool[0] past 3) <= 0.11`; `P(Tate past 4) <= 0.10`; `P(pool[6] at <= 4) <= 0.02`. Per-format expected values in the docstring (1qb / sf: `0.455/0.638`, `0.089/0.042`, `0.073/0.073`, `0.0000/0.0000`) alongside shipped (`0.455 / 0.155 / 0.171 / 0.1147`, identical on both formats). Separate one-line assertion that `pool[1]` is "Carnell Tate", message pointing at §4.5 |
+| T-290-11 | behavioural | R-12 | **Both formats.** At the pinned `N = 1500`: `25 <= distinct round-1 top-4 orderings <= 120`. Shipped is **171** ⇒ fails the upper bound on unfixed code (so this test has teeth); the MIN = 0 collapse gives 18 / 24 ⇒ fails the lower. Docstring must state that the statistic scales with N and that N is pinned for that reason |
+| **T-290-14** | **structural** | **R-2b** | **The primary collapse guard.** Deterministic, seedless, both formats: `min(round_reach_cap(1), max(run_offset(pool[:24], allow_cross=0), MOCK_RUN_MIN_OFFSET)) >= 1`. Fails at the *cause* rather than a distributional symptom. Un-floored on sf_tep this is 0 |
+| **T-290-15** | **unit** | **R-2b** | `MOCK_RUN_MIN_OFFSET < round_reach_cap(1)`, with a message naming the failure: at MIN = 3 the round-1 composition is `min(3, max(off, 3)) == 3` for every board and the feature is silently disabled in round 1 |
+| **T-290-16** | **AST** | **R-7b** | `need_pressure(` appears inside **both** `advance_cpu` and `simulate_reaches` — the same both-call-sites rule as T-290-07 |
 | T-290-12 | route | R-18 / R-20 | `GET /api/mock-draft` on an **existing** row for an MFL-shaped league: no `order[]` / `my_picks[]` `owner_username` contains `"mfl:"`; a franchise absent from the member map renders exactly `"Team 0003"`; a member with no stored name is **omitted** (⇒ `null`), never `""` |
 | T-290-13 | route | R-19 | A `database_players` stub that raises on any id outside `_rookie_player_ids(season)` completes both create and GET without raising |
-| T-292-01 | route | R-14 | `POST /api/mock-draft/abandon` on a `complete` row → `{ok: true}`; a second call is idempotent; another user's row → 404; a subsequent `GET` returns `{empty: true, reason: "no_active_mock"}` |
+| T-292-01 | route | R-14 | **Seed THREE completed mocks** for one (user, league). `POST /api/mock-draft/abandon` on the newest → `{ok: true}`, and **one** subsequent `GET` returns `{empty: true, reason: "no_active_mock"}` — not the second-newest recap. Idempotent on a repeat call; another user's completed rows in the same league are untouched; the same user's completed rows in a *different* league are untouched. ⚠ Round 1's single-row version passed while the defect stood |
 | T-292-04 | db+route | R-17 | Extends `:1330` — create after a **complete** row leaves the complete row untouched and the new row active with the user reachable on the clock |
 | — | regression | R-9/R-10/R-21/R-22 | `:248 :265 :332 :347 :362 :375 :392 :402 :443 :472 :584 :595 :607 :619 :724 :742 :764 :787 :956-1056 :1330` all pass **unmodified** |
 | — | tripwire | D-10 | `test_w2_16_calibration_gate` (`:1809`) passes unmodified. See §8 |
 
-**Failing-first is mandatory** for T-290-04 and T-290-10. Run both against
-`7cea1fa` and paste the failure text into `status.md` before the fix lands.
+**Failing-first is mandatory** for **T-290-04, T-290-10, T-290-11, T-290-14 and
+T-292-01**. Run each against `7cea1fa` and paste the failure text into
+`status.md` before the fix lands. T-290-11 and T-290-14 are on this list
+*because* Round 1's versions of them passed on the defect they existed to catch —
+a test that cannot fail on unfixed code is not evidence.
+
+**Seeding, for reproducibility (I-13):** every distributional test iterates
+`for seed in range(N)` with `N` a module constant, builds settings with an
+**explicit `order=`** (never the seeded shuffle) so the user's slot is fixed, and
+relies on `_pick_rng(state, pick_no) = Random(rng_seed*10007 + pick_no)`. All
+figures in this PRD reproduce to three decimals across runs and across machines.
 
 ### 7.3 Maestro
 
@@ -555,11 +653,29 @@ passes: not `startup`, `teams >= 6`, not `live`, not `complete`, and
 asserts `draft-room.undrafted-row..*` renders on this very league with the
 `standard` profile.
 
-**Therefore: the first mock flow is authorable NOW, with zero seeder work.**
-G3's finding that `seed_ui_test_db.py` writes no `draft_picks` rows is confirmed
-(it also writes no `mock_drafts`) — and it does not bite here, because the flow
-creates the mock **live through the UI** against the ffv3 cassette, which is
-hermetic under the harness.
+**No engine, route or `mock_drafts`-seeding work is needed** — the flow creates
+the mock live through the shipped UI against the ffv3 cassette, and G3's finding
+that `seed_ui_test_db.py` writes no `draft_picks` (it writes no `mock_drafts`
+either) does not bite.
+
+⚠ **But there IS a seeding precondition, and Round 1 wrongly called it "zero
+seeder work".** `d2` declares its profile as *"standard + ffv3-predraft corpus
+merged into the fixture dir"* — and **no tooling implements that merge.**
+Verified: `backend/tests/fixtures/profiles/standard.json` declares exactly one
+league (`990000000000000001`); d1 and d2 target `1312076055586050048` and
+`1312140920132497408`, which appear in **no** profile; and `git grep` finds d1/d2
+referenced only by docs and their own YAML — **no suite file, no runner** — so
+their current green status is unverified.
+
+**This is a named precondition of the Tier-1 sim gate, not an assumption.** Two
+options, to be sized by the build agent before authoring the flow:
+1. Add the ffv3 league to a profile's `leagues[]` (or add a `mock.json` profile)
+   so `leagues.row.1312140920132497408` renders — the smaller change, and it
+   fixes d1/d2 as a side effect.
+2. Implement the corpus-merge step the d1/d2 headers already assume.
+
+Also for the flow author: ffv3's **top-level `rounds` is `null`** — the 4 lives in
+`settings.rounds`.
 
 **New flow:** `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml`,
 `tags: [rookie, draft-room, mock]`, profile `standard` + the `ffv3-predraft`
@@ -579,6 +695,10 @@ corpus merged into the fixture dir (identical to `d2`), flags `draft.room` /
    **primary** and visible
 7. `mock-entry.run-it-back` → `mock-setup.start` → `mock-draft.on-the-clock`
    again — ***#292's acceptance***
+8. Drive the second mock to its recap, then **dismiss it via `mock-draft.end`**
+   and assert the room's card reaches `mock-entry.start` ("No mock running") —
+   ***R-14's acceptance***: with two completed mocks on file, ONE dismissal must
+   clear the surface, not reveal the previous recap
 
 **testID audit — every id above already exists**, verified by
 `grep testID` in source: `signin.username-input`, `signin.continue-btn`,
@@ -662,6 +782,15 @@ bars fail too, because the fitted parameters and the caps disagree. So (b) is
 measured against the *current* run's values, captured before the change, not
 against 08d's published KS numbers.
 
+**G-2b — the calibration harness cannot see the need half (I-9).**
+`_lakeview_corpus` prices rosters with **rookie-only** Elo, so every viable count
+is 0 and every owner enters `simulate_reaches` at pressure 1.0 — under `max` and
+under the denominator-weighted aggregate alike. **The D-10 regression bar
+therefore reports the run rule's effect and nothing at all about R-7/R-8.** Record
+that sentence beside the numbers in `status.md`, so a green-looking bar is not
+read as broader validation than it is. The harness artifact is pre-existing and
+out of scope to fix here.
+
 **G-3 — flags are ON; this ships lit.** `draft.mock`, `draft.room`, `draft.tab`,
 `draft.rank_inline` are all `true`. There is no dark landing. Treat the Maestro
 gate as load-bearing, not ceremonial.
@@ -721,8 +850,8 @@ Every item maps to ≥ 1 requirement; every requirement maps to ≥ 1 test.
 
 | Item | Requirements |
 |---|---|
-| **#290** (tiers) | R-1, R-2, R-3, R-4, R-5, R-6, R-11, R-12 |
-| **#290** (need-driven reaching) | R-7, R-8, R-9, R-10 |
+| **#290** (tiers) | R-1, R-2, R-2b, R-3, R-4, R-5, R-6, R-11, R-12 |
+| **#290** (need-driven reaching) | R-7, R-7b, R-8, R-9, R-10 |
 | **#291** | R-13 |
 | **#292** | R-14, R-15, R-16, R-17 |
 | **D-16** | R-18, R-19, R-20 |
@@ -732,11 +861,13 @@ Every item maps to ≥ 1 requirement; every requirement maps to ≥ 1 test.
 |---|---|
 | R-1 | T-290-01, T-290-02 |
 | R-2 | T-290-03 |
+| R-2b | T-290-14, T-290-15, T-290-06 |
 | R-3 | T-290-04 |
 | R-4 | T-290-05 |
 | R-5 | T-290-06 + `:332`, `:362` |
 | R-6 | T-290-07 |
 | R-7 | T-290-08 |
+| R-7b | T-290-16 |
 | R-8 | T-290-09 |
 | R-9 | `:248`, `:472` (unmodified) |
 | R-10 | `:584`, `:607`, `:724` (unmodified) |
