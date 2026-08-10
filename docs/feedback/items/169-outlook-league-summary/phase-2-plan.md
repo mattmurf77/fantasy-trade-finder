@@ -36,11 +36,20 @@ Sketched by the operator 2026-08-09; this is the phase-2 north star:
 Steps 7–9 are **already built** (phases 3–5 of the shipped pipeline). Phase 2 is steps 1–6
 replacing the flat μ.
 
-**Bye weeks are being pulled NOW** (operator directive, 2026-08-09) as a "middle path"
-ahead of full projections: keep phase 1's validated μ, apply a per-week multiplier for
-starting-lineup value on bye, on **both** sides of each matchup. Evaluated on the phase-1
-backtest before it ships — see `bye-week-multiplier-2026-08-09.md`. This also delivers the
-bye dataset step 4 needs, accelerating phase 2.
+**Bye weeks: data landed, multiplier rejected** (2026-08-09) — see
+[`bye-week-multiplier-2026-08-09.md`](bye-week-multiplier-2026-08-09.md). The nflverse
+ingestion (`backend/outlook/bye_weeks.py`, CC-BY, cached, tested) is **kept** as reusable
+infrastructure for step 4. The naive multiplier is **NOT shipped**: playoff Brier got
+*worse* (0.1113 → 0.1212) at every scale tested.
+
+> **This is the single most important finding for phase 2.** The mechanism is real — scores
+> in bye-heavy weeks do fall (CI [−0.305, −0.138], excludes 0) — but only ~22% as much as a
+> fixed-lineup model assumes (empirical slope −0.222 vs the model's −1.000). **Managers
+> absorb most of a bye by starting someone else.** Step 4 of the pipeline below ("zero out
+> the bye player") therefore CANNOT be implemented naively: a projection model must
+> re-optimize the lineup from available players for that week, not zero a starter and keep
+> the rest. A model that skips the re-optimization will systematically over-penalize byes
+> and score worse than today's flat μ — which is exactly what just happened.
 
 ## Candidate strength providers
 
@@ -79,15 +88,21 @@ Operator-raised 2026-08-09; validation agents running. Results land in
 `hypothesis-pick-capital-2026-08-09.md` and `hypothesis-bench-depth-2026-08-09.md`, and
 whichever survive get specced into a provider adjustment here.
 
-| # | Hypothesis | Predicted effect on μ/σ |
-|---|---|---|
-| 1a | Heavy pick capital → in-season buying → team gets stronger | μ rises through season |
-| 1b | Heavy pick capital → rebuilding → sheds producers | μ falls through season |
-| 1c | Positional bench depth → injury resilience | σ falls (fragility, not scoring power) |
+Operator-raised 2026-08-09; **all three validated 2026-08-09 — no term ships.** Reports:
+[`hypothesis-pick-capital-2026-08-09.md`](hypothesis-pick-capital-2026-08-09.md),
+[`hypothesis-bench-depth-2026-08-09.md`](hypothesis-bench-depth-2026-08-09.md).
 
-1a and 1b predict **opposite signs from the same signal** — the net, and any moderator that
-separates them (record at midseason, contender vs rebuilder), is the real finding. A clean
-null on any of these keeps a bogus term out of the model.
+| # | Hypothesis | Verdict | Key evidence |
+|---|---|---|---|
+| 1a | Pick capital → in-season buying → stronger | **NOT SUPPORTED** (ran backwards) | buy:sell ratio *falls* as capital rises |
+| 1b | Pick capital → rebuilding → sheds producers | **SUPPORTED but underpowered** | buy:sell 2.4:1 → 0.7:1 → 0.6:1 by capital tercile (monotonic, mechanism-level, confound-resistant); outcome correlations r ≈ −0.20 to −0.25 but confounded by pick-rich teams already being weaker (r ≈ −0.3) |
+| 1c | Positional bench depth → injury resilience | **NOT SUPPORTED** | next-man-up survives controlling at r = +0.17 (raw bench total collapses +0.27 → +0.02), but variance ≈ 0 and the absence interaction fails — no injury mechanism |
+
+**Standing decision (2026-08-09): no coefficient specced from any of the three.** 1b is the
+only live candidate; revisit when the sample exceeds ~72 team-seasons. Both agents
+independently hit the same blocker — **no dated historical dynasty-value board exists**, so
+retroactive roster pricing uses today's values. Building/finding one is the prerequisite for
+re-testing 1b honestly, and would also sharpen `RosterValueStrength`'s own backtest.
 
 ## Sequencing and gates
 
