@@ -11,9 +11,9 @@
 
 ---
 
-## 2026-08-10 (screen library shipped: 102 captures, 25 screens, capture harness)
+## 2026-08-10 (screen library shipped: 141 captures, 32 screens, capture harness)
 
-- **The screen library is live** (`screens/` at repo root): every reachable mobile screen in every reachable state — 102 pngquant-compressed captures across 5 fixture profiles x 2 flag sets (incl. the **complete Analyst onboarding set**, 16 scenes, all six poses), regenerable in one command (`mobile/scripts/screen-capture.sh`), freshness-linted (`screen-freshness.sh`), mockup ground truth per [`../mockups/CLAUDE.md`](../mockups/CLAUDE.md) + [`../screens/CLAUDE.md`](../screens/CLAUDE.md). New: launch-argument screen entry (test builds only, build-time gate), draft/espn fixture profiles + 3 `/__test__` pins, sim-gate tier rows + scope-block capture-delta + warn-only pre-push freshness check. Unreachable states documented in the capture matrix, not faked. Found en route: spotlight-solver product bug, trios controls inert under Maestro (open), `isdigit()` ESPN guard bug (fix running in separate session).
+- **The screen library is live** (`screens/` at repo root): every reachable mobile screen in every reachable state — 141 pngquant-compressed captures across 9 fixture profiles x 2 flag sets (incl. the **complete Analyst onboarding set**, 16 scenes, all six poses), regenerable in one command (`mobile/scripts/screen-capture.sh`), freshness-linted (`screen-freshness.sh`), mockup ground truth per [`../mockups/CLAUDE.md`](../mockups/CLAUDE.md) + [`../screens/CLAUDE.md`](../screens/CLAUDE.md). New: launch-argument screen entry (test builds only, build-time gate), draft/espn fixture profiles + 3 `/__test__` pins, sim-gate tier rows + scope-block capture-delta + warn-only pre-push freshness check. Unreachable states documented, not faked; the UX audit's nine capture requests all resolved (response doc in the audit folder). Found en route: spotlight-solver product bug, trios controls inert under Maestro (open), `isdigit()` ESPN guard bug (fix running in separate session).
 >>>>>>> 2e18e85 (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
 
 >>>>>>> 36a033b (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
