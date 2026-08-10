@@ -25,6 +25,8 @@ import backend.server as server
 from backend.outlook.league_state import (
     LeagueState, TeamState, compute_num_byes,
 )
+from backend.outlook import config as _outlook_config
+from backend.outlook.pipeline import run_outlook
 from backend.outlook.playoff_format import StandardFormat, get_playoff_format
 from backend.outlook.serialize import StandardSerializer
 from backend.outlook.simulator import simulate, stable_hash
@@ -338,6 +340,97 @@ def test_is_preseason_and_beta_are_independent_signals():
     meta6 = _serialized_meta(6)
     assert meta6["is_preseason"] is False
     assert meta6["beta"] is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — meta.priced_slot_coverage (BUG-5 coverage instrument, 2026-08-10)
+#
+# `strength.lineup_pricing()` has existed since the BUG-5 pass but nothing
+# consumed it, so an IDP league's payload carried an unqualified whole-lineup
+# number. These pin the wiring: the fraction, the named blind slots, and the
+# `affects_strength` honesty flag that keeps a trailing_scores payload from
+# implying its odds depend on a board it never read.
+# ---------------------------------------------------------------------------
+
+# The operator's FFv3 slot shape, minus the bench (the shape that motivated
+# BUG-5): 7 of 15 starting slots are priceable by a QB/RB/WR/TE-only board.
+_IDP_SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K",
+              "DL", "DL", "LB", "LB", "DB", "DB", "IDP_FLEX"]
+_IDP_UNPRICED = ["K", "DL", "DL", "LB", "LB", "DB", "DB", "IDP_FLEX"]
+
+
+def _idp_league(completed_weeks=0):
+    """A league with FFv3's starting slots and an offence-only value board."""
+    st = _state(n_teams=8, completed_weeks=completed_weeks,
+                weekly_scores={r: [100.0 + r] * completed_weeks
+                               for r in range(1, 9)})
+    st.roster_slots = list(_IDP_SLOTS)
+    value, pos = {}, {}
+    for t in st.teams:
+        for i, p in enumerate(["QB", "RB", "RB", "WR", "WR", "TE", "TE",
+                               "K", "DE", "DT", "LB", "OLB", "CB", "S", "S"]):
+            pid = f"p{t.roster_id}-{i}"
+            t.player_ids.append(pid)
+            pos[pid] = p
+            # Only the skill positions carry a value — exactly the
+            # DynastyProcess board's universe.
+            value[pid] = float(10 + i + t.roster_id) if p in (
+                "QB", "RB", "WR", "TE") else 0.0
+    return st, value, pos
+
+
+def test_meta_priced_slot_coverage_names_the_unpriced_idp_and_kicker_slots():
+    st, value, pos = _idp_league()
+    payload = run_outlook(st, player_value=value, player_pos=pos,
+                          model_cfg={}, basis="consensus", n_sims=200)
+    cov = payload["meta"]["priced_slot_coverage"]
+    assert cov["total_slots"] == 15
+    assert cov["priced_slots"] == 7
+    assert cov["fraction"] == pytest.approx(7 / 15, abs=1e-4)
+    assert cov["unpriced_slots"] == _IDP_UNPRICED
+    # Preseason resolves to roster_value, which DOES read the board.
+    assert payload["meta"]["strength_source"] == "roster_value"
+    assert cov["affects_strength"] is True
+
+
+def test_fully_priced_league_reports_full_coverage():
+    st, value, pos = _idp_league()
+    st.roster_slots = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX"]
+    payload = run_outlook(st, player_value=value, player_pos=pos,
+                          model_cfg={}, basis="consensus", n_sims=200)
+    cov = payload["meta"]["priced_slot_coverage"]
+    assert cov["fraction"] == 1.0
+    assert cov["unpriced_slots"] == []
+
+
+def test_coverage_is_marked_as_not_affecting_a_trailing_scores_payload():
+    """`trailing_scores` derives mu/sigma from game results and never touches
+    the value board, so the coverage fact still ships but must not imply the
+    odds depend on it."""
+    st, value, pos = _idp_league(completed_weeks=6)
+    payload = run_outlook(st, player_value=value, player_pos=pos,
+                          model_cfg={}, basis="consensus", n_sims=200)
+    assert payload["meta"]["strength_source"] == "trailing_scores"
+    cov = payload["meta"]["priced_slot_coverage"]
+    assert cov["priced_slots"] == 7          # the fact is unchanged
+    assert cov["affects_strength"] is False  # but it does not bear on the odds
+
+
+def test_coverage_measurement_changes_no_prediction():
+    """The instrument is a measurement. Odds must be bit-identical to the same
+    run scored without it (same seed, same strengths, same everything)."""
+    st, value, pos = _idp_league()
+    payload = run_outlook(st, player_value=value, player_pos=pos,
+                          model_cfg={}, basis="consensus", n_sims=500)
+    strengths = RosterValueStrength().estimate(
+        st, StrengthContext(player_value=value, player_pos=pos, cfg={}))
+    res = simulate(st, strengths, StandardFormat(st.playoff_slots, st.num_byes),
+                   n_sims=500, config_seed=_outlook_config.config_seed({}))
+    bare = StandardSerializer().serialize(
+        st, res, strengths, strength_source="roster_value", basis="consensus")
+    assert bare["meta"]["priced_slot_coverage"] is None   # not measured -> null
+    assert [t["odds"] for t in bare["teams"]] == \
+        [t["odds"] for t in payload["teams"]]
 
 
 # ---------------------------------------------------------------------------

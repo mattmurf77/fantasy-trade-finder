@@ -657,6 +657,27 @@ export type OutlookStrengthSource =
   | 'blended'
   | (string & {});
 
+// How much of the league's STARTING lineup the dynasty value board can price
+// (BUG-5, 2026-08-10). The board carries QB/RB/WR/TE only, so an IDP or kicker
+// league prices a minority of its slots — 7 of 15 in the operator's FFv3
+// league. `fraction` is 0..1 over `total_slots`; `unpriced_slots` names the
+// blind ones in roster order (e.g. ['K','DL','DL','LB','LB','DB','DB',
+// 'IDP_FLEX']) so a caption can be specific rather than vague.
+//
+// `affects_strength` is the honest half: only the board-reading strength
+// sources (`roster_value`, `blended`) consume the board at all, so a
+// `trailing_scores` payload reports the coverage fact with
+// `affects_strength: false` and its odds do not depend on the board.
+// A client should qualify the numbers ("based on your offensive starters")
+// only when `affects_strength` is true AND `fraction` < 1.
+export interface OutlookPricedSlotCoverage {
+  fraction: number; // 0..1
+  total_slots: number;
+  priced_slots: number;
+  unpriced_slots: string[];
+  affects_strength: boolean;
+}
+
 export interface OutlookMeta {
   strength_source: OutlookStrengthSource;
   completed_weeks: number;
@@ -667,6 +688,9 @@ export interface OutlookMeta {
   seed: number;
   is_preseason: boolean;
   beta: boolean;
+  // Null when the measurement was not taken (the serializer emits null rather
+  // than a fabricated 1.0). Optional so a pre-2026-08-10 server still parses.
+  priced_slot_coverage?: OutlookPricedSlotCoverage | null;
 }
 
 export interface OutlookTeam {

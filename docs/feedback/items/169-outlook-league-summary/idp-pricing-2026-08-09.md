@@ -9,6 +9,21 @@
 > 2. **It is a missing signal, not a bias.** The unpriced slots contribute 0.0 to *every* team, so they cancel in `RosterValueStrength`'s cross-team z-score. The published preseason numbers (Brier 0.1959, +21.6 %) are arithmetically correct — they just describe a model that ranks IDP teams on their **offensive core alone**, which is not what the report said it was measuring.
 > 3. **No available fix beats the status quo.** No license-clean dynasty IDP value board exists (verified, not assumed). Both candidate workarounds were backtested: a league-mean fallback is **worse** (Δ Brier +0.0005) and coverage attenuation is **inside the noise** (−0.0019, CI [−0.0167, +0.0070]). Shipped: the slot-eligibility correctness fix (0/72 predictions moved) and a `lineup_pricing()` instrument so the surface can say so honestly.
 
+> **CORRECTION — 2026-08-10 (absolute baselines only; every verdict here
+> stands).** The five-variant backtest below ran on the **pre-BUG-1** engine,
+> so its **V0 absolute** figures for the two Lakeview seasons are superseded:
+> pooled playoff Brier **0.1959 → 0.1968**, Lakeview **0.2298 → 0.2326**
+> (§5.2), pooled title **0.0740 → 0.0746**. **FFv3 — the only IDP league here,
+> and the entire basis of §5.1 — is unchanged to four decimals (0.1789), and
+> so is every per-variant delta.** The BUG-1 fix cannot reach an H2H league,
+> which is exactly why the IDP conclusions are untouched: V1 is still
+> bit-identical to V0, the league-mean fallback still loses, and the
+> attenuation is still inside the noise.
+>
+> The one substantive change is that §6's "explicitly not done" follow-up is
+> **done**: `meta.priced_slot_coverage` now ships on every payload. See
+> [`calibration-combined-2026-08-10.md`](calibration-combined-2026-08-10.md).
+
 ---
 
 ## Table of contents
@@ -323,6 +338,20 @@ not evidence about IDP.
 | The five-variant backtest | `scripts/outlook_idp_pricing_backtest.py` + `backend/tests/fixtures/outlook-hypotheses/idp-pricing-backtest-records.json` | — |
 
 ### Follow-up, explicitly not done here
+
+> **DONE 2026-08-10.** The wiring below landed. `pipeline.run_outlook` now calls
+> `lineup_pricing()` and the serializer emits
+> `meta.priced_slot_coverage = {fraction, total_slots, priced_slots,
+> unpriced_slots[], affects_strength}` on every payload — FFv3 reports
+> `fraction 0.4667`, `7/15`, `unpriced_slots ["K","DL","DL","LB","LB","DB",
+> "DB","IDP_FLEX"]`. `affects_strength` is true only for the board-reading
+> sources (`roster_value`, `blended`), so a `trailing_scores` payload carries
+> the fact without implying its odds depend on the board. Prediction-neutral,
+> pinned by `test_coverage_measurement_changes_no_prediction`. Documented in
+> `docs/api-reference.md` and typed in `mobile/src/api/league.ts`
+> (`OutlookPricedSlotCoverage`) — **type only, no UI change; `outlook.odds`
+> stays dark.** See
+> [`calibration-combined-2026-08-10.md`](calibration-combined-2026-08-10.md).
 
 **`lineup_pricing()` is not wired into the payload.** The `meta` block is built
 in `backend/outlook/serialize.py`, which a parallel agent owns this session. The

@@ -22,8 +22,11 @@ it to week W with `as_of()`, which:
   * truncates weekly_scores to weeks 1..W,
   * sets completed_weeks = W.
 Everything else the simulator reads (the pairing schedule, playoff_slots,
-regular_season_weeks) is genuinely known before the season starts — the
-schedule assumption is validated in `check_future_pairings()` below.
+regular_season_weeks, playoff_seed_type) is genuinely known before the season
+starts — the schedule assumption is validated in `check_future_pairings()`
+below, and `playoff_seed_type` is read straight off the captured league
+settings by `seed_type()` and threaded into every `run_outlook` /
+`get_playoff_format` call (BUG-3; wired 2026-08-10).
 
 Team `player_ids` are NOT rewound (Sleeper does not expose historical rosters),
 which is exactly why this backtest only scores the `trailing_scores` source.
@@ -204,6 +207,19 @@ def _book_median_games(st, state, week: int):
                 by_rid[t.roster_id].losses += 1
             else:
                 by_rid[t.roster_id].ties += 1
+
+
+def seed_type(fx: dict) -> "int | None":
+    """Sleeper's `settings.playoff_seed_type` — 0 = fixed bracket (no
+    reseeding), 1 = reseed (BUG-3, modelled since 2026-08-10 in
+    `backend/outlook/playoff_format.py`).
+
+    Passing it is not optional for an honest score: FFv3 is `0` in all four of
+    its captured seasons, so a backtest that omits it simulates those brackets
+    under the *reseeding* rule the league does not use, and every title number
+    it reports is measured against the wrong bracket. Lakeview is `1`, which
+    is also the fallback, so only the FFv3 half moves."""
+    return ((fx.get("league") or {}).get("settings") or {}).get("playoff_seed_type")
 
 
 def median_mode(fx: dict) -> bool:
@@ -493,7 +509,7 @@ def bye_variant_backtest(players_team_pos: dict, sims: int):
             st = as_of(full, wk)
             strengths, source_key = _strengths_for(st, {}, {}, {})
             fmt = get_playoff_format("standard", st.playoff_slots, st.num_byes,
-                                     st.num_divisions)
+                                     st.num_divisions, seed_type(fx))
 
             base_res = _simulate(
                 st, strengths, fmt, n_sims=sims,
@@ -542,6 +558,17 @@ def _identical_on_h2h_leagues(bug1_records, median_leagues) -> str:
     sequence, same odds. Any drift here means the fix leaked."""
     drift = max((abs(r[3] - r[2]) for r in bug1_records
                  if r[0] not in median_leagues), default=0.0)
+    return "YES (max |delta| = %.6f)" % drift if drift == 0 else \
+        "NO — max |delta| = %.6f (INVESTIGATE)" % drift
+
+
+def _identical_on_reseed_leagues(bug3_records, reseed_leagues) -> str:
+    """Structural claim, checked empirically: `playoff_seed_type: 1` maps to
+    `reseed`, which IS the unconditional pre-fix behaviour, so wiring the
+    setting must leave those leagues bit-identical. Any drift means
+    `_resolve_seed_type` changed today's behaviour for value 1."""
+    drift = max((max(abs(r[3] - r[2]), abs(r[6] - r[5]))
+                 for r in bug3_records if r[0] in reseed_leagues), default=0.0)
     return "YES (max |delta| = %.6f)" % drift if drift == 0 else \
         "NO — max |delta| = %.6f (INVESTIGATE)" % drift
 
@@ -702,6 +729,10 @@ def main():
     records: list[tuple] = []
     # (league, week, prefix_p, fixed_p, y_p, prefix_t, fixed_t, y_t)
     bug1_records: list[tuple] = []
+    # Same shape for the BUG-3 A/B: (league, week, blind_p, wired_p, y_p,
+    # blind_t, wired_t, y_t) — "blind" is this harness before 2026-08-10.
+    bug3_records: list[tuple] = []
+    seed_type_leagues: dict[str, "int | None"] = {}
 
     print("\n## Per-league / per-week runs\n")
     for name in PAST_SEASONS:
@@ -709,19 +740,28 @@ def main():
         full = build_full_state(fx)
         field, champ = truth(fx, full.playoff_slots)
         med = median_mode(fx)
+        stype = seed_type(fx)
+        seed_type_leagues[name] = stype
         if med:
             median_leagues.append(name)
         print("  %s: teams=%d reg_weeks=%d slots=%d byes=%d completed=%d "
-              "median_match=%s champ=%s field=%s"
+              "median_match=%s seed_type=%s champ=%s field=%s"
               % (name, len(full.teams), full.regular_season_weeks,
                  full.playoff_slots, full.num_byes, full.completed_weeks,
-                 med, champ, sorted(field)))
+                 med, stype, champ, sorted(field)))
         for wk in AS_OF_WEEKS:
             st = as_of(full, wk)
             payload = run_outlook(
                 st, player_value={}, player_pos={}, model_cfg={},
-                basis="consensus", source_override="auto", n_sims=args.sims)
+                basis="consensus", source_override="auto", n_sims=args.sims,
+                playoff_seed_type=stype)
             sources_used.add(payload["meta"]["strength_source"])
+            # The shipped engine's odds for this league-week, keyed by roster —
+            # the "fixed"/"wired" arm of both A/Bs below.
+            fixed_by_rid_p = {t["roster_id"]: t["odds"]["playoff_pct"]
+                              for t in payload["teams"]}
+            fixed_by_rid_t = {t["roster_id"]: t["odds"]["title_pct"]
+                              for t in payload["teams"]}
             bl = baselines(st, full.playoff_slots)
             for team in payload["teams"]:
                 rid = team["roster_id"]
@@ -739,7 +779,8 @@ def main():
             st2 = strip_future_schedule(st, wk)
             pay2 = run_outlook(
                 st2, player_value={}, player_pos={}, model_cfg={},
-                basis="consensus", source_override="auto", n_sims=args.sims)
+                basis="consensus", source_override="auto", n_sims=args.sims,
+                playoff_seed_type=stype)
             for team in pay2["teams"]:
                 rid = team["roster_id"]
                 nosched_p[wk].append(
@@ -747,17 +788,33 @@ def main():
                 nosched_t[wk].append(
                     (team["odds"]["title_pct"], 1.0 if rid == champ else 0.0))
 
+            # BUG-3 A/B: the SEED-TYPE-BLIND engine — what this harness itself
+            # scored before 2026-08-10, when it never passed the setting and
+            # `_resolve_seed_type(None)` therefore reseeded every league. Only
+            # the bracket differs, so only `title_pct` (and `bye_pct`) can
+            # move; `playoff_pct` is settled before the bracket is played.
+            pay4 = run_outlook(
+                st, player_value={}, player_pos={}, model_cfg={},
+                basis="consensus", source_override="auto", n_sims=args.sims,
+                playoff_seed_type=None)
+            for team in pay4["teams"]:
+                rid = team["roster_id"]
+                bug3_records.append((name, wk,
+                                     team["odds"]["playoff_pct"],
+                                     fixed_by_rid_p[rid],
+                                     1.0 if rid in field else 0.0,
+                                     team["odds"]["title_pct"],
+                                     fixed_by_rid_t[rid],
+                                     1.0 if rid == champ else 0.0))
+
             # BUG-1 A/B: the PRE-FIX engine, reproduced exactly by forcing the
             # H2H-only rewind and clearing median_match so simulate() books
             # one decision per week (what shipped before 2026-08-09).
             st3 = as_of(full, wk, median=False)
             pay3 = run_outlook(
                 st3, player_value={}, player_pos={}, model_cfg={},
-                basis="consensus", source_override="auto", n_sims=args.sims)
-            fixed_by_rid_p = {t["roster_id"]: t["odds"]["playoff_pct"]
-                              for t in payload["teams"]}
-            fixed_by_rid_t = {t["roster_id"]: t["odds"]["title_pct"]
-                              for t in payload["teams"]}
+                basis="consensus", source_override="auto", n_sims=args.sims,
+                playoff_seed_type=stype)
             for team in pay3["teams"]:
                 rid = team["roster_id"]
                 y_p = 1.0 if rid in field else 0.0
@@ -830,6 +887,37 @@ def main():
     print("  H2H-only leagues must be BIT-IDENTICAL (no code path taken): %s"
           % _identical_on_h2h_leagues(bug1_records, median_leagues))
     bootstrap_brier_delta(bug1_records, label="BUG-1 fix (fixed - pre-fix)")
+
+    print("\n## BUG-3 — seed-type-blind harness vs seed-type-wired harness\n")
+    print("  league seed types: %s" % seed_type_leagues)
+    fixed_bracket_leagues = [n for n, v in seed_type_leagues.items() if v == 0]
+    reseed_leagues = [n for n, v in seed_type_leagues.items() if v != 0]
+    print("  fixed-bracket (playoff_seed_type=0) leagues: %s" % fixed_bracket_leagues)
+    b3_blind_p = [(r[2], r[4]) for r in bug3_records]
+    b3_wired_p = [(r[3], r[4]) for r in bug3_records]
+    b3_blind_t = [(r[5], r[7]) for r in bug3_records]
+    b3_wired_t = [(r[6], r[7]) for r in bug3_records]
+    print("  ALL leagues   playoff Brier  blind=%.4f -> wired %.4f  (%+.4f)"
+          % (brier(b3_blind_p), brier(b3_wired_p),
+             brier(b3_wired_p) - brier(b3_blind_p)))
+    print("  ALL leagues   title   Brier  blind=%.4f -> wired %.4f  (%+.4f)"
+          % (brier(b3_blind_t), brier(b3_wired_t),
+             brier(b3_wired_t) - brier(b3_blind_t)))
+    fb = [r for r in bug3_records if r[0] in fixed_bracket_leagues]
+    if fb:
+        print("  FIXED-BRACKET only  title Brier  blind=%.4f -> wired %.4f  (%+.4f)"
+              % (brier([(r[5], r[7]) for r in fb]),
+                 brier([(r[6], r[7]) for r in fb]),
+                 brier([(r[6], r[7]) for r in fb])
+                 - brier([(r[5], r[7]) for r in fb])))
+    print("  playoff odds must be UNCHANGED (field is settled before the "
+          "bracket): %s"
+          % ("YES (max |delta| = %.6f)"
+             % max((abs(r[3] - r[2]) for r in bug3_records), default=0.0)))
+    print("  seed_type=1 leagues must be BIT-IDENTICAL (1 == reseed == "
+          "pre-fix behaviour): %s"
+          % _identical_on_reseed_leagues(bug3_records, reseed_leagues))
+    bootstrap_brier_delta(bug3_records, label="BUG-3 wiring (wired - blind)")
 
     bootstrap_skill(records, len(PAST_SEASONS))
 

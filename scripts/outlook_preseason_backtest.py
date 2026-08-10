@@ -277,22 +277,28 @@ def main():
                  rep.total_rows, rep.unmatched, 100 * rep.unmatched_rate,
                  100 * ros_cov, 100 * slot_cov))
 
+        # BUG-3: each league's real bracket rule (0 = fixed, 1 = reseed).
+        # Omitting it simulates FFv3's four seasons under the reseeding rule
+        # that league does not use — see `backtest.seed_type`.
+        stype = backtest.seed_type(fx)
+
         payload = run_outlook(st0, player_value=values, player_pos=player_pos,
                               model_cfg={}, basis="consensus",
-                              source_override="auto", n_sims=args.sims)
+                              source_override="auto", n_sims=args.sims,
+                              playoff_seed_type=stype)
         assert payload["meta"]["strength_source"] == "roster_value", \
             payload["meta"]["strength_source"]
 
         today_payload = run_outlook(st0, player_value=today_vals,
                                     player_pos=player_pos, model_cfg={},
                                     basis="consensus", source_override="auto",
-                                    n_sims=args.sims)
+                                    n_sims=args.sims, playoff_seed_type=stype)
 
         # already-validated reference: the week-3 trailing-scores model
         st3 = backtest.as_of(full, 3)
         wk3 = run_outlook(st3, player_value={}, player_pos={}, model_cfg={},
                           basis="consensus", source_override="auto",
-                          n_sims=args.sims)
+                          n_sims=args.sims, playoff_seed_type=stype)
         assert wk3["meta"]["strength_source"] == "trailing_scores"
 
         by_rid = {t["roster_id"]: t for t in payload["teams"]}

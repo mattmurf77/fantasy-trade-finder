@@ -340,3 +340,82 @@ def test_reseed_bracket_reproduces_lakeviews_real_champion_for_seed_type_1(name)
     fmt = StandardFormat(full.playoff_slots, full.num_byes, playoff_seed_type=1)
     champ = fmt.champion(seed_order, sample)
     assert champ == champ_truth
+
+
+# ---------------------------------------------------------------------------
+# 5 — the OFFLINE BACKTEST HARNESSES must pass the setting too (2026-08-10)
+#
+# The BUG-3 fix landed in `playoff_format.py` but
+# `scripts/outlook_calibration_backtest.py` was not updated to pass
+# `playoff_seed_type` into its `run_outlook` / `get_playoff_format` calls, so
+# every title number it published kept scoring FFv3 (4 of the 6 captured
+# league-seasons, all `playoff_seed_type: 0`) under the RESEEDING rule that
+# league does not use. The guards below make that specific regression — a new
+# or edited call site that forgets the argument — a test failure rather than a
+# silently wrong report.
+# ---------------------------------------------------------------------------
+
+_SEED_TYPE_ARG_NAMES = ("playoff_seed_type", "seed_type", "stype")
+
+
+def _calls_missing_seed_type(module_path: str) -> list[str]:
+    """Every `run_outlook(...)` / `get_playoff_format(...)` call in a script
+    that does not pass the league's seed type, as 'func:lineno' strings."""
+    import ast
+    with open(module_path) as f:
+        tree = ast.parse(f.read(), module_path)
+    missing = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = (fn.attr if isinstance(fn, ast.Attribute)
+                else fn.id if isinstance(fn, ast.Name) else None)
+        if name not in ("run_outlook", "get_playoff_format"):
+            continue
+        if not any(a in ast.unparse(node) for a in _SEED_TYPE_ARG_NAMES):
+            missing.append("%s:%d" % (name, node.lineno))
+    return missing
+
+
+@pytest.mark.parametrize("script", ["outlook_calibration_backtest.py",
+                                    "outlook_preseason_backtest.py"])
+def test_backtest_scripts_pass_seed_type_into_every_bracket_they_build(script):
+    path = os.path.join(_SCRIPTS, script)
+    if not os.path.exists(path):
+        pytest.skip("%s not present" % script)
+    missing = _calls_missing_seed_type(path)
+    assert not missing, (
+        "%s builds a playoff bracket without the league's playoff_seed_type "
+        "at: %s — its title numbers would score FFv3 on the wrong bracket "
+        "(BUG-3)." % (script, ", ".join(missing)))
+
+
+@pytestmark_fixtures
+@pytest.mark.parametrize("name,expected", [
+    ("ffv3-2022", 0), ("ffv3-2023", 0), ("ffv3-2024", 0), ("ffv3-2025", 0),
+    ("lakeview-2024", 1), ("lakeview-2025", 1),
+])
+def test_backtest_seed_type_helper_reads_each_leagues_real_setting(name, expected):
+    import outlook_calibration_backtest as bt
+    assert bt.seed_type(bt.load_fixture(name)) == expected
+
+
+@pytestmark_fixtures
+def test_seed_type_is_load_bearing_on_a_real_captured_season():
+    """Guard against the wiring being cosmetic: on a real `playoff_seed_type:
+    0` season the fixed bracket must produce a DIFFERENT title distribution
+    from the reseeding one the harness used before. Playoff odds are
+    seed-type-independent by construction — the field is settled before the
+    bracket is played — so only `title_pct` may move."""
+    import outlook_calibration_backtest as bt
+    fx = bt.load_fixture("ffv3-2022")
+    st = bt.as_of(bt.build_full_state(fx), 9)
+    fixed = run_outlook(st, player_value={}, player_pos={}, model_cfg={},
+                        basis="consensus", n_sims=4000, playoff_seed_type=0)
+    reseed = run_outlook(st, player_value={}, player_pos={}, model_cfg={},
+                         basis="consensus", n_sims=4000, playoff_seed_type=1)
+    titles = lambda p: {t["roster_id"]: t["odds"]["title_pct"] for t in p["teams"]}
+    berths = lambda p: {t["roster_id"]: t["odds"]["playoff_pct"] for t in p["teams"]}
+    assert titles(fixed) != titles(reseed)
+    assert berths(fixed) == berths(reseed)

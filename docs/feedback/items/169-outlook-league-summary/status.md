@@ -218,10 +218,14 @@ operator's own leagues. Full method, numbers and verdict:
   [idp-pricing-2026-08-09.md](idp-pricing-2026-08-09.md) §4.1), and both
   candidate workarounds were backtested and lost (league-mean fallback
   Δ Brier +0.0005; coverage attenuation −0.0019, CI [−0.0167, +0.0070]).
-  **Open follow-up before lighting the flag for any IDP league:** wire
+  ~~**Open follow-up before lighting the flag for any IDP league:** wire
   `strength.lineup_pricing()` into the payload `meta` (owned by
   `backend/outlook/serialize.py`) so the UI can say *"based on your offensive
-  starters"* instead of showing an unqualified number.
+  starters"* instead of showing an unqualified number.~~ **DONE 2026-08-10 —
+  `meta.priced_slot_coverage` ships on every payload
+  (`{fraction, total_slots, priced_slots, unpriced_slots[], affects_strength}`);
+  FFv3 reports 7/15 = 0.4667. Prediction-neutral, typed in
+  `mobile/src/api/league.ts` with no UI change.**
 - **BUG-1 (severe, open):** `settings.league_average_match` (median match) is
   ignored — the operator's Lakeview league has it ON in the live 2026 season,
   which makes `projected_wins` read 22.29 in a 14-week season. Tracked by a
@@ -488,10 +492,13 @@ indistinguishable; the engine only pulls clearly ahead at week 6 — 0.120).
 `is_preseason` still clears at week 1 as before; the two fields now
 genuinely diverge in the week 1-5 window, which is the whole point.
 
-**Not done:** `scripts/outlook_calibration_backtest.py` was not updated to
+~~**Not done:** `scripts/outlook_calibration_backtest.py` was not updated to
 pass `playoff_seed_type` into its `get_playoff_format` calls, so a re-run of
 the full calibration backtest still scores the pre-fix (always-reseed)
-bracket simulation. Recommended before the next calibration revalidation.
+bracket simulation. Recommended before the next calibration revalidation.~~
+**DONE 2026-08-10 — both harnesses wired, and the combined post-fix
+re-measurement is published:
+[calibration-combined-2026-08-10.md](calibration-combined-2026-08-10.md).**
 
 **Files:** `backend/outlook/playoff_format.py`, `backend/outlook/serialize.py`
 (owned this pass), `backend/outlook/pipeline.py`, `backend/server.py` (thin
@@ -499,3 +506,74 @@ wiring only — `league_state.py`/`simulator.py`/`strength.py` untouched, per
 the sibling-agent file split), `backend/tests/test_outlook_playoff_seed_type.py`
 (new), `backend/tests/test_outlook_odds.py`, `backend/tests/test_outlook_route_cache.py`,
 `docs/api-reference.md`.
+
+## Combined post-fix calibration (2026-08-10) — the definitive picture, still dark
+
+Two wiring gaps closed, then **one** re-measurement of both harnesses over the
+same 6 captured league-seasons with all four fixes in place. Full report:
+**[calibration-combined-2026-08-10.md](calibration-combined-2026-08-10.md)**.
+`outlook.odds` untouched; no flag, no `config/features.json`, no UI change.
+
+**Wiring 1 — `playoff_seed_type` into the backtests.** Both
+`scripts/outlook_calibration_backtest.py` (new `seed_type()` helper, threaded
+into every `run_outlook`/`get_playoff_format` call, plus a BUG-3 A/B block
+mirroring BUG-1's) and `scripts/outlook_preseason_backtest.py`. An AST guard
+(`test_backtest_scripts_pass_seed_type_into_every_bracket_they_build`) fails the
+suite if a future call site omits it.
+
+**Wiring 2 — IDP coverage into the payload.** `pipeline.run_outlook` calls
+`strength.lineup_pricing()`; `serialize.py` emits
+`meta.priced_slot_coverage = {fraction, total_slots, priced_slots,
+unpriced_slots[], affects_strength}`. FFv3 reports `0.4667`, 7/15,
+`["K","DL","DL","LB","LB","DB","DB","IDP_FLEX"]`. `affects_strength` is true
+only for the board-reading sources (`roster_value`/`blended`), so a
+`trailing_scores` payload carries the fact without implying its odds depend on
+the board. Prediction-neutral (pinned by a test). Typed in
+`mobile/src/api/league.ts` (`OutlookPricedSlotCoverage`) — **type only, no
+UI/behaviour change**.
+
+**Results.** In-season pooled (n = 288): playoff Brier **0.0997** (+60.1 %,
+90 % CI [+47.6, +72.2]); title **0.0732** (+4.2 %, CI [−13.1, +20.0] — still
+spans zero). Per week: 0.2012 / 0.1065 / 0.0538 / 0.0372. Preseason (n = 72):
+playoff **0.1968** (+21.3 %, CI **[+2.9, +39.1]**); title 0.0746 (+2.3 %, CI
+spans zero). The BUG-3 wiring moved pooled title Brier by **0.0001** and
+playoff Brier by **zero** (bit-identical — the playoff field is settled before
+the bracket is played), on a sample where the bracket rule was wrong for 4 of
+6 league-seasons. A null, reported as one.
+
+**Over-confidence: SURVIVED.** Preseason 95 % → **78 %** realized (was 75 %),
+3 % → 17 % at the bottom. The in-season engine's two populated buckets are
+inside ±0.05 (n = 99 and n = 100).
+
+**The two operator decisions, answered:**
+1. **Bands, not percentages — verdict STANDS and is better supported.** Both
+   pillars moved the wrong way: over-confidence survived, and the preseason
+   skill lower bound went **+4.1 % → +2.9 %**. A 5 %-rounded playoff
+   percentage from week 6 is defensible on pooled in-season calibration but is
+   an operator risk call, not a validated result (the table is not stratified
+   by week). Title odds: never a percentage, at any week.
+2. **Gate numbers at week 6; allow bands from week 0; never gate at week 3.**
+   Week 3 is dominated — the preseason model is indistinguishable from it and
+   nominally better (paired Δ −0.0043), and week 3 is the only week the engine
+   loses to B3 standings-shrunk *and* has title odds worse than a constant.
+   Week 6 nearly halves the Brier (0.2012 → 0.1065) and is already the
+   `_BETA_UNTIL_COMPLETED_WEEKS` threshold, so **`meta.beta` clearing IS the
+   gate**. BUG-1's preseason regression (0.2298 → 0.2326) argues *for* week 6:
+   it diagnoses the roster-value prior, not the fix.
+
+**Still unvalidated:** title odds (6 champion events; three of six
+league-seasons worse than climatology); IDP pricing (instrumented, not solved —
+no license-clean board exists); `playoff_seed_type: 1` semantics
+(doc-corroborated, not fixture-proven — the `1` leagues are bit-identical
+before and after the wiring, which proves behaviour preservation and nothing
+about correctness); per-week calibration (pooled only); 2 leagues / 1 shape.
+
+**Files:** `scripts/outlook_calibration_backtest.py`,
+`scripts/outlook_preseason_backtest.py`, `scripts/CLAUDE.md`,
+`backend/outlook/serialize.py`, `backend/outlook/pipeline.py`,
+`backend/tests/test_outlook_odds.py`,
+`backend/tests/test_outlook_playoff_seed_type.py`,
+`backend/tests/fixtures/outlook-hypotheses/preseason-backtest-records.json`
+(regenerated), `docs/api-reference.md`, `mobile/src/api/league.ts`, and dated
+corrections in `calibration-report-2026-08-09.md`,
+`dated-values-revalidation-2026-08-09.md`, `idp-pricing-2026-08-09.md`.
