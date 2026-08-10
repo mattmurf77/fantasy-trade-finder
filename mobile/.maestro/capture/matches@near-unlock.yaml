@@ -1,0 +1,62 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MATCHES-NEARUNLOCK
+# profile: near-unlock
+# flags: release
+# captures: progress-module
+# source: mobile/src/screens/MatchesScreen.tsx
+# interactive-stop: progress-module
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 154 — the Matches empty state carrying the unlock-progress module
+# at threshold−1. Distinct from matches@fresh's `empty--mutual`: same layout,
+# different progress content (one segment from full on every position), which
+# is why it is its own row on its own profile.
+#
+# `matches.progress-module` (MatchesScreen.tsx:554) renders under the empty
+# headline once the summary + coverage queries resolve; both ids are awaited so
+# the frame is never half-painted.
+tags: [capture, matches, near-unlock]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.matches"
+    timeout: 30000
+- tapOn:
+    id: "tab.matches"
+
+# ── progress-module ──────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "matches.empty-text"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "matches.progress-module"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: matches__progress-module

@@ -1,0 +1,135 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MANUAL-RANKS
+# profile: standard
+# flags: release
+# captures: error, populated
+# source: mobile/src/screens/ManualRanksScreen.tsx, mobile/src/components/PositionChip.tsx, mobile/src/components/TierBadge.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for Overall Ranks (matrix rows 66-72).
+# Preamble copied from capture/trades.yaml through the league pick; no
+# OutlookSheet dismissal (Acquire tab is never visited). No
+# /__test__/reset anywhere — reset signs us out.
+#
+# Ordering: the board reads ['rankings', 'all'] with the default 30 s
+# staleTime, so a successful load blocks a later error capture inside that
+# window. Error first, then `stack.back-btn` POPS the screen (native stack
+# → unmount) so the second entry is a genuine fresh mount that refetches
+# the errored query into the populated board.
+#
+#   error     → fail_next 500 on /api/rankings, real production body
+#   populated → the drag board with rows, anchored on the per-row rank
+#               button's accessibility label
+#
+# NOT captured here, with reasons (reported to the orchestrator):
+#   row--editing (row 67) — the rank-number Pressable that opens the edit
+#     field carries an accessibilityLabel only, no testID
+#     (ManualRanksScreen.tsx:466-476); a text-selector tap is banned.
+#   save-pill--saving / --saved / --error (rows 68/69/70) — all three need a
+#     MOVE first, and the only movers are a real drag (excluded, ruling E)
+#     or the VoiceOver custom actions moveUp/moveDown
+#     (ManualRanksScreen.tsx:491-492), which Maestro cannot invoke. Needs
+#     testIDs on the row rank button (`manual-ranks.row.<pid>.rank`) or a
+#     tappable move affordance before these rows are reachable.
+#   search-highlight (row 71) — EXCLUDED per the sign-off (ruling E:
+#     the 250 ms scroll-retry timing class).
+tags: [capture, manual-ranks]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+
+# ── error ────────────────────────────────────────────────────────────────
+# RUN-1 FAILURE + FIX (batch A): the error state never rendered with
+# count=2. RankMenu.go('ManualRanks') PREFETCHES ['rankings', 'all']
+# (TabNav.tsx:794-801) while the screen's own query is keyed
+# ['rankings', activeFormat, 'all'] (ManualRanksScreen.tsx:146-152) — the
+# keys do NOT match, so the two never dedupe and each fires 1 attempt + 1
+# react-query retry (state/queryClient.ts:26). The prefetch ate the whole
+# budget and the screen's retry then SUCCEEDED. count=4 covers all four
+# requests. Body is the real production 500 (backend/server.py:2071
+# handle_unexpected_error); the screen renders readErrorCopy's fallback for
+# a non-verification failure (:641).
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/rankings"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "4"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.manual"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.manual"
+- extendedWaitUntil:
+    visible:
+      text: ".*Could not load rankings.*"
+    timeout: 30000
+- takeScreenshot: manual-ranks__error
+
+# ── populated ────────────────────────────────────────────────────────────
+# Pop so the next entry remounts and refetches (an errored query refetches
+# on mount; a screen that merely stayed in the stack would not).
+# The anchor is the first row's rank-button accessibility label — "set rank
+# for <name>" (ManualRanksScreen.tsx:473). It exists only when rows render,
+# and unlike the row names it is fixture-independent copy.
+- tapOn:
+    id: "stack.back-btn"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- tapOn:
+    id: "rankmenu.manual"
+- extendedWaitUntil:
+    visible:
+      text: ".*set rank for.*"
+    timeout: 40000
+- waitForAnimationToEnd
+- takeScreenshot: manual-ranks__populated

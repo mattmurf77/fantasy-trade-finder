@@ -1,0 +1,66 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SETTINGS-TWO
+# profile: two-leagues
+# flags: release
+# captures: league-rows
+# source: mobile/src/screens/SettingsScreen.tsx
+# interactive-stop: league-rows
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 167 — the "Switch league" block. `leagueSwitchRows` is null unless
+# leagues.length > 1 (SettingsScreen.tsx:711), so `two-leagues` is the only
+# profile that can show it.
+#
+# `account.settings_v2` is ON in the refreshed release fixture, which changes
+# section ORDER — hence the scroll-until-visible on the row content rather than
+# a fixed number of scrolls. The rows themselves have no testIDs, so the
+# fixture league name is the anchor; nothing is tapped (a tap would start a
+# real league switch), so the missing ids don't block this row.
+tags: [capture, settings, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "topbar.settings"
+    timeout: 30000
+- tapOn:
+    id: "topbar.settings"
+# The whole tree is absent until /api/notifications/prefs resolves — wait on
+# the close control, which only exists once Settings has painted.
+- extendedWaitUntil:
+    visible:
+      id: "settings.close-btn"
+    timeout: 30000
+
+# ── league-rows ──────────────────────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      text: ".*QA Second League.*"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: settings__league-rows

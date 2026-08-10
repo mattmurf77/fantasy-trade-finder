@@ -1,0 +1,138 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRIOS-FRESH
+# profile: fresh
+# flags: release
+# captures: loading, populated, progress-locked, partial-selection, all-ranked
+# source: mobile/src/screens/RankScreen.tsx, mobile/src/components/TrioPlayerCard.tsx
+# interactive-stop: populated
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix rows 26-31 (profile `fresh`). Ordering is chosen so no /__test__/reset
+# is needed and no injection has to be un-armed:
+#   loading           → 4 s latency on /api/trio*, armed BEFORE entering Trios;
+#                       anchored on `trios.card.a` being ABSENT (the skeleton
+#                       row carries no testID — RankScreen.tsx:562-573)
+#   populated         → the same fetch landing
+#   progress-locked   → same frame; `rank.unlock-payoff` renders only while
+#                       LOCKED (`ux.outlook_inline_default` ON in release AND
+#                       !unlocked — RankScreen.tsx:518), which `fresh` is
+#   partial-selection → tap card a (instruction copy changes per count)
+#   all-ranked        → tap b then c. Requires speed mode OFF: it persists in
+#                       AsyncStorage, and `clearState: true` above is what
+#                       guarantees the default-off state for this cell.
+# BLOCKED — `error` IS NOT CAPTURED. The trio error branch is only reachable
+# as a REFETCH failure (a cold failure stops at the `!trio` skeleton test above
+# it), and every control on this screen that triggers a refetch turned out to
+# be inert under Maestro. Evidence across four runs:
+#   • Skip (`trios.skip-btn`, 20260810T033334): tap reported PASSED, and the
+#     backend log shows ZERO further GET /api/trio in the 60 s after the
+#     injection was armed — skipTrio()'s invalidate produced no refetch.
+#   • Confirm (`trios.confirm-btn`, 20260810T043905 and 20260810T044408): tap
+#     reported PASSED — the second run with `scrollUntilVisible` first, so the
+#     button was demonstrably on screen — and the backend log shows ZERO
+#     POST /api/rank3 (api/rankings.ts:150-157) in either run.
+# Two different controls, both reported tapped, both producing no network call
+# at all. That is an app/harness question that needs an interactive look, not
+# another flow rewrite, so the state is reported rather than faked. Everything
+# above it captures cleanly.
+#
+# The latency stays armed for the rest of the cell by design — every later
+# trio fetch is slow but correct, which costs seconds and buys determinism.
+tags: [capture, trios, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+
+# ── loading ──────────────────────────────────────────────────────────────
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trio*"
+      INJECT_MS: "4000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trios"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trios"
+- extendedWaitUntil:
+    visible:
+      id: "trios.speed-toggle"
+    timeout: 20000
+- assertNotVisible:
+    id: "trios.card.a"
+- takeScreenshot: trios__loading
+
+# ── populated ────────────────────────────────────────────────────────────
+# Trio CONTENTS are server-chosen and vary run to run (matrix ruling D): the
+# library captures the SHAPE of the 3-up row, not player identity.
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 40000
+- waitForAnimationToEnd
+- takeScreenshot: trios__populated
+
+# ── progress-locked ──────────────────────────────────────────────────────
+# Per-position n/threshold counters + the payoff line live above the cards;
+# `rank.unlock-payoff` is the only locked-state-exclusive testID on screen.
+- assertVisible:
+    id: "rank.unlock-payoff"
+- takeScreenshot: trios__progress-locked
+
+# ── partial-selection ────────────────────────────────────────────────────
+- tapOn:
+    id: "trios.card.a"
+- waitForAnimationToEnd
+- takeScreenshot: trios__partial-selection
+
+# ── all-ranked ───────────────────────────────────────────────────────────
+# Confirm only appears once all three are ranked in manual mode
+# (RankScreen.tsx:658) — it is both the anchor and the proof speed mode is off.
+- tapOn:
+    id: "trios.card.b"
+- tapOn:
+    id: "trios.card.c"
+- extendedWaitUntil:
+    visible:
+      id: "trios.confirm-btn"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: trios__all-ranked

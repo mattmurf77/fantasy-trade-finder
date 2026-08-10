@@ -1,0 +1,105 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRADES-FRESH
+# profile: fresh
+# flags: release
+# captures: empty--cold, generating
+# source: mobile/src/screens/TradesScreen.tsx, mobile/src/components/SkeletonTradeCard.tsx
+# interactive-stop: empty--cold
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix rows 36-37 on `fresh`. Row 35 (`skeleton--first-run`) is NOT captured
+# here and is not reachable under `flags: release` — see the note below.
+#
+#   empty--cold → the resting Acquire landing before Find is pressed. In
+#                 release `onboarding.trades_first` is OFF, so the first-run
+#                 auto-generate (TradesScreen.tsx:1397-1406) never fires and
+#                 this frame is stable rather than a race.
+#   generating  → 6 s of latency per status poll widens the running window.
+#                 PILOT FINDING (carried from trades.yaml, run 20260809T222219):
+#                 do NOT anchor on `trades.progress-strip` — it mounts only
+#                 while job.status === 'running' and Maestro's hierarchy poll
+#                 can miss the window. The robust anchor is `trades.empty-text`
+#                 UNMOUNTING when the running placeholder replaces it.
+#
+# ROW 35 (`skeleton--first-run`) — UNREACHABLE IN RELEASE. `firstRun` LATCHES
+# at mount from `onboardingEnabled('onboarding.trades_first')`
+# (TradesScreen.tsx:297-304), and that flag is false in the refreshed release
+# fixture. Per ruling A the library captures release truth, so the state has no
+# release row; it IS captured under the onboarding exception as
+# `onboarding__s2-wait` (onboarding-deck@fresh.yaml), where the first-run
+# skeleton is the backdrop of The Analyst's computing scene.
+tags: [capture, trades, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+# First-run team-outlook sheet (Contender pre-selected) — dismissed only if
+# it actually mounted, exactly as in the signin/trades pilots.
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+
+# ── empty--cold ──────────────────────────────────────────────────────────
+- assertVisible:
+    id: "trades.empty-text"
+- assertNotVisible:
+    id: "trades.card-top"
+- waitForAnimationToEnd
+- takeScreenshot: trades__empty--cold
+
+# ── generating ───────────────────────────────────────────────────────────
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trades/status*"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    notVisible:
+      id: "trades.empty-text"
+    timeout: 30000
+- takeScreenshot: trades__generating

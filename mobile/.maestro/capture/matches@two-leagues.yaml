@@ -1,0 +1,67 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MATCHES-TWO
+# profile: two-leagues
+# flags: release
+# captures: populated--all-filter
+# source: mobile/src/screens/MatchesScreen.tsx
+# interactive-stop: populated--all-filter
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 165 — the cross-league list on the default "All" filter, with the
+# multi-chip filter row (All + one chip per league) and per-row league badges.
+# `two-leagues` seeds 2 mutual in league 1 and 1 mutual in league 2, so /all
+# returns rows from both.
+#
+# Row 166 (`filter--league-scoped`) is NOT captured: the filter chips carry no
+# testIDs (MatchesScreen.tsx:471-491, accessibilityLabel only), and tapping one
+# would need a text selector — barred by lld.md §4.4 rule 1. See the report.
+#
+# Anchors: the segment control proves the screen painted, and the ABSENCE of
+# `matches.empty-text` proves the list is populated rather than merely slow.
+tags: [capture, matches, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.matches"
+    timeout: 30000
+- tapOn:
+    id: "tab.matches"
+
+# ── populated--all-filter ────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.mutual"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible:
+      id: "matches.empty-text"
+    timeout: 30000
+- assertVisible:
+    text: "QA Second League"
+- waitForAnimationToEnd
+- takeScreenshot: matches__populated--all-filter

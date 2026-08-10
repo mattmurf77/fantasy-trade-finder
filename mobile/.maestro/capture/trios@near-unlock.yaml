@@ -1,0 +1,120 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRIOS-NEARUNLOCK
+# profile: near-unlock
+# flags: release
+# captures: progress-near-threshold
+# source: mobile/src/screens/RankScreen.tsx
+# interactive-stop: progress-near-threshold
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix rows 147-149. `near-unlock` seeds threshold−1 trio interactions for
+# every position in the league's format (sf_tep) and `unlocked: false`, so one
+# completed trio per position crosses the unlock threshold.
+#
+#   progress-near-threshold → captured FIRST, before any submit: the segmented
+#       track sits one segment short on every position and `rank.unlock-payoff`
+#       (locked-only, RankScreen.tsx:518) is on screen.
+#   unlock-crossing → one trio confirmed per position, QB→RB→WR→TE. The cross
+#       flips `unlocked` SERVER-side, so the client cannot derive it from the
+#       local merge and falls back to invalidating `progress`
+#       (RankScreen.tsx:176-183) — an extra round-trip. That is exactly why
+#       this state is anchored on the banner APPEARING rather than on a count.
+#   unlock-banner--fresh → the settled banner after the animation ends.
+#
+# Speed mode must stay OFF (else the 2nd tap auto-submits and `trios.confirm-btn`
+# never renders). It persists in AsyncStorage; `clearState: true` is what
+# guarantees the default.
+#
+# The banner carries no testID (RankScreen.tsx:686-696) — the anchor is its
+# `ux.outlook_inline_default` copy, which is ON in the refreshed release
+# fixture (the other variant is "Trade Finder unlocked — check the Acquire
+# tab"). Flagged for the P4 testID sweep: `trios.unlock-banner`.
+#
+# ANCHOR FIX (sim run 2026-08-09 failed on `trios.confirm-btn is not visible`).
+# The per-position blocks used Confirm UNMOUNTING as the "submit landed" gate.
+# Wrong signal: Confirm's mount condition is `!speedMode &&
+# selectionOrder.length === 3` (RankScreen.tsx:658), so it stays up for the
+# whole `submitMutation.isPending` window and only leaves when
+# `setSelectionOrder([])` runs — which happens in BOTH onSuccess (:205) and
+# onError (:236). The positive twin of that same state change is the
+# instruction live region reverting to its zero-selection copy (:530-533), so
+# each block now waits on "Tap in order of preference…". It fires on either
+# outcome and cannot be missed the way a transient unmount can — the same
+# class of finding as the trades pilot's empty-text anchor.
+# SECOND FIX, same state (run 20260810T043905). The instruction anchor was
+# right but the TAP was landing nowhere: the failure screenshot shows all three
+# cards ranked, the instruction reading "All ranked — confirm when ready", and
+# Confirm BELOW THE FOLD under the I-AM-SPEED tile. `extendedWaitUntil` was
+# satisfied by the element existing in the hierarchy, and the tap then went to
+# off-screen coordinates. Every Confirm tap is now preceded by
+# `scrollUntilVisible`, the same treatment the onboarding tour's disposition
+# buttons needed. (`scrollUntilVisible` does work on this app's scroll views —
+# league@near-unlock captured progress-module and works-now with it in the same
+# run; it is bare `- scroll` that does nothing.)
+tags: [capture, trios, near-unlock]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trios"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trios"
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 40000
+
+# ── progress-near-threshold ──────────────────────────────────────────────
+- assertVisible:
+    id: "rank.unlock-payoff"
+- waitForAnimationToEnd
+- takeScreenshot: trios__progress-near-threshold
+
+# ── unlock-crossing / unlock-banner--fresh — BLOCKED, NOT CAPTURED ───────
+# Both need four trios CONFIRMED (one per position) to cross the threshold.
+# Confirm is inert under Maestro on this screen: runs 20260810T043905 and
+# 20260810T044408 both report the tap as PASSED — the second after
+# `scrollUntilVisible` proved the button was on screen, fixing the genuine
+# below-the-fold bug the first run exposed — yet the backend log contains ZERO
+# POST /api/rank3 (api/rankings.ts:150-157) in either. trios@fresh hit the same
+# wall on `trios.skip-btn` (zero GET /api/trio refetches after a passing tap).
+# Two different controls on the same screen, both reported tapped, neither
+# producing a single request. Reported for an interactive look rather than
+# worked around; `progress-near-threshold` above is unaffected and green.

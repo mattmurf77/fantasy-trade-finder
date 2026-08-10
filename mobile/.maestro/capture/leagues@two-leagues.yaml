@@ -1,0 +1,44 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUES-TWO
+# profile: two-leagues
+# flags: release
+# captures: populated--two
+# source: mobile/src/screens/LeaguePickerScreen.tsx
+# interactive-stop: populated--two
+#
+# Matrix row 157 — the multi-row picker. Both fixture leagues are Sleeper, so
+# the platform Badge slot (LeaguePickerScreen.tsx:357-359) renders empty here;
+# the ESPN badge variant belongs to the (unbuilt) `espn` profile, not to this
+# row.
+#
+# Both rows are awaited before the shot so the capture can never record a
+# half-rendered FlatList.
+tags: [capture, leagues, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+
+# ── populated--two ───────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000002"
+    timeout: 20000
+- assertVisible:
+    id: "leagues.link-espn"
+- waitForAnimationToEnd
+- takeScreenshot: leagues__populated--two

@@ -1,0 +1,82 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-QUICK-SET
+# profile: standard
+# flags: release
+# captures: step-populated--seeded
+# source: mobile/src/screens/QuickSetTiersScreen.tsx, mobile/src/components/RookieScopeControl.tsx, mobile/src/components/chalkline/TickLabel.tsx
+# interactive-stop: step-populated--seeded
+#
+# Screen-library capture flow for the Quick Set walk (matrix row 58 — the
+# only `standard` row; rows 19-24 belong to the `fresh` profile and are
+# another author's). Preamble copied from capture/trades.yaml through the
+# league pick; no OutlookSheet dismissal (Acquire tab is never visited).
+# No /__test__/reset anywhere — reset signs us out.
+#
+#   step-populated--seeded → the walk at its first rung with the profile's
+#     seeded-suggested tiers already in place, so every chip carries its
+#     current tier label ("<name>, currently <tier>", QuickSetTiersScreen
+#     .tsx:409-413) rather than the unset state the `fresh` profile shows.
+#
+# Note on routing: with no stored rankingMethodPref and a clean device,
+# #244's completion-aware launch routing already opens the Rank stack ON
+# QuickSetTiers. Going through rank.more-ways → rankmenu.quickset anyway
+# keeps this flow independent of that default — the menu row navigates to
+# the same route whether it is already mounted or not.
+tags: [capture, quick-set]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.quickset"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.quickset"
+
+# ── step-populated--seeded ───────────────────────────────────────────────
+# quick-set.save-btn is chrome (it renders in the loading state too), so it
+# only proves arrival. The grid itself is proven by a chip's accessibility
+# label, which is the fixture-independent half of "<name>, currently
+# <tier>" — chips exist only on the loaded branch (the loading, scoped-empty
+# and error branches all replace the grid, QuickSetTiersScreen.tsx:575-582).
+# The per-chip testIDs are player-id templated, so they are deliberately not
+# used as anchors here.
+- extendedWaitUntil:
+    visible:
+      id: "quick-set.save-btn"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      text: ".*currently.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: quick-set__step-populated--seeded

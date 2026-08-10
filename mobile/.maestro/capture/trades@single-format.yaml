@@ -1,0 +1,79 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRADES-SINGLEFORMAT
+# profile: single-format
+# flags: release
+# captures: format-gate
+# source: mobile/src/screens/TradesScreen.tsx, mobile/src/components/FormatGate.tsx
+# interactive-stop: format-gate
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 169 — FormatGate REPLACES the whole controls+deck block
+# (TradesScreen.tsx:3606-3613). `single-format` seeds the league as sf_tep with
+# the user unlocked only in 1qb_ppr, which is exactly the gate's condition:
+# needed format absent from `unlocked_formats`, other format present (:929-937).
+#
+# Anchors: the gate card has no testID, so it is pinned from both sides — the
+# gate headline is present, and `trades.find-btn` is ABSENT (it lives in the
+# replaced block, so its absence is the state's structural signature).
+# `visual.chalkline_cleanup` selects between two renderings of the same copy;
+# the headline string is identical in both branches (FormatGate.tsx:62 / :121).
+#
+# Row 170 (`format-gate--copy-alert`) is a native Alert — EXCLUDED from v1 per
+# ruling B; recorded in the matrix as `excluded--native-alert`.
+tags: [capture, trades, single-format]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+
+# ── format-gate ──────────────────────────────────────────────────────────
+# The gate needs /api/rankings/progress to have RESOLVED (it is never shown on
+# a loading/error/placeholder state), so the wait is on the gate copy itself.
+- extendedWaitUntil:
+    visible:
+      text: "Set up SF TEP to trade here"
+    timeout: 40000
+- assertNotVisible:
+    id: "trades.find-btn"
+- waitForAnimationToEnd
+- takeScreenshot: trades__format-gate

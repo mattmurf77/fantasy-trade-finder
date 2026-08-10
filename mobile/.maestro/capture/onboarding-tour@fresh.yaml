@@ -1,0 +1,399 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-ONBOARDING-TOUR
+# profile: fresh
+# flags: onboarding-v2
+# captures: s2-wait, s2-1, s2-2, s2-3, s3-1, s3-2, s4-1, s5-1, s5-0, s5-5, s6-1, s6-2, s8-1
+# source: mobile/src/screens/TradesScreen.tsx, mobile/src/screens/QuickSetTiersScreen.tsx,
+#         mobile/src/components/AnalystGuide.tsx, mobile/src/components/analystScript.ts,
+#         mobile/src/components/analyst/*, mobile/src/state/useGuide.ts
+# interactive-stop: s2-1
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# THE ANALYST — guided onboarding, part 2 of 2. Scenes S2 (the deck) through S8
+# (sign-off), walked in the order the script's own gates enforce. Part 1
+# (onboarding-signin@fresh.yaml) documents the flag fixture, the pose-regex
+# selector convention and the never-trap mechanics; both apply verbatim here.
+#
+# EXTRA FLAG REQUIREMENTS beyond part 1's list (verified against source):
+#   onboarding.trades_first     true — `firstRun` LATCHES at mount from this
+#       flag (TradesScreen.tsx:297-304) and EVERY S2 scene is gated on it
+#       (:2397, :2408). Without it the whole S2 block is dead.
+#   onboarding.quickset_prompt  true — `quicksetPromptOn` guards
+#       maybeShowQuicksetPrompt (:2473), the sole trigger for S3.1/S3.2.
+#   onboarding.apple_save_moment true — `appleSaveOn` inside appleAskEligible
+#       (:2682); without it S6.2 is skipped (S6.1 and S8.1 still fire).
+#
+# S0/S1 are re-walked here without screenshots — part 1 owns those rows.
+# `clearState: true` wipes `ftf_onboarding_state`, so every `once: true` step
+# is fresh on each run of this cell.
+#
+# NOT CAPTURED (reported, not silently dropped):
+#   S2.identity / S2.re-entry / S3.snooze / S4.2 / S4.idle / S7.1 — see the
+#   report. S7.1 needs a deck exhausted to a nondeterministic length (matrix
+#   ruling D wants a /__test__ deck-size pin first); S2.identity, S2.re-entry,
+#   S4.2 and S4.idle exist in the markdown script but have no entry in
+#   components/analystScript.ts and no requestGuideStep call site — they are
+#   unbuilt, not unreachable.
+tags: [capture, onboarding, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# S0.1 (neutral) → advance; S0.2 (point) advances on the submit itself.
+- extendedWaitUntil:
+    visible:
+      id: "guide.tap-catcher"
+    timeout: 20000
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 40000
+
+# ── S2.wait · running the simulations (computing) ────────────────────────
+# WINDOW WIDENED (run 20260810T035014 failed here; the failure screenshot
+# showed the tour already at S2.1, i.e. the deck had landed while Maestro was
+# still navigating). Backend log for that run: generate at :09-:10, status
+# polls at :17 and :24, deck complete ~:24 — a ~14 s running window, and the
+# league-tap → tab-tap → conditional-sheet-probe sequence ate most of it on an
+# app whose hierarchy dump is not cheap. Two changes, no sleeps:
+#   • status-poll latency 6 s → 8 s, so once the client has a running job,
+#     `job.status === 'running'` holds long enough to photograph. 15 s was
+#     tried in 20260810T041037 and overshot in the other direction: the poll
+#     loop is 800→4000 ms with jitter, so every extra second is paid several
+#     times over and the deck never landed inside the wait. 8 s is the band
+#     where BOTH the running window and the completion fit.
+# BOTH halves of the gate are bought, because the gate is an OR:
+#   `deck.length === 0 && (job?.status === 'running' || generateMutation.isPending)`
+# The `job.status` half is SERVER-timed and cannot be made deterministic from
+# here: session/init kicks a pre-gen job (flask.log "session/init: kicked off
+# pre-gen trade job"), and whether it is still running when TradesScreen asks
+# is a coin flip — 20260810T040526 logged a generate that returned with ZERO
+# status polls because the pre-gen had already finished. The
+# `generateMutation.isPending` half is CLIENT-timed and fully controllable: a
+# 3 s delay on the generate POST holds isPending true for 3 s no matter what
+# the server job is doing. So generate is delayed just enough to guarantee the
+# window, and kept short so it does not hand the pre-gen more head start than
+# it needs.
+# Both are armed BEFORE the league tap because the first-run auto-generate
+# fires on TradesScreen MOUNT (:1397-1406), as soon as the tab paints.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trades/generate"
+      INJECT_MS: "3000"
+- assertTrue: ${output.inject.ok}
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trades/status*"
+      INJECT_MS: "8000"
+- assertTrue: ${output.inject.ok}
+- waitForAnimationToEnd
+- tapOn:
+    id: "leagues.row.*"
+# STRAIGHT from the league tap into the wait — no `tab.trades` wait, no tab
+# tap, no conditional sheet probe. All three were in the first drafts and all
+# three sit INSIDE the few seconds this state exists for; on this app a single
+# hierarchy dump is not cheap, and 20260810T041654 lost the window to exactly
+# that overhead. `onboarding.trades_first` lands the first run on Acquire by
+# itself (the a9fb54d routing the script's S2 note cites), so the tab tap was
+# only ever belt-and-braces. The outlook sheet cannot appear here either —
+# its force-open is suppressed while `ux.outlook_inline_default` is ON, and
+# the 20260810T035014 screenshot confirms the inline receipt renders instead.
+# `extendedWaitUntil` polls continuously, so Maestro is now watching THROUGH
+# the LeaguePicker→Trades transition rather than arriving after it.
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*computing"
+    timeout: 90000
+- takeScreenshot: onboarding__s2-wait
+
+# ── S2.1 · first card lands (celebrate) ──────────────────────────────────
+# S2.wait is advance:'action' — the arriving deck closes it (:2407) and opens
+# S2.1 in the freed slot. Anchored on the pose, not on a timer.
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 240000
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*celebrate"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s2-1
+
+# ── S2.2 · swipe coaching (point, spotlit card body) ─────────────────────
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s2-2
+
+# ── S2.3 · the provenance beat (neutral) ─────────────────────────────────
+# S2.2 advances on a REAL disposition, and getting one took two tries:
+#   • tapping `trades.pass-btn` outright → "Element not found"
+#     (20260810T040051): the disposition row sits BELOW the card and the page
+#     is scrolled to the spotlit card, so the buttons are off-screen.
+#   • an element-anchored LEFT swipe on `trades.card-top` → no-op
+#     (20260810T042920): the failure screenshot shows the SAME card still on
+#     screen. The deck's PanResponder does not accept Maestro's synthetic
+#     directional swipe.
+# What works is scrolling the buttons into view and pressing one: decide() is
+# shared by both paths — TradesScreen.tsx:3008-3014 calls it "swipe or button"
+# — so the disposition, the analytics and the guide advance are identical.
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-btn"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "trades.pass-btn"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*neutral"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s2-3
+
+# ── S3.1 · the pitch (thinking) ──────────────────────────────────────────
+# Trigger (:2482): first PASS once totalSwipes >= 2. The pass above was swipe
+# 1; this one is swipe 2 and fires the prompt path, which in the guided arm
+# requests S3.1 and arms S3.2.
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-btn"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "trades.pass-btn"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*thinking"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s3-1
+
+# ── S3.2 · the offer, CTAs inside the bubble (point) ─────────────────────
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.cta.*accept"
+    timeout: 20000
+- assertVisible:
+    id: "guide.avatar.*point"
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s3-2
+
+# ── S4.1 · the Quick Set walk (point) ────────────────────────────────────
+# Accepting routes into onboarding-mode Quick Set (onboardingReturn: true).
+- tapOn:
+    id: "guide.cta.*accept"
+- extendedWaitUntil:
+    visible:
+      id: "quick-set.save-btn"
+    timeout: 40000
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s4-1
+
+# Walk the eight tier rungs (utils/tierBands.ts:23-32) with empty saves: with
+# zero chips selected the primary composes as a Skip (QuickSetTiersScreen
+# :646-660), and the chip ids are player-id templated — unusable as selectors.
+# Loop shape (Maestro 2.5.1 rejects `maxRuns` — it aborts the whole staged
+# cell at PARSE time, which is what swallowed the first onboarding run): a
+# BOUNDED `repeat: times:` whose body is conditional on the button still being
+# there. Ten iterations over eight rungs is slack for a swallowed tap; once the
+# screen navigates back to Trades the remaining iterations are no-ops, so the
+# loop both self-terminates and cannot hang the cell the way a bare
+# `repeat: while:` could.
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- repeat:
+    times: 10
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "quick-set.save-btn"
+          commands:
+            - tapOn:
+                id: "quick-set.save-btn"
+            - waitForAnimationToEnd
+
+# ── S5 · the reveal (celebrate on new trades, oops on the honest null) ───
+# Returning to Trades posts the forced regen; when it completes The Analyst
+# delivers S5.1 or S5.0 (:2567-2575). Which one is DATA-dependent (an
+# all-empty walk usually reprices to the same deck), so both are captured
+# conditionally — exactly one fires. Matrix ruling D: representative, not
+# byte-stable.
+- extendedWaitUntil:
+    visible:
+      id: "guide.bubble"
+    timeout: 180000
+- waitForAnimationToEnd
+- runFlow:
+    when:
+      visible:
+        id: "guide.avatar.*celebrate"
+    commands:
+      - takeScreenshot: onboarding__s5-1
+- runFlow:
+    when:
+      visible:
+        id: "guide.avatar.*oops"
+    commands:
+      - takeScreenshot: onboarding__s5-0
+
+# ── S5.5 · next position, directed (point + CTAs) ────────────────────────
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.cta.*dismiss"
+    timeout: 30000
+- assertVisible:
+    id: "guide.avatar.*point"
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s5-5
+
+# ── S6.1 · first target logged (celebrate) ───────────────────────────────
+# "Later" keeps us on the deck (accept would route back into Quick Set).
+- tapOn:
+    id: "guide.cta.*dismiss"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "trades.like-btn"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "trades.like-btn"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*celebrate"
+    timeout: 30000
+- takeScreenshot: onboarding__s6-1
+
+# ── S6.2 · the Apple setup line (neutral) ────────────────────────────────
+# S6.1 auto-advances at 2200ms and S6.2 is requested 2400ms after the like
+# (:3140-3145); both are awaited, never slept through. Conditional because the
+# scene is skipped entirely for a verified/account-only user — if the fixture
+# user ever becomes verified this cell must not fail, it must record that the
+# row is not applicable.
+- runFlow:
+    when:
+      visible:
+        id: "guide.avatar.*neutral"
+    commands:
+      - takeScreenshot: onboarding__s6-2
+
+# ── S8.1 · sign-off (celebrate) ──────────────────────────────────────────
+# S6.2 hands off to the Apple sheet; declining it frees the slot, and the
+# chain effect (:2455-2459) then requests S8.1 — after which completeTour()
+# puts The Analyst into reactive-only mode.
+- runFlow:
+    when:
+      visible:
+        id: "trades.apple-sheet.decline"
+    commands:
+      - tapOn:
+          id: "trades.apple-sheet.decline"
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*celebrate"
+    timeout: 60000
+- assertVisible:
+    id: "guide.dismiss-tour"
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s8-1

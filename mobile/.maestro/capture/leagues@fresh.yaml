@@ -1,0 +1,52 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUES-FRESH
+# profile: fresh
+# flags: release
+# captures: empty
+# source: mobile/src/screens/LeaguePickerScreen.tsx
+# interactive-stop: empty
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 13 — the empty league picker. Signs in as the `fresh` profile's
+# extra fixture user `qa_no_leagues` (extra_users[0], league list []), which is
+# the ONLY way to reach the "No 2026 NFL leagues found" branch: the profile's
+# app_user always has one league.
+#
+# Anchors: the empty branch itself carries no testID (LeaguePickerScreen.tsx
+# :312-318), so the state is pinned from both sides — the flag-gated link
+# footer (`leagues.link-espn`, rendered in EVERY non-loading state including
+# this one, :385-395) proves the picker painted, and `assertNotVisible` on the
+# row prefix proves the list is empty rather than merely slow.
+tags: [capture, leagues, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_no_leagues"
+- tapOn:
+    id: "signin.continue-btn"
+
+# ── empty ────────────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "leagues.link-espn"
+    timeout: 30000
+- assertNotVisible:
+    id: "leagues.row.*"
+- assertVisible:
+    text: "No 2026 NFL leagues found for this account."
+- waitForAnimationToEnd
+- takeScreenshot: leagues__empty

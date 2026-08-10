@@ -1,0 +1,61 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-TWO
+# profile: two-leagues
+# flags: release
+# captures: hero--second-league
+# source: mobile/src/screens/LeagueScreen.tsx
+# interactive-stop: hero--second-league
+#
+# Matrix row 168 — the league hero rendered for the SECOND fixture league
+# (10-team 1QB PPR "QA Second League"), the counterpart to the 12-team SF TEP
+# hero every other profile produces.
+#
+# The second league is selected AT THE PICKER rather than through the TopBar
+# switcher: the switcher's rows carry no testIDs (LeagueSwitcherSheet.tsx
+# :95-136), and picking here reaches the same destination with an id selector.
+# (This is also why matrix rows 162/163 — the switcher's switching overlays —
+# are reported as blocked rather than authored: those states exist ONLY on the
+# switcher path.)
+tags: [capture, league, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000002"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000002"
+- extendedWaitUntil:
+    visible:
+      id: "tab.league"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+
+# ── hero--second-league ──────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+- assertVisible:
+    text: "QA Second League"
+- waitForAnimationToEnd
+- takeScreenshot: league__hero--second-league

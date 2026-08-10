@@ -76,7 +76,7 @@ while IFS= read -r f; do
   p="$(hdr "$f" profile)"; p="${p:-standard}"
   [[ -n "$PROFILE_FILTER" && "$p" != "$PROFILE_FILTER" ]] && continue
   FLOWS+=("$f")
-done < <(find "$CAPTURE_DIR" -maxdepth 1 -name '*.yaml' | sort)
+done < <(find "$CAPTURE_DIR" -maxdepth 2 -name '*.yaml' -not -path '*/helpers/*' | sort)
 
 [[ "${#FLOWS[@]}" -gt 0 ]] || { echo "no capture flows matched (screen='$SCREEN' profile='$PROFILE_FILTER')" >&2; exit 5; }
 

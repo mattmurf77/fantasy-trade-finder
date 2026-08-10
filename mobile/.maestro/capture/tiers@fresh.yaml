@@ -1,0 +1,76 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TIERS-FRESH
+# profile: fresh
+# flags: release
+# captures: populated--unassigned-pool
+# source: mobile/src/screens/TiersScreen.tsx, mobile/src/navigation/TabNav.tsx
+# interactive-stop: populated--unassigned-pool
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 32 — the zero-data tier board. `fresh` seeds `tiers: null`, so
+# every player sits in the Unassigned pool and no tier band has members.
+#
+# Nav: `ux.rank_tab_destination` is ON in release, so the Rank tab NAVIGATES
+# (it does not open the mode sheet). With no ranking-method pref, #244 routes
+# a fresh user to QuickSetTiers; the RankMenu is reached from the shared
+# "More ways to rank" header control (`rank.more-ways`, TabNav.tsx:148) that
+# every rank surface carries under that flag.
+tags: [capture, tiers, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.tiers"
+
+# ── populated--unassigned-pool ───────────────────────────────────────────
+# The board mounts on QB. `tiers.list` is the board wrapper (TiersScreen.tsx
+# :1356) — it exists in every non-loading, non-error state, so it is the
+# arrival anchor; the empty-pool character of the state is what the capture
+# records.
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 30000
+- assertVisible:
+    id: "tiers.pos-tab.*qb"
+- waitForAnimationToEnd
+- takeScreenshot: tiers__populated--unassigned-pool

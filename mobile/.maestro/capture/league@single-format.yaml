@@ -1,0 +1,76 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-SINGLEFORMAT
+# profile: single-format
+# flags: release
+# captures: coverage--single-format
+# source: mobile/src/screens/LeagueScreen.tsx
+# interactive-stop: coverage--single-format
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 173 — "coverage card hides entirely at 0". On `single-format` the
+# user holds no rankings in the league's format (sf_tep), so `rankedOpps === 0`,
+# `coverageZero` is true and the Coverage card is REPLACED by the progress
+# module (#229 zero-fold, LeagueScreen.tsx:657-683).
+#
+# ANCHOR (pre-audit revision): the earlier draft also asserted the Coverage
+# card's copy ABSENT. Dropped — whether /api/league/coverage reports 0 ranked
+# opponents for this profile depends on whether coverage is scored in the
+# LEAGUE's format (sf_tep, where this user has nothing) or format-agnostically
+# (where `qa_opp_ranked` would count), and the fixture does not settle it. A
+# hard negative would fail the whole cell over a question the screenshot
+# itself answers. `league.progress-module` is asserted instead, and it is
+# guaranteed here: moduleVisible needs summary + coverage resolved AND one of
+# ringIncomplete / matchesZero / contrarianInsufficient, and `single-format`
+# seeds matches_seed {mutual: 0} — matchesZero is true by construction.
+tags: [capture, league, single-format]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.league"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+
+# ── coverage--single-format ──────────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "league.progress-module"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: league__coverage--single-format

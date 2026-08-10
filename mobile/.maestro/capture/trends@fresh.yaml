@@ -1,0 +1,85 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRENDS-FRESH
+# profile: fresh
+# flags: release
+# captures: empty--no-history
+# source: mobile/src/screens/TrendsScreen.tsx
+# interactive-stop: empty--no-history
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 34 — Trends with no history. `fresh` seeds zero rankings and zero
+# days of history, so all three sections (risers, fallers, consensus gaps)
+# render their empty bodies together.
+#
+# TrendsScreen has NO testIDs anywhere (verified 2026-08-09) — the screen
+# explainer (TrendsScreen.tsx:143-148) is the only stable arrival anchor, so
+# it is matched as a prefix regex (the copy interpolates {WINDOW_DAYS} mid-
+# string). Flagged to the orchestrator as the P4 testID sweep's first
+# candidate: `trends.risers`/`trends.fallers`/`trends.gaps` section ids would
+# retire this text anchor.
+#
+# The matrix trap asks for "the whole scroll", but a second scrolled frame is
+# NOT captured: agent A proved bare `- scroll` does not move these lists, and
+# the element-anchored alternative (`swipe: {from: {id: <list-id>}}`) has no id
+# to anchor to — TrendsScreen carries zero testIDs. The row is `empty--no-
+# history`, singular, so the top frame satisfies it; the scroll trap is
+# recorded as blocked on the same P4 testID sweep this file already flags.
+tags: [capture, trends, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trends"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trends"
+
+# ── empty--no-history ────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      text: "All ranks on this page are your own.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: trends__empty--no-history

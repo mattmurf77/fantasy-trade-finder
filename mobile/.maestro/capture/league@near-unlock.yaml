@@ -1,0 +1,82 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-NEARUNLOCK
+# profile: near-unlock
+# flags: release
+# captures: progress-module, works-now
+# source: mobile/src/screens/LeagueScreen.tsx, mobile/src/screens/LeagueSummaryScreen.tsx
+# interactive-stop: progress-module
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix rows 152-153.
+#   progress-module → `league.progress-module` (LeagueScreen.tsx:694) needs the
+#       summary AND coverage queries both resolved, so it is NEVER on the first
+#       frame; the capture waits for the id rather than for the hero.
+#   works-now → `league.works-now` (:713) renders only while mutual matches
+#       == 0, which is true for `near-unlock` (matches_seed {mutual: 0}).
+#
+# The League TAB root is LeagueRankings (LeagueSummaryScreen); the classic
+# league page is pushed from `league-summary.league-home`.
+#
+# LeagueScreen has no error state — failures render as em-dashes — so both
+# captures assert their module id rather than assuming paint.
+tags: [capture, league, near-unlock]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.league"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+
+# ── progress-module ──────────────────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "league.progress-module"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: league__progress-module
+
+# ── works-now ────────────────────────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "league.works-now"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: league__works-now

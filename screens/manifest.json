@@ -5,8 +5,439 @@
     "name": "FTF-iOS18",
     "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
   },
-  "generated_at": "2026-08-10T02:39:01+00:00",
+  "generated_at": "2026-08-10T09:47:13+00:00",
   "screens": {
+    "anchors": {
+      "captures": [
+        {
+          "bytes": 21355,
+          "captured_at": "2026-08-10T05:25:11+00:00",
+          "file": "mobile/anchors/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 16226,
+          "captured_at": "2026-08-10T05:25:11+00:00",
+          "file": "mobile/anchors/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "loading"
+        },
+        {
+          "bytes": 44304,
+          "captured_at": "2026-08-10T05:25:11+00:00",
+          "file": "mobile/anchors/question.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "question"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/PickAnchorScreen.tsx",
+        "mobile/src/components/TierBadge.tsx",
+        "mobile/src/utils/anchorRows.ts"
+      ],
+      "source_sha256": "a9e8b119f1ac4657bdf14063c2a00a1312ff16808b11c0989b57a32da68c2756"
+    },
+    "league": {
+      "captures": [
+        {
+          "bytes": 52654,
+          "captured_at": "2026-08-10T09:12:25+00:00",
+          "file": "mobile/league/coverage--single-format.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@single-format.yaml",
+          "injections": [],
+          "profile": "single-format",
+          "state": "coverage--single-format"
+        },
+        {
+          "bytes": 46986,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/league/hero--second-league.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@two-leagues.yaml",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "hero--second-league"
+        },
+        {
+          "bytes": 55328,
+          "captured_at": "2026-08-10T09:47:13+00:00",
+          "file": "mobile/league/progress-module.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
+          "injections": [],
+          "profile": "near-unlock",
+          "state": "progress-module"
+        },
+        {
+          "bytes": 47717,
+          "captured_at": "2026-08-10T09:47:13+00:00",
+          "file": "mobile/league/works-now.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
+          "injections": [],
+          "profile": "near-unlock",
+          "state": "works-now"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/LeagueScreen.tsx",
+        "mobile/src/screens/LeagueSummaryScreen.tsx"
+      ],
+      "source_sha256": "517e8fc4cba9487d621a5f041f79785eea2ae79db21dfe4853d8b23205d025fe"
+    },
+    "league-summary": {
+      "captures": [
+        {
+          "bytes": 52765,
+          "captured_at": "2026-08-10T09:12:25+00:00",
+          "file": "mobile/league-summary/populated--single-format.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league-summary@single-format.yaml",
+          "injections": [],
+          "profile": "single-format",
+          "state": "populated--single-format"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/LeagueSummaryScreen.tsx"
+      ],
+      "source_sha256": "a767fb3d61260dbeb0e6e09cef3338a0c581fdf766c46a41c4efccd57eb3b2dc"
+    },
+    "leagues": {
+      "captures": [
+        {
+          "bytes": 13986,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/leagues/empty.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/leagues@fresh.yaml",
+          "injections": [],
+          "profile": "fresh",
+          "state": "empty"
+        },
+        {
+          "bytes": 30800,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/leagues/populated--two.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/leagues@two-leagues.yaml",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "populated--two"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/LeaguePickerScreen.tsx"
+      ],
+      "source_sha256": "b4f031e99eb887ea00b3417269e7d58cd9320c8ba84d91cd0f210578d1d880a3"
+    },
+    "manual-ranks": {
+      "captures": [
+        {
+          "bytes": 34145,
+          "captured_at": "2026-08-10T05:59:04+00:00",
+          "file": "mobile/manual-ranks/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/manual-ranks.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 54133,
+          "captured_at": "2026-08-10T05:59:04+00:00",
+          "file": "mobile/manual-ranks/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/manual-ranks.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "standard",
+          "state": "populated"
+        },
+        {
+          "bytes": 53310,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/manual-ranks/populated--unranked-order.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/manual-ranks@fresh.yaml",
+          "injections": [],
+          "profile": "fresh",
+          "state": "populated--unranked-order"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/ManualRanksScreen.tsx",
+        "backend/ranking_service.py"
+      ],
+      "source_sha256": "7d26b3d94a9057f7838a2f718065d407d593d04f2c1c5e0452f6cc7edc1d63b9"
+    },
+    "matches": {
+      "captures": [
+        {
+          "bytes": 43292,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/matches/empty--mutual.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/matches@fresh.yaml",
+          "injections": [],
+          "profile": "fresh",
+          "state": "empty--mutual"
+        },
+        {
+          "bytes": 57801,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/matches/populated--all-filter.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/matches@two-leagues.yaml",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "populated--all-filter"
+        },
+        {
+          "bytes": 43923,
+          "captured_at": "2026-08-10T09:47:13+00:00",
+          "file": "mobile/matches/progress-module.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/matches@near-unlock.yaml",
+          "injections": [],
+          "profile": "near-unlock",
+          "state": "progress-module"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/MatchesScreen.tsx"
+      ],
+      "source_sha256": "8bbb73d76007e024daeb477448b8a5f39f48a18c6c1c97d0e5e3630545a69995"
+    },
+    "onboarding": {
+      "captures": [
+        {
+          "bytes": 52596,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s0-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s0-1"
+        },
+        {
+          "bytes": 53314,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s0-2.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s0-2"
+        },
+        {
+          "bytes": 55924,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s0-err-down.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s0-err-down"
+        },
+        {
+          "bytes": 115750,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s0-err-notfound.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s0-err-notfound"
+        },
+        {
+          "bytes": 30786,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/onboarding/s1-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "s1-1"
+        },
+        {
+          "bytes": 57300,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s2-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s2-1"
+        },
+        {
+          "bytes": 64678,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s2-2.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s2-2"
+        },
+        {
+          "bytes": 55524,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s2-3.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s2-3"
+        },
+        {
+          "bytes": 50406,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s2-wait.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s2-wait"
+        },
+        {
+          "bytes": 62356,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s3-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s3-1"
+        },
+        {
+          "bytes": 49337,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s3-2.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s3-2"
+        },
+        {
+          "bytes": 80518,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s4-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s4-1"
+        },
+        {
+          "bytes": 64117,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s5-0.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s5-0"
+        },
+        {
+          "bytes": 61477,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s5-5.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s5-5"
+        },
+        {
+          "bytes": 56582,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s6-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s6-1"
+        },
+        {
+          "bytes": 59461,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/onboarding/s8-1.png",
+          "flags": "onboarding-v2",
+          "flow": "unknown",
+          "injections": [],
+          "profile": "fresh",
+          "state": "s8-1"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/OnboardingScreen.tsx"
+      ],
+      "source_sha256": "71b4052c8b6cbfdbfe26e580bc142dbba9f0acc62eb0005fbd968f88b8cd84d4"
+    },
+    "quick-set": {
+      "captures": [
+        {
+          "bytes": 69037,
+          "captured_at": "2026-08-10T06:32:54+00:00",
+          "file": "mobile/quick-set/step-populated--seeded.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/quick-set.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "step-populated--seeded"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/QuickSetTiersScreen.tsx",
+        "mobile/src/components/RookieScopeControl.tsx",
+        "mobile/src/components/chalkline/TickLabel.tsx"
+      ],
+      "source_sha256": "da0fb09137b19e88786253139a35ca413d1afc0a255993ba6506410142cd6087"
+    },
+    "settings": {
+      "captures": [
+        {
+          "bytes": 46771,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/settings/league-rows.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/settings@two-leagues.yaml",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "league-rows"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/SettingsScreen.tsx"
+      ],
+      "source_sha256": "ce7e7df0f18eaf97ddd7cc80e63f4322dd366aa5bd14a3bc75a5f9274a2aaae9"
+    },
     "signin": {
       "captures": [
         {
@@ -67,6 +498,122 @@
       ],
       "source_sha256": "86f6a8a71faedf49126db7314e63d94f209af411cad5f5f76ae41e32d38a5766"
     },
+    "tiers": {
+      "captures": [
+        {
+          "bytes": 47594,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 44201,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "loading"
+        },
+        {
+          "bytes": 58540,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "populated"
+        },
+        {
+          "bytes": 56771,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/populated--all-tab.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "populated--all-tab"
+        },
+        {
+          "bytes": 51296,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/tiers/populated--unassigned-pool.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers@fresh.yaml",
+          "injections": [],
+          "profile": "fresh",
+          "state": "populated--unassigned-pool"
+        },
+        {
+          "bytes": 72346,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/search-highlight.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "search-highlight"
+        },
+        {
+          "bytes": 67936,
+          "captured_at": "2026-08-10T05:35:50+00:00",
+          "file": "mobile/tiers/sticky-header.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "sticky-header"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/TiersScreen.tsx",
+        "mobile/src/navigation/TabNav.tsx"
+      ],
+      "source_sha256": "04b36789034638807b5c0208b6710a8125225402e1b379f86ef1c62ae71f714d"
+    },
+    "topbar": {
+      "captures": [
+        {
+          "bytes": 48327,
+          "captured_at": "2026-08-10T09:20:38+00:00",
+          "file": "mobile/topbar/league-switcher.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/topbar@two-leagues.yaml",
+          "injections": [],
+          "profile": "two-leagues",
+          "state": "league-switcher"
+        }
+      ],
+      "source": [
+        "mobile/src/components/TopBar.tsx",
+        "mobile/src/components/LeagueSwitcherSheet.tsx"
+      ],
+      "source_sha256": "263330d9fd84ce4e30dc21ba00872d5679fea93bc308653a8f9149d218a84c59"
+    },
     "trades": {
       "captures": [
         {
@@ -83,6 +630,18 @@
           "state": "empty"
         },
         {
+          "bytes": 41918,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trades/empty--cold.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "empty--cold"
+        },
+        {
           "bytes": 41845,
           "captured_at": "2026-08-10T02:39:01+00:00",
           "file": "mobile/trades/error.png",
@@ -96,6 +655,28 @@
           "state": "error"
         },
         {
+          "bytes": 43538,
+          "captured_at": "2026-08-10T09:12:25+00:00",
+          "file": "mobile/trades/format-gate.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades@single-format.yaml",
+          "injections": [],
+          "profile": "single-format",
+          "state": "format-gate"
+        },
+        {
+          "bytes": 46831,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trades/generating.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "generating"
+        },
+        {
           "bytes": 50539,
           "captured_at": "2026-08-10T02:39:01+00:00",
           "file": "mobile/trades/loading.png",
@@ -107,6 +688,16 @@
           ],
           "profile": "standard",
           "state": "loading"
+        },
+        {
+          "bytes": 42459,
+          "captured_at": "2026-08-10T09:47:13+00:00",
+          "file": "mobile/trades/locked-gate.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades@near-unlock.yaml",
+          "injections": [],
+          "profile": "near-unlock",
+          "state": "locked-gate"
         },
         {
           "bytes": 48835,
@@ -124,11 +715,184 @@
       ],
       "source": [
         "mobile/src/screens/TradesScreen.tsx",
-        "mobile/src/components/SkeletonTradeCard.tsx",
-        "mobile/src/components/Toast.tsx",
-        "mobile/src/components/TradeCard.tsx"
+        "mobile/src/components/FormatGate.tsx"
       ],
-      "source_sha256": "ddd42e325cd2bbd59f21092bd91dac66f7d4bd75bc66a1b4602e080ad1c88650"
+      "source_sha256": "61834b38518181a589c0e7f577d2fe0bfc9bfac9ae685bbcd045e3ad70e1fdb3"
+    },
+    "trends": {
+      "captures": [
+        {
+          "bytes": 56736,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trends/empty--no-history.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trends@fresh.yaml",
+          "injections": [],
+          "profile": "fresh",
+          "state": "empty--no-history"
+        },
+        {
+          "bytes": 47367,
+          "captured_at": "2026-08-10T05:19:05+00:00",
+          "file": "mobile/trends/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trends.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 37977,
+          "captured_at": "2026-08-10T05:19:05+00:00",
+          "file": "mobile/trends/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trends.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "loading"
+        },
+        {
+          "bytes": 65018,
+          "captured_at": "2026-08-10T05:19:05+00:00",
+          "file": "mobile/trends/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trends.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "populated"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/TrendsScreen.tsx"
+      ],
+      "source_sha256": "060d6bff633e43ab50d82c741fd32569b7919cdf6e8c84d60ac283ab3578a257"
+    },
+    "trios": {
+      "captures": [
+        {
+          "bytes": 50752,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trios/all-ranked.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "all-ranked"
+        },
+        {
+          "bytes": 40578,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trios/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "loading"
+        },
+        {
+          "bytes": 56001,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trios/partial-selection.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "partial-selection"
+        },
+        {
+          "bytes": 50132,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trios/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "populated"
+        },
+        {
+          "bytes": 44313,
+          "captured_at": "2026-08-10T08:56:04+00:00",
+          "file": "mobile/trios/populated--unlocked.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "populated--unlocked"
+        },
+        {
+          "bytes": 50132,
+          "captured_at": "2026-08-10T09:42:07+00:00",
+          "file": "mobile/trios/progress-locked.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "fresh",
+          "state": "progress-locked"
+        },
+        {
+          "bytes": 49242,
+          "captured_at": "2026-08-10T09:47:13+00:00",
+          "file": "mobile/trios/progress-near-threshold.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios@near-unlock.yaml",
+          "injections": [],
+          "profile": "near-unlock",
+          "state": "progress-near-threshold"
+        },
+        {
+          "bytes": 48347,
+          "captured_at": "2026-08-10T08:56:04+00:00",
+          "file": "mobile/trios/scope-rookie--empty.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "scope-rookie--empty"
+        },
+        {
+          "bytes": 46626,
+          "captured_at": "2026-08-10T08:56:04+00:00",
+          "file": "mobile/trios/speed-mode-on.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "speed-mode-on"
+        },
+        {
+          "bytes": 49159,
+          "captured_at": "2026-08-10T08:56:04+00:00",
+          "file": "mobile/trios/unlock-banner.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trios.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "unlock-banner"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/RankScreen.tsx"
+      ],
+      "source_sha256": "db974616050c29ab04fae95905909961aa23c589449f463fd13dc665da128c07"
     }
   }
 }
