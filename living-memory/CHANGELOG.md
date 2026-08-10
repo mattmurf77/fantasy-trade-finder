@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-10 (DP name map: "Ken Walker III" historical-board join)
+
+- **Root cause was a DP rename, not a missing alias.** DynastyProcess's 2022-era boards say **"Ken Walker III"**; their current board says **"Kenneth Walker III"** (already mapped). So the gap never touched the live valuation path — it only broke the *dated historical* board joins that `backend/dp_values_history.py` feeds to the outlook backtests, silently dropping DP rank 61 from the 2022 season.
+- **Fix:** one `DP_TO_SLEEPER_NAME` entry (`"ken walker iii" -> "kenneth walker"`), commented with the rename history and with an explicit note that the RB/WR "Kenneth Walker" collision is handled downstream by #127's position-strict `pos_map`, NOT by this name map — so nobody removes it later as a collision risk. Inert on the live path while DP emits the long form.
+- **Verified:** 2022 board now has **zero unmatched Walkers**, total unmatched 15/553. Regression test asserts against the join report (the value map is keyed by Sleeper id, not name — a first attempt asserting a name key failed and was corrected).
+- Gates: **2298 passed / 1 skipped**, exit 0. Closes the blemish disclosed in `dated-values-revalidation-2026-08-09.md` §2.
+
 ## 2026-08-10 (definitive post-fix calibration — both operator decisions now evidence-backed)
 
 - **Combined re-measurement after the four-bug wave** (`calibration-combined-2026-08-10.md`): in-season playoff **Brier 0.0997, +60.1 % skill, CI [+47.6, +72.2]**, improving .2012 → .1065 → .0538 → .0372 across weeks 3/6/9/12. Preseason playoff **0.1968, +21.3 %, CI [+2.9, +39.1]**. Title odds **+4.2 %, CI spans zero, and 3 of 6 leagues lose to climatology** — unshippable at any week.

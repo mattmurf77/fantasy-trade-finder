@@ -233,3 +233,23 @@ def test_real_preseason_boards_resolve_at_documented_rate():
         _vals, rep, _meta = dvh.values_as_of(dvh.week_boundary(season, 0))
         assert rep.unmatched_rate < 0.12, (season, rep.summary())
         assert rep.by_tier.get(1, 0) > 400, (season, rep.summary())
+
+
+def test_ken_walker_iii_short_form_resolves_on_the_2022_board():
+    """DP renamed him mid-history: the 2022-era boards say "Ken Walker III",
+    the current board says "Kenneth Walker III". Both must reach the one
+    Sleeper player, or the 2022 backtest silently drops DP rank 61 (the gap
+    disclosed in the 2026-08-09 revalidation report §2). Guards the
+    `ken walker iii` entry in data_loader.DP_TO_SLEEPER_NAME."""
+    from backend.data_loader import DP_TO_SLEEPER_NAME
+
+    assert DP_TO_SLEEPER_NAME.get("ken walker iii") == "kenneth walker"
+    # The long form DP uses today must still map to the same player.
+    assert DP_TO_SLEEPER_NAME.get("kenneth walker iii") == "kenneth walker"
+
+    # The board's value map is keyed by SLEEPER ID, so assert against the
+    # join report instead: no Walker may remain unmatched on the 2022 board.
+    _vals, rep, _meta = dvh.values_as_of(dvh.week_boundary(2022, 0))
+    unmatched_walkers = [n for n, _pos in rep.unmatched_names
+                         if "walker" in n.lower()]
+    assert unmatched_walkers == [], unmatched_walkers
