@@ -67,8 +67,17 @@ def simulate(
     *,
     n_sims: int = DEFAULT_SIMS,
     config_seed: int = 0,
+    weekly_mu_multiplier: dict[int, dict[int, float]] | None = None,
 ) -> SimResult:
-    """Run N seeded season simulations. Pure — no I/O, no clock."""
+    """Run N seeded season simulations. Pure — no I/O, no clock.
+
+    `weekly_mu_multiplier` (week -> roster_id -> multiplier) is an OPTIONAL
+    seam for evaluated-but-unshipped strength variants (e.g. the #169
+    bye-week multiplier in `bye_multiplier.py`) — left `None` by every live
+    caller, which reproduces the exact draw sequence as if the parameter
+    didn't exist. When a roster/week isn't in the map its multiplier is 1.0
+    (no change). Regular season only — the playoff bracket always draws at
+    the team's flat mu, since byes never overlap the postseason."""
     seed = stable_hash(state.league_id) ^ int(config_seed)
     rng = random.Random(seed)
 
@@ -92,15 +101,19 @@ def simulate(
     gauss = rng.gauss
     mu = {rid: strengths[rid].mu for rid in roster_ids}
     sig = {rid: strengths[rid].sigma for rid in roster_ids}
+    wmm = weekly_mu_multiplier or None
 
     for _ in range(n_sims):
         wins = dict(base_wins)
         pf = dict(base_pf)
         # Regular-season remainder
-        for pairs in remaining_pairs:
+        for week, pairs in zip(remaining, remaining_pairs):
+            week_mult = wmm.get(week) if wmm else None
             for a, b in pairs:
-                sa = gauss(mu[a], sig[a])
-                sb = gauss(mu[b], sig[b])
+                ma = mu[a] * week_mult[a] if week_mult and a in week_mult else mu[a]
+                mb = mu[b] * week_mult[b] if week_mult and b in week_mult else mu[b]
+                sa = gauss(ma, sig[a])
+                sb = gauss(mb, sig[b])
                 pf[a] += sa
                 pf[b] += sb
                 if sa > sb:

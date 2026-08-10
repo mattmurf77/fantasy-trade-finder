@@ -540,6 +540,8 @@ Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds
 | `outlook_trailing_min_weeks` | 3.0 | K — minimum completed weeks before `TrailingScoresStrength` is usable and `auto` switches off roster-value (1..K-1 uses `blended`). |
 | `outlook_sim_count` | 10000.0 | Monte-Carlo season simulations per request. |
 | `outlook_seed` | 0.0 | Config seed XORed with `stable_hash(league_id)` for the deterministic RNG (same league+seed → identical odds). |
+| `outlook_bye_multiplier_enabled` | 0.0 | Gate for the EVALUATED per-week bye-week μ multiplier (`backend/outlook/bye_multiplier.py`) — **`pipeline.py` does not read this key; it exists only as the wiring point for a future ship decision.** See [feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md](feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md) for the backtest verdict before ever flipping this. |
+| `outlook_bye_multiplier_scale` | 1.0 | Linear scale from starting-lineup value-fraction-on-bye to the μ multiplier haircut (`mu_multipliers()`). **Heuristic, unshipped.** |
 
 ### Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`
 

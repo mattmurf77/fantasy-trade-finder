@@ -356,3 +356,28 @@ keyed `outlook_odds_rollout` with `{"is_tester_allowlist": true}` targeting and
 - `docs/integrations/sleeper.md` — §5.4 rewritten (was "uncached"), endpoint
   table row 10
 - `docs/api-reference.md`, `docs/config-reference.md` — caching + flag status
+
+## Bye-week μ multiplier — evaluated, NO-SHIP (2026-08-09)
+
+Operator directive: make the flat single-μ strength model bye-aware, considering
+BOTH sides of a matchup, since Sleeper's player dump carries no bye field (byes
+have to be derived from an nflverse schedule CSV). Built and validated as a
+fully evaluated variant — full method, backtest, mechanism check, and verdict:
+**[bye-week-multiplier-2026-08-09.md](bye-week-multiplier-2026-08-09.md)**.
+
+- **Verdict: NO-SHIP.** At every tested `outlook_bye_multiplier_scale`
+  (0.22/0.40/0.60/1.00) the multiplier is flat-to-worse on playoff Brier
+  against the same 6-league/4-as-of-week backtest the shipped engine was
+  validated against; at the shipped default (1.0) it's **+8.82% worse**
+  (cluster-bootstrap 90% CI **[−0.0011, +0.0206]**, includes 0 — statistically
+  null, but never positive at any scale or as-of week tested).
+- **Why:** a mechanism check against 1,008 real team-weeks shows real fantasy
+  managers absorb ~78% of a bye's value loss via bench swaps that a
+  fixed-lineup multiplier can't model — empirical slope **−0.222** (90% CI
+  **[−0.305, −0.138]**) vs. the multiplier's naive **−1.000** assumption.
+- **Nothing live changed.** `bye_multiplier.py` is not imported by
+  `pipeline.py`/`server.py`; `model_config.outlook_bye_multiplier_enabled`
+  exists (default `0.0`) but is not read anywhere yet.
+- **Kept regardless of the verdict:** `backend/outlook/bye_weeks.py` — tested,
+  CC-BY-attributed nflverse schedule → bye-week ingestion, reusable by any
+  future weekly-points projection source (`OwnModelStrength` stub).

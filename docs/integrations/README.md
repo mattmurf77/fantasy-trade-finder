@@ -18,6 +18,7 @@ consumer-facing distillation — one file per external service, organized around
 | [espn.md](espn.md) | ESPN Fantasy Football unofficial v3 API (`lm-api-reads.fantasy.espn.com`) — league linking, roster import, standings-derived draft order |
 | [mfl.md](mfl.md) | MyFantasyLeague — official export API + authenticated login flow |
 | [dynastyprocess.md](dynastyprocess.md) | DynastyProcess consensus-values CSVs (GitHub) — Elo seeds, pick slot prices, player-id crosswalk; also documents the adjacent KTC scrape |
+| [nflverse.md](nflverse.md) | nflverse/nfldata NFL schedule CSV (GitHub) — bye-week derivation for the EVALUATED #169 bye-multiplier (`backend/outlook/bye_weeks.py`); not yet reachable from any live server route |
 | [anthropic.md](anthropic.md) | Anthropic Claude API — smart matchup selection |
 | [expo-push.md](expo-push.md) | Expo push-notification relay (`exp.host`) |
 

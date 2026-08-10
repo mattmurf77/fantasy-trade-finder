@@ -41,13 +41,24 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from backend.outlook import bye_weeks as _bye_weeks  # noqa: E402
+from backend.outlook import config as _outlook_cfg  # noqa: E402
+from backend.outlook.bye_multiplier import (  # noqa: E402
+    simulate_with_bye_multiplier, weekly_value_fraction_on_bye,
+)
 from backend.outlook.league_state import SleeperLeagueState  # noqa: E402
 from backend.outlook.pipeline import run_outlook  # noqa: E402
+from backend.outlook.playoff_format import get_playoff_format  # noqa: E402
+from backend.outlook.simulator import simulate as _simulate  # noqa: E402
+from backend.outlook.strength import (  # noqa: E402
+    StrengthContext, get_strength_provider, resolve_strength_source,
+)
 
 FIXTURES = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "backend", "tests", "fixtures", "outlook-calibration",
 )
+PLAYERS_TEAM_POS_FIXTURE = os.path.join(FIXTURES, "players_team_pos.json")
 PAST_SEASONS = [
     "lakeview-2025", "lakeview-2024",
     "ffv3-2025", "ffv3-2024", "ffv3-2023", "ffv3-2022",
@@ -397,6 +408,250 @@ def _pstdev(xs):
     return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
 
 
+# ---------------------------------------------------------------------------
+# Bye-week mu multiplier — EVALUATED variant (feedback #169, operator
+# directive 2026-08-09). Everything below is additive: it scores
+# `bye_multiplier.py` against the SAME 6 league-seasons / as-of weeks the
+# shipped engine is scored against above, and does not change anything
+# above this point.
+#
+# Data caveats (both apply equally to the mechanism check and the Brier
+# comparison — read before trusting either number):
+#   1. `player_ids` on each roster is the CURRENT (2026) snapshot — Sleeper
+#      does not expose historical rosters, so this backtest already runs the
+#      SHIPPED engine's roster-value/trailing-scores strength against
+#      current rosters even for a 2022 as-of week (same limitation the
+#      module docstring above flags for BUG-1). The bye multiplier inherits
+#      it: a 2022 team's "starting lineup" here is who's on that Sleeper
+#      roster TODAY, not who actually started in 2022.
+#   2. Player VALUE is approximated as 1.0 (equal weight) per selected
+#      starting-lineup slot, not real dynasty trade value. No historical
+#      trade-value snapshot exists for 2022-2025 offline, and reusing TODAY's
+#      DynastyProcess values against a mix of past-season as-of states would
+#      be a second, harder-to-defend approximation on top of caveat 1.
+#      Equal-weight is a conservative stand-in: "fraction of STARTING SLOTS
+#      on bye" instead of "fraction of starting-lineup VALUE on bye".
+# ---------------------------------------------------------------------------
+
+def load_players_team_pos() -> dict:
+    with open(PLAYERS_TEAM_POS_FIXTURE) as f:
+        return json.load(f)
+
+
+def _byes_offline_opener(request, timeout=None):
+    """Force bye_weeks.get_byes() to fall back to the committed snapshot
+    fixture instead of ever touching the network (this script's hard rule)."""
+    raise AssertionError("bye-multiplier backtest must never touch the network")
+
+
+def _strengths_for(state, player_value, player_pos, model_cfg):
+    configured = _outlook_cfg.get_strength_source(None)
+    source_key = resolve_strength_source(configured, state, model_cfg)
+    provider = get_strength_provider(source_key)
+    ctx = StrengthContext(player_value=player_value, player_pos=player_pos, cfg=model_cfg)
+    return provider.estimate(state, ctx), source_key
+
+
+def bye_variant_backtest(players_team_pos: dict, sims: int):
+    """Runs the SAME as-of harness as the headline backtest above, but scores
+    `bye_multiplier.simulate_with_bye_multiplier` instead of the shipped
+    `simulate()`, using the IDENTICAL strengths (so any Brier delta is
+    attributable to the multiplier alone, not to a different strength draw)."""
+    _bye_weeks.reset_cache()
+    player_value = {pid: 1.0 for pid in players_team_pos}
+    player_pos = {pid: v["position"] for pid, v in players_team_pos.items()}
+    player_team = {pid: v["team"] for pid, v in players_team_pos.items()}
+
+    base_p, base_t = defaultdict(list), defaultdict(list)
+    variant_p, variant_t = defaultdict(list), defaultdict(list)
+    # (league, week, base_p, variant_p, y_p, base_t, variant_t, y_t) per team
+    records: list[tuple] = []
+
+    print("\n## Bye-multiplier variant — same as-of harness, same 6 leagues\n")
+    for name in PAST_SEASONS:
+        fx = load_fixture(name)
+        full = build_full_state(fx)
+        field, champ = truth(fx, full.playoff_slots)
+        for wk in AS_OF_WEEKS:
+            st = as_of(full, wk)
+            strengths, source_key = _strengths_for(st, {}, {}, {})
+            fmt = get_playoff_format("standard", st.playoff_slots, st.num_byes,
+                                     st.num_divisions)
+
+            base_res = _simulate(
+                st, strengths, fmt, n_sims=sims,
+                config_seed=_outlook_cfg.config_seed({}))
+            variant_res = simulate_with_bye_multiplier(
+                st, strengths, fmt,
+                player_value=player_value, player_pos=player_pos,
+                player_team=player_team, season=full.season, cfg={},
+                n_sims=sims, config_seed=_outlook_cfg.config_seed({}),
+                _byes_opener=_byes_offline_opener,
+            )
+            for t in st.teams:
+                rid = t.roster_id
+                y_p = 1.0 if rid in field else 0.0
+                y_t = 1.0 if rid == champ else 0.0
+                bp, vp = base_res.playoff_pct(rid), variant_res.playoff_pct(rid)
+                bt, vt = base_res.title_pct(rid), variant_res.title_pct(rid)
+                base_p[wk].append((bp, y_p)); variant_p[wk].append((vp, y_p))
+                base_t[wk].append((bt, y_t)); variant_t[wk].append((vt, y_t))
+                records.append((name, wk, bp, vp, y_p, bt, vt, y_t))
+
+    all_bp = [x for wk in AS_OF_WEEKS for x in base_p[wk]]
+    all_vp = [x for wk in AS_OF_WEEKS for x in variant_p[wk]]
+    all_bt = [x for wk in AS_OF_WEEKS for x in base_t[wk]]
+    all_vt = [x for wk in AS_OF_WEEKS for x in variant_t[wk]]
+    print("  PLAYOFF Brier   baseline=%.4f  bye-variant=%.4f  (%+.2f%%)"
+          % (brier(all_bp), brier(all_vp),
+             100 * (brier(all_vp) / brier(all_bp) - 1)))
+    print("  TITLE   Brier   baseline=%.4f  bye-variant=%.4f  (%+.2f%%)"
+          % (brier(all_bt), brier(all_vt),
+             100 * (brier(all_vt) / brier(all_bt) - 1)))
+
+    print("\n  | week | n | base playoff | variant playoff | base title | variant title |")
+    print("  |---|---|---|---|---|---|")
+    for wk in AS_OF_WEEKS:
+        print("  | %d | %d | %.4f | %.4f | %.4f | %.4f |" % (
+            wk, len(base_p[wk]), brier(base_p[wk]), brier(variant_p[wk]),
+            brier(base_t[wk]), brier(variant_t[wk])))
+
+    bootstrap_brier_delta(records)
+    return records
+
+
+def bootstrap_brier_delta(records, iters=4000, seed=20260809):
+    """Cluster bootstrap (over league-seasons, same rationale as
+    `bootstrap_skill`) of the Brier DELTA (variant - baseline). Negative =
+    the multiplier improves calibration; positive = it hurts."""
+    import random as _r
+    rng = _r.Random(seed)
+    by_league = defaultdict(list)
+    for lg, _wk, bp, vp, yp, bt, vt, yt in records:
+        by_league[lg].append((bp, vp, yp, bt, vt, yt))
+    leagues = list(by_league)
+
+    def delta(sample_leagues):
+        rows = [r for lg in sample_leagues for r in by_league[lg]]
+        b_p = brier([(r[0], r[2]) for r in rows])
+        v_p = brier([(r[1], r[2]) for r in rows])
+        b_t = brier([(r[3], r[5]) for r in rows])
+        v_t = brier([(r[4], r[5]) for r in rows])
+        return v_p - b_p, v_t - b_t
+
+    dps, dts = [], []
+    for _ in range(iters):
+        draw = [rng.choice(leagues) for _ in leagues]
+        dp, dt = delta(draw)
+        dps.append(dp)
+        dts.append(dt)
+    dps.sort()
+    dts.sort()
+
+    def ci(v):
+        return v[int(0.05 * len(v))], v[int(0.95 * len(v))]
+
+    obs_dp, obs_dt = delta(leagues)
+    lo_p, hi_p = ci(dps)
+    lo_t, hi_t = ci(dts)
+    print("\n## Bye-multiplier Brier delta — cluster bootstrap, 90%% CI\n")
+    print("  playoff Brier delta (variant - baseline): %+.4f   90%% CI [%+.4f, %+.4f]  -> %s"
+          % (obs_dp, lo_p, hi_p,
+             "IMPROVES (excludes 0, negative)" if hi_p < 0 else
+             "DEGRADES (excludes 0, positive)" if lo_p > 0 else "NULL (CI includes 0)"))
+    print("  title   Brier delta (variant - baseline): %+.4f   90%% CI [%+.4f, %+.4f]  -> %s"
+          % (obs_dt, lo_t, hi_t,
+             "IMPROVES (excludes 0, negative)" if hi_t < 0 else
+             "DEGRADES (excludes 0, positive)" if lo_t > 0 else "NULL (CI includes 0)"))
+
+
+def mechanism_check(players_team_pos: dict):
+    """Does an actual team's weekly score fall, in bye-heavy weeks, by
+    roughly the fraction the multiplier predicts? Uses REAL weekly scores
+    already in the fixtures — the strongest available evidence, independent
+    of the Brier comparison above (and independent of the strength provider
+    entirely)."""
+    _bye_weeks.reset_cache()
+    player_value = {pid: 1.0 for pid in players_team_pos}
+    player_pos = {pid: v["position"] for pid, v in players_team_pos.items()}
+    player_team = {pid: v["team"] for pid, v in players_team_pos.items()}
+
+    rows = []  # (league, frac_on_bye, pct_deviation_from_own_season_avg)
+    for name in PAST_SEASONS:
+        fx = load_fixture(name)
+        full = build_full_state(fx)
+        weeks = list(range(1, full.completed_weeks + 1))
+        if not weeks:
+            continue
+        frac_map = weekly_value_fraction_on_bye(
+            full, player_value, player_pos, player_team, season=full.season,
+            weeks=weeks, _byes_opener=_byes_offline_opener,
+        )
+        for t in full.teams:
+            scores = full.weekly_scores.get(t.roster_id) or []
+            if len(scores) < len(weeks):
+                continue
+            team_avg = sum(scores) / len(scores)
+            if team_avg <= 0:
+                continue
+            for i, w in enumerate(weeks):
+                frac = frac_map.get(w, {}).get(t.roster_id)
+                if frac is None:
+                    continue
+                actual = scores[i]
+                rows.append((name, frac, (actual - team_avg) / team_avg))
+
+    print("\n## Mechanism check — real score deviation vs fraction of starting"
+          " slots on bye\n")
+    print("  team-weeks: %d\n" % len(rows))
+    bins = [(0.0, 0.001), (0.001, 0.15), (0.15, 0.30), (0.30, 1.01)]
+    print("  | bye-fraction bucket | n | mean fraction | mean actual"
+          " deviation | naive predicted deviation (scale=1.0) |")
+    print("  |---|---|---|---|---|")
+    for lo, hi in bins:
+        sel = [(f, d) for _lg, f, d in rows if lo <= f < hi]
+        if not sel:
+            print("  | %.3f-%.3f | 0 | — | — | — |" % (lo, hi))
+            continue
+        mf = sum(f for f, _ in sel) / len(sel)
+        md = sum(d for _, d in sel) / len(sel)
+        print("  | %.3f-%.3f | %d | %.3f | %+.1f%% | %+.1f%% |"
+              % (lo, hi, len(sel), mf, 100 * md, -100 * mf))
+
+    def ols_slope(pairs):
+        n = len(pairs)
+        mean_f = sum(f for f, _ in pairs) / n
+        mean_d = sum(d for _, d in pairs) / n
+        cov = sum((f - mean_f) * (d - mean_d) for f, d in pairs) / n
+        var_f = sum((f - mean_f) ** 2 for f, _ in pairs) / n
+        return cov / var_f if var_f > 0 else float("nan")
+
+    slope = ols_slope([(f, d) for _lg, f, d in rows])
+    print("\n  OLS slope (actual pct-deviation per unit fraction-on-bye): %+.3f"
+          "  (naive scale=1.0 prediction: -1.000)" % slope)
+
+    # Cluster bootstrap over league-seasons (same rationale as bootstrap_skill).
+    import random as _r
+    rng = _r.Random(20260809)
+    by_league = defaultdict(list)
+    for lg, f, d in rows:
+        by_league[lg].append((f, d))
+    leagues = list(by_league)
+    slopes = []
+    for _ in range(4000):
+        draw = [rng.choice(leagues) for _ in leagues]
+        pairs = [pt for lg in draw for pt in by_league[lg]]
+        slopes.append(ols_slope(pairs))
+    slopes.sort()
+    lo_s, hi_s = slopes[int(0.05 * len(slopes))], slopes[int(0.95 * len(slopes))]
+    print("  90%% CI (cluster bootstrap over %d league-seasons): [%+.3f, %+.3f]"
+          % (len(leagues), lo_s, hi_s))
+    print("  Interpretation: |slope| << 1.0 means real managers absorb byes"
+          " via bench swaps far more than a fixed-lineup multiplier assumes;"
+          " |slope| ~= 1.0 would validate the naive scale directly.")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sims", type=int, default=10000)
@@ -563,6 +818,13 @@ def main():
     print("|---|---|---|---|")
     for name, wk, bp, bt in per_league_rows:
         print("| %s | %d | %.4f | %.4f |" % (name, wk, bp, bt))
+
+    # -------------------------------------------------------------------
+    # Bye-week mu multiplier — EVALUATED variant (feedback #169)
+    # -------------------------------------------------------------------
+    players_team_pos = load_players_team_pos()
+    bye_variant_backtest(players_team_pos, args.sims)
+    mechanism_check(players_team_pos)
 
 
 if __name__ == "__main__":
