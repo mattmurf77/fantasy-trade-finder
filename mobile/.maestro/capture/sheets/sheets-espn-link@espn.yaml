@@ -1,0 +1,319 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SHEETS-ESPN-LINK
+# profile: espn
+# flags: release
+# captures: input, input--private-expanded, error--needs-league-id, error--espn-auth-required
+# source: mobile/src/components/EspnLinkSheet.tsx, mobile/src/screens/LeaguePickerScreen.tsx, backend/server.py espn_link
+# interactive-stop: input
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this file carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split this profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# Screen-library capture flow for the ESPN link SHEET — the capturable
+# remainder app-inventory §2.27 carves out of the excluded EspnConnectScreen:
+# "the SHEET AROUND it — EspnLinkSheet — IS capturable and worth matrix rows
+# for its input / team / done steps, the my-leagues list, manual entry, and the
+# private-league s2+SWID fields. Only the pushed WebView screen itself is
+# excluded." Matrix row 16 flagged the same thing from the other side ("verify
+# the footer buttons render before authoring"). They do render: `!loading &&
+# espnEnabled` is the only condition (LeaguePickerScreen.tsx:386-394), and
+# `espn.link` is ON.
+#
+# ENTRY — LeaguePicker's link footer, BEFORE a league is picked. The sheet is
+# also reachable post-session from Settings (and from `league.espn-resync-
+# signin`, which navigates to LeaguePicker with `espnLink: true` and
+# auto-opens it), but the pre-pick footer needs no prior state and is the path
+# the P1 inventory names. The flow therefore never taps `leagues.row.*` at all.
+#
+# ── WHAT THIS PROFILE CAN AND CANNOT SHOW ────────────────────────────────
+# `espn.league_picker` is pinned OFF in backend/tests/fixtures/profiles/
+# espn.json. That is not an oversight to route around — it is the honest
+# fixture value, because the picker is a read of the session user's STORED
+# `espn_credentials` cookies and R-11 makes credentials unrepresentable in a
+# fixture (test_espn_league_row_carries_the_platform_binding pins
+# `espn_auth == 'public'` as "the ONLY auth mode a fixture may claim").
+# Consequently:
+#   · `espn-link.my-leagues` / `.my-league.<id>` / `.manual-entry-toggle` /
+#     `.picker-toggle` / `.my-leagues-busy` are UNREACHABLE — `showingPicker`
+#     requires `leaguePicker && myLeagues && !useManualEntry`, and the flag
+#     alone kills it.
+#   · `espn-link.my-leagues-empty` is unreachable EVEN on a profile with the
+#     flag on: it needs `myLeagues.length === 0`, i.e. a SUCCESSFUL
+#     /api/espn/my-leagues, and that route 403s `espn_auth_required` without
+#     stored cookies (backend/server.py:18708). `fetchMyLeagues` swallows every
+#     failure into `myLeagues = null`, which is the text-field branch.
+#   Closing any of these needs a fixture that can hold ESPN cookies, which is
+#   the thing the profile schema deliberately forbids.
+#
+# ── SAFETY: NO LIVE ESPN EGRESS ──────────────────────────────────────────
+# `espn-link.continue` calls POST /api/espn/link, which reaches ESPN for real —
+# ESPN has no fixture seam. The flow taps Continue exactly twice, and each tap
+# is safe for a DIFFERENT reason:
+#   1. First tap, empty field: `fetchPreview` returns at its own client-side
+#      guard (`parseEspnLeagueInput` → null, EspnLinkSheet.tsx:244) BEFORE any
+#      request is constructed. Zero network.
+#   2. Second tap, with an id typed: guarded by a `fail_next` armed FIRST, so
+#      `_before_request_hook` refuses the request ahead of routing.
+# DO NOT reorder the second injection after its tap.
+# This is also why the `team` and `done` steps are UNCAPTURED: both require a
+# real preview to come back from ESPN, which no injection can synthesise (the
+# harness can fail a request, not fabricate a crosswalk payload).
+#
+# ── THE SHEET IS NEVER CLOSED, BY CONSTRUCTION ───────────────────────────
+# `requestClose` raises a native Alert ("Discard this league link?") whenever
+# `ux.sheet_guard` is on and the sheet is dirty — which it is the moment a
+# league id is typed. Native Alerts are excluded from v1 (sign-off ruling B),
+# and the backdrop carries no testID anyway. The flow therefore ends on the
+# sheet.
+tags: [capture, sheets, espn-link, espn]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml.
+# The preamble stops at the PICKER here — the league is never picked, because
+# the footer this flow uses only exists on that screen.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - inputText: "qa_espn"
+      - assertVisible:
+          text: ".*qa_espn.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# Waiting on the ROW (not the footer) is what proves the picker finished
+# loading: the footer is gated on `!loading`, so it appears at the same moment,
+# but the row is the stronger signal that both the Sleeper list (`[]`) and the
+# ESPN merge have resolved.
+- extendedWaitUntil:
+    visible:
+      id: "leagues.link-espn"
+    timeout: 30000
+
+# ── ARM THE ESPN REFUSAL BEFORE THE SHEET IS EVEN OPENED ─────────────────
+# RUN-2 FIX (run 20260810T160024) — and this one is a SAFETY fix, not a
+# flakiness fix. The first cut armed this immediately before the Continue tap
+# that was supposed to consume it. That left every earlier step in a window
+# where a stray tap on Continue would fire an UN-INJECTED POST /api/espn/link,
+# and that is exactly what happened: flask.log line 147 shows
+# `POST /api/espn/link → 404`, and the failure screenshot shows ESPN's own
+# "ESPN has no league with that ID for that season" — i.e. the request reached
+# real ESPN, which has no fixture seam. The rails counters did not catch it
+# because `sleeper_live_egress_attempts` only counts SLEEPER.
+#
+# Arming here makes egress structurally impossible for the whole flow rather
+# than ordering-dependent: from this point on, every /api/espn/link attempt is
+# refused by `_before_request_hook` ahead of routing.
+#
+# COUNT=3 is a SAFETY MARGIN, not the expected number. Exactly one deliberate
+# request is made (`linkEspnLeague` is a bare POST — no react-query `retry: 1`,
+# and api/client.ts's gateway retry is GET-only). The spare two exist so that a
+# stray or double tap is refused locally instead of reaching ESPN.
+#
+# BODY is the real 403 this route emits for an ESPN auth refusal, lifted from
+# backend/server.py:18447-18453 (`_espn_error_response`, kind == "auth") — the
+# same mapper POST /api/espn/link runs its EspnError through. What the client
+# branches on is the `error` CODE (`ApiError.isEspnAuthRequired`,
+# api/client.ts:194-203); the `message` is replaced by the sheet's own copy.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/espn/link"
+      INJECT_STATUS: "403"
+      INJECT_COUNT: "3"
+      INJECT_BODY: '{"error": "espn_auth_required", "message": "ESPN wouldn''t share this league — it''s private or the saved cookies expired. Paste fresh espn_s2 + SWID cookies to continue."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "leagues.link-espn"
+
+# ── input ────────────────────────────────────────────────────────────────
+# Step 1 of the three-step flow, in its manual-entry form (see the header for
+# why the picker branch is unreachable on this profile). `espn-link.input` is
+# the league-id/URL field; `espn-link.continue` renders only while
+# `!showingPicker`, so its presence is itself the proof that the text-field
+# branch — not the picker — is what mounted.
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.input"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.private-toggle"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.continue"
+    timeout: 20000
+# waitForAnimationToEnd is correct here (unlike the spinner frames elsewhere in
+# this block): it lets the sheet finish sliding up, so the frame is the state
+# at rest rather than a mid-presentation smear. This sheet does NOT auto-focus
+# a field, so no keyboard is expected — which is the difference from
+# capture/sheets/sheets-feedback.yaml's open frame.
+- waitForAnimationToEnd
+- takeScreenshot: sheets-espn-link__input
+
+# ── input--private-expanded ──────────────────────────────────────────────
+# The private-league disclosure. With `espn.webview_capture` ON the PRIMARY fix
+# is the in-app sign-in button (`espn-connect.sign-in`) and the paste fields
+# are demoted to the fallback — flag OFF would render the same section
+# paste-only. The button is NOT tapped: it pushes EspnConnectScreen, a live
+# espn.com WebView behind Disney SSO and an emailed OTP, excluded by
+# app-inventory §2.27.
+#
+# NOTE the toggle's side effect (EspnLinkSheet.tsx:459-470): opening this
+# section also fires `fetchMyLeagues()` as the "stored creds exist" probe. On
+# this profile that is a no-op — the function returns immediately on
+# `!leaguePicker` — so no request is made and no picker can appear mid-frame.
+#
+# RUN-8 FIX: this frame is captured BEFORE anything else happens to the sheet
+# — before the empty-Continue validation error below, and before any typing.
+# Run 20260810T173042 shot it AFTER the validation error and the red "Enter a
+# numeric ESPN league ID" line sat in a frame that is supposed to document
+# only the private-league disclosure. Ordering is deliberate on two further
+# counts. The previous cut typed
+# the league id first, which left the keyboard up — and the captured PNG showed
+# it covering the SWID field and the whole CTA row, i.e. half the state this
+# frame exists to document. Typing first also put Continue underneath the
+# keyboard, which is why its tap silently did nothing and no POST was ever made
+# (flask.log for that run records zero /api/espn/link calls). Expanding while
+# the sheet is untouched gives a clean, keyboard-free frame.
+- tapOn:
+    id: "espn-link.private-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.s2-input"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.swid-input"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "espn-connect.sign-in"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-espn-link__input--private-expanded
+
+# Collapse again so the validation error below is shot against the sheet's
+# resting shape, and so the league-id field is the sheet's ONLY input when
+# the typing happens further down (see the auth-error block).
+- tapOn:
+    id: "espn-link.private-toggle"
+- extendedWaitUntil:
+    notVisible:
+      id: "espn-link.s2-input"
+    timeout: 20000
+
+# ── error--needs-league-id ───────────────────────────────────────────────
+# The client-side validation refusal — zero network, see the safety note. This
+# is the cheapest honest error state in the whole block and the only one in it
+# that needs no injection at all.
+- tapOn:
+    id: "espn-link.continue"
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.error"
+    timeout: 20000
+# Full-match regex, wrapped in `.*`, verified against EspnLinkSheet.tsx:245.
+- extendedWaitUntil:
+    visible:
+      text: ".*Enter a numeric ESPN league ID or a fantasy.espn.com league URL.*"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-espn-link__error--needs-league-id
+
+# ── error--espn-auth-required ────────────────────────────────────────────
+# The private-league refusal, and the reason it earns a frame: the sheet does
+# not just print the error, it AUTO-EXPANDS the private section so the fix is
+# on screen (EspnLinkSheet.tsx:277-285), and it branches the copy on whether
+# cookies were actually SENT — a user who just signed in must not be told to
+# "sign in" as if nothing happened. This flow types an id and NO cookies, so it
+# takes the `cookiesWereSent === false` branch of `espnAuthErrorCopy`.
+#
+# Collapse the private section again before typing. With it open the sheet
+# carries THREE TextInputs, and the RUN-1 failure was the league id landing in
+# the wrong one — Continue then hit `fetchPreview`'s client-side guard
+# (`parseEspnLeagueInput` → null, EspnLinkSheet.tsx:244) and re-rendered the
+# VALIDATION error instead of the auth one. Typing while the league-id field is
+# the sheet's ONLY input removes the ambiguity entirely. The auth error
+# re-expands the section by itself, so nothing is lost from the final frame.
+- tapOn:
+    id: "espn-link.input"
+- eraseText
+- inputText: "1189600"
+# Assertion, never a tap — a mistype fails HERE, loudly and locally, instead of
+# surfacing later as the wrong error copy.
+- assertVisible:
+    text: ".*1189600.*"
+#
+# The refusal for this tap was armed BEFORE the sheet was opened (see the
+# safety block in the preamble), deliberately, so that no ordering accident can
+# let any tap reach real ESPN.
+#
+# BODY is the real 403 this route emits for an ESPN auth refusal, lifted from
+# backend/server.py:18447-18453 (`_espn_error_response`, kind == "auth") — the
+# same mapper POST /api/espn/link runs its EspnError through. What the client
+# branches on is the `error` CODE (`ApiError.isEspnAuthRequired`,
+# api/client.ts:194-203); the `message` is replaced by the sheet's own copy,
+# which is what the assertion below reads.
+#
+# The league id typed is the fixture's own — `1189600`
+# (test_seed_ui_test_db.py ESPN_LEAGUE_ID) — so the request that gets refused
+# is the one a real user of this fixture would actually make.
+#
+# FORCED SCROLL BEFORE THE TAP. Typing raises the keyboard, and in RUN-3 that
+# left Continue underneath it: Maestro resolved the element, tapped its
+# coordinates, hit the keyboard instead, and the flow sailed on with the STALE
+# validation error still on screen. visibilityPercentage 100 + centerElement
+# force the CTA into the visible area above the keyboard before it is tapped.
+- scrollUntilVisible:
+    element:
+      id: "espn-link.continue"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "espn-link.continue"
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.error"
+    timeout: 30000
+# Full-match regex, wrapped in `.*`, verified against EspnLinkSheet.tsx:52-54
+# (the `webviewCapture && !cookiesWereSent` branch of espnAuthErrorCopy).
+- extendedWaitUntil:
+    visible:
+      text: ".*This league is private. Sign in to ESPN below and we.ll fetch it.*"
+    timeout: 20000
+# The auto-expansion is half the point of this frame — assert it rather than
+# assume the section merely stayed open from the previous capture.
+- extendedWaitUntil:
+    visible:
+      id: "espn-connect.sign-in"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-espn-link__error--espn-auth-required

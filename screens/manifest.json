@@ -5,7 +5,7 @@
     "name": "FTF-iOS18",
     "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
   },
-  "generated_at": "2026-08-10T15:08:00+00:00",
+  "generated_at": "2026-08-10T22:09:02+00:00",
   "screens": {
     "anchors": {
       "captures": [
@@ -129,6 +129,68 @@
       ],
       "source_sha256": "b4d18be61cbb5d5a42bf05d0f2da01fb49d90d934b5677ac2e7714b90b34d86c"
     },
+    "draft-room": {
+      "captures": [
+        {
+          "bytes": 7856,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/draft-room/error--generic.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "error--generic"
+        },
+        {
+          "bytes": 7604,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/draft-room/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "loading"
+        },
+        {
+          "bytes": 48916,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/draft-room/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "populated"
+        },
+        {
+          "bytes": 47164,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/draft-room/undrafted--my-board.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "undrafted--my-board"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/DraftRoomScreen.tsx",
+        "mobile/src/components/draft/DraftRows.tsx",
+        "mobile/src/navigation/TabNav.tsx"
+      ],
+      "source_sha256": "3bdd399aafcabecba5ac584729a1e91293230f4d5a60b394f9411293377b497c"
+    },
     "free-agents": {
       "captures": [
         {
@@ -176,6 +238,58 @@
           "state": "coverage--single-format"
         },
         {
+          "bytes": 50715,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/league/draft-picks-row.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "draft-picks-row"
+        },
+        {
+          "bytes": 52776,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/league/espn-auth-expired.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "espn-auth-expired"
+        },
+        {
+          "bytes": 50098,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/league/espn-badge.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "espn-badge"
+        },
+        {
+          "bytes": 49540,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/league/espn-resyncing.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "espn-resyncing"
+        },
+        {
           "bytes": 50635,
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/first-paint-pending.png",
@@ -210,8 +324,8 @@
           "state": "populated"
         },
         {
-          "bytes": 58769,
-          "captured_at": "2026-08-10T15:08:00+00:00",
+          "bytes": 51366,
+          "captured_at": "2026-08-10T16:51:55+00:00",
           "file": "mobile/league/progress-module.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
@@ -220,8 +334,8 @@
           "state": "progress-module"
         },
         {
-          "bytes": 47031,
-          "captured_at": "2026-08-10T15:08:00+00:00",
+          "bytes": 47075,
+          "captured_at": "2026-08-10T16:51:55+00:00",
           "file": "mobile/league/works-now.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
@@ -232,15 +346,16 @@
       ],
       "source": [
         "mobile/src/screens/LeagueScreen.tsx",
-        "mobile/src/screens/LeagueSummaryScreen.tsx"
+        "mobile/src/api/client.ts (ApiError.isEspnAuthRequired)",
+        "backend/server.py espn_import"
       ],
-      "source_sha256": "517e8fc4cba9487d621a5f041f79785eea2ae79db21dfe4853d8b23205d025fe"
+      "source_sha256": "9508f6e3eb7397de031bee3d63d6ec7d3dca3d96824bf1e65c7c4d89ed27fc72"
     },
     "league-summary": {
       "captures": [
         {
           "bytes": 62525,
-          "captured_at": "2026-08-10T15:03:04+00:00",
+          "captured_at": "2026-08-10T19:40:57+00:00",
           "file": "mobile/league-summary/basis--personal.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -252,8 +367,8 @@
           "state": "basis--personal"
         },
         {
-          "bytes": 56052,
-          "captured_at": "2026-08-10T15:03:04+00:00",
+          "bytes": 56068,
+          "captured_at": "2026-08-10T19:40:57+00:00",
           "file": "mobile/league-summary/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -265,8 +380,8 @@
           "state": "error"
         },
         {
-          "bytes": 38179,
-          "captured_at": "2026-08-10T15:03:04+00:00",
+          "bytes": 38139,
+          "captured_at": "2026-08-10T19:40:57+00:00",
           "file": "mobile/league-summary/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -278,8 +393,8 @@
           "state": "loading"
         },
         {
-          "bytes": 56295,
-          "captured_at": "2026-08-10T15:03:04+00:00",
+          "bytes": 56691,
+          "captured_at": "2026-08-10T19:40:57+00:00",
           "file": "mobile/league-summary/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -291,8 +406,8 @@
           "state": "populated"
         },
         {
-          "bytes": 54929,
-          "captured_at": "2026-08-10T15:03:04+00:00",
+          "bytes": 53717,
+          "captured_at": "2026-08-10T19:40:57+00:00",
           "file": "mobile/league-summary/populated--single-format.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary@single-format.yaml",
@@ -306,7 +421,7 @@
         "mobile/src/components/PlayerCard.tsx",
         "mobile/src/components/MemberEnteredMarker.tsx"
       ],
-      "source_sha256": "10a47c74d0731e7930f6a869dedac5da04c5e6f3700c273e917d58b648050dad"
+      "source_sha256": "ed9ae1568401b33cf3d169dc87cbb0395ac99f604863b911af5435886fa5f75c"
     },
     "leagues": {
       "captures": [
@@ -469,6 +584,96 @@
         "mobile/src/screens/MatchesScreen.tsx"
       ],
       "source_sha256": "8bbb73d76007e024daeb477448b8a5f39f48a18c6c1c97d0e5e3630545a69995"
+    },
+    "mock-draft": {
+      "captures": [
+        {
+          "bytes": 52489,
+          "captured_at": "2026-08-10T22:09:02+00:00",
+          "file": "mobile/mock-draft/active--on-the-clock.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
+          "injections": [],
+          "profile": "draft-pre",
+          "state": "active--on-the-clock"
+        },
+        {
+          "bytes": 14098,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/mock-draft/empty--no-active-mock.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "empty--no-active-mock"
+        },
+        {
+          "bytes": 29487,
+          "captured_at": "2026-08-10T22:02:53+00:00",
+          "file": "mobile/mock-draft/entry--card.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
+          "injections": [],
+          "profile": "draft-pre",
+          "state": "entry--card"
+        },
+        {
+          "bytes": 12191,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/mock-draft/error--generic.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "error--generic"
+        },
+        {
+          "bytes": 9214,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/mock-draft/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "loading"
+        },
+        {
+          "bytes": 62527,
+          "captured_at": "2026-08-10T22:09:02+00:00",
+          "file": "mobile/mock-draft/row-selected--confirm-bar.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
+          "injections": [],
+          "profile": "draft-pre",
+          "state": "row-selected--confirm-bar"
+        },
+        {
+          "bytes": 64276,
+          "captured_at": "2026-08-10T22:09:02+00:00",
+          "file": "mobile/mock-draft/setup-sheet.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
+          "injections": [],
+          "profile": "draft-pre",
+          "state": "setup-sheet"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/MockDraftScreen.tsx",
+        "mobile/src/screens/DraftRoomScreen.tsx",
+        "mobile/src/components/draft/MockEntryPanel.tsx",
+        "mobile/src/components/draft/MockSetupSheet.tsx"
+      ],
+      "source_sha256": "0d755111d2a26cb88b363b2df841f19d08f0672efc4f005cde6584e6ce1dbcae"
     },
     "onboarding": {
       "captures": [
@@ -638,6 +843,94 @@
       ],
       "source_sha256": "71b4052c8b6cbfdbfe26e580bc142dbba9f0acc62eb0005fbd968f88b8cd84d4"
     },
+    "pick-assignment": {
+      "captures": [
+        {
+          "bytes": 13389,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/error--generic.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "error--generic"
+        },
+        {
+          "bytes": 53551,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/grid--populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "grid--populated"
+        },
+        {
+          "bytes": 7712,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "loading"
+        },
+        {
+          "bytes": 36055,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/owner-sheet.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "owner-sheet"
+        },
+        {
+          "bytes": 53210,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/season-tab--future.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "season-tab--future"
+        },
+        {
+          "bytes": 45867,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/pick-assignment/setup--edit-order.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "setup--edit-order"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/PickAssignmentScreen.tsx",
+        "mobile/src/screens/LeagueScreen.tsx",
+        "backend/server.py pick_assignments_route"
+      ],
+      "source_sha256": "af52e86787aa06cceac2223b0c249c519658c08f9a320089327581699c2eb69a"
+    },
     "portfolio": {
       "captures": [
         {
@@ -765,6 +1058,130 @@
       ],
       "source_sha256": "b03534868f1435a58c798d415f4382a7924fdd0d1dca9f594a8966b2d9fb60f4"
     },
+    "record-picks": {
+      "captures": [
+        {
+          "bytes": 7794,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/record-picks/error--generic.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "error--generic"
+        },
+        {
+          "bytes": 7678,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/record-picks/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "loading"
+        },
+        {
+          "bytes": 44230,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/record-picks/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "populated"
+        },
+        {
+          "bytes": 45839,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/record-picks/team-picker-expanded.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "team-picker-expanded"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/RecordPicksScreen.tsx",
+        "mobile/src/screens/DraftRoomScreen.tsx",
+        "backend/draft_board_service.py assigned_board"
+      ],
+      "source_sha256": "cec82abee8ee2a8137dc089f4f3d8bf7cb298c77cbc3e7d7c13cc787e61b5d7e"
+    },
+    "rookie-ranks": {
+      "captures": [
+        {
+          "bytes": 38674,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/rookie-ranks/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "error"
+        },
+        {
+          "bytes": 59051,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/rookie-ranks/filter--rb.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "filter--rb"
+        },
+        {
+          "bytes": 35531,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/rookie-ranks/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "loading"
+        },
+        {
+          "bytes": 58321,
+          "captured_at": "2026-08-10T21:59:12+00:00",
+          "file": "mobile/rookie-ranks/populated--from-draft-room.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
+          "injections": [
+            "latency",
+            "fail_next"
+          ],
+          "profile": "draft",
+          "state": "populated--from-draft-room"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/RookieRanksScreen.tsx",
+        "mobile/src/components/RookieScopeControl.tsx",
+        "mobile/src/screens/DraftRoomScreen.tsx"
+      ],
+      "source_sha256": "a0d624f58b3fcd1fc7a50ba66793496e710ff870c90659c678c4c62965b8f0f6"
+    },
     "settings": {
       "captures": [
         {
@@ -818,6 +1235,64 @@
         "mobile/src/screens/SettingsScreen.tsx"
       ],
       "source_sha256": "ce7e7df0f18eaf97ddd7cc80e63f4322dd366aa5bd14a3bc75a5f9274a2aaae9"
+    },
+    "sheets-espn-link": {
+      "captures": [
+        {
+          "bytes": 65335,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/sheets-espn-link/error--espn-auth-required.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "error--espn-auth-required"
+        },
+        {
+          "bytes": 46143,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/sheets-espn-link/error--needs-league-id.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "error--needs-league-id"
+        },
+        {
+          "bytes": 41284,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/sheets-espn-link/input.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "input"
+        },
+        {
+          "bytes": 63647,
+          "captured_at": "2026-08-10T21:47:02+00:00",
+          "file": "mobile/sheets-espn-link/input--private-expanded.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "injections": [
+            "fail_next"
+          ],
+          "profile": "espn",
+          "state": "input--private-expanded"
+        }
+      ],
+      "source": [
+        "mobile/src/components/EspnLinkSheet.tsx",
+        "mobile/src/screens/LeaguePickerScreen.tsx",
+        "backend/server.py espn_link"
+      ],
+      "source_sha256": "942365535e1f48d26eb94ce97cc62933a8f6915e33ef570e9a144950891acbdf"
     },
     "sheets-feedback": {
       "captures": [

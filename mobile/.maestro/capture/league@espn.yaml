@@ -1,0 +1,260 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-ESPN
+# profile: espn
+# flags: release
+# captures: espn-badge, draft-picks-row, espn-resyncing, espn-auth-expired
+# source: mobile/src/screens/LeagueScreen.tsx, mobile/src/api/client.ts (ApiError.isEspnAuthRequired), backend/server.py espn_import
+# interactive-stop: espn-badge
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this file carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split this profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# Screen-library capture flow for LeagueScreen's ESPN branch
+# (capture-matrix-2026-08-09.md deferred block: LeagueScreen's ESPN branch is
+# one of the five screens ruling C names as having ZERO coverage, because "no
+# ESPN fixture profile exists"). The `espn` profile is a 10-team
+# `platform='espn'` league — pinned by backend/tests/test_seed_ui_test_db.py::
+# test_espn_league_row_carries_the_platform_binding.
+#
+# HOW THE SCREEN KNOWS IT IS ESPN — this is the whole reachability story, and
+# it does NOT run through the backend. `isEspn` is read off the CACHED league
+# list in the session store (`cachedLeagues.some(lg => lg.league_id ===
+# leagueId && lg.platform === 'espn')`, LeagueScreen.tsx:123), and that list is
+# stamped by LeaguePickerScreen's merge of `GET /api/espn/leagues` into the
+# Sleeper result (LeaguePickerScreen.tsx:170-181). qa_espn's Sleeper league
+# list is honestly `[]` (test_espn_league_emits_no_sleeper_cassettes), so the
+# ONE row on the picker IS the ESPN league and picking it is what arms every
+# capture below. Skipping the picker with a launch argument would produce a
+# session whose cached list was never written — which is exactly why this flow
+# is tap-nav end to end and uses no FTFTestRoute at all.
+#
+# ── SAFETY: THE RE-SYNC BUTTON IS THE ONE LIVE-EGRESS CONTROL HERE ───────
+# `league.espn-resync` calls POST /api/espn/import, and this profile is
+# `espn_auth: 'public'` — so the route SKIPS the credential branch and goes
+# straight to `_espn_import_payload`, i.e. a real fetch against ESPN. ESPN has
+# no fixture seam (that is the same constraint that forced the pick-assignment
+# grid to ship with a STORED order). The `fail_next` injection below is
+# therefore not a convenience, it is a PRECONDITION: it is armed BEFORE the tap
+# and `_before_request_hook` refuses the request ahead of routing, so the
+# handler never runs and nothing leaves the machine. DO NOT reorder the
+# injection after the tap, and do not add an un-injected re-sync tap to this
+# file. That also makes `espn-resync-success` deliberately UNCAPTURED: the only
+# way to reach it is to let the request through.
+#
+# ── NO ERROR STATE EXISTS ON THIS SCREEN ─────────────────────────────────
+# Every failed read degrades to zeros/em-dashes via `num()` — there is no error
+# branch to photograph (already recorded in app-inventory §2.16). The two
+# failure frames below are re-sync failures, which are local component state
+# (`resyncMsg` / `resyncAuthFail`), not query state.
+#
+# NOT CAPTURED, with evidence:
+#   · `espn-resync-success` — see the safety note above.
+#   · `low-activity` / `progress-module` / `works-now` / `market-pulse-strip` /
+#     `whats-new-coach-mark` / `members-overlay` / `rookie-board-sheet` — none
+#     are ESPN-specific; they belong to the standard-profile league rows
+#     (capture/league.yaml et al) and are not re-shot here.
+#   · `explore--rookie-board-tile` — `draft.room` is TRUE on this profile, and
+#     operator decision O1 makes the Draft Room REPLACE the rookie-board tile
+#     whenever that flag is on, so the tile variant is unreachable here.
+tags: [capture, league, espn]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - inputText: "qa_espn"
+      - assertVisible:
+          text: ".*qa_espn.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# See the header: this tap is what writes `platform: 'espn'` into the session's
+# cached league list, which is the only thing `isEspn` reads.
+# `onboarding.league_autoskip` is false in the release flags, so this
+# one-league picker does not auto-skip out from under the tap.
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see capture/league.yaml for the full finding.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.league"
+# Since #181 the League TAB lands on the rankings root (LeagueRankings /
+# LeagueSummaryScreen); the classic page is the pushed sub-route reached from
+# that root's row. `league-summary.league-home` renders unconditionally at tab
+# root when no team is focused (LeagueSummaryScreen.tsx:663).
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+
+# ── espn-badge ───────────────────────────────────────────────────────────
+# Two ESPN-only renders share this frame, and both hang off `isEspn`: the
+# text-only "ESPN" Badge in the hero chip row (LeagueScreen.tsx:427 — a text
+# badge, no logo, per the Chalkline no-emoji/no-image rule) and the read-only
+# expectation copy beneath the hero. The copy is the discriminator, because a
+# Badge's label is not uniquely addressable; the hero itself renders for every
+# platform.
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 40000
+# Full-match regex, wrapped in `.*`. Verified against LeagueScreen.tsx:467-470.
+# The source wraps this sentence across lines, so the assertion matches only
+# the first clause — enough to be unique, and immune to the JSX line-wrap
+# collapsing differently than a naive copy of the source text would suggest.
+- extendedWaitUntil:
+    visible:
+      text: ".*ESPN read-only import.*"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: league__espn-badge
+
+# ── draft-picks-row ──────────────────────────────────────────────────────
+# The dedicated "Draft picks" section below Explore — deliberately NOT a fourth
+# Explore tile (LeagueScreen.tsx:578-600). It renders on `picks.assign &&
+# isEspn`, so this frame is also the proof that the flag/platform pairing
+# resolved. Its sub-line is the SAME `pickAssignmentSubline` formatter the grid
+# screen and the Draft Room's progress row use, which is why those three can
+# never disagree.
+#
+# Forced scroll, per capture/rank-home.yaml: iOS keeps off-screen ScrollView
+# children in the hierarchy, so a bare scrollUntilVisible would leave the row
+# unphotographed at the bottom of the frame.
+- scrollUntilVisible:
+    element:
+      id: "league.draft-picks-row"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: league__draft-picks-row
+
+# ── espn-resyncing ───────────────────────────────────────────────────────
+# BOTH injections are armed before the tap — see the safety note in the header.
+# The latency is what makes the in-flight frame catchable at all: `resyncing`
+# is set immediately before the await and cleared in the `finally`, so without
+# a delay the button's "Re-syncing from ESPN…" label exists for as long as the
+# request takes and no longer.
+#
+# COUNT=1, and the arithmetic is different from every other flow in this block:
+# `importEspnLeague` is a bare async call inside a component handler
+# (LeagueScreen.tsx:141) — NOT a react-query query, so `retry: 1` does not
+# apply — and it is a POST, so api/client.ts's GET-only gateway retry does not
+# apply either. Exactly one request per tap, and the flow taps once.
+#
+# BODY is the real 403 this route emits for an ESPN auth refusal, lifted from
+# backend/server.py:18447-18453 (`_espn_error_response`, kind == "auth"). That
+# is the body a genuinely-expired or private read produces; the route's OTHER
+# espn_auth_required body (server.py:18765, "This private league needs your
+# ESPN cookies again.") belongs to the `espn_auth == 'cookie'` branch, which
+# this `public` fixture never enters. Either satisfies
+# `ApiError.isEspnAuthRequired`, which keys on the ERROR CODE only
+# (api/client.ts:194-203).
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/espn/import"
+      INJECT_MS: "5000"
+- assertTrue: ${output.inject.ok}
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/espn/import"
+      INJECT_STATUS: "403"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "espn_auth_required", "message": "ESPN wouldn''t share this league — it''s private or the saved cookies expired. Paste fresh espn_s2 + SWID cookies to continue."}'
+- assertTrue: ${output.inject.ok}
+- scrollUntilVisible:
+    element:
+      id: "league.espn-resync"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- tapOn:
+    id: "league.espn-resync"
+# The button's own label is the state: `resyncing ? 'Re-syncing from ESPN…' :
+# 'Re-sync ESPN rosters'` (LeagueScreen.tsx:745). It is also `disabled` in this
+# frame. The source uses a typographic ellipsis; `.` covers it. Text
+# ASSERTION, never a tap.
+- extendedWaitUntil:
+    visible:
+      text: ".*Re-syncing from ESPN.*"
+    timeout: 20000
+- takeScreenshot: league__espn-resyncing
+
+# ── espn-auth-expired ────────────────────────────────────────────────────
+# The Phase-1b self-serve refusal: `resyncAuthFail` plus `espn.webview_capture`
+# ON puts the "Sign in to ESPN" primary under the failure message instead of
+# leaving a dead-end sentence (LeagueScreen.tsx:759-770).
+#
+# NOTE WHAT IS BEING PHOTOGRAPHED: with the WebView-capture flag on, the
+# message is the CLIENT's own copy — 'ESPN needs you to sign in again to read
+# this private league.' (LeagueScreen.tsx:154) — not the injected body's
+# `message`. The injected body still has to be the real one, because what the
+# client branches on is its `error` code; the copy swap is the product
+# behaviour this frame documents.
+#
+# The button is NOT tapped: it navigates to LeaguePicker with the ESPN sheet
+# auto-opened, which is capture/sheets/sheets-espn-link@espn.yaml's subject and
+# would tear this screen down.
+- extendedWaitUntil:
+    visible:
+      id: "league.espn-resync-signin"
+    timeout: 30000
+# FRAMING FIX (run 20260810T161900). The assertion above passed while the
+# capture was useless: the failure message sat clipped against the bottom edge
+# behind the FeedbackFAB, and the Sign-in button — the entire point of this
+# state — was below the fold. Maestro treats off-screen ScrollView children as
+# visible, so `visible:` is NOT evidence that something is IN THE PHOTOGRAPH.
+# That trap has now cost three separate frames in this block; scroll the
+# subject into view before the shutter, every time.
+- scrollUntilVisible:
+    element:
+      id: "league.espn-resync-signin"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- assertVisible:
+    text: ".*ESPN needs you to sign in again to read this private league.*"
+- waitForAnimationToEnd
+- takeScreenshot: league__espn-auth-expired

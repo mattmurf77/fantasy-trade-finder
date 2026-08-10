@@ -63,3 +63,7 @@ settings.stud-tax.*
 settings.pick-pricing.*
 # FeedbackInboxScreen.tsx:212   testID={`feedback-inbox.delete.${it.id}`}
 feedback-inbox.delete.*
+# DraftModeToggle builds ids from a variable prefix (MockChrome.tsx: testID={`${testIDPrefix}.real`})
+draft-room.mode.*
+# mock-entry blocked-panel ids are object properties rendered as testID={block.testID} (MockChrome.tsx)
+mock-entry.*
