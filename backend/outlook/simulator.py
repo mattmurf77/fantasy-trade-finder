@@ -43,6 +43,9 @@ class SimResult:
     titles: dict[int, int] = field(default_factory=dict)
     sum_wins: dict[int, float] = field(default_factory=dict)
     sum_seed: dict[int, float] = field(default_factory=dict)
+    # Remaining weeks the platform published no pairings for, which were
+    # re-paired at random (pre-draft leagues only — see league_state.py).
+    random_paired_weeks: list[int] = field(default_factory=list)
 
     def playoff_pct(self, rid: int) -> float:
         return self.made_playoffs.get(rid, 0) / self.n_sims
@@ -86,11 +89,18 @@ def simulate(
     base_pf = {t.roster_id: t.points_for for t in state.teams}
     division = {t.roster_id: t.division for t in state.teams}
     remaining = state.remaining_weeks()
-    # Precompute remaining pairings; for weeks with no known pairing (future
-    # weeks Sleeper may not expose), fall back to a random round-robin pairing.
+    # Precompute remaining pairings. A scheduled league publishes its full
+    # remaining pairing graph, so this is the REAL schedule; the random
+    # round-robin fallback fires only for weeks with no pairings at all
+    # (pre-draft leagues — see league_state.py).
     remaining_pairs = _remaining_pairings(state, remaining, roster_ids, rng)
+    # Sleeper's median match: each week also books a decision against the
+    # league median score, so the base standings arrive on a 2-per-week scale
+    # and the simulation must increment on that same scale (BUG-1 / G-024).
+    median_match = bool(state.median_match)
 
-    res = SimResult(n_sims=n_sims, seed=seed)
+    res = SimResult(n_sims=n_sims, seed=seed,
+                    random_paired_weeks=state.unscheduled_weeks())
     for rid in roster_ids:
         res.made_playoffs[rid] = 0
         res.byes[rid] = 0
@@ -109,6 +119,7 @@ def simulate(
         # Regular-season remainder
         for week, pairs in zip(remaining, remaining_pairs):
             week_mult = wmm.get(week) if wmm else None
+            week_scores = {} if median_match else None
             for a, b in pairs:
                 ma = mu[a] * week_mult[a] if week_mult and a in week_mult else mu[a]
                 mb = mu[b] * week_mult[b] if week_mult and b in week_mult else mu[b]
@@ -123,6 +134,20 @@ def simulate(
                 else:
                     wins[a] += 0.5
                     wins[b] += 0.5
+                if week_scores is not None:
+                    week_scores[a] = sa
+                    week_scores[b] = sb
+            if week_scores:
+                # Second decision of the week: every team versus the league
+                # median of THIS simulated week's drawn scores. Draws no extra
+                # randomness, so a non-median league's draw sequence — and
+                # therefore its odds — are byte-identical to before.
+                med = _median(week_scores.values())
+                for rid, s in week_scores.items():
+                    if s > med:
+                        wins[rid] += 1
+                    elif s == med:
+                        wins[rid] += 0.5
         # Seed
         standings = [(rid, wins[rid], pf[rid], division[rid]) for rid in roster_ids]
         seed_order = fmt.seed(standings)
@@ -141,10 +166,24 @@ def simulate(
     return res
 
 
+def _median(values) -> float:
+    """Median of the week's drawn scores — Sleeper's median-match opponent.
+    Even team counts average the two middle scores, matching Sleeper (verified
+    to reproduce all 24 median-league rosters' real records)."""
+    vals = sorted(values)
+    n = len(vals)
+    if n % 2:
+        return vals[n // 2]
+    return (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+
+
 def _remaining_pairings(state, remaining_weeks, roster_ids, rng):
-    """Pairings for each remaining week. Uses the known schedule where present;
-    otherwise a random round-robin so the simulation still runs (flagged: this
-    fallback fires only when the platform doesn't expose future pairings)."""
+    """Pairings for each remaining week. Uses the real published schedule where
+    present — which, on a scheduled Sleeper league, is EVERY remaining week
+    (validated 2026-08-09, 18/18 weeks on an unplayed league). The random
+    round-robin fallback fires only for a week the platform publishes no
+    pairings for at all, i.e. a `pre_draft` league; `SimResult.
+    random_paired_weeks` records exactly which weeks took that path."""
     out = []
     for week in remaining_weeks:
         pairs = state.schedule.get(week)

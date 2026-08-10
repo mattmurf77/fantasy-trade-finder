@@ -309,6 +309,19 @@ Third, unchanged from the parent report: `projected_wins` for a median league st
 
 **Conclusion for the ship decision:** the preseason recommendation in §4 is conditional on BUG-1 exactly as the in-season one is, and the median-league split is an additional reason to fix it before any surface lights.
 
+> **UPDATE — 2026-08-09: BUG-1 is fixed, and this section's hypothesis did NOT pan out.** With `simulate()` now booking the median decision, the preseason split was re-measured on the same fixtures (`scripts/outlook_preseason_backtest.py --sims 10000`):
+>
+> | Split | n | preseason playoff Brier — before | after | week-3 model (after) |
+> |---|---|---|---|---|
+> | median-match leagues (Lakeview 2024/2025) | 24 | 0.2298 | **0.2326** | 0.2109 |
+> | H2H-only leagues (FFv3 2022–2025) | 48 | 0.1789 | **0.1789** (identical) | 0.1963 |
+>
+> Modelling the median game made the preseason median-league number *marginally worse*, not better — and the H2H leagues are bit-identical, confirming the change is confined to median leagues. The reasoning above was right about the mechanism (the median game removes luck) but wrong about the sign of the consequence: less luck means the engine is **more confident**, which costs Brier precisely where the underlying prior is weak. The dynasty-value prior is weak, so the median league gets no relief from the fix. The confound this section flags — median leagues are also the only superflex/TEP leagues — is therefore the better explanation of the 0.2298-vs-0.1789 gap, and it remains unresolved at n = 2 league-seasons.
+>
+> The `projected_wins` scale complaint IS resolved: `projected_wins` now lands on the same 28-decision scale as the record Sleeper displays. And the in-season picture improved substantially (median leagues 0.1017 → 0.0666) — see the parent report §7. Net: the ship recommendation in §4 is **unchanged**, and the case for gating the surface to `completed_weeks >= 3` is slightly stronger.
+>
+> *(Interaction: the FFv3 numbers will also move once the parallel IDP-slot pricing defect is fixed. A combined re-measurement is needed after both land.)*
+
 ---
 
 ## 6. Hypothesis 1b, re-tested with period-correct values
