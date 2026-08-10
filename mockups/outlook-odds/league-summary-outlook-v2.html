@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #169 — League Summary outlook v2 (bands, playoff-only, merged standings)</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:28px 16px 64px;gap:22px}
+  .pageh{max-width:840px;width:100%}
+  .pageh h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.05;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+  .pageh h1::before{content:"";width:16px;height:3px;background:var(--warn);flex:none}
+  .pageh p{font-size:13px;line-height:1.55;color:var(--chalk-dim);margin:0 0 4px;max-width:74ch}
+  .pageh p b{color:var(--chalk)}
+  .pageh .tag{display:inline-block;font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+     color:var(--warn);border:1px solid var(--warn);border-radius:2px;padding:2px 6px;margin:8px 6px 0 0}
+  .pageh .tag.dead{color:var(--neg);border-color:var(--neg)}
+  .pageh .tag.ok{color:var(--pos);border-color:var(--pos)}
+
+  .framerow{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;align-items:flex-start;max-width:840px}
+  .frame{width:393px;max-width:100%}
+  .frame h3{font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.02em;
+     text-transform:uppercase;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .frame h3 .fb{font:600 9px var(--ui);letter-spacing:.06em;border-radius:2px;padding:2px 6px;text-transform:uppercase}
+  .fb.cur{color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .fb.rec{color:var(--pos);border:1px solid var(--pos)}
+  .fb.opt{color:var(--warn);border:1px solid var(--warn)}
+  .frame .fsub{font-size:12px;line-height:1.5;color:var(--chalk-dim);margin:0 0 10px}
+
+  .phone{width:393px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+     border-radius:22px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+     padding:0 20px;font:600 12px var(--mono);color:var(--chalk-dim)}
+  .body{padding:12px 16px 18px}
+
+  /* home row + basis toggle (current screen chrome, abbreviated) */
+  .homerow{display:flex;align-items:center;gap:10px;padding:8px 0 10px;margin-bottom:10px;
+     border-bottom:1px solid var(--line)}
+  .homerow .hm{flex:1}
+  .homerow .hm b{font:600 13px var(--ui);display:block}
+  .homerow .hm small{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .homerow .chev{color:var(--chalk-faint)}
+  .basis{display:flex;gap:8px;margin-bottom:12px}
+  .chip{padding:6px 11px;border-radius:4px;border:1px solid var(--line);background:transparent;
+     color:var(--chalk-dim);font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase}
+  .chip.on{background:var(--ink-3);border-color:var(--line-strong);color:var(--chalk)}
+
+  /* section header */
+  .oddshead{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+  .ticklab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--warn);
+     display:flex;align-items:center;gap:8px}
+  .ticklab::before{content:"";width:12px;height:2px;background:var(--warn);flex:none}
+  .ribbon{font:600 8px var(--ui);letter-spacing:.05em;text-transform:uppercase;color:var(--warn);
+     border:1px solid var(--warn);border-radius:2px;padding:2px 6px}
+  .srccap{font:500 11px var(--ui);color:var(--chalk-faint);margin:0 0 8px;line-height:1.45}
+
+  /* CURRENT (as-built) rows */
+  .cur-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .cur-row .rk{font:600 13px var(--mono);color:var(--chalk-dim);width:18px;text-align:center;padding-top:2px}
+  .cur-row .rk.you{color:var(--ice)}
+  .cur-mid{flex:1;min-width:0}
+  .cur-name{display:flex;align-items:center;gap:6px}
+  .cur-name b{font:600 13px var(--ui)}
+  .youbadge{font:600 8px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     color:var(--on-ice);background:var(--ice);border-radius:2px;padding:1px 4px}
+  .cur-sub{font:500 11px var(--mono);color:var(--chalk-dim);margin:2px 0 6px}
+  .cur-stats{display:flex;gap:14px}
+  .cur-stat{flex:1}
+  .cur-stat .lab{font:500 9px var(--ui);letter-spacing:.05em;text-transform:uppercase;color:var(--chalk-faint)}
+  .cur-stat .val{font:600 14px var(--mono);margin:1px 0 4px}
+  .cur-track{height:4px;background:var(--ink-3);border-radius:2px;overflow:hidden}
+  .cur-fill{height:100%;background:var(--warn)}
+
+  /* PROPOSED rows — single line, seed-ordered */
+  .p-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .p-row .rk{font:600 13px var(--mono);color:var(--chalk-dim);width:18px;text-align:center}
+  .p-row .rk.you{color:var(--ice)}
+  .p-row .nm{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
+  .p-row .nm b{font:600 13px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .p-row .rec{font:500 11px var(--mono);color:var(--chalk-dim);white-space:nowrap}
+  .band{font:600 9px var(--ui);letter-spacing:.05em;text-transform:uppercase;border-radius:2px;
+     padding:3px 7px;white-space:nowrap}
+  .band.likely{color:var(--pos);border:1px solid var(--pos);background:rgba(34,197,94,.08)}
+  .band.tossup{color:var(--warn);border:1px solid var(--warn);background:rgba(245,158,11,.08)}
+  .band.unlikely{color:var(--neg);border:1px solid var(--neg);background:rgba(239,68,68,.08)}
+  .pctchip{font:600 12px var(--mono);color:var(--chalk);background:var(--ink-2);
+     border:1px solid var(--line-strong);border-radius:2px;padding:2px 7px;white-space:nowrap}
+  .cutline{display:flex;align-items:center;gap:8px;padding:7px 0;color:var(--chalk-faint);
+     font:500 9px var(--ui);letter-spacing:.07em;text-transform:uppercase}
+  .cutline::before,.cutline::after{content:"";flex:1;border-top:1px dashed var(--line-strong)}
+  .idpcap{display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding:8px 10px;
+     background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--warn);
+     border-radius:4px;font:500 11px var(--ui);color:var(--chalk-dim);line-height:1.45}
+
+  /* collapsed strip variant */
+  .strip{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:12px;
+     background:#12100b;border:1px solid #3a2f14;border-radius:6px}
+  .strip .sl{font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--warn)}
+  .strip .sv{flex:1;display:flex;align-items:center;gap:8px;font:500 12px var(--ui);color:var(--chalk-dim)}
+  .strip .chev{color:var(--chalk-faint)}
+
+  /* abbreviated chart stub to show the fold */
+  .chartstub{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px}
+  .chartstub .ch{display:flex;justify-content:space-between;margin-bottom:10px}
+  .chartstub .ch b{font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.02em;text-transform:uppercase}
+  .chartstub .ch small{font:500 10px var(--mono);color:var(--chalk-faint)}
+  .cols{display:flex;align-items:flex-end;gap:6px;height:64px}
+  .cols i{flex:1;display:block;border-radius:2px 2px 0 0;background:var(--ink-3);overflow:hidden;position:relative}
+  .cols i b{position:absolute;inset:auto 0 0 0;display:block}
+  .fade{position:relative}
+  .fade::after{content:"BELOW THE FOLD ↓";position:absolute;inset:0;display:flex;align-items:flex-end;
+     justify-content:center;padding-bottom:6px;background:linear-gradient(rgba(7,9,12,0),rgba(7,9,12,.88) 70%);
+     font:600 9px var(--ui);letter-spacing:.1em;color:var(--chalk-faint)}
+  /* NOTE: this gradient is mockup annotation chrome (fold indicator), not UI. */
+
+  .why{width:393px;max-width:100%;font-size:12px;line-height:1.6;color:var(--chalk-faint);
+     background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--warn);
+     border-radius:6px;padding:11px 13px;margin-top:10px}
+  .why b{color:var(--chalk-dim)} .why .m{font-family:var(--mono);font-size:11px}
+  .why .good{color:var(--pos)} .why .bad{color:var(--neg)}
+</style>
+</head>
+<body>
+
+<div class="pageh">
+  <h1>League Summary — Outlook v2</h1>
+  <p><b>The one surface that earned full odds treatment.</b> The shipped <span style="font-family:var(--mono)">OddsSection</span> (dark, flag <span style="font-family:var(--mono)">outlook.odds</span>) is three revisions behind the calibration evidence: it renders title odds (no demonstrated skill — removed, not caveated), raw 1%-precision percentages at any week (bands are the verdict for weeks 0–5), and a decimal "proj seed 3.2". The v2 merges <b>projected standings</b> (the list order + projected record — previously shown nowhere) and <b>playoff odds</b> (the band chip) into one seed-ordered section keyed to the existing <span style="font-family:var(--mono)">meta.beta</span> signal, which clears at <span style="font-family:var(--mono)">completed_weeks &ge; 6</span> — the calibrated gate, no new mechanism.</p>
+  <span class="tag">bands weeks 0–5</span><span class="tag ok">playoff odds validated (+60%)</span><span class="tag dead">title odds removed</span><span class="tag">gate = meta.beta (week 6)</span>
+</div>
+
+<!-- ───────────────────────── FRAME A — CURRENT ───────────────────────── -->
+<div class="framerow">
+<div class="frame">
+  <h3>A · As built today <span class="fb cur">current</span></h3>
+  <p class="fsub">Faithful to <span style="font-family:var(--mono)">LeagueSummaryScreen.tsx</span> OddsSection/OddsRow/OddStat: playoff% AND title% at 1% precision, two amber meters per team, "proj seed 3.2", at any week. 12 teams &times; 2 stat blocks push the value chart far below the fold.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="homerow"><div class="hm"><b>League home</b><small>Lakeview Dynasty · 12-team</small></div><span class="chev">&#8250;</span></div>
+      <div class="basis"><span class="chip on">Consensus</span><span class="chip">My board</span><span class="chip" style="opacity:.45">Redraft (soon)</span></div>
+
+      <div class="oddshead"><span class="ticklab">Playoff picture</span><span class="ribbon">Projected · preseason · beta</span></div>
+      <p class="srccap">Preseason roster-value projection · 10,000 sims · top 6 make the playoffs</p>
+
+      <div class="cur-row">
+        <div class="rk">1</div>
+        <div class="cur-mid">
+          <div class="cur-name"><b>The Autodrafters</b></div>
+          <div class="cur-sub">0-0 · proj seed 1.8</div>
+          <div class="cur-stats">
+            <div class="cur-stat"><div class="lab">Playoff</div><div class="val">83%</div><div class="cur-track"><div class="cur-fill" style="width:83%"></div></div></div>
+            <div class="cur-stat"><div class="lab">Title</div><div class="val">21%</div><div class="cur-track"><div class="cur-fill" style="width:21%"></div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="cur-row">
+        <div class="rk you">2</div>
+        <div class="cur-mid">
+          <div class="cur-name"><b>Dynasty Warlords</b><span class="youbadge">You</span></div>
+          <div class="cur-sub">0-0 · proj seed 3.2</div>
+          <div class="cur-stats">
+            <div class="cur-stat"><div class="lab">Playoff</div><div class="val">71%</div><div class="cur-track"><div class="cur-fill" style="width:71%"></div></div></div>
+            <div class="cur-stat"><div class="lab">Title</div><div class="val">12%</div><div class="cur-track"><div class="cur-fill" style="width:12%"></div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="cur-row">
+        <div class="rk">3</div>
+        <div class="cur-mid">
+          <div class="cur-name"><b>Zero RB Zealots</b></div>
+          <div class="cur-sub">0-0 · proj seed 3.9</div>
+          <div class="cur-stats">
+            <div class="cur-stat"><div class="lab">Playoff</div><div class="val">64%</div><div class="cur-track"><div class="cur-fill" style="width:64%"></div></div></div>
+            <div class="cur-stat"><div class="lab">Title</div><div class="val">9%</div><div class="cur-track"><div class="cur-fill" style="width:9%"></div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="fade" style="height:88px">
+        <div class="cur-row">
+          <div class="rk">4</div>
+          <div class="cur-mid">
+            <div class="cur-name"><b>Bell Cow Believers</b></div>
+            <div class="cur-sub">0-0 · proj seed 4.4</div>
+            <div class="cur-stats">
+              <div class="cur-stat"><div class="lab">Playoff</div><div class="val">58%</div><div class="cur-track"><div class="cur-fill" style="width:58%"></div></div></div>
+              <div class="cur-stat"><div class="lab">Title</div><div class="val">8%</div><div class="cur-track"><div class="cur-fill" style="width:8%"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="why"><b>Why it can't ship as-is:</b> the Title column asserts a number with <b class="bad">no demonstrated skill</b> (3 of 6 backtested leagues do worse than guessing); "83%" preseason is exactly the over-confident figure the calibration killed (a 95% preseason call realizes 78%); "proj seed 3.2" is meaningless to a non-technical user; and 8 more teams of this render below the fold, burying the actual product. Nothing here reads <span class="m">meta.priced_slot_coverage</span>, so an IDP league shows offense-only odds uncaptioned.</div>
+</div>
+
+<!-- ───────────────────────── FRAME B — PROPOSED weeks 0–5 ───────────────────────── -->
+<div class="frame">
+  <h3>B · Weeks 0–5 — bands only <span class="fb rec">recommended</span></h3>
+  <p class="fsub">While <span style="font-family:var(--mono)">meta.beta</span> is true: seed-ordered single-line rows, a three-band chip, a visible playoff cutline, no numbers anywhere. The list order IS the projected standings; the chip IS the playoff odds. Title odds: gone.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="homerow"><div class="hm"><b>League home</b><small>Lakeview Dynasty · 12-team</small></div><span class="chev">&#8250;</span></div>
+      <div class="basis"><span class="chip on">Consensus</span><span class="chip">My board</span><span class="chip" style="opacity:.45">Redraft (soon)</span></div>
+
+      <div class="oddshead"><span class="ticklab">Season outlook</span><span class="ribbon">Projected · preseason · beta</span></div>
+      <p class="srccap">Preseason roster-value projection · order = projected finish · top 6 make the playoffs</p>
+
+      <div class="p-row"><div class="rk">1</div><div class="nm"><b>The Autodrafters</b></div><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk you">2</div><div class="nm"><b>Dynasty Warlords</b><span class="youbadge">You</span></div><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk">3</div><div class="nm"><b>Zero RB Zealots</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">4</div><div class="nm"><b>Bell Cow Believers</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">5</div><div class="nm"><b>Waiver Wire Wolves</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">6</div><div class="nm"><b>Middling Managers</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="cutline">top 6 make the playoffs</div>
+      <div class="p-row"><div class="rk">7</div><div class="nm"><b>Trade Deadline Ghosts</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">8</div><div class="nm"><b>Kicker Truthers</b></div><span class="band unlikely">Unlikely</span></div>
+      <div class="p-row" style="border-bottom:none"><div class="rk">9</div><div class="nm"><b>Rebuild Central</b></div><span class="band unlikely">Unlikely</span></div>
+
+      <div class="chartstub">
+        <div class="ch"><b>League Rankings</b><small>consensus · all</small></div>
+        <div class="cols">
+          <i style="height:100%"><b style="height:38%;background:var(--qb)"></b></i><i style="height:88%"><b style="height:30%;background:var(--rb)"></b></i>
+          <i style="height:80%"><b style="height:42%;background:var(--wr)"></b></i><i style="height:74%"><b style="height:25%;background:var(--te)"></b></i>
+          <i style="height:66%"><b style="height:35%;background:var(--wr)"></b></i><i style="height:60%"><b style="height:28%;background:var(--rb)"></b></i>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="why"><b>Why bands:</b> preseason skill is real but weak (+21.3%, CI floor <b>+2.9%</b>) and over-confident at the extremes (95% predicted &rarr; 78% realized; 3% &rarr; 17%). Three bands are the finest granularity that evidence supports: <span class="m">Likely &ge; 0.65 · Toss-up 0.35–0.65 · Unlikely &lt; 0.35</span> (thresholds are an operator sign-off item; chips reuse the pos/warn/neg tercile-chip precedent already shipped on this screen — data encodings, not chrome). <b>No projected W-L pre-week-6</b>: a "proj 10-4" is the same false-precision number as "71%" wearing a different unit; order + band carries the information the model has actually earned. Single-line rows put the whole 12-team picture plus the top of the chart on one screen.</div>
+</div>
+</div>
+
+<!-- ───────────────────────── FRAMES C1/C2 — week 6+ ───────────────────────── -->
+<div class="framerow">
+<div class="frame">
+  <h3>C1 · Week 6+ — bands persist <span class="fb rec">safe default</span></h3>
+  <p class="fsub"><span style="font-family:var(--mono)">meta.beta</span> cleared (<span style="font-family:var(--mono)">completed_weeks &ge; 6</span>): ribbon drops "beta", rows gain the numbers that have now earned their place — current record and projected final record. Odds stay banded.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="oddshead"><span class="ticklab">Season outlook</span><span class="ribbon">Projected</span></div>
+      <p class="srccap">Based on recent scoring · order = projected finish · top 6 make the playoffs</p>
+
+      <div class="p-row"><div class="rk">1</div><div class="nm"><b>Zero RB Zealots</b></div><span class="rec">5-1 · proj 11-3</span><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk you">2</div><div class="nm"><b>Dynasty Warlords</b><span class="youbadge">You</span></div><span class="rec">4-2 · proj 9-5</span><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk">3</div><div class="nm"><b>The Autodrafters</b></div><span class="rec">4-2 · proj 9-5</span><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk">4</div><div class="nm"><b>Waiver Wire Wolves</b></div><span class="rec">3-3 · proj 8-6</span><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">5</div><div class="nm"><b>Bell Cow Believers</b></div><span class="rec">3-3 · proj 7-7</span><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">6</div><div class="nm"><b>Middling Managers</b></div><span class="rec">3-3 · proj 7-7</span><span class="band tossup">Toss-up</span></div>
+      <div class="cutline">top 6 make the playoffs</div>
+      <div class="p-row"><div class="rk">7</div><div class="nm"><b>Kicker Truthers</b></div><span class="rec">2-4 · proj 6-8</span><span class="band tossup">Toss-up</span></div>
+      <div class="p-row" style="border-bottom:none"><div class="rk">8</div><div class="nm"><b>Rebuild Central</b></div><span class="rec">1-5 · proj 4-10</span><span class="band unlikely">Unlikely</span></div>
+    </div>
+  </div>
+  <div class="why"><b>Why numbers appear here and not before:</b> week 6 is the first point the engine is unambiguously good — playoff Brier nearly halves from week 3 (0.2012 &rarr; 0.1065, +57% skill) and <span class="m">meta.beta</span> already encodes exactly this threshold. Projected W-L joins because BUG-1 is fixed (median-match leagues project on the same decision scale Sleeper displays). Bands remain the default presentation: per-week calibration is still unmeasured (the pooled tables are an inference, not a measurement).</div>
+</div>
+
+<div class="frame">
+  <h3>C2 · Week 6+ — 5%-rounded percentage <span class="fb opt">operator risk option</span></h3>
+  <p class="fsub">Same layout; the band chip becomes a playoff percentage rounded to 5%. Defensible on pooled in-season calibration (the two big buckets sit inside &plusmn;0.05) — but the calibration table is not stratified by week, so this is an <b>operator risk call, not a validated result</b>.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="oddshead"><span class="ticklab">Season outlook</span><span class="ribbon">Projected</span></div>
+      <p class="srccap">Based on recent scoring · playoff odds rounded to 5% · top 6 make the playoffs</p>
+
+      <div class="p-row"><div class="rk">1</div><div class="nm"><b>Zero RB Zealots</b></div><span class="rec">5-1 · proj 11-3</span><span class="pctchip">90%</span></div>
+      <div class="p-row"><div class="rk you">2</div><div class="nm"><b>Dynasty Warlords</b><span class="youbadge">You</span></div><span class="rec">4-2 · proj 9-5</span><span class="pctchip">75%</span></div>
+      <div class="p-row"><div class="rk">3</div><div class="nm"><b>The Autodrafters</b></div><span class="rec">4-2 · proj 9-5</span><span class="pctchip">70%</span></div>
+      <div class="p-row"><div class="rk">4</div><div class="nm"><b>Waiver Wire Wolves</b></div><span class="rec">3-3 · proj 8-6</span><span class="pctchip">55%</span></div>
+      <div class="p-row"><div class="rk">5</div><div class="nm"><b>Bell Cow Believers</b></div><span class="rec">3-3 · proj 7-7</span><span class="pctchip">45%</span></div>
+      <div class="p-row"><div class="rk">6</div><div class="nm"><b>Middling Managers</b></div><span class="rec">3-3 · proj 7-7</span><span class="pctchip">40%</span></div>
+      <div class="cutline">top 6 make the playoffs</div>
+      <div class="p-row"><div class="rk">7</div><div class="nm"><b>Kicker Truthers</b></div><span class="rec">2-4 · proj 6-8</span><span class="pctchip">30%</span></div>
+      <div class="p-row" style="border-bottom:none"><div class="rk">8</div><div class="nm"><b>Rebuild Central</b></div><span class="rec">1-5 · proj 4-10</span><span class="pctchip">10%</span></div>
+    </div>
+  </div>
+  <div class="why"><b>Tradeoff:</b> a number is more legible than a band and week-6+ pooled calibration supports it — but "75%" invites 1-point comparisons the model can't back, and the C1&rarr;C2 difference is invisible to most users while the risk is real. If chosen, the 5% rounding is load-bearing (never render 73%), title odds stay banned regardless, and the choice should be a server-side presentation flag so it can be reverted without a client build.</div>
+</div>
+</div>
+
+<!-- ───────────────────────── FRAME D — IDP caption · FRAME E — collapsed strip ───────────────────────── -->
+<div class="framerow">
+<div class="frame">
+  <h3>D · IDP league — coverage caption <span class="fb rec">required for IDP</span></h3>
+  <p class="fsub">FFv3 starts 15 slots; no license-clean dynasty IDP value board exists, so 8 slots are unpriced and <span style="font-family:var(--mono)">meta.priced_slot_coverage</span> reports <span style="font-family:var(--mono)">fraction 0.4667, affects_strength true</span>. The caption renders ONLY then — a <span style="font-family:var(--mono)">trailing_scores</span> payload never reads the board and gets no caption.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="oddshead"><span class="ticklab">Season outlook</span><span class="ribbon">Projected · preseason · beta</span></div>
+      <p class="srccap">Preseason roster-value projection · order = projected finish · top 6 make the playoffs</p>
+
+      <div class="p-row"><div class="rk">1</div><div class="nm"><b>Blitz Krieg</b></div><span class="band likely">Likely</span></div>
+      <div class="p-row"><div class="rk you">2</div><div class="nm"><b>Sack Lunch</b><span class="youbadge">You</span></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row"><div class="rk">3</div><div class="nm"><b>Edge Case</b></div><span class="band tossup">Toss-up</span></div>
+      <div class="p-row" style="border-bottom:none"><div class="rk">4</div><div class="nm"><b>Pick Six Packers</b></div><span class="band tossup">Toss-up</span></div>
+
+      <div class="idpcap"><span style="color:var(--warn);font-weight:700">!</span><span><b style="color:var(--chalk-dim)">Based on your offensive starters.</b> This league starts 8 defensive/kicker slots FTF can't price yet, so the projection reads QB/RB/WR/TE strength only.</span></div>
+    </div>
+  </div>
+  <div class="why"><b>Why this is a precondition, not polish:</b> in an IDP league every preseason number the model produces is an offensive-core estimate — lighting odds there without the caption presents a half-lineup projection as a whole-league one. Copy states the limitation in league terms ("8 defensive/kicker slots"), not payload terms. <span class="m">unpriced_slots[]</span> carries the exact slot names if the operator wants them itemized behind a tap.</div>
+</div>
+
+<div class="frame">
+  <h3>E · Collapsed "your outlook" strip <span class="fb opt">placement variant</span></h3>
+  <p class="fsub">Tenet #205 alternative: the section collapses to a one-line amber strip (your band only) between the basis toggle and the chart; tapping expands the full B/C section in place. The chart — the screen's actual product — stays above the fold.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>League</span></div>
+    <div class="body">
+      <div class="homerow"><div class="hm"><b>League home</b><small>Lakeview Dynasty · 12-team</small></div><span class="chev">&#8250;</span></div>
+      <div class="basis"><span class="chip on">Consensus</span><span class="chip">My board</span><span class="chip" style="opacity:.45">Redraft (soon)</span></div>
+
+      <div class="strip">
+        <span class="sl">Season outlook</span>
+        <span class="sv"><span class="band likely">Likely</span> for the playoffs · projected 2nd of 12</span>
+        <span class="chev">&#8250;</span>
+      </div>
+
+      <div class="chartstub" style="margin-top:0">
+        <div class="ch"><b>League Rankings</b><small>consensus · all</small></div>
+        <div class="cols">
+          <i style="height:100%"><b style="height:38%;background:var(--qb)"></b></i><i style="height:88%"><b style="height:30%;background:var(--rb)"></b></i>
+          <i style="height:80%"><b style="height:42%;background:var(--wr)"></b></i><i style="height:74%"><b style="height:25%;background:var(--te)"></b></i>
+          <i style="height:66%"><b style="height:35%;background:var(--wr)"></b></i><i style="height:60%"><b style="height:28%;background:var(--rb)"></b></i>
+          <i style="height:54%"><b style="height:22%;background:var(--qb)"></b></i><i style="height:47%"><b style="height:30%;background:var(--te)"></b></i>
+        </div>
+      </div>
+      <div class="p-row" style="margin-top:10px"><div class="rk">1</div><div class="nm"><b>The Autodrafters</b></div><span class="rec">31.2k</span></div>
+      <div class="p-row"><div class="rk you">2</div><div class="nm"><b>Dynasty Warlords</b><span class="youbadge">You</span></div><span class="rec">29.8k</span></div>
+    </div>
+  </div>
+  <div class="why"><b>Tradeoff:</b> "projected 2nd of 12" states your seed in words a non-technical user parses instantly, and the whole-league table is one tap away instead of 12 rows deep. Cost: the league-wide standings — the shareable, argument-starting part — lose glanceability. Recommended pairing: strip collapsed by default at the TOP of the screen, full section (B/C) expanded in place on tap, expansion state remembered per league. If the operator prefers the full section always open, it should mount BELOW the chart card, not above it.</div>
+</div>
+</div>
+
+</body>
+</html>

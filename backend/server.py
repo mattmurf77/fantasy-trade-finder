@@ -10443,6 +10443,15 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         pick ids from our rookie ids would silently under-count. A crosswalk
         failure therefore degrades to an honestly-suppressed list, never a
         wrong one.
+      * franchise NAMES ← the same `league_members` rows, `username` →
+        `display_name` (#289). MFL's export carries none; ours have held them
+        since link time. This is a read off a list already in hand, so it adds
+        ZERO queries — and without it `owner_username` was `null` on every MFL
+        row and the client fell back to rendering the synthetic member id.
+      * MFL player NAMES ← `_shared_crosswalk().by_mfl_id`, the DP crosswalk's
+        own `mfl_id → (name, position)` map, for the ids that never crosswalked
+        to one of our players (rookies, mostly). Read off the same object as
+        `by_mfl_sleeper` so both degrade together.
       * rostered ids ← `league_members.player_ids`, already crosswalked into
         our id space at import time (MFL rosters are not re-fetched here).
     """
@@ -10464,10 +10473,17 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         members = []
     prefix = _mfl_member_id(lid, "")
     franchise_to_user: dict[str, str] = {}
+    usernames: dict[str, str] = {}
     rostered: list[str] = []
     for m in members:
         uid = str(m.get("user_id") or "")
         rostered.extend(str(p) for p in (m.get("player_ids") or []) if p)
+        # #289 — the franchise display name, off the row we already loaded.
+        # Zero extra queries. Empty names are dropped so `_render_mfl` falls
+        # through to `Team <fid>` rather than emitting "".
+        name = str(m.get("username") or m.get("display_name") or "").strip()
+        if uid and name:
+            usernames[uid] = name
         if uid.startswith(prefix):
             franchise_to_user[uid[len(prefix):]] = uid
     my_team = str(row.get("platform_my_team") or "")
@@ -10476,17 +10492,25 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         franchise_to_user[my_team] = link_user
 
     try:
-        player_ids = _shared_crosswalk().by_mfl_sleeper
+        xw = _shared_crosswalk()
+        player_ids = xw.by_mfl_sleeper
+        # #289 tier 2 — the crosswalk's own MFL id -> (name, position) map,
+        # read off the SAME object so a crosswalk failure degrades both maps
+        # together rather than leaving a half-wired name source.
+        player_names = xw.by_mfl_id
     except Exception as e:                       # never a 5xx (lld §2.1)
         log.warning("draft-board: MFL crosswalk unavailable for %s: %s", lid, e)
         player_ids = {}
+        player_names = {}
 
     return {
         "request_fields": {
             "mfl_host":              host,
             "mfl_year":              year,
             "mfl_franchise_to_user": franchise_to_user,
+            "mfl_usernames":         usernames,
             "mfl_player_ids":        player_ids,
+            "mfl_player_names":      player_names,
             "rostered_ids":          rostered,
         },
         "cookie": _mfl_cookie_for(sess, str(sess.get("user_id") or "")),

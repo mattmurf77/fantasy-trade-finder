@@ -396,6 +396,14 @@ DP_TO_SLEEPER_NAME: dict[str, str] = {
     "jimmy horn jr": "jimmy horn",
     "joe milton iii": "joe milton",
     "john metchie iii": "john metchie",
+    # 2026-08-10: DP's CURRENT board says "Kenneth Walker III"; its 2022-era
+    # boards said "Ken Walker III". Both map to the same Sleeper player, so
+    # dated historical boards (backend/dp_values_history.py, used by the
+    # outlook backtests) join instead of silently dropping DP rank 61.
+    # Inert on the live path while DP emits the long form. The RB/WR
+    # "Kenneth Walker" collision is handled downstream by the position-strict
+    # join (#127's pos_map), not by this name map.
+    "ken walker iii": "kenneth walker",
     "kenneth walker iii": "kenneth walker",
     "kevin coleman jr": "kevin coleman",
     "kyle pitts sr": "kyle pitts",
