@@ -5,13 +5,13 @@
     "name": "FTF-iOS18",
     "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
   },
-  "generated_at": "2026-08-10T14:13:25+00:00",
+  "generated_at": "2026-08-10T15:08:00+00:00",
   "screens": {
     "anchors": {
       "captures": [
         {
-          "bytes": 21355,
-          "captured_at": "2026-08-10T05:25:11+00:00",
+          "bytes": 21594,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/anchors.yaml",
@@ -23,8 +23,8 @@
           "state": "error"
         },
         {
-          "bytes": 16226,
-          "captured_at": "2026-08-10T05:25:11+00:00",
+          "bytes": 16421,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/anchors.yaml",
@@ -36,8 +36,8 @@
           "state": "loading"
         },
         {
-          "bytes": 44304,
-          "captured_at": "2026-08-10T05:25:11+00:00",
+          "bytes": 44696,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/question.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/anchors.yaml",
@@ -59,8 +59,8 @@
     "calc": {
       "captures": [
         {
-          "bytes": 51670,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 52290,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/demo-verdict.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -69,8 +69,8 @@
           "state": "demo-verdict"
         },
         {
-          "bytes": 47879,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 48553,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/league-mode.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -79,8 +79,8 @@
           "state": "league-mode"
         },
         {
-          "bytes": 44613,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 45343,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/live-populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -89,8 +89,8 @@
           "state": "live-populated"
         },
         {
-          "bytes": 54487,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 53462,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/one-sided-read.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -99,8 +99,8 @@
           "state": "one-sided-read"
         },
         {
-          "bytes": 58607,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 61127,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/picker-open.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -109,8 +109,8 @@
           "state": "picker-open"
         },
         {
-          "bytes": 42442,
-          "captured_at": "2026-08-10T13:05:47+00:00",
+          "bytes": 41118,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/verdict--live.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/calc.yaml",
@@ -132,8 +132,8 @@
     "free-agents": {
       "captures": [
         {
-          "bytes": 13551,
-          "captured_at": "2026-08-10T11:29:14+00:00",
+          "bytes": 13673,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/free-agents/error--rosters-unavailable.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/free-agents.yaml",
@@ -144,8 +144,8 @@
           "state": "error--rosters-unavailable"
         },
         {
-          "bytes": 68086,
-          "captured_at": "2026-08-10T11:29:14+00:00",
+          "bytes": 69945,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/free-agents/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/free-agents.yaml",
@@ -166,8 +166,8 @@
     "league": {
       "captures": [
         {
-          "bytes": 57232,
-          "captured_at": "2026-08-10T11:07:06+00:00",
+          "bytes": 53094,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/coverage--single-format.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@single-format.yaml",
@@ -176,8 +176,8 @@
           "state": "coverage--single-format"
         },
         {
-          "bytes": 50257,
-          "captured_at": "2026-08-10T11:12:43+00:00",
+          "bytes": 50635,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/first-paint-pending.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league.yaml",
@@ -188,8 +188,8 @@
           "state": "first-paint-pending"
         },
         {
-          "bytes": 47089,
-          "captured_at": "2026-08-10T11:07:06+00:00",
+          "bytes": 46766,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/hero--second-league.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@two-leagues.yaml",
@@ -198,8 +198,8 @@
           "state": "hero--second-league"
         },
         {
-          "bytes": 47651,
-          "captured_at": "2026-08-10T11:12:43+00:00",
+          "bytes": 48920,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league.yaml",
@@ -210,8 +210,8 @@
           "state": "populated"
         },
         {
-          "bytes": 53115,
-          "captured_at": "2026-08-10T13:24:37+00:00",
+          "bytes": 58769,
+          "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/league/progress-module.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
@@ -220,8 +220,8 @@
           "state": "progress-module"
         },
         {
-          "bytes": 47935,
-          "captured_at": "2026-08-10T13:24:37+00:00",
+          "bytes": 47031,
+          "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/league/works-now.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
@@ -239,8 +239,8 @@
     "league-summary": {
       "captures": [
         {
-          "bytes": 62511,
-          "captured_at": "2026-08-10T11:58:58+00:00",
+          "bytes": 62525,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league-summary/basis--personal.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -252,8 +252,8 @@
           "state": "basis--personal"
         },
         {
-          "bytes": 58381,
-          "captured_at": "2026-08-10T11:58:58+00:00",
+          "bytes": 56052,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league-summary/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -265,8 +265,8 @@
           "state": "error"
         },
         {
-          "bytes": 38166,
-          "captured_at": "2026-08-10T11:58:58+00:00",
+          "bytes": 38179,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league-summary/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -278,8 +278,8 @@
           "state": "loading"
         },
         {
-          "bytes": 56745,
-          "captured_at": "2026-08-10T11:58:58+00:00",
+          "bytes": 56295,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league-summary/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -291,8 +291,8 @@
           "state": "populated"
         },
         {
-          "bytes": 52976,
-          "captured_at": "2026-08-10T10:23:04+00:00",
+          "bytes": 54929,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league-summary/populated--single-format.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary@single-format.yaml",
@@ -311,8 +311,8 @@
     "leagues": {
       "captures": [
         {
-          "bytes": 13986,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 13985,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/leagues/empty.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/leagues@fresh.yaml",
@@ -321,8 +321,8 @@
           "state": "empty"
         },
         {
-          "bytes": 30800,
-          "captured_at": "2026-08-10T09:20:38+00:00",
+          "bytes": 30740,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/leagues/populated--two.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/leagues@two-leagues.yaml",
@@ -339,8 +339,8 @@
     "manual-ranks": {
       "captures": [
         {
-          "bytes": 34145,
-          "captured_at": "2026-08-10T05:59:04+00:00",
+          "bytes": 34277,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/manual-ranks.yaml",
@@ -351,8 +351,8 @@
           "state": "error"
         },
         {
-          "bytes": 54133,
-          "captured_at": "2026-08-10T05:59:04+00:00",
+          "bytes": 54258,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/manual-ranks.yaml",
@@ -363,8 +363,8 @@
           "state": "populated"
         },
         {
-          "bytes": 53310,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 54738,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/populated--unranked-order.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/manual-ranks@fresh.yaml",
@@ -375,15 +375,16 @@
       ],
       "source": [
         "mobile/src/screens/ManualRanksScreen.tsx",
-        "backend/ranking_service.py"
+        "mobile/src/components/PositionChip.tsx",
+        "mobile/src/components/TierBadge.tsx"
       ],
-      "source_sha256": "7d26b3d94a9057f7838a2f718065d407d593d04f2c1c5e0452f6cc7edc1d63b9"
+      "source_sha256": "7e9e30a0e315811967ac45f9ba82607a87aa88b3cdb7502bdf77c84b871deae5"
     },
     "matches": {
       "captures": [
         {
-          "bytes": 43243,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 43277,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/empty--mutual.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches@fresh.yaml",
@@ -392,8 +393,8 @@
           "state": "empty--mutual"
         },
         {
-          "bytes": 26454,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 26537,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches.yaml",
@@ -405,8 +406,8 @@
           "state": "error"
         },
         {
-          "bytes": 59359,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 61017,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--all-filter.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches@two-leagues.yaml",
@@ -415,8 +416,8 @@
           "state": "populated--all-filter"
         },
         {
-          "bytes": 47513,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 45937,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--awaiting.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches.yaml",
@@ -428,8 +429,8 @@
           "state": "populated--awaiting"
         },
         {
-          "bytes": 57386,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 56805,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--mutual.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches.yaml",
@@ -441,8 +442,8 @@
           "state": "populated--mutual"
         },
         {
-          "bytes": 44502,
-          "captured_at": "2026-08-10T13:24:37+00:00",
+          "bytes": 44487,
+          "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/matches/progress-module.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches@near-unlock.yaml",
@@ -451,8 +452,8 @@
           "state": "progress-module"
         },
         {
-          "bytes": 31211,
-          "captured_at": "2026-08-10T10:02:49+00:00",
+          "bytes": 31342,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/skeleton.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/matches.yaml",
@@ -472,8 +473,8 @@
     "onboarding": {
       "captures": [
         {
-          "bytes": 52596,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 52379,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s0-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -482,8 +483,8 @@
           "state": "s0-1"
         },
         {
-          "bytes": 53314,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 53580,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s0-2.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -492,8 +493,8 @@
           "state": "s0-2"
         },
         {
-          "bytes": 55924,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 55984,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s0-err-down.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -502,8 +503,8 @@
           "state": "s0-err-down"
         },
         {
-          "bytes": 115750,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 95167,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s0-err-notfound.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -512,8 +513,8 @@
           "state": "s0-err-notfound"
         },
         {
-          "bytes": 30786,
-          "captured_at": "2026-08-10T09:20:38+00:00",
+          "bytes": 32697,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s1-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -522,8 +523,8 @@
           "state": "s1-1"
         },
         {
-          "bytes": 57300,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 55815,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s2-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -532,8 +533,8 @@
           "state": "s2-1"
         },
         {
-          "bytes": 64678,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 66773,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s2-2.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -542,8 +543,8 @@
           "state": "s2-2"
         },
         {
-          "bytes": 55524,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 60570,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s2-3.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -552,8 +553,8 @@
           "state": "s2-3"
         },
         {
-          "bytes": 50406,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 49612,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s2-wait.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -562,8 +563,8 @@
           "state": "s2-wait"
         },
         {
-          "bytes": 62356,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 63077,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s3-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -572,8 +573,8 @@
           "state": "s3-1"
         },
         {
-          "bytes": 49337,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 49565,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s3-2.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -582,8 +583,8 @@
           "state": "s3-2"
         },
         {
-          "bytes": 80518,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 78363,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s4-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -592,8 +593,8 @@
           "state": "s4-1"
         },
         {
-          "bytes": 64117,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 61045,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s5-0.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -602,8 +603,8 @@
           "state": "s5-0"
         },
         {
-          "bytes": 61477,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 57323,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s5-5.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -612,8 +613,8 @@
           "state": "s5-5"
         },
         {
-          "bytes": 56582,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 57431,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s6-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -622,8 +623,8 @@
           "state": "s6-1"
         },
         {
-          "bytes": 59461,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 59034,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/onboarding/s8-1.png",
           "flags": "onboarding-v2",
           "flow": "unknown",
@@ -640,8 +641,8 @@
     "portfolio": {
       "captures": [
         {
-          "bytes": 51887,
-          "captured_at": "2026-08-10T14:13:25+00:00",
+          "bytes": 51805,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/portfolio/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/portfolio@two-leagues.yaml",
@@ -652,8 +653,8 @@
           "state": "populated"
         },
         {
-          "bytes": 53404,
-          "captured_at": "2026-08-10T14:13:25+00:00",
+          "bytes": 49302,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/portfolio/refreshing.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/portfolio@two-leagues.yaml",
@@ -672,8 +673,8 @@
     "profile": {
       "captures": [
         {
-          "bytes": 9292,
-          "captured_at": "2026-08-10T14:10:57+00:00",
+          "bytes": 9710,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/profile/flag-off.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/profile.yaml",
@@ -690,8 +691,8 @@
     "quick-rank": {
       "captures": [
         {
-          "bytes": 51764,
-          "captured_at": "2026-08-10T14:08:58+00:00",
+          "bytes": 51364,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-rank/step--clicked.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/quick-rank.yaml",
@@ -700,8 +701,8 @@
           "state": "step--clicked"
         },
         {
-          "bytes": 50772,
-          "captured_at": "2026-08-10T14:08:58+00:00",
+          "bytes": 50391,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-rank/step-populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/quick-rank.yaml",
@@ -718,8 +719,8 @@
     "quick-set": {
       "captures": [
         {
-          "bytes": 69037,
-          "captured_at": "2026-08-10T06:32:54+00:00",
+          "bytes": 66892,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-set/step-populated--seeded.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/quick-set.yaml",
@@ -738,8 +739,8 @@
     "rank-home": {
       "captures": [
         {
-          "bytes": 63021,
-          "captured_at": "2026-08-10T14:06:41+00:00",
+          "bytes": 63029,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/rank-home/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rank-home.yaml",
@@ -748,8 +749,8 @@
           "state": "populated"
         },
         {
-          "bytes": 57288,
-          "captured_at": "2026-08-10T14:06:41+00:00",
+          "bytes": 57157,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/rank-home/populated--more-expanded.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rank-home.yaml",
@@ -767,8 +768,8 @@
     "settings": {
       "captures": [
         {
-          "bytes": 45006,
-          "captured_at": "2026-08-10T11:55:59+00:00",
+          "bytes": 45957,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/account-section.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/settings.yaml",
@@ -779,8 +780,8 @@
           "state": "account-section"
         },
         {
-          "bytes": 46785,
-          "captured_at": "2026-08-10T10:32:54+00:00",
+          "bytes": 46602,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/league-rows.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/settings@two-leagues.yaml",
@@ -789,8 +790,8 @@
           "state": "league-rows"
         },
         {
-          "bytes": 5451,
-          "captured_at": "2026-08-10T11:55:59+00:00",
+          "bytes": 5531,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/settings.yaml",
@@ -801,8 +802,8 @@
           "state": "loading"
         },
         {
-          "bytes": 49464,
-          "captured_at": "2026-08-10T11:55:59+00:00",
+          "bytes": 49657,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/settings.yaml",
@@ -814,17 +815,15 @@
         }
       ],
       "source": [
-        "mobile/src/screens/SettingsScreen.tsx",
-        "mobile/src/components/TopBar.tsx",
-        "mobile/src/components/SteerSlider.tsx"
+        "mobile/src/screens/SettingsScreen.tsx"
       ],
-      "source_sha256": "f29f0505db1e16f3e3c396013059f09db146fd60ef68125298e81f33079d4e6a"
+      "source_sha256": "ce7e7df0f18eaf97ddd7cc80e63f4322dd366aa5bd14a3bc75a5f9274a2aaae9"
     },
     "sheets-feedback": {
       "captures": [
         {
-          "bytes": 65943,
-          "captured_at": "2026-08-10T11:53:28+00:00",
+          "bytes": 51667,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-feedback/open.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-feedback.yaml",
@@ -838,13 +837,13 @@
         "mobile/src/components/FeedbackFAB.tsx",
         "mobile/src/navigation/RootNav.tsx"
       ],
-      "source_sha256": "7485a5eb146f043ae943de69072e1301348c7f2677c8cfc8119bccb8b4ff35bd"
+      "source_sha256": "a6ecb65f013edaf6b9b5a574db55b0fb6b7db7e41b52ebc6292cd7b5dc8a4528"
     },
     "sheets-league-switcher": {
       "captures": [
         {
-          "bytes": 50653,
-          "captured_at": "2026-08-10T10:48:33+00:00",
+          "bytes": 51962,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-league-switcher/open.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-league-switcher.yaml",
@@ -862,8 +861,8 @@
     "sheets-rank-menu": {
       "captures": [
         {
-          "bytes": 46771,
-          "captured_at": "2026-08-10T10:42:38+00:00",
+          "bytes": 48385,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-rank-menu/collapsed.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-rank-menu.yaml",
@@ -872,8 +871,8 @@
           "state": "collapsed"
         },
         {
-          "bytes": 51825,
-          "captured_at": "2026-08-10T10:42:38+00:00",
+          "bytes": 52858,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-rank-menu/more-expanded.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-rank-menu.yaml",
@@ -891,8 +890,8 @@
     "sheets-trade-dna": {
       "captures": [
         {
-          "bytes": 56704,
-          "captured_at": "2026-08-10T10:45:27+00:00",
+          "bytes": 54620,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-trade-dna/fine-tuning.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-trade-dna.yaml",
@@ -901,8 +900,8 @@
           "state": "fine-tuning"
         },
         {
-          "bytes": 53146,
-          "captured_at": "2026-08-10T10:45:27+00:00",
+          "bytes": 53372,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-trade-dna/open.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/sheets/sheets-trade-dna.yaml",
@@ -921,8 +920,8 @@
     "signin": {
       "captures": [
         {
-          "bytes": 14266,
-          "captured_at": "2026-08-10T02:22:19+00:00",
+          "bytes": 14552,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/signin/busy.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/signin.yaml",
@@ -934,8 +933,8 @@
           "state": "busy"
         },
         {
-          "bytes": 33666,
-          "captured_at": "2026-08-10T02:22:19+00:00",
+          "bytes": 34425,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/signin/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/signin.yaml",
@@ -947,8 +946,8 @@
           "state": "error"
         },
         {
-          "bytes": 34951,
-          "captured_at": "2026-08-10T02:22:19+00:00",
+          "bytes": 35180,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/signin/hint-prefill.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/signin.yaml",
@@ -960,8 +959,8 @@
           "state": "hint-prefill"
         },
         {
-          "bytes": 36325,
-          "captured_at": "2026-08-10T02:22:19+00:00",
+          "bytes": 36334,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/signin/idle.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/signin.yaml",
@@ -981,8 +980,8 @@
     "tiers": {
       "captures": [
         {
-          "bytes": 47594,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 47782,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -994,8 +993,8 @@
           "state": "error"
         },
         {
-          "bytes": 44201,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 44312,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -1007,8 +1006,8 @@
           "state": "loading"
         },
         {
-          "bytes": 58540,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 58750,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -1020,8 +1019,8 @@
           "state": "populated"
         },
         {
-          "bytes": 56771,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 57191,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated--all-tab.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -1033,8 +1032,8 @@
           "state": "populated--all-tab"
         },
         {
-          "bytes": 51296,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 51293,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated--unassigned-pool.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers@fresh.yaml",
@@ -1043,8 +1042,8 @@
           "state": "populated--unassigned-pool"
         },
         {
-          "bytes": 72346,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 72488,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/search-highlight.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -1056,8 +1055,8 @@
           "state": "search-highlight"
         },
         {
-          "bytes": 67936,
-          "captured_at": "2026-08-10T05:35:50+00:00",
+          "bytes": 69203,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/sticky-header.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/tiers.yaml",
@@ -1071,15 +1070,16 @@
       ],
       "source": [
         "mobile/src/screens/TiersScreen.tsx",
-        "mobile/src/navigation/TabNav.tsx"
+        "mobile/src/components/PlayerCard.tsx",
+        "mobile/src/components/TierBadge.tsx"
       ],
-      "source_sha256": "04b36789034638807b5c0208b6710a8125225402e1b379f86ef1c62ae71f714d"
+      "source_sha256": "6b788c3d0202da1e7d616f3b73a1a554b7d1c74e1b2f728c800d6132eecb22ed"
     },
     "topbar": {
       "captures": [
         {
-          "bytes": 48327,
-          "captured_at": "2026-08-10T09:20:38+00:00",
+          "bytes": 48169,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/topbar/league-switcher.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/topbar@two-leagues.yaml",
@@ -1097,8 +1097,8 @@
     "trades": {
       "captures": [
         {
-          "bytes": 41835,
-          "captured_at": "2026-08-10T02:39:01+00:00",
+          "bytes": 41514,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/empty.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades.yaml",
@@ -1110,8 +1110,8 @@
           "state": "empty"
         },
         {
-          "bytes": 41918,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 41885,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/empty--cold.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades@fresh.yaml",
@@ -1122,8 +1122,8 @@
           "state": "empty--cold"
         },
         {
-          "bytes": 41845,
-          "captured_at": "2026-08-10T02:39:01+00:00",
+          "bytes": 41784,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades.yaml",
@@ -1135,8 +1135,8 @@
           "state": "error"
         },
         {
-          "bytes": 43538,
-          "captured_at": "2026-08-10T09:12:25+00:00",
+          "bytes": 45094,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/format-gate.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades@single-format.yaml",
@@ -1145,8 +1145,8 @@
           "state": "format-gate"
         },
         {
-          "bytes": 46831,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 51046,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/generating.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades@fresh.yaml",
@@ -1157,8 +1157,8 @@
           "state": "generating"
         },
         {
-          "bytes": 50539,
-          "captured_at": "2026-08-10T02:39:01+00:00",
+          "bytes": 47367,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades.yaml",
@@ -1170,8 +1170,8 @@
           "state": "loading"
         },
         {
-          "bytes": 41289,
-          "captured_at": "2026-08-10T13:24:37+00:00",
+          "bytes": 42356,
+          "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/trades/locked-gate.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades@near-unlock.yaml",
@@ -1180,8 +1180,8 @@
           "state": "locked-gate"
         },
         {
-          "bytes": 48835,
-          "captured_at": "2026-08-10T02:39:01+00:00",
+          "bytes": 51921,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trades/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trades.yaml",
@@ -1202,8 +1202,8 @@
     "trends": {
       "captures": [
         {
-          "bytes": 56736,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 56813,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/empty--no-history.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trends@fresh.yaml",
@@ -1212,8 +1212,8 @@
           "state": "empty--no-history"
         },
         {
-          "bytes": 47367,
-          "captured_at": "2026-08-10T05:19:05+00:00",
+          "bytes": 47134,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trends.yaml",
@@ -1225,8 +1225,8 @@
           "state": "error"
         },
         {
-          "bytes": 37977,
-          "captured_at": "2026-08-10T05:19:05+00:00",
+          "bytes": 38101,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trends.yaml",
@@ -1238,8 +1238,8 @@
           "state": "loading"
         },
         {
-          "bytes": 65018,
-          "captured_at": "2026-08-10T05:19:05+00:00",
+          "bytes": 65278,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trends.yaml",
@@ -1252,15 +1252,17 @@
         }
       ],
       "source": [
-        "mobile/src/screens/TrendsScreen.tsx"
+        "mobile/src/screens/TrendsScreen.tsx",
+        "mobile/src/components/TrendBar.tsx",
+        "mobile/src/components/PositionChip.tsx"
       ],
-      "source_sha256": "060d6bff633e43ab50d82c741fd32569b7919cdf6e8c84d60ac283ab3578a257"
+      "source_sha256": "e198f9cb51be9e6f7283939efd17fc98ef8ca63d976022b0142a3c27fa32fcb6"
     },
     "trios": {
       "captures": [
         {
-          "bytes": 50752,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 51321,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/all-ranked.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@fresh.yaml",
@@ -1271,8 +1273,8 @@
           "state": "all-ranked"
         },
         {
-          "bytes": 40578,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 40862,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@fresh.yaml",
@@ -1283,8 +1285,8 @@
           "state": "loading"
         },
         {
-          "bytes": 56001,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 52293,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/partial-selection.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@fresh.yaml",
@@ -1295,8 +1297,8 @@
           "state": "partial-selection"
         },
         {
-          "bytes": 50132,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 47477,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@fresh.yaml",
@@ -1307,8 +1309,8 @@
           "state": "populated"
         },
         {
-          "bytes": 44313,
-          "captured_at": "2026-08-10T08:56:04+00:00",
+          "bytes": 43561,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/populated--unlocked.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios.yaml",
@@ -1317,8 +1319,8 @@
           "state": "populated--unlocked"
         },
         {
-          "bytes": 50132,
-          "captured_at": "2026-08-10T09:42:07+00:00",
+          "bytes": 47477,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/progress-locked.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@fresh.yaml",
@@ -1329,8 +1331,8 @@
           "state": "progress-locked"
         },
         {
-          "bytes": 49285,
-          "captured_at": "2026-08-10T13:24:37+00:00",
+          "bytes": 49448,
+          "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/trios/progress-near-threshold.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios@near-unlock.yaml",
@@ -1339,8 +1341,8 @@
           "state": "progress-near-threshold"
         },
         {
-          "bytes": 48347,
-          "captured_at": "2026-08-10T08:56:04+00:00",
+          "bytes": 48425,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/scope-rookie--empty.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios.yaml",
@@ -1349,8 +1351,8 @@
           "state": "scope-rookie--empty"
         },
         {
-          "bytes": 46626,
-          "captured_at": "2026-08-10T08:56:04+00:00",
+          "bytes": 44861,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/speed-mode-on.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios.yaml",
@@ -1359,8 +1361,8 @@
           "state": "speed-mode-on"
         },
         {
-          "bytes": 49159,
-          "captured_at": "2026-08-10T08:56:04+00:00",
+          "bytes": 47289,
+          "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/unlock-banner.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/trios.yaml",
