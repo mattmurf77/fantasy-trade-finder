@@ -99,7 +99,7 @@ fi
 ( cd "$REPO" && export PORT="$PORT" PYTHONUNBUFFERED=1 && exec python3 run.py ) \
   > "$REPORT_DIR/flask.log" 2>&1 &
 FLASK_PID=$!
-trap 'kill $FLASK_PID 2>/dev/null' EXIT
+trap 'kill $FLASK_PID 2>/dev/null; wait $FLASK_PID 2>/dev/null' EXIT  # reap synchronously — an async kill leaves the port bound into the next cell
 
 # Handshake (30 s budget): whoami reports our profile AND flags round-trip.
 for i in $(seq 1 30); do
