@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-09 (outlook odds program: calibrated, productionized, still dark — operator decision pending)
+
+- **Calibration backtest (opus):** 6 real seasons of the operator's leagues as-of weeks 3/6/9/12. **Playoff odds: validated** — Brier 0.1113, +55.5% skill vs climatology (90% CI excludes 0), beats standings-extrapolation, calibration slightly under-confident (safe direction). **Title odds: NOT validated** — 6 champion events, CI spans zero. Verdict: MARGINAL PASS conditional. Report: `docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md`. 4 bugs found incl. **BUG-1 SEVERE**: `league_average_match` (median leagues) ignored → projected_wins 22.29 in a 14-week season on the LIVE 2026 league (G-024, xfail-pinned, spec'd for fix agent). BUG-2 resolves an LLD open item (Sleeper DOES publish future matchup_ids).
+- **Productionized dark (opus):** matchup fan-out cached by data grain (settled weeks immutable/no-TTL via learned high-water mark; live week 900s), flag `outlook.odds` 4-touch registered default-false, mobile/serializer contract reconciled (nullability fixes, preseason "Projected · beta" verified both sides; caught meta.beta==is_preseason aliasing — beta label would vanish at week 1). Lighting = plain flag flip via FTF_FLAGS env soak (procedure in status.md §Productionization; NOT executed).
+- **DynastyDaddy dual-lens source reference (2 sonnet lenses + adversarial reconciler):** converged doc byte-verified vs Leondoff/dynasty-daddy@6efac02 (MIT). They simulate NO scores (weighted coin flips), default strength is static preseason ADP (Elo is an opt-in Beta toggle), fixed bracket (no reseeding), no preseason uncertainty caveat. FTF's Gaussian/seeded/reseeding design validated by contrast. One adoptable idea: MOV-scaled K Elo strength provider. Each lens had 1 error the other caught; reconciler found 1 thing neither did. Parent research doc corrected inline (KTC→ADP claim).
+- **Operator decision pending:** fix BUG-1 then light playoff-odds-only (gated completed_weeks≥3), per calibration recommendation. Nothing user-visible shipped in this wave.
+- Gates: 2173 passed / 1 skipped / 1 xfailed; tsc clean.
+
 ## 2026-08-09 (ESPN linking round 2: cold-load login fix, league picker — field-validated)
 
 - **Field validation of the round-1 fixes:** operator successfully linked the private league on build 95 — events show cookie-authed league_read 200 (2.3MB) at 22:44 UTC after the wrong-account 401s. The observability layer diagnosed the whole arc without a debug session (correct cookie shapes + 401 = valid-but-non-member session).
