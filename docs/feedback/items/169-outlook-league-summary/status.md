@@ -174,6 +174,33 @@ env string.
 **Tests:** `backend/tests/test_outlook_odds.py` (19 pass + 1 skipped backtest
 scaffold). Full backend suite 998 passed / 1 skipped (was 979).
 
+## Calibration verdict (2026-08-09) — READ BEFORE FLIPPING THE FLAG
+
+The engine was backtested against 6 real captured Sleeper seasons of the
+operator's own leagues. Full method, numbers and verdict:
+**[calibration-report-2026-08-09.md](calibration-report-2026-08-09.md)**.
+
+- **Playoff odds: validated.** Brier 0.1113 vs climatology 0.2500 — **+55.5 %
+  skill, 90 % CI [+44.5 %, +65.9 %]**, beats standings-extrapolation too, and
+  improves monotonically from week 3 to week 12.
+- **Title odds: NOT validated.** +5.1 % skill, CI **[−13.2 %, +22.3 %] includes
+  zero**; at week 3 it is *worse* than a constant 1/12. Six champion events is
+  not a validation.
+- **Preseason `roster_value` source: not backtestable** (no historical value
+  board), and a Sleeper-projections cross-check disagrees with it on half the
+  playoff field in the superflex league.
+- **BUG-1 (severe, open):** `settings.league_average_match` (median match) is
+  ignored — the operator's Lakeview league has it ON in the live 2026 season,
+  which makes `projected_wins` read 22.29 in a 14-week season. Tracked by a
+  strict `xfail` in `backend/tests/test_outlook_calibration.py`; see also
+  `living-memory/GOTCHAS.md` G-024.
+- **Resolved:** Sleeper *does* publish future-week `matchup_id` pairings once a
+  league is scheduled (only `pre_draft` leagues lack them); the random-pairing
+  fallback costs ~5 % of playoff Brier.
+
+**Recommendation: do not flip `outlook.odds` until BUG-1 is fixed**; then ship
+playoff odds only, gated to `completed_weeks >= 3` and `status != "pre_draft"`.
+
 **Flagged for operator review:** the roster-value→weekly-points calibration
 (`outlook_mean_points`/`outlook_points_per_value_sd`/`outlook_sigma_default`)
 is a documented heuristic, not empirically fit — tune via the offline backtest
