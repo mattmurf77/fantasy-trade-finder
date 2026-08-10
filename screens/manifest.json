@@ -1,11 +1,11 @@
 {
-  "app_sha": "2f3cafe85cfaa0c5526e930e974302fea7b042f6bb752c9cda895be3f53061db",
+  "app_sha": "c81753a3802aea70938633123b655bab284a0f6df31e9dc043c26aab1f03e12e",
   "device": {
     "ios": "18.4",
     "name": "FTF-iOS18",
     "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
   },
-  "generated_at": "2026-08-10T13:24:37+00:00",
+  "generated_at": "2026-08-10T14:13:25+00:00",
   "screens": {
     "anchors": {
       "captures": [
@@ -637,6 +637,84 @@
       ],
       "source_sha256": "71b4052c8b6cbfdbfe26e580bc142dbba9f0acc62eb0005fbd968f88b8cd84d4"
     },
+    "portfolio": {
+      "captures": [
+        {
+          "bytes": 51887,
+          "captured_at": "2026-08-10T14:13:25+00:00",
+          "file": "mobile/portfolio/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/portfolio@two-leagues.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "two-leagues",
+          "state": "populated"
+        },
+        {
+          "bytes": 53404,
+          "captured_at": "2026-08-10T14:13:25+00:00",
+          "file": "mobile/portfolio/refreshing.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/portfolio@two-leagues.yaml",
+          "injections": [
+            "latency"
+          ],
+          "profile": "two-leagues",
+          "state": "refreshing"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/PortfolioScreen.tsx"
+      ],
+      "source_sha256": "6aca413dbd3e8873a88753952ef9bcdd0947525e3db93aa5c03ccaf46979faa2"
+    },
+    "profile": {
+      "captures": [
+        {
+          "bytes": 9292,
+          "captured_at": "2026-08-10T14:10:57+00:00",
+          "file": "mobile/profile/flag-off.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/profile.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "flag-off"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/ProfileScreen.tsx"
+      ],
+      "source_sha256": "3ae73efb88dc357c953188aefefc7ba9c759f60cc0eae1b032fb1d1d3ba702f7"
+    },
+    "quick-rank": {
+      "captures": [
+        {
+          "bytes": 51764,
+          "captured_at": "2026-08-10T14:08:58+00:00",
+          "file": "mobile/quick-rank/step--clicked.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/quick-rank.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "step--clicked"
+        },
+        {
+          "bytes": 50772,
+          "captured_at": "2026-08-10T14:08:58+00:00",
+          "file": "mobile/quick-rank/step-populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/quick-rank.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "step-populated"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/QuickRankScreen.tsx"
+      ],
+      "source_sha256": "dab3e65b8ec667ba90c1d9cf1199f9ec7dbb9a86bbb88e9c5756f2aba5b9fd36"
+    },
     "quick-set": {
       "captures": [
         {
@@ -656,6 +734,35 @@
         "mobile/src/components/chalkline/TickLabel.tsx"
       ],
       "source_sha256": "da0fb09137b19e88786253139a35ca413d1afc0a255993ba6506410142cd6087"
+    },
+    "rank-home": {
+      "captures": [
+        {
+          "bytes": 63021,
+          "captured_at": "2026-08-10T14:06:41+00:00",
+          "file": "mobile/rank-home/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rank-home.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "populated"
+        },
+        {
+          "bytes": 57288,
+          "captured_at": "2026-08-10T14:06:41+00:00",
+          "file": "mobile/rank-home/populated--more-expanded.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/rank-home.yaml",
+          "injections": [],
+          "profile": "standard",
+          "state": "populated--more-expanded"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/RankHomeScreen.tsx",
+        "mobile/src/navigation/rankChooserModel.ts"
+      ],
+      "source_sha256": "b03534868f1435a58c798d415f4382a7924fdd0d1dca9f594a8966b2d9fb60f4"
     },
     "settings": {
       "captures": [

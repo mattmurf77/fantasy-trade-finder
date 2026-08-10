@@ -1,0 +1,106 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-PORTFOLIO-TWO
+# profile: two-leagues
+# flags: release
+# captures: populated, refreshing
+# source: mobile/src/screens/PortfolioScreen.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for the cross-league Portfolio (matrix rows 158
+# and 160). Portfolio was zero-coverage because of ENTRY: the Acquire subnav's
+# Portfolio pill only renders with ≥2 leagues AND no finder mode, and `trades
+# .finder_hub` (on in release) lands TradesHome directly in the guided deck —
+# i.e. always in a finder mode. This flow uses the launch-argument entry (see
+# capture/rank-home.yaml's header for the mechanism and its production gate):
+# `-FTFTestRoute Portfolio` resolves through the Trades tab's nested stack.
+#
+# `two-leagues` is required, not cosmetic: the screen's first branch is a hard
+# gate on `useSession().leagues.length >= 2`, and the league list is restored
+# from AsyncStorage (`sleeper_leagues`) on the second launch — written by the
+# normal sign-in + league pick below.
+#
+# SELECTOR NOTE: `leagues.row.*` rather than a literal id, matching
+# capture/matches@two-leagues.yaml — the seeder currently gives every profile
+# 990000000000000001, but a regex cannot drift when a fixture renumbers.
+#
+# The screen carries no list testID (its only testID, portfolio.open-settings,
+# belongs to the <2-league gate), so the populated branch is anchored on the
+# ListHeaderComponent's exposure summary, which no other branch renders.
+tags: [capture, portfolio, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# RUN-2 FIX: the shared sign-in preamble flakes — `inputText` occasionally
+# races the field's focus and lands nowhere, and the empty username box only
+# surfaces 30 s later as a missing `leagues.row.*` (observed once on this
+# flow, passing on the identical preamble in its sibling). The retry wraps the
+# whole sign-in leg and is idempotent: `eraseText` clears whatever a
+# half-landed attempt left in the field before retyping. No fixed sleeps.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+
+# ── populated ────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: Portfolio
+# Full-match regex. "<n> distinct players across <m> leagues" is the summary
+# header, mounted only on the populated branch — the <2-league gate, the
+# loading spinner, the error card and the "No exposure yet" empty list all
+# render different bodies.
+- extendedWaitUntil:
+    visible:
+      text: ".*distinct players across.*"
+    timeout: 60000
+- assertNotVisible:
+    id: "portfolio.open-settings"
+- waitForAnimationToEnd
+- takeScreenshot: portfolio__populated
+
+# ── refreshing ───────────────────────────────────────────────────────────
+# RefreshControl is bound to `query.isFetching`, so the spinner lives exactly
+# as long as the refetch does — a 4 s latency on /api/portfolio makes it
+# survive the gesture and the shutter. fnmatch runs against request.path with
+# the query string stripped (backend/test_support.py `_before_request_hook`),
+# so the bare path matches the `?league_ids=…` call this screen makes.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/portfolio"
+      INJECT_MS: "4000"
+- assertTrue: ${output.inject.ok}
+# Element-anchored swipe (no start/end points): the pull has to START INSIDE
+# the FlatList or it lands on the stack header and does nothing. The summary
+# header is the list's own first cell, which is exactly where a user's thumb
+# would begin a pull-to-refresh.
+- swipe:
+    from:
+      text: ".*distinct players across.*"
+    direction: DOWN
+    duration: 500
+- takeScreenshot: portfolio__refreshing
