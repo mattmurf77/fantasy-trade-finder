@@ -1,0 +1,134 @@
+{
+  "app_sha": "2f3cafe85cfaa0c5526e930e974302fea7b042f6bb752c9cda895be3f53061db",
+  "device": {
+    "ios": "18.4",
+    "name": "FTF-iOS18",
+    "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
+  },
+  "generated_at": "2026-08-10T02:39:01+00:00",
+  "screens": {
+    "signin": {
+      "captures": [
+        {
+          "bytes": 14266,
+          "captured_at": "2026-08-10T02:22:19+00:00",
+          "file": "mobile/signin/busy.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/signin.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "busy"
+        },
+        {
+          "bytes": 33666,
+          "captured_at": "2026-08-10T02:22:19+00:00",
+          "file": "mobile/signin/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/signin.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 34951,
+          "captured_at": "2026-08-10T02:22:19+00:00",
+          "file": "mobile/signin/hint-prefill.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/signin.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "hint-prefill"
+        },
+        {
+          "bytes": 36325,
+          "captured_at": "2026-08-10T02:22:19+00:00",
+          "file": "mobile/signin/idle.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/signin.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "idle"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/SignInScreen.tsx"
+      ],
+      "source_sha256": "86f6a8a71faedf49126db7314e63d94f209af411cad5f5f76ae41e32d38a5766"
+    },
+    "trades": {
+      "captures": [
+        {
+          "bytes": 41835,
+          "captured_at": "2026-08-10T02:39:01+00:00",
+          "file": "mobile/trades/empty.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "empty"
+        },
+        {
+          "bytes": 41845,
+          "captured_at": "2026-08-10T02:39:01+00:00",
+          "file": "mobile/trades/error.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "error"
+        },
+        {
+          "bytes": 50539,
+          "captured_at": "2026-08-10T02:39:01+00:00",
+          "file": "mobile/trades/loading.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "loading"
+        },
+        {
+          "bytes": 48835,
+          "captured_at": "2026-08-10T02:39:01+00:00",
+          "file": "mobile/trades/populated.png",
+          "flags": "release",
+          "flow": "mobile/.maestro/capture/trades.yaml",
+          "injections": [
+            "fail_next",
+            "latency"
+          ],
+          "profile": "standard",
+          "state": "populated"
+        }
+      ],
+      "source": [
+        "mobile/src/screens/TradesScreen.tsx",
+        "mobile/src/components/SkeletonTradeCard.tsx",
+        "mobile/src/components/Toast.tsx",
+        "mobile/src/components/TradeCard.tsx"
+      ],
+      "source_sha256": "ddd42e325cd2bbd59f21092bd91dac66f7d4bd75bc66a1b4602e080ad1c88650"
+    }
+  }
+}

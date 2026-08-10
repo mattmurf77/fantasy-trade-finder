@@ -859,6 +859,14 @@ def build_cassettes(world: World) -> dict[str, object]:
              "metadata": {"team_name": f"Team {world.users[uid]['display_name']}"}}
             for i, uid in enumerate(lg["member_order"])
         ]
+        # Owned-picks + draft-status features (both added after this fixture
+        # set was written) fetch these on every league load. Empty arrays are
+        # the honest seeded answer — no picks have been traded and no draft
+        # exists — and they hold vcr_misses at 0 for EVERY profile. With
+        # `drafts` empty the backend falls back to its rosters_heuristic for
+        # draft status, which is what the seeded rosters already imply.
+        cassettes[f"league/{lid}/traded_picks"] = []
+        cassettes[f"league/{lid}/drafts"] = []
 
     cassettes["players/nfl/adp"] = world.adp_map()
     # players/nfl is fetched outside the _sleeper_get seam today (raw urllib
@@ -875,7 +883,8 @@ def _verify_no_cassette_gap(world: World, cassettes: dict[str, object]) -> None:
         needed.append(f"user/{u['username']}")
         needed.append(f"user/{u['user_id']}/leagues/nfl/{SEASON}")
     for lid in world.leagues:
-        needed += [f"league/{lid}", f"league/{lid}/rosters", f"league/{lid}/users"]
+        needed += [f"league/{lid}", f"league/{lid}/rosters", f"league/{lid}/users",
+                   f"league/{lid}/traded_picks", f"league/{lid}/drafts"]
     missing = [p for p in needed if p not in cassettes]
     if missing:
         raise SeederError(EXIT_CASSETTE_GAP,

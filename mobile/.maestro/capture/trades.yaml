@@ -1,0 +1,131 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRADES
+# profile: standard
+# flags: release
+# captures: empty, error, loading, populated
+# source: mobile/src/screens/TradesScreen.tsx, mobile/src/components/SkeletonTradeCard.tsx, mobile/src/components/Toast.tsx, mobile/src/components/TradeCard.tsx
+# interactive-stop: empty
+#
+# Screen-library capture flow for Trades. Preamble copied from
+# flows/smoke/05-trades-render.yaml, including the conditional dismissal of the
+# first-run team-outlook sheet (outlook.save-btn, Contender pre-selected).
+#
+# State ordering avoids /__test__/reset entirely (reset clears backend
+# sessions = signs us out):
+#   empty      → resting state after the preamble (trades.empty-text)
+#   error      → fail_next 500 (real production body) on POST
+#                /api/trades/generate; count=1 so it self-clears before the
+#                real run below
+#   loading    → latency on the status poll holds the running-job UI open;
+#                anchored on trades.empty-text UNMOUNTING (see below)
+#   populated  → the same (slowed) job completes into the deck
+tags: [capture, trades]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+
+# ── empty ────────────────────────────────────────────────────────────────
+- assertVisible:
+    id: "trades.empty-text"
+- takeScreenshot: trades__empty
+
+# ── error ────────────────────────────────────────────────────────────────
+# The failure surfaces as a Toast, which carries no testID today, so there is
+# nothing to wait on — we settle the tap animation and shoot. Body is the REAL
+# production shape from server.py's handle_unexpected_error (errorhandler at
+# backend/server.py:2070), so the toast renders shipping copy ("Unexpected
+# server error.") instead of the injector's "ftf_injected" placeholder:
+# client.ts:552 builds the message as parsed.message || parsed.error.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/generate"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.find-btn"
+- waitForAnimationToEnd
+- takeScreenshot: trades__error
+- extendedWaitUntil:
+    visible:
+      id: "trades.empty-text"
+    timeout: 20000
+
+# ── loading ──────────────────────────────────────────────────────────────
+# PILOT FINDING (run 20260809T222219): do NOT anchor this state on
+# trades.progress-strip. The strip mounts only while job.status === 'running'
+# (TradesScreen.tsx:4072/4248), and with only 2.5 s of poll latency that
+# window was ~8 s — short enough that Maestro's hierarchy polling missed it
+# and the flow died on "Assertion is false: trades.progress-strip is visible".
+# (The strip itself is fine and does appear in the capture below; it was a
+# race, not a layout problem.)
+#
+# The robust anchor is the empty-state headline DISAPPEARING: trades.empty-text
+# unmounts the instant the running placeholder replaces it, it is always in
+# view, and it cannot be missed the way a transient mount can. 6 s of latency
+# per status poll widens the running window as well, without changing what the
+# job ultimately returns.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trades/status*"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    notVisible:
+      id: "trades.empty-text"
+    timeout: 30000
+- takeScreenshot: trades__loading
+
+# ── populated ────────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 120000
+- waitForAnimationToEnd
+- takeScreenshot: trades__populated

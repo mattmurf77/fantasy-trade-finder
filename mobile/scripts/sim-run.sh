@@ -3,7 +3,7 @@
 #
 #   sim-run.sh --udid <UDID> --app <path/to/.app> --profile <name>
 #              [--flags <json-or-@file>] [--seed <int>] [--flow <file-or-tag>]
-#              [--keep-data] [--report-dir <dir>]
+#              [--keep-data] [--report-dir <dir>] [--maestro-output <dir>]
 #
 # Steps: seed → start Flask (test mode) → handshake → sim erase/boot → install
 #        → maestro flows (if --flow given and maestro installed) → collect → stop.
@@ -11,7 +11,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-UDID="" APP="" PROFILE="" FLAGS="" SEED="1337" FLOW="" KEEP_DATA=0
+UDID="" APP="" PROFILE="" FLAGS="" SEED="1337" FLOW="" KEEP_DATA=0 MAESTRO_OUT=""
 REPORT_DIR="$REPO/mobile/test-artifacts/$(date +%Y%m%dT%H%M%S)-cell"
 
 while [[ $# -gt 0 ]]; do
@@ -24,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --flow) FLOW="$2"; shift 2 ;;
     --keep-data) KEEP_DATA=1; shift ;;
     --report-dir) REPORT_DIR="$2"; shift 2 ;;
+    --maestro-output) MAESTRO_OUT="$2"; shift 2 ;;   # cwd for maestro → takeScreenshot lands here (--flow must be absolute)
     *) echo "sim-run.sh: unknown arg $1" >&2; exit 5 ;;
   esac
 done
@@ -155,7 +156,12 @@ xcrun simctl install "$UDID" "$APP" || { echo "INFRA: install failed" >&2; exit 
 # --- Flows (optional until Maestro lands) ------------------------------------
 if [[ -n "$FLOW" ]]; then
   command -v maestro >/dev/null || { echo "INFRA: maestro not installed (brew install maestro)" >&2; exit 2; }
-  maestro --device "$UDID" test "$FLOW" --format junit --output "$REPORT_DIR/junit.xml"
+  if [[ -n "$MAESTRO_OUT" ]]; then
+    mkdir -p "$MAESTRO_OUT"
+    ( cd "$MAESTRO_OUT" && maestro --device "$UDID" test "$FLOW" --format junit --output "$REPORT_DIR/junit.xml" )
+  else
+    maestro --device "$UDID" test "$FLOW" --format junit --output "$REPORT_DIR/junit.xml"
+  fi
   RESULT=$?
   curl -sf -X POST "$URL/__test__/reset" >/dev/null
 else

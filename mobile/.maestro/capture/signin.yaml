@@ -1,0 +1,86 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SIGNIN
+# profile: standard
+# flags: release
+# captures: idle, error, busy, hint-prefill
+# source: mobile/src/screens/SignInScreen.tsx
+# interactive-stop: idle
+#
+# Screen-library capture flow for SignIn. Pre-auth screen — no league/tab
+# preamble. States are ordered so no /__test__/reset is ever needed mid-flow
+# (reset clears backend sessions, i.e. signs us out):
+#   idle          → clean launch, keychain cleared so no "Continue as" row
+#   error         → fail_next 404 on the auth endpoint (count self-decrements)
+#   busy          → latency on the auth endpoint, screenshot while the button
+#                   spinner is up, then let the real sign-in land
+#   hint-prefill  → relaunch WITHOUT clearKeychain: getLastUsername() repopulates
+#                   the field and renders signin.hint-btn
+tags: [capture, signin]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- assertNotVisible:
+    id: "signin.error-text"
+- takeScreenshot: signin__idle
+
+# ── error ────────────────────────────────────────────────────────────────
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_STATUS: "404"
+      INJECT_COUNT: "1"
+      # Real production 404 body (backend/server.py extension_auth) so the
+      # screen's err.message fallback renders the shipping copy:
+      INJECT_BODY: '{"error": "user_not_found", "message": "Sleeper user @qa_standard not found."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "signin.error-text"
+    timeout: 20000
+- takeScreenshot: signin__error
+
+# ── busy ─────────────────────────────────────────────────────────────────
+# 4 s of injected latency on the auth POST holds the in-button spinner long
+# enough to photograph; the request then completes normally.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_MS: "4000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.continue-btn"
+- waitForAnimationToEnd
+- takeScreenshot: signin__busy
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+
+# ── hint-prefill ─────────────────────────────────────────────────────────
+# setLastUsername() wrote the username to the keychain during the sign-in
+# above; clearing state but NOT the keychain returns us to SignIn with the
+# "Continue as @qa_standard" row rendered.
+- launchApp:
+    clearState: true
+    clearKeychain: false
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.hint-btn"
+    timeout: 20000
+- takeScreenshot: signin__hint-prefill
