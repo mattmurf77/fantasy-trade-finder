@@ -184,6 +184,17 @@
 
 ---
 
+## D-022 — MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id
+**Date:** 2026-08-10 (feedback #289, `draft.mfl` already ON)
+**Context:** MFL Draft Room boards rendered raw ids on both axes. `_render_mfl` set `username = {}` ("MFL has no display-name export here"), so `owner_username` was structurally `null` on every MFL row and the client fell back to the synthetic member id (`mfl:62846.f0001`); and it hard-coded `name: ""`, `position: ""`, `team: None` on every pick, so made picks rendered a bare numeric id with an empty position chip. MFL's export genuinely carries no names — but **ours does**: `league_members` has held the cleaned franchise name for every franchise since link time, and `_mfl_board_binding` was already loading those rows and discarding everything but the ids.
+**Decision:** Resolve identity server-side at the single producer (`_render_mfl`), so every board consumer benefits. Franchise names come from the already-loaded `league_members` rows, falling back to `Team <fid>` (matching the sibling `_sync_mfl_owned_picks` convention). Player names resolve in four tiers with **total precedence**: the all-zeros slot sentinel (`player: "0000"`) → `No selection`; our own `players` row for a crosswalked id (the only tier carrying `team`); the DP crosswalk's own `by_mfl_id` name/position map; then the placeholder `Player <mfl_id>`. Total precedence means the two name sources can never disagree about a rendered row.
+**Alternatives considered:** Stop at tier 1 and leave `name: ""` on a miss, letting the client's `pick.name || pick.player_id` fallback show the number — **rejected**: rookies are the crosswalk's weakest segment and a rookie draft is exactly where they appear, so that variant leaves the reported defect live on the most likely rows. (Vindicated in the route smoke: against a cold player cache, tier 1 resolved *nothing* and all 30 names came from tier 2 — without it the board would have been 30 rows of `Player 17472`.) Also rejected: a defaulted `members_fn` fetcher to avoid a shared-file edit (a redundant query per render plus a seam whose only purpose is dodging a merge); `Player 0000` for the sentinel (asserts a player exists); dropping the sentinel row (would break a passing test — `_mfl_counts` counts it as made and the suite asserts `len(picks) == man["made"]`).
+**Consequences:** The load-bearing guard is **the keying, not the query list.** MFL and Sleeper player ids are numeric strings from different epochs that overlap densely in the rookie band — 255 MFL ids in the committed snapshot are also a *different* player's Sleeper id (`13674` = Dallas Goedert as MFL, Chris Hilton Jr. as Sleeper). A pick may take tier 1 only if its own MFL id crosswalked, and its row must be read by **that pick's crosswalked id**, never by `pick["player_id"]`, which still holds the raw MFL id on a miss. Consuming `load_players_by_ids`' `{player_id: row}` result with the raw id renders one pick's player on another pick — inside a query that is itself entirely legal, and silently. Pinned by `T-289-06`, which was verified to FAIL on the naive keying before being accepted. Zero added queries (names ride objects already fetched); one batched player read per board, none when nothing crosswalked. No schema, route, or flag change — `draft.mfl → false` remains the rollback lever. Known gap, accepted: `original_username` stays `null`, so traded MFL rows still render `from —` (the honest fix is client-side and would escalate the sim gate from Tier 3 to Tier 1).
+**Status:** Active.
+**Related ADR:** — (feedback item `docs/feedback/items/289-mfl-draft-room-ids/`)
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -209,6 +220,7 @@
 | D-019 | Prepare the Trade, Never Fabricate the Execute Path | 2026-07-25 |
 | D-020 | Analytics Omits Untrustworthy Data Rather Than Reporting It | 2026-08-06 |
 | D-021 | Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS | 2026-08-08 |
+| D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
 
 ---
 
