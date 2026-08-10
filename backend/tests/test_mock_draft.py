@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import ast
 import collections
+import types
 import csv
 import json
 import math
@@ -229,9 +230,22 @@ def test_w2_04_jets_persona_is_bpa_within_one_slot_over_500_draws():
 
 def _reach_draws(*, bpa_prob, decay, n=6000, outlook=mds.DEFAULT_OUTLOOK,
                  width=20):
-    """`n` seeded picks off a flat, need-free board -> the reach depths."""
+    """`n` seeded picks off a flat board -> the reach depths.
+
+    **Maximal need on purpose (#290 / D-5).** Since the mixture weight became
+    need-conditional, `effective_bpa_prob` returns exactly `bpa_prob` only at
+    maximal need — so `needs = 0.0` would make this helper measure the TILT
+    while every test it feeds is named after the reach BRANCH.
+
+    This is not a weakened assertion. The board is single-position, so the need
+    bonus `weight * severity * max_reach` is a CONSTANT across every candidate
+    and cancels out of the argmin: `argmin(rank - c - noise) ==
+    argmin(rank - noise)` exactly. The measured law is identical under both the
+    shipped and the changed engine; only the branch being sampled is now the
+    one the tests claim to sample.
+    """
     board = _candidates(["WR"] * width)
-    needs = {pos: 0.0 for pos in ("QB", "RB", "WR", "TE")}
+    needs = {pos: 1.0 for pos in ("QB", "RB", "WR", "TE")}
     return [int(mds.cpu_pick(board, outlook, needs, random.Random(seed),
                              max_reach=3.0, bpa_prob=bpa_prob,
                              reach_decay=decay)[1:]) - 1
@@ -2007,3 +2021,579 @@ def test_w2_16_the_mean_bar_is_measurable_on_one_block_of_three():
         f"outside the +/-{MEAN_BAR} bar — W2d's claim that the bar is "
         "measurable on at least one block no longer holds, and the verdict's "
         "reasoning depends on it")
+
+
+# ===========================================================================
+# #290 / #292 / D-16 — the run model, need-conditional reaching, lifecycle,
+# and owner identity.
+#
+# Spec: docs/feedback/items/290-mock-draft-engine/{prd,lld-delta}.md
+#
+# TWO-SIDED BARS ARE MANDATORY HERE. Every distributional bar below is bounded
+# on BOTH sides, because the one-sided versions the first draft carried
+# (`P(#1 at 1.01) >= 0.43`, `>= 12 distinct orderings`) both PASS on a fully
+# collapsed board — measured at 1.000 and 24 with `MOCK_RUN_MIN_OFFSET = 0`.
+# A one-sided bar cannot tell "fixed" from "deterministic".
+#
+# N IS PINNED. The distinct-orderings statistic scales with N, so N must not be
+# varied without re-tabulating every bound below.
+# ===========================================================================
+
+RUN_N = 500                      # pinned; see the note above
+SF_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"]
+RUN_FORMATS = (("1qb_ppr", STANDARD_LINEUP), ("sf_tep", SF_LINEUP))
+
+
+def _vrow(value, pid):
+    return {"player_id": pid, "value": value, "valued": value is not None,
+            "position": "WR"}
+
+
+def _rows(*values):
+    return [_vrow(v, f"p{i}") for i, v in enumerate(values)]
+
+
+def _round1(fmt, lineup, n=RUN_N):
+    """`(pool, names, picks_by_seed)` — n seeded round-1 replays.
+
+    Explicit `order=` (never the seeded shuffle) so the user's slot is fixed
+    and the CPU run length is constant. That is the reproducibility contract:
+    a randomised order silently changes how many CPU picks precede the user.
+    """
+    ctx = _rookie_ctx(fmt, lineup=lineup)
+    pool = mds.consensus_pool(ctx)
+    owners = [f"o{i}" for i in range(12)]
+    settings = mds.build_settings(ctx, owners=owners, user_owner_id=owners[-1],
+                                  rounds=1, draft_type="linear", order=owners,
+                                  order_source="explicit")
+    names = [(ctx.player_rows.get(str(r["player_id"])) or {}).get("full_name")
+             for r in pool]
+    runs = []
+    for seed in range(n):
+        state = mds.new_state(ctx, settings, seed, user_id=owners[-1])
+        mds.advance_cpu(state, ctx, pool, allow_unvalidated_model=True)
+        runs.append([str(p["player_id"]) for p in state["picks"]])
+    return pool, names, runs
+
+
+# --- R-1 / T-290-01 — run detection, unit table --------------------------
+
+def test_290_01_run_offset_boundary_table():
+    """The gap rule over a hand-built board, every boundary condition named."""
+    # n == 0 and n == 1 -> 0, the safe value.
+    assert mds.run_offset([]) == 0
+    assert mds.run_offset(_rows(100.0)) == 0
+
+    # An all-tied block is never cut: `med == 0` disables the rule entirely.
+    flat = _rows(*([100.0] * 10))
+    assert mds.run_offset(flat) == len(flat) - 1
+    assert mds.run_boundaries(flat) == []
+
+    # An ordinary, evenly-spaced sequence has no locally-significant drop.
+    even = _rows(*[100.0 - 5 * i for i in range(12)])
+    assert mds.run_boundaries(even) == []
+
+    # A cliff after index 3 against a background of 5s.
+    cliff = _rows(100.0, 95.0, 90.0, 85.0, 20.0, 15.0, 10.0, 5.0, 0.0, -5.0)
+    assert 3 in mds.run_boundaries(cliff)
+    assert mds.run_offset(cliff, allow_cross=0) == 3
+    # `allow_cross=1` skips exactly one boundary.
+    assert mds.run_offset(cliff, allow_cross=1) > 3
+
+    # A boundary at the LAST gap still returns a valid in-range offset.
+    tail = _rows(100.0, 95.0, 90.0, 85.0, 80.0, 75.0, 70.0, 65.0, 60.0, 5.0)
+    assert mds.run_offset(tail) <= len(tail) - 1
+
+    # A whole-unvalued head carries no opinion -> no wall, `n - 1`.
+    blind = _rows(*([None] * 8))
+    assert mds.run_offset(blind) == len(blind) - 1
+    assert mds.run_boundaries(blind) == []
+
+    # Valued -> unvalued is ALWAYS a boundary, whatever the magnitude.
+    frontier = _rows(100.0, 95.0, 90.0, None, None, None)
+    assert mds.run_boundaries(frontier)[0] == 2
+    assert mds.run_offset(frontier, allow_cross=0) == 2
+
+
+def test_290_14_the_candidate_set_is_never_a_singleton():
+    """T-290-14 — the seedless structural guard on `MOCK_RUN_MIN_OFFSET`.
+
+    **This is the test that would have caught the Round-2 blocker**, and it is
+    deliberately seedless and structural so no lucky seed can hide the defect.
+
+    A boundary at index 0 means the head is alone in its run. Without the floor
+    that truncates the candidate set to ONE row and the pick stops being a
+    draw at all: measured on the real `sf_tep` board, `MOCK_RUN_MIN_OFFSET = 0`
+    forces pick 1.01 in 100% of mocks (and still leaves 24 distinct top-4
+    orderings, which is why the one-sided `>= 12` bar could not see it).
+
+    `1qb_ppr` is fine at 0 — its first run is 4 wide. That asymmetry is the
+    whole lesson: a parameter validated on one board was catastrophic on the
+    other, so both are asserted here.
+    """
+    assert mds.MOCK_RUN_MIN_OFFSET >= 1
+    for fmt, lineup in RUN_FORMATS:
+        ctx = _rookie_ctx(fmt, lineup=lineup)
+        pool = mds.consensus_pool(ctx)
+        head = pool[:mds.MOCK_CANDIDATE_WINDOW]
+        for allow in (0, mds.MOCK_RUN_CROSS_ALLOWANCE_LATE):
+            off = mds.run_offset(head, allow_cross=allow)
+            assert off >= 1, (
+                f"{fmt}: run_offset={off} truncates the candidate set to a "
+                "single row, so the CPU pick is deterministic — this is the "
+                "sf_tep collapse MOCK_RUN_MIN_OFFSET exists to prevent")
+    # And the floor is what is doing the work on sf_tep: its first run really
+    # is a singleton under the raw rule.
+    sf = mds.consensus_pool(_rookie_ctx("sf_tep", lineup=SF_LINEUP))
+    assert mds.run_boundaries(sf[:mds.MOCK_CANDIDATE_WINDOW])[0] == 0, (
+        "sf_tep's first run is no longer a singleton; re-read T-290-14 — the "
+        "board moved and this guard's premise needs re-checking")
+
+
+# --- R-2 / T-290-03 — run sizes are 4-5 as an EMERGENT property ----------
+
+def test_290_03_median_run_size_is_four_or_five_on_both_formats():
+    """D-9: the 4-5 target is CHECKED, never clamped.
+
+    Measured at `m = 2.5, W = 9`: median 5.0 on BOTH formats. Asserted as a
+    range and recomputed from the fixture, so a consensus refresh moves the
+    test rather than silently invalidating the parameter.
+
+    Measured against the RAW gap rule (`run_boundaries`), not `run_offset` —
+    the `MOCK_RUN_MIN_OFFSET` floor is a safety device on the candidate set and
+    would report every singleton run as a pair.
+    """
+    for fmt, lineup in RUN_FORMATS:
+        pool = mds.consensus_pool(_rookie_ctx(fmt, lineup=lineup))
+        bounds = mds.run_boundaries(pool)
+        sizes, prev = [], -1
+        for b in bounds:
+            sizes.append(b - prev)
+            prev = b
+        if prev < len(pool) - 1:
+            sizes.append(len(pool) - 1 - prev)
+        median = statistics.median(sizes)
+        assert 4 <= median <= 5, (
+            f"{fmt}: median run size {median} (sizes={sizes[:8]}) is outside "
+            "the operator's 'tight groups of 4-5'; re-read PRD section 4 "
+            "before retuning MOCK_RUN_GAP_MULTIPLE")
+
+
+# --- R-3 / R-4 — the wall in rounds 1-2, softened in rounds 3+ -----------
+
+def _wall_probe(fmt, lineup, rounds, n=200):
+    """`[(round_no, position_in_pool, offset_0, offset_1)]` for CPU picks.
+
+    Drives the USER's picks too. `advance_cpu` halts the moment the user is on
+    the clock, so a probe that only calls `advance_cpu` never sees past round 1
+    — the user drafts last in this fixture. The user always takes the board
+    pick, which keeps the CPU sequence deterministic per seed.
+    """
+    ctx = _rookie_ctx(fmt, lineup=lineup)
+    pool = mds.consensus_pool(ctx)
+    owners = [f"o{i}" for i in range(12)]
+    settings = mds.build_settings(ctx, owners=owners, user_owner_id=owners[-1],
+                                  rounds=rounds, draft_type="linear",
+                                  order=owners, order_source="explicit")
+    window = mds.candidate_window(mds.MOCK_MAX_REACH_DEFAULT)
+    out = []
+    for seed in range(n):
+        state = mds.new_state(ctx, settings, seed, user_id=owners[-1])
+        mds.advance_cpu(state, ctx, pool, allow_unvalidated_model=True)
+        while state["status"] == mds.STATUS_ACTIVE:
+            slot = mds.next_pick(state)
+            if slot is None:
+                break
+            avail = mds._available(ctx, state, pool)
+            if not avail:
+                break
+            mds.apply_user_pick(state, ctx, str(avail[0]["player_id"]), pool)
+
+        taken = set()
+        for p in state["picks"]:
+            if p.get("by") != mds.BY_CPU:
+                taken.add(str(p["player_id"]))
+                continue
+            avail = [r for r in pool if str(r["player_id"]) not in taken]
+            head = avail[:window]
+            pos = next(i for i, r in enumerate(head)
+                       if str(r["player_id"]) == str(p["player_id"]))
+            out.append((int(p["round"]), pos,
+                        mds.run_offset(head, allow_cross=0),
+                        mds.run_offset(
+                            head, allow_cross=mds.MOCK_RUN_CROSS_ALLOWANCE_LATE)))
+            taken.add(str(p["player_id"]))
+    return out
+
+
+def test_290_04_rounds_one_and_two_never_cross_a_run_boundary():
+    """R-3 — EXACT, not statistical. A hard wall in rounds 1-2 (D-6)."""
+    for fmt, lineup in RUN_FORMATS:
+        probes = _wall_probe(fmt, lineup, rounds=2)
+        assert probes, "no CPU picks sampled"
+        for round_no, pos, off0, _off1 in probes:
+            if round_no <= 2:
+                assert pos <= off0, (
+                    f"{fmt} r{round_no}: pick at pool position {pos} passed "
+                    f"the head's run boundary at {off0} — the rounds-1/2 wall "
+                    "is not holding")
+
+
+def test_290_05_rounds_three_plus_cross_at_most_one_boundary():
+    """R-4 — bounded by the one-boundary allowance, AND proven to soften.
+
+    The second assertion matters as much as the first: a rule that merely
+    *permits* crossing without any pick ever crossing is indistinguishable
+    from the rounds-1/2 wall, and the softening would be dead code.
+    """
+    crossed_any = False
+    for fmt, lineup in RUN_FORMATS:
+        probes = _wall_probe(fmt, lineup, rounds=4)
+        late = [p for p in probes if p[0] >= 3]
+        assert late, "no round-3+ CPU picks sampled"
+        for round_no, pos, off0, off1 in late:
+            assert pos <= off1, (
+                f"{fmt} r{round_no}: pick at {pos} exceeds the one-boundary "
+                f"allowance {off1}")
+            assert pos <= mds.round_reach_cap(round_no), (
+                f"{fmt} r{round_no}: pick at {pos} exceeds the W2e round cap")
+            if pos > off0:
+                crossed_any = True
+    assert crossed_any, (
+        "no round-3+ pick ever crossed a run boundary across either format — "
+        "the D-6 softening is permitted but never exercised, so it is dead")
+
+
+# --- R-5 / T-290-06 — the run can only TIGHTEN the operator's cap --------
+
+def test_290_06_the_run_never_loosens_the_w2e_cap():
+    """R-5 — composition invariant, over every round the engine can draft."""
+    board = _rows(*[1000.0 - 3 * i for i in range(24)])
+    cliff = _rows(*([1000.0, 997.0, 994.0] + [500.0 - i for i in range(21)]))
+    for round_no in range(1, 9):
+        cap = mds.round_reach_cap(round_no)
+        for head in (board, cliff):
+            allow = 0 if round_no <= 2 else mds.MOCK_RUN_CROSS_ALLOWANCE_LATE
+            effective = min(cap, mds.run_offset(head, allow_cross=allow))
+            assert 0 <= effective <= cap, (
+                f"round {round_no}: effective cap {effective} is outside "
+                f"[0, {cap}] — the run must only ever tighten")
+
+
+# --- R-6 / T-290-07 — both call sites, or neither ------------------------
+
+def test_290_07_the_run_rule_is_applied_at_both_call_sites():
+    """G-6 — `advance_cpu` and `simulate_reaches` compose the cap identically.
+
+    Structural: applying the rule in the product but not in the calibration
+    harness would silently invalidate the verdict the harness records.
+    """
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(mds))
+    seen = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in (
+                "advance_cpu", "simulate_reaches"):
+            seen[node.name] = any(
+                isinstance(c.func, ast.Name) and c.func.id == "run_offset"
+                for c in ast.walk(node) if isinstance(c, ast.Call))
+    assert seen == {"advance_cpu": True, "simulate_reaches": True}, (
+        f"run_offset call sites: {seen} — R-6 requires BOTH or neither")
+
+
+# --- R-7 / R-8 — need-conditional reaching (D-5) -------------------------
+
+def test_290_08_effective_bpa_prob_endpoints_and_monotonicity():
+    """R-7 — `bpa_prob` is exactly the value at MAXIMAL need."""
+    floor = mds.MOCK_IDIOSYNCRASY_FLOOR
+    assert mds.effective_bpa_prob(0.10, {"RB": 1.0}) == pytest.approx(0.10)
+    assert mds.effective_bpa_prob(0.10, {}) == pytest.approx(1 - 0.9 * floor)
+    assert mds.effective_bpa_prob(0.10, {"RB": 0.0}) == pytest.approx(
+        1 - 0.9 * floor)
+    assert mds.effective_bpa_prob(0.10, {"RB": 0.5}) == pytest.approx(
+        1 - 0.9 * (floor + (1 - floor) * 0.5))
+    prev = -1.0
+    for k in range(11):
+        v = mds.effective_bpa_prob(0.10, {"RB": k / 10.0})
+        assert 0.10 - 1e-9 <= v <= 1.0
+        if prev >= 0:
+            assert v <= prev + 1e-12, "must be non-increasing in severity"
+        prev = v
+
+
+def test_290_08b_aggregate_severity_is_denominator_weighted_not_max():
+    """D-5's real defect: a `max()` aggregate makes the mechanism INERT.
+
+    `_BENCH_TARGET` gives TE `(S, B) = (1, 0)`, so ANY roster without a 1280+
+    TE scores `severity("TE") == 1.0`. Under `max()` that is `1.0` for almost
+    every August roster, `effective_bpa_prob` returns `bpa_prob` unchanged, and
+    need-conditional reaching ships as exactly today's behaviour while looking
+    like a fix.
+    """
+    targets = mds.slot_targets(STANDARD_LINEUP)
+    capacity = sum(s + b for s, b in targets.values())
+    te_only = {"QB": 0.0, "RB": 0.0, "WR": 0.0, "TE": 1.0}
+    agg = mds.aggregate_severity(te_only, targets)
+    te_denom = targets["TE"][0] + targets["TE"][1]
+    assert agg == pytest.approx(te_denom / capacity)
+    assert agg < 0.25, (
+        f"a lone missing TE scores {agg:.3f} — that is max()-like behaviour "
+        "and it makes D-5 inert; see aggregate_severity's docstring")
+    # A genuinely desperate roster still reads as maximal.
+    assert mds.aggregate_severity(
+        {p: 1.0 for p in ("QB", "RB", "WR", "TE")},
+        targets) == pytest.approx(1.0)
+    # And the difference propagates to the mixture weight.
+    assert mds.effective_bpa_prob(0.10, te_only, targets) > 0.5
+    assert mds.effective_bpa_prob(
+        0.10, {p: 1.0 for p in ("QB", "RB", "WR", "TE")},
+        targets) == pytest.approx(0.10)
+
+
+def _reach_draws_needfree(*, bpa_prob, decay, n, width=20):
+    """Like `_reach_draws` but at ZERO need — the tilt, not the branch."""
+    board = _candidates(["WR"] * width)
+    needs = {pos: 0.0 for pos in ("QB", "RB", "WR", "TE")}
+    return [int(mds.cpu_pick(board, mds.DEFAULT_OUTLOOK, needs,
+                             random.Random(seed), max_reach=3.0,
+                             bpa_prob=bpa_prob, reach_decay=decay)[1:]) - 1
+            for seed in range(n)]
+
+
+def test_290_09_a_bot_with_no_need_still_reaches_sometimes():
+    """R-8 / D-5 — "need DOMINATES reaching, but idiosyncrasy survives"."""
+    draws = _reach_draws_needfree(bpa_prob=0.10, decay=0.70, n=4000)
+    rate = sum(1 for d in draws if d > 0) / len(draws)
+    assert rate > 0.02, (
+        f"reach rate {rate:.3f} at zero need — D-5 requires that idiosyncrasy "
+        "SURVIVES; a pure-BPA satisfied bot makes the board chalky")
+    assert 0.12 <= rate <= 0.30, (
+        f"reach rate {rate:.3f} outside the expected band for "
+        f"MOCK_IDIOSYNCRASY_FLOOR={mds.MOCK_IDIOSYNCRASY_FLOOR}")
+
+
+# --- R-11 / R-12 — top-of-board integrity, BOTH formats, TWO-SIDED -------
+
+def test_290_10_top_of_board_integrity_on_both_formats():
+    """R-11 — the acceptance case, reported per format.
+
+    Shipped engine at N=500 (identical on BOTH formats, which is itself the
+    proof of root cause (a) — the model never reads `value`):
+        P(pool[0] at 1.01)     0.456
+        P(pool[0] past pick 3) 0.180
+        P(pool[6] at pick <=4) 0.102
+        P(Tate past pick 4)    0.194
+
+    Measured after this change:
+                            1qb_ppr   sf_tep
+        P(pool[0] at 1.01)    0.456    0.650
+        P(pool[0] past 3)     0.100    0.040
+        P(pool[6] at <= 4)    0.000    0.000
+        P(Tate past 4)        0.076    0.076
+
+    Note `P(Tate past 4)` is NOT asserted to be zero. Tate is the consensus #2
+    and shares a run with Tyson and Lemon (46.1 and 71.1 Elo); under the
+    value-gap rule the operator asked for, Tate at pick 4 is legitimate. See
+    PRD section 4 — driving it to zero would encode the wrong model.
+    """
+    for fmt, lineup in RUN_FORMATS:
+        pool, names, runs = _round1(fmt, lineup)
+        ids = [str(r["player_id"]) for r in pool]
+        n = len(runs)
+
+        def p_at(idx, upto, _ids=ids, _runs=runs, _n=n):
+            return sum(1 for r in _runs if _ids[idx] in r[:upto]) / _n
+
+        p0_at1 = sum(1 for r in runs if r[0] == ids[0]) / n
+        p0_past3 = 1.0 - p_at(0, 3)
+        p6_by4 = p_at(6, 4)
+
+        # TWO-SIDED: the upper bound is what rejects a collapsed board, where
+        # this statistic is 1.000.
+        assert 0.35 <= p0_at1 <= 0.85, (
+            f"{fmt}: P(consensus #1 at 1.01) = {p0_at1:.3f}. Below 0.35 the "
+            "top of the board has gone random again; above 0.85 the run rule "
+            "has collapsed round 1 to a forced pick (measured 1.000 at "
+            "MOCK_RUN_MIN_OFFSET=0).")
+        assert p0_past3 <= 0.12, (
+            f"{fmt}: P(consensus #1 falls past pick 3) = {p0_past3:.3f} "
+            "(shipped 0.180)")
+        assert p6_by4 <= 0.02, (
+            f"{fmt}: P(consensus #7 at pick <= 4) = {p6_by4:.3f} "
+            "(shipped 0.102)")
+
+        assert names[1] == "Carnell Tate", (
+            f"the pinned board moved — pool[1] is now {names[1]!r}, not "
+            "Carnell Tate. Re-read PRD section 4.5 before touching any bar "
+            "in this test.")
+        t_past4 = 1.0 - p_at(1, 4)
+        assert t_past4 <= 0.10, (
+            f"{fmt}: P(Tate falls past pick 4) = {t_past4:.3f} "
+            "(shipped 0.194)")
+
+
+def test_290_11_the_board_is_still_varied_but_no_longer_random():
+    """R-12 — TWO-SIDED, and the upper bound FAILS on shipped code.
+
+    Distinct round-1 top-4 orderings at the pinned N=500:
+        shipped engine            149   (rejected by the upper bound)
+        MOCK_RUN_MIN_OFFSET = 0    24   (rejected by the LOWER bound)
+        this change, 1qb_ppr       39
+        this change, sf_tep        33
+
+    The lower bound is 28, not 12: a `>= 12` bar passes on the fully collapsed
+    superflex board, which is exactly how this class of defect ships green.
+    """
+    for fmt, lineup in RUN_FORMATS:
+        _pool, _names, runs = _round1(fmt, lineup)
+        orderings = {tuple(r[:4]) for r in runs}
+        assert 28 <= len(orderings) <= 80, (
+            f"{fmt}: {len(orderings)} distinct top-4 orderings over N="
+            f"{RUN_N}. Below 28 the run rule has over-tightened (24 = the "
+            "collapsed sf_tep board); above 80 it is not biting at all "
+            "(149 = shipped).")
+
+
+# --- D-16 / R-18..R-20 — owner identity ----------------------------------
+
+def test_290_12_mfl_owner_names_never_render_a_machine_id():
+    """R-18 / R-20 — the ladder, and the "Team <fid>" last resort."""
+    lid = "88881"
+    stored = {"username": "Gridiron Gang", "display_name": ""}
+    assert server._mock_owner_name(f"mfl:{lid}.f0001", stored,
+                                   None) == "Gridiron Gang"
+    # display_name is the second rung.
+    assert server._mock_owner_name(
+        f"mfl:{lid}.f0002", {"username": "", "display_name": "Bench Mob"},
+        None) == "Bench Mob"
+    # No stored row -> the session username (the Sleeper path, unaffected).
+    assert server._mock_owner_name("sleeper-user", None, "op") == "op"
+    # A franchise absent from the member map renders exactly "Team <fid>",
+    # zero-padding intact — never the raw synthetic id.
+    assert server._mock_owner_name(f"mfl:{lid}.f0003", None, None) == "Team 0003"
+    # A session username that IS the synthetic id is filtered, not trusted.
+    assert server._mock_owner_name(
+        f"mfl:{lid}.f0004", None, f"mfl:{lid}.f0004") == "Team 0004"
+    # Nothing resolves and it is not a synthetic id -> OMITTED (empty), so
+    # `state_payload` emits None rather than "".
+    assert server._mock_owner_name("plain-id", None, None) == ""
+    for uid in (f"mfl:{lid}.f0003", f"mfl:{lid}.f0004"):
+        assert "mfl:" not in server._mock_owner_name(uid, None, None)
+
+
+def test_290_12b_the_username_map_itself_never_carries_a_machine_id():
+    """R-18 — asserted on the MAP BUILDER, not just the ladder helper.
+
+    This is the assertion that discriminates against the shipped code. The two
+    sites used to build the map as
+    `{str(m.user_id): m.username for m in members}` straight off the session
+    league object; for an MFL league the session member's `username` IS the
+    synthetic id, so the map carried `"mfl:<league>.f<fid>"` and
+    `MockDraftScreen` rendered it in the on-the-clock card and the order rail.
+    A test that only exercises `_mock_owner_name` would pass on that code.
+    """
+    lid = "no-such-league-290-12b"          # no stored league_members rows
+    members = [
+        types.SimpleNamespace(user_id=f"mfl:{lid}.f0001",
+                              username=f"mfl:{lid}.f0001"),
+        types.SimpleNamespace(user_id=f"mfl:{lid}.f0002", username=""),
+        types.SimpleNamespace(user_id="sleeper-user", username="op"),
+    ]
+    out = server._mock_usernames(lid, members)
+    for uid, name in out.items():
+        assert "mfl:" not in name, (
+            f"{uid} -> {name!r} still renders a machine id; the map is being "
+            "built off the session object again (D-16)")
+    assert out[f"mfl:{lid}.f0001"] == "Team 0001"
+    assert out[f"mfl:{lid}.f0002"] == "Team 0002"
+    assert out["sleeper-user"] == "op", "the Sleeper path must be unaffected"
+
+
+def test_290_13_no_player_lookup_uses_an_uncrosswalked_id(
+        client, flag_on, session, monkeypatch):
+    """R-19 — the mock's player half never leaves our own id space.
+
+    MFL and Sleeper player ids overlap densely (255 committed MFL ids are also
+    a *different* player's Sleeper id), and `database_players` returns
+    `{player_id: row}` — so a lookup keyed on a raw MFL id renders one pick's
+    player on another pick, inside a query that is entirely legal. The mock is
+    safe by construction because `ctx.player_rows` is keyed on
+    `_rookie_player_ids(season)`; this test is what keeps it that way.
+    """
+    allowed = {"p1"}
+    seen = []
+
+    def _strict_players(ids):
+        got = set(map(str, ids))
+        seen.append(got)
+        extra = got - allowed
+        assert not extra, f"player lookup used non-rookie ids: {sorted(extra)}"
+        return {"p1": {"full_name": "Rookie One", "position": "WR",
+                       "team": "ARI", "rookie_year": "2026", "search_rank": 1}}
+
+    monkeypatch.setattr(dbs, "database_players", _strict_players)
+    created = _post(client, league_id=LAKEVIEW_LEAGUE)
+    assert created.status_code in (200, 201), created.get_data()
+    got = client.get(f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}",
+                     headers={"X-Session-Token": ROUTE_TOKEN})
+    assert got.status_code == 200
+    assert seen, "database_players was never called — the test proved nothing"
+
+
+# --- #292 / R-14, R-17 — the lifecycle ----------------------------------
+
+def test_292_01_abandoning_a_completed_mock_clears_the_whole_backlog():
+    """T-292-01 — THREE rows, not one.
+
+    A one-row seed passes on the paginated bug. `load_current_mock_draft`'s
+    complete-fallback is `ORDER BY id DESC LIMIT 1` and nothing prunes complete
+    rows, so dismissing mock N merely uncovers mock N-1: with one row the bug
+    is invisible, with three it is obvious.
+    """
+    from backend.database import (create_mock_draft, load_current_mock_draft,
+                                  load_mock_draft, update_mock_draft,
+                                  abandon_completed_mock_drafts)
+    user, league = "u-292-01", "L-292-01"
+    ids = []
+    for k in range(3):
+        mid = create_mock_draft(user, league, 2026, '{"rounds": 4}', "[]", k)
+        update_mock_draft(mid, user, status="complete")
+        ids.append(mid)
+
+    # Precondition: the fallback surfaces the most recent complete row.
+    assert load_current_mock_draft(user, league)["id"] == ids[-1]
+
+    n = abandon_completed_mock_drafts(user, league)
+    assert n == 3, f"cleared {n} rows, expected all 3 — the dismissal paginated"
+    assert load_current_mock_draft(user, league) is None
+    for mid in ids:
+        assert load_mock_draft(mid)["status"] == "abandoned"
+
+    # Idempotent.
+    assert abandon_completed_mock_drafts(user, league) == 0
+
+    # Owner-scoped: another user's completed row is untouched.
+    other = create_mock_draft("someone-else", league, 2026,
+                              '{"rounds": 4}', "[]", 9)
+    update_mock_draft(other, "someone-else", status="complete")
+    assert abandon_completed_mock_drafts(user, league) == 0
+    assert load_mock_draft(other)["status"] == "complete", (
+        "another user's completed mock was retired — the clear is not "
+        "owner-scoped")
+
+
+def test_292_04_a_second_mock_creates_after_a_completed_one():
+    """T-292-04 / R-17 — extends `only_one_active`, on a COMPLETE predecessor."""
+    from backend.database import (create_mock_draft, load_current_mock_draft,
+                                  load_mock_draft, update_mock_draft)
+    user, league = "u-292-04", "L-292-04"
+    first = create_mock_draft(user, league, 2026, '{"rounds": 4}', "[]", 1)
+    update_mock_draft(first, user, status="complete")
+    assert load_current_mock_draft(user, league)["id"] == first
+
+    second = create_mock_draft(user, league, 2026, '{"rounds": 4}', "[]", 2)
+    # The complete row is left alone — create only retires an ACTIVE sibling.
+    assert load_mock_draft(first)["status"] == "complete"
+    current = load_current_mock_draft(user, league)
+    assert current["id"] == second and current["status"] == "active"

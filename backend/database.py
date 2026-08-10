@@ -10783,6 +10783,33 @@ def load_current_mock_draft(user_id: str, league_id: str) -> dict | None:
     return dict(row._mapping) if row else None
 
 
+def abandon_completed_mock_drafts(user_id: str, league_id: str) -> int:
+    """Retire EVERY completed mock for this user+league. Returns the count.
+
+    #292 — "can't do a second mock draft". `load_current_mock_draft`'s
+    complete-fallback is `ORDER BY id DESC LIMIT 1` over `status = "complete"`,
+    and nothing ever prunes a complete row. So abandoning one completed mock
+    only uncovers the one beneath it: the next `GET /api/mock-draft` returns
+    mock N-1's recap and the room is blocked all over again. Dismissal
+    PAGINATED through the history instead of clearing it, which is why the
+    dead-end looked unfixable from the client.
+
+    Owner-scoped (`user_id` is in the WHERE, so one user can never retire
+    another's rows) and idempotent — a second call matches nothing and returns
+    0. `active` and already-`abandoned` rows are left alone: this closes out
+    the recap backlog, it does not cancel a draft in progress.
+    """
+    with engine.begin() as conn:
+        result = conn.execute(
+            mock_drafts_table.update()
+            .where(and_(mock_drafts_table.c.user_id == str(user_id),
+                        mock_drafts_table.c.league_id == str(league_id),
+                        mock_drafts_table.c.status == "complete"))
+            .values(status="abandoned", updated_at=_now())
+        )
+    return int(result.rowcount or 0)
+
+
 def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = None,
                       status: str | None = None) -> bool:
     """Persist an advanced (or abandoned) mock. Owner-scoped; False when the

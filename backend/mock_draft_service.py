@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import statistics
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -585,6 +586,225 @@ def _decay_to_scale(decay: float) -> float:
     return -1.0 / math.log(decay)
 
 
+# ── The run (#290) ────────────────────────────────────────────────────────
+#
+# A "run" is an engine-internal cluster of candidates the consensus prices as
+# effectively interchangeable. It is NOT the 8-tier ladder and never touches
+# `tier_config.json` or the cross-client tier enum — see
+# `docs/cross-client-invariants.md`'s quarantine paragraph and #279.
+
+#: How many times the LOCAL median gap a value drop must be before it counts as
+#: a run boundary. Dimensionless on purpose (D-9): an absolute Elo threshold
+#: behaves differently at the head of the board than in the tail, which is the
+#: flattening this module already records at :231.
+#:
+#: 2.5 is not a taste call. On the pinned 2026 consensus board it yields a
+#: MEDIAN RUN OF 5 players on BOTH scoring formats — the operator's "tight
+#: groups of 4-5" as an emergent property of the value curve rather than an
+#: imposed clamp. At 2.0 the first run collapses to a single player and round 1
+#: is forced. Measurements: docs/feedback/items/290-mock-draft-engine/status.md
+MOCK_RUN_GAP_MULTIPLE = 2.5
+
+#: Width, in GAPS, of the window the median is taken over. Odd so the window is
+#: symmetric about the gap under test where it can be.
+MOCK_RUN_MEDIAN_WINDOW = 9
+
+#: Rounds 3+ may cross this many run boundaries (D-6's "softer penalty in
+#: rounds 3+"). Rounds 1-2 cross none — a hard wall. Expressed in the same
+#: units as the thing it softens (candidate-set width), so `cpu_pick`'s scoring
+#: function stays byte-identical and the Gumbel-max identity survives.
+MOCK_RUN_CROSS_ALLOWANCE_LATE = 1
+
+#: The FLOOR on :func:`run_offset`'s return, in candidate slots.
+#:
+#: Load-bearing, and the reason is a measured near-miss. A boundary at index 0
+#: means "the head is alone in its run", which without this floor truncates the
+#: candidate set to a single row and makes the pick deterministic. On `sf_tep`
+#: the top of the 2026 board is exactly that shape, so `MOCK_RUN_MIN_OFFSET = 0`
+#: forces pick 1.01 in 100% of superflex mocks and collapses round-1 variety —
+#: a parameter that looked fine on `1qb_ppr` and was catastrophic on the other
+#: board. At 1 the head always has at least one rival, so a wall can tighten the
+#: field to a pair but can never remove the draw. Pinned by T-290-14, which is
+#: seedless and structural precisely so it cannot be tuned away by a lucky seed.
+MOCK_RUN_MIN_OFFSET = 1
+
+#: The share of today's reach rate a bot with ZERO positional need keeps (D-5:
+#: "need DOMINATES reaching, but idiosyncrasy survives"). At 0.25 and the fitted
+#: `mock_bpa_prob = 0.10`, a satisfied roster reaches 22.5% of the time against
+#: a desperate roster's unchanged 90%. Zero here would make most August bots
+#: pure BPA and the board chalky, which D-5 explicitly rejects.
+MOCK_IDIOSYNCRASY_FLOOR = 0.25
+
+
+def run_boundaries(candidates_ranked: Sequence[Mapping[str, Any]],
+                   *,
+                   multiple: float = MOCK_RUN_GAP_MULTIPLE,
+                   window: int = MOCK_RUN_MEDIAN_WINDOW) -> list[int]:
+    """Indices ``i`` such that a run boundary sits between rows ``i``/``i+1``.
+
+    The raw gap rule, with **no** :data:`MOCK_RUN_MIN_OFFSET` floor applied —
+    that floor is a safety device on the CANDIDATE SET, not part of the
+    partition. Keeping the two separable is what lets R-2's "median run of 4-5"
+    be measured against the rule the operator asked for rather than against the
+    floor, which would report every singleton run as a pair.
+
+    A single forward walk; no ``sorted``, no ``.sort`` (amendment 1).
+    """
+    n = len(candidates_ranked)
+    if n <= 1:
+        return []
+
+    # Two parallel lists over the n-1 adjacent pairs. `frontier` marks the
+    # valued -> unvalued edge, which is a boundary regardless of magnitude
+    # because there is no gap to measure across it.
+    gaps: list[float | None] = []
+    frontier: list[bool] = []
+    for i in range(n - 1):
+        a = candidates_ranked[i].get("value")
+        b = candidates_ranked[i + 1].get("value")
+        if a is None:
+            # Inside the unvalued block: the consensus holds no opinion, so
+            # there is nothing to wall off (`reach_report`, :1181-1191).
+            gaps.append(None)
+            frontier.append(False)
+        elif b is None:
+            gaps.append(None)
+            frontier.append(True)
+        else:
+            # The pool is value-descending, so a negative gap is impossible;
+            # the clamp keeps a future reordering from poisoning the median.
+            gaps.append(max(0.0, float(a) - float(b)))
+            frontier.append(False)
+
+    out: list[int] = []
+    for i, g in enumerate(gaps):
+        if g is None:
+            if frontier[i]:
+                out.append(i)
+            continue
+        lo = max(0, i - window // 2)
+        hi = min(len(gaps), lo + window)
+        lo = max(0, hi - window)          # re-clip so the window keeps its
+                                          # full width near the list's end
+        win = [x for x in gaps[lo:hi] if x is not None]
+        med = statistics.median(win) if win else 0.0
+        # `med > 0.0` excludes a flat block: an exact tie carries no opinion,
+        # so a consensus-tied run is never cut into singletons.
+        if med > 0.0 and g >= float(multiple) * med:
+            out.append(i)
+    return out
+
+
+def run_offset(candidates_ranked: Sequence[Mapping[str, Any]],
+               *,
+               allow_cross: int = 0,
+               multiple: float = MOCK_RUN_GAP_MULTIPLE,
+               window: int = MOCK_RUN_MEDIAN_WINDOW) -> int:
+    """The 0-based distance from the head of ``candidates_ranked`` to the last
+    row a CPU may consider without passing more than ``allow_cross`` run
+    boundaries.
+
+    Pure. No RNG, no I/O, no ordering — a single forward walk over the list
+    ``_undrafted`` already produced, modelled on :func:`_block_rank` (:1127),
+    which is why amendment 1's no-``sorted`` rule needs no waiver here.
+
+    Returns a value in ``[0, len(candidates_ranked) - 1]``, floored at
+    :data:`MOCK_RUN_MIN_OFFSET` wherever the list is wide enough to allow it,
+    and suitable to pass straight into ``min()`` against :func:`round_reach_cap`.
+
+    A boundary sits between rows ``i`` and ``i+1`` when the value drop there is
+    at least ``multiple`` times the MEDIAN gap in a ``window``-wide local
+    neighbourhood. Adaptive rather than a fixed Elo threshold (D-9): the same
+    absolute drop means something different at the head of the board than in
+    the tail.
+    """
+    n = len(candidates_ranked)
+    if n <= 1:
+        return 0
+
+    limit = n - 1
+    crossed = 0
+    for i in run_boundaries(candidates_ranked, multiple=multiple, window=window):
+        if crossed >= int(allow_cross):
+            limit = i
+            break
+        crossed += 1
+
+    # The floor is applied LAST and clamped to the list, so it can widen a
+    # single-candidate wall to a pair but can never point past the end.
+    return max(0, min(n - 1, max(int(MOCK_RUN_MIN_OFFSET), limit)))
+
+
+def aggregate_severity(needs_for_team: Mapping[str, float],
+                       targets: Mapping[str, tuple[int, int]] | None = None) -> float:
+    """How badly this team needs ANYTHING, in ``[0, 1]``.
+
+    **Denominator-weighted, NOT ``max()`` — and that is the whole point.**
+    :func:`severity` is ``clamp01((S + B - viable) / (S + B))`` per position,
+    and :data:`_BENCH_TARGET` gives TE ``(S, B) = (1, 0)``. So *any* roster
+    without a 1280+ TE scores ``severity("TE") == 1.0``, which in August is
+    almost every roster. A ``max()`` aggregate would therefore return 1.0
+    nearly always, :func:`effective_bpa_prob` would return ``bpa_prob``
+    unchanged, and D-5's need-conditional reaching would be inert — it would
+    ship as exactly today's behaviour while looking like a fix.
+
+    Weighting each position by its own denominator ``S + B`` fixes that: on a
+    1QB roster the capacity is ``1 + 3 + 3 + 1 = 8``, so a lone missing TE is
+    worth ``1/8`` of the team's total need rather than all of it.
+
+        aggregate = sum_pos(clamp01_shortfall_pos) / sum_pos(S_pos + B_pos)
+
+    ``targets`` is optional so the unit callers that pass a bare ``{pos: sev}``
+    map keep working; without it every position carries equal weight, which for
+    the single-position boards the noise-law tests use is the same number.
+
+    Pure; consumes no RNG.
+    """
+    if not needs_for_team:
+        return 0.0
+    total_w = 0.0
+    total = 0.0
+    for pos, sev in needs_for_team.items():
+        if targets is None:
+            w = 1.0
+        else:
+            s, b = targets.get(pos, (0, 0))
+            w = float(int(s) + int(b))
+        if w <= 0.0:
+            continue
+        total_w += w
+        total += w * max(0.0, min(1.0, float(sev)))
+    if total_w <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, total / total_w))
+
+
+def effective_bpa_prob(bpa_prob: float,
+                       needs_for_team: Mapping[str, float],
+                       targets: Mapping[str, tuple[int, int]] | None = None) -> float:
+    """P(this pick is the strict board pick), tilted by how needy the team is.
+
+    ``bpa_prob`` is the FITTED mixture weight and stays the value at MAXIMAL
+    need: a team with a desperate hole reaches exactly as often as the fit says.
+    As need falls the reach branch is damped toward — but never to —
+    best-available, which is D-5's ruling ("need DOMINATES reaching, but
+    idiosyncrasy survives"):
+
+        tilt          = floor + (1 - floor) * aggregate_severity
+        bpa_effective = 1 - (1 - bpa_prob) * tilt
+
+    severity == 1 -> bpa_effective == bpa_prob      (today's behaviour)
+    severity == 0 -> bpa_effective == 1 - (1 - bpa_prob) * floor
+
+    Pure; consumes no RNG. It changes the mixture WEIGHT and nothing about the
+    noise FAMILY, so the Gumbel-max identity and the geometric reach law hold
+    unchanged conditional on reaching (T-W2-04b).
+    """
+    sev = aggregate_severity(needs_for_team, targets)
+    tilt = MOCK_IDIOSYNCRASY_FLOOR + (1.0 - MOCK_IDIOSYNCRASY_FLOOR) * sev
+    return 1.0 - (1.0 - float(bpa_prob)) * tilt
+
+
 def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
              persona_outlook: str | None,
              needs_for_team: Mapping[str, float],
@@ -593,7 +813,8 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
              max_reach: float = MOCK_MAX_REACH_DEFAULT,
              bpa_prob: float = MOCK_BPA_PROB_DEFAULT,
              reach_decay: float = MOCK_REACH_DECAY_DEFAULT,
-             reach_cap: int | None = None) -> str:
+             reach_cap: int | None = None,
+             targets: Mapping[str, tuple[int, int]] | None = None) -> str:
     """One CPU pick — ``argmin(rank - need_bonus - reach_noise)``.
 
     ``candidates_ranked`` is the head of the consensus pool, 1-based by list
@@ -604,6 +825,15 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
     ``need_bonus <= need_weight * 1.0 * max_reach``, so a championship team with
     a desperate need reaches at most ``max_reach`` slots and a `jets` team takes
     the board pick. One scoring function, persona = parameters.
+
+    **Need is also conditional on the mixture WEIGHT since #290 (D-5).**
+    ``bpa_prob`` is now the value at MAXIMAL need — a desperate roster reaches
+    exactly as often as the fit says — and :func:`effective_bpa_prob` damps the
+    reach branch toward best-available as need falls, never to it. ``targets``
+    carries ``{pos: (S, B)}`` so the aggregate can be denominator-weighted; a
+    caller that omits it gets equal weights, which is the same number on the
+    single-position boards the noise-law tests use. The scoring loop below is
+    byte-identical either way: only the Bernoulli's threshold moves.
 
     **The noise term is the W2b re-spec** (build-w2b.md). W2a drew
     ``Uniform(0, jitter)`` per candidate; its reachable support was bounded by
@@ -638,9 +868,15 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
         candidates_ranked = candidates_ranked[:max(0, int(reach_cap)) + 1]
     weight = need_weight(persona_outlook)
     scale = _decay_to_scale(reach_decay)
+    # D-5 — the mixture weight is need-conditional. `bpa_prob` keeps its name,
+    # its default and its meaning in the signature; it is now the value at
+    # MAXIMAL need, and a satisfied roster is damped toward best-available.
+    # Consumes no RNG, and is evaluated BEFORE the draw, so the Bernoulli stays
+    # the first draw of the pick and INV-10 holds.
+    bpa_eff = effective_bpa_prob(bpa_prob, needs_for_team, targets)
     # ONE Bernoulli per pick, drawn first so the branch (and therefore the
     # whole stream) is a pure function of the seed.
-    reaching = scale > 0.0 and rng.random() >= float(bpa_prob)
+    reaching = scale > 0.0 and rng.random() >= float(bpa_eff)
     best_id: str | None = None
     best_score: float | None = None
     for rank, row in enumerate(candidates_ranked, start=1):
@@ -850,10 +1086,21 @@ def _team_viable(ctx: MockContext, state: Mapping[str, Any],
     return counts
 
 
+def _severity_targets(ctx: MockContext,
+                      state: Mapping[str, Any]) -> dict[str, tuple[int, int]]:
+    """``{pos: (S, B)}`` for this mock's lineup template.
+
+    Split out of :func:`_severities` because :func:`aggregate_severity` needs
+    the DENOMINATORS, not just the per-position severities — see its docstring
+    for why a ``max()`` over the severities alone is inert (D-5).
+    """
+    return slot_targets(state["settings"].get("lineup_slots")
+                        or ctx.lineup_slots)
+
+
 def _severities(ctx: MockContext, state: Mapping[str, Any],
                 owner_id: str) -> dict[str, float]:
-    targets = slot_targets(state["settings"].get("lineup_slots")
-                           or ctx.lineup_slots)
+    targets = _severity_targets(ctx, state)
     viable = _team_viable(ctx, state, owner_id)
     return {pos: severity(viable, targets, pos) for pos in _POSITIONS}
 
@@ -934,11 +1181,22 @@ def advance_cpu(state: dict, ctx: MockContext,
             str(owner), {"outlook": DEFAULT_OUTLOOK})
         # Budget spent => strict best-available for the rest of the round.
         cap = round_reach_cap(round_no) if spent < round_reach_budget(round_no) else 0
-        player_id = cpu_pick(available[:window], persona.get("outlook"),
+        head = available[:window]
+        if cap > 0:
+            # #290 — the run can only TIGHTEN the operator's W2e cap, never
+            # loosen it. `cap == 0` is the spent-budget case and already means
+            # strict best-available, so the run rule is skipped rather than
+            # min()'d — that keeps "strict best available" verbatim.
+            cap = min(cap, run_offset(
+                head,
+                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE))
+        targets = _severity_targets(ctx, state)
+        player_id = cpu_pick(head, persona.get("outlook"),
                              _severities(ctx, state, str(owner)),
                              _pick_rng(state, slot["pick_no"]),
                              max_reach=max_reach, bpa_prob=bpa_prob,
-                             reach_decay=reach_decay, reach_cap=cap)
+                             reach_decay=reach_decay, reach_cap=cap,
+                             targets=targets)
         if str(available[0]["player_id"]) != str(player_id):
             spent += 1                      # this pick was a reach
         _append(state, slot, player_id, BY_CPU)
@@ -1245,9 +1503,18 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
         rng = random.Random(rng_root.randrange(2 ** 31) * 10_007 + pick_no)
         head = available[:window]
         cap = round_reach_cap(round_no) if spent < round_reach_budget(round_no) else 0
+        if cap > 0:
+            # #290 R-6 / G-6 — composed IDENTICALLY to `advance_cpu`. Applying
+            # the run rule in the product but not here would silently invalidate
+            # the calibration harness, which exists to prove the simulator and
+            # the product cannot diverge on the policy (:1226-1229).
+            cap = min(cap, run_offset(
+                head,
+                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE))
         chosen = cpu_pick(head, personas.get(owner, DEFAULT_OUTLOOK),
                           needs, rng, max_reach=max_reach, bpa_prob=bpa_prob,
-                          reach_decay=reach_decay, reach_cap=cap)
+                          reach_decay=reach_decay, reach_cap=cap,
+                          targets=targets)
         # The pick is always inside the window, so the scan is O(K), not O(n).
         position = next(i for i, r in enumerate(head)
                         if str(r["player_id"]) == chosen)

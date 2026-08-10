@@ -455,15 +455,20 @@ FLAG_KEYS: tuple[str, ...] = (
     # /api/mock-draft routes; effective gating is `draft.room` AND
     # `draft.mock`. Independent of `draft.live_poll` (the mock never polls),
     # `draft.mfl` and `picks.slot_values`.
-    # OFF (default) ⇒ every mock route 404s `feature_disabled` before any
-    # session work, the `mock_drafts` table is never read or written, and no
-    # other route's response changes.
-    # NOTE: this flag stays OFF beyond the usual "lands dark" convention. W2's
-    # calibration gate FAILED on 2026-08-06 (mock_draft_service.CPU_MODEL_VALIDATED
-    # is False; see docs/plans/draft-extensions/mock-calibration-2026-08.md),
-    # so the plan's abort criterion cut the CPU-bot mock. With the flag ON the
-    # create route answers the typed-empty `{"empty": true, "reason":
-    # "cpu_model_unvalidated"}` rather than serving unvalidated bots.
+    # When OFF ⇒ every mock route 404s `feature_disabled` before any session
+    # work, the `mock_drafts` table is never read or written, and no other
+    # route's response changes.
+    # STATUS: **ON since W2e** (`config/features.json`), so this surface is lit
+    # in production and changes to the engine ship visible on merge. The
+    # earlier note here said the flag "stays OFF" because W2's calibration gate
+    # failed on 2026-08-06 — that is no longer the state of the world. W2e
+    # replaced the single global reach cap with the operator's round-tiered
+    # policy and the operator accepted THAT rule as the definition of "bots
+    # draft plausibly", so `mock_draft_service.CPU_MODEL_VALIDATED` is now True
+    # (see its comment, and docs/plans/draft-extensions/mock-calibration-2026-08d.md).
+    # The typed-empty `{"empty": true, "reason": "cpu_model_unvalidated"}`
+    # contract still exists and is what the create route would answer if
+    # `CPU_MODEL_VALIDATED` were flipped back to False.
     "draft.mock",
     # draft-extensions W3 M-A/M-B (ADR-010) — ESPN pick assignment. Gates the
     # three assignment routes (GET/PUT /api/league/pick-assignments,

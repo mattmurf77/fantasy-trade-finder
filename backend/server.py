@@ -121,7 +121,7 @@ from .database import (
     load_league_ids_for_draft_status_refresh,
     # draft-extensions W2 — mock drafts
     create_mock_draft, load_mock_draft, load_current_mock_draft,
-    update_mock_draft,
+    update_mock_draft, abandon_completed_mock_drafts,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
@@ -11444,6 +11444,91 @@ def draft_board_route():
 
 _MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
 
+#: `mfl:<league>.f<franchise>` — the synthetic member id `_mfl_member_id`
+#: (:20109) mints for every MFL franchise that is not the linked user.
+_MOCK_MFL_MEMBER_RE = re.compile(r"^mfl:.*\.f(?P<fid>\w+)$")
+
+
+def _mock_owner_name(user_id: str, stored: dict | None,
+                     session_username) -> str:
+    """One rung-by-rung resolution of a mock owner's display name (D-16).
+
+    Ladder, first non-empty wins — the SAME one `_sync_mfl_owned_picks`
+    (:9204-9207) and G1's `_mfl_board_binding` (:10480-10485) use, so the Draft
+    Room and the Mock Draft cannot disagree about a franchise's name on
+    adjacent screens:
+
+        league_members.username -> league_members.display_name
+        -> the session member's own `username`
+        -> "Team <fid>" for a synthetic MFL id
+
+    Returns ``""`` when nothing resolves, which the caller turns into an
+    OMITTED key rather than an empty string: `state_payload` then emits
+    ``owner_username: None`` and the client's existing fallback renders. An
+    absent name is honest; an empty one is not.
+
+    **Never returns a string containing "mfl:".** The session username of a
+    synthetic MFL member can be the raw id itself, so that rung is filtered
+    rather than trusted. Pinned by T-290-12.
+    """
+    if stored:
+        name = str(stored.get("username") or stored.get("display_name") or "").strip()
+        if name and "mfl:" not in name:
+            return name
+    sess_name = str(session_username or "").strip()
+    if sess_name and "mfl:" not in sess_name:
+        return sess_name
+    match = _MOCK_MFL_MEMBER_RE.match(str(user_id or ""))
+    if match:
+        # The fid exactly as it appears in the id, zero-padding intact.
+        return f"Team {match.group('fid')}"
+    return ""
+
+
+def _mock_usernames(league_id: str, members) -> dict[str, str]:
+    """``user_id -> display name`` for a mock's ``order[]`` rows (D-16).
+
+    Built off `league_members` — which holds franchise names for MFL leagues,
+    written at link and at every re-sync — rather than off whatever the session
+    league object happens to carry. Without this an MFL mock rendered the raw
+    synthetic member id in the on-the-clock card and the order rail.
+
+    ONE `load_league_members` call, never one per member. Members present in
+    the stored rows but absent from the session object are still named: an MFL
+    mock's order is built off the draft, not off the session roster list.
+
+    This is the OWNER half of identity only. It adds no id to any player
+    lookup — `ctx.player_rows` stays keyed on `_rookie_player_ids(season)`, our
+    own id space, which is what keeps the mock clear of the MFL/Sleeper id
+    collision that G1's R-7 documents (255 committed MFL ids are also a
+    *different* player's Sleeper id). Pinned by T-290-13.
+    """
+    try:
+        stored = {str(m.get("user_id") or ""): m
+                  for m in load_league_members(str(league_id))}
+    except Exception as e:                      # never a 5xx — degrade to session
+        log.warning("mock-draft: league_members unavailable for %s: %s",
+                    league_id, e)
+        stored = {}
+
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    for m in members or ():
+        uid = str(getattr(m, "user_id", "") or "")
+        if not uid:
+            continue
+        seen.add(uid)
+        name = _mock_owner_name(uid, stored.get(uid), getattr(m, "username", None))
+        if name:
+            out[uid] = name
+    for uid, row in stored.items():
+        if not uid or uid in seen:
+            continue
+        name = _mock_owner_name(uid, row, None)
+        if name:
+            out[uid] = name
+    return out
+
 
 def _mock_league_context(sess: dict, league_id: str, season: int):
     """Build the engine's injected context from the session + the DB.
@@ -11458,7 +11543,7 @@ def _mock_league_context(sess: dict, league_id: str, season: int):
     g_league = sess.get("league")
     members = list(getattr(g_league, "members", []) or [])
     rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
-    usernames = {str(m.user_id): m.username for m in members}
+    usernames = _mock_usernames(str(league_id), members)      # D-16 (create)
     rostered = {pid for ids in rosters.values() for pid in ids}
 
     fmt = _active_format(sess)
@@ -11495,7 +11580,10 @@ def _mock_context_from_row(sess: dict, state: dict):
     g_league = sess.get("league")
     members = list(getattr(g_league, "members", []) or [])
     rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
-    usernames = {str(m.user_id): m.username for m in members}
+    # D-16 (RESUME) — every GET and every /pick lands here, so this is the
+    # common path, not the create one. Fixing only `_mock_league_context`
+    # would leave every resumed mock still rendering machine ids.
+    usernames = _mock_usernames(str(state["league_id"]), members)
     fmt = settings.get("scoring_format") or _active_format(sess)
     _pool_players, consensus_seed = _get_universal_pool(fmt)
     rookie_ids = _rookie_player_ids(int(state["season"]))
@@ -11805,7 +11893,11 @@ def mock_draft_pick_route():
 @app.route("/api/mock-draft/abandon", methods=["POST"])
 @_gate_unverified_write
 def mock_draft_abandon_route():
-    """POST /api/mock-draft/abandon `{mock_id}` → `{ok: true}`."""
+    """POST /api/mock-draft/abandon `{mock_id}` → `{ok: true}`.
+
+    Retires the named row AND clears the league's completed-mock backlog, so a
+    dismissal actually frees the room (#292). Owner-scoped and idempotent.
+    """
     if not is_enabled("draft.mock"):
         return jsonify({"error": "feature_disabled"}), 404
 
@@ -11815,9 +11907,18 @@ def mock_draft_abandon_route():
     sess["last_active"] = time.time()
     body = request.get_json(silent=True) or {}
     user_id = str(sess.get("user_id") or "")
+    row = load_mock_draft(body.get("mock_id") or 0, user_id)
     if not update_mock_draft(body.get("mock_id") or 0, user_id,
                              status=mds.STATUS_ABANDONED):
         return jsonify({"error": "mock_not_found"}), 404
+    # #292 — retiring one row is not enough. `load_current_mock_draft` falls
+    # back to the most recent `complete` row with no time bound, and complete
+    # rows are never pruned, so dismissing mock N just surfaces mock N-1's
+    # recap on the next GET. Clearing the backlog is what makes the dismissal
+    # terminal instead of paginated.
+    league_id = str((row or {}).get("league_id") or "")
+    if league_id:
+        abandon_completed_mock_drafts(user_id, league_id)
     return jsonify({"ok": True})
 
 
