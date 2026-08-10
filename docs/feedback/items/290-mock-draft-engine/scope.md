@@ -3,7 +3,7 @@
 **Date:** 2026-08-10
 **Entry point:** feedback #290, #291, #292 + operator scope addition **D-16**
 **Builder:** G2 author agent (Phase 1) → G2 build agent (Phase 2)
-**Operator sign-off on waivers:** **REQUIRED — three waivers below (§1, §3, §6) plus one flag recommendation (§2) and one file-ownership gap (§7).**
+**Operator sign-off on waivers:** **REQUIRED — three waivers (§1, §3, §6), one flag recommendation (§2), one file-ownership gap (§7), and three new rulings from Round 3: O-6 (tier-wall tightness), O-7 (D-5 reading), O-8 (round-2 cap, FYI).**
 
 > Copied from [`docs/templates/feature-scope.md`](../../../templates/feature-scope.md).
 > Companion docs: [`prd.md`](./prd.md) · [`hld-delta.md`](./hld-delta.md) ·
@@ -69,13 +69,16 @@ instead, say so and it becomes a fifth workstream with its own owner.
 
 ## 2. Schema & flag scope
 
-- **New/changed tables or columns:** **none.** No `mock_drafts` change, no
-  migration, no `backend/database.py` edit at all (the abandon route already
-  accepts a completed row — [`prd.md` §2.3](./prd.md#23-292--three-dead-ends-all-client-side-d-8)).
-  `docs/data-dictionary.md`: **n/a**.
+- **New/changed tables or columns:** **none** — no schema change, no migration,
+  `docs/data-dictionary.md` **n/a**. ⚠ Round 1 said "no `backend/database.py`
+  edit at all"; that is **withdrawn**. One new *function*,
+  `abandon_completed_mock_drafts(user_id, league_id)`, is required because
+  completed mocks accumulate and one dismissal is not enough (I-5,
+  [`lld-delta.md` §7.5](./lld-delta.md#75-backend-sweep-the-accumulated-completed-mocks-i-5)).
+  **G2 retains its `backend/database.py:10714-10805` region claim.**
 - **New/changed feature flags:** **none proposed.** Recommendation below.
-- **New env vars / `model_config` keys:** **none.** Four new module constants
-  (`MOCK_RUN_GAP_MULTIPLE`, `MOCK_RUN_MEDIAN_WINDOW`,
+- **New env vars / `model_config` keys:** **none.** Five new module constants
+  (`MOCK_RUN_GAP_MULTIPLE`, `MOCK_RUN_MEDIAN_WINDOW`, **`MOCK_RUN_MIN_OFFSET`**,
   `MOCK_RUN_CROSS_ALLOWANCE_LATE`, `MOCK_IDIOSYNCRASY_FLOOR`) are deliberately
   **not** `model_config` rows, for the same reason the W2e policy tables are not
   (`mock_draft_service.py:104-113`): they are support bounds on the model, and a
@@ -151,12 +154,17 @@ override while the statistical verdict remains FAILED, so ``. The rest of the
 sentence (*"a deliberate re-fit + re-gate is owed before either value means
 anything"*) is still true and should stay.
 
-**(d) NEW — `docs/architecture.md:135`** and **(e) NEW — `docs/glossary.md:30`
+**(d) NEW — `backend/feature_flags.py:462`** carries the same stale
+*"calibration gate FAILED"* comment (found by the Planner, not by Round 1). Same
+correction as (a).
+
+**(e) NEW — `docs/architecture.md:135`** and **(f) NEW — `docs/glossary.md:30`
 and `:42`** carry the same stale `CPU_MODEL_VALIDATED = False` claim, and
 `architecture.md` additionally says *"`advance_cpu` raise[s] unless a caller
 explicitly opts in … the routes never do"*, which is now false. Exact clause-level
 replacements: [`hld-delta.md` §12](./hld-delta.md#12-docsarchitecturemd-rows-to-amend).
-These two were **not** in the plan's R10 and are the same defect.
+These three were **not** in the plan's R10 and are the same defect. **Six
+locations total**, not the plan's two.
 
 ---
 
@@ -170,6 +178,15 @@ These two were **not** in the plan's R10 and are the same defect.
   "Start a new mock" → a second mock reaches `mock-draft.on-the-clock`).
   Full step list: [`prd.md` §7.3](./prd.md#73-maestro).
 - [ ] Extended flow: none.
+- ⚠ **PRECONDITION, not an assumption (I-8).** The flow needs the ffv3 league on
+  screen, and **no tooling puts it there today.** `profiles/standard.json`
+  declares exactly one league (`990000000000000001`); d1/d2 target leagues in no
+  profile; and `git grep` finds d1/d2 referenced by no suite file or runner, so
+  their green status is unverified. Round 1's *"zero seeder work"* is
+  **withdrawn**. Resolve before authoring: either add ffv3 to a profile's
+  `leagues[]` (smaller, and fixes d1/d2 too) or implement the corpus-merge step
+  their headers already assume. Also: ffv3's top-level `rounds` is `null` — the 4
+  is in `settings.rounds`.
 - [x] **PARTIAL WAIVER — three uncovered areas, each with its reason:**
   1. **#292 dead-ends 2 and 3** (sticky create error; sticky `postRefusal`).
      *Reason:* both need a server failure or a typed-empty refusal injected
@@ -188,6 +205,10 @@ These two were **not** in the plan's R10 and are the same defect.
      live-league QA pass on Dependables (62846) — same session, one extra
      screenshot.
 
+- **Sim-gate consequence of the above:** the Tier-1 gate requires "the feature's
+  own flow". If the seeding precondition is not resolved, the mock flow cannot
+  run and the deviation becomes an operator decision recorded here — it is not
+  something a build agent may quietly skip.
 - **`testID`s added:** exactly one — **`mock-entry.retry`**
   (`MockEntryPanel.tsx`, fed a literal from `DraftRoomScreen.tsx`). **No flow
   references it**, so it needs no allow-list entry. No testID is renamed, moved
@@ -221,7 +242,7 @@ These two were **not** in the plan's R10 and are the same defect.
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` | **n/a** | **No route added, renamed, removed or contract-changed.** `SCHEMA` unchanged; every `/api/mock-draft` response key set unchanged. The plan expected an abandon-contract widening; the route already accepts a `complete` row (`server.py:11781-11794` → `database.py:10786-10805`, `WHERE` on id + user_id only). D-16 changes the *value* of `order[].owner_username` from a machine id to a name — same type, same nullability. Orchestrator-owned either way. |
+| `docs/api-reference.md` | **YES — one sentence** | ⚠ Round 1 said "n/a"; **withdrawn**. No route is added, renamed or removed, and no request/response *shape* or status code changes (`SCHEMA` unchanged, key sets unchanged). But `POST /api/mock-draft/abandon`'s **semantics widen**: dismissing a *completed* mock now abandons every completed row for that (user, league), not just the named one (I-5). Add to the `/abandon` entry: *"Abandoning a mock whose status is `complete` also abandons every other completed mock for the same user and league — older completed rows are unreachable from any client, and leaving them turns one dismissal into N (#292)."* D-16 additionally changes the *value* of `order[].owner_username` from a machine id to a name — same type, same nullability, no doc change. Orchestrator-owned. |
 | `living-memory/LLD.md` | **YES** | A convention shifts: the mock engine gains a **gap-derived, engine-internal cluster ("run")** that is explicitly *not* the cross-client tier enum, computed by a forward walk to satisfy amendment 1's no-`sorted` rule, and composed with the W2e cap through `min()` so product policy can only be tightened. Also record that mock CPU support bounds are module constants, never `model_config` rows. Orchestrator-owned. |
 | `docs/architecture.md` | **YES** | The `mock_draft_service.py` row (`:135`). Two clauses amended for this change (need-conditional mixture weight; the run as a second, tighter bound) and **two corrected as pre-existing staleness** (`CPU_MODEL_VALIDATED = False`; "the routes never do"). Clause-level text: [`hld-delta.md` §12](./hld-delta.md#12-docsarchitecturemd-rows-to-amend). Orchestrator-owned. |
 | `living-memory/HLD.md` | **n/a** | No new module, no new client, no new major flow. This is a change to a model's internals inside an existing module; the convention half lands in `LLD.md`. |
@@ -304,6 +325,41 @@ alternative is specced if you disagree.
 it does — the `ffv3-predraft` corpus is 12 teams, `pre_draft`, 4 rounds, and
 clears every block predicate, so the first mock flow is authorable with **no**
 seeder work.
+
+**O-6 — NEW, and the one genuine product tradeoff left: how tight should the
+tier wall be?** The run rule needs a floor (`MOCK_RUN_MIN_OFFSET`) or it forces
+pick 1.01 in every superflex/TE-premium league. The floor is a dial, and **the
+defect you reported is fixed at every setting** — `P(consensus #7 reaching pick
+≤ 4)` goes `0.115 → 0.0000` on both formats at floors 0, 1 and 2. What the dial
+trades is how tightly the top of round 1 is pinned:
+
+| Floor | P(#1 goes 1.01) 1qb / sf | P(#1 falls past 3) | P(Tate falls past 4) | distinct round-1 openings |
+|---|---|---|---|---|
+| today | 0.455 / 0.455 | 0.155 | 0.171 | 171 |
+| 0 | 0.455 / **1.000 (forced)** | 0.025 / 0.000 | 0.000 / 0.103 | 18 / 24 |
+| **1 (recommended)** | 0.455 / 0.638 | 0.089 / 0.042 | 0.073 / 0.073 | 39 / 33 |
+| 2 | 0.455 / 0.520 | 0.127 / 0.107 | 0.128 / 0.120 | 84 / 74 |
+
+**Recommend 1:** the minimum that makes a forced pick structurally impossible,
+halves both fall probabilities on both formats, and is nearly format-symmetric.
+A build agent proceeds on 1 unless you say otherwise; changing it later is one
+constant and three test rows.
+
+**O-7 — NEW. D-5: confirm that re-weighting *who* reaches answers "reaching
+should more so be to fill a position of need than just random".** Measured: when
+a bot has a real hole it **already** picks that position 2.77× more often than the
+window's base rate — per-pick direction is not the problem and is unchanged. What
+was random is that *every* bot reached 90 % of the time regardless of need. After
+this change a satisfied roster drops to ~30 % while a needy one stays at 90 %, so
+the reaches that remain are predominantly need-fills. **If you meant that a
+reaching bot should prefer its needed position even more strongly than 2.77×, say
+so** — that is `mock_max_reach_slots`, a separate product cap, and a separate item.
+
+**O-8 — NEW, FYI. Your round-2 reach cap of 5 will often be 1 in practice.**
+Measured at round-2 depth on 1qb_ppr, the head's run is 2 players wide, so the
+effective cap is 1 against the 5 you ruled in W2e. Contract-legal — the run rule
+can only tighten — but you ruled that table verbatim and should know it is in
+practice often 3/1/x rather than 3/5/15.
 
 **O-5 — File-ownership gap, needs a ruling before Phase 2.** The batch plan's
 ownership table gives G2 `mock_draft_service.py`, `MockDraftScreen.tsx`, the

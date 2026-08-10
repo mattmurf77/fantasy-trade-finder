@@ -37,18 +37,57 @@
 #: behaves differently at the head of the board than in the tail, which is the
 #: flattening this module already records at :231.
 #:
-#: 2.5 is not a taste call. On the pinned 2026 consensus board it yields a
-#: MEDIAN RUN OF 5 players on BOTH scoring formats — the operator's "tight
-#: groups of 4-5" as an emergent property of the value curve rather than an
-#: imposed clamp — while leaving P(consensus #1 goes 1.01) exactly where the
-#: shipped engine has it (45.1%). At 2.0 the first run collapses to a single
-#: player, round 1 becomes 5 distinct openings over 2000 seeds, and 1.01 is
-#: forced. Measurements: docs/feedback/items/290-mock-draft-engine/prd.md §4.
+#: 2.5 yields a MEDIAN RUN OF 5 players on BOTH scoring formats — the operator's
+#: "tight groups of 4-5" as an emergent property of the value curve rather than
+#: an imposed clamp (D-9). It governs the PARTITION only.
+#:
+#: **It does NOT on its own keep pick 1.01 free, and must never be described as
+#: if it did.** Un-floored, `run_offset(pool[:24])` is 3 on 1qb_ppr but **0 on
+#: sf_tep**, which forces 1.01 in every superflex / TE-premium league. The
+#: threshold that keeps 1.01 free is :data:`MOCK_RUN_MIN_OFFSET`, below.
+#:
+#: **Safe band: 2.2 <= m <= 2.6.** Inside it, P(consensus #7 reaching pick <= 4)
+#: is 0.0000 on both formats and the median run stays 4.0-5.0. It leaks at 2.8
+#: (0.0173 on sf_tep) and breaks R-11's 0.02 bar at 3.0 (0.0507 on 1qb_ppr).
+#: 2.5 sits mid-plateau, not on an edge: with the floor in place, every m in
+#: [2.2, 2.6] behaves within 0.638 <-> 0.455 of P(#1 at 1.01).
+#: Per-format measurements: docs/feedback/items/290-mock-draft-engine/prd.md §4.
 MOCK_RUN_GAP_MULTIPLE = 2.5
 
 #: Width, in GAPS, of the window the median is taken over. Odd so the window is
 #: symmetric about the gap under test where it can be.
 MOCK_RUN_MEDIAN_WINDOW = 9
+
+#: The run rule may never truncate the candidate set below this many slots.
+#:
+#: **Why a floor exists.** A run of size 1 makes `run_offset` 0, which makes
+#: `reach_cap` 0, which makes the pick DETERMINISTIC. That is what happens on
+#: sf_tep at every m the partition otherwise wants, and it is the collapse D-6
+#: and R-12 exist to prevent. The floor is the only thing standing between a
+#: genuine value cliff and a forced 1.01.
+#:
+#: **This is NOT the size clamp D-9 forbids.** D-9 rejects clamping runs DOWN to
+#: 4-5, because that manufactures boundaries where the values state none. A floor
+#: only ever SUPPRESSES a boundary's effect on the cap; it can never create one,
+#: and it leaves the partition (and therefore R-2's median-run figure) untouched.
+#: It states a product rule — "a bot may always consider at least MIN+1 available
+#: players, however large the gap above them" — not a claim about the values.
+#:
+#: **It can never loosen the operator's W2e cap:** the outer
+#: `min(round_reach_cap(r), ...)` still binds, so effective_cap <= round cap
+#: always (R-5, T-290-06).
+#:
+#: **Boundary condition, pinned by T-290-15: MIN must be < round_reach_cap(1) = 3.**
+#: At MIN = 3 the round-1 composition is `min(3, max(off, 3)) == 3` for every
+#: board, every figure reverts to the shipped engine exactly, and the feature is
+#: silently disabled in the round it matters most.
+#:
+#: 1 is the MINIMUM intervention that makes a forced pick structurally impossible.
+#: Measured at m=2.5 (1qb_ppr / sf_tep): P(#1 at 1.01) 0.455 / 0.638,
+#: P(#1 falls past 3) 0.089 / 0.042, P(Tate falls past 4) 0.073 / 0.073,
+#: P(#7 reaches pick <= 4) 0.0000 / 0.0000. Operator ruling O-6 may set this to
+#: 2 instead (more variety, less tier discipline) — see prd.md §4.
+MOCK_RUN_MIN_OFFSET = 1
 
 #: Rounds 3+ may cross this many run boundaries (D-6's "softer penalty in
 #: rounds 3+"). Rounds 1-2 cross none — a hard wall. Expressed in the same
@@ -61,6 +100,11 @@ MOCK_RUN_CROSS_ALLOWANCE_LATE = 1
 #: `mock_bpa_prob = 0.10`, a satisfied roster reaches 22.5% of the time against
 #: a desperate roster's unchanged 90%. Zero here would make most August bots
 #: pure BPA and the board chalky, which D-5 explicitly rejects.
+#:
+#: The floor is only meaningful because the pressure it scales is DENOMINATOR-
+#: WEIGHTED (see :func:`need_pressure`). Under a naive `max()` over positions,
+#: TE's (S,B) = (1,0) means any roster without a 1280+ TE scores 1.0 and this
+#: constant is never reached at all.
 MOCK_IDIOSYNCRASY_FLOOR = 0.25
 ```
 
@@ -187,9 +231,10 @@ Replace the two statements at `:936-941`:
             # `cap == 0` is the spent-budget case and already means strict
             # best-available, so the run rule is skipped rather than min()'d —
             # that keeps "strict best available" the operator's words verbatim.
-            cap = min(cap, run_offset(
+            cap = min(cap, max(run_offset(
                 head,
-                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE))
+                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE),
+                MOCK_RUN_MIN_OFFSET))
         player_id = cpu_pick(head, persona.get("outlook"),
                              _severities(ctx, state, str(owner)),
                              _pick_rng(state, slot["pick_no"]),
@@ -211,9 +256,10 @@ composition:
 ```python
         cap = round_reach_cap(round_no) if spent < round_reach_budget(round_no) else 0
         if cap > 0:
-            cap = min(cap, run_offset(
+            cap = min(cap, max(run_offset(
                 head,
-                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE))
+                allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE),
+                MOCK_RUN_MIN_OFFSET))
         chosen = cpu_pick(head, personas.get(owner, DEFAULT_OUTLOOK), …)
 ```
 
@@ -226,12 +272,21 @@ pool, not `head`, exactly as today.
 For every round `r` and every candidate head `h`:
 
 ```
-effective_cap(r, h) <= round_reach_cap(r)          # min() can only tighten
-effective_cap(r, h) >= 0
-spent >= round_reach_budget(r)  =>  effective_cap == 0
+effective_cap(r, h) <= round_reach_cap(r)                       # min() only tightens
+effective_cap(r, h) >= min(round_reach_cap(r), MOCK_RUN_MIN_OFFSET)
+spent >= round_reach_budget(r)  =>  effective_cap == 0          # floor is skipped
+MOCK_RUN_MIN_OFFSET < round_reach_cap(1)                        # else round 1 is a no-op
 ```
 
-Pinned by T-290-04 and T-290-05 ([`prd.md` §7](./prd.md#7-test-plan)).
+**The floor sits INSIDE the `min()`, never outside it.** `max(run_offset, MIN)`
+raises the run's contribution; the outer `min(round_reach_cap(r), …)` still binds,
+so the operator's W2e cap is never loosened. Writing it the other way round —
+`max(min(cap, run_offset), MIN)` — would let the floor override a spent budget and
+break "strict best available". The `if cap > 0` guard already excludes the
+spent-budget case, so the floor cannot resurrect a reach the budget forbade.
+
+Pinned by T-290-04, T-290-05, T-290-06, T-290-14 and T-290-15
+([`prd.md` §7](./prd.md#7-test-plan)).
 
 ---
 
@@ -242,8 +297,37 @@ Pinned by T-290-04 and T-290-05 ([`prd.md` §7](./prd.md#7-test-plan)).
 Place immediately above `cpu_pick`.
 
 ```python
+def need_pressure(severities: Mapping[str, float],
+                  targets: Mapping[str, tuple[int, int]]) -> float:
+    """How much of this team's STARTING+BENCH need is unfilled, in [0, 1].
+
+    The denominator-weighted share of unmet slots:
+
+        sum_p severity[p] * (S_p + B_p)  /  sum_p (S_p + B_p)
+
+    **Why not ``max(severities.values())``.** ``slot_targets`` gives TE
+    ``(S, B) = (1, 0)`` on a standard lineup, so a team with no 1280+ TE scores
+    ``severity["TE"] == 1.0`` and ``max`` returns 1.0 — which makes
+    :func:`effective_bpa_prob` return ``bpa_prob``, i.e. TODAY'S BEHAVIOUR, for
+    the large majority of real rosters. Measured on a roster full at QB/RB/WR
+    with no viable TE: ``max`` = 1.000 (P(reach) 0.900, unchanged), ``mean`` =
+    0.250, denominator-weighted = **0.111** (P(reach) 0.300).
+
+    **Why not ``mean``.** A team missing its whole WR corps and a team missing
+    one TE both score 0.25 under ``mean``. Denominator weighting scores them
+    0.44 and 0.11, which is the honest ordering.
+    """
+    den = sum(sum(targets.get(p, (0, 0))) for p in _POSITIONS)
+    if den <= 0:
+        return 0.0
+    num = sum(float(severities.get(p, 0.0)) * sum(targets.get(p, (0, 0)))
+              for p in _POSITIONS)
+    return max(0.0, min(1.0, num / den))
+
+
 def effective_bpa_prob(bpa_prob: float,
-                       needs_for_team: Mapping[str, float]) -> float:
+                       needs_for_team: Mapping[str, float],
+                       pressure: float | None = None) -> float:
     """P(this pick is the strict board pick), tilted by the team's worst hole.
 
     ``bpa_prob`` is the FITTED mixture weight and stays the value at MAXIMAL
@@ -262,26 +346,41 @@ def effective_bpa_prob(bpa_prob: float,
     noise FAMILY, so the Gumbel-max identity and the geometric reach law hold
     unchanged conditional on reaching (T-W2-04b).
     """
-    values = [float(v) for v in (needs_for_team or {}).values()]
-    sev = max(values) if values else 0.0
-    sev = max(0.0, min(1.0, sev))
+    if pressure is None:
+        # Callers that hold no lineup template (the existing unit tests) fall
+        # back to the worst single hole. Production callers ALWAYS pass
+        # `pressure` from `need_pressure`; see the note below.
+        values = [float(v) for v in (needs_for_team or {}).values()]
+        pressure = max(values) if values else 0.0
+    sev = max(0.0, min(1.0, float(pressure)))
     tilt = MOCK_IDIOSYNCRASY_FLOOR + (1.0 - MOCK_IDIOSYNCRASY_FLOOR) * sev
     return 1.0 - (1.0 - float(bpa_prob)) * tilt
 ```
 
-`max(...)` over severities, not a sum or a mean: severity is already `clamp01`
-per position (`severity()`, `:545-552`), and "how badly does this team need
-*anything*" is the worst hole, not the average one. A mean would make a team with
-one desperate hole and three filled positions look 75 % satisfied.
+**`pressure` is optional in the signature and mandatory in production.** The
+default exists so the shipped single-position unit tests keep working unchanged
+(on a uniform board `max` and the weighted share coincide). Both engine call
+sites — `advance_cpu` and `simulate_reaches` — **must** pass it, and T-290-16
+asserts they do by AST.
+
+**Per-position severity is unchanged and still drives DIRECTION.** `need_pressure`
+aggregates only for the mixture weight (how *often* a bot reaches). The
+`bonus = weight × severity[pos] × max_reach` term at `:648`, which decides *what*
+it reaches for, keeps reading the raw per-position severity and is not touched —
+measured at a **2.77× lift** over the window base rate on the shipped engine
+([`prd.md` §4.6](./prd.md#46-what-d-5-does-and-does-not-change)).
 
 ### 4.2 `cpu_pick` — the only change inside it
+
+`cpu_pick` gains one keyword-only parameter,
+`need_pressure_value: float | None = None`, threaded straight through.
 
 `backend/mock_draft_service.py:641-643`:
 
 ```python
      weight = need_weight(persona_outlook)
      scale = _decay_to_scale(reach_decay)
-+    bpa_eff = effective_bpa_prob(bpa_prob, needs_for_team)
++    bpa_eff = effective_bpa_prob(bpa_prob, needs_for_team, need_pressure_value)
      # ONE Bernoulli per pick, drawn first so the branch (and therefore the
      # whole stream) is a pure function of the seed.
 -    reaching = scale > 0.0 and rng.random() >= float(bpa_prob)
@@ -293,7 +392,24 @@ its default and its meaning in the signature; the docstring gains one paragraph
 naming `effective_bpa_prob` and stating that `bpa_prob` is now the value at
 maximal need.
 
-### 4.3 RNG-stream invariant
+### 4.3 Caller wiring
+
+Both engine call sites hoist `slot_targets` once and pass the pressure per pick:
+
+```python
+# advance_cpu, before the loop (it is per-mock, not per-pick):
+targets = slot_targets(state["settings"].get("lineup_slots") or ctx.lineup_slots)
+# ...inside the loop, beside the existing _severities call:
+sev = _severities(ctx, state, str(owner))
+player_id = cpu_pick(head, persona.get("outlook"), sev, _pick_rng(...),
+                     ..., need_pressure_value=need_pressure(sev, targets))
+```
+
+`simulate_reaches` already has `targets` as a parameter (`:1234`), so it passes
+`need_pressure(needs, targets)` with no new plumbing. **Both, or neither** — the
+same rule as the run rule (R-6).
+
+### 4.4 RNG-stream invariant
 
 `effective_bpa_prob` consumes no RNG and is evaluated **before** the single
 `rng.random()` call, so the Bernoulli stays the first draw of the pick and
@@ -608,16 +724,62 @@ future flow stable.
 **No new top-level return is introduced** — `headerRight` is a `useLayoutEffect`
 callback, outside the component's single return.
 
-### 7.5 What is *not* changed
+### 7.5 Backend: sweep the accumulated completed mocks (I-5)
 
-- **No backend change, no route change.** `mock_draft_abandon_route`
-  (`backend/server.py:11781-11794`) already accepts a `complete` row:
-  `update_mock_draft`'s `WHERE` is id + user_id only
-  (`backend/database.py:10786-10805`). ⚠ The plan's §4.1 "Option A — extend the
-  abandon route" describes work that does not exist.
+**Round 1 claimed #292 was mobile-only. That was right for the first completed
+mock and wrong for the steady state**, and the correction costs one small
+`database.py` function.
+
+`create_mock_draft` abandons only rows with `status == "active"`
+(`database.py:10739`), and `load_current_mock_draft`'s complete-fallback is
+`ORDER BY id DESC LIMIT 1` (`:10774-10781`). So **completed rows accumulate, one
+per finished mock, forever** — dismiss mock #N and #N-1 appears. For anyone past
+their second mock (exactly the #292 population) the dead-end is paginated, not
+fixed.
+
+**New in `backend/database.py`, beside the other four mock functions:**
+
+```python
+def abandon_completed_mock_drafts(user_id: str, league_id: str) -> int:
+    """Abandon EVERY completed mock for this (user, league). Returns rowcount.
+
+    Older completed rows are unreachable from any UI — every read path goes
+    through `load_current_mock_draft`, which returns only the newest — so
+    clearing them destroys nothing a user can see, and leaving them turns one
+    dismissal into N (#292).
+    """
+```
+
+One `UPDATE … WHERE user_id = ? AND league_id = ? AND status = 'complete'`
+setting `status='abandoned', updated_at=now`. Owner-scoped, idempotent.
+
+**Route change — `mock_draft_abandon_route` (`server.py:11781-11794`), G2's region:**
+
+```python
+row = load_mock_draft(body.get("mock_id") or 0, user_id)     # +1 query
+if row is None:
+    return jsonify({"error": "mock_not_found"}), 404
+if str(row.get("status")) == mds.STATUS_COMPLETE:
+    abandon_completed_mock_drafts(user_id, str(row["league_id"]))
+elif not update_mock_draft(row["id"], user_id, status=mds.STATUS_ABANDONED):
+    return jsonify({"error": "mock_not_found"}), 404
+return jsonify({"ok": True})
+```
+
+Request shape, response shape and status codes are **unchanged**; only the
+semantics of dismissing a *completed* mock widen. `docs/api-reference.md`
+therefore moves from "n/a" to **one clarifying sentence** — see
+[`scope.md` §4](./scope.md#4-docs-scope-mandatory--hld--lld--api).
+
+**Consequence for ownership:** G2 **retains** its `backend/database.py:10714-10805`
+region claim. Round 1's release of it is withdrawn.
+
+### 7.6 What is *not* changed
+
 - **`load_current_mock_draft` (`database.py:10762-10785`) is untouched.** Its
   complete-fallback is the documented resume-or-recap contract; the fix is to
-  give the user a way to *dismiss*, not to make the row expire invisibly.
+  give the user a way to *dismiss*, not to make the row expire invisibly, and not
+  to change what "current" means.
 - **`MockSetupSheet.tsx` is not touched.** The busy-stranding path the plan
   flagged is not one of D-8's three proven dead-ends and is out of scope.
 - **`MOCK_MIN_TEAMS` disagreement stays** — client `6`
@@ -695,8 +857,8 @@ substantive claims hold; these drift or are wrong.
 | `database.py:10723-10748` `create_mock_draft`; `:10762-10785` `load_current_mock_draft`; complete-fallback at `:10774` | correct | — |
 | `server.py:11437` mock `usernames` (plan) / `:11438` (G1 PRD §11) | **`:11437`, and a SECOND site at `:11474`** | material — see §5.1 |
 | `server.py:11744-11779` `/pick`, `:11781-11794` `/abandon` | correct | — |
-| "Extend the abandon route to accept a `complete` row" (§4.1 Option A) | **already true** — `update_mock_draft` filters on id + user only | material — removes the whole backend half of #292 |
+| "Extend the abandon route to accept a `complete` row" (§4.1 Option A) | **already true** — `update_mock_draft` filters on id + user only. **But** `create_mock_draft` abandons only `active` rows (`:10739`) and the complete-fallback is `ORDER BY id DESC LIMIT 1`, so completed rows accumulate and one dismissal is not enough | material — the route needs no *contract* change, but #292 does need a backend sweep (§7.5). Round 1's "mobile-only" is withdrawn |
 | `DraftRoomScreen.tsx:1325` / `:1375` / `:823-830`; `MockDraftScreen.tsx:200-212` (actually `:198-212`) / `:284`; `MockEntryPanel.tsx:90-96` / `:72-80` / `:41`; `test_mock_draft.py:332` / `:708` / `:248` / `:265` / `:402` | all correct | — |
 | §1: "the consensus #7 rookie goes 4th overall 10.9 % of the time" | measured on a **synthetic uniform** board. On the **real** pinned board the same statistic is ~11 % for Kenyon Sadiq (#7) — so the number survives, but the *player* it was attributed to does not: **Carnell Tate is consensus #2** | material — see [`prd.md` §4](./prd.md#4-the-tate-case) |
 | §8 Spike A: "Tate's consensus rank cannot be established" | **established** — `_rookie_ctx` + `consensus_pool` reproduce the shipped board with no DB; Tate is #2 in both `1qb_ppr` and `sf_tep` | material — Spike A is closed, not blocking |
-| R9: "`ffv3-predraft` is blocked by `draft_order: null`" | `draft_order: null` only downgrades `order_source` to `randomized` (`_mock_real_draft`, `server.py:11555-11557`); it does **not** block a mock. The fixture is 12 teams, `pre_draft`, 4 rounds, linear — every `mockBlock` predicate passes | material — a hermetic Maestro mock flow is authorable **today**, with no seeder change |
+| R9: "`ffv3-predraft` is blocked by `draft_order: null`" | `draft_order: null` only downgrades `order_source` to `randomized` (`_mock_real_draft`, `server.py:11555-11557`); it does **not** block a mock. The fixture is 12 teams, `pre_draft`, 4 rounds, linear — every `mockBlock` predicate passes. ⚠ **But the league is not seedable today:** `profiles/standard.json` declares exactly one league (`990000000000000001`), d1/d2 target leagues in no profile, and `git grep` finds d1/d2 referenced by no suite file or runner — the "corpus merged into the fixture dir" step is unimplemented. Also: ffv3's **top-level `rounds` is `null`** (the 4 is in `settings.rounds`) | material both ways — no engine or route work is needed, but the flow is blocked on a pre-existing seeding gap. Round 1's "zero seeder work" is withdrawn; see [`scope.md` §3](./scope.md#3-test-scope-mobile-test-platform) |

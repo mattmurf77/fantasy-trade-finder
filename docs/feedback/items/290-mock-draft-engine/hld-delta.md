@@ -43,8 +43,9 @@ never loosen it. The second input is **positional need**, which now conditions
 the *probability* of taking the idiosyncrasy branch rather than only the size of
 the need bonus. On the client side there is **no architectural change at all**:
 #291 is a render-condition change in one shared row component, and #292 is
-client lifecycle work over a route contract that — contrary to the plan — already
-supports everything it needs.
+client lifecycle work plus one small `database.py` sweep function: the abandon
+*route contract* needs no change, but completed mocks accumulate, so dismissing
+one must clear them all.
 
 ---
 
@@ -380,6 +381,8 @@ been crosswalked.** Exact contract: [`lld-delta.md` §5](./lld-delta.md#5-d-16--
 |---|---|---|
 | **D-1** | The run lives in `mock_draft_service.py`, computed per pick over the windowed candidate head. | *Beside `_undrafted` in `draft_board_service.py`* — G1's file, and it would become shipped board-payload surface. *Precomputed once per mock and snapshotted into `settings`* — the pool shrinks every pick, so a frozen run table would drift from the board it describes; and it would put a model-internal in a persisted contract. |
 | **D-2** | Adaptive local-median threshold, `m = 2.5`, `W = 9`. | *Absolute Elo gap* — settled by D-9; also verified to fail on the flattening tail. *`m = 2.0`* — measured: collapses round 1 to 5 distinct openings and forces 1.01. *`m = 3.0`* — median run 11 on 1qb_ppr; stops being "tight groups". |
+| **D-2b** | **A floor on the composed cap** (`MOCK_RUN_MIN_OFFSET = 1`), separating the partition from the wall. | *A different `m`* — 27 `(m, W)` configurations were swept on both boards and **none** clears `run_offset >= 1` on both while holding a 4-5 median run on both; `m ≥ 2.8` also breaks R-11's `P(#7 ≤ 4) ≤ 0.02` bar on 1qb_ppr (0.0507 at 3.0). *A whole-head median instead of a sliding window* — measured strictly worse, collapsing both formats at every `m`. *Per-format constants* — two magic numbers, still cliff-adjacent, no principled basis. |
+| **D-2c** | **Denominator-weighted need pressure**, not `max()`. | *`max()`* (Round 1's spec) — `slot_targets` gives TE `(S,B) = (1,0)`, so any roster without a 1280+ TE scores 1.0 and the whole need-conditional change is a **no-op**. *`mean`* — scores a missing WR corps and a missing TE identically (0.25 each); denominator weighting gives 0.44 vs 0.11. |
 | **D-3** | No size clamp on runs. | *Clamp to 4-5* — settled by D-9; and the measured board's tail is one genuinely flat 53-row block, so a clamp invents boundaries. Mooted anyway by the 15-slot round cap. |
 | **D-4** | The Tate case is re-specced as a **top-of-board integrity** assertion, not "P(Tate ≤ 4) → 0". | *The plan's secondary assertion* — falsified by measurement: Tate is consensus **#2** and shares a run with Tyson and Lemon, so Tate at pick 4 is legitimate under the very rule the operator asked for. Driving it to zero would be wrong. Full argument and the operator-facing consequence: [`prd.md` §4](./prd.md#4-the-tate-case). |
 | **D-5′** | D-6's rounds-3+ softening is a **one-boundary allowance**. | *A score penalty* — perturbs the noise family per pick and breaks the geometric-law test. *A different multiple in late rounds* — a second parameter to fit with no evidence to fit it on. |
@@ -406,6 +409,13 @@ against a **prototype** of the full engine change in this worktree (then reverte
 | **Budget semantics + resume identity** | "reach" still means pool position > 0 | holds (`:402`) |
 | **Geometric reach law** | noise family untouched; measured at maximal need | holds after the helper correction (§5, R-14) |
 | **Calibration tripwire** | `test_w2_16` asserts `all_pass is False` | **did not fire** under the prototype |
+
+**Round-3 correction to the "80 passed" reading.** The prototype passing the whole
+suite was *not* evidence the change is safe — the shipped 80 tests pin invariants
+(determinism, resume identity, budget accounting, the policy table, AST shape) and
+have almost **no distributional coverage**. All the constraint on this change comes
+from the new tests in [`prd.md` §7.3](./prd.md#73-backend-pytest--backendteststest_mock_draftpy-additions-only),
+which is why their two-sidedness (Q in the reconciliation log) is load-bearing.
 
 **Accepted, and stated once:** a persisted mock created before this change
 replays *differently* after it, because truncating the candidate list changes how

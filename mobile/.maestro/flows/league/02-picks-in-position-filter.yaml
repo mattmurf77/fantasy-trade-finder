@@ -1,0 +1,112 @@
+appId: com.fantasytradefinder.app
+# tc: T3 + T4 (feedback #294 — neither do the position specific filters)
+# profile: standard
+# flags: release+league.picks_always_counted
+#
+# TIER B — same seeding blocker as 01-picks-in-subsets.yaml: the hermetic
+# world has zero draft_picks rows, so `hasPicks` is false, rule A cannot fire
+# and the Picks pill never renders. Skip in the gate (`--exclude-tags picks`),
+# verify manually via T-S6, unskip when the seeding follow-up lands. Flag
+# forcing and the two sim-run.sh traps: see 01's header.
+#
+# WHAT THIS PROVES. The R-6 state machine, which is the whole of #294:
+#   {}            --tap RB--> {RB, PICKS}   rule A (auto-add)
+#   {RB, PICKS}   --tap Picks-> {RB}        explicit, visible opt-out
+#   {RB}          --tap RB---> {}  = All    rule B (exit)
+# Rule B is what keeps the position pill REVERSIBLE — without it, tapping RB
+# off lands the user in a picks-only ranking they never asked for.
+#
+# SELECTOR NOTE — the open question prd.md §7.4 handed to this author, closed
+# as far as it can be closed here, so the next author does not re-litigate it:
+#   • Installed Maestro is 2.5.1, read from /opt/homebrew/Cellar/maestro/2.5.1.
+#     `maestro --version` could NOT be executed on this machine — it dies with
+#     "Unable to locate a Java Runtime" (no JRE; same failure the PRD author
+#     hit). The version is therefore from the install path, not the binary.
+#   • `selected:` IS a documented Maestro element-matcher property in 2.x, and
+#     the pills expose accessibilityState={{ selected }} (PosFilterPills), so
+#     the mechanical assertion is used below rather than an eyeball check.
+#   • NOT verified empirically: that React Native's accessibilityState.selected
+#     reaches XCUIElement.isSelected through the iOS driver. This lane could
+#     not run Maestro (no JRE) and was forbidden from holding the simulator.
+#   • IF the first Tier-B run shows the matcher never resolves: delete the
+#     three `selected:` qualifiers, fall back to the screenshots as the
+#     artifact, and record that result HERE. The Picks bar segment visible in
+#     the screenshots corroborates inclusion either way.
+tags: [league, picks]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.posfilter.all"
+    timeout: 20000
+
+# ── T3: the R-6 state machine ────────────────────────────────────────────
+# Step 1 — first position tap out of All auto-adds PICKS (rule A). On
+# origin/main the Picks pill stays unselected and RB value alone is charted.
+- tapOn:
+    id: "league-summary.posfilter.rb"
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+    selected: true
+- takeScreenshot: league-02-rb-autoadds-picks
+
+# Step 2 — the opt-out is one visible tap, and it sticks.
+- tapOn:
+    id: "league-summary.posfilter.picks"
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+    selected: false
+- takeScreenshot: league-02-picks-deselected
+
+# Step 3 — removing the last core position exits to All (rule B), rather
+# than stranding the user on a picks-only ranking.
+- tapOn:
+    id: "league-summary.posfilter.rb"
+- assertVisible:
+    id: "league-summary.posfilter.all"
+    selected: true
+- takeScreenshot: league-02-rule-b-exit-to-all
+
+# ── T4: #237 mirroring + a truthful #243 caption ─────────────────────────
+# The flow never taps a Starters control, so `subsetLabel` is still "All" —
+# the caption must read `All · RB + Picks`, NOT `Starters · …`.
+- tapOn:
+    id: "league-summary.bar..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.roster-close"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.roster-posfilter.rb"
+- assertVisible:
+    id: "league-summary.filter-caption"
+# Canonical QB→RB→WR→TE order with Picks last and title-cased (filterPosLabel),
+# not the raw `PICKS` enum in tap order — R-8.2.
+- assertVisible: '.*All · RB \+ Picks.*'
+- takeScreenshot: league-02-mirrored-caption
+- tapOn:
+    id: "league-summary.roster-close"

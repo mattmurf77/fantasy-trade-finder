@@ -20,3 +20,12 @@ rookie-ranks.filter.*
 feedback.severity.*
 draft-room.notice.*
 draft-room.undrafted-row*
+# LeagueSummaryScreen.tsx: SubsetControl / PosFilterPills / BarColumn template
+# their ids. Deliberately NOT a bare `league-summary.*` — that would
+# blanket-exempt the static ids (roster-picks, filter-caption, roster-close,
+# avg-line, league-home) the lint currently checks for real.
+league-summary.subset.*
+league-summary.roster-subset.*
+league-summary.posfilter.*
+league-summary.roster-posfilter.*
+league-summary.bar.*
