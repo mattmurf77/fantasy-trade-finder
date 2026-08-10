@@ -19587,7 +19587,15 @@ def league_outlook_route():
         }
 
     fmt = _active_format(sess)
-    platform = (getattr(g_league, "platform", None) or "sleeper")
+    # Platform must be resolved from the REQUESTED league_id, not from the
+    # session's currently-attached league — those disagree for multi-league
+    # users. `league_id` above may already differ from g_league.league_id
+    # (explicit query param), so g_league.platform is the wrong source here
+    # (it produced a spurious 501 for an ESPN-session user requesting a
+    # Sleeper league, or a misleading 404 the other way around). Follow the
+    # same DB-lookup convention as the pick-assignments seeder and the
+    # draft-status stamp (both key off get_league_draft_context(league_id)).
+    platform = (get_league_draft_context(league_id) or {}).get("platform") or "sleeper"
     try:
         from . import outlook as outlook_pkg
         _outlook_captured: dict = {}

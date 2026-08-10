@@ -151,16 +151,46 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     entry points (deep link app/league/summary, stored whats-new routes).
 //     No home row, no re-tap registration (it isn't the tab root).
 //
-// #169 OUTLOOK ODDS layer (flag `outlook.odds`, DARK): the playoff/title-odds
-// view lives between the basis toggle and the dynasty chart. It is a SEPARATE
-// gated section — when `outlook.odds` is off (the default; the flag is absent
-// from LAUNCHED_FLAG_DEFAULTS) the section does NOT render and GET
-// /api/league/outlook is NOT called (it 404s while the modeling backend is
-// dark). Only when on do we fetch + render. Every odds figure is a projection:
-// the section carries a "Projected · preseason · beta" ribbon + a strength-
-// source caption so no percentage ever reads as authoritative (see
-// mockups/outlook-odds/outlook-card.html — the amber "Season outlook" block).
-// The basis toggle governs BOTH the odds fetch and the dynasty chart.
+// #169 SEASON OUTLOOK layer (flag `outlook.odds`, DARK): ONE merged section
+// between the basis toggle and the dynasty chart. It is a SEPARATE gated
+// section — when `outlook.odds` is off (the default; the flag is absent from
+// LAUNCHED_FLAG_DEFAULTS) nothing renders and GET /api/league/outlook is NOT
+// called (it 404s while the modeling backend is dark). Only when on do we
+// fetch + render. The basis toggle governs BOTH the outlook fetch and the
+// dynasty chart.
+//
+// v2 (2026-08-10, docs/feedback/items/169-outlook-league-summary/
+// odds-surface-audit.md § ranked build order item 1; mockup
+// mockups/outlook-odds/league-summary-outlook-v2.html frames B + C1 + D). The
+// design is a calibration result, not a style preference —
+// calibration-combined-2026-08-10.md is the authority and none of the
+// following may be "improved" without re-measuring:
+//   • PROJECTED STANDINGS AND PLAYOFF ODDS ARE ONE THING. Row order (by
+//     `odds.projected_seed`) plus the dashed cutline IS the projected
+//     standings; the three-band chip IS the playoff odds. No second list, no
+//     toggle, no separate screen.
+//   • NO RAW PERCENTAGES. The engine is over-confident at the extremes (a 95%
+//     preseason call realizes 78%), so bands — Likely / Toss-up / Unlikely,
+//     thresholds in docs/cross-client-invariants.md — are the finest
+//     granularity the evidence supports.
+//   • NO TITLE ODDS, ANYWHERE. `odds.title_pct` has no demonstrated skill (CI
+//     spans zero; 3 of 6 backtested league-seasons lose to guessing). It is
+//     absent, not caveated.
+//   • `meta.beta` IS THE TWO-STATE SWITCH, and it is the only one. It clears
+//     at `completed_weeks >= 6`, the week the playoff Brier nearly halves.
+//     Weeks 0–5 (beta true): order + bands, NO win-loss numbers — a projected
+//     record is the same false-precision point estimate as "71%" in a
+//     different unit. Week 6+ (beta false): rows gain current + projected
+//     records.
+//   • IDP CAPTION. When `meta.priced_slot_coverage` reports partial coverage
+//     AND `affects_strength`, the section says the projection reads offensive
+//     starters only. Never captioned when `affects_strength` is false (a
+//     `trailing_scores` payload never read a value board).
+//   • NON-SLEEPER LEAGUES get an honest one-row unavailable state and no
+//     request — `backend/outlook/league_state.py` implements Sleeper only, so
+//     the others would 501.
+// Amber/warn is the projection signal throughout (the established "Projected"
+// visual language on this screen).
 
 type UiBasis = 'consensus' | 'personal';
 type CorePos = 'QB' | 'RB' | 'WR' | 'TE';
@@ -387,17 +417,36 @@ export default function LeagueSummaryScreen() {
     personalQuery.refetch();
   };
 
-  // #169 outlook odds — DARK behind `outlook.odds`. `enabled` is false unless
-  // the flag is on AND a league is selected, so GET /api/league/outlook never
-  // fires while the layer is dark (the endpoint 404s). Shares the `basis` state
-  // with the dynasty chart. Off by default: the flag is absent from
-  // LAUNCHED_FLAG_DEFAULTS, so `useFlag` returns false until a live map turns
-  // it on.
+  // #169 season outlook — DARK behind `outlook.odds`. `enabled` is false unless
+  // the flag is on AND a league is selected AND the platform is one the
+  // simulator implements, so GET /api/league/outlook never fires while the
+  // layer is dark (the endpoint 404s) nor for a league the engine would 501
+  // on. Shares the `basis` state with the dynasty chart. Off by default: the
+  // flag is absent from LAUNCHED_FLAG_DEFAULTS, so `useFlag` returns false
+  // until a live map turns it on.
   const oddsEnabled = useFlag('outlook.odds');
+  // Client-side platform gate (audit surface #12). `backend/outlook/
+  // league_state.py` registers ESPN/MFL/Fleaflicker as NotImplemented stubs,
+  // so an outlook request for one of them is a guaranteed 501 — and the League
+  // tab IS reachable for those leagues, which makes silence a mystery rather
+  // than honest degradation. Resolve the platform the same way every other
+  // client gate does (`api/espn.ts:isEspnLeague`, `api/platformLink.ts`):
+  // match the active id against the cached league list. UNKNOWN RESOLVES TO
+  // SUPPORTED — a league missing from the list (or a server that didn't stamp
+  // `platform`) must not lose the section on a guess; only a positively
+  // identified non-Sleeper platform is gated out.
+  // Selected as a BOOLEAN, not as the leagues array: the store compares with
+  // Object.is, so the screen re-renders only when the answer actually flips —
+  // with the flag dark this subscription can never change what renders.
+  const outlookSupported = useSession(
+    (s) =>
+      (s.leagues.find((lg) => lg.league_id === leagueId)?.platform ?? 'sleeper') ===
+      'sleeper',
+  );
   const outlookQuery = useQuery({
     queryKey: ['league-outlook', leagueId, basis],
     queryFn: () => getOutlook(leagueId!, basis),
-    enabled: oddsEnabled && !!leagueId,
+    enabled: oddsEnabled && outlookSupported && !!leagueId,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -798,10 +847,18 @@ export default function LeagueSummaryScreen() {
           />
         </View>
 
-        {/* #169 outlook-odds layer — gated on `outlook.odds` (dark). Rendered
-            only when the flag is on; the fetch is likewise gated so nothing
-            fires while dark. Basis-driven (shares the toggle above). */}
-        {oddsEnabled ? <OddsSection query={outlookQuery} /> : null}
+        {/* #169 season-outlook layer — gated on `outlook.odds` (dark).
+            Rendered only when the flag is on; the fetch is likewise gated so
+            nothing fires while dark. Basis-driven (shares the toggle above).
+            A non-Sleeper league gets the honest unavailable row instead of the
+            section — and no request. */}
+        {oddsEnabled ? (
+          outlookSupported ? (
+            <SeasonOutlookSection query={outlookQuery} />
+          ) : (
+            <OutlookUnsupportedRow />
+          )
+        ) : null}
 
         {/* ── Chart card (2026-07-26 League Analyzer treatment) ─────────── */}
         <View style={styles.card}>
@@ -1588,7 +1645,7 @@ function TeamRow({ team, rank, active, totalLabel, onPress }: {
   );
 }
 
-// ── #169 outlook odds ────────────────────────────────────────────────────
+// ── #169 season outlook ──────────────────────────────────────────────────
 // Friendly captions for the backend's roster-strength source. Unknown keys
 // degrade to a generic projection caption rather than leaking a raw enum.
 const STRENGTH_SOURCE_CAPTION: Record<string, string> = {
@@ -1600,9 +1657,9 @@ function sourceCaption(src: string): string {
   return STRENGTH_SOURCE_CAPTION[src] ?? 'Projected from team strength';
 }
 
-// The load-bearing honesty label. `meta.beta`/`meta.is_preseason` are true
-// today (July, zero games), so this reads "Projected · preseason · beta" —
-// never a bare authoritative percentage.
+// The load-bearing honesty label. Weeks 0–5 this reads
+// "Projected · preseason · beta"; from week 6 `meta.beta` is false and the
+// ribbon shortens to "Projected" — never a bare authoritative percentage.
 function betaRibbonLabel(meta: OutlookMeta): string {
   const parts = ['Projected'];
   if (meta.is_preseason) parts.push('preseason');
@@ -1610,26 +1667,118 @@ function betaRibbonLabel(meta: OutlookMeta): string {
   return parts.join(' · ');
 }
 
-// 0..1 fraction → whole-percent string. Preseason values are 0.0 → "0%".
-function pct(frac: number): string {
-  return `${Math.round((frac ?? 0) * 100)}%`;
+// ── Playoff bands (cross-client invariant) ───────────────────────────────
+// Keys, labels, thresholds and colors are registered in
+// docs/cross-client-invariants.md § "Playoff outlook bands" — web parity is a
+// later item that MUST read them from there rather than re-derive them.
+// Thresholds are the calibration verdict: the preseason table's ≥0.65 buckets
+// realize 0.60–0.78 and its ≤0.35 buckets realize 0.0–0.5, so three bands are
+// the finest granularity the evidence supports. Colors reuse the pos/warn/neg
+// tercile-chip precedent already shipped on this screen (a data encoding, not
+// chrome).
+type PlayoffBand = 'likely' | 'tossup' | 'unlikely';
+const PLAYOFF_BAND_LIKELY_MIN = 0.65;
+const PLAYOFF_BAND_UNLIKELY_MAX = 0.35;
+const PLAYOFF_BAND_LABEL: Record<PlayoffBand, string> = {
+  likely: 'Likely',
+  tossup: 'Toss-up',
+  unlikely: 'Unlikely',
+};
+const PLAYOFF_BAND_COLOR: Record<PlayoffBand, string> = {
+  likely: semantic.pos,
+  tossup: semantic.warn,
+  unlikely: semantic.neg,
+};
+function playoffBand(frac: number): PlayoffBand {
+  const p = frac ?? 0;
+  if (p >= PLAYOFF_BAND_LIKELY_MIN) return 'likely';
+  if (p < PLAYOFF_BAND_UNLIKELY_MAX) return 'unlikely';
+  return 'tossup';
 }
 
-function record(t: OutlookTeam): string {
-  const base = `${t.wins}-${t.losses}`;
-  return t.ties > 0 ? `${base}-${t.ties}` : base;
+// OPERATOR RISK OPTION — OFF, and it ships off (mockup frame C2, audit § open
+// questions Q1). Turning this true replaces the week-6+ band chip with a
+// playoff percentage rounded to 5%. It is defensible ONLY on the POOLED
+// in-season calibration table, which is not stratified by week — an inference,
+// not a measurement — so it is an operator's risk call and nobody else's. Two
+// rules travel with it and are enforced below: the 5% rounding is load-bearing
+// (never render 73%), and it never applies while `meta.beta` is true. Title
+// odds stay banned either way. If the operator ever wants this on, the audit's
+// recommendation is to make it a server-side presentation flag so it reverts
+// without a client build; this constant is the local placeholder for that
+// decision, not the decision.
+const OUTLOOK_WEEK6_PERCENT_ENABLED = false;
+// Load-bearing: the granularity IS the honesty claim.
+const OUTLOOK_PERCENT_ROUNDING = 0.05;
+function roundedPct(frac: number): string {
+  const p = Math.max(0, Math.min(1, frac ?? 0));
+  // Round in PERCENTAGE POINTS, not fractions: 0.75/0.05*0.05 is
+  // 0.7500000000000001 in float, which would print "75.00000000000001%".
+  const step = OUTLOOK_PERCENT_ROUNDING * 100;
+  return `${Math.round((p * 100) / step) * step}%`;
 }
 
-// The playoff/title-odds section. Rendered only when `outlook.odds` is on;
-// degrades quietly (renders nothing) while the endpoint is dark/404s so the
-// screen never shows a broken projection block.
-function OddsSection({ query }: { query: UseQueryResult<LeagueOutlookResponse> }) {
+function record(wins: number, losses: number, ties: number): string {
+  const base = `${wins}-${losses}`;
+  return ties > 0 ? `${base}-${ties}` : base;
+}
+
+// Week 6+ only: "4-2 · proj 9-5". `projected_wins` is a validated output
+// post-BUG-1; the projected losses are the remainder of the regular season, so
+// the pair always sums to `regular_season_weeks` and reads on the same scale
+// the platform's own standings do. Ties are NOT projected (the simulator
+// resolves every matchup), so a league with ties on the board shows them in
+// the current record only.
+function projectedRecord(team: OutlookTeam, meta: OutlookMeta): string {
+  const games = meta.regular_season_weeks;
+  const wins = Math.max(0, Math.min(games, Math.round(team.odds.projected_wins)));
+  return `${wins}-${games - wins}`;
+}
+
+// The IDP / partial-coverage caption (mockup frame D). Renders ONLY when the
+// board actually fed the odds (`affects_strength`) AND it could not price the
+// whole starting lineup. A `trailing_scores` payload reports coverage with
+// `affects_strength: false` — its odds never read a value board, so captioning
+// it would be a false qualification. Copy states the limitation in LEAGUE
+// terms ("8 defensive/kicker slots"), never payload terms.
+function coverageCaption(meta: OutlookMeta): string | null {
+  const cov = meta.priced_slot_coverage;
+  if (!cov || !cov.affects_strength || cov.fraction >= 1) return null;
+  const named = cov.unpriced_slots ?? [];
+  const count = named.length || Math.max(0, cov.total_slots - cov.priced_slots);
+  if (count === 0) return null;
+  // Name only the slot families the payload actually named, so a kicker-only
+  // league never reads "defensive" — and a payload that named none stays
+  // generic rather than guessing at what they were.
+  const hasKicker = named.some((s) => (s || '').toUpperCase() === 'K');
+  const hasDefense = named.some((s) => (s || '').toUpperCase() !== 'K');
+  const kind =
+    hasKicker && hasDefense
+      ? 'defensive/kicker'
+      : hasKicker
+        ? 'kicker'
+        : hasDefense
+          ? 'defensive'
+          : 'lineup';
+  const noun = count === 1 ? 'slot' : 'slots';
+  return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} FTF can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
+}
+
+// The merged season-outlook section: projected standings (row order + cutline)
+// and playoff odds (band chip) as ONE thing. Rendered only when `outlook.odds`
+// is on; degrades quietly (renders nothing) while the endpoint is dark/404s so
+// the screen never shows a broken projection block.
+function SeasonOutlookSection({
+  query,
+}: {
+  query: UseQueryResult<LeagueOutlookResponse>;
+}) {
   const data = query.data;
 
   if (query.isLoading && !data) {
     return (
       <View style={styles.oddsSection} testID="league-summary.odds.section">
-        <TickLabel color={semantic.warn}>Playoff picture</TickLabel>
+        <TickLabel color={semantic.warn}>Season outlook</TickLabel>
         <View style={styles.oddsLoading}>
           <ActivityIndicator color={semantic.warn} />
         </View>
@@ -1637,16 +1786,36 @@ function OddsSection({ query }: { query: UseQueryResult<LeagueOutlookResponse> }
     );
   }
 
-  // No data (dark endpoint / error / empty league) → render nothing. Better a
-  // missing section than a fabricated or broken one.
+  // No data (dark endpoint / error / empty league / pre_draft league with no
+  // schedule) → render nothing. Better a missing section than a fabricated one.
   if (!data || data.teams.length === 0) return null;
 
   const { meta, teams } = data;
+  // THE ORDER IS THE PRODUCT. Sort by projected seed ascending so the rows
+  // literally are the projected standings — the payload's own ordering is by
+  // playoff_pct, which is nearly but not exactly the same thing, and "nearly"
+  // would put a team below the cutline above one that is projected to finish
+  // ahead of it. Ties resolve on playoff odds then roster_id so the order is
+  // deterministic across refetches.
+  const ordered = [...teams].sort(
+    (a, b) =>
+      a.odds.projected_seed - b.odds.projected_seed ||
+      b.odds.playoff_pct - a.odds.playoff_pct ||
+      a.roster_id - b.roster_id,
+  );
+  // `meta.beta` is the two-state switch — see the header comment. It is false
+  // only from `completed_weeks >= 6`.
+  const showRecords = !meta.beta;
+  const cutAfter =
+    meta.playoff_slots > 0 && meta.playoff_slots < ordered.length
+      ? meta.playoff_slots
+      : null;
+  const coverage = coverageCaption(meta);
 
   return (
     <View style={styles.oddsSection} testID="league-summary.odds.section">
       <View style={styles.oddsHead}>
-        <TickLabel color={semantic.warn}>Playoff picture</TickLabel>
+        <TickLabel color={semantic.warn}>Season outlook</TickLabel>
         <View
           style={styles.betaRibbon}
           testID="league-summary.odds.beta-ribbon"
@@ -1659,60 +1828,124 @@ function OddsSection({ query }: { query: UseQueryResult<LeagueOutlookResponse> }
         style={[type.bodySm, styles.oddsSource]}
         testID="league-summary.odds.source"
       >
-        {`${sourceCaption(meta.strength_source)} · ${meta.sims.toLocaleString('en-US')} sims · top ${meta.playoff_slots} make the playoffs`}
+        {[
+          sourceCaption(meta.strength_source),
+          'order = projected finish',
+          // Only claim a playoff line when the payload actually has one.
+          meta.playoff_slots > 0
+            ? `top ${meta.playoff_slots} make the playoffs`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
       </Text>
 
       <View style={styles.oddsList}>
-        {teams.map((t, idx) => (
-          <OddsRow key={t.roster_id} team={t} rank={idx + 1} />
+        {ordered.map((t, idx) => (
+          <React.Fragment key={t.roster_id}>
+            <OutlookRow
+              team={t}
+              meta={meta}
+              rank={idx + 1}
+              showRecord={showRecords}
+              last={idx === ordered.length - 1}
+            />
+            {cutAfter === idx + 1 ? (
+              <View style={styles.oddsCutline} testID="league-summary.odds.cutline">
+                <View style={styles.oddsCutRule} />
+                <Text style={styles.oddsCutText}>
+                  {`top ${meta.playoff_slots} make the playoffs`}
+                </Text>
+                <View style={styles.oddsCutRule} />
+              </View>
+            ) : null}
+          </React.Fragment>
         ))}
       </View>
+
+      {coverage ? (
+        <View style={styles.oddsCoverage} testID="league-summary.odds.coverage-note">
+          <Text style={[type.bodySm, styles.oddsCoverageText]}>{coverage}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-// One team's projected odds: order numeral (payload is pre-sorted by
-// playoff_pct desc), name + You badge, record + projected seed, then the two
-// headline odds (playoff / title) as figure + thin warn meter.
-function OddsRow({ team, rank }: { team: OutlookTeam; rank: number }) {
+// One team's row: order numeral (= projected finish), name + You badge, the
+// record pair from week 6, and the band chip. Deliberately single-line — the
+// whole league plus the top of the value chart has to fit one screen, which
+// the old two-meter block made impossible. No projected seed decimal, no title
+// odds, no raw playoff percentage.
+function OutlookRow({
+  team,
+  meta,
+  rank,
+  showRecord,
+  last,
+}: {
+  team: OutlookTeam;
+  meta: OutlookMeta;
+  rank: number;
+  showRecord: boolean;
+  last: boolean;
+}) {
+  const band = playoffBand(team.odds.playoff_pct);
+  // The percentage option only ever exists past the beta gate (§7: "only from
+  // week 6"), so `showRecord` — which IS `!meta.beta` — guards it too.
+  const asPercent = OUTLOOK_WEEK6_PERCENT_ENABLED && showRecord;
   return (
     <View
-      style={styles.oddsRow}
+      // The section already carries a bottom hairline fence; the last row's
+      // own rule would double it.
+      style={[styles.oddsRow, last && styles.oddsRowLast]}
       testID={`league-summary.odds.row.${team.roster_id}`}
     >
       <Text style={[styles.oddsRank, team.is_you && { color: ice.base }]}>{rank}</Text>
-      <View style={styles.oddsMid}>
-        <View style={styles.oddsNameRow}>
-          <Text style={[type.title, styles.oddsName]} numberOfLines={1}>
-            {team.display_name || team.username || String(team.roster_id)}
-          </Text>
-          {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
-        </View>
-        <Text style={[type.data, styles.oddsSub]}>
-          {`${record(team)} · proj seed ${team.odds.projected_seed.toFixed(1)}`}
+      <View style={styles.oddsNameRow}>
+        <Text style={[type.title, styles.oddsName]} numberOfLines={1}>
+          {team.display_name || team.username || String(team.roster_id)}
         </Text>
-        <View style={styles.oddsStats}>
-          <OddStat label="Playoff" frac={team.odds.playoff_pct} />
-          <OddStat label="Title" frac={team.odds.title_pct} />
-        </View>
+        {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
       </View>
+      {showRecord ? (
+        <Text style={[type.data, styles.oddsRecord]} numberOfLines={1}>
+          {`${record(team.wins, team.losses, team.ties)} · proj ${projectedRecord(team, meta)}`}
+        </Text>
+      ) : null}
+      {asPercent ? (
+        <View style={styles.oddsPctChip} testID={`league-summary.odds.pct.${team.roster_id}`}>
+          <Text style={[type.data, styles.oddsPctChipText]}>
+            {roundedPct(team.odds.playoff_pct)}
+          </Text>
+        </View>
+      ) : (
+        <View
+          style={[styles.oddsBand, { borderColor: PLAYOFF_BAND_COLOR[band] }]}
+          testID={`league-summary.odds.band.${team.roster_id}`}
+          accessibilityRole="text"
+          accessibilityLabel={`${PLAYOFF_BAND_LABEL[band]} to make the playoffs`}
+        >
+          <Text style={[styles.oddsBandText, { color: PLAYOFF_BAND_COLOR[band] }]}>
+            {PLAYOFF_BAND_LABEL[band]}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
 
-// A single projected-odds figure with a thin warn meter. Warn (amber) is the
-// "this is projected, not settled" signal — matches the mockup's amber block.
-function OddStat({ label, frac }: { label: string; frac: number }) {
-  const fillPct = Math.max(0, Math.min(1, frac ?? 0)) * 100;
+// Honest unavailable state for a non-Sleeper league (audit surface #12). Today
+// the section simply doesn't render for these leagues, which reads as a bug;
+// one row explaining why is the whole fix. No retry affordance — there is
+// nothing the user can do, and offering one would imply there is.
+function OutlookUnsupportedRow() {
   return (
-    <View style={styles.oddStat}>
-      <Text style={styles.oddStatLabel}>{label}</Text>
-      <Text style={[type.data, styles.oddStatValue]}>{pct(frac)}</Text>
-      <View style={styles.oddStatTrack}>
-        {fillPct > 0 ? (
-          <View style={[styles.oddStatFill, { width: `${fillPct}%` }]} />
-        ) : null}
-      </View>
+    <View style={styles.oddsSection} testID="league-summary.odds.unsupported">
+      <TickLabel color={semantic.warn}>Season outlook</TickLabel>
+      <Text style={[type.bodySm, styles.oddsSource]}>
+        Season outlook needs schedule and scoring history — Sleeper leagues only for now.
+      </Text>
     </View>
   );
 }
@@ -2005,7 +2238,7 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
 
-  // #169 outlook odds section — sits between the basis toggle and the chart,
+  // #169 season outlook section — sits between the basis toggle and the chart,
   // fenced off with a bottom hairline. Warn (amber) is the projection signal.
   oddsSection: {
     marginBottom: space.lg,
@@ -2031,37 +2264,77 @@ const styles = StyleSheet.create({
   oddsSource: { marginTop: space.sm, color: chalk.dim },
   oddsLoading: { paddingVertical: space.xl, alignItems: 'center' },
 
-  oddsList: { marginTop: space.md, gap: 2 },
+  oddsList: { marginTop: space.md },
+  // Single-line rows: numeral · name · (record from week 6) · band chip. The
+  // whole league has to fit above the fold alongside the chart, which the
+  // pre-v2 two-meter block made impossible.
   oddsRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: space.sm,
     paddingVertical: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: ink.line,
   },
+  oddsRowLast: { borderBottomWidth: 0 },
   oddsRank: {
     ...type.data,
     width: 22,
     textAlign: 'center',
     color: chalk.dim,
-    marginTop: 2,
   },
-  oddsMid: { flex: 1, gap: 5 },
-  oddsNameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  oddsNameRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
   oddsName: { flexShrink: 1 },
-  oddsSub: { color: chalk.dim },
-  oddsStats: { flexDirection: 'row', gap: space.md, marginTop: 2 },
-  oddStat: { flex: 1, gap: 4 },
-  oddStatLabel: { ...type.label, color: chalk.faint },
-  oddStatValue: { color: chalk.base },
-  oddStatTrack: {
-    height: 5,
-    backgroundColor: ink.ink3,
-    borderRadius: 3,
-    overflow: 'hidden',
+  oddsRecord: { color: chalk.dim },
+  // Band chip — border-in-encode-color, Chalkline badge construction. The
+  // color IS the band (cross-client invariant), so the label always ships
+  // alongside it: color alone would fail a color-blind read.
+  oddsBand: {
+    borderWidth: 1,
+    borderRadius: radii.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
-  oddStatFill: { height: '100%', backgroundColor: semantic.warn, borderRadius: 3 },
+  oddsBandText: { ...type.label },
+  // Operator risk option only (OUTLOOK_WEEK6_PERCENT_ENABLED, off).
+  oddsPctChip: {
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  oddsPctChipText: { color: chalk.base },
+  // The playoff cutline — a dashed rule is not available in RN, so the rule is
+  // a hairline and the label carries the meaning.
+  oddsCutline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.sm,
+  },
+  oddsCutRule: { flex: 1, height: 1, backgroundColor: ink.lineStrong },
+  oddsCutText: { ...type.label, color: chalk.faint },
+  // Partial-coverage (IDP) caption — warn rail, matching the mockup's
+  // border-left treatment. No glyph: the chalkline icon set has no "!" and
+  // emoji are banned.
+  oddsCoverage: {
+    marginTop: space.md,
+    padding: space.sm,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderLeftWidth: 2,
+    borderLeftColor: semantic.warn,
+    borderRadius: radii.sm,
+  },
+  oddsCoverageText: { color: chalk.dim },
 
   center: {
     alignItems: 'center',
