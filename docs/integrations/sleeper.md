@@ -44,7 +44,7 @@ app/site) — neither is an API call and neither carries any FTF data.
 | 7 | `GET /league/{league_id}/drafts` | Draft list for a league: `draft_id`, `status`, `season`, `type` | `backend/server.py:10203-10219` (`_fetch_sleeper_drafts`); `backend/draft_board_service.py:289-290` | feeds `/api/draft/board` and `#228`'s current-season-drafted exclusion |
 | 8 | `GET /draft/{draft_id}` | Single draft detail | `backend/draft_board_service.py:292-294` | feeds `/api/draft/board` |
 | 9 | `GET /draft/{draft_id}/picks` | Picks already made in a live/complete draft | `backend/draft_board_service.py:296-297` | feeds `/api/draft/board` |
-| 10 | `GET /league/{league_id}/matchups/{week}` | Weekly scores/pairings, one call per completed week | `backend/outlook/league_state.py:218` | feeds `/api/league/outlook` |
+| 10 | `GET /league/{league_id}/matchups/{week}` | Weekly scores/pairings, one call per regular-season week — **cached per league+season+week** since 2026-08-09 (`_outlook_sleeper_fetch()`, `backend/server.py`; completed weeks never refetch — see §5.4) | `backend/outlook/league_state.py:218` via the injected fetch | feeds `/api/league/outlook` |
 | 11 | `GET /league/{league_id}/transactions/{week}` | Completed transactions for one leg/week; filtered to `type=trade, status=complete` | `backend/sleeper_trades_service.py:53-68` (`fetch_week_transactions`, swept for weeks 1–18 every call — see §5) | not directly routed — session-init background capture only |
 | 12 | `GET /players/nfl` | **Bulk player dump, ~5 MB raw / ~4.8 MB filtered.** All NFL players; FTF keeps only QB/RB/WR/TE with a `full_name` | `backend/server.py:1593,1672-1684` (`_PLAYERS_BULK_URL` / `_fetch_players_bulk`); called from `_ensure_sleeper_cache_populated` (`backend/server.py:13920-13969`) and the M0 refresh daemon (`backend/server.py:1795-1823`) | `/api/sleeper/players`, `/api/sleeper/players/warm` |
 | 13 | `GET /players/nfl/adp` | Average draft position — **undocumented**, best-effort | `backend/server.py:586-615` (`_fetch_sleeper_adp`) | not routed — feeds player-DB sync only |
@@ -303,12 +303,34 @@ Server-side cache with a state-dependent TTL and a circuit breaker
   foregrounded + `state:live` (`config/features.json` comment at
   `_comment_rookie_draft`).
 
-### 5.4 Uncached, live-per-request
-- `GET /api/league/outlook` (playoff odds, flag `outlook.odds`) — every call does
-  a full live fan-out (league meta, rosters, users, one `matchups/{week}` call
-  per completed week) with **no server-side cache observed**
-  (`backend/server.py:19025-19080`, `backend/outlook/league_state.py:132-150,218`).
-  Highest-cardinality live-fetch surface in the app if hit frequently.
+### 5.4 Outlook weekly fan-out (`GET /api/league/outlook`, flag `outlook.odds`)
+Phase 1 walks EVERY regular-season week (`matchups/{week}`, up to 14 calls), so
+this was the worst uncached surface in the app. Since 2026-08-09 the fan-out
+goes through `_outlook_sleeper_fetch()` (`backend/server.py`, next to the
+route), which sits in the `fetch=` seam `build_league_state` already injects —
+`backend/outlook/` is untouched, and every MISS still goes through
+`_sleeper_get`, so the cache's effect is visible in apihealth as `league.matchups`
+`api_call` events that stop happening.
+
+Tiered by the grain of the data, keyed `(league_id, season, week)`:
+
+| Week | Rule | TTL |
+|---|---|---|
+| Below the scored high-water mark | A later week has already scored ⇒ the rows can never change | **none** (immutable, cached for the process's life) |
+| At the high-water mark (or week 1 preseason) | The live/in-progress week | 900 s |
+| Above it | Not yet played — pairings/schedule only | 3,600 s |
+
+Both tiers are bounded at `_OUTLOOK_WEEK_CACHE_MAX` (250) entries, evicted
+oldest-inserted-first; matchup rows carry per-player point maps, so the bound is
+memory, not correctness. Steady state per league: one short-TTL call for the
+live week, a few hourly schedule calls, and **exactly one upstream call per week
+that completes** — free forever after.
+
+The league-meta / `rosters` / `users` reads stay live **on purpose**: `rosters`
+carries the W/L/points-for standings the odds are computed FROM, and a stale
+standing is a wrong answer, not a slow one.
+
+### 5.5 Uncached, live-per-request
 - `GET /api/trades/validate` (pre-send warnings) — live `league` meta + `rosters`
   fetch on every call, by design ("Sleeper remains the authority" — the point is
   freshness right before a send), `backend/server.py:20225-20284`.

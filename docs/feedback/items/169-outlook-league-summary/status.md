@@ -179,3 +179,153 @@ scaffold). Full backend suite 998 passed / 1 skipped (was 979).
 is a documented heuristic, not empirically fit — tune via the offline backtest
 scaffold. Sleeper future-week `matchup_id` pairing stability is assumed, not
 validated against live 2025 data (falls back to random re-pairing if absent).
+
+## Productionization (2026-08-09) — hardened, still dark
+
+The surface was productionized so that lighting it is a **one-touch flip**.
+Nothing here lights anything: `outlook.odds` is false in every touch, the route
+still 404s, and the mobile section still does not render or fetch. A parallel
+calibration effort owns the go/no-go on the numbers themselves.
+
+### 1. Sleeper fan-out caching
+
+`docs/integrations/sleeper.md` had `/api/league/outlook` as the worst uncached
+surface in the app: Phase 1 walks EVERY regular-season week (`matchups/{week}`,
+up to 14 upstream calls) live on every request. Fixed in `backend/server.py` —
+`_outlook_sleeper_fetch()`, which the route now passes as `build_league_state`'s
+`fetch=`. **`backend/outlook/` is untouched** (the injected-fetch seam was
+already there), and every cache MISS still routes through `_sleeper_get`, the
+instrumented egress chokepoint — so the cache shows up in apihealth as
+`league.matchups` `api_call` events that stop happening.
+
+Tiered by the grain of the data, keyed `(league_id, season, week)`:
+
+| Week | Rule | TTL |
+|---|---|---|
+| below the scored high-water mark | a later week has scored ⇒ rows are immutable | **none** |
+| at the high-water mark (or week 1 preseason) | the live/in-progress week | 900 s |
+| above it | not yet played — pairings only | 3,600 s |
+
+The high-water mark is learned from the fetched rows themselves (a week with
+any nonzero `points`), so no new upstream endpoint (`/state/nfl`) was needed;
+promotion into the settled tier is order-independent. `season` comes from the
+league-meta read the provider already makes first, and a week is **never**
+cached without one — a seasonless key could serve last year's scores.
+
+Idiom: the per-key `(timestamp, value)` dict of `_SUGGESTED_ORDER_CACHE` /
+`_FA_LEAGUE_META_CACHE`, **not** `espn_service._xwalk_cache` (that caches ONE
+global blob on a TTL; this needs per league+season+week keys). In-process, like
+every other cache in this codebase: completed-week rows are cheaply re-derivable
+from Sleeper, so a DB table would buy durability across restarts at the cost of
+schema + a data-dictionary entry the payload doesn't need. Both tiers are
+bounded at 250 entries (matchup rows carry per-player point maps).
+
+`rosters` / `users` / league meta stay **live on purpose** — `rosters` carries
+the W/L/points-for standings the odds are computed FROM, and a stale standing is
+a wrong answer, not a slow one. Steady state per league: 3 live reads, one
+short-TTL week call, a few hourly schedule calls, and exactly one upstream call
+per newly-completed week — free forever after.
+
+### 2. Flag registration — verified, four touches, dark
+
+`outlook.odds` is registered in all four places at **false**: `FLAG_KEYS` +
+`DEFAULT_FLAGS` (`backend/feature_flags.py`), `config/features.json`,
+`backend/tests/fixtures/flags/release.json`, and `docs/config-reference.md`. It
+is deliberately **absent** from `backend/tests/fixtures/flags/all-on.json` (a
+flag sweep must not light an uncalibrated surface) and from mobile's
+`LAUNCHED_FLAG_DEFAULTS`. The route's gate is the LLD's: `is_enabled` false ⇒
+`404 {"error": "not_found"}`, checked before session resolution and before any
+Sleeper call. `backend/tests/test_outlook_route_cache.py` holds the ships-off
+test (real flag map, nothing patched: 404 + zero Sleeper calls) and the mirror
+assertions.
+
+### 3. Contract reconciliation (mobile ↔ `serialize.py`)
+
+The odds layer was typed in July; `LeagueSummaryScreen` has been rebuilt since
+(#277 tier labels, #281 key dedupe, #279 aggregate labels). Re-verified:
+
+- **Compiles into the current screen** — `OddsSection` still mounts between the
+  basis toggle and the chart card, `useFlag`-gated on both the render and the
+  `useQuery`'s `enabled`. `npx tsc --noEmit` exit 0.
+- **Field-for-field vs the payload** — two mismatches found and fixed on the
+  MOBILE side (the wire is the authority): `scoring_format` and
+  `strength.{mu,sigma}` are nullable in `serialize.py` but were typed
+  non-nullable in `mobile/src/api/league.ts`. Everything else matched exactly.
+  Now pinned by a test that parses the TS interfaces and compares them to a
+  live payload.
+- **Preseason rules honored on both sides** — backend sets
+  `meta.is_preseason = meta.beta = (completed_weeks == 0)`; mobile composes
+  "Projected · preseason · beta" from those two booleans and always renders the
+  `strength_source` caption. The caption map covers every *selectable* provider
+  (`roster_value`, `trailing_scores`, `blended`); the registered stubs fall
+  through to the generic caption by design. Both are now test-pinned.
+- **Open question for the lighting decision (engine-owned, not changed here):**
+  `meta.beta` is derived from `is_preseason`, so the FIRST in-season payload
+  drops the "beta" word while the model is still uncalibrated. If the surface is
+  lit in-season, `beta` should probably be its own signal rather than a
+  preseason alias.
+
+### 4. Lighting procedure — RECOMMENDED: plain flag flip
+
+**Not executed.** Run only after the calibration verdict passes and the
+live-Sleeper `matchup_id` pairing check clears (both still open above).
+
+**Recommendation: a plain flag flip, not the tester-allowlist experiment route
+(#279 / `onboarding_v2_rollout`).** Reasoning:
+
+- The flag is already the *complete* gate on both sides — route 404 AND the
+  client's render AND the client's fetch. Lighting genuinely is one value. The
+  experiment route would require NEW code on both sides: the route's global
+  `is_enabled` check would have to become a per-unit
+  `experiments.variant_for(...)` call, and mobile's `useFlag('outlook.odds')`
+  would have to become a variant read — `/api/feature-flags` serves a GLOBAL
+  `flags` map plus a SEPARATE `experiments` map, so an experiment cannot overlay
+  a flag key. Building that is the opposite of "the only remaining step is a
+  flip".
+- #279 reached for the experiments engine because that surface's route was
+  **already live for everyone**, so per-user targeting was the only way to
+  isolate a cohort. Here the whole surface is dark, so the flag already provides
+  the isolation; a second mechanism buys only cohort *granularity*.
+- Blast radius is now bounded: the fan-out is cached (above), so lighting for
+  every tester costs ~7 Sleeper calls per league on first hit and ~1 per 15 min
+  after — this was the main argument for a narrow cohort, and it is gone.
+- Honesty is not cohort-dependent: the beta ribbon + source caption ship with
+  every render, so a wider audience is never shown a bare authoritative number.
+
+**Procedure (operator, prod):**
+
+1. Preconditions: calibration verdict green; future-week `matchup_id` pairing
+   validated against a live league; a TestFlight build carrying the odds layer
+   is installed (already merged — no new client code is needed to light).
+2. **Soak (instantly revertible, no deploy):** in the Render dashboard set
+   `FTF_FLAGS={"outlook.odds": true}`. Env wins over `config/features.json`
+   (`_compute_flags`: defaults → features.json → `FTF_FLAGS`). Then restart, or
+   `curl -X POST https://fantasy-trade-finder.onrender.com/api/feature-flags/reload -H "X-Cron-Secret: $CRON_SECRET"`.
+3. Verify: `GET /api/league/outlook?league_id=<id>` returns 200 (not 404); the
+   League tab shows "Playoff picture" with the "Projected · preseason · beta"
+   ribbon and the source caption; apihealth shows `league.matchups` `api_call`
+   volume at roughly one burst per league rather than one burst per view.
+4. **Make it durable:** flip `"outlook.odds": true` in `config/features.json`
+   (and the release fixture, to keep the mirror honest), merge → Render deploys,
+   then remove the `FTF_FLAGS` override so there is one source of truth.
+5. **Revert at any point:** delete the env var (or revert the one-line commit)
+   and reload. The route 404s again and the client hides the section on its next
+   flag refresh (boot + ≥30-min foreground refetch) — no client build involved.
+
+If the operator would rather expose it to themselves only first, that is the
+experiment route and it is a *build*, not a flip: add the `variant_for` check to
+the route, add a client-side variant read, and create an account-unit experiment
+keyed `outlook_odds_rollout` with `{"is_tester_allowlist": true}` targeting and
+0/10000 weights, exactly as
+`docs/feedback/items/279-aggregate-tier-labels/status.md` documents.
+
+### Files (this pass)
+
+- `backend/server.py` — `_outlook_sleeper_fetch()` + the tiered week cache; the
+  route now injects it
+- `backend/tests/test_outlook_route_cache.py` — new: cache behavior,
+  instrumentation visibility, flag mirror + ships-off, wire contract
+- `mobile/src/api/league.ts` — nullable `scoring_format` / `strength.{mu,sigma}`
+- `docs/integrations/sleeper.md` — §5.4 rewritten (was "uncached"), endpoint
+  table row 10
+- `docs/api-reference.md`, `docs/config-reference.md` — caching + flag status
