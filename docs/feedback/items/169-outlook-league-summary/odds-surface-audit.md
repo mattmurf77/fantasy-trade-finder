@@ -68,6 +68,29 @@ information-exposure exists. But it is wrong-answer-producing the day the flag l
 multi-league user. **Fix:** resolve platform from the *requested* league (or reject a
 `league_id` that isn't one of the session's leagues), independent of any design decision here.
 
+**FIXED (2026-08-10).** `backend/server.py`'s `league_outlook_route` now resolves `platform`
+via `get_league_draft_context(league_id)` — the same DB-lookup convention the pick-assignments
+seeder and the draft-status stamp already use — keyed on the *requested* `league_id`, defaulting
+to `"sleeper"` only when that league has no `leagues` row (unlinked/never-synced, matching the
+prior fallback). `g_league.platform` is no longer read at all. Regression coverage added in
+`backend/tests/test_outlook_odds.py`: an ESPN-attached session requesting a Sleeper `league_id`
+now gets the Sleeper 200 instead of the spurious 501; a Sleeper-attached session requesting an
+ESPN `league_id` now gets the honest 501 `not_supported` instead of a Sleeper-API-driven 404;
+the single-league case (session and request agree) is pinned unchanged. `outlook.odds` stays
+dark — this is a correctness fix, not a lighting decision. Full suite: 2298 passed, 1 skipped,
+plus 3 new tests → 2301 passed, 1 skipped.
+
+**Sibling defect found, not fixed (out of scope for this pass):** the same class of mistake
+exists at `pick_assignments_order_route` (`backend/server.py`, `POST
+/api/league/pick-assignments/order`, ~line 11075 on `main`@16b1dcb) —
+`platform=str(getattr(g_league, "platform", None) or (get_league_draft_context(league_id) or
+{}).get("platform") or "espn").lower()` prefers the session's attached-league platform over a
+DB lookup keyed on the request body's `league_id`, so it has the same latent multi-league
+mismatch potential (masked today because that route's `league_id` also defaults from `g_league`
+and the assignment feature is exercised almost exclusively single-league). Flagging for a
+follow-up pass; not touched here per this fix's scope (`backend/server.py`'s outlook route
+only).
+
 ## Full surface enumeration — verdicts
 
 One **Belongs** now. Two **Belongs later**. Everything else rejected — per the operator's
