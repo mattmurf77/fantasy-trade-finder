@@ -39,18 +39,26 @@ _PLAYED_WEEKS = (1, 2)
 _REGULAR_WEEKS = 4
 
 
-def _fake_sleeper(season: str = "2026", calls: list[str] | None = None):
-    """A stand-in for `_sleeper_get` that records every URL it is asked for."""
+def _fake_sleeper(season: str = "2026", calls: list[str] | None = None,
+                  playoff_seed_type: int | None = None):
+    """A stand-in for `_sleeper_get` that records every URL it is asked for.
+
+    `playoff_seed_type`, when given, is included in the league-meta
+    `settings` blob — real Sleeper leagues carry this field (BUG-3); omitted
+    by default to also cover leagues where it's absent."""
     log = calls if calls is not None else []
 
     def fake(url: str, timeout: int = 15):
         log.append(url)
         path = url.split("/v1/", 1)[1]
         if path == f"league/{LEAGUE_ID}":
+            settings = {"playoff_week_start": _REGULAR_WEEKS + 1,
+                       "playoff_teams": 4}
+            if playoff_seed_type is not None:
+                settings["playoff_seed_type"] = playoff_seed_type
             return {
                 "season": season,
-                "settings": {"playoff_week_start": _REGULAR_WEEKS + 1,
-                             "playoff_teams": 4},
+                "settings": settings,
                 "roster_positions": ["QB", "RB", "BN"],
             }
         if path == f"league/{LEAGUE_ID}/rosters":
@@ -193,6 +201,37 @@ def test_every_upstream_fetch_flows_through_the_instrumented_chokepoint():
 
 
 # ---------------------------------------------------------------------------
+# BUG-3 — `_outlook_sleeper_fetch`'s `captured` side-channel for
+# `playoff_seed_type` (backend/outlook/playoff_format.py owns modeling it;
+# this closure is the only place that can observe the raw Sleeper setting
+# without a second network call or editing league_state.py).
+# ---------------------------------------------------------------------------
+
+def test_outlook_sleeper_fetch_captures_playoff_seed_type_when_present():
+    fake, _log = _fake_sleeper(playoff_seed_type=0)
+    with patch.object(server, "_sleeper_get", fake):
+        captured: dict = {}
+        _load(server._outlook_sleeper_fetch(captured))
+    assert captured["playoff_seed_type"] == 0
+
+
+def test_outlook_sleeper_fetch_captured_is_none_when_absent():
+    fake, _log = _fake_sleeper()  # no playoff_seed_type in league settings
+    with patch.object(server, "_sleeper_get", fake):
+        captured: dict = {}
+        _load(server._outlook_sleeper_fetch(captured))
+    assert captured["playoff_seed_type"] is None
+
+
+def test_outlook_sleeper_fetch_without_captured_arg_does_not_crash():
+    """Default (no `captured` dict passed) must behave exactly as before —
+    this is a purely additive, opt-in parameter."""
+    fake, _log = _fake_sleeper(playoff_seed_type=1)
+    with patch.object(server, "_sleeper_get", fake):
+        _load(server._outlook_sleeper_fetch())  # no captured=... at all
+
+
+# ---------------------------------------------------------------------------
 # Flag registration — `outlook.odds` is a full 4-touch flag, DARK everywhere
 # ---------------------------------------------------------------------------
 
@@ -271,6 +310,30 @@ def _payload(client) -> dict:
                        headers=_headers())
     assert r.status_code == 200, r.get_data(as_text=True)
     return r.get_json()
+
+
+def test_route_threads_playoff_seed_type_from_sleeper_settings_into_run_outlook(client):
+    """End-to-end BUG-3 wiring: the raw `settings.playoff_seed_type` the fake
+    Sleeper league carries must reach `run_outlook` (and therefore
+    `get_playoff_format`) — this is the route-level counterpart to the
+    `playoff_format.py` unit/fixture tests in test_outlook_playoff_seed_type.py."""
+    import backend.outlook as outlook_pkg
+    fake, _log = _fake_sleeper(playoff_seed_type=0)
+    calls: list = []
+    real_run_outlook = outlook_pkg.run_outlook
+
+    def spy(*a, **k):
+        calls.append(k.get("playoff_seed_type"))
+        return real_run_outlook(*a, **k)
+
+    with patch.object(server, "is_enabled", lambda k: k == "outlook.odds"), \
+         patch.object(server, "_sleeper_get", fake), \
+         patch.object(server, "_get_universal_pool", lambda fmt: ([], {})), \
+         patch.object(outlook_pkg, "run_outlook", spy):
+        r = client.get(f"/api/league/outlook?league_id={LEAGUE_ID}",
+                       headers=_headers())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert calls == [0]
 
 
 def test_payload_shape_is_the_documented_contract(client):

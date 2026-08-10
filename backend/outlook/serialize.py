@@ -1,6 +1,26 @@
 """Phase 5 — serialize SimResult + LeagueState into the /api/league/outlook
 payload. The payload contract is the FIXED public surface; providers vary
 behind it. Teams are returned playoff_pct-desc (title_pct, points_for tiebreak).
+
+`meta.is_preseason` vs `meta.beta`
+-----------------------------------
+These are deliberately SEPARATE signals (2026-08-09 fix — see the "meta.beta
+aliasing problem" in
+docs/feedback/items/169-outlook-league-summary/status.md §Productionization
+and the transition-week evidence in
+docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md):
+
+  - `is_preseason` = `completed_weeks == 0` — a pure fact about the season.
+  - `beta` = model-CONFIDENCE, independently computed from `completed_weeks`.
+    `beta` used to be a plain alias of `is_preseason`, which meant the "beta"
+    label vanished at week 1 even though the model was still uncalibrated.
+    The 2026-08-09 revalidation found preseason playoff Brier (0.1959) is
+    statistically indistinguishable from the week-3 in-season model (0.1972);
+    the engine only pulls clearly ahead at week 6 (0.120) and is well
+    calibrated by week 12 (0.055). So `beta` stays true through week 5 and
+    only clears at `_BETA_UNTIL_COMPLETED_WEEKS` (6) — independent of
+    `is_preseason`, which clears at week 1. Both fields ship on every
+    payload; clients may use either or both.
 """
 
 from __future__ import annotations
@@ -10,6 +30,11 @@ from typing import Protocol
 from .league_state import LeagueState
 from .simulator import SimResult
 from .strength import TeamStrength
+
+# See module docstring — the week-6 line is where the 2026-08-09 calibration
+# revalidation found the engine first pulls clearly away from the
+# statistically-indistinguishable-from-preseason week-3 reading.
+_BETA_UNTIL_COMPLETED_WEEKS = 6
 
 
 class OutlookSerializer(Protocol):
@@ -56,6 +81,7 @@ class StandardSerializer:
             x["roster_id"],
         ))
         preseason = state.is_preseason
+        beta = state.completed_weeks < _BETA_UNTIL_COMPLETED_WEEKS
         return {
             "league_id": state.league_id,
             "platform": state.platform,
@@ -70,7 +96,7 @@ class StandardSerializer:
                 "sims": result.n_sims,
                 "seed": result.seed,
                 "is_preseason": preseason,
-                "beta": preseason,
+                "beta": beta,
             },
             "teams": teams,
         }

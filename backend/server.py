@@ -19347,7 +19347,7 @@ def _outlook_week_ttl(key: tuple[str, str, int]) -> float:
             else _OUTLOOK_SCHEDULE_TTL_SECONDS)
 
 
-def _outlook_sleeper_fetch():
+def _outlook_sleeper_fetch(captured: dict | None = None):
     """Return a `fetch(url)` for `build_league_state` that caches the weekly
     matchups fan-out and passes everything else straight to `_sleeper_get`.
 
@@ -19355,6 +19355,14 @@ def _outlook_sleeper_fetch():
     points-for standings the odds are computed FROM, and stale standings would
     be a wrong answer, not a slow one. Only the immutable-by-nature weekly
     scores are cached.
+
+    `captured`, if given, is filled in-place with raw league-meta facts this
+    closure happens to see but `LeagueState` (backend/outlook/league_state.py)
+    doesn't carry a field for — currently just `playoff_seed_type` (BUG-3,
+    docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md
+    §7). This is the ONE place the injected Phase-1 fetch touches the raw
+    `/league/{id}` settings blob, so it's also the only place that can observe
+    that field without a second network call or editing league_state.py.
     """
     def fetch(url: str):
         m = _OUTLOOK_MATCHUPS_RE.search(url)
@@ -19363,9 +19371,13 @@ def _outlook_sleeper_fetch():
             # Learn the season from the league-meta read (fetched first by the
             # provider) so week keys are season-scoped.
             meta_m = _OUTLOOK_LEAGUE_META_RE.search(url)
-            if meta_m and isinstance(data, dict) and data.get("season"):
-                with _outlook_cache_lock:
-                    _OUTLOOK_SEASON_BY_LEAGUE[meta_m.group(1)] = str(data["season"])
+            if meta_m and isinstance(data, dict):
+                if data.get("season"):
+                    with _outlook_cache_lock:
+                        _OUTLOOK_SEASON_BY_LEAGUE[meta_m.group(1)] = str(data["season"])
+                if captured is not None:
+                    captured["playoff_seed_type"] = (data.get("settings") or {}).get(
+                        "playoff_seed_type")
             return data
 
         league_id, week = m.group(1), int(m.group(2))
@@ -19406,7 +19418,9 @@ def league_outlook_route():
     board, P2.5 read-gated). basis=redraft → 501 (no redraft value source).
 
     Dark by default: 404 while the `outlook.odds` flag is off. Preseason
-    payloads (completed_weeks==0) carry meta.is_preseason / meta.beta = true.
+    payloads (completed_weeks==0) carry meta.is_preseason=true. meta.beta is a
+    SEPARATE model-confidence signal (weeks 0-5, independent of is_preseason —
+    see backend/outlook/serialize.py).
 
     Phase 1's weekly fan-out goes through `_outlook_sleeper_fetch()` (see
     above): completed weeks are cached with no TTL, the live week for 15 min,
@@ -19450,8 +19464,10 @@ def league_outlook_route():
     platform = (getattr(g_league, "platform", None) or "sleeper")
     try:
         from . import outlook as outlook_pkg
+        _outlook_captured: dict = {}
         state = outlook_pkg.build_league_state(
-            league_id, platform=platform, fetch=_outlook_sleeper_fetch())
+            league_id, platform=platform,
+            fetch=_outlook_sleeper_fetch(_outlook_captured))
         if not state.teams:
             return jsonify({"error": "league_not_found"}), 404
 
@@ -19492,6 +19508,7 @@ def league_outlook_route():
             basis=basis,
             scoring_format=fmt,
             you_user_id=g_user_id,
+            playoff_seed_type=_outlook_captured.get("playoff_seed_type"),
         )
         return jsonify(payload)
     except NotImplementedError as e:

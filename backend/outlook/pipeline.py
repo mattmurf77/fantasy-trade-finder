@@ -49,6 +49,7 @@ def run_outlook(
     you_user_id: str = "",
     n_sims: int | None = None,
     format_key: str = "standard",
+    playoff_seed_type: int | None = None,
 ) -> dict:
     """Phases 2-5: strength → simulate → seed/bracket → serialize. Pure."""
     if scoring_format is not None:
@@ -64,9 +65,16 @@ def run_outlook(
     strengths = provider.estimate(state, ctx)
 
     # Phase 4 — format (built before Phase 3 because the simulator consumes it)
+    # `playoff_seed_type` (BUG-3) is a Phase-1 fact `LeagueState` doesn't carry
+    # a dedicated field for; callers may either pass it explicitly here or
+    # (like `scoring_format` above) attach it to `state` and rely on the
+    # `getattr` fallback — see `backend/server.py`'s `league_outlook_route`,
+    # which captures it from the raw Sleeper league-meta response.
+    seed_type = (playoff_seed_type if playoff_seed_type is not None
+                else getattr(state, "playoff_seed_type", None))
     fmt = get_playoff_format("standard" if format_key is None else format_key,
                              state.playoff_slots, state.num_byes,
-                             state.num_divisions)
+                             state.num_divisions, seed_type)
 
     # Phase 3 — simulate
     sims = n_sims if n_sims is not None else _cfg.sim_count(model_cfg)
