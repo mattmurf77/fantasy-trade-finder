@@ -88,7 +88,15 @@ print(json.dumps(base, sort_keys=True, separators=(",", ":")))
   export FTF_FLAGS="$MERGED_FLAGS"
 fi
 
-( cd "$REPO" && PORT="$PORT" python3 run.py ) > "$REPORT_DIR/flask.log" 2>&1 &
+# `exec` is load-bearing: without it bash forks the subshell AND python, so $!
+# is the subshell, not Flask. Two consequences, both false-PASS hazards — the
+# stale-Flask pid assertion below could never pass (it fired on a clear port
+# every time), and the EXIT trap killed the already-dead subshell, orphaning
+# Flask on the port for the NEXT run's assertions to talk to.
+# PYTHONUNBUFFERED: flask.log is block-buffered otherwise, so the tail of it —
+# including feature_flags' parse warnings — is lost when the trap kills Flask.
+( cd "$REPO" && export PORT="$PORT" PYTHONUNBUFFERED=1 && exec python3 run.py ) \
+  > "$REPORT_DIR/flask.log" 2>&1 &
 FLASK_PID=$!
 trap 'kill $FLASK_PID 2>/dev/null' EXIT
 
