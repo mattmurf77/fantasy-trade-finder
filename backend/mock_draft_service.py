@@ -28,10 +28,15 @@ decision to re-balance the fit/hold-out SPLIT for draft depth and to add a
 third validation corpus, with the model still frozen; W2e took the operator's
 PRODUCT decision on how deep and how often a bot may reach and replaced the
 single global cap with the round-tiered policy below, **without re-fitting or
-re-gating**. The last recorded verdict is **STILL A FAILURE**, so
-:func:`advance_cpu` remains unreachable from the routes; the
-engine, its tests and the harness that produced the verdict all ship so the
-verdict is reproducible and the next attempt can be re-gated without a rebuild.
+re-gating**. The last recorded verdict is **STILL A FAILURE**, but the ship
+decision no longer follows from it: :data:`CPU_MODEL_VALIDATED` was flipped
+True by operator override once W2e made the reach policy a product rule, so
+:func:`advance_cpu` **is** reachable from the routes and `draft.mock` is ON.
+``test_w2_16_calibration_gate`` pins the statistical verdict independently, so
+a change that makes the model pass turns the suite red and forces a deliberate
+artifact re-publish rather than a silent one. The engine, its tests and the
+harness that produced the verdict all ship so the verdict is reproducible and
+the next attempt can be re-gated without a rebuild.
 
 **INV-10 — deterministic and self-contained.** Same ``rng_seed`` ⇒ a
 byte-identical draft; zero platform egress after creation (this module
@@ -735,53 +740,39 @@ def run_offset(candidates_ranked: Sequence[Mapping[str, Any]],
     return max(0, min(n - 1, max(int(MOCK_RUN_MIN_OFFSET), limit)))
 
 
-def aggregate_severity(needs_for_team: Mapping[str, float],
-                       targets: Mapping[str, tuple[int, int]] | None = None) -> float:
-    """How badly this team needs ANYTHING, in ``[0, 1]``.
+def need_pressure(severities: Mapping[str, float],
+                  targets: Mapping[str, tuple[int, int]]) -> float:
+    """How much of this team's STARTING+BENCH need is unfilled, in ``[0, 1]``.
 
-    **Denominator-weighted, NOT ``max()`` — and that is the whole point.**
-    :func:`severity` is ``clamp01((S + B - viable) / (S + B))`` per position,
-    and :data:`_BENCH_TARGET` gives TE ``(S, B) = (1, 0)``. So *any* roster
-    without a 1280+ TE scores ``severity("TE") == 1.0``, which in August is
-    almost every roster. A ``max()`` aggregate would therefore return 1.0
-    nearly always, :func:`effective_bpa_prob` would return ``bpa_prob``
-    unchanged, and D-5's need-conditional reaching would be inert — it would
-    ship as exactly today's behaviour while looking like a fix.
+    The denominator-weighted share of unmet slots:
 
-    Weighting each position by its own denominator ``S + B`` fixes that: on a
-    1QB roster the capacity is ``1 + 3 + 3 + 1 = 8``, so a lone missing TE is
-    worth ``1/8`` of the team's total need rather than all of it.
+        sum_p severity[p] * (S_p + B_p)  /  sum_p (S_p + B_p)
 
-        aggregate = sum_pos(clamp01_shortfall_pos) / sum_pos(S_pos + B_pos)
+    **Why not ``max(severities.values())``.** :func:`slot_targets` gives TE
+    ``(S, B) = (1, 0)`` on a standard lineup, so a team with no 1280+ TE scores
+    ``severity["TE"] == 1.0`` and ``max`` returns 1.0 — which makes
+    :func:`effective_bpa_prob` return ``bpa_prob``, i.e. TODAY'S BEHAVIOUR, for
+    the large majority of real rosters. Measured on a roster full at QB/RB/WR
+    with no viable TE: ``max`` = 1.000 (P(reach) 0.900, unchanged), ``mean`` =
+    0.250, denominator-weighted = **0.111** (P(reach) 0.300).
 
-    ``targets`` is optional so the unit callers that pass a bare ``{pos: sev}``
-    map keep working; without it every position carries equal weight, which for
-    the single-position boards the noise-law tests use is the same number.
+    **Why not ``mean``.** A team missing its whole WR corps and a team missing
+    one TE both score 0.25 under ``mean``. Denominator weighting scores them
+    0.44 and 0.11, which is the honest ordering.
 
     Pure; consumes no RNG.
     """
-    if not needs_for_team:
+    den = sum(sum(targets.get(p, (0, 0))) for p in _POSITIONS)
+    if den <= 0:
         return 0.0
-    total_w = 0.0
-    total = 0.0
-    for pos, sev in needs_for_team.items():
-        if targets is None:
-            w = 1.0
-        else:
-            s, b = targets.get(pos, (0, 0))
-            w = float(int(s) + int(b))
-        if w <= 0.0:
-            continue
-        total_w += w
-        total += w * max(0.0, min(1.0, float(sev)))
-    if total_w <= 0.0:
-        return 0.0
-    return max(0.0, min(1.0, total / total_w))
+    num = sum(float(severities.get(p, 0.0)) * sum(targets.get(p, (0, 0)))
+              for p in _POSITIONS)
+    return max(0.0, min(1.0, num / den))
 
 
 def effective_bpa_prob(bpa_prob: float,
                        needs_for_team: Mapping[str, float],
-                       targets: Mapping[str, tuple[int, int]] | None = None) -> float:
+                       pressure: float | None = None) -> float:
     """P(this pick is the strict board pick), tilted by how needy the team is.
 
     ``bpa_prob`` is the FITTED mixture weight and stays the value at MAXIMAL
@@ -790,17 +781,29 @@ def effective_bpa_prob(bpa_prob: float,
     best-available, which is D-5's ruling ("need DOMINATES reaching, but
     idiosyncrasy survives"):
 
-        tilt          = floor + (1 - floor) * aggregate_severity
+        tilt          = floor + (1 - floor) * pressure
         bpa_effective = 1 - (1 - bpa_prob) * tilt
 
-    severity == 1 -> bpa_effective == bpa_prob      (today's behaviour)
-    severity == 0 -> bpa_effective == 1 - (1 - bpa_prob) * floor
+    pressure == 1 -> bpa_effective == bpa_prob      (today's behaviour)
+    pressure == 0 -> bpa_effective == 1 - (1 - bpa_prob) * floor
 
     Pure; consumes no RNG. It changes the mixture WEIGHT and nothing about the
     noise FAMILY, so the Gumbel-max identity and the geometric reach law hold
     unchanged conditional on reaching (T-W2-04b).
+
+    ``pressure`` is optional in the signature and MANDATORY in production. The
+    default exists so the shipped single-position unit tests keep working
+    unchanged — on a uniform board ``max`` and the weighted share coincide.
+    Both engine call sites pass it from :func:`need_pressure`, and T-290-16
+    asserts by AST that they do.
     """
-    sev = aggregate_severity(needs_for_team, targets)
+    if pressure is None:
+        # Callers that hold no lineup template (the existing unit tests) fall
+        # back to the worst single hole. Production callers ALWAYS pass
+        # `pressure` from `need_pressure`.
+        values = [float(v) for v in (needs_for_team or {}).values()]
+        pressure = max(values) if values else 0.0
+    sev = max(0.0, min(1.0, float(pressure)))
     tilt = MOCK_IDIOSYNCRASY_FLOOR + (1.0 - MOCK_IDIOSYNCRASY_FLOOR) * sev
     return 1.0 - (1.0 - float(bpa_prob)) * tilt
 
@@ -814,7 +817,7 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
              bpa_prob: float = MOCK_BPA_PROB_DEFAULT,
              reach_decay: float = MOCK_REACH_DECAY_DEFAULT,
              reach_cap: int | None = None,
-             targets: Mapping[str, tuple[int, int]] | None = None) -> str:
+             need_pressure_value: float | None = None) -> str:
     """One CPU pick — ``argmin(rank - need_bonus - reach_noise)``.
 
     ``candidates_ranked`` is the head of the consensus pool, 1-based by list
@@ -829,11 +832,17 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
     **Need is also conditional on the mixture WEIGHT since #290 (D-5).**
     ``bpa_prob`` is now the value at MAXIMAL need — a desperate roster reaches
     exactly as often as the fit says — and :func:`effective_bpa_prob` damps the
-    reach branch toward best-available as need falls, never to it. ``targets``
-    carries ``{pos: (S, B)}`` so the aggregate can be denominator-weighted; a
-    caller that omits it gets equal weights, which is the same number on the
-    single-position boards the noise-law tests use. The scoring loop below is
-    byte-identical either way: only the Bernoulli's threshold moves.
+    reach branch toward best-available as need falls, never to it.
+    ``need_pressure_value`` is the denominator-weighted share of unfilled slots
+    from :func:`need_pressure`; a caller that omits it falls back to the worst
+    single hole, which is the same number on the single-position boards the
+    noise-law tests use. The scoring loop below is byte-identical either way:
+    only the Bernoulli's threshold moves.
+
+    **The per-position severity term is untouched.** ``need_pressure``
+    aggregates only for the mixture weight — how *often* a bot reaches. The
+    ``bonus = weight * severity[pos] * max_reach`` term below, which decides
+    *what* it reaches for, still reads the raw per-position severity.
 
     **The noise term is the W2b re-spec** (build-w2b.md). W2a drew
     ``Uniform(0, jitter)`` per candidate; its reachable support was bounded by
@@ -873,7 +882,7 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
     # MAXIMAL need, and a satisfied roster is damped toward best-available.
     # Consumes no RNG, and is evaluated BEFORE the draw, so the Bernoulli stays
     # the first draw of the pick and INV-10 holds.
-    bpa_eff = effective_bpa_prob(bpa_prob, needs_for_team, targets)
+    bpa_eff = effective_bpa_prob(bpa_prob, needs_for_team, need_pressure_value)
     # ONE Bernoulli per pick, drawn first so the branch (and therefore the
     # whole stream) is a pure function of the seed.
     reaching = scale > 0.0 and rng.random() >= float(bpa_eff)
@@ -1159,6 +1168,8 @@ def advance_cpu(state: dict, ctx: MockContext,
     reach_decay = float(noise.get("reach_decay", MOCK_REACH_DECAY_DEFAULT))
     window = candidate_window(max_reach)
     rows = pool if pool is not None else consensus_pool(ctx)
+    # Per-mock, not per-pick: the lineup template cannot change mid-draft.
+    targets = _severity_targets(ctx, state)
     round_no: int | None = None
     spent = 0
 
@@ -1190,13 +1201,12 @@ def advance_cpu(state: dict, ctx: MockContext,
             cap = min(cap, run_offset(
                 head,
                 allow_cross=0 if round_no <= 2 else MOCK_RUN_CROSS_ALLOWANCE_LATE))
-        targets = _severity_targets(ctx, state)
-        player_id = cpu_pick(head, persona.get("outlook"),
-                             _severities(ctx, state, str(owner)),
+        sev = _severities(ctx, state, str(owner))
+        player_id = cpu_pick(head, persona.get("outlook"), sev,
                              _pick_rng(state, slot["pick_no"]),
                              max_reach=max_reach, bpa_prob=bpa_prob,
                              reach_decay=reach_decay, reach_cap=cap,
-                             targets=targets)
+                             need_pressure_value=need_pressure(sev, targets))
         if str(available[0]["player_id"]) != str(player_id):
             spent += 1                      # this pick was a reach
         _append(state, slot, player_id, BY_CPU)
@@ -1514,7 +1524,7 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
         chosen = cpu_pick(head, personas.get(owner, DEFAULT_OUTLOOK),
                           needs, rng, max_reach=max_reach, bpa_prob=bpa_prob,
                           reach_decay=reach_decay, reach_cap=cap,
-                          targets=targets)
+                          need_pressure_value=need_pressure(needs, targets))
         # The pick is always inside the window, so the scan is O(K), not O(n).
         position = next(i for i, r in enumerate(head)
                         if str(r["player_id"]) == chosen)
