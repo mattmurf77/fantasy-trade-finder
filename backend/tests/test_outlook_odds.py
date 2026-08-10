@@ -291,6 +291,55 @@ def test_serializer_shape_and_preseason_beta():
     assert pcts == sorted(pcts, reverse=True)
 
 
+def _serialized_meta(completed_weeks: int) -> dict:
+    """Build a payload at a given `completed_weeks` and return just `meta` —
+    helper for the beta/is_preseason transition-week tests below."""
+    st = _state(n_teams=6, completed_weeks=completed_weeks,
+               weekly_scores={r: [100.0] * completed_weeks for r in range(1, 7)})
+    rids = [t.roster_id for t in st.teams]
+    strengths = _flat_strengths(rids)
+    res = simulate(st, strengths, StandardFormat(st.playoff_slots, st.num_byes),
+                   n_sims=200, config_seed=0)
+    return StandardSerializer().serialize(
+        st, res, strengths, strength_source="roster_value",
+        basis="consensus", you_user_id="u1")["meta"]
+
+
+@pytest.mark.parametrize("completed_weeks", [0, 1, 2, 3, 4, 5])
+def test_beta_stays_true_through_week_5(completed_weeks):
+    """2026-08-09 fix: preseason (week 0) Brier is statistically
+    indistinguishable from the week-3 in-season model — `beta` must stay
+    true across that whole low-confidence window, not just at week 0."""
+    meta = _serialized_meta(completed_weeks)
+    assert meta["beta"] is True
+
+
+@pytest.mark.parametrize("completed_weeks", [6, 7, 12])
+def test_beta_clears_at_week_6(completed_weeks):
+    """Week 6 is the first as-of point in the calibration backtest where the
+    engine's playoff Brier (0.120) is unambiguously better than the
+    preseason/week-3 reading — see serialize.py's `_BETA_UNTIL_COMPLETED_WEEKS`."""
+    meta = _serialized_meta(completed_weeks)
+    assert meta["beta"] is False
+
+
+def test_is_preseason_and_beta_are_independent_signals():
+    """The bug this fixes: `beta` used to be a plain alias of `is_preseason`,
+    so it went false at week 1. They must now diverge in the week 1-5 window
+    (is_preseason already false, beta still true)."""
+    meta = _serialized_meta(3)
+    assert meta["is_preseason"] is False
+    assert meta["beta"] is True
+    # And at week 0 both happen to be true, but for independent reasons.
+    meta0 = _serialized_meta(0)
+    assert meta0["is_preseason"] is True
+    assert meta0["beta"] is True
+    # And by week 6+ both are false.
+    meta6 = _serialized_meta(6)
+    assert meta6["is_preseason"] is False
+    assert meta6["beta"] is False
+
+
 # ---------------------------------------------------------------------------
 # Endpoint — flag gating + payload shape
 # ---------------------------------------------------------------------------

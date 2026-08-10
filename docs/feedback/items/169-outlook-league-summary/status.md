@@ -309,17 +309,29 @@ The odds layer was typed in July; `LeagueSummaryScreen` has been rebuilt since
   non-nullable in `mobile/src/api/league.ts`. Everything else matched exactly.
   Now pinned by a test that parses the TS interfaces and compares them to a
   live payload.
-- **Preseason rules honored on both sides** — backend sets
-  `meta.is_preseason = meta.beta = (completed_weeks == 0)`; mobile composes
-  "Projected · preseason · beta" from those two booleans and always renders the
+- **Preseason rules honored on both sides** — backend sets `meta.is_preseason
+  = (completed_weeks == 0)` and (2026-08-10, see below) `meta.beta =
+  (completed_weeks < 6)` as an INDEPENDENT signal; mobile composes "Projected
+  · preseason · beta" from those two booleans and always renders the
   `strength_source` caption. The caption map covers every *selectable* provider
   (`roster_value`, `trailing_scores`, `blended`); the registered stubs fall
   through to the generic caption by design. Both are now test-pinned.
-- **Open question for the lighting decision (engine-owned, not changed here):**
+- **RESOLVED 2026-08-10** (was: "Open question for the lighting decision —
   `meta.beta` is derived from `is_preseason`, so the FIRST in-season payload
-  drops the "beta" word while the model is still uncalibrated. If the surface is
-  lit in-season, `beta` should probably be its own signal rather than a
-  preseason alias.
+  drops the 'beta' word while the model is still uncalibrated"). Fixed in
+  `backend/outlook/serialize.py`: `beta` is now an INDEPENDENT signal —
+  `completed_weeks < 6` — not an alias of `is_preseason` (`completed_weeks ==
+  0`). Threshold justified by the 2026-08-09 revalidation: preseason playoff
+  Brier (0.1959) is statistically indistinguishable from the week-3 in-season
+  model (0.1972); the engine only pulls clearly ahead at week 6 (0.120) and is
+  well-calibrated by week 12 (0.055) — see
+  [calibration-report-2026-08-09.md §3](calibration-report-2026-08-09.md#3-tier-1--backtest-against-reality).
+  Both fields still ship on every payload; the mobile ribbon composition
+  (`betaRibbonLabel`) and its "Projected · preseason · beta" wording are
+  UNCHANGED — this is a backend value-semantics fix only, not a UI change.
+  Tests: `test_beta_stays_true_through_week_5` / `test_beta_clears_at_week_6` /
+  `test_is_preseason_and_beta_are_independent_signals` in
+  `backend/tests/test_outlook_odds.py`.
 
 ### 4. Lighting procedure — RECOMMENDED: plain flag flip
 
@@ -410,3 +422,48 @@ fully evaluated variant — full method, backtest, mechanism check, and verdict:
 - **Kept regardless of the verdict:** `backend/outlook/bye_weeks.py` — tested,
   CC-BY-attributed nflverse schedule → bye-week ingestion, reusable by any
   future weekly-points projection source (`OwnModelStrength` stub).
+
+## BUG-3 fix + honest `beta` signal (2026-08-10) — still dark
+
+Two calibration-report follow-ups closed. `outlook.odds` untouched (still
+false everywhere); no flag/config change; no mobile UI/behavior change.
+
+**BUG-3 — `settings.playoff_seed_type` now modeled.** Dated FIXED note with
+full method in
+[calibration-report-2026-08-09.md §7](calibration-report-2026-08-09.md#7-bugs-found).
+Summary: `backend/outlook/playoff_format.py` now branches on the Sleeper
+setting — `0` → fixed/standard bracket (no re-seeding, empirically proven
+against 3 divergent instances across the 4 completed `ffv3-*` fixture
+seasons), `1` → reseed (today's unconditional pre-fix behavior, preserved
+exactly; documented but not independently divergence-proven against the
+fixture set), anything else → explicit LOGGED fallback to reseed
+(`_resolve_seed_type`). Threaded from Sleeper's league-meta response (already
+fetched by Phase 1) via a `captured` side-channel in
+`backend/server.py::_outlook_sleeper_fetch()` — zero extra network calls, and
+`backend/outlook/league_state.py` was NOT touched (a sibling agent owns
+BUG-1/median-match in that file concurrently). `pipeline.run_outlook` gained
+an optional `playoff_seed_type` kwarg, falling back to `getattr(state,
+"playoff_seed_type", None)` — same precedent as the existing `scoring_format`
+attribute-attach pattern.
+
+**`meta.beta` aliasing — fixed.** Was: a plain alias of `meta.is_preseason`
+(`completed_weeks == 0`), so the "beta" label vanished at week 1 while the
+model was still uncalibrated (flagged as an open question above). Now:
+`backend/outlook/serialize.py` computes `beta = completed_weeks < 6`,
+independent of `is_preseason`. Threshold justified by the 2026-08-09
+revalidation (preseason Brier 0.1959 ≈ week-3 Brier 0.1972, statistically
+indistinguishable; the engine only pulls clearly ahead at week 6 — 0.120).
+`is_preseason` still clears at week 1 as before; the two fields now
+genuinely diverge in the week 1-5 window, which is the whole point.
+
+**Not done:** `scripts/outlook_calibration_backtest.py` was not updated to
+pass `playoff_seed_type` into its `get_playoff_format` calls, so a re-run of
+the full calibration backtest still scores the pre-fix (always-reseed)
+bracket simulation. Recommended before the next calibration revalidation.
+
+**Files:** `backend/outlook/playoff_format.py`, `backend/outlook/serialize.py`
+(owned this pass), `backend/outlook/pipeline.py`, `backend/server.py` (thin
+wiring only — `league_state.py`/`simulator.py`/`strength.py` untouched, per
+the sibling-agent file split), `backend/tests/test_outlook_playoff_seed_type.py`
+(new), `backend/tests/test_outlook_odds.py`, `backend/tests/test_outlook_route_cache.py`,
+`docs/api-reference.md`.

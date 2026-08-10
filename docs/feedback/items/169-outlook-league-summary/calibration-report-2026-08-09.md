@@ -543,6 +543,40 @@ league where it is non-zero has its bracket simulated under the wrong rule.
 Recommend reading it into `LeagueState` and either modelling it or refusing to
 emit `title_pct` when it is unsupported.
 
+> **FIXED 2026-08-10.** `backend/outlook/playoff_format.py` now models both
+> values, verified against real league payloads rather than guessed:
+> - **`0` → fixed/standard bracket (no re-seeding).** Confirmed empirically:
+>   replaying the 4 completed `playoff_seed_type: 0` fixture seasons
+>   (ffv3-2022/2023/2024/2025) found 3 independent "divergent" instances — a
+>   round-1 upset that would have produced a DIFFERENT round-2 pairing under
+>   reseeding than under a fixed bracket — and every one matched the
+>   fixed-bracket prediction exactly, none matched reseed. Corroborated by
+>   Sleeper's own support docs ("standard bracket, no re-seeding") and a
+>   third-party API reference.
+> - **`1` → reseed** (highest surviving seed always plays the lowest). This
+>   is what the engine already modeled unconditionally before the fix — i.e.
+>   "today's behavior" is preserved exactly for `playoff_seed_type: 1` and for
+>   any missing/unrecognized value (explicit, LOGGED fallback via
+>   `_resolve_seed_type`, never silent). The 2 completed `playoff_seed_type: 1`
+>   fixture seasons (lakeview-2024/2025) never contained a divergent upset
+>   pattern, so value `1` is corroborated by documentation + no contradicting
+>   fixture evidence, not by a divergence proof the way `0` is — disclosed,
+>   not hidden.
+> - The raw setting is threaded from Sleeper's league-meta response (captured
+>   by `_outlook_sleeper_fetch()` in `backend/server.py` — no extra network
+>   call) through `pipeline.run_outlook(..., playoff_seed_type=...)` into
+>   `get_playoff_format(...)`, without editing `league_state.py`.
+> - New tests: `backend/tests/test_outlook_playoff_seed_type.py` (value
+>   mapping + logged fallback, a hand-verified synthetic divergence case, and
+>   the 6-fixture champion-replay proof above) plus route-level wiring tests
+>   in `test_outlook_route_cache.py`.
+> - Not done here: re-running the full offline calibration backtest
+>   (`scripts/outlook_calibration_backtest.py`) with seed-type-aware brackets —
+>   the script still calls `get_playoff_format` without passing
+>   `playoff_seed_type`, so its title-Brier numbers above still reflect the
+>   pre-fix (always-reseed) simulation. Recommended follow-up before the next
+>   calibration revalidation, same as BUG-1's regression-guard note.
+
 ### BUG-4 — `points_for` is not exactly reconstructible from weekly scores — **LOW, external**
 
 lakeview-2024 roster 10: Sleeper's roster `fpts` is 1981.22 but the sum of its
