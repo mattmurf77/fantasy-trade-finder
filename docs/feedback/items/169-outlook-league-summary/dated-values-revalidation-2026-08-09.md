@@ -113,6 +113,29 @@ The row count is the wrong denominator on its own, because most unresolved rows 
 
 *(roster coverage = share of rostered QB/RB/WR/TE with a value on that dated board; starting-slot coverage = share of the greedily-**selected** starting lineup's skill slots that carry a price)*
 
+> **CORRECTION — 2026-08-09 ([`idp-pricing-2026-08-09.md`](idp-pricing-2026-08-09.md), BUG-5).**
+> **The "100.0 %" column above is measured over QB/RB/WR/TE slots only** — it
+> silently excludes the eight slots that never had a chance of being covered.
+> FFv3 starts `QB,RB,RB,WR,WR,TE,FLEX,K,DL,DL,LB,LB,DB,DB,IDP_FLEX`, and the
+> DynastyProcess board carries **no defender and no kicker**, so the true
+> starting-slot coverage for the four `ffv3-*` rows is **7 / 15 = 46.7 %**,
+> spanning **~33 % of the points those teams actually scored**. Lakeview's rows
+> are genuinely 100 %. This is the most misleading line in this report and it
+> propagates to criterion **PS7** in §4, which should read **FAIL for the four
+> IDP league-seasons**, not PASS on all six.
+>
+> **The numbers in §3 do not change.** The unpriced slots contribute 0.0 to
+> *every* team, so they cancel in `RosterValueStrength`'s cross-team z-score —
+> this is a missing signal, not a bias, and the V0 baseline of the BUG-5
+> backtest reproduces every figure in §3.3, §3.5 and §5 to four decimals. What
+> changes is what they *describe*: for 4 of these 6 league-seasons the preseason
+> estimate is an **offensive-core** estimate. No available pricing fix beat the
+> status quo (no license-clean dynasty IDP board exists; a league-mean fallback
+> measured Δ Brier **+0.0005** and coverage attenuation **−0.0019**, CI
+> [−0.0167, +0.0070]) — so the §4 recommendation stands, with the added
+> condition that an IDP league's odds must be **labelled** as offence-only
+> before the surface lights.
+
 **The one disclosure that matters.** An unmatched player is not merely unpriced — he is priced at 0.0, so `select_starting_lineup` will never start him. That is only harmful if an unmatched player was actually good. Ranking each board's unmatched rows by value:
 
 | Season | best-ranked unmatched player | DP rank | value |
