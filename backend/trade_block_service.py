@@ -41,7 +41,7 @@ import logging
 import urllib.request
 from datetime import datetime, timezone
 
-from .database import replace_trade_block
+from .database import is_linked_platform_league, replace_trade_block
 
 log = logging.getLogger(__name__)
 
@@ -162,10 +162,12 @@ def sync_league_trade_block(league_id: str, *, _opener=None) -> int:
     """Fetch + validate + store the league's trade block. Returns row count.
 
     No-op (returns 0 without touching the table) for non-Sleeper league
-    ids (ESPN imports, demo leagues) — same digit guard as
+    ids (demo leagues, plus platform-imported ESPN/MFL/Fleaflicker rows
+    whose native ids are numeric) — same guard pairing as
     server._fetch_sleeper_league_meta.
     """
-    if not league_id or not str(league_id).isdigit():
+    if not league_id or not str(league_id).isdigit() \
+            or is_linked_platform_league(league_id):
         return 0
     league_players = fetch_league_players(league_id, _opener=_opener)
     rosters = _fetch_rosters(league_id, _opener=_opener)

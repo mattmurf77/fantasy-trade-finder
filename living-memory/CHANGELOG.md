@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-09 (ESPN numeric-id guard fix: Sleeper-only helpers now skip linked-platform leagues; branch, not merged)
+
+- **Bug:** `server._fetch_sleeper_league_meta` and `trade_block_service.sync_league_trade_block` guarded "is this Sleeper?" with `isdigit()` alone, though their docstrings claimed they no-op for ESPN imports — ESPN native ids ARE numeric, so every `/api/session/init` on an ESPN league fired 1–3 Sleeper requests that 404 (prod latency/noise; false `vcr_misses` in the FTF_TEST_MODE harness). Same root cause as #149/#150.
+- **Fix (branch `claude/suspicious-chaplygin-7dab59`, worktree modest-cerf-12ce88):** both guards now pair `isdigit()` with `database.is_linked_platform_league(league_id)` — the established convention from the rosters/league_users proxies (server.py ~13909/13940). Regression tests in `test_espn_link_route.py` pin both helpers to zero Sleeper calls for a linked ESPN league.
+- **Follow-up once merged:** revert two workarounds in worktree `~/ftf-worktrees/screens-wt` (branch screen-library-2026-08-09) that exist only to route around this bug: `espn.json` profile pinning `sleeper.trade_block: false`, and `seed_ui_test_db.py`'s `{"__http_error__": 404}` ESPN cassette sentinel + its `_verify_no_cassette_gap` carve-out + `test_espn_league_emits_no_sleeper_cassettes`.
+- Gates: full suite 2219 passed / 1 skipped / 1 xfailed after change. No schema/API/flag surface touched.
+
 ## 2026-08-09 (dated DP value boards — preseason source finally backtested; NOT merged, no flag change)
 
 - **The "no dated dynasty-value board exists" blocker was FALSE (G-025).** DynastyProcess keeps the full git history of `values-players.csv` (weekly, back to ~2020-09); any revision is a plain GET at `raw.githubusercontent.com/.../<sha>/...`. New `backend/dp_values_history.py` + **24 committed dated boards** (2022–2025 × weeks 0/3/6/9/12/14, 484 KB) in `backend/tests/fixtures/dp-values-history/`. Offline by default — an uncaptured date raises rather than substituting a neighbour; live path is capture-only and `observe_call`-wrapped. Name→Sleeper join reuses the shipped crosswalk (3 tiers, position-strict): unmatched **0.2–1.8 %** of DP rows, **96.8–99.3 %** roster coverage, **100 %** starting-slot coverage on all six league-seasons.

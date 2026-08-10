@@ -360,3 +360,32 @@ def test_rosters_proxy_still_hits_sleeper_for_unlinked_numeric_ids(client):
         r = c.get("/api/sleeper/rosters/555555555")
     assert r.status_code == 200
     assert hit["n"] == 1                       # unlinked numeric id → Sleeper
+
+
+# ---------------------------------------------------------------------------
+# Sleeper-only helpers no-op for imported leagues (session-init 404 noise)
+#
+# ESPN platform-native ids are numeric, so a bare isdigit() guard let
+# _fetch_sleeper_league_meta and sync_league_trade_block fire Sleeper
+# requests that 404 on every /api/session/init for an imported league
+# (and booked false vcr_misses in the FTF_TEST_MODE harness). These pin
+# that both helpers bail before any network call once the league row is
+# platform-linked.
+# ---------------------------------------------------------------------------
+
+def test_league_meta_helper_skips_imported_espn_league(client):
+    c, token, _ = client
+    assert _link(c, token, team_id=1).status_code == 200
+    with patch.object(server, "_sleeper_get", _no_sleeper):
+        assert server._fetch_sleeper_league_meta(ESPN_LEAGUE) is None
+
+
+def test_trade_block_sync_skips_imported_espn_league(client):
+    from backend.trade_block_service import sync_league_trade_block
+    c, token, _ = client
+    assert _link(c, token, team_id=1).status_code == 200
+
+    def _no_network_opener(request, timeout=None):
+        raise AssertionError("imported league must not hit Sleeper")
+
+    assert sync_league_trade_block(ESPN_LEAGUE, _opener=_no_network_opener) == 0

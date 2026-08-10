@@ -677,7 +677,8 @@ def _fetch_sleeper_league_meta(league_id: str) -> dict | None:
 
     Endpoint: https://api.sleeper.app/v1/league/{league_id}
     """
-    if not league_id or not str(league_id).isdigit():
+    if not league_id or not str(league_id).isdigit() \
+            or is_linked_platform_league(league_id):
         return None
     url = f"https://api.sleeper.app/v1/league/{league_id}"
     try:
