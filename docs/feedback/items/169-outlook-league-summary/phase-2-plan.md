@@ -95,14 +95,33 @@ Operator-raised 2026-08-09; **all three validated 2026-08-09 — no term ships.*
 | # | Hypothesis | Verdict | Key evidence |
 |---|---|---|---|
 | 1a | Pick capital → in-season buying → stronger | **NOT SUPPORTED** (ran backwards) | buy:sell ratio *falls* as capital rises |
-| 1b | Pick capital → rebuilding → sheds producers | **SUPPORTED but underpowered** | buy:sell 2.4:1 → 0.7:1 → 0.6:1 by capital tercile (monotonic, mechanism-level, confound-resistant); outcome correlations r ≈ −0.20 to −0.25 but confounded by pick-rich teams already being weaker (r ≈ −0.3) |
+| 1b | Pick capital → rebuilding → sheds producers | ~~**SUPPORTED but underpowered**~~ → **WEAKENED (re-tested 2026-08-09 with dated boards)** | buy:sell 2.4:1 → 0.7:1 → 0.6:1 by capital tercile (monotonic, mechanism-level, confound-resistant); outcome correlations r ≈ −0.20 to −0.25 but confounded by pick-rich teams already being weaker (r ≈ −0.3) |
 | 1c | Positional bench depth → injury resilience | **NOT SUPPORTED** | next-man-up survives controlling at r = +0.17 (raw bench total collapses +0.27 → +0.02), but variance ≈ 0 and the absence interaction fails — no injury mechanism |
 
 **Standing decision (2026-08-09): no coefficient specced from any of the three.** 1b is the
-only live candidate; revisit when the sample exceeds ~72 team-seasons. Both agents
+only live candidate; revisit when the sample exceeds ~72 team-seasons. ~~Both agents
 independently hit the same blocker — **no dated historical dynasty-value board exists**, so
 retroactive roster pricing uses today's values. Building/finding one is the prerequisite for
-re-testing 1b honestly, and would also sharpen `RosterValueStrength`'s own backtest.
+re-testing 1b honestly, and would also sharpen `RosterValueStrength`'s own backtest.~~
+
+**PREREQUISITE MET AND CLOSED — 2026-08-09.** The "no dated board exists" premise was
+**wrong**: the DynastyProcess repo keeps the full git history of `values-players.csv`, so any
+past season can be priced with a period-correct board. 24 dated boards (2022–2025 × weeks
+0/3/6/9/12/14) are committed under `backend/tests/fixtures/dp-values-history/`, served offline
+by `backend/dp_values_history.py`. Both follow-ups it gated are now done —
+[`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md):
+
+- **1b re-tested honestly.** Sub-test (i) flips from r = −0.11 (CI excluding 0) to **+0.076
+  (CI spanning 0)**; the confound strengthens (−0.35 → **−0.41**); (ii), (iii) and the buy:sell
+  gradient are bit-identical. **1b is WEAKENED** — see the verdict row above, now read as
+  "supported on outcomes and behaviour, NOT on roster composition". Δ dynasty value is a
+  structurally poor instrument for 1b; do not re-run that sub-test on more seasons.
+- **`RosterValueStrength` backtested.** Preseason playoff Brier **0.1959** vs climatology
+  0.2500 (**+21.6 %**, 90 % CI [+4.1 %, +38.3 %]); preseason **title odds show no skill**.
+  Over-confident at the extremes (95 % → 75 % realized) and beaten by climatology in 2 of 6
+  league-seasons. **Statistically indistinguishable from the week-3 `trailing_scores` model**,
+  which means the `completed_weeks >= 3` gate in §Sequencing buys no measured accuracy at
+  week 3 — its honest justification is weeks 6+.
 
 ## Sequencing and gates
 

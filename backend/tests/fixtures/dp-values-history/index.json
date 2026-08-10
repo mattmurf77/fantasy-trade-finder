@@ -1,0 +1,275 @@
+{
+  "_provenance": {
+    "captured": "2026-08-09",
+    "license": "CC-BY (DynastyProcess); see docs/integrations/dynastyprocess.md",
+    "note": "Slimmed to player, pos, value_1qb, value_2qb, scrape_date; rows with no 1QB and no SF value dropped. Each snapshot is the nearest commit AT OR BEFORE its key date, so a board never contains information from after the date it is used to price.",
+    "purpose": "dated dynasty value boards for the #169 outlook backtests (preseason roster_value source + pick-capital hypothesis 1b)",
+    "source": "https://github.com/dynastyprocess/data \u2014 files/values-players.csv, git history"
+  },
+  "snapshots": {
+    "2022-09-08": {
+      "committed_at": "2022-09-02T04:28:41Z",
+      "file": "values-2022-09-08.csv",
+      "raw_bytes": 43758,
+      "rows": 553,
+      "scrape_date": "2022-09-02",
+      "season": 2022,
+      "sha": "beb24c54f61ac9d63ab1c2043ea1b61ec282d90d",
+      "slim_bytes": 19011,
+      "week": 0
+    },
+    "2022-09-29": {
+      "committed_at": "2022-09-23T04:30:07Z",
+      "file": "values-2022-09-29.csv",
+      "raw_bytes": 46852,
+      "rows": 596,
+      "scrape_date": "2022-09-23",
+      "season": 2022,
+      "sha": "d2d9e6faab1a0216e92feff04703b0917270d3a7",
+      "slim_bytes": 20335,
+      "week": 3
+    },
+    "2022-10-20": {
+      "committed_at": "2022-10-14T04:39:22Z",
+      "file": "values-2022-10-20.csv",
+      "raw_bytes": 46161,
+      "rows": 585,
+      "scrape_date": "2022-10-14",
+      "season": 2022,
+      "sha": "95015f69263b5215f14a800c36bb9326a175e0d9",
+      "slim_bytes": 20005,
+      "week": 6
+    },
+    "2022-11-10": {
+      "committed_at": "2022-11-04T03:55:08Z",
+      "file": "values-2022-11-10.csv",
+      "raw_bytes": 42151,
+      "rows": 531,
+      "scrape_date": "2022-11-04",
+      "season": 2022,
+      "sha": "6d9bce5652c52c9e92ea5e5f565590bb1045165d",
+      "slim_bytes": 18295,
+      "week": 9
+    },
+    "2022-12-01": {
+      "committed_at": "2022-11-25T03:18:03Z",
+      "file": "values-2022-12-01.csv",
+      "raw_bytes": 40528,
+      "rows": 510,
+      "scrape_date": "2022-11-25",
+      "season": 2022,
+      "sha": "fc8b0da8574f78b6de397500e3d25eba13ea08fa",
+      "slim_bytes": 17645,
+      "week": 12
+    },
+    "2022-12-15": {
+      "committed_at": "2022-12-09T03:02:02Z",
+      "file": "values-2022-12-15.csv",
+      "raw_bytes": 43605,
+      "rows": 551,
+      "scrape_date": "2022-12-09",
+      "season": 2022,
+      "sha": "141bf05db9381399fdca7805b09e37576dd2242a",
+      "slim_bytes": 18900,
+      "week": 14
+    },
+    "2023-09-07": {
+      "committed_at": "2023-09-01T02:37:31Z",
+      "file": "values-2023-09-07.csv",
+      "raw_bytes": 45708,
+      "rows": 576,
+      "scrape_date": "2023-09-01",
+      "season": 2023,
+      "sha": "5308c3c41d07c0922827092af1a33136199b6fcd",
+      "slim_bytes": 19705,
+      "week": 0
+    },
+    "2023-09-28": {
+      "committed_at": "2023-09-22T02:33:15Z",
+      "file": "values-2023-09-28.csv",
+      "raw_bytes": 39304,
+      "rows": 496,
+      "scrape_date": "2023-09-22",
+      "season": 2023,
+      "sha": "495cc07a71436f6f059fd9384485876786f47cce",
+      "slim_bytes": 17141,
+      "week": 3
+    },
+    "2023-10-19": {
+      "committed_at": "2023-10-13T02:38:15Z",
+      "file": "values-2023-10-19.csv",
+      "raw_bytes": 47595,
+      "rows": 587,
+      "scrape_date": "2023-10-13",
+      "season": 2023,
+      "sha": "f0bc784fe9c7ab5bb18dcc4ecc0e7d6b72ba5275",
+      "slim_bytes": 20075,
+      "week": 6
+    },
+    "2023-11-09": {
+      "committed_at": "2023-11-03T02:35:09Z",
+      "file": "values-2023-11-09.csv",
+      "raw_bytes": 43166,
+      "rows": 543,
+      "scrape_date": "2023-11-03",
+      "season": 2023,
+      "sha": "cf3cdc8b6dd9a676dea187a69001e6ae8fb478d0",
+      "slim_bytes": 18666,
+      "week": 9
+    },
+    "2023-11-30": {
+      "committed_at": "2023-11-24T02:37:39Z",
+      "file": "values-2023-11-30.csv",
+      "raw_bytes": 43453,
+      "rows": 550,
+      "scrape_date": "2023-11-24",
+      "season": 2023,
+      "sha": "1ce46a0516d05401fbeb68421db0d1e41179adb2",
+      "slim_bytes": 18905,
+      "week": 12
+    },
+    "2023-12-14": {
+      "committed_at": "2023-12-08T02:40:53Z",
+      "file": "values-2023-12-14.csv",
+      "raw_bytes": 47001,
+      "rows": 592,
+      "scrape_date": "2023-12-08",
+      "season": 2023,
+      "sha": "72e5e93dab88c2d06c575af6dbac56cc2e2bb7bc",
+      "slim_bytes": 20241,
+      "week": 14
+    },
+    "2024-09-05": {
+      "committed_at": "2024-08-30T02:53:34Z",
+      "file": "values-2024-09-05.csv",
+      "raw_bytes": 42265,
+      "rows": 534,
+      "scrape_date": "2024-08-30",
+      "season": 2024,
+      "sha": "ce5e9ba0214b956ff2fcad051105d7564ff0728b",
+      "slim_bytes": 18475,
+      "week": 0
+    },
+    "2024-09-26": {
+      "committed_at": "2024-09-20T02:59:52Z",
+      "file": "values-2024-09-26.csv",
+      "raw_bytes": 35885,
+      "rows": 455,
+      "scrape_date": "2024-09-20",
+      "season": 2024,
+      "sha": "82e10c28582f3893861768ce6b1bcd27e87ebe6b",
+      "slim_bytes": 15841,
+      "week": 3
+    },
+    "2024-10-17": {
+      "committed_at": "2024-10-11T03:00:43Z",
+      "file": "values-2024-10-17.csv",
+      "raw_bytes": 38560,
+      "rows": 487,
+      "scrape_date": "2024-10-11",
+      "season": 2024,
+      "sha": "4fc4b94ba9ee536130d6bf9c468573b36b85fac1",
+      "slim_bytes": 16904,
+      "week": 6
+    },
+    "2024-11-07": {
+      "committed_at": "2024-11-01T03:12:48Z",
+      "file": "values-2024-11-07.csv",
+      "raw_bytes": 49833,
+      "rows": 613,
+      "scrape_date": "2024-11-01",
+      "season": 2024,
+      "sha": "543fa4d272b780153035dfdfe1c342b39f67eef5",
+      "slim_bytes": 21004,
+      "week": 9
+    },
+    "2024-11-28": {
+      "committed_at": "2024-11-22T03:08:46Z",
+      "file": "values-2024-11-28.csv",
+      "raw_bytes": 49999,
+      "rows": 647,
+      "scrape_date": "2024-11-22",
+      "season": 2024,
+      "sha": "253a5ba4d6a1c17d9944ff8a12ddb06b8cfc6c5d",
+      "slim_bytes": 22111,
+      "week": 12
+    },
+    "2024-12-12": {
+      "committed_at": "2024-12-06T03:13:21Z",
+      "file": "values-2024-12-12.csv",
+      "raw_bytes": 48238,
+      "rows": 564,
+      "scrape_date": "2024-12-06",
+      "season": 2024,
+      "sha": "4d3651e988eace8355d9af81828e42ea8309c5ab",
+      "slim_bytes": 19370,
+      "week": 14
+    },
+    "2025-09-04": {
+      "committed_at": "2025-08-29T03:15:22Z",
+      "file": "values-2025-09-04.csv",
+      "raw_bytes": 43076,
+      "rows": 546,
+      "scrape_date": "2025-08-29",
+      "season": 2025,
+      "sha": "10dde2b393efb289719fb4304f69c258b5419ba4",
+      "slim_bytes": 18866,
+      "week": 0
+    },
+    "2025-09-25": {
+      "committed_at": "2025-09-19T03:14:07Z",
+      "file": "values-2025-09-25.csv",
+      "raw_bytes": 25442,
+      "rows": 324,
+      "scrape_date": "2025-09-19",
+      "season": 2025,
+      "sha": "a1e6c5d4d0175df7b59f02e6033128b5454bc82b",
+      "slim_bytes": 11513,
+      "week": 3
+    },
+    "2025-10-16": {
+      "committed_at": "2025-10-10T03:14:50Z",
+      "file": "values-2025-10-16.csv",
+      "raw_bytes": 34566,
+      "rows": 439,
+      "scrape_date": "2025-10-10",
+      "season": 2025,
+      "sha": "32dfc6fc49f70c4f7955edc6f409810961739877",
+      "slim_bytes": 15324,
+      "week": 6
+    },
+    "2025-11-06": {
+      "committed_at": "2025-10-31T03:32:56Z",
+      "file": "values-2025-11-06.csv",
+      "raw_bytes": 38766,
+      "rows": 485,
+      "scrape_date": "2025-10-31",
+      "season": 2025,
+      "sha": "0b665173e93b85733e819bc5ed9aefa871139a93",
+      "slim_bytes": 16884,
+      "week": 9
+    },
+    "2025-11-27": {
+      "committed_at": "2025-11-21T03:30:46Z",
+      "file": "values-2025-11-27.csv",
+      "raw_bytes": 42040,
+      "rows": 535,
+      "scrape_date": "2025-11-21",
+      "season": 2025,
+      "sha": "1ab450269ecda47253f0a44686b98e34a268bbca",
+      "slim_bytes": 18473,
+      "week": 12
+    },
+    "2025-12-11": {
+      "committed_at": "2025-12-05T03:38:49Z",
+      "file": "values-2025-12-11.csv",
+      "raw_bytes": 38272,
+      "rows": 483,
+      "scrape_date": "2025-12-05",
+      "season": 2025,
+      "sha": "6e4dbbf46f3fa73d3f76ef2e1d2ab039673aab92",
+      "slim_bytes": 16789,
+      "week": 14
+    }
+  }
+}

@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-025 | "No historical data exists" for a GitHub-hosted CSV | Research / external data |
 | G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion |
 | G-023 | Fixing a feedback item already fixed weeks ago | Feedback / process |
 | G-022 | Worktree agents drift, duplicate edits, blow up EAS archive | Mobile / worktrees / EAS |
@@ -185,6 +186,15 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** several distinct problems, all from the same source. Worktree agents branch from an **older commit than branch HEAD** (merge-base `20548ff` vs HEAD `30492ac`). Disjoint source-file ownership holds, but agents independently edit the same **shared docs** (`docs/cross-client-invariants.md`, per-folder `CLAUDE.md`). Every worktree lacks `mobile/node_modules`, so each agent symlinks the main checkout's. And 71 worktrees (8.6 GB) pushed the EAS archive from 228 MB to **1.2 GB**, failing the upload.
 - **Fix:** `.easignore` (note: an earlier version globbed `*.png`, stripped the app icon and splash, and failed the Bundle JavaScript phase — scope it narrowly). Check `git merge-base` per branch and rebase before merging. Assign shared docs a single owner per wave.
 - **Prevention:** always branch from a freshly fetched `origin/main`, per the convention in [`../CLAUDE.md`](../CLAUDE.md).
+
+### G-025 — "there is no historical data" for a file that lives in a git repo
+- **Symptom:** three independent 2026-08-09 analyses ([calibration report](../docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md), pick-capital, bench-depth) each concluded that the preseason `RosterValueStrength` source was **untestable** because "FTF has no dated value snapshots", and two of them substituted a weaker metric on that basis. It cost a full validation gap in a shipping decision.
+- **Cause:** the DynastyProcess values feed was reasoned about as a *live endpoint* (`raw.githubusercontent.com/.../master/files/values-players.csv`) rather than as a *file in a public git repository*. `master` is one ref; every past revision is equally fetchable.
+- **Fix:** for any GitHub-hosted data file, `api.github.com/repos/<owner>/<repo>/commits?path=<file>&per_page=1&until=<ISO date>` resolves the nearest revision at-or-before a date, and `raw.githubusercontent.com/<owner>/<repo>/<sha>/<file>` fetches it. **Send a `User-Agent`** — a bare `curl` on `raw.` gets a redirect stub, which is easy to misread as "no data". DP's history runs to ~2020-09 with a stable column shape.
+- **Generalisation:** before writing "no historical data exists", check whether the source is version-controlled, has a Wayback capture, or publishes dated files. In this repo that also applies to `db_playerids.csv` and `values.csv` — same repo, same history.
+- **Where it lives now:** `backend/dp_values_history.py` + 24 committed boards in `backend/tests/fixtures/dp-values-history/`. Full writeup: `docs/feedback/items/169-outlook-league-summary/dated-values-revalidation-2026-08-09.md`.
+
+---
 
 ### G-024 — a Sleeper league's W/L can be double its games played (median match)
 - **Symptom:** a 14-week Sleeper season reports a 13-15 record (28 decisions). Anything that assumes one win per week silently runs on the wrong scale — e.g. the outlook simulator emitting `projected_wins = 22.29` for a 14-week season.

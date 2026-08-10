@@ -9,6 +9,18 @@
 > **title-odds** number has **no demonstrated skill** at this sample and must
 > not ship as a headline figure. Overall: **MARGINAL PASS, conditional.**
 
+> **CORRECTION — 2026-08-09.** This report states in four places that the
+> preseason `RosterValueStrength` source is *not backtestable* because "FTF
+> has no dated value snapshots". **That premise was wrong.** DynastyProcess
+> keeps the full git history of `values-players.csv`, so any past season can
+> be priced with a period-correct board. The source has since been backtested:
+> preseason playoff Brier **0.1959** (+21.6 % vs climatology, 90 % CI
+> [+4.1 %, +38.3 %] — real but weak, and over-confident at the extremes);
+> preseason title odds show **no** skill. See
+> [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md).
+> Every affected passage below is annotated inline; the original text is left
+> intact so the reasoning trail survives.
+
 ---
 
 ## Table of contents
@@ -32,7 +44,7 @@
 |---|---|---|
 | Phase 1 `LeagueStateProvider` | **Partially — and it has a severe bug** | Replayed against 6 real captured seasons; reproduces Sleeper's own final W/L exactly *only once you account for median-match scoring*, which the shipped code does not. See [BUG-1](#7-bugs-found). |
 | Phase 2 `TrailingScoresStrength` | **Yes** | This is what `auto` resolves to at every as-of week tested (3/6/9/12). |
-| Phase 2 `RosterValueStrength` | **NO — not backtestable** | It needs a *historical* dynasty value board. Sleeper exposes no historical rosters and FTF has no dated value snapshots, so there is no honest way to score the preseason default. This is the single biggest gap in this report. |
+| Phase 2 `RosterValueStrength` | ~~**NO — not backtestable**~~ → **YES, backtested 2026-08-09** | ~~It needs a *historical* dynasty value board. Sleeper exposes no historical rosters and FTF has no dated value snapshots, so there is no honest way to score the preseason default. This is the single biggest gap in this report.~~ **Corrected 2026-08-09:** dated boards DO exist (DynastyProcess git history), and Sleeper's `/matchups/1` serves the real week-1 roster. Scored at as-of week 0 in [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md) §3. |
 | Phase 3 `simulate()` | **Yes** | Backtest + 22 permanent invariant tests. |
 | Phase 4 `StandardFormat` | **Indirectly** | Ground truth is taken from Sleeper's own bracket, so seeding errors surface as prediction error. One unmodelled setting found (`playoff_seed_type`, [BUG-3](#7-bugs-found)). |
 | Phase 5 `serialize` | **Yes** | Existing tests + payload used throughout the backtest. |
@@ -257,8 +269,12 @@ news: a platform that does not publish future pairings still gets usable odds.
   statistically indistinguishable from the engine.
 - Any per-bucket calibration claim above a predicted probability of ~0.4 for
   title odds (n ≤ 6 per bucket).
-- **Any claim about the preseason `roster_value` source at all** — it was not
-  scored (see §1).
+- ~~**Any claim about the preseason `roster_value` source at all** — it was not
+  scored (see §1).~~ **Corrected 2026-08-09:** it has since been scored — real
+  but weak playoff skill (+21.6 %, CI [+4.1, +38.3]), no title skill,
+  over-confident at the extremes, beaten by climatology in 2 of 6
+  league-seasons. See
+  [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md).
 - Generalization beyond 12-team, 6-slot dynasty leagues. Both leagues have the
   identical shape; 4-, 8- and 10-team formats and divisional leagues are
   entirely untested against reality.
@@ -559,7 +575,7 @@ corrected via `var(true) = var(observed) − σ²/weeks`.)
 |---|---|---|---|
 | `outlook_sigma_default` | 25 | **22.1** | Close, ~13 % conservative. Harmless — errs toward *less* confident odds. Fine as-is; 22 would be better. |
 | `outlook_mean_points` | 110 | **130.6** | ~19 % low, but **it cancels**: only mu *differences* affect a head-to-head, so a uniform shift changes nothing. Cosmetic only — worth fixing so the number isn't misread as meaningful. |
-| `outlook_points_per_value_sd` | 12 | true talent SD **14.1** | This knob should equal `corr(roster value, weekly points) × 14.1`, not 14.1 itself. 12 implies an assumed correlation of ~0.85, which is **optimistic** for a dynasty board predicting current-season points (see §5b). Without a historical value board the correlation cannot be measured — so 12 is unfalsifiable, not validated. |
+| `outlook_points_per_value_sd` | 12 | true talent SD **14.1** | This knob should equal `corr(roster value, weekly points) × 14.1`, not 14.1 itself. 12 implies an assumed correlation of ~0.85, which is **optimistic** for a dynasty board predicting current-season points (see §5b). ~~Without a historical value board the correlation cannot be measured — so 12 is unfalsifiable, not validated.~~ **Corrected 2026-08-09:** dated boards exist, so this IS measurable. Not measured directly yet, but the end-to-end consequence is: the preseason source is over-confident at the extremes (95 % predictions realize 75 %), which is the shape an over-stated `points_per_value_sd` produces — see [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md) §3.4. |
 
 **Format-dependence is the bigger finding:** the superflex/TEP league's talent
 spread (16.8–17.9) is ~35 % wider than the 1QB league's (10.7–14.2). A single
@@ -584,7 +600,7 @@ The bar below is proposed by this agent; the operator rules.
 | P6 | Title odds not worse than climatology at any shipped week | — | **week 3 is worse** (0.0953 vs 0.0764) | **FAIL** |
 | P7 | Internal invariants hold | all pass | 22 pass, 1 xfail (tracks BUG-1) | **PASS** |
 | P8 | No severe unfixed correctness bug on a real operator league | zero | **BUG-1** (Lakeview, live) | **FAIL** |
-| P9 | Preseason default source validated | backtested | **not backtestable** (no historical value board) | **FAIL — untestable** |
+| P9 | Preseason default source validated | backtested | ~~**not backtestable** (no historical value board)~~ → **backtested 2026-08-09**: playoff +21.6 % (CI excludes 0) but over-confident and 4/6 league-seasons; title no skill | ~~**FAIL — untestable**~~ → **MARGINAL** ([details](dated-values-revalidation-2026-08-09.md)) |
 | P10 | Cross-source agreement | Spearman > 0.8 or explained | 0.57 (SF/TEP) / 0.93 (1QB) — explained in §5b | **MARGINAL** |
 
 ### Verdict: MARGINAL PASS, conditional
@@ -606,7 +622,14 @@ seasons and 2 league formats — not a "it compiles" result.
    entirely at v1; or show it only from week 6 with explicit "low confidence"
    labelling; or show a seed distribution instead, which the sim already computes
    and which does not require a rare-event claim.
-3. **The preseason default (`roster_value`) is entirely unvalidated**, and Tier 2
+3. ~~**The preseason default (`roster_value`) is entirely unvalidated**~~
+   **(corrected 2026-08-09 — it is now validated, and the answer is "weak":
+   playoff skill +21.6 %, CI [+4.1, +38.3], over-confident at the extremes,
+   no title skill; and it is statistically INDISTINGUISHABLE from the week-3
+   model, so the `completed_weeks >= 3` gate recommended below buys no
+   measured accuracy at week 3 — its justification is weeks 6+. See
+   [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md)
+   §4.)** The original reasoning follows. It is entirely unvalidated, and Tier 2
    gives positive reason to doubt it: on the superflex league the dynasty-value
    prior and a 2026 projection feed disagree on half the playoff field. Since
    the flag would be flipped *in the preseason*, this is the source users would

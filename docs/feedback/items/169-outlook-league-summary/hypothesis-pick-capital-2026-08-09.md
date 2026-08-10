@@ -6,6 +6,29 @@
 
 > **Verdict in one line:** **1a ("more picks → gets stronger") is not supported anywhere in this sample. 1b ("more picks → signals a rebuild that sheds players") has weak-to-moderate, mostly consistent support** — teams that start a season holding more future pick capital tend to under-perform their already-observed early-season form, make the playoffs less often, and are more likely to trade players away for picks (not picks for players) as the season goes on. Effect sizes are small and the sample (72 team-seasons, 6 independent league-clusters) is underpowered for a confident causal claim; the strongest single piece of evidence is the **behavioral** one (what teams actually traded), not the outcome correlations. **No implementation is recommended at this sample size** — see §7.
 
+> **CORRECTION AND RE-VERDICT — 2026-08-09.** This report states that "there
+> is no historical, dated dynasty-value board" and substitutes points-per-game
+> for sub-test (i) on that basis. **The premise was wrong** — DynastyProcess
+> keeps the full git history of `values-players.csv`. Sub-test (i) has since
+> been re-run with period-correct boards, and **the result changes**:
+> Pearson r moves from **−0.113 / −0.108 (CI excluding 0)** to
+> **+0.076 / +0.074 with a CI spanning zero** — a clean null whose point
+> estimate is mildly the *wrong* sign for 1b. The confound (capital vs week-1
+> lineup strength) gets *stronger*: −0.349 → **−0.415**. Everything that never
+> depended on a value board — (ii), (iii), and §6.2's buy:sell gradient — is
+> **bit-identical**.
+>
+> **Net: 1b is WEAKENED, not overturned.** "Real signal on 3 of 4 sub-tests"
+> should read "**2 of 4 outcome sub-tests plus the behavioural mechanism; no
+> signal on roster composition**". The §7 recommendation (do not spec a term)
+> is unchanged and better supported. The §7 prerequisite — "revisit if/when a
+> historical, dated dynasty-value board exists" — is **met and answered**, and
+> the answer is that Δ dynasty value is a structurally poor instrument for 1b:
+> a competent rebuild trades present output for future value, so it moves this
+> metric the *opposite* way from 1b's framing. Full re-test:
+> [`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md) §6.
+> Original text below left intact.
+
 ---
 
 ## Table of contents
@@ -96,8 +119,13 @@ player_pos, roster_slots)` is the shipped optimal-lineup pricer (greedy fill
 by value) and is imported and called unmodified. The brief asked for it fed a
 dynasty-value board; **this report feeds it each player's own-season
 points-per-game instead**, for the same reason the calibration report
-declined to backtest `RosterValueStrength` at all: **there is no historical,
-dated dynasty-value board.** Pricing a 2022 roster with today's live values
+declined to backtest `RosterValueStrength` at all: ~~**there is no historical,
+dated dynasty-value board.**~~ **[CORRECTED 2026-08-09 — there is one: the
+DynastyProcess repo keeps the git history of `values-players.csv`. Sub-test (i)
+was re-run with period-correct boards and its result flips sign and loses
+significance; see
+[`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md)
+§6. Original reasoning follows.]** Pricing a 2022 roster with today's live values
 would score a since-broken-out rookie as valuable in 2022 because of what he
 did in 2024-25 — exactly the dressed-up-with-hindsight result this report's
 honesty section forbids. Feeding the same function each player's actual
@@ -367,11 +395,24 @@ or overfit term into a preseason source that, per the calibration report, is
 `completed_weeks >= 3`... where `trailing_scores` — the source that was
 actually validated — takes over" is the calibration report's own standing
 recommendation). Spending calibration effort on an adjustment to a source
-the operator may not even ship is premature. **Revisit if/when a historical,
+the operator may not even ship is premature. ~~**Revisit if/when a historical,
 dated dynasty-value board exists** (the same prerequisite the calibration
 report flagged) — at that point hypothesis (i) could be retested properly
 (dynasty value, not points-per-game) and with more league-seasons, both of
-which would meaningfully raise confidence one way or the other.
+which would meaningfully raise confidence one way or the other.~~
+
+**[CLOSED 2026-08-09.** The prerequisite was met the same day (DynastyProcess
+git history) and hypothesis (i) was retested properly, in dynasty value, with
+period-correct boards. Result: r = **+0.076 / +0.074**, 90 % CI spanning zero
+— a null with the point estimate mildly the *wrong* sign for 1b, replacing
+the −0.113 / −0.108 reported in §4. Do **not** re-run this sub-test on more
+league-seasons: §6 of
+[`dated-values-revalidation-2026-08-09.md`](dated-values-revalidation-2026-08-09.md)
+shows Δ dynasty value is a structurally poor instrument for 1b, because a
+competent rebuild trades present output for future value and therefore moves
+the metric the opposite way from 1b's framing. The recommendation above — do
+not spec an adjustment term — stands, and is better supported than when it
+was written.**]**
 
 ---
 
