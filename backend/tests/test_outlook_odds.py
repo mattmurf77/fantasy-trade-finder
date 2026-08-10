@@ -504,6 +504,105 @@ def test_endpoint_bad_basis_400(client):
 
 
 # ---------------------------------------------------------------------------
+# Platform must resolve from the REQUESTED league_id, not the session's
+# attached league (the 2026-08-10 design-audit bug — see
+# docs/feedback/items/169-outlook-league-summary/odds-surface-audit.md).
+# Before the fix, `platform = getattr(g_league, "platform", None)` ignored
+# `league_id` entirely, so a multi-league user got the wrong provider:
+#   - ESPN-attached session + Sleeper league_id  → spurious 501 (ESPN
+#     provider is NotImplementedError; Sleeper provider would have worked)
+#   - Sleeper-attached session + ESPN league_id  → misleading 404 (Sleeper
+#     API 404s on an id it doesn't own; the honest answer is 501 not_supported)
+# ---------------------------------------------------------------------------
+
+def _attach_league(sess, league_id: str, platform: str) -> None:
+    from backend.trade_service import League
+    sess["league"] = League(league_id=league_id, name="Test League",
+                            platform=platform, members=[])
+
+
+def test_endpoint_uses_requested_league_platform_not_session_league(client):
+    """ESPN-session-user requesting a Sleeper league gets the Sleeper
+    answer (200), not the session's ESPN provider's 501."""
+    import backend.outlook as outlook_pkg
+
+    _attach_league(server._sessions[TOKEN], "ESPN-LEAGUE-1", "espn")
+    assert server._sessions[TOKEN]["league"].platform == "espn"
+
+    st = _state(n_teams=6, completed_weeks=0)
+    seen_platform = {}
+
+    def _fake_draft_context(league_id):
+        # Only the REQUESTED Sleeper league has a DB row here — the
+        # session's attached ESPN league is deliberately a different id.
+        if league_id == "SLEEPER-LEAGUE-1":
+            return {"platform": "sleeper"}
+        return None
+
+    def _fake_build_state(league_id, platform="sleeper", fetch=None):
+        seen_platform["platform"] = platform
+        return st
+
+    with patch.object(server, "is_enabled", lambda k: k == "outlook.odds"), \
+         patch.object(server, "get_league_draft_context", _fake_draft_context), \
+         patch.object(outlook_pkg, "build_league_state", _fake_build_state), \
+         patch.object(server, "_get_universal_pool", lambda fmt: ([], {})):
+        r = client.get("/api/league/outlook?league_id=SLEEPER-LEAGUE-1",
+                       headers=_headers())
+
+    assert r.status_code == 200, r.get_data(as_text=True)
+    # The proof: build_league_state was called with the Sleeper platform
+    # resolved from the REQUESTED league_id, not the session's ESPN league
+    # (which would have raised NotImplementedError → 501).
+    assert seen_platform["platform"] == "sleeper"
+
+
+def test_endpoint_sleeper_session_requesting_espn_league_is_501_not_404(client):
+    """Sleeper-attached session requesting an ESPN league_id now gets the
+    honest 501 (not-yet-supported provider) instead of a Sleeper-API-driven
+    404 for a league Sleeper never had."""
+    _attach_league(server._sessions[TOKEN], "SLEEPER-LEAGUE-2", "sleeper")
+
+    def _fake_draft_context(league_id):
+        if league_id == "ESPN-LEAGUE-2":
+            return {"platform": "espn"}
+        return None
+
+    with patch.object(server, "is_enabled", lambda k: k == "outlook.odds"), \
+         patch.object(server, "get_league_draft_context", _fake_draft_context):
+        r = client.get("/api/league/outlook?league_id=ESPN-LEAGUE-2",
+                       headers=_headers())
+
+    assert r.status_code == 501
+    assert r.get_json()["error"] == "not_supported"
+
+
+def test_endpoint_single_league_case_still_resolves_sleeper(client):
+    """Preserved behavior: a session attached to a Sleeper league, requesting
+    that SAME league_id (the common single-league case, and what every
+    other outlook test in this file exercises), still resolves to Sleeper
+    and returns 200 — no DB row required (unlinked leagues default to
+    Sleeper, matching the pre-fix fallback)."""
+    import backend.outlook as outlook_pkg
+
+    _attach_league(server._sessions[TOKEN], "LG-TEST", "sleeper")
+    st = _state(n_teams=6, completed_weeks=0)
+    seen_platform = {}
+
+    def _fake_build_state(league_id, platform="sleeper", fetch=None):
+        seen_platform["platform"] = platform
+        return st
+
+    with patch.object(server, "is_enabled", lambda k: k == "outlook.odds"), \
+         patch.object(outlook_pkg, "build_league_state", _fake_build_state), \
+         patch.object(server, "_get_universal_pool", lambda fmt: ([], {})):
+        r = client.get("/api/league/outlook?league_id=LG-TEST", headers=_headers())
+
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert seen_platform["platform"] == "sleeper"
+
+
+# ---------------------------------------------------------------------------
 # Offline backtest scaffold — NOT CI-gated. Skipped unless a captured-data
 # fixture path is provided via FTF_OUTLOOK_BACKTEST env. Never fetches live.
 # ---------------------------------------------------------------------------
