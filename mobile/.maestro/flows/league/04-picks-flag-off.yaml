@@ -1,0 +1,89 @@
+appId: com.fantasytradefinder.app
+# tc: T7 (R-0.1 — the no-regression proof for the DEFAULT, shipped state)
+# profile: standard
+# flags: release
+#
+# TIER A — runs today, and needs NO flag forcing and NO pick data. It runs
+# against the default hermetic flag set: backend/tests/fixtures/flags/
+# release.json carries "league.picks_always_counted": false and the standard
+# profile does not override it, so the flag is OFF exactly as it will be for
+# every user until the operator flips it.
+#
+# WHAT THIS PROVES — stated precisely, because it is easy to overclaim.
+# With `hasPicks` false in the seed, assertions (a) and (b) below hold for
+# TWO independent reasons (flag OFF *and* no picks), so this flow alone cannot
+# distinguish them. Its honest job is a NAVIGATION + SCREENSHOT-BASELINE
+# no-regression check: the screen still mounts, navigates and renders
+# identically to origin/main @ 7cea1fa under the shipped default. Diff the
+# screenshots below against the same steps captured on 7cea1fa before the
+# change lands — that baseline is the deliverable.
+#
+# The flag-OFF ARM is evidenced elsewhere, and deliberately not claimed here:
+#   • source level, seed-independent — check-picks-subset-invariance.js
+#     assertions 4b, 5a, 5b, 6c, 7c, 7g, 8b, 9b, 12b, 15d;
+#   • with REAL pick data — the manual control T-S6b, which is the only test
+#     that can see flag-OFF against a league that actually holds picks.
+#
+# DELIBERATELY ABSENT: an assertion that "RB survives a subset switch". It
+# proves nothing — RB survives on origin/main, in this build, and in a build
+# where the flag was never wired up, because only 'PICKS' was ever stripped.
+# It was deleted rather than reworded; re-adding it would launder a false
+# green (prd.md §7.4, Planner O-8).
+tags: [league]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.subset.all"
+    timeout: 20000
+- takeScreenshot: league-04-flagoff-all
+
+# ── (a) the Picks pill is absent in Starters and Bench, as on origin/main ──
+- tapOn:
+    id: "league-summary.subset.starters"
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-04-flagoff-starters
+- tapOn:
+    id: "league-summary.subset.bench"
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-04-flagoff-bench
+- tapOn:
+    id: "league-summary.subset.all"
+
+# ── (b) tapping RB from All does NOT auto-add Picks — rule A stays dark ───
+- tapOn:
+    id: "league-summary.posfilter.rb"
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-04-flagoff-rb-no-autoadd
+- tapOn:
+    id: "league-summary.subset.starters"
+- takeScreenshot: league-04-flagoff-rb-starters
+- tapOn:
+    id: "league-summary.posfilter.all"

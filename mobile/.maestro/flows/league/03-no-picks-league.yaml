@@ -1,0 +1,104 @@
+appId: com.fantasytradefinder.app
+# tc: T5 + T6 (R-11 — no-picks leagues are untouched in either flag state)
+# profile: standard
+# flags: release+league.picks_always_counted
+#
+# TIER A — runs today. League 990000000000000001 carries NO draft picks (the
+# hermetic seed writes zero draft_picks rows), so `hasPicks` is false and
+# prd.md §3.3 applies: nothing on this screen changes in any subset or under
+# any filter, EVEN WITH THE FLAG ON. That is the point of running it flag-ON —
+# it proves the reversal is correctly gated on `hasPicks` and cannot leak a
+# Picks pill, legend key, bar segment or Draft-capital group into a league
+# that has no draft capital to show.
+#
+# Flag forcing and the two sim-run.sh traps: see 01-picks-in-subsets.yaml.
+#
+# HONEST SCOPE. T6 (the navigation leg below) is mapped to NO requirement. It
+# was previously credited to R-5 ("switching subset never mutates the filter")
+# while testing nothing: the only thing switchSubset has EVER stripped is
+# 'PICKS', so an RB filter survives a subset switch on origin/main, in this
+# build, and in a build with no flag at all. Exercising R-5 needs PICKS in the
+# filter, which needs pick data the seed does not have. R-5's real coverage is
+# check-picks-subset-invariance.js assertion 8 plus the manual T-S6 pass. T6
+# is kept as a cheap navigation regression and nothing more.
+tags: [league]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+
+# ── T5: no Picks surface anywhere, in any subset, flag ON ────────────────
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.subset.all"
+    timeout: 20000
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- tapOn:
+    id: "league-summary.subset.starters"
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- tapOn:
+    id: "league-summary.subset.bench"
+- assertNotVisible:
+    id: "league-summary.posfilter.picks"
+- takeScreenshot: league-03-no-picks-bench
+- tapOn:
+    id: "league-summary.subset.all"
+
+# The drill-in carries no Draft-capital group either — `items.length` is 0.
+- tapOn:
+    id: "league-summary.bar..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.roster-close"
+    timeout: 20000
+- assertNotVisible:
+    id: "league-summary.roster-picks"
+- assertNotVisible:
+    id: "league-summary.roster-posfilter.picks"
+- takeScreenshot: league-03-no-picks-drill
+- tapOn:
+    id: "league-summary.roster-close"
+
+# ── T6: navigation regression only — mapped to no requirement ────────────
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.posfilter.rb"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.posfilter.rb"
+- tapOn:
+    id: "league-summary.subset.starters"
+- tapOn:
+    id: "league-summary.subset.bench"
+- tapOn:
+    id: "league-summary.subset.all"
+# The chart still draws (rather than a blank well) and the pills survive.
+- assertVisible:
+    id: "league-summary.avg-line"
+- assertVisible:
+    id: "league-summary.posfilter.rb"
+- takeScreenshot: league-03-subset-round-trip

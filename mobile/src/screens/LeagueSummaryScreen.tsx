@@ -51,18 +51,26 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 // ranked team list rows (rank numeral, name, value, chevron; caller's row
 // highlighted).
 //   - Position filter (single OR multi, "All" default): on change the bars
-//     RE-VALUE to the selected position(s) only and RE-SORT teams — a pure
-//     client-side transform over per-position values (no refetch). Restyled
-//     to colored outline pills, selected = solid fill.
+//     RE-VALUE to the selected keys and RE-SORT teams — a pure client-side
+//     transform over per-position values (no refetch). Restyled to colored
+//     outline pills, selected = solid fill. Under
+//     `league.picks_always_counted` (#293/#294, default OFF) the selected
+//     keys ALWAYS include draft capital unless the user explicitly
+//     deselects the Picks pill: tapping the first position pill auto-adds
+//     PICKS, so a filter never silently drops a team's pick value. With the
+//     flag OFF the bars re-value to the selected position(s) ONLY, which is
+//     the shipped pre-#293 behavior.
 //   - All · Starters · Bench segmented control (2026-07-26): "Starters" is
 //     the DERIVED value-optimal lineup the server computes per team
 //     (payload `teams[].starters` — the league's slot template filled with
 //     each team's highest-value eligible players; NO per-week lineup data),
 //     "Bench" is the rest. Selecting either recomputes EVERY team's
-//     per-position values from that subset and re-ranks the whole league;
-//     the drill-in filters to the same subset. Rendered ONLY when the
-//     payload says `starters_available` (honest degradation — platforms
-//     without a slot template hide the control entirely).
+//     per-position values from that subset and re-ranks the whole league
+//     (draft capital is NOT recomputed — under
+//     `league.picks_always_counted` it is added to both subsets whole; see
+//     `activeTotal`); the drill-in filters to the same subset. Rendered
+//     ONLY when the payload says `starters_available` (honest degradation —
+//     platforms without a slot template hide the control entirely).
 //   - Basis toggle: Consensus (universal-pool values) | My board (the caller's
 //     own values, consensus fallback for unranked players). Redraft is a
 //     disabled "(soon)" chip — the backend reserves basis=redraft but answers
@@ -158,8 +166,11 @@ type UiBasis = 'consensus' | 'personal';
 type CorePos = 'QB' | 'RB' | 'WR' | 'TE';
 // #14 FR1 — the filterable chart keys: the four positions plus the
 // draft-capital group ("Picks"). Picks isn't a position, so it renders in a
-// neutral ink tone, never a position hex (cross-client-invariants). Picks are
-// neither starters nor bench, so the Picks key only exists in the All subset.
+// neutral ink tone, never a position hex (cross-client-invariants).
+// #293/#294 (flag `league.picks_always_counted`, default OFF): the Picks key
+// exists in EVERY subset — draft capital is subset-independent, so it is
+// selectable and charted in Starters and Bench too. With the flag OFF the
+// key only exists in the All subset (the shipped pre-#293 rule).
 type FilterKey = CorePos | 'PICKS';
 // 2026-07-26 — league-wide roster subset. 'starters' = the derived
 // value-optimal lineup (payload teams[].starters); 'bench' = everything else.
@@ -254,17 +265,60 @@ function computeSubset(team: PowerRankedTeam, subset: Subset): TeamComputed {
 
 // The value a team contributes under the active subset + position filter.
 // All-subset with no filter = the team's authoritative total (matches the
-// backend rank; includes draft capital). Starters/bench = the recomputed
-// core-position sum (picks are neither starters nor bench). A non-empty
-// filter = the summed value of the selected groups.
-function activeTotal(tc: TeamComputed, subset: Subset, filter: Set<FilterKey>): number {
+// backend rank; includes draft capital). A non-empty filter = the summed
+// value of the selected groups.
+//
+// #293/#294, flag `league.picks_always_counted` (default OFF) — a REVERSAL of
+// the shipped "picks are neither starters nor bench" rule, on the operator's
+// ruling that a team's draft-pick value contribution is subset-independent
+// and filter-independent: switching to Starters/Bench or filtering to a
+// position must never make a team's value silently drop by its draft capital.
+//   ON  — starters/bench = the recomputed core-position sum PLUS the team's
+//         full `picks.value`, and a `PICKS` filter member contributes that
+//         value in every subset.
+//   OFF — starters/bench = the core-position sum alone and a `PICKS` member
+//         contributes a literal 0 outside All (the pre-#293 behavior).
+// `all` keeps returning `total_value` in BOTH states and must never add
+// `picks.value` again — the server already summed it in
+// (total_value = positions_value + picks.value, docs/api-reference.md).
+//
+// NAMED CONSEQUENCE of the ON state: because the same `picks.value` is
+// counted in both halves, Starters + Bench deliberately no longer partition
+// All (starters_active + bench_active = positions_value + 2·P). The screen
+// never displays that sum, and the hint copy names the second component
+// ("Best starting lineup + draft capital.") rather than claiming "only".
+//
+// PILL INVARIANT (state it in exactly this qualified form — the unqualified
+// version is FALSE for an empty filter): *whenever the filter is non-empty,
+// the Picks pill's selected state is exactly equal to whether pick value is
+// in the chart. An empty filter means every key — including picks — with no
+// pill selected.*
+//
+// The flag arrives as a REQUIRED 4th parameter with NO default: this function
+// is module-scope and cannot close over the component's `useFlag` result, and
+// a defaulted parameter would let an unthreaded call site compile while
+// silently behaving as OFF. Both call sites (`ranked`, `otherByTeam`) MUST
+// pass it — threading only the bars would make the #248 other-basis overlay
+// disagree with them by exactly P and reintroduce #208's spurious ticks.
+function activeTotal(
+  tc: TeamComputed,
+  subset: Subset,
+  filter: Set<FilterKey>,
+  picksAlwaysCounted: boolean,
+): number {
   if (filter.size === 0) {
-    return subset === 'all' ? tc.team.total_value : tc.coreTotal;
+    if (subset === 'all') return tc.team.total_value;
+    return picksAlwaysCounted ? tc.coreTotal + (tc.team.picks?.value ?? 0) : tc.coreTotal;
   }
   let sum = 0;
   filter.forEach((p) => {
-    if (p === 'PICKS') sum += subset === 'all' ? tc.team.picks?.value ?? 0 : 0;
-    else sum += tc.posValues[p];
+    if (p === 'PICKS') {
+      sum += picksAlwaysCounted
+        ? tc.team.picks?.value ?? 0
+        : subset === 'all'
+          ? tc.team.picks?.value ?? 0
+          : 0;
+    } else sum += tc.posValues[p];
   });
   return sum;
 }
@@ -363,11 +417,53 @@ export default function LeagueSummaryScreen() {
     if (!startersAvailable && subset !== 'all') setSubset('all');
   }, [startersAvailable, subset]);
 
+  // #293/#294 — the ONE read of `league.picks_always_counted` (default OFF).
+  // Every gated expression on this screen resolves to THIS boolean within a
+  // render: the flag switches the whole set atomically or not at all. Bar
+  // SEGMENT heights are percentages of their own sum while a bar's HEIGHT
+  // comes from the team total, so a partially-gated build would grow the bar
+  // by the pick value while silently stretching the four position segments to
+  // fill it — a bar that looks right and encodes a lie. The two module-scope
+  // consumers that cannot close over this identifier (`activeTotal`,
+  // `BarColumn`) take it as a REQUIRED, undefaulted parameter/prop so `tsc`
+  // catches an unthreaded caller. Never call `useFlag` for this key again.
+  const picksAlwaysCounted = useFlag('league.picks_always_counted');
+
   // Picks pill/segments only when the league actually carries draft capital
-  // (ESPN + demo leagues report zero; old servers omit the field entirely)
-  // AND the All subset is active (picks are neither starters nor bench).
+  // (ESPN + demo leagues report zero; old servers omit the field entirely).
+  // #293/#294: with the flag ON that is the whole condition — draft capital
+  // is charted in every subset, so its pill and legend key render in every
+  // subset too. With the flag OFF the key additionally requires the All
+  // subset (the pre-#293 "picks are neither starters nor bench" rule).
   const hasPicks = teams.some((t) => (t.picks?.value ?? 0) > 0);
-  const showPicksKey = hasPicks && subset === 'all';
+  const showPicksKey = picksAlwaysCounted ? hasPicks : hasPicks && subset === 'all';
+  // Is pick value actually part of the charted value right now? Drives the
+  // three hint/subline strings so none of them claims "only" while draft
+  // capital is in the bar. Gated on the flag itself, or the copy would change
+  // while the arithmetic did not.
+  const picksInView =
+    picksAlwaysCounted && hasPicks && (posFilter.size === 0 || posFilter.has('PICKS'));
+
+  // #293/#294 kill-switch reconciliation. Flag ON makes
+  // (subset ≠ all ∧ PICKS ∈ posFilter) a routine state; it is UNREACHABLE
+  // with the flag OFF. If the operator pulls the switch mid-session the
+  // server map wins on the next revalidate while `posFilter` — component
+  // state — persists, leaving an invisible, unremovable filter member
+  // silently zeroing the view (worst case: every bar 0, no pill on screen to
+  // explain it). Same shape as the `startersAvailable` fallback above.
+  // A no-op in a never-ON session, so first-render OFF stays byte-identical.
+  // This does NOT replace `switchSubset`'s synchronous OFF-path strip — that
+  // one runs before the render, this one after; dropping either is a
+  // regression, not a simplification.
+  useEffect(() => {
+    if (!picksAlwaysCounted && subset !== 'all' && posFilter.has('PICKS')) {
+      setPosFilter((prev) => {
+        const next = new Set(prev);
+        next.delete('PICKS');
+        return next;
+      });
+    }
+  }, [picksAlwaysCounted, subset, posFilter]);
 
   // Per-team subset stats, recomputed when the subset changes.
   const computed = useMemo(
@@ -381,14 +477,14 @@ export default function LeagueSummaryScreen() {
   const ranked = useMemo(() => {
     const rows = computed.map((tc) => ({
       tc,
-      active: activeTotal(tc, subset, posFilter),
+      active: activeTotal(tc, subset, posFilter, picksAlwaysCounted),
     }));
     rows.sort(
       (a, b) =>
         b.active - a.active || (a.tc.team.user_id < b.tc.team.user_id ? -1 : 1),
     );
     return rows;
-  }, [computed, subset, posFilter]);
+  }, [computed, subset, posFilter, picksAlwaysCounted]);
 
   const maxActive = useMemo(
     () => Math.max(1, ...ranked.map((r) => r.active)),
@@ -427,16 +523,24 @@ export default function LeagueSummaryScreen() {
   );
   // Per-team other-basis active value + rank under the active filters (same
   // sort + tie-break as the bars).
+  // #293/#294 — `picksAlwaysCounted` is MANDATORY here, exactly as on the
+  // bars. `picks.value` is basis-independent (_power_picks_by_owner takes no
+  // basis), so threading both call sites gives the two bases the SAME
+  // per-team constant and leaves `boardsDifferInView` — a pure difference
+  // comparison — invariant. Threading only the bars would make every
+  // picks-holding team's two values differ by exactly P, flipping
+  // `boardsDifferInView` true and drawing a fabricated tick and rank-swing
+  // chip on every column: #208's reported symptom, reintroduced.
   const otherByTeam = useMemo(() => {
     const rows = otherComputed.map((tc) => ({
       id: tc.team.user_id,
-      active: activeTotal(tc, subset, posFilter),
+      active: activeTotal(tc, subset, posFilter, picksAlwaysCounted),
     }));
     rows.sort((a, b) => b.active - a.active || (a.id < b.id ? -1 : 1));
     const m = new Map<string, { active: number; rank: number }>();
     rows.forEach((r, i) => m.set(r.id, { active: r.active, rank: i + 1 }));
     return m;
-  }, [otherComputed, subset, posFilter]);
+  }, [otherComputed, subset, posFilter, picksAlwaysCounted]);
   // Denominator for the other basis' rank — its OWN team count, not the bars'.
   // The two parallel queries can briefly hold different team sets (a
   // membership change landing between fetches, or one payload served stale via
@@ -539,22 +643,59 @@ export default function LeagueSummaryScreen() {
       ? otherByTeam.get(selected.tc.team.user_id) ?? null
       : null;
 
+  // The single shared pill factory — both pill rows use it, so the drill-in
+  // panel mirrors the chart card automatically.
+  //
+  // #294, flag `league.picks_always_counted`: selecting a position must not
+  // remove draft capital, so the plain toggle gains two rules (ON only):
+  //   A — auto-add: the FIRST position tap out of the unfiltered state also
+  //       selects PICKS, so the filter never silently drops pick value. The
+  //       pill lights up, so the inclusion is visible and one tap reverses it.
+  //   B — exit: removing a position that leaves NO core position selected
+  //       clears the filter to All, instead of stranding the user in a
+  //       picks-only ranking they never asked for. This is what keeps the
+  //       position pill reversible — tap RB on, tap RB off, back where you
+  //       started. Its one cost: starting at {PICKS}, adding RB, then
+  //       removing RB lands on All rather than back on {PICKS} (one extra
+  //       tap). Distinguishing those would need a hidden "the user chose
+  //       picks by hand" state axis, which is deliberately NOT built.
+  // Both rules are memoryless functions of `prev`, `pos` and `hasPicks`.
+  //
+  // Invariant, in exactly this qualified form: *whenever the filter is
+  // non-empty, the Picks pill's selected state is exactly equal to whether
+  // pick value is in the chart. An empty filter means every key — including
+  // picks — with no pill selected.* The unqualified version is FALSE in the
+  // empty-filter case (picks ARE charted while the pill reads unselected,
+  // exactly as QB value is charted while the QB pill reads unselected) and
+  // must not be propagated.
   const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<FilterKey>>>) =>
     (pos: FilterKey | 'ALL') => {
       setter((prev) => {
         if (pos === 'ALL') return new Set();
         const next = new Set(prev);
-        if (next.has(pos)) next.delete(pos);
+        const removing = next.has(pos);
+        if (removing) next.delete(pos);
         else next.add(pos);
+        if (picksAlwaysCounted && pos !== 'PICKS') {
+          if (prev.size === 0 && hasPicks) next.add('PICKS'); // rule A
+          if (removing && !CORE_POSITIONS.some((p) => next.has(p))) return new Set(); // rule B
+        }
         return next;
       });
     };
 
-  // Switching off All drops the Picks key from the shared filter — picks are
-  // neither starters nor bench, so a stale PICKS selection would zero bars.
+  // #293/#294 — with `league.picks_always_counted` ON, switching subset never
+  // mutates the filter: pick value counts in Starters and Bench too, so a
+  // PICKS selection is valid everywhere and stripping it would be the very
+  // silent drop the operator's ruling forbids.
+  // With the flag OFF, switching off All drops the Picks key from the shared
+  // filter — picks are neither starters nor bench there, so a stale PICKS
+  // selection would zero bars. This strip is SYNCHRONOUS; the ON→OFF
+  // reconciliation effect above runs after a render and covers a different
+  // case (the flag changing under a mounted screen). Both are needed.
   const switchSubset = (s: Subset) => {
     setSubset(s);
-    if (s !== 'all') {
+    if (!picksAlwaysCounted && s !== 'all') {
       setPosFilter((prev) => {
         if (!prev.has('PICKS')) return prev;
         const next = new Set(prev);
@@ -776,12 +917,30 @@ export default function LeagueSummaryScreen() {
               ▲▼N entry). Operator: keep only the below-graph key — this
               hint now always states the ranking basis. */}
           <Text style={[type.bodySm, styles.hint, selected ? styles.hintTight : null]}>
-            {`${subset === 'starters' ? 'Best starting lineup only. ' : subset === 'bench' ? 'Bench only. ' : ''}${
+            {/* #293 — the word "only" is false whenever draft capital is in
+                the bar, so the subset prefix names the second component
+                instead. #294 — the filtered branch prints the canonical
+                QB→RB→WR→TE label (Picks last, title-cased) rather than the
+                raw enum in tap order; that one gates on the FLAG, not on
+                `picksInView`, because it is a casing/ordering fix that must
+                apply even when the user has deselected Picks — while flag
+                OFF must still render today's raw `[...posFilter].join`. */}
+            {`${
+              subset === 'starters'
+                ? picksInView
+                  ? 'Best starting lineup + draft capital. '
+                  : 'Best starting lineup only. '
+                : subset === 'bench'
+                  ? picksInView
+                    ? 'Bench + draft capital. '
+                    : 'Bench only. '
+                  : ''
+            }${
               posFilter.size === 0
                 ? basis === 'consensus'
                   ? 'Ranked by roster value on community consensus.'
                   : 'Ranked by roster value on YOUR board — unranked players use consensus.'
-                : `Ranked by ${[...posFilter].join(' + ')} value only — chart reordered.`
+                : `Ranked by ${picksAlwaysCounted ? filterPosLabel : [...posFilter].join(' + ')} value only — chart reordered.`
             }`}
           </Text>
 
@@ -825,6 +984,7 @@ export default function LeagueSummaryScreen() {
                         maxActive={scaleMax}
                         subset={subset}
                         filter={posFilter}
+                        picksAlwaysCounted={picksAlwaysCounted}
                         focused={selectedId === id}
                         grayed={!!selectedId && selectedId !== id}
                         onPress={() => setSelectedId(id)}
@@ -928,7 +1088,9 @@ export default function LeagueSummaryScreen() {
                       selected.tc.team.total_value_label) ||
                     Math.round(selected.active).toLocaleString('en-US')
                   : '—'
-              }${subset === 'all' ? '' : subset === 'starters' ? ' starter' : ' bench'} value`}
+              }${subset === 'all' ? '' : subset === 'starters' ? ' starter' : ' bench'}${
+                picksInView && subset !== 'all' ? ' + picks' : ''
+              } value`}
             </Text>
             {/* #237 — mirrored filter set: the SAME subset control + position
                 pills as the chart card, bound to the SAME state, so the two
@@ -1011,9 +1173,17 @@ export default function LeagueSummaryScreen() {
                 );
               })}
               {/* #14 FR1 — draft capital: the team's owned picks, priced on
-                  the generic ladder. All subset only (picks are neither
-                  starters nor bench); hidden for leagues without pick data. */}
-              {subset === 'all' &&
+                  the generic ladder. Hidden for leagues (or teams) without
+                  pick data, and when the user has explicitly deselected the
+                  Picks pill. #293, flag `league.picks_always_counted`: with
+                  the flag ON this group renders under EVERY subset, matching
+                  the bar — pick value is in the Starters and Bench totals, so
+                  the panel that itemises those totals has to show it. With
+                  the flag OFF it stays All-subset only (picks are neither
+                  starters nor bench). It is not a roster section: `groupRows`
+                  never emits it, so it renders here, below the position
+                  groups. */}
+              {(picksAlwaysCounted || subset === 'all') &&
               (posFilter.size === 0 || posFilter.has('PICKS')) &&
               (selected.tc.team.picks?.items?.length ?? 0) > 0 ? (
                 <View testID="league-summary.roster-picks">
@@ -1177,8 +1347,11 @@ function SubsetControl({ idPrefix, subset, onSwitch }: {
 // position pill is a colored OUTLINE pill whose selected state is a SOLID
 // fill in the position hex (2026-07-26 restyle — label text carries the
 // encoding alongside color, per the a11y floor). The neutral "Picks" pill
-// (#14 FR1) appears only when the league actually has draft capital and the
-// All subset is active. Multi-select.
+// (#14 FR1) appears whenever the league actually has draft capital — in
+// EVERY subset under `league.picks_always_counted` (#293/#294), and in the
+// All subset only when that flag is OFF. Its selected state is the user's
+// explicit opt-in/opt-out of pick value; see `togglePos` for the rules that
+// keep it in sync and for the (qualified) pill invariant. Multi-select.
 function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
   idPrefix: string;
   filter: Set<FilterKey>;
@@ -1232,9 +1405,18 @@ function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
 
 // One team as a VERTICAL stacked column (2026-07-26): position segments
 // TOP-DOWN QB→RB→WR→TE — the same order as the filter pills (#195) — with
-// the neutral Picks segment at the BASE in the All view (picks stay last in
-// the QB→RB→WR→TE→Picks reading order, so the former top "cap" becomes the
-// base under the top-down flip). Height scaled to the league max, slightly
+// the neutral Picks segment at the BASE (picks stay last in the
+// QB→RB→WR→TE→Picks reading order, so the former top "cap" becomes the base
+// under the top-down flip). #293, flag `league.picks_always_counted`: ON, the
+// Picks segment renders in EVERY subset; OFF, only in the All view.
+// `picksAlwaysCounted` is a REQUIRED prop, passed as the bare identifier from
+// the component body — this function is module-scope and must never call
+// `useFlag` itself. It is what keeps the flag ATOMIC: segment heights are
+// `segValue(p) / segSum` while the bar's own height comes from `active`, so
+// if `activeTotal` counted picks and `shownBase`/`segValue` did not, the bar
+// would grow by the pick value while the four position segments silently
+// stretched to fill it — right-looking and wrong.
+// Height scaled to the league max, slightly
 // rounded top (≤8px per Chalkline), rank numeral underneath (the caller's
 // numeral in an ice pill). In drill-in focus every non-selected column
 // renders muted-gray segments.
@@ -1246,13 +1428,14 @@ function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
 // vs other basis), already thresholded to |Δ| ≥ 2 by the caller — null = no
 // chip. All three are null/false when the overlay is off, rendering the
 // exact pre-#248 column.
-function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, grayed, onPress, showDeltaRow, tickPct, delta, otherRank, otherLabel }: {
+function BarColumn({ tc, rank, active, maxActive, subset, filter, picksAlwaysCounted, focused, grayed, onPress, showDeltaRow, tickPct, delta, otherRank, otherLabel }: {
   tc: TeamComputed;
   rank: number;
   active: number;
   maxActive: number;
   subset: Subset;
   filter: Set<FilterKey>;
+  picksAlwaysCounted: boolean;
   focused: boolean;
   grayed: boolean;
   onPress: () => void;
@@ -1266,7 +1449,7 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
   const shownBase: FilterKey[] =
     filter.size > 0
       ? [...filter]
-      : subset === 'all'
+      : picksAlwaysCounted || subset === 'all'
         ? [...CORE_POSITIONS, 'PICKS']
         : [...CORE_POSITIONS];
   // Stable stacking order regardless of Set insertion order: QB→RB→WR→TE
@@ -1276,7 +1459,9 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
   const shown = shownBase.sort((a, b) => orderOf(a) - orderOf(b));
   const segValue = (p: FilterKey): number =>
     p === 'PICKS'
-      ? subset === 'all' ? team.picks?.value ?? 0 : 0
+      ? picksAlwaysCounted
+        ? team.picks?.value ?? 0
+        : subset === 'all' ? team.picks?.value ?? 0 : 0
       : tc.posValues[p];
   const segColor = (p: FilterKey): string =>
     grayed ? GRAY_SEGMENT[p] : p === 'PICKS' ? PICKS_COLOR : posColor(p);
