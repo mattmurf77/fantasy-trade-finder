@@ -135,7 +135,7 @@ import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment
 import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
-import { tierForElo } from '../utils/tierBands';
+import { TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useAppActive } from '../hooks/useAppActive';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -608,7 +608,17 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
                 owns mobile/ only — firing `draft_room_mode_switched` would
                 be dropped server-side while reading like live
                 instrumentation. Register the events, then add the calls. */}
-            <DraftModeToggle mode={mode} onMode={setMode} />
+            {/* #292 dead-end 3 — `postRefusal` was never cleared, so ONE
+                transient refusal muted the card for the rest of the session.
+                Re-entering Mock mode is the user asking again; the card must
+                be allowed to answer again. */}
+            <DraftModeToggle
+              mode={mode}
+              onMode={(m) => {
+                if (m === 'mock') setPostRefusal(null);
+                setMode(m);
+              }}
+            />
             {/* Pinned, so the marker survives every scroll position. */}
             {mockMode ? (
               <View style={styles.mockRailWrap}>
@@ -631,9 +641,28 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
           }
           block={mockBlock}
           meta={mockMeta}
+          // #292 dead-end 2 — one failed create left a BUTTONLESS card:
+          // react-query holds `isError` until the next `mutate`/`reset`, and
+          // the error branch rendered no control at all. `reset()` clears the
+          // create half, `refetch()` re-answers the query half, and both feed
+          // the one `errorText` above — so one control clears both.
+          retry={{
+            label: 'Try again',
+            testID: 'mock-entry.retry',
+            onPress: () => {
+              createMock.reset();
+              mockQuery.refetch();
+            },
+          }}
           {...mockEntryContent({
             activeMock,
-            onStart: () => setSetupOpen(true),
+            onStart: () => {
+              // Opening the setup sheet is the user asking again. A stale
+              // refusal or a stale create error must not survive the ask.
+              setPostRefusal(null);
+              createMock.reset();
+              setSetupOpen(true);
+            },
             onResume: () => navigation?.navigate?.('MockDraft', { leagueId }),
           })}
         />
@@ -824,8 +853,14 @@ function mockEntryContent({
     return {
       headline: 'Mock complete',
       body: `${activeMock.picks.length} picks. Your league was never touched.`,
-      primary: { label: 'View recap', onPress: onResume, testID: 'mock-entry.recap' },
-      secondary: { label: 'Run it back', onPress: onStart, testID: 'mock-entry.run-it-back' },
+      // #292 — the way ONWARD is the primary. Shipped, "View recap" was the
+      // primary and starting another was the recessive ghost, so the room
+      // read as a terminus. The testIDs stay bound to the ACTION, not the
+      // position: `mock-entry.run-it-back` is still start-another and
+      // `mock-entry.recap` is still the recap, so no id is added, renamed or
+      // orphaned and `testid-lint` is unaffected.
+      primary: { label: 'Start a new mock', onPress: onStart, testID: 'mock-entry.run-it-back' },
+      secondary: { label: 'View recap', onPress: onResume, testID: 'mock-entry.recap' },
     };
   }
   return {
@@ -1320,9 +1355,30 @@ export function UndraftedRowView({
             {row.position || '—'}
           </Text>
           {row.team ? ` · ${row.team}` : ''}
+          {/* #291 — when the action label takes the trailing slot, whatever
+              that slot was showing is RELOCATED here, never deleted: #277's
+              tier badge for a valued row, and D7's honest "No value" for a
+              row the board has no price for. The trailing slot holds one
+              thing at a time; the meta line already carries the row's
+              secondary facts and has the width for one more. */}
+          {!actionLabel
+            ? ''
+            : row.valued
+              ? ` · ${TIER_LABEL[tierForElo(
+                  row.value as number,
+                  row.position as Position,
+                  rowFormat ?? '1qb_ppr',
+                )]}`
+              : ' · No value'}
         </Text>
       </View>
-      {actionLabel && selected ? (
+      {/* #291 — the affordance is visible BEFORE the tap. The shipped gate
+          was `actionLabel && selected`, which made a mock row pixel-identical
+          to the read-only room row until after it had been tapped: the
+          capability was announced to VoiceOver (`accessibilityHint`, below)
+          and to nobody else. `actionLabel` is itself gated on the user's turn
+          by the caller, so the CPU-turn render is byte-identical to today. */}
+      {actionLabel ? (
         <Text style={draftRow.rowAction}>{actionLabel}</Text>
       ) : row.valued ? (
         // #277 — the board's raw-Elo `value` renders as its pick-tier

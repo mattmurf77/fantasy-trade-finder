@@ -174,13 +174,27 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
       navigation?.goBack?.();
       return;
     }
+    // #292 dead-end 1 — a completed mock stayed "current" forever, and the
+    // only dismissal control was hidden once it completed. The same control
+    // now clears a recap; only the words change, because "End this mock?"
+    // over a finished board describes something that already happened.
+    //
+    // The backend's abandon route clears the caller's WHOLE completed backlog
+    // for this league, not just this row (`abandon_completed_mock_drafts`) —
+    // completed rows accumulate one per finished mock and only the newest is
+    // reachable, so a per-row dismissal merely paginated the dead end. The
+    // copy promises what the route now actually does: one clear, and the room
+    // is free. Nothing observable is destroyed — the older rows had no UI.
+    const done = state?.status === 'complete';
     Alert.alert(
-      'End this mock?',
-      'The board and your picks are discarded. Your league is untouched — nothing here was ever written to it.',
+      done ? 'Clear this recap?' : 'End this mock?',
+      done
+        ? 'The recap is discarded. You can start a new mock any time — your league was never touched.'
+        : 'The board and your picks are discarded. Your league is untouched — nothing here was ever written to it.',
       [
-        { text: 'Keep drafting', style: 'cancel' },
+        { text: done ? 'Keep it' : 'Keep drafting', style: 'cancel' },
         {
-          text: 'End mock',
+          text: done ? 'Clear' : 'End mock',
           style: 'destructive',
           onPress: () => {
             abandonMockDraft(mockId)
@@ -193,20 +207,24 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
         },
       ],
     );
-  }, [state?.mock_id, navigation, queryClient, leagueId]);
+  }, [state?.mock_id, state?.status, navigation, queryClient, leagueId]);
 
   useLayoutEffect(() => {
+    const done = state?.status === 'complete';
     navigation?.setOptions?.({
+      // `headerRight` is a `useLayoutEffect` callback, OUTSIDE the component's
+      // single return — adding the `complete` case cannot introduce a second
+      // top-level return or escape the mode rail.
       headerRight: () =>
-        state?.status === 'active' ? (
+        state?.status === 'active' || done ? (
           <Pressable
             testID="mock-draft.end"
             onPress={endMock}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="End this mock draft"
+            accessibilityLabel={done ? 'Clear this mock draft recap' : 'End this mock draft'}
           >
-            <Text style={styles.headerAction}>End</Text>
+            <Text style={styles.headerAction}>{done ? 'Clear' : 'End'}</Text>
           </Pressable>
         ) : null,
     });
@@ -281,7 +299,7 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
   const clockName = useMemo(() => {
     if (!state || !onClock?.roster_id) return null;
     const slot = state.order.find((o) => o.owner_user_id === onClock.roster_id);
-    return slot?.owner_username ?? String(onClock.roster_id);
+    return ownerNameOf(slot?.owner_username, onClock.roster_id);
   }, [state, onClock?.roster_id]);
 
   /** Picks that landed since the user's last one — the run they missed. */
@@ -383,7 +401,12 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
             ) : null}
 
             <View style={styles.section}>
-              <TickLabel>Still on the board</TickLabel>
+              {/* #291 — the section header states the affordance while the
+                  user is on the clock. Maestro cannot assert on a style and
+                  can assert on text, so this string is the flow's acceptance
+                  for "visible before tap". Deliberately NOT the room's
+                  platform-guarantee copy: this board really does take taps. */}
+              <TickLabel>{isUserTurn ? 'Tap to draft' : 'Still on the board'}</TickLabel>
               <View style={draftRow.basisRow}>
                 <BasisChip
                   testID="mock-draft.basis.consensus"
@@ -425,7 +448,11 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
                     onMenu={rowActionsOn ? onRowMenu : undefined}
                     onPress={isUserTurn ? setSelected : undefined}
                     selected={selected?.player_id === r.player_id}
-                    actionLabel="Pick"
+                    // #291 — the label's PRESENCE is now the turn. The row
+                    // renders it before any tap, so gating it here is what
+                    // keeps the CPU-turn render byte-identical to the
+                    // read-only room row.
+                    actionLabel={isUserTurn ? 'Pick' : undefined}
                   />
                 ))
               )}
@@ -541,6 +568,11 @@ function OnTheClockCard({
         round {onClock.round} · pick {onClock.pick_no} of {total} · {made} picks made
         {persona && !isUser ? ` · ${persona}` : ''}
       </Text>
+      {/* #291 — "You're on the clock" said WHOSE turn it was and never HOW to
+          act. One instruction line, inside the existing card, no new testID. */}
+      {isUser ? (
+        <Text style={styles.clockHow}>Tap a rookie below, then confirm.</Text>
+      ) : null}
     </View>
   );
 }
@@ -619,7 +651,10 @@ function Recap({
   const nameOf = useMemo(() => {
     const m = new Map<string, string>();
     for (const o of state.order) {
-      if (o.owner_user_id) m.set(o.owner_user_id, o.owner_username ?? o.owner_user_id);
+      // Same ladder as the on-the-clock card (D-16). The recap's rail is the
+      // second site: fixing only the clock would leave a finished MFL mock
+      // still printing raw franchise ids down every round.
+      if (o.owner_user_id) m.set(o.owner_user_id, ownerNameOf(o.owner_username, o.owner_user_id));
     }
     return m;
   }, [state.order]);
@@ -711,6 +746,42 @@ function resolveUserOwnerId(state: MockDraftState | null): string | null {
   return own != null ? String(own) : null;
 }
 
+/** `mfl:<league>.f<franchise>` — the synthetic member id the backend mints
+ *  for every MFL franchise that is not the linked user
+ *  (`server.py:_MOCK_MFL_MEMBER_RE`). Kept in step with that regex, not
+ *  broadened: a name is only invented for an id whose shape says what it is. */
+const MFL_MEMBER_RE = /^mfl:.*\.f(\w+)$/;
+
+/** An owner's display name, never a machine id (D-16).
+ *
+ *  The backend now resolves this through `league_members`
+ *  (`username → display_name → session username → "Team <fid>"`,
+ *  `server.py:_mock_owner_name`) and OMITS the key rather than emitting an
+ *  empty string, so `owner_username` is a real name on almost every row and
+ *  this fallback rarely fires. It still exists because the last resort it
+ *  replaces was `String(roster_id)`, which on an MFL league renders
+ *  `mfl:62846.f0003` — a raw synthetic id printed at the top of the board.
+ *
+ *  The `Team <fid>` string is the SAME convention the backend's last rung and
+ *  G1's Draft Room hydration use (`draft_board_service._hydrate_mfl_picks`
+ *  tier 3, `f"Player {mfl_pid}"`, is that convention for the *player* half).
+ *  Two adjacent surfaces naming one franchise two ways is the whole defect —
+ *  so this is the shipped convention re-used, not a second one invented.
+ *
+ *  Non-MFL ids fall through to the shipped behaviour: a Sleeper roster id is
+ *  a number the user has at least seen before, and inventing a name for it
+ *  would be a change to the Sleeper path that D-16 does not authorise. */
+function ownerNameOf(username: string | null | undefined, ownerId: unknown): string {
+  const name = String(username ?? '').trim();
+  if (name && !name.includes('mfl:')) return name;
+  const id = String(ownerId ?? '');
+  const match = MFL_MEMBER_RE.exec(id);
+  // The fid exactly as it appears in the id, zero-padding intact — the
+  // backend pads the same way, so the two cannot render "Team 3" vs "Team 0003".
+  if (match) return `Team ${match[1]}`;
+  return id;
+}
+
 function emptyCopy(reason: string | null): string {
   switch (reason) {
     case 'no_active_mock':
@@ -767,6 +838,11 @@ const styles = StyleSheet.create({
   clockPick: { ...type.data, fontSize: 19, color: chalk.base },
   clockWho: { ...type.bodySm, color: flare.base, flex: 1 },
   clockMeta: { ...type.bodySm, fontSize: 11, color: chalk.faint },
+  // #291 — the instruction, not a decoration: full body size (13, well clear
+  // of the 11px floor) and chalk.dim, so it reads as guidance rather than
+  // sinking into the meta line above it. Ice is reserved for the action
+  // itself (the row's "Pick" label and the confirm bar).
+  clockHow: { ...type.bodySm, color: chalk.dim },
 
   tickerRow: {
     flexDirection: 'row',
