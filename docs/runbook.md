@@ -13,6 +13,7 @@ Operational procedures. Add to this as you learn things.
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
   - [Enforcement](#enforcement)
+  - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
 - [Feature flags](#feature-flags)
@@ -92,8 +93,8 @@ execution — the operator keeps the decision, the system keeps the receipts.
 
 | Tier | Change class | Required before merge to `main` |
 |---|---|---|
-| 1 | Mobile screen / navigation / state change | Full smoke suite (11 flows) + the feature's own flow, on sim |
-| 2 | Mobile logic touched, no UI change | Feature's flow + affected smoke subset |
+| 1 | Mobile screen / navigation / state change | Full smoke suite (11 flows) + the feature's own flow, on sim **+ `mobile/scripts/screen-capture.sh --screen <touched>` for every screen whose visuals changed** |
+| 2 | Mobile logic touched, no UI change | Feature's flow + affected smoke subset **+ run `mobile/scripts/screen-freshness.sh`; re-capture only the screens it flags** |
 | 3 | Backend route/schema consumed by mobile | Smoke subset that exercises the route |
 | 4 | Backend-only, web-only, docs-only | No sim run; pytest / `tsc --noEmit` (CI covers these) |
 
@@ -124,11 +125,37 @@ fixes — CLAUDE.md §Conventions "Feature gates" → "Rigor is an operator
 decision"); a one-line ledger note (`express: <what> — gates skipped by
 operator`) is the whole ceremony.
 
+### Screen library (capture freshness)
+
+`screens/` is the committed capture library: every mobile screen in every state
+(`screens/mobile/<screen>/<state>.png`), taken hermetically from the real app on the
+canonical simulator. It exists so design work starts from what the app *actually* looks
+like instead of from memory. Two scripts own it — nothing else writes there:
+
+| Script | Cost | What it does |
+|---|---|---|
+| `mobile/scripts/screen-freshness.sh` | < 1 s, no sim | Rehashes each screen's declared source files against `screens/manifest.json`. Exit `0` fresh · `1` stale · `2` no manifest. `--quiet` for scripting. |
+| `mobile/scripts/screen-capture.sh --screen <x>` | 4–7 min, needs sim | Re-captures screen `<x>` in every state and rewrites its manifest entry. `--interactive` leaves the sim parked in that state instead. |
+
+**Evidence is the manifest**, not the run: `screens/manifest.json` records each capture's
+flow, profile, injections, `captured_at`, and the source-file hash that freshness compares
+against. A screen is "captured for this change" exactly when its manifest hash matches HEAD.
+
+The pre-push hook **warns, never blocks**, when a push touches `mobile/src/screens/**`
+without any `screens/` path in the same range — capture freshness is a design-truth
+obligation, not a ship blocker. The scope block's capture-delta row (§3 of
+`docs/templates/feature-scope.md`) is where the intent gets declared up front.
+
+Details, layout conventions, and the mockup-agent contract: `screens/CLAUDE.md`.
+Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with a warning).
+
 ### Failure symptom / lever
 
 - Hook blocks unexpectedly → the marker is stale (different machine, or the sim run
   predates a rebase). Re-run the required tier; don't reach for the escape hatch first.
 - Hook silent when it should block → `git config core.hooksPath` unset in this clone.
+- Capture warning on every push → a screen's source moved but was never re-captured. Run
+  `screen-freshness.sh` to see which, then `screen-capture.sh --screen <x>`.
 
 ---
 

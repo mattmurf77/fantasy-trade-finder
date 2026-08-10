@@ -55,6 +55,7 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 - [ ] **Extended flow:** <existing file> — added steps: …
 - [ ] **WAIVED because:** … (e.g. not mobile-visible; covered by smoke flow NN unchanged)
 - `testID`s added/renamed: <list> (must pass `mobile/scripts/testid-lint.sh`)
+- **Capture delta:** <screens to re-capture at ship, e.g. `trades`, `sheets/trade-dna` | none — no visual change> — run `mobile/scripts/screen-capture.sh --screen <x>` (see `docs/runbook.md` § Screen library)
 - Smoke-suite impact: which of the 11 smoke flows cross this surface, and are they still green?
 - Backend: pytest files added/updated: <list, or why none>
 

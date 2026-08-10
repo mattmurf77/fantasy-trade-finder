@@ -40,3 +40,26 @@ draft-room.mode.*
 mock-entry.start
 mock-entry.run-it-back
 mock-entry.recap
+# --- 2026-08-09 sweep (screen-library build). Each verified in mobile/src ---
+# PickAnchorScreen.tsx:293      testID={`anchors.scope-${s.toLowerCase()}`}
+anchors.scope*
+# AnalystGuide.tsx:142          testID={`guide.avatar.${active.pose}`}
+guide.avatar.*
+# AnalystGuide.tsx:164          testID={`guide.cta.${c.action}`}
+guide.cta.*
+# LeagueSummaryScreen.tsx:1379  testID={`league-summary.team.${team.user_id}`}
+league-summary.team.*
+# FreeAgentsScreen.tsx:166      testID={`free-agents.pos-tab.${f.toLowerCase()}`}
+free-agents.pos-tab.*
+# FreeAgentsScreen.tsx:538      testID={`free-agents.add.${row.player_id}`}
+free-agents.add.*
+# FreeAgentsScreen.tsx:433      testID={`fa-claim.drop.${c.id}`}
+fa-claim.drop.*
+# TradeFinderModeBar.tsx:118    testID={`trades.finder-mode.${c.key}`}
+trades.finder-mode.*
+# SettingsScreen.tsx:869        testID={`settings.stud-tax.${o.key}`}
+settings.stud-tax.*
+# SettingsScreen.tsx:913        testID={`settings.pick-pricing.${o.key}`}
+settings.pick-pricing.*
+# FeedbackInboxScreen.tsx:212   testID={`feedback-inbox.delete.${it.id}`}
+feedback-inbox.delete.*

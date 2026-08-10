@@ -26,6 +26,13 @@ precedent (it came out of the same dual-agent process).
   (screenshot checkpoint, visible text, absence of crash).
 - Web-touching groups: a web test section (URLs, user actions, expected DOM
   text) since Maestro only covers the app.
+- **UI-touching items name their captures.** List the affected
+  `screens/mobile/<screen>/` captures as explicit PRD inputs — they are the exact
+  ground truth for "current". Every mockup round starts from them, never from
+  memory or from reading source alone (`screens/CLAUDE.md`, `mockups/CLAUDE.md`).
+  If `mobile/scripts/screen-freshness.sh` flags one stale, request the re-capture
+  before the design round, not after. The scope block's **capture delta** row (§3)
+  then names which screens get re-captured at ship.
 
 ## The loop
 
