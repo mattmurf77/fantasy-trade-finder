@@ -21,6 +21,21 @@ docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md)
     only clears at `_BETA_UNTIL_COMPLETED_WEEKS` (6) — independent of
     `is_preseason`, which clears at week 1. Both fields ship on every
     payload; clients may use either or both.
+
+`meta.priced_slot_coverage`
+---------------------------
+BUG-5: the DynastyProcess value board carries QB/RB/WR/TE only, so in an IDP
+or kicker league a large share of the starting lineup prices at exactly 0.0 —
+8 of 15 slots in the operator's FFv3 league. `strength.lineup_pricing()`
+measures that; this block is what puts it on the wire (2026-08-10) so a client
+can say *"based on your offensive starters"* instead of presenting a
+whole-lineup number it cannot back up. It changes no prediction.
+
+`affects_strength` is the honesty half: only the board-reading strength
+sources (`roster_value`, `blended`) actually consume the value map, so a
+`trailing_scores` payload carries the coverage fact with `affects_strength:
+false` — the odds in that payload do not depend on the board at all. See
+docs/feedback/items/169-outlook-league-summary/idp-pricing-2026-08-09.md.
 """
 
 from __future__ import annotations
@@ -29,7 +44,11 @@ from typing import Protocol
 
 from .league_state import LeagueState
 from .simulator import SimResult
-from .strength import TeamStrength
+from .strength import LineupPricing, TeamStrength
+
+# Strength sources whose estimate actually reads the value board. Anything
+# else derives mu/sigma from game results, so unpriced slots cannot bias it.
+_BOARD_BACKED_SOURCES = frozenset({"roster_value", "blended"})
 
 # See module docstring — the week-6 line is where the 2026-08-09 calibration
 # revalidation found the engine first pulls clearly away from the
@@ -37,17 +56,36 @@ from .strength import TeamStrength
 _BETA_UNTIL_COMPLETED_WEEKS = 6
 
 
+def _coverage_block(pricing: "LineupPricing | None",
+                    strength_source: str) -> "dict | None":
+    """`meta.priced_slot_coverage` — see the module docstring.
+
+    `None` when the caller supplied no `LineupPricing` (the measurement was
+    not taken), which is honest about absence rather than reporting a
+    fabricated 1.0."""
+    if pricing is None:
+        return None
+    return {
+        "fraction": round(pricing.coverage, 4),
+        "total_slots": pricing.total_slots,
+        "priced_slots": pricing.priceable_slots,
+        "unpriced_slots": list(pricing.unpriceable_slots),
+        "affects_strength": strength_source in _BOARD_BACKED_SOURCES,
+    }
+
+
 class OutlookSerializer(Protocol):
     def serialize(self, state: LeagueState, result: SimResult,
                   strengths: dict[int, TeamStrength], *,
                   strength_source: str, basis: str,
-                  you_user_id: str = "") -> dict:
+                  you_user_id: str = "",
+                  pricing: "LineupPricing | None" = None) -> dict:
         ...
 
 
 class StandardSerializer:
     def serialize(self, state, result, strengths, *,
-                  strength_source, basis, you_user_id=""):
+                  strength_source, basis, you_user_id="", pricing=None):
         teams = []
         for t in state.teams:
             rid = t.roster_id
@@ -97,6 +135,7 @@ class StandardSerializer:
                 "seed": result.seed,
                 "is_preseason": preseason,
                 "beta": beta,
+                "priced_slot_coverage": _coverage_block(pricing, strength_source),
             },
             "teams": teams,
         }

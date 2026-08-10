@@ -9,6 +9,31 @@
 > 2. **Preseason playoff odds have real but weak skill** — Brier 0.1959 vs climatology 0.2500 (**+21.6 %**, 90 % CI **[+4.1 %, +38.3 %]**, excludes 0), statistically indistinguishable from the already-validated week-3 model, but **over-confident at the extremes** and beaten by climatology in 2 of 6 league-seasons. **Preseason title odds have no demonstrated skill** (+3.1 %, CI [−17.7 %, +24.9 %]).
 > 3. **Hypothesis 1b is WEAKENED, not overturned.** Its Δ-roster-value sub-test flips from r = −0.11 to **r = +0.076 with a CI spanning zero** once values are period-correct. The behavioural buy:sell gradient (2.4 : 1 → 0.7 : 1 → 0.6 : 1) is bit-identical, because it never depended on values.
 
+> **CORRECTION — 2026-08-10.** Every preseason figure in this report was
+> measured on the **pre-BUG-1** engine (median-match scoring ignored by the
+> simulator, which §5 below correctly flags as live at week 0). The whole
+> fix wave has since landed and both harnesses were re-run; the numbers move,
+> and **the movement is against this report's own conclusion, not for it**:
+>
+> | | published here | re-measured 2026-08-10 |
+> |---|---|---|
+> | preseason playoff Brier | 0.1959 | **0.1968** |
+> | preseason playoff skill | +21.6 %, CI **[+4.1, +38.3]** | **+21.3 %, CI [+2.9, +39.1]** |
+> | preseason title Brier / skill | 0.0740 / +3.1 % | **0.0746 / +2.3 %** |
+> | 0.9–1.0 calibration bucket | 0.949 → 0.750 (n = 8) | **0.947 → 0.778 (n = 9)** |
+> | week-3 reference playoff Brier | 0.1972 | **0.2012** |
+> | preseason − week-3 playoff Δ | −0.0013 | **−0.0043** (preseason still nominally better) |
+> | lakeview-2025 / lakeview-2024 | 0.1806 / 0.2789 | **0.1730 / 0.2923** |
+> | median-match / H2H split | 0.2298 / 0.1789 | **0.2326 / 0.1789** (H2H bit-identical) |
+>
+> The **conclusions of §4 are unchanged and slightly better supported**:
+> playoff odds banded not precise (the lower CI bound got *worse*), title odds
+> no-ship, and the `completed_weeks >= 3` gate still buys nothing. The four
+> FFv3 seasons are unchanged to four decimals; all movement is inside the two
+> median-match seasons. Full picture, plus the in-season half:
+> [`calibration-combined-2026-08-10.md`](calibration-combined-2026-08-10.md).
+> Original text below is left intact.
+
 ---
 
 ## Table of contents

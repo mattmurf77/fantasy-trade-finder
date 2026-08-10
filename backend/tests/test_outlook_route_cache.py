@@ -342,7 +342,17 @@ def test_payload_shape_is_the_documented_contract(client):
                          "meta", "teams"}
     assert set(body["meta"]) == {
         "strength_source", "completed_weeks", "regular_season_weeks",
-        "playoff_slots", "byes", "sims", "seed", "is_preseason", "beta"}
+        "playoff_slots", "byes", "sims", "seed", "is_preseason", "beta",
+        "priced_slot_coverage"}
+    # BUG-5 coverage instrument (2026-08-10) — a measurement, never null on a
+    # real route response, and shaped for a client that wants to say "based on
+    # your offensive starters".
+    cov = body["meta"]["priced_slot_coverage"]
+    assert set(cov) == {"fraction", "total_slots", "priced_slots",
+                        "unpriced_slots", "affects_strength"}
+    assert 0.0 <= cov["fraction"] <= 1.0
+    assert cov["priced_slots"] + len(cov["unpriced_slots"]) == cov["total_slots"]
+    assert isinstance(cov["affects_strength"], bool)
     team = body["teams"][0]
     assert set(team) == {
         "roster_id", "user_id", "username", "display_name", "is_you",

@@ -32,6 +32,20 @@
 > Every affected passage below is annotated inline; the original text is left
 > intact so the reasoning trail survives.
 
+> **SUPERSEDED IN PART — 2026-08-10.** The whole fix wave (BUG-1/2/3/5) has
+> landed, both offline harnesses are now wired to the settings the engine
+> models, and a single combined re-measurement replaces the patchwork of
+> per-branch deltas below:
+> [`calibration-combined-2026-08-10.md`](calibration-combined-2026-08-10.md).
+> Pooled playoff Brier **0.0997** (skill **+60.1 %**, CI [+47.6, +72.2]);
+> pooled title Brier **0.0732** (skill **+4.2 %**, CI [−13.1, +20.0] — still
+> spans zero); per week 0.2012 / 0.1065 / 0.0538 / 0.0372. The `playoff_seed_type`
+> wiring gap this report's §7 flagged is closed and its effect measured: title
+> 0.0733 → 0.0732, playoff bit-identical. **The over-confidence that blocks
+> showing a raw percentage survived the fixes**, and the preseason lower
+> confidence bound moved from +4.1 % to **+2.9 %**. Everything below remains
+> correct as of its own date and engine.
+
 > **CORRECTION — 2026-08-09 (second).** Those preseason numbers were measured
 > on a **corrupted basis** for 4 of the 6 league-seasons. The value board prices
 > QB/RB/WR/TE only, and the FFv3 league starts 8 IDP/K slots out of 15 — so the
@@ -700,12 +714,22 @@ emit `title_pct` when it is unsupported.
 >   mapping + logged fallback, a hand-verified synthetic divergence case, and
 >   the 6-fixture champion-replay proof above) plus route-level wiring tests
 >   in `test_outlook_route_cache.py`.
-> - Not done here: re-running the full offline calibration backtest
+> - ~~Not done here: re-running the full offline calibration backtest
 >   (`scripts/outlook_calibration_backtest.py`) with seed-type-aware brackets —
 >   the script still calls `get_playoff_format` without passing
 >   `playoff_seed_type`, so its title-Brier numbers above still reflect the
 >   pre-fix (always-reseed) simulation. Recommended follow-up before the next
->   calibration revalidation, same as BUG-1's regression-guard note.
+>   calibration revalidation, same as BUG-1's regression-guard note.~~
+>   **DONE 2026-08-10** — both offline harnesses now thread the setting
+>   (`seed_type()` in the calibration script; the same helper reused by
+>   `outlook_preseason_backtest.py`), and the calibration script carries a
+>   BUG-3 A/B block mirroring BUG-1's. **Measured effect of the wiring alone:
+>   pooled title Brier 0.0733 → 0.0732; playoff Brier bit-identical
+>   (max |Δ| = 0.000000, the playoff field is settled before the bracket is
+>   played); `playoff_seed_type: 1` leagues bit-identical by construction.**
+>   The bracket rule was modelled wrong for 4 of 6 league-seasons and it moved
+>   the pooled title number by 0.0001 — a null, reported plainly. Full picture:
+>   [`calibration-combined-2026-08-10.md`](calibration-combined-2026-08-10.md).
 
 ### BUG-4 — `points_for` is not exactly reconstructible from weekly scores — **LOW, external**
 
@@ -741,8 +765,11 @@ offensive core only*, and must be described that way.
 workarounds were backtested and neither beat the status quo (league-mean
 fallback Δ Brier **+0.0005**; coverage attenuation **−0.0019**, 90 % CI
 [−0.0167, +0.0070]). `strength.lineup_pricing()` now measures the affected slots
-so the surface can label the estimate honestly — wiring it into `meta` is the
-open follow-up. Full evidence:
+so the surface can label the estimate honestly — ~~wiring it into `meta` is the
+open follow-up~~ **wired 2026-08-10: `meta.priced_slot_coverage`
+`{fraction, total_slots, priced_slots, unpriced_slots[], affects_strength}`,
+emitted on every payload from `pipeline.run_outlook`; prediction-neutral and
+pinned by a test.** Full evidence:
 [`idp-pricing-2026-08-09.md`](idp-pricing-2026-08-09.md).
 
 ### Non-bug confirmations

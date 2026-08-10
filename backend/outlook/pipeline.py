@@ -23,6 +23,7 @@ from .simulator import get_simulator
 from .strength import (
     StrengthContext,
     get_strength_provider,
+    lineup_pricing,
     resolve_strength_source,
 )
 
@@ -82,9 +83,12 @@ def run_outlook(
     result = simulator.run(state, strengths, fmt, n_sims=sims,
                            config_seed=_cfg.config_seed(model_cfg))
 
-    # Phase 5 — serialize
+    # Phase 5 — serialize. `lineup_pricing` is a pure measurement of how much
+    # of this league's starting lineup the supplied value board can price
+    # (BUG-5); it feeds `meta.priced_slot_coverage` and changes no prediction.
     serializer = get_serializer()
     return serializer.serialize(
         state, result, strengths,
         strength_source=source_key, basis=basis, you_user_id=you_user_id,
+        pricing=lineup_pricing(state.roster_slots, player_value, player_pos),
     )
