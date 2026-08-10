@@ -52,7 +52,41 @@ SEEDER="$REPO/backend/tests/fixtures/seed_ui_test_db.py"
 [[ -f "$SEEDER" ]] || { echo "seeder missing: $SEEDER" >&2; exit 2; }
 ENVBLOCK="$(cd "$REPO" && python3 "$SEEDER" --profile "$PROFILE" --seed "$SEED" --print-env)" || exit 2
 set -a; eval "$ENVBLOCK"; set +a
-[[ -n "$FLAGS" ]] && export FTF_FLAGS="$FLAGS"
+# Flag pinning: profile manifest ∪ --flags, per key, --flags wins (lld.md §2.5
+# "flags_base ∪ flag_overrides ∪ --flags"). The env block above already exported
+# the profile's FULL seeded flag map; --flags MERGES over it. A bare replace
+# silently dropped every profile flag_override, so a one-key override ran the
+# cell against a flag state nobody asked for. `--flags` takes inline JSON or
+# @path/to/file.json; anything unparseable is a hard exit 5, never a warning.
+if [[ -n "$FLAGS" ]]; then
+  if [[ "$FLAGS" == @* ]]; then
+    FLAGS_FILE="${FLAGS#@}"
+    [[ -f "$FLAGS_FILE" && -r "$FLAGS_FILE" ]] \
+      || { echo "BAD ARGS: --flags @$FLAGS_FILE — file missing or unreadable" >&2; exit 5; }
+    FLAGS="$(cat "$FLAGS_FILE")" \
+      || { echo "BAD ARGS: --flags @$FLAGS_FILE — read failed" >&2; exit 5; }
+  fi
+  BASE_FLAGS="${FTF_FLAGS:-}"; [[ -n "$BASE_FLAGS" ]] || BASE_FLAGS='{}'
+  MERGED_FLAGS="$(FTF_BASE="$BASE_FLAGS" FTF_OVER="$FLAGS" python3 -c '
+import json, os, sys
+def obj(label, raw):
+    try:
+        v = json.loads(raw)
+    except Exception as e:
+        sys.exit("%s is not valid JSON: %s" % (label, e))
+    if not isinstance(v, dict):
+        sys.exit("%s must be a JSON object of flag-key -> bool" % label)
+    return v
+base = obj("seeded profile flag map", os.environ["FTF_BASE"])
+over = obj("--flags override", os.environ["FTF_OVER"])
+bad = sorted(k for k, v in over.items() if not isinstance(v, bool))
+if bad:
+    sys.exit("--flags override values must be true/false; non-bool for %s" % bad)
+base.update(over)
+print(json.dumps(base, sort_keys=True, separators=(",", ":")))
+')" || { echo "BAD ARGS: --flags rejected (see above) — refusing to run (exit 5)" >&2; exit 5; }
+  export FTF_FLAGS="$MERGED_FLAGS"
+fi
 
 ( cd "$REPO" && PORT="$PORT" python3 run.py ) > "$REPORT_DIR/flask.log" 2>&1 &
 FLASK_PID=$!
@@ -74,6 +108,33 @@ assert str(w.get('pid'))==os.environ.get('FLASK_PID'), (
 " || { echo "INFRA: whoami mismatch (see above): $WHO" >&2; exit 2; }
 PINNED="$(curl -sf "$URL/api/feature-flags")" || { echo "INFRA: flags fetch failed" >&2; exit 2; }
 echo "$PINNED" > "$REPORT_DIR/flags.json"
+# ASSERT the round-trip (lld.md §2.5b: "a mis-pinned run must die here, not
+# mid-flow"). This response used to be archived and never checked, so a cell
+# whose flags never took effect asserted the OLD behaviour and exited 0.
+echo "$PINNED" | python3 -c '
+import json, os, sys
+served = (json.load(sys.stdin) or {}).get("flags") or {}
+raw = (os.environ.get("FTF_FLAGS") or "").strip()
+if not raw:
+    sys.exit("no FTF_FLAGS in the environment — this run pins no flags at all; "
+             "the seeder env block did not export a flag map")
+intended = json.loads(raw)
+wrong, absent = [], []
+for k in sorted(intended):
+    want = bool(intended[k])
+    if k not in served:
+        absent.append("  %s: intended %s, ABSENT from /api/feature-flags "
+                      "(key not in backend/feature_flags.py DEFAULT_FLAGS?)" % (k, want))
+    elif bool(served[k]) != want:
+        wrong.append("  %s: intended %s, served %s" % (k, want, bool(served[k])))
+if wrong or absent:
+    n = len(wrong) + len(absent)
+    print("FLAG PIN MISMATCH — %d of %d intended flag(s) did not take effect:"
+          % (n, len(intended)), file=sys.stderr)
+    print("\n".join(wrong + absent), file=sys.stderr)
+    sys.exit(1)
+print("flags: %d intended flag(s) round-tripped via /api/feature-flags" % len(intended))
+' || { echo "INFRA: flag pin round-trip failed (see above) — this run would have exercised a flag state nobody asked for; refusing (exit 2)" >&2; exit 2; }
 
 # --- Simulator ---------------------------------------------------------------
 if [[ "$KEEP_DATA" -eq 0 ]]; then
