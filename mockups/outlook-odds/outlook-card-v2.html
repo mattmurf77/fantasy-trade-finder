@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #169 — Trade outlook card v2 (playoff-only, no amputation)</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --t-first:#2dd4bf;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:28px 16px 64px;gap:22px}
+  .pageh{max-width:840px;width:100%}
+  .pageh h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.05;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+  .pageh h1::before{content:"";width:16px;height:3px;background:var(--warn);flex:none}
+  .pageh p{font-size:13px;line-height:1.55;color:var(--chalk-dim);margin:0 0 4px;max-width:74ch}
+  .pageh p b{color:var(--chalk)}
+  .pageh .tag{display:inline-block;font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+     border-radius:2px;padding:2px 6px;margin:8px 6px 0 0}
+  .tag.warn{color:var(--warn);border:1px solid var(--warn)}
+  .tag.dead{color:var(--neg);border:1px solid var(--neg)}
+
+  .framerow{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;align-items:flex-start;max-width:840px}
+  .frame{width:393px;max-width:100%}
+  .frame h3{font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.02em;
+     text-transform:uppercase;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .frame h3 .fb{font:600 9px var(--ui);letter-spacing:.06em;border-radius:2px;padding:2px 6px;text-transform:uppercase}
+  .fb.cur{color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .fb.rec{color:var(--pos);border:1px solid var(--pos)}
+  .fb.later{color:var(--warn);border:1px solid var(--warn)}
+  .frame .fsub{font-size:12px;line-height:1.5;color:var(--chalk-dim);margin:0 0 10px}
+
+  .phone{width:393px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+     border-radius:22px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+     padding:0 20px;font:600 12px var(--mono);color:var(--chalk-dim)}
+  .body{padding:12px 16px 18px}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .cardhead{padding:12px 15px 11px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .cardhead .partner{font:600 13px var(--ui)}
+  .cardhead .partner small{display:block;font:500 11px var(--mono);color:var(--chalk-dim);margin-top:1px}
+  .cardhead .lane{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ice);
+     border:1px solid var(--ice);border-radius:2px;padding:2px 6px}
+  .swaprow{display:grid;grid-template-columns:1fr 26px 1fr;gap:8px;padding:13px 15px;align-items:center}
+  .col h5{font:600 9px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--chalk-faint);margin:0 0 8px}
+  .a{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+  .a:last-child{margin-bottom:0}
+  .a .pi{width:4px;height:20px;border-radius:2px;flex:none}
+  .a .pi.qb{background:var(--qb)} .a .pi.rb{background:var(--rb)}
+  .a .pi.wr{background:var(--wr)} .a .pi.te{background:var(--te)} .a .pi.pick{background:var(--t-first)}
+  .a b{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .swap{display:flex;align-items:center;justify-content:center;color:var(--chalk-faint);font-size:15px}
+  .vstrip{margin:0 15px 4px;background:var(--ink-2);border:1px solid var(--line);border-radius:6px;
+     padding:9px 12px;display:flex;align-items:center;gap:10px}
+  .vstrip .dotp{width:8px;height:8px;border-radius:2px;background:var(--pos);flex:none}
+  .vstrip p{margin:0;font:500 12px var(--ui);color:var(--chalk-dim);line-height:1.4}
+  .vstrip p b{color:var(--chalk)} .vstrip .pick{color:var(--t-first);font-weight:600}
+
+  /* outlook block */
+  .outlook{margin:12px 15px 4px;background:#12100b;border:1px solid #3a2f14;border-radius:8px;padding:13px 14px}
+  .outlook .oh{font:600 10px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--warn);
+     margin:0 0 12px;display:flex;align-items:center;gap:7px}
+  .outlook .oh .beta{margin-left:auto;font:600 8px var(--ui);letter-spacing:.05em;color:var(--warn);
+     border:1px solid var(--warn);border-radius:2px;padding:1px 5px}
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cell{background:var(--ink-1);border:1px solid var(--line);border-radius:6px;padding:10px 11px}
+  .cell .cl{font:500 10px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px}
+  .cell .cv{font:600 17px var(--mono);color:var(--chalk);display:flex;align-items:baseline;gap:5px}
+  .cell .cv .d{font-size:11px}
+  .d.up{color:var(--pos)} .d.dn{color:var(--neg)}
+  .obar{height:5px;background:var(--ink-3);border-radius:3px;margin-top:7px;overflow:hidden;position:relative}
+  .obar .now{position:absolute;left:0;top:0;bottom:0;background:var(--warn);border-radius:3px}
+  .obar .add{position:absolute;top:0;bottom:0;background:var(--pos);opacity:.55}
+  .bandline{display:flex;align-items:center;gap:8px;margin-top:2px}
+  .band{font:600 9px var(--ui);letter-spacing:.05em;text-transform:uppercase;border-radius:2px;padding:3px 7px}
+  .band.likely{color:var(--pos);border:1px solid var(--pos);background:rgba(34,197,94,.08)}
+  .band.tossup{color:var(--warn);border:1px solid var(--warn);background:rgba(245,158,11,.08)}
+  .oarrow{color:var(--chalk-faint);font-size:13px}
+  .ofoot{font:500 10px var(--ui);color:var(--chalk-faint);margin-top:10px;line-height:1.5}
+
+  .why{margin:11px 15px 15px;font:500 12px var(--ui);color:var(--chalk-dim);line-height:1.5;
+     background:var(--ink-2);border-radius:6px;padding:10px 12px}
+  .why b{color:var(--chalk)}
+  .actions{display:flex;gap:8px;padding:0 15px 15px}
+  .actions .btn{flex:1;padding:11px;border-radius:4px;font:600 12px var(--ui);letter-spacing:.05em;
+     text-transform:uppercase;text-align:center;border:1px solid var(--line-strong);color:var(--chalk)}
+  .actions .primary{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+
+  /* lineup impact rows (shipped #238/#169 module, abbreviated) */
+  .limp{margin:12px 15px 4px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .limp .lh{padding:9px 12px;border-bottom:1px solid var(--line);font:600 10px var(--ui);
+     letter-spacing:.07em;text-transform:uppercase;color:var(--chalk-dim)}
+  .lrow{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font:500 11px var(--ui)}
+  .lrow:last-child{border-bottom:none}
+  .lrow .slot{font:600 10px var(--mono);color:var(--chalk-faint);width:34px}
+  .lrow .pnm{flex:1;color:var(--chalk-dim)}
+  .lrow .pnm b{color:var(--chalk);font-weight:600}
+  .tierchip{font:600 9px var(--mono);border:1px solid var(--line-strong);border-radius:2px;
+     padding:2px 5px;color:var(--chalk);background:var(--ink-2);white-space:nowrap}
+
+  /* struck annotation for the dead elements (mockup chrome, not UI) */
+  .dead-x{position:relative}
+  .dead-x::after{content:"REMOVED — no demonstrated skill";position:absolute;inset:0;display:flex;
+     align-items:center;justify-content:center;background:rgba(12,14,17,.82);
+     font:600 9px var(--ui);letter-spacing:.08em;color:var(--neg);border:1px dashed var(--neg);border-radius:6px}
+
+  .whybox{width:393px;max-width:100%;font-size:12px;line-height:1.6;color:var(--chalk-faint);
+     background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--warn);
+     border-radius:6px;padding:11px 13px;margin-top:10px}
+  .whybox b{color:var(--chalk-dim)} .whybox .m{font-family:var(--mono);font-size:11px}
+</style>
+</head>
+<body>
+
+<div class="pageh">
+  <h1>Trade Outlook Card v2 — Playoff-Only</h1>
+  <p>The July-approved <span style="font-family:var(--mono)">outlook-card.html</span> paired <b>playoff% and title%</b> as its central two-up rhythm and closed with a 2026/27/28 championship-odds block. Title odds have no demonstrated skill (CI spans zero; 3 of 6 leagues worse than guessing) and multi-year odds compound every unvalidated dependency — both are <b>removed, not caveated</b>. The design problem: keep the card whole. The answer: <b>projected record takes title's cell</b> — the two-up rhythm survives with two validated outputs (record | playoff odds), and the multi-year block is replaced by a scope label ("2026 season").</p>
+  <span class="tag dead">title odds removed</span><span class="tag dead">multi-year block removed</span><span class="tag warn">summary/calculator only, week 6+</span><span class="tag warn">never on deck cards</span>
+</div>
+
+<!-- ── FRAME A: July card, annotated ── -->
+<div class="framerow">
+<div class="frame">
+  <h3>A · July card — what died <span class="fb cur">reference</span></h3>
+  <p class="fsub">The approved mockup with the calibration verdict overlaid (overlays are annotation, not UI). Everything amber was one modeling layer; only part of it survived validation.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>Trade Finder</span></div>
+    <div class="body">
+      <div class="card">
+        <div class="cardhead">
+          <div class="partner">with The Autodrafters<small>7–2 · contender</small></div>
+          <span class="lane">Window</span>
+        </div>
+        <div class="swaprow">
+          <div class="col"><h5>You give</h5>
+            <div class="a"><div class="pi wr"></div><b>Garrett Wilson</b></div>
+            <div class="a"><div class="pi pick"></div><b>2027 2nd</b></div>
+          </div>
+          <div class="swap">&#8644;</div>
+          <div class="col"><h5>You get</h5>
+            <div class="a"><div class="pi rb"></div><b>Bijan Robinson</b></div>
+          </div>
+        </div>
+        <div class="outlook">
+          <p class="oh"><span>Season outlook</span><span class="beta">Projected</span></p>
+          <div class="twoup" style="margin-bottom:10px">
+            <div class="cell"><div class="cl">Your playoff odds</div><div class="cv">86% <span class="d up">+11</span></div>
+              <div class="obar"><div class="now" style="width:75%"></div><div class="add" style="left:75%;width:11%"></div></div></div>
+            <div class="cell dead-x"><div class="cl">Your title odds</div><div class="cv">18% <span class="d up">+6</span></div>
+              <div class="obar"><div class="now" style="width:12%"></div><div class="add" style="left:12%;width:6%"></div></div></div>
+          </div>
+          <div class="cell dead-x" style="display:block">
+            <div class="cl">Championship odds — by season</div>
+            <div style="font:600 12px var(--mono);color:var(--chalk-dim);line-height:1.9">2026 — 18%<br>2027 — 14%<br>2028 — 9%</div>
+          </div>
+          <p class="ofoot">Also unshippable as drawn: "86%" at 1% precision (5% rounding is the floor, week 6+ only), and the card rendered at any week.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="whybox"><b>What survives:</b> the amber "Season outlook" block identity (warn amber = projection signal), the before/after meter grammar (amber now + green delta), and the "Why" sentence. <b>What died:</b> the title cell, the multi-year block, 1%-precision figures, and any-week rendering.</div>
+</div>
+
+<!-- ── FRAME B: proposed week 6+ ── -->
+<div class="frame">
+  <h3>B · Trade summary, week 6+ <span class="fb rec">recommended shape</span></h3>
+  <p class="fsub">On-demand, on the trade SUMMARY (one sim pair per viewed trade — never per deck card). Two-up keeps its rhythm: <b>projected record | playoff odds</b>. Odds delta shown in 5% steps; sub-5% moves render as "&asymp;no change", not "+2".</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>Trade Summary</span></div>
+    <div class="body">
+      <div class="card">
+        <div class="cardhead">
+          <div class="partner">with The Autodrafters<small>5–1 · contender</small></div>
+          <span class="lane">Window</span>
+        </div>
+        <div class="swaprow">
+          <div class="col"><h5>You give</h5>
+            <div class="a"><div class="pi wr"></div><b>Garrett Wilson</b></div>
+            <div class="a"><div class="pi pick"></div><b>2027 2nd</b></div>
+          </div>
+          <div class="swap">&#8644;</div>
+          <div class="col"><h5>You get</h5>
+            <div class="a"><div class="pi rb"></div><b>Bijan Robinson</b></div>
+          </div>
+        </div>
+        <div class="vstrip">
+          <span class="dotp"></span>
+          <p><b>Even by value</b> — within <span class="pick">a Mid 3rd</span>. This deal is about <b>fit</b>, not value.</p>
+        </div>
+        <div class="outlook">
+          <p class="oh"><span>Season outlook · 2026</span><span class="beta">Projected</span></p>
+          <div class="twoup">
+            <div class="cell">
+              <div class="cl">Projected record</div>
+              <div class="cv">8–6 <span class="d up">&#9650; +1 win</span></div>
+              <div class="ofoot" style="margin-top:5px">now 4–2 · was proj 7–7</div>
+            </div>
+            <div class="cell">
+              <div class="cl">Playoff odds</div>
+              <div class="cv">70% <span class="d up">+10</span></div>
+              <div class="obar"><div class="now" style="width:60%"></div><div class="add" style="left:60%;width:10%"></div></div>
+              <div class="ofoot" style="margin-top:5px">rounded to 5% · was 60%</div>
+            </div>
+          </div>
+          <p class="ofoot">Re-simulated with this trade applied · odds only for THIS season — dynasty value is the multi-year story, and the value verdict above carries it.</p>
+        </div>
+        <div class="why"><b>Why:</b> Bijan is a weekly RB1 in a lineup thin at RB — the model projects ~1 more win over your remaining schedule, moving you off the 6-seed bubble.</div>
+        <div class="actions"><span class="btn">Pass</span><span class="btn primary">Send offer</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="whybox"><b>Why it doesn't look amputated:</b> the two-up grid never emptied — title's cell now holds projected record, an output the sim already ships (<span class="m">projected_wins</span>, BUG-1 fixed) and the single most legible number in the payload. The multi-year block's slot is a one-line scope note that hands multi-year framing to the value verdict, which is the product's actual long-horizon instrument. <b>Cost note:</b> requires a with-trade re-sim (new backend work — roster-swapped <span class="m">run_outlook</span>); one pair per opened summary is bounded, per-deck-card is not (and is rejected).</div>
+</div>
+</div>
+
+<!-- ── FRAME C: weeks 0–5 + band variant ── -->
+<div class="framerow">
+<div class="frame">
+  <h3>C · Weeks 0–5 — no odds block at all <span class="fb rec">recommended</span></h3>
+  <p class="fsub">While <span style="font-family:var(--mono)">meta.beta</span> is true a trade's odds delta is the difference of two numbers the model hasn't earned — and in bands, most trades read "Toss-up &rarr; Toss-up". The card is already complete without it: value verdict + the SHIPPED position-impact tier chips (#169/#238) carry "why this trade".</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>Trade Summary</span></div>
+    <div class="body">
+      <div class="card">
+        <div class="cardhead">
+          <div class="partner">with The Autodrafters<small>0–0 · preseason</small></div>
+          <span class="lane">Window</span>
+        </div>
+        <div class="swaprow">
+          <div class="col"><h5>You give</h5>
+            <div class="a"><div class="pi wr"></div><b>Garrett Wilson</b></div>
+            <div class="a"><div class="pi pick"></div><b>2027 2nd</b></div>
+          </div>
+          <div class="swap">&#8644;</div>
+          <div class="col"><h5>You get</h5>
+            <div class="a"><div class="pi rb"></div><b>Bijan Robinson</b></div>
+          </div>
+        </div>
+        <div class="vstrip">
+          <span class="dotp"></span>
+          <p><b>Even by value</b> — within <span class="pick">a Mid 3rd</span>. This deal is about <b>fit</b>, not value.</p>
+        </div>
+        <div class="limp">
+          <div class="lh">Starting lineup changes</div>
+          <div class="lrow"><span class="slot">RB2</span><span class="pnm"><b>Bijan Robinson</b> in for J. Mason</span><span class="tierchip">4th · RB28</span><span class="oarrow">&rarr;</span><span class="tierchip">1 1st · RB3</span></div>
+          <div class="lrow"><span class="slot">WR1</span><span class="pnm"><b>Nico Collins</b> up for G. Wilson</span><span class="tierchip">1 1st · WR9</span><span class="oarrow">&rarr;</span><span class="tierchip">1 1st · WR12</span></div>
+        </div>
+        <div class="why"><b>Why:</b> turns your deepest position into a weekly RB1 without touching your starting WR core.</div>
+        <div class="actions"><span class="btn">Pass</span><span class="btn primary">Send offer</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="whybox"><b>Absence is the design.</b> No teaser, no locked state, no "odds coming at week 6" — a promise of a number is still a number-shaped claim. The outlook block simply appears at week 6+ (frame B). This also matches the operator's own sequencing: #169 was narrowed to position-specific impact first; trade-level odds are the later step.</div>
+</div>
+
+<div class="frame">
+  <h3>D · Week 6+ band variant <span class="fb later">if C2 is declined</span></h3>
+  <p class="fsub">If the operator declines the 5%-rounded percentage league-wide (league-summary frame C2), the trade summary uses the same band grammar: a transition when the trade crosses a threshold, plain words when it doesn't.</p>
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>Trade Summary</span></div>
+    <div class="body">
+      <div class="card" style="border-radius:8px">
+        <div class="outlook" style="margin:12px 15px">
+          <p class="oh"><span>Season outlook · 2026</span><span class="beta">Projected</span></p>
+          <div class="twoup">
+            <div class="cell">
+              <div class="cl">Projected record</div>
+              <div class="cv">8–6 <span class="d up">&#9650; +1 win</span></div>
+              <div class="ofoot" style="margin-top:5px">now 4–2 · was proj 7–7</div>
+            </div>
+            <div class="cell">
+              <div class="cl">Playoff outlook</div>
+              <div class="bandline"><span class="band tossup">Toss-up</span><span class="oarrow">&rarr;</span><span class="band likely">Likely</span></div>
+              <div class="ofoot" style="margin-top:7px">this trade crosses the line</div>
+            </div>
+          </div>
+        </div>
+        <div class="outlook" style="margin:0 15px 15px">
+          <p class="oh"><span>Same cell when nothing moves</span></p>
+          <div class="cell">
+            <div class="cl">Playoff outlook</div>
+            <div class="bandline"><span class="band likely">Likely</span><span class="ofoot" style="margin:0">— unchanged by this trade</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="whybox"><b>Tradeoff:</b> a band transition ("Toss-up &rarr; Likely") is the most honest and most dramatic framing a trade can earn — but most trades won't earn it, and "unchanged" must be said plainly rather than hidden, or the module reads as broken. This variant only makes sense if bands are also the league-summary presentation (consistency is a cross-client invariant: band names, thresholds, and chip colors ship in <span class="m">docs/cross-client-invariants.md</span> the day either shape ships).</div>
+</div>
+</div>
+
+</body>
+</html>
