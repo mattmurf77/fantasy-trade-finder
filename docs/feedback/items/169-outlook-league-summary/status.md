@@ -186,9 +186,18 @@ operator's own leagues. Full method, numbers and verdict:
 - **Title odds: NOT validated.** +5.1 % skill, CI **[−13.2 %, +22.3 %] includes
   zero**; at week 3 it is *worse* than a constant 1/12. Six champion events is
   not a validation.
-- **Preseason `roster_value` source: not backtestable** (no historical value
-  board), and a Sleeper-projections cross-check disagrees with it on half the
-  playoff field in the superflex league.
+- ~~**Preseason `roster_value` source: not backtestable** (no historical value
+  board)~~ **→ BACKTESTED 2026-08-09** (dated DynastyProcess boards do exist —
+  see **[dated-values-revalidation-2026-08-09.md](dated-values-revalidation-2026-08-09.md)**):
+  playoff Brier **0.1959** vs climatology 0.2500 = **+21.6 %**, 90 % CI
+  **[+4.1 %, +38.3 %]** (excludes 0) — real but weak, **over-confident at the
+  extremes** (95 % → 75 % realized), beaten by climatology in **2 of 6**
+  league-seasons, and **statistically indistinguishable from the week-3
+  model**. Preseason **title** odds: **no skill** (+3.1 %, CI [−17.7, +24.9]).
+  **Recommendation: render playoff odds only, banded rather than as a precise
+  percentage, title odds withheld, BUG-1 fixed first.** A
+  Sleeper-projections cross-check still disagrees with the roster-value prior
+  on half the playoff field in the superflex league.
 - **BUG-1 (severe, open):** `settings.league_average_match` (median match) is
   ignored — the operator's Lakeview league has it ON in the live 2026 season,
   which makes `projected_wins` read 22.29 in a 14-week season. Tracked by a
