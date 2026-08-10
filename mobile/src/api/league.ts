@@ -644,8 +644,12 @@ export async function getPowerRankings(
 // Every odds figure is a PROJECTION, not a settled fact. `meta.beta` /
 // `meta.is_preseason` mark the numbers provisional; the UI labels the whole
 // layer "Projected · preseason · beta" and NEVER shows a bare authoritative
-// percentage. Percentages are 0..1 fractions. Teams arrive pre-sorted by
-// `odds.playoff_pct` descending.
+// percentage — `playoff_pct` renders as a three-band chip whose keys,
+// thresholds and colors are a cross-client invariant (see
+// docs/cross-client-invariants.md § "Playoff outlook bands"). Percentages are
+// 0..1 fractions. Teams arrive pre-sorted by `odds.playoff_pct` descending —
+// which is NOT the projected-standings order; a surface presenting the rows AS
+// the standings re-sorts by `odds.projected_seed` (LeagueSummaryScreen does).
 export type OutlookBasis = 'consensus' | 'personal';
 
 // Backend strength-source keys → friendly captions are mapped in the screen.
@@ -707,8 +711,13 @@ export interface OutlookTeam {
   // (backend/outlook/serialize.py emits null rather than a fake number).
   strength: { mu: number | null; sigma: number | null };
   odds: {
-    playoff_pct: number; // 0..1
+    playoff_pct: number; // 0..1 — rendered as a BAND, never as a raw number
     bye_pct: number;     // 0..1
+    /** SERVED BUT UNRENDERABLE (calibration-combined-2026-08-10.md §7): title
+     *  odds have no demonstrated skill — the skill CI spans zero and 3 of 6
+     *  backtested league-seasons do worse than a constant. No client may show
+     *  this at any week, in any form, banded or numeric. The field stays on
+     *  the type because the backend still serves it. */
     title_pct: number;   // 0..1
     projected_wins: number;
     projected_seed: number;

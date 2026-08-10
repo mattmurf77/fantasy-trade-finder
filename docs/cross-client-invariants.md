@@ -149,6 +149,31 @@ Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46
 
 ---
 
+## Playoff outlook bands (#169, flag `outlook.odds`)
+
+The **only** permitted rendering of `GET /api/league/outlook`'s `teams[].odds.playoff_pct`. The band is a data encoding by the same rule that governs tier colors — a client must read these keys, thresholds and colors, never re-derive them.
+
+| Band key | Label | Threshold on `playoff_pct` (0..1) | Color token | Canonical hex |
+|---|---|---|---|---|
+| `likely` | Likely | `>= 0.65` | semantic `pos` | `#22C55E` |
+| `tossup` | Toss-up | `>= 0.35` and `< 0.65` | semantic `warn` | `#F59E0B` |
+| `unlikely` | Unlikely | `< 0.35` | semantic `neg` | `#EF4444` |
+
+Bucketing is a top-down walk (first band whose floor the value clears), so the boundaries belong to the higher band: exactly `0.65` is `likely`, exactly `0.35` is `tossup`. Colors are the pos/warn/neg **semantic** tokens, not tier or position hexes; the label always ships next to the color (color alone fails a color-blind read).
+
+**Why bands and not percentages** ([`docs/feedback/items/169-outlook-league-summary/calibration-combined-2026-08-10.md`](feedback/items/169-outlook-league-summary/calibration-combined-2026-08-10.md) §7): the engine is over-confident at the extremes — a 95% preseason call realizes 78% — and the preseason skill lower CI bound is +2.9%. Three bands are the finest granularity that evidence supports (≥0.65 buckets realize 0.60–0.78; ≤0.35 buckets realize 0.0–0.5). Two rules travel with the thresholds and are part of the invariant:
+
+- **`meta.beta` is the two-state switch.** It clears at `completed_weeks >= 6`. Weeks 0–5 (beta true): bands and row order only, **no win-loss numbers** — a projected record is the same false-precision point estimate as a percentage in a different unit. Week 6+ (beta false): rows may add current + projected records.
+- **`odds.title_pct` is unrenderable at any week, in any form.** Not a calibration judgement — an absence of skill (CI spans zero; 3 of 6 backtested league-seasons lose to a constant). It is served but never shown, banded or numeric.
+
+A **playoff** percentage rounded to the nearest 5%, from week 6 only, is the one documented alternative to the band chip — an operator risk call on pooled (not week-stratified) calibration, not a validated result. It ships **off** (`OUTLOOK_WEEK6_PERCENT_ENABLED` in `LeagueSummaryScreen.tsx`); the 5% rounding is load-bearing if it is ever turned on.
+
+Row **order** is a sibling encoding: a surface presenting the rows as projected standings sorts by `odds.projected_seed` ascending (ties → `playoff_pct` desc → `roster_id` asc). The payload's own ordering is by `playoff_pct`, which is nearly but not exactly the standings order.
+
+**Locations to update together:** `mobile/src/screens/LeagueSummaryScreen.tsx` (`PLAYOFF_BAND_LIKELY_MIN` / `PLAYOFF_BAND_UNLIKELY_MAX` / `PLAYOFF_BAND_LABEL` / `PLAYOFF_BAND_COLOR` / `playoffBand`), `mobile/src/theme/chalkline.ts` (`semantic`), `mobile/src/api/league.ts` (the `odds` field notes), and — when web parity lands — `web/league-rankings.html`. Backend serves raw fractions and must stay band-agnostic.
+
+---
+
 ## Team outlook modes
 
 Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
