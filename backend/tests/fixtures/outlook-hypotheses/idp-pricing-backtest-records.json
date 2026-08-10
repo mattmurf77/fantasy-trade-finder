@@ -1,0 +1,2738 @@
+[
+ {
+  "V0 status quo": {
+   "mu": 6.89,
+   "playoff": 0.5086,
+   "title": 0.0269
+  },
+  "V1 eligibility fix": {
+   "mu": 6.89,
+   "playoff": 0.5086,
+   "title": 0.0269
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.89,
+   "playoff": 0.5086,
+   "title": 0.0269
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.89,
+   "playoff": 0.5086,
+   "title": 0.0269
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.89,
+   "playoff": 0.5086,
+   "title": 0.0269
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 1,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.39,
+   "playoff": 0.6216,
+   "title": 0.0367
+  },
+  "V1 eligibility fix": {
+   "mu": 7.39,
+   "playoff": 0.6216,
+   "title": 0.0367
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.39,
+   "playoff": 0.6216,
+   "title": 0.0367
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.39,
+   "playoff": 0.6216,
+   "title": 0.0367
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.39,
+   "playoff": 0.6216,
+   "title": 0.0367
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 2,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.96,
+   "playoff": 0.5479,
+   "title": 0.0319
+  },
+  "V1 eligibility fix": {
+   "mu": 6.96,
+   "playoff": 0.5479,
+   "title": 0.0319
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.96,
+   "playoff": 0.5479,
+   "title": 0.0319
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.96,
+   "playoff": 0.5479,
+   "title": 0.0319
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.96,
+   "playoff": 0.5479,
+   "title": 0.0319
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 3,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 10.14,
+   "playoff": 0.9788,
+   "title": 0.3132
+  },
+  "V1 eligibility fix": {
+   "mu": 10.14,
+   "playoff": 0.9788,
+   "title": 0.3132
+  },
+  "V2 league-mean fallback": {
+   "mu": 10.14,
+   "playoff": 0.9788,
+   "title": 0.3132
+  },
+  "V3 attenuation (linear)": {
+   "mu": 10.14,
+   "playoff": 0.9788,
+   "title": 0.3132
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 10.14,
+   "playoff": 0.9788,
+   "title": 0.3132
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 4,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.58,
+   "playoff": 0.4542,
+   "title": 0.0249
+  },
+  "V1 eligibility fix": {
+   "mu": 6.58,
+   "playoff": 0.4542,
+   "title": 0.0249
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.58,
+   "playoff": 0.4542,
+   "title": 0.0249
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.58,
+   "playoff": 0.4542,
+   "title": 0.0249
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.58,
+   "playoff": 0.4542,
+   "title": 0.0249
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 5,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.5,
+   "playoff": 0.4007,
+   "title": 0.0137
+  },
+  "V1 eligibility fix": {
+   "mu": 6.5,
+   "playoff": 0.4007,
+   "title": 0.0137
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.5,
+   "playoff": 0.4007,
+   "title": 0.0137
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.5,
+   "playoff": 0.4007,
+   "title": 0.0137
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.5,
+   "playoff": 0.4007,
+   "title": 0.0137
+  },
+  "actual_wins": 5.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 6,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.42,
+   "playoff": 0.3808,
+   "title": 0.0109
+  },
+  "V1 eligibility fix": {
+   "mu": 6.42,
+   "playoff": 0.3808,
+   "title": 0.0109
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.42,
+   "playoff": 0.3808,
+   "title": 0.0109
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.42,
+   "playoff": 0.3808,
+   "title": 0.0109
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.42,
+   "playoff": 0.3808,
+   "title": 0.0109
+  },
+  "actual_wins": 11.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 7,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 4.82,
+   "playoff": 0.1001,
+   "title": 0.0009
+  },
+  "V1 eligibility fix": {
+   "mu": 4.82,
+   "playoff": 0.1001,
+   "title": 0.0009
+  },
+  "V2 league-mean fallback": {
+   "mu": 4.82,
+   "playoff": 0.1001,
+   "title": 0.0009
+  },
+  "V3 attenuation (linear)": {
+   "mu": 4.82,
+   "playoff": 0.1001,
+   "title": 0.0009
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 4.82,
+   "playoff": 0.1001,
+   "title": 0.0009
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 8,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 10.95,
+   "playoff": 0.9942,
+   "title": 0.4936
+  },
+  "V1 eligibility fix": {
+   "mu": 10.95,
+   "playoff": 0.9942,
+   "title": 0.4936
+  },
+  "V2 league-mean fallback": {
+   "mu": 10.95,
+   "playoff": 0.9942,
+   "title": 0.4936
+  },
+  "V3 attenuation (linear)": {
+   "mu": 10.95,
+   "playoff": 0.9942,
+   "title": 0.4936
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 10.95,
+   "playoff": 0.9942,
+   "title": 0.4936
+  },
+  "actual_wins": 11.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 9,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.82,
+   "playoff": 0.51,
+   "title": 0.0266
+  },
+  "V1 eligibility fix": {
+   "mu": 6.82,
+   "playoff": 0.51,
+   "title": 0.0266
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.82,
+   "playoff": 0.51,
+   "title": 0.0266
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.82,
+   "playoff": 0.51,
+   "title": 0.0266
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.82,
+   "playoff": 0.51,
+   "title": 0.0266
+  },
+  "actual_wins": 10.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 10,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.75,
+   "playoff": 0.4743,
+   "title": 0.0203
+  },
+  "V1 eligibility fix": {
+   "mu": 6.75,
+   "playoff": 0.4743,
+   "title": 0.0203
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.75,
+   "playoff": 0.4743,
+   "title": 0.0203
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.75,
+   "playoff": 0.4743,
+   "title": 0.0203
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.75,
+   "playoff": 0.4743,
+   "title": 0.0203
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 11,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.8,
+   "playoff": 0.0288,
+   "title": 0.0004
+  },
+  "V1 eligibility fix": {
+   "mu": 3.8,
+   "playoff": 0.0288,
+   "title": 0.0004
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.8,
+   "playoff": 0.0288,
+   "title": 0.0004
+  },
+  "V3 attenuation (linear)": {
+   "mu": 3.8,
+   "playoff": 0.0288,
+   "title": 0.0004
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 3.8,
+   "playoff": 0.0288,
+   "title": 0.0004
+  },
+  "actual_wins": 1.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2025",
+  "median_match": true,
+  "roster_id": 12,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.71,
+   "playoff": 0.6082,
+   "title": 0.0865
+  },
+  "V1 eligibility fix": {
+   "mu": 7.71,
+   "playoff": 0.6082,
+   "title": 0.0865
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.71,
+   "playoff": 0.6082,
+   "title": 0.0865
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.71,
+   "playoff": 0.6082,
+   "title": 0.0865
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.71,
+   "playoff": 0.6082,
+   "title": 0.0865
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 1,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.94,
+   "playoff": 0.019,
+   "title": 0.0003
+  },
+  "V1 eligibility fix": {
+   "mu": 3.94,
+   "playoff": 0.019,
+   "title": 0.0003
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.94,
+   "playoff": 0.019,
+   "title": 0.0003
+  },
+  "V3 attenuation (linear)": {
+   "mu": 3.94,
+   "playoff": 0.019,
+   "title": 0.0003
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 3.94,
+   "playoff": 0.019,
+   "title": 0.0003
+  },
+  "actual_wins": 2.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 2,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.14,
+   "playoff": 0.0929,
+   "title": 0.0033
+  },
+  "V1 eligibility fix": {
+   "mu": 5.14,
+   "playoff": 0.0929,
+   "title": 0.0033
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.14,
+   "playoff": 0.0929,
+   "title": 0.0033
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.14,
+   "playoff": 0.0929,
+   "title": 0.0033
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.14,
+   "playoff": 0.0929,
+   "title": 0.0033
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 3,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.8,
+   "playoff": 0.8213,
+   "title": 0.1699
+  },
+  "V1 eligibility fix": {
+   "mu": 8.8,
+   "playoff": 0.8213,
+   "title": 0.1699
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.8,
+   "playoff": 0.8213,
+   "title": 0.1699
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.8,
+   "playoff": 0.8213,
+   "title": 0.1699
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.8,
+   "playoff": 0.8213,
+   "title": 0.1699
+  },
+  "actual_wins": 12.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 4,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.65,
+   "playoff": 0.3465,
+   "title": 0.0311
+  },
+  "V1 eligibility fix": {
+   "mu": 6.65,
+   "playoff": 0.3465,
+   "title": 0.0311
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.65,
+   "playoff": 0.3465,
+   "title": 0.0311
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.65,
+   "playoff": 0.3465,
+   "title": 0.0311
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.65,
+   "playoff": 0.3465,
+   "title": 0.0311
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 5,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.57,
+   "playoff": 0.5623,
+   "title": 0.0639
+  },
+  "V1 eligibility fix": {
+   "mu": 7.57,
+   "playoff": 0.5623,
+   "title": 0.0639
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.57,
+   "playoff": 0.5623,
+   "title": 0.0639
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.57,
+   "playoff": 0.5623,
+   "title": 0.0639
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.57,
+   "playoff": 0.5623,
+   "title": 0.0639
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 6,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.13,
+   "playoff": 0.0061,
+   "title": 0.0
+  },
+  "V1 eligibility fix": {
+   "mu": 3.13,
+   "playoff": 0.0061,
+   "title": 0.0
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.13,
+   "playoff": 0.0061,
+   "title": 0.0
+  },
+  "V3 attenuation (linear)": {
+   "mu": 3.13,
+   "playoff": 0.0061,
+   "title": 0.0
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 3.13,
+   "playoff": 0.0061,
+   "title": 0.0
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 7,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.98,
+   "playoff": 0.6845,
+   "title": 0.1098
+  },
+  "V1 eligibility fix": {
+   "mu": 7.98,
+   "playoff": 0.6845,
+   "title": 0.1098
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.98,
+   "playoff": 0.6845,
+   "title": 0.1098
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.98,
+   "playoff": 0.6845,
+   "title": 0.1098
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.98,
+   "playoff": 0.6845,
+   "title": 0.1098
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 8,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.99,
+   "playoff": 0.6625,
+   "title": 0.0952
+  },
+  "V1 eligibility fix": {
+   "mu": 7.99,
+   "playoff": 0.6625,
+   "title": 0.0952
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.99,
+   "playoff": 0.6625,
+   "title": 0.0952
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.99,
+   "playoff": 0.6625,
+   "title": 0.0952
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.99,
+   "playoff": 0.6625,
+   "title": 0.0952
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 9,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.51,
+   "playoff": 0.7673,
+   "title": 0.1308
+  },
+  "V1 eligibility fix": {
+   "mu": 8.51,
+   "playoff": 0.7673,
+   "title": 0.1308
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.51,
+   "playoff": 0.7673,
+   "title": 0.1308
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.51,
+   "playoff": 0.7673,
+   "title": 0.1308
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.51,
+   "playoff": 0.7673,
+   "title": 0.1308
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 10,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.57,
+   "playoff": 0.5611,
+   "title": 0.0655
+  },
+  "V1 eligibility fix": {
+   "mu": 7.57,
+   "playoff": 0.5611,
+   "title": 0.0655
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.57,
+   "playoff": 0.5611,
+   "title": 0.0655
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.57,
+   "playoff": 0.5611,
+   "title": 0.0655
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.57,
+   "playoff": 0.5611,
+   "title": 0.0655
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 11,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 9.02,
+   "playoff": 0.8683,
+   "title": 0.2437
+  },
+  "V1 eligibility fix": {
+   "mu": 9.02,
+   "playoff": 0.8683,
+   "title": 0.2437
+  },
+  "V2 league-mean fallback": {
+   "mu": 9.02,
+   "playoff": 0.8683,
+   "title": 0.2437
+  },
+  "V3 attenuation (linear)": {
+   "mu": 9.02,
+   "playoff": 0.8683,
+   "title": 0.2437
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 9.02,
+   "playoff": 0.8683,
+   "title": 0.2437
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "lakeview-2024",
+  "median_match": true,
+  "roster_id": 12,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.65,
+   "playoff": 0.8446,
+   "title": 0.1452
+  },
+  "V1 eligibility fix": {
+   "mu": 8.65,
+   "playoff": 0.8446,
+   "title": 0.1452
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.77,
+   "playoff": 0.6858,
+   "title": 0.0686
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.79,
+   "playoff": 0.6875,
+   "title": 0.1347
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.16,
+   "playoff": 0.7604,
+   "title": 0.1463
+  },
+  "actual_wins": 10.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 1,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.99,
+   "playoff": 0.2685,
+   "title": 0.0102
+  },
+  "V1 eligibility fix": {
+   "mu": 5.99,
+   "playoff": 0.2685,
+   "title": 0.0102
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.03,
+   "playoff": 0.2774,
+   "title": 0.0109
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.52,
+   "playoff": 0.3801,
+   "title": 0.0362
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.3,
+   "playoff": 0.3329,
+   "title": 0.0232
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 2,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.2,
+   "playoff": 0.0087,
+   "title": 0.0001
+  },
+  "V1 eligibility fix": {
+   "mu": 3.2,
+   "playoff": 0.0087,
+   "title": 0.0001
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.17,
+   "playoff": 0.0079,
+   "title": 0.0
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.09,
+   "playoff": 0.1198,
+   "title": 0.0053
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 4.26,
+   "playoff": 0.0468,
+   "title": 0.0009
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 3,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.21,
+   "playoff": 0.7904,
+   "title": 0.112
+  },
+  "V1 eligibility fix": {
+   "mu": 8.21,
+   "playoff": 0.7904,
+   "title": 0.112
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.31,
+   "playoff": 0.8076,
+   "title": 0.1216
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.59,
+   "playoff": 0.6506,
+   "title": 0.1137
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.84,
+   "playoff": 0.7101,
+   "title": 0.1163
+  },
+  "actual_wins": 10.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 4,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.75,
+   "playoff": 0.4204,
+   "title": 0.0184
+  },
+  "V1 eligibility fix": {
+   "mu": 6.75,
+   "playoff": 0.4204,
+   "title": 0.0184
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.82,
+   "playoff": 0.4359,
+   "title": 0.0216
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.88,
+   "playoff": 0.46,
+   "title": 0.0532
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.82,
+   "playoff": 0.4397,
+   "title": 0.0337
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 5,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 10.67,
+   "playoff": 0.9886,
+   "title": 0.4762
+  },
+  "V1 eligibility fix": {
+   "mu": 10.67,
+   "playoff": 0.9886,
+   "title": 0.4762
+  },
+  "V2 league-mean fallback": {
+   "mu": 10.8,
+   "playoff": 0.9913,
+   "title": 0.5185
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.87,
+   "playoff": 0.8775,
+   "title": 0.2785
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 9.66,
+   "playoff": 0.9502,
+   "title": 0.3738
+  },
+  "actual_wins": 11.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 6,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.44,
+   "playoff": 0.3482,
+   "title": 0.0159
+  },
+  "V1 eligibility fix": {
+   "mu": 6.44,
+   "playoff": 0.3482,
+   "title": 0.0159
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.56,
+   "playoff": 0.374,
+   "title": 0.016
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.71,
+   "playoff": 0.4234,
+   "title": 0.0478
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.6,
+   "playoff": 0.3885,
+   "title": 0.0314
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 7,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.54,
+   "playoff": 0.3854,
+   "title": 0.02
+  },
+  "V1 eligibility fix": {
+   "mu": 6.54,
+   "playoff": 0.3854,
+   "title": 0.02
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.6,
+   "playoff": 0.3997,
+   "title": 0.0218
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.77,
+   "playoff": 0.4383,
+   "title": 0.0525
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.67,
+   "playoff": 0.4135,
+   "title": 0.0342
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 8,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.48,
+   "playoff": 0.3732,
+   "title": 0.0177
+  },
+  "V1 eligibility fix": {
+   "mu": 6.48,
+   "playoff": 0.3732,
+   "title": 0.0177
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.6,
+   "playoff": 0.3987,
+   "title": 0.0189
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.74,
+   "playoff": 0.4356,
+   "title": 0.0504
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.64,
+   "playoff": 0.4109,
+   "title": 0.0347
+  },
+  "actual_wins": 11.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 9,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.23,
+   "playoff": 0.1436,
+   "title": 0.0042
+  },
+  "V1 eligibility fix": {
+   "mu": 5.23,
+   "playoff": 0.1436,
+   "title": 0.0042
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.26,
+   "playoff": 0.1463,
+   "title": 0.0041
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.13,
+   "playoff": 0.3095,
+   "title": 0.0269
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.75,
+   "playoff": 0.2342,
+   "title": 0.0123
+  },
+  "actual_wins": 2.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 10,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.37,
+   "playoff": 0.587,
+   "title": 0.0429
+  },
+  "V1 eligibility fix": {
+   "mu": 7.37,
+   "playoff": 0.587,
+   "title": 0.0429
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.52,
+   "playoff": 0.6214,
+   "title": 0.0472
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.19,
+   "playoff": 0.5403,
+   "title": 0.0715
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.27,
+   "playoff": 0.5581,
+   "title": 0.0592
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 11,
+  "season": 2025,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.48,
+   "playoff": 0.8414,
+   "title": 0.1372
+  },
+  "V1 eligibility fix": {
+   "mu": 8.48,
+   "playoff": 0.8414,
+   "title": 0.1372
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.58,
+   "playoff": 0.854,
+   "title": 0.1508
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.72,
+   "playoff": 0.6774,
+   "title": 0.1293
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.04,
+   "playoff": 0.7547,
+   "title": 0.134
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2025",
+  "median_match": false,
+  "roster_id": 12,
+  "season": 2025,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 9.27,
+   "playoff": 0.9048,
+   "title": 0.2028
+  },
+  "V1 eligibility fix": {
+   "mu": 9.27,
+   "playoff": 0.9048,
+   "title": 0.2028
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.69,
+   "playoff": 0.8263,
+   "title": 0.1451
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.12,
+   "playoff": 0.7454,
+   "title": 0.1623
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.61,
+   "playoff": 0.8228,
+   "title": 0.1831
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 1,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.45,
+   "playoff": 0.7968,
+   "title": 0.1208
+  },
+  "V1 eligibility fix": {
+   "mu": 8.45,
+   "playoff": 0.7968,
+   "title": 0.1208
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.67,
+   "playoff": 0.828,
+   "title": 0.1465
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.69,
+   "playoff": 0.6591,
+   "title": 0.1214
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.01,
+   "playoff": 0.7244,
+   "title": 0.1221
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 2,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 4.77,
+   "playoff": 0.0677,
+   "title": 0.001
+  },
+  "V1 eligibility fix": {
+   "mu": 4.77,
+   "playoff": 0.0677,
+   "title": 0.001
+  },
+  "V2 league-mean fallback": {
+   "mu": 4.77,
+   "playoff": 0.064,
+   "title": 0.0015
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.91,
+   "playoff": 0.245,
+   "title": 0.0168
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.43,
+   "playoff": 0.1557,
+   "title": 0.0065
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 3,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.52,
+   "playoff": 0.8213,
+   "title": 0.1705
+  },
+  "V1 eligibility fix": {
+   "mu": 8.52,
+   "playoff": 0.8213,
+   "title": 0.1705
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.81,
+   "playoff": 0.8592,
+   "title": 0.2101
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.74,
+   "playoff": 0.6828,
+   "title": 0.1432
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.08,
+   "playoff": 0.7503,
+   "title": 0.1613
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 4,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.39,
+   "playoff": 0.5481,
+   "title": 0.0402
+  },
+  "V1 eligibility fix": {
+   "mu": 7.39,
+   "playoff": 0.5481,
+   "title": 0.0402
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.54,
+   "playoff": 0.5844,
+   "title": 0.0491
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.18,
+   "playoff": 0.535,
+   "title": 0.0768
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.28,
+   "playoff": 0.547,
+   "title": 0.063
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 5,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.86,
+   "playoff": 0.8718,
+   "title": 0.1879
+  },
+  "V1 eligibility fix": {
+   "mu": 8.86,
+   "playoff": 0.8718,
+   "title": 0.1879
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.23,
+   "playoff": 0.7687,
+   "title": 0.1207
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.93,
+   "playoff": 0.7249,
+   "title": 0.1456
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.32,
+   "playoff": 0.7949,
+   "title": 0.1658
+  },
+  "actual_wins": 12.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 6,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.76,
+   "playoff": 0.4018,
+   "title": 0.0252
+  },
+  "V1 eligibility fix": {
+   "mu": 6.76,
+   "playoff": 0.4018,
+   "title": 0.0252
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.93,
+   "playoff": 0.4354,
+   "title": 0.0276
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.89,
+   "playoff": 0.467,
+   "title": 0.0545
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.85,
+   "playoff": 0.4455,
+   "title": 0.0385
+  },
+  "actual_wins": 12.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 7,
+  "season": 2024,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.03,
+   "playoff": 0.0915,
+   "title": 0.002
+  },
+  "V1 eligibility fix": {
+   "mu": 5.03,
+   "playoff": 0.0915,
+   "title": 0.002
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.06,
+   "playoff": 0.0899,
+   "title": 0.0022
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.04,
+   "playoff": 0.2678,
+   "title": 0.0235
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.61,
+   "playoff": 0.1776,
+   "title": 0.0089
+  },
+  "actual_wins": 5.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 8,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.33,
+   "playoff": 0.1258,
+   "title": 0.0033
+  },
+  "V1 eligibility fix": {
+   "mu": 5.33,
+   "playoff": 0.1258,
+   "title": 0.0033
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.32,
+   "playoff": 0.1208,
+   "title": 0.0039
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.2,
+   "playoff": 0.2942,
+   "title": 0.0263
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.83,
+   "playoff": 0.2161,
+   "title": 0.011
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 9,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.56,
+   "playoff": 0.0151,
+   "title": 0.0002
+  },
+  "V1 eligibility fix": {
+   "mu": 3.56,
+   "playoff": 0.0151,
+   "title": 0.0002
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.45,
+   "playoff": 0.012,
+   "title": 0.0001
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.27,
+   "playoff": 0.141,
+   "title": 0.0074
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 4.52,
+   "playoff": 0.0606,
+   "title": 0.0014
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 10,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.01,
+   "playoff": 0.4633,
+   "title": 0.0331
+  },
+  "V1 eligibility fix": {
+   "mu": 7.01,
+   "playoff": 0.4633,
+   "title": 0.0331
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.17,
+   "playoff": 0.4938,
+   "title": 0.0424
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.02,
+   "playoff": 0.5002,
+   "title": 0.0655
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.02,
+   "playoff": 0.492,
+   "title": 0.0524
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 11,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 9.04,
+   "playoff": 0.892,
+   "title": 0.213
+  },
+  "V1 eligibility fix": {
+   "mu": 9.04,
+   "playoff": 0.892,
+   "title": 0.213
+  },
+  "V2 league-mean fallback": {
+   "mu": 9.36,
+   "playoff": 0.9175,
+   "title": 0.2508
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.01,
+   "playoff": 0.7376,
+   "title": 0.1567
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.46,
+   "playoff": 0.8131,
+   "title": 0.186
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2024",
+  "median_match": false,
+  "roster_id": 12,
+  "season": 2024,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 9.31,
+   "playoff": 0.908,
+   "title": 0.2513
+  },
+  "V1 eligibility fix": {
+   "mu": 9.31,
+   "playoff": 0.908,
+   "title": 0.2513
+  },
+  "V2 league-mean fallback": {
+   "mu": 9.4,
+   "playoff": 0.9164,
+   "title": 0.2624
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.18,
+   "playoff": 0.762,
+   "title": 0.1846
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.66,
+   "playoff": 0.8357,
+   "title": 0.2082
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 1,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.15,
+   "playoff": 0.2378,
+   "title": 0.0088
+  },
+  "V1 eligibility fix": {
+   "mu": 6.15,
+   "playoff": 0.2378,
+   "title": 0.0088
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.19,
+   "playoff": 0.2504,
+   "title": 0.0097
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.58,
+   "playoff": 0.3805,
+   "title": 0.034
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.4,
+   "playoff": 0.3215,
+   "title": 0.022
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 2,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 4.3,
+   "playoff": 0.0386,
+   "title": 0.0011
+  },
+  "V1 eligibility fix": {
+   "mu": 4.3,
+   "playoff": 0.0386,
+   "title": 0.0011
+  },
+  "V2 league-mean fallback": {
+   "mu": 4.31,
+   "playoff": 0.0394,
+   "title": 0.001
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.67,
+   "playoff": 0.1979,
+   "title": 0.0135
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.09,
+   "playoff": 0.1102,
+   "title": 0.0038
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 3,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.63,
+   "playoff": 0.8238,
+   "title": 0.1408
+  },
+  "V1 eligibility fix": {
+   "mu": 8.63,
+   "playoff": 0.8238,
+   "title": 0.1408
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.72,
+   "playoff": 0.8388,
+   "title": 0.1484
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.8,
+   "playoff": 0.6791,
+   "title": 0.1228
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.16,
+   "playoff": 0.7506,
+   "title": 0.1346
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 4,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.16,
+   "playoff": 0.4879,
+   "title": 0.037
+  },
+  "V1 eligibility fix": {
+   "mu": 7.16,
+   "playoff": 0.4879,
+   "title": 0.037
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.22,
+   "playoff": 0.5098,
+   "title": 0.0393
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.08,
+   "playoff": 0.5112,
+   "title": 0.069
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.12,
+   "playoff": 0.5088,
+   "title": 0.0569
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 5,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.5,
+   "playoff": 0.8105,
+   "title": 0.1185
+  },
+  "V1 eligibility fix": {
+   "mu": 8.5,
+   "playoff": 0.8105,
+   "title": 0.1185
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.82,
+   "playoff": 0.6711,
+   "title": 0.0692
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.73,
+   "playoff": 0.6663,
+   "title": 0.1199
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.07,
+   "playoff": 0.7357,
+   "title": 0.123
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 6,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.6,
+   "playoff": 0.608,
+   "title": 0.0604
+  },
+  "V1 eligibility fix": {
+   "mu": 7.6,
+   "playoff": 0.608,
+   "title": 0.0604
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.66,
+   "playoff": 0.628,
+   "title": 0.0615
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.3,
+   "playoff": 0.5688,
+   "title": 0.0825
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.42,
+   "playoff": 0.5822,
+   "title": 0.077
+  },
+  "actual_wins": 10.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 7,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.28,
+   "playoff": 0.1215,
+   "title": 0.0037
+  },
+  "V1 eligibility fix": {
+   "mu": 5.28,
+   "playoff": 0.1215,
+   "title": 0.0037
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.36,
+   "playoff": 0.1335,
+   "title": 0.0039
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.18,
+   "playoff": 0.3045,
+   "title": 0.0285
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.8,
+   "playoff": 0.2206,
+   "title": 0.0142
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 8,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.63,
+   "playoff": 0.3733,
+   "title": 0.0267
+  },
+  "V1 eligibility fix": {
+   "mu": 6.63,
+   "playoff": 0.3733,
+   "title": 0.0267
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.68,
+   "playoff": 0.3904,
+   "title": 0.0275
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.81,
+   "playoff": 0.452,
+   "title": 0.0588
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.73,
+   "playoff": 0.4212,
+   "title": 0.0437
+  },
+  "actual_wins": 7.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 9,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 3.16,
+   "playoff": 0.0075,
+   "title": 0.0001
+  },
+  "V1 eligibility fix": {
+   "mu": 3.16,
+   "playoff": 0.0075,
+   "title": 0.0001
+  },
+  "V2 league-mean fallback": {
+   "mu": 3.18,
+   "playoff": 0.0074,
+   "title": 0.0001
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.03,
+   "playoff": 0.1129,
+   "title": 0.0055
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 4.2,
+   "playoff": 0.0415,
+   "title": 0.0005
+  },
+  "actual_wins": 2.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 10,
+  "season": 2023,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.77,
+   "playoff": 0.6508,
+   "title": 0.074
+  },
+  "V1 eligibility fix": {
+   "mu": 7.77,
+   "playoff": 0.6508,
+   "title": 0.074
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.83,
+   "playoff": 0.6696,
+   "title": 0.0779
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.37,
+   "playoff": 0.5844,
+   "title": 0.0924
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.54,
+   "playoff": 0.608,
+   "title": 0.0841
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 11,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 9.5,
+   "playoff": 0.9323,
+   "title": 0.2776
+  },
+  "V1 eligibility fix": {
+   "mu": 9.5,
+   "playoff": 0.9323,
+   "title": 0.2776
+  },
+  "V2 league-mean fallback": {
+   "mu": 9.65,
+   "playoff": 0.9452,
+   "title": 0.2991
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.26,
+   "playoff": 0.7804,
+   "title": 0.1885
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.8,
+   "playoff": 0.864,
+   "title": 0.232
+  },
+  "actual_wins": 12.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2023",
+  "median_match": false,
+  "roster_id": 12,
+  "season": 2023,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 4.95,
+   "playoff": 0.1002,
+   "title": 0.0014
+  },
+  "V1 eligibility fix": {
+   "mu": 4.95,
+   "playoff": 0.1002,
+   "title": 0.0014
+  },
+  "V2 league-mean fallback": {
+   "mu": 4.32,
+   "playoff": 0.0455,
+   "title": 0.0005
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.99,
+   "playoff": 0.2576,
+   "title": 0.0168
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.54,
+   "playoff": 0.1758,
+   "title": 0.0056
+  },
+  "actual_wins": 3.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 1,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.95,
+   "playoff": 0.7587,
+   "title": 0.0883
+  },
+  "V1 eligibility fix": {
+   "mu": 7.95,
+   "playoff": 0.7587,
+   "title": 0.0883
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.95,
+   "playoff": 0.7515,
+   "title": 0.0898
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.47,
+   "playoff": 0.6305,
+   "title": 0.1023
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.67,
+   "playoff": 0.6855,
+   "title": 0.1064
+  },
+  "actual_wins": 14.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 2,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.71,
+   "playoff": 0.4294,
+   "title": 0.0184
+  },
+  "V1 eligibility fix": {
+   "mu": 6.71,
+   "playoff": 0.4294,
+   "title": 0.0184
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.78,
+   "playoff": 0.4343,
+   "title": 0.0198
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.85,
+   "playoff": 0.4623,
+   "title": 0.0489
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.79,
+   "playoff": 0.4467,
+   "title": 0.0338
+  },
+  "actual_wins": 5.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 3,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.55,
+   "playoff": 0.6755,
+   "title": 0.07
+  },
+  "V1 eligibility fix": {
+   "mu": 7.55,
+   "playoff": 0.6755,
+   "title": 0.07
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.57,
+   "playoff": 0.6715,
+   "title": 0.0731
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.26,
+   "playoff": 0.5809,
+   "title": 0.0898
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.37,
+   "playoff": 0.6214,
+   "title": 0.0878
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 4,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.72,
+   "playoff": 0.2081,
+   "title": 0.0057
+  },
+  "V1 eligibility fix": {
+   "mu": 5.72,
+   "playoff": 0.2081,
+   "title": 0.0057
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.9,
+   "playoff": 0.2342,
+   "title": 0.0074
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.36,
+   "playoff": 0.3387,
+   "title": 0.0282
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.09,
+   "playoff": 0.2828,
+   "title": 0.0137
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 5,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 4.47,
+   "playoff": 0.0628,
+   "title": 0.001
+  },
+  "V1 eligibility fix": {
+   "mu": 4.47,
+   "playoff": 0.0628,
+   "title": 0.001
+  },
+  "V2 league-mean fallback": {
+   "mu": 4.64,
+   "playoff": 0.0764,
+   "title": 0.0019
+  },
+  "V3 attenuation (linear)": {
+   "mu": 5.75,
+   "playoff": 0.229,
+   "title": 0.0183
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.2,
+   "playoff": 0.1422,
+   "title": 0.0059
+  },
+  "actual_wins": 0.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 6,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 7.24,
+   "playoff": 0.5621,
+   "title": 0.0366
+  },
+  "V1 eligibility fix": {
+   "mu": 7.24,
+   "playoff": 0.5621,
+   "title": 0.0366
+  },
+  "V2 league-mean fallback": {
+   "mu": 7.33,
+   "playoff": 0.5752,
+   "title": 0.0391
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.11,
+   "playoff": 0.5236,
+   "title": 0.0655
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 7.16,
+   "playoff": 0.5415,
+   "title": 0.0522
+  },
+  "actual_wins": 11.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 7,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.49,
+   "playoff": 0.8452,
+   "title": 0.1357
+  },
+  "V1 eligibility fix": {
+   "mu": 8.49,
+   "playoff": 0.8452,
+   "title": 0.1357
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.47,
+   "playoff": 0.8359,
+   "title": 0.1391
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.72,
+   "playoff": 0.6807,
+   "title": 0.1293
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.04,
+   "playoff": 0.7554,
+   "title": 0.1385
+  },
+  "actual_wins": 6.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 8,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 6.46,
+   "playoff": 0.3653,
+   "title": 0.012
+  },
+  "V1 eligibility fix": {
+   "mu": 6.46,
+   "playoff": 0.3653,
+   "title": 0.012
+  },
+  "V2 league-mean fallback": {
+   "mu": 6.53,
+   "playoff": 0.379,
+   "title": 0.0154
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.72,
+   "playoff": 0.4241,
+   "title": 0.0434
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 6.61,
+   "playoff": 0.3983,
+   "title": 0.0247
+  },
+  "actual_wins": 8.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 9,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 8.99,
+   "playoff": 0.9026,
+   "title": 0.1784
+  },
+  "V1 eligibility fix": {
+   "mu": 8.99,
+   "playoff": 0.9026,
+   "title": 0.1784
+  },
+  "V2 league-mean fallback": {
+   "mu": 8.94,
+   "playoff": 0.8924,
+   "title": 0.1796
+  },
+  "V3 attenuation (linear)": {
+   "mu": 7.97,
+   "playoff": 0.7342,
+   "title": 0.1486
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 8.4,
+   "playoff": 0.8192,
+   "title": 0.1617
+  },
+  "actual_wins": 10.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 10,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 5.02,
+   "playoff": 0.1065,
+   "title": 0.0015
+  },
+  "V1 eligibility fix": {
+   "mu": 5.02,
+   "playoff": 0.1065,
+   "title": 0.0015
+  },
+  "V2 league-mean fallback": {
+   "mu": 5.23,
+   "playoff": 0.123,
+   "title": 0.0018
+  },
+  "V3 attenuation (linear)": {
+   "mu": 6.02,
+   "playoff": 0.2656,
+   "title": 0.0189
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 5.6,
+   "playoff": 0.1885,
+   "title": 0.0076
+  },
+  "actual_wins": 4.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 11,
+  "season": 2022,
+  "y_playoff": 0.0,
+  "y_title": 0.0
+ },
+ {
+  "V0 status quo": {
+   "mu": 10.46,
+   "playoff": 0.9836,
+   "title": 0.451
+  },
+  "V1 eligibility fix": {
+   "mu": 10.46,
+   "playoff": 0.9836,
+   "title": 0.451
+  },
+  "V2 league-mean fallback": {
+   "mu": 10.35,
+   "playoff": 0.9811,
+   "title": 0.4325
+  },
+  "V3 attenuation (linear)": {
+   "mu": 8.78,
+   "playoff": 0.8728,
+   "title": 0.29
+  },
+  "V3 attenuation (sqrt)": {
+   "mu": 9.52,
+   "playoff": 0.9427,
+   "title": 0.3621
+  },
+  "actual_wins": 9.0,
+  "clim": {
+   "playoff": 0.5,
+   "title": 0.08333333333333333
+  },
+  "league": "ffv3-2022",
+  "median_match": false,
+  "roster_id": 12,
+  "season": 2022,
+  "y_playoff": 1.0,
+  "y_title": 1.0
+ }
+]

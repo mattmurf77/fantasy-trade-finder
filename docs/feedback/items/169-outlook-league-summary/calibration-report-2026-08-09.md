@@ -21,6 +21,17 @@
 > Every affected passage below is annotated inline; the original text is left
 > intact so the reasoning trail survives.
 
+> **CORRECTION — 2026-08-09 (second).** Those preseason numbers were measured
+> on a **corrupted basis** for 4 of the 6 league-seasons. The value board prices
+> QB/RB/WR/TE only, and the FFv3 league starts 8 IDP/K slots out of 15 — so the
+> preseason model ranked those teams on **under half their starting lineup**,
+> covering only ~67 % of the points they scored. The arithmetic is unaffected
+> (the gap is identical for every team in a league, so it cancels in the
+> z-score), but the *description* was wrong: in an IDP league the preseason
+> estimate is an **offensive-core** estimate. Recorded as
+> [BUG-5](#bug-5--idp-and-kicker-starting-slots-are-unpriced--moderate-affects-4-of-the-6-backtested-league-seasons-added-2026-08-09); no pricing
+> fix beat the status quo. See [`idp-pricing-2026-08-09.md`](idp-pricing-2026-08-09.md).
+
 ---
 
 ## Table of contents
@@ -541,6 +552,34 @@ total and not backfilled into the weekly record. Consequence for FTF: the
 `points_for` seeding tiebreak can disagree with the scoring history by ~1 %.
 Not actionable, but it is why the rewind test checks PF within 2 % rather than
 exactly.
+
+### BUG-5 — IDP and kicker starting slots are unpriced — **MODERATE, affects 4 of the 6 backtested league-seasons** *(added 2026-08-09)*
+
+`RosterValueStrength` prices a starting lineup with the DynastyProcess board,
+which carries **QB/RB/WR/TE only** (676 rows, zero IDP, zero K — verified live).
+The operator's **FFv3** league starts
+`QB,RB,RB,WR,WR,TE,FLEX,K,DL,DL,LB,LB,DB,DB,IDP_FLEX`, so **8 of 15 starting
+slots price at exactly 0.0**, covering **~33 % of what those teams actually
+scored**. Compounding it, `select_starting_lineup()` matched a slot name against
+the player's NFL `position`, so a `DL` slot never accepted a DE/DT and
+`IDP_FLEX` accepted nobody — 25–33 of 180 slots per league-season were left
+entirely empty.
+
+**It is a missing signal, not a bias.** The unpriced slots contribute 0.0 to
+every team, so they cancel in the cross-team z-score. Every number in this
+report and in the preseason revalidation is arithmetically unaffected — but for
+those 4 league-seasons "strength from starting-lineup value" means *from the
+offensive core only*, and must be described that way.
+
+**Fixed:** the slot-eligibility half (measured **0 of 72 predictions moved**).
+**Not fixed:** the pricing half. No license-clean dynasty IDP value board exists
+(DynastyProcess, nflverse, FantasyCalc, KTC all checked); both candidate
+workarounds were backtested and neither beat the status quo (league-mean
+fallback Δ Brier **+0.0005**; coverage attenuation **−0.0019**, 90 % CI
+[−0.0167, +0.0070]). `strength.lineup_pricing()` now measures the affected slots
+so the surface can label the estimate honestly — wiring it into `meta` is the
+open follow-up. Full evidence:
+[`idp-pricing-2026-08-09.md`](idp-pricing-2026-08-09.md).
 
 ### Non-bug confirmations
 

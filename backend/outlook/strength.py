@@ -35,6 +35,26 @@ where z() is the cross-league z-score of starting-lineup value. Defaults live
 in model_config (outlook_mean_points=110, outlook_points_per_value_sd=12,
 outlook_sigma_default=25). These spreads are plausible but unvalidated; the
 backtest scaffold (tests/test_outlook_odds.py) is where they should be tuned.
+
+BUG-5 — IDP AND KICKER SLOTS ARE UNPRICED (known, measured, NOT priced)
+-----------------------------------------------------------------------
+`RosterValueStrength` prices a lineup with the DynastyProcess board, which
+carries QB/RB/WR/TE only. In an IDP or kicker league a large share of the
+starting lineup therefore prices at exactly 0.0 — 8 of 15 slots (53 %) and
+~33 % of realised scoring in the operator's FFv3 league. `lineup_pricing()`
+measures exactly which slots are affected; call it before presenting a
+roster-value strength estimate as a whole-lineup number.
+
+Fixed here: the *selection* half — `select_starting_lineup` now knows real
+IDP slot eligibility, so those slots are filled rather than left empty.
+**Deliberately NOT fixed: the pricing.** The unpriced slots contribute 0.0 to
+*every* team, so they cancel in the cross-team z-score — a missing signal, not
+a bias. Two candidate fixes (pricing unpriced starters at the league mean, and
+attenuating z by the priced share) were both backtested and neither beat the
+status quo (Δ playoff Brier +0.0005 and −0.0019, 90 % CIs spanning zero), and
+no license-clean dynasty IDP value board exists to price them honestly. Do not
+invent one. Evidence and the standing recommendation:
+docs/feedback/items/169-outlook-league-summary/idp-pricing-2026-08-09.md.
 """
 
 from __future__ import annotations
@@ -53,6 +73,35 @@ _FLEX_ELIGIBLE: dict[str, tuple[str, ...]] = {
     "SUPER_FLEX": ("QB", "RB", "WR", "TE"),
     "SUPERFLEX": ("QB", "RB", "WR", "TE"),
 }
+
+# IDP slots (BUG-5). Sleeper names a defensive starting slot after the
+# *fantasy position group* it accepts — "DL", "LB", "DB" — while a player's
+# `position` is his NFL position ("DE", "DT", "CB", "SS", ...). For
+# QB/RB/WR/TE/K the two strings coincide, which is why matching the slot name
+# against the position string worked for offence-only leagues and silently
+# left every defensive slot empty in an IDP league. `IDP_FLEX` takes any of
+# the three groups.
+_IDP_LINE = ("DL", "DE", "DT", "NT")
+_IDP_BACKER = ("LB", "OLB", "ILB", "MLB")
+_IDP_BACK = ("DB", "CB", "S", "SS", "FS")
+_IDP_SLOT_ELIGIBLE: dict[str, tuple[str, ...]] = {
+    "DL": _IDP_LINE,
+    "LB": _IDP_BACKER,
+    "DB": _IDP_BACK,
+    "IDP_FLEX": _IDP_LINE + _IDP_BACKER + _IDP_BACK,
+}
+
+# Full slot → eligible-positions map. Anything absent falls back to an
+# identity match (slot name == position), which is exactly the pre-BUG-5
+# behaviour for QB/RB/WR/TE/K/DEF and for any platform slot we don't know.
+_SLOT_ELIGIBLE: dict[str, tuple[str, ...]] = {
+    **_FLEX_ELIGIBLE, **_IDP_SLOT_ELIGIBLE,
+}
+
+
+def eligible_positions(slot: str) -> tuple[str, ...]:
+    """Positions allowed to fill `slot`. Unknown slots match their own name."""
+    return _SLOT_ELIGIBLE.get(slot, (slot,))
 
 
 @dataclass(frozen=True)
@@ -94,12 +143,20 @@ def select_starting_lineup(
     player_pos: dict[str, str],
     roster_slots: list[str],
 ) -> list[str]:
-    """Greedy best-lineup SELECTION: fill each dedicated slot with the
-    highest-value eligible unused player, then flex slots from the remaining
-    pool. Returns the selected player_ids (not their values) so callers that
-    need to know WHICH players are starting — not just the lineup's total
-    value — can reuse the same selection (see `bye_multiplier.py`, feedback
-    #169, for the first such caller).
+    """Greedy best-lineup SELECTION: fill each single-position slot with the
+    highest-value eligible unused player, then the multi-position (flex-style)
+    slots from the remaining pool. Returns the selected player_ids (not their
+    values) so callers that need to know WHICH players are starting — not just
+    the lineup's total value — can reuse the same selection (see
+    `bye_multiplier.py`, feedback #169, for the first such caller).
+
+    Slot eligibility comes from `eligible_positions()`, so an IDP "DL" slot
+    accepts a DE/DT/NT and `IDP_FLEX` accepts any defender (BUG-5). Before
+    that fix the slot name was matched against the position string directly,
+    which is correct for QB/RB/WR/TE/K and silently left every defensive slot
+    empty. The fix changes the *selection*; it cannot change
+    `starting_lineup_value` while the value board prices no defenders, since
+    every newly-selectable player is worth 0.0.
 
     Returns `[]` when the league exposes no starting slots (e.g. an
     ESPN-imported league without roster_positions) — `starting_lineup_value`
@@ -119,18 +176,15 @@ def select_starting_lineup(
         pairs.sort(key=lambda pv: pv[0], reverse=True)
 
     selected: list[str] = []
-    # dedicated (non-flex) slots first so flex draws from true leftovers
-    dedicated = [s for s in roster_slots if s not in _FLEX_ELIGIBLE]
-    flex = [s for s in roster_slots if s in _FLEX_ELIGIBLE]
-    for slot in dedicated:
-        pool = by_pos.get(slot)
-        if pool:
-            selected.append(pool.pop(0)[1])
-    for slot in flex:
-        elig = _FLEX_ELIGIBLE[slot]
+    # single-position slots first so the multi-position ones draw from true
+    # leftovers. For an offence-only league this is exactly the pre-BUG-5
+    # dedicated/flex partition, in the same order.
+    single = [s for s in roster_slots if len(eligible_positions(s)) == 1]
+    multi = [s for s in roster_slots if len(eligible_positions(s)) > 1]
+    for slot in single + multi:
         # pick the single best available value across eligible positions
         best_pos, best_val = None, None
-        for pos in elig:
+        for pos in eligible_positions(slot):
             pool = by_pos.get(pos)
             if pool and (best_val is None or pool[0][0] > best_val):
                 best_pos, best_val = pos, pool[0][0]
@@ -152,6 +206,61 @@ def starting_lineup_value(
         return sum(player_value.get(str(p), 0.0) for p in player_ids)
     selected = select_starting_lineup(player_ids, player_value, player_pos, roster_slots)
     return sum(player_value.get(pid, 0.0) for pid in selected)
+
+
+@dataclass(frozen=True)
+class LineupPricing:
+    """How much of a league's STARTING lineup the value board can price
+    (BUG-5). A slot is priceable when at least one position eligible for it
+    carries a non-zero value somewhere in the board.
+
+    This is a property of the league's slot shape crossed with the board's
+    position universe — not of any one team — so every team in a league gets
+    the same number, and a fully-priced league reports `coverage == 1.0`."""
+    total_slots: int
+    priceable_slots: int
+    unpriceable_slots: tuple[str, ...]   # slot names, in roster order
+
+    @property
+    def coverage(self) -> float:
+        """Priced share of the starting lineup, 0.0–1.0. A league with no
+        starting slots at all reports 1.0 — `starting_lineup_value` sums the
+        whole roster there, so there is no slot to be blind to."""
+        if not self.total_slots:
+            return 1.0
+        return self.priceable_slots / self.total_slots
+
+
+def lineup_pricing(
+    roster_slots: list[str],
+    player_value: dict[str, float],
+    player_pos: dict[str, str],
+) -> LineupPricing:
+    """Which of a league's starting slots the value board can price.
+
+    The DynastyProcess board FTF seeds from carries QB/RB/WR/TE only, so in an
+    IDP or kicker league a large share of the starting lineup prices at exactly
+    0.0 and `RosterValueStrength` sees under half of every roster. The number
+    returned here is what makes that visible — it does not change any
+    prediction. See `docs/feedback/items/169-outlook-league-summary/
+    idp-pricing-2026-08-09.md`.
+
+    The board's position universe is derived from the data actually supplied
+    (positions holding at least one non-zero value) rather than hard-coded, so
+    a future board that does price defenders needs no change here."""
+    priced_positions = {
+        (player_pos.get(pid) or "?")
+        for pid, val in player_value.items() if val > 0
+    }
+    unpriceable = tuple(
+        s for s in roster_slots
+        if not priced_positions.intersection(eligible_positions(s))
+    )
+    return LineupPricing(
+        total_slots=len(roster_slots),
+        priceable_slots=len(roster_slots) - len(unpriceable),
+        unpriceable_slots=unpriceable,
+    )
 
 
 @runtime_checkable

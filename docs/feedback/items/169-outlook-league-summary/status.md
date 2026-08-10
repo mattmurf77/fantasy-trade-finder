@@ -198,6 +198,26 @@ operator's own leagues. Full method, numbers and verdict:
   percentage, title odds withheld, BUG-1 fixed first.** A
   Sleeper-projections cross-check still disagrees with the roster-value prior
   on half the playoff field in the superflex league.
+- **BUG-5 (moderate, pricing half open) — 2026-08-09:** `RosterValueStrength`
+  prices lineups with a board that carries **QB/RB/WR/TE only**. The operator's
+  **FFv3** league starts 8 IDP/K slots out of 15, so **53 % of its starting
+  slots price at 0.0**, covering **~33 % of the points those teams scored** —
+  and FFv3 is **4 of the 6 backtested league-seasons**. The preseason numbers
+  above were therefore measured on an **offensive-core-only** basis for those
+  four seasons. *They are arithmetically unaffected* (the gap is identical for
+  every team in a league, so it cancels in the z-score) — but the revalidation
+  report's "starting-slot coverage 100 %" row counted skill slots only and is
+  corrected. **Fixed:** IDP slot eligibility in `select_starting_lineup()`
+  (measured 0 of 72 predictions moved). **Not fixed:** the pricing. No
+  license-clean dynasty IDP value board exists (DynastyProcess, nflverse,
+  FantasyCalc, KTC, Sleeper `search_rank` all checked and rejected — see
+  [idp-pricing-2026-08-09.md](idp-pricing-2026-08-09.md) §4.1), and both
+  candidate workarounds were backtested and lost (league-mean fallback
+  Δ Brier +0.0005; coverage attenuation −0.0019, CI [−0.0167, +0.0070]).
+  **Open follow-up before lighting the flag for any IDP league:** wire
+  `strength.lineup_pricing()` into the payload `meta` (owned by
+  `backend/outlook/serialize.py`) so the UI can say *"based on your offensive
+  starters"* instead of showing an unqualified number.
 - **BUG-1 (severe, open):** `settings.league_average_match` (median match) is
   ignored — the operator's Lakeview league has it ON in the live 2026 season,
   which makes `projected_wins` read 22.29 in a 14-week season. Tracked by a

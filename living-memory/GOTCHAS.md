@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-026 | Half a roster silently prices at 0.0 in an IDP or K league | Backend / outlook / values |
 | G-025 | "No historical data exists" for a GitHub-hosted CSV | Research / external data |
 | G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion |
 | G-023 | Fixing a feedback item already fixed weeks ago | Feedback / process |
@@ -193,6 +194,16 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Fix:** for any GitHub-hosted data file, `api.github.com/repos/<owner>/<repo>/commits?path=<file>&per_page=1&until=<ISO date>` resolves the nearest revision at-or-before a date, and `raw.githubusercontent.com/<owner>/<repo>/<sha>/<file>` fetches it. **Send a `User-Agent`** — a bare `curl` on `raw.` gets a redirect stub, which is easy to misread as "no data". DP's history runs to ~2020-09 with a stable column shape.
 - **Generalisation:** before writing "no historical data exists", check whether the source is version-controlled, has a Wayback capture, or publishes dated files. In this repo that also applies to `db_playerids.csv` and `values.csv` — same repo, same history.
 - **Where it lives now:** `backend/dp_values_history.py` + 24 committed boards in `backend/tests/fixtures/dp-values-history/`. Full writeup: `docs/feedback/items/169-outlook-league-summary/dated-values-revalidation-2026-08-09.md`.
+
+---
+
+### G-026 — the dynasty value board is offence-only, so IDP and K roster slots price at 0.0
+- **Symptom:** anything that sums "roster value" or "starting-lineup value" reports a plausible-looking number that is silently missing half the lineup in an IDP or kicker league. The outlook engine's preseason strength source ranked the operator's FFv3 teams on **7 of their 15 starting slots** for four backtested seasons, and its own coverage table read "100 %" — because that table counted QB/RB/WR/TE slots only.
+- **Cause:** every value path in FTF is seeded from DynastyProcess `values-players.csv`, which contains **QB/RB/WR/TE and nothing else** (676 rows, 2026-08-09). `backend/data_loader.py::VALID_POSITIONS` is literally `{"QB","RB","WR","TE"}`, so the universal player pool has no defender or kicker in it at all — such a player resolves to value `0.0` **and** position `"?"`. An unpriced player is indistinguishable from a missing one.
+- **Second trap, same function:** Sleeper names a defensive starting **slot** after the fantasy position *group* (`DL`, `LB`, `DB`, `IDP_FLEX`) while a player's `position` is his NFL position (`DE`, `DT`, `NT`, `OLB`, `CB`, `SS`, `FS`). Matching the slot name against the position string — which is correct for QB/RB/WR/TE/K — leaves every defensive slot empty. Fixed in `backend/outlook/strength.py::eligible_positions`.
+- **Fix / non-fix:** there is **no license-clean dynasty IDP value board** to price them with (DynastyProcess publishes none; FantasyCalc none; nflverse none; the `dynasty-idp` rows inside DP's `db_fpecr` are a FantasyPros scrape, 100 players deep, and ranks not values). Do **not** invent one. `backend/outlook/strength.py::lineup_pricing()` measures which slots a board cannot price — call it and label the output rather than presenting an unqualified whole-lineup figure.
+- **Prevention:** before summing player values across a roster, ask what the league *starts*. `roster_positions` containing any of `K`, `DL`, `LB`, `DB`, `IDP_FLEX`, `DEF` means the board covers a minority of the lineup. Note the cancellation that saves you: a **cross-team z-score** within one league is unaffected (the gap is identical for every team), but an **absolute** value — a displayed lineup total, a fraction-of-value share, a cross-league comparison — is not.
+- **Full writeup:** `docs/feedback/items/169-outlook-league-summary/idp-pricing-2026-08-09.md` (BUG-5), incl. the measured before/after showing no available fix beats the status quo.
 
 ---
 

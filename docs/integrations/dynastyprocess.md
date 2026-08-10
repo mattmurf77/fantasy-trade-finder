@@ -68,6 +68,33 @@ From `values-players.csv` (columns present in the live file: `player, pos, team,
 
 `team`, `age`, `draft_year`, `ecr_*`, `scrape_date`, `fp_id` are present in the file but **not read**.
 
+### The board is offence-only — there is no IDP or kicker source here
+
+**Verified 2026-08-09 against the live files, not assumed.** `values-players.csv`
+is `WR 251 · RB 196 · TE 133 · QB 96` and `values.csv` is the same 676 rows plus
+85 `pos == "PICK"` rows. **Zero IDP rows, zero K rows, in either file.** There is
+no `values-idp.csv`: the full `files/` listing is `database.csv`, `db_fpecr*`,
+`db_playerids*`, `fp_dynastyvsredraft.csv`, `fp_latest_weekly*`,
+`missing_ids.json`, `values-picks.csv`, `values-players.csv`, `values.csv`, and
+an `archives/` folder holding no values file. The `VALID_POSITIONS` filter in
+`data_loader.py` (`{QB, RB, WR, TE}`) matches the data rather than narrowing it.
+
+**Consequence:** any FTF surface that prices a *lineup* rather than a *player*
+is blind to a defensive or kicker slot — 8 of 15 starting slots in the
+operator's own FFv3 league. See `backend/outlook/strength.py::lineup_pricing()`,
+`living-memory/GOTCHAS.md` **G-026**, and
+`docs/feedback/items/169-outlook-league-summary/idp-pricing-2026-08-09.md` for
+the measurement and for why no substitute source was adopted.
+
+**`db_fpecr_latest.csv` is not the escape hatch.** It *does* carry IDP (a
+`dynasty-idp` page, 100 players: 50 LB / 30 DL / 20 DB), but it is a
+**FantasyPros scrape republished by DynastyProcess**, and FantasyPros is the
+commercial-ToS landmine `docs/feedback/items/169-outlook-league-summary/projection-source-research.md`
+already ruled out for production — relaying it through a third party does not
+change that. It is also an ECR *rank*, not a value on the 0–10000 scale, and 100
+players does not cover a 12-team IDP league's starters. FTF reads no column from
+it today; keep it that way absent a negotiated FantasyPros deal.
+
 From `values.csv`, only rows with `pos == "PICK"`: the `player` column doubles as the pick label (`"2026 Pick 1.01"`, `"2027 Early 1st"`) and `value_1qb`/`value_2qb` map through the same `seed_elo_for_value()` curve.
 
 ## Error modes
