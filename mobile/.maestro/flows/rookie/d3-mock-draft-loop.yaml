@@ -1,0 +1,222 @@
+appId: com.fantasytradefinder.app
+# tc: T-291-01 / T-291-03 — the mock loop, end to end, twice.
+# profile: standard + ffv3-predraft corpus merged into the fixture dir
+#          (identical to d2 — see the PRECONDITION note below)
+# flags: draft.room ON, draft.mock ON, draft.tab ON, draft.rank_inline OFF
+#
+# WHAT THIS FLOW IS FOR. Two acceptances the pytest suite structurally cannot
+# reach, because both are about what a person can SEE and DO:
+#
+#   #291  `assertVisible: "Tap to draft"` BEFORE any row is tapped. The pick
+#         path always worked; the defect was that a tappable mock row looked
+#         exactly like a read-only Draft Room row until after it had been
+#         tapped. A tap-then-assert flow passes on that bug — the assertion
+#         has to land while the board is still untouched.
+#
+#   #292  The loop runs TWICE, and the second recap is dismissed. Completed
+#         mocks accumulate one row per finished mock and only the newest was
+#         ever reachable, so a per-row dismissal merely uncovered mock N-1.
+#         With two completed mocks on file, ONE dismissal must return the
+#         room to "No mock running" — not to the previous recap. That is why
+#         this flow is not one lap.
+#
+# ⚠ PRECONDITION, inherited from d1/d2 and NOT introduced here.
+#   `backend/tests/fixtures/profiles/standard.json` declares exactly one
+#   league (990000000000000001). d1, d2 and this flow all target
+#   1312140920132497408, which appears in no profile, and the "corpus merged
+#   into the fixture dir" step those headers assume is unimplemented. Until
+#   the ffv3 league is added to a profile's `leagues[]`, step 2 below cannot
+#   find its row. Sized and raised in
+#   docs/feedback/items/290-mock-draft-engine/status.md — the fix is one
+#   profile entry and it repairs d1/d2 as a side effect.
+#
+# Rounds are stepped 4 -> 1 so the user makes exactly ONE pick per lap and
+# the CPU tail resolves straight into the recap. ffv3's top-level `rounds` is
+# null; the 4 lives in `settings.rounds`.
+tags: [rookie, draft-room, mock]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.1312140920132497408"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.1312140920132497408"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.league-home"
+- scrollUntilVisible:
+    element:
+      id: "league.draft-room-row"
+    direction: DOWN
+    timeout: 25000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- tapOn:
+    id: "league.draft-room-row"
+
+# ── the Mock side of the room ────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.mode.mock"
+    timeout: 30000
+- tapOn:
+    id: "draft-room.mode.mock"
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.card"
+    timeout: 20000
+- assertVisible:
+    id: "mock-entry.start"
+- takeScreenshot: rookie-d3-mock-entry
+
+# ── lap 1 ────────────────────────────────────────────────────────────────
+- tapOn:
+    id: "mock-entry.start"
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup-sheet"
+    timeout: 20000
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- assertVisible:
+    id: "mock-setup.rounds.value"
+- tapOn:
+    id: "mock-setup.type.linear"
+- tapOn:
+    id: "mock-setup.start"
+
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.on-the-clock"
+    timeout: 40000
+- assertVisible:
+    id: "mock-draft.rail"
+# ═══ #291's acceptance. This assertion runs BEFORE any row has been
+#     tapped — that is the whole point of it. ═══
+- assertVisible: "Tap to draft"
+- assertVisible: "Tap a rookie below, then confirm."
+- takeScreenshot: rookie-d3-affordance-before-tap
+
+- scrollUntilVisible:
+    element:
+      id: "mock-draft.undrafted-row..*"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- tapOn:
+    id: "mock-draft.undrafted-row..*"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.confirm"
+    timeout: 20000
+- tapOn:
+    id: "mock-draft.confirm.draft"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.recap"
+    timeout: 60000
+- takeScreenshot: rookie-d3-recap-1
+
+# Back to the room. The complete card's PRIMARY is now the way onward.
+- tapOn:
+    id: "mock-draft.back-btn"
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.run-it-back"
+    timeout: 20000
+- takeScreenshot: rookie-d3-complete-card
+
+# ── lap 2 — ***#292's acceptance*** ──────────────────────────────────────
+- tapOn:
+    id: "mock-entry.run-it-back"
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup-sheet"
+    timeout: 20000
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.type.linear"
+- tapOn:
+    id: "mock-setup.start"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.on-the-clock"
+    timeout: 40000
+
+- scrollUntilVisible:
+    element:
+      id: "mock-draft.undrafted-row..*"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- tapOn:
+    id: "mock-draft.undrafted-row..*"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.confirm"
+    timeout: 20000
+- tapOn:
+    id: "mock-draft.confirm.draft"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.recap"
+    timeout: 60000
+
+# ── ***R-14's acceptance*** ──────────────────────────────────────────────
+# Two completed mocks are now on file. ONE dismissal must clear the surface.
+# If the abandon only retired the newest row, the room would come back
+# showing the FIRST mock's recap and `mock-entry.start` would never appear.
+- assertVisible:
+    id: "mock-draft.end"
+- tapOn:
+    id: "mock-draft.end"
+# The confirmation is a native Alert — its buttons are drawn by iOS and
+# cannot carry a testID, so this is the one place an id selector does not
+# exist. Multi-line `text:` form, which the linter permits; a one-line
+# `tapOn: "Clear"` would (correctly) be rejected.
+- tapOn:
+    text: "Clear"
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.start"
+    timeout: 30000
+- assertNotVisible:
+    id: "mock-entry.recap"
+- takeScreenshot: rookie-d3-surface-cleared
