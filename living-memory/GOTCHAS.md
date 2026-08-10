@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion |
 | G-023 | Fixing a feedback item already fixed weeks ago | Feedback / process |
 | G-022 | Worktree agents drift, duplicate edits, blow up EAS archive | Mobile / worktrees / EAS |
 | G-021 | Native header back chevron renders but does nothing | Mobile / navigation |
@@ -184,6 +185,15 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** several distinct problems, all from the same source. Worktree agents branch from an **older commit than branch HEAD** (merge-base `20548ff` vs HEAD `30492ac`). Disjoint source-file ownership holds, but agents independently edit the same **shared docs** (`docs/cross-client-invariants.md`, per-folder `CLAUDE.md`). Every worktree lacks `mobile/node_modules`, so each agent symlinks the main checkout's. And 71 worktrees (8.6 GB) pushed the EAS archive from 228 MB to **1.2 GB**, failing the upload.
 - **Fix:** `.easignore` (note: an earlier version globbed `*.png`, stripped the app icon and splash, and failed the Bundle JavaScript phase — scope it narrowly). Check `git merge-base` per branch and rebase before merging. Assign shared docs a single owner per wave.
 - **Prevention:** always branch from a freshly fetched `origin/main`, per the convention in [`../CLAUDE.md`](../CLAUDE.md).
+
+### G-024 — a Sleeper league's W/L can be double its games played (median match)
+- **Symptom:** a 14-week Sleeper season reports a 13-15 record (28 decisions). Anything that assumes one win per week silently runs on the wrong scale — e.g. the outlook simulator emitting `projected_wins = 22.29` for a 14-week season.
+- **Cause:** `settings.league_average_match == 1` ("median match"): every team plays its head-to-head opponent **and** the league median each week, so Sleeper books two W/L decisions per week. `/rosters` reports the combined total; `/matchups/{week}` still shows only the head-to-head pairing.
+- **Fix:** read `settings.league_average_match` whenever you consume `settings.wins/losses/ties`. To reconstruct standings from weekly scores, add the median game: compare each team's week score to the league median that week. Verified to reproduce Sleeper's own totals exactly on 24 median-league rosters.
+- **Where it bites today:** the operator's **Lakeview** league has it on in 2024, 2025 and the live 2026 season; Fantasy Football V3 does not. `backend/outlook/league_state.py` still ignores it — tracked by a strict `xfail` in `backend/tests/test_outlook_calibration.py`.
+- **Related:** `settings.playoff_seed_type` (1 on Lakeview) is likewise unread by `backend/outlook/playoff_format.py`. Full writeup: `docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md`.
+
+---
 
 ### G-023 — testers report against the shipped binary, not your branch
 - **Symptom:** you write a careful fix for a feedback item that was already fixed weeks ago.
