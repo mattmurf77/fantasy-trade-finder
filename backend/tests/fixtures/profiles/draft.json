@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "name": "draft",
+  "description": "12-team SF TEP league MID-ROOKIE-DRAFT: a 4-round snake draft with a populated draft_order, 18 of 48 picks made, 6 traded picks and 38 rookies still on the board. Rosters are drafted from the VETERAN pool only (roster_size 22 \u2014 the Draft Room's undrafted list is rookie_ids minus drafted minus ROSTERED, so seeding the rookie class onto rosters would empty the board this profile exists to show); the 18 made picks are then placed on their picker's roster, which is what Sleeper does the instant a pick lands. qa_draft is unlocked in both formats so the Draft Room's basis=my_board pricing and the mock-draft entry both resolve. The unblocker for the capture matrix's draft-room / mock-draft rows, which have zero coverage against the other profiles (every one of them serves drafts: []).",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta": false,
+    "landing.try_before_sync": false,
+    "league.activity_feed": false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages": false,
+    "swipe.gesture_audit": true,
+    "swipe.qc_compliments": true,
+    "trade.finder_targeting": true,
+    "trade.preference_lists": true,
+    "trade.send_in_sleeper": true,
+    "trade_math.human_explanations": true,
+    "trades.new_partners_alerts": false,
+    "trades.queue_2k": false,
+    "draft.room": true,
+    "draft.tab": true,
+    "draft.mock": true,
+    "draft.rank_inline": true,
+    "picks.slot_values": true,
+    "draft.live_poll": false
+  },
+  "app_user": {
+    "username": "qa_draft",
+    "user_id": "900000000000000001",
+    "unlocked": true,
+    "rankings": {
+      "positions": [
+        "QB",
+        "RB",
+        "WR",
+        "TE"
+      ],
+      "trios_per_position": "threshold+2",
+      "history_days": 30,
+      "formats": [
+        "1qb_ppr",
+        "sf_tep"
+      ]
+    },
+    "tiers": "seeded-suggested",
+    "anchors": null
+  },
+  "extra_users": [],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "990000000000000001",
+      "name": "QA Draft League",
+      "platform": "sleeper",
+      "total_rosters": 12,
+      "format": "sf_tep",
+      "roster_size": 22,
+      "members": [
+        {
+          "username": "qa_opp_ranked",
+          "user_id": "900000000000000002",
+          "rankings": "generated",
+          "roster": "generated:balanced"
+        },
+        {
+          "username": "qa_opp_unranked",
+          "user_id": "900000000000000003",
+          "rankings": null,
+          "roster": "generated:balanced"
+        }
+      ],
+      "matches_seed": {
+        "mutual": 0,
+        "awaiting": 0
+      },
+      "draft": {
+        "rounds": 4,
+        "type": "snake",
+        "status": "drafting",
+        "picks_made": 18,
+        "traded_picks": 6,
+        "draft_order": true
+      }
+    }
+  ],
+  "players_cache": "warm"
+}

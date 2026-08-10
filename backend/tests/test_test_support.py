@@ -137,6 +137,159 @@ def test_bad_injection_specs_rejected(client):
     assert client.post("/__test__/latency", json={"path": "/x", "ms": -1}).status_code == 400
 
 
+
+# ---------------------------------------------------------------------------
+# 1b. Determinism pins (screen-library capture matrix, D-rows)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def deck_client():
+    """A bare app whose /api/trades/status answers a 7-card deck."""
+    app = Flask(__name__)
+    sessions: dict = {"tok": {"user_id": "u1"}}
+    import threading
+    ts.install(app, sessions=sessions, sessions_lock=threading.Lock())
+
+    @app.route("/api/trades/status")
+    def status():
+        return {"job_id": "j1", "status": "complete",
+                "cards": [{"trade_id": f"t{i}"} for i in range(7)]}
+
+    @app.route("/api/rankings")
+    def rankings():
+        return {"cards": [{"trade_id": "not-a-deck"}] * 7}
+
+    c = app.test_client()
+    c._sessions = sessions
+    yield c
+    c.post("/__test__/reset", json={"counters": True})
+
+
+def test_deck_size_pin_truncates_the_served_deck(deck_client):
+    assert len(deck_client.get("/api/trades/status").get_json()["cards"]) == 7
+    deck_client.post("/__test__/pin/deck_size", json={"n": 3})
+    body = deck_client.get("/api/trades/status").get_json()
+    assert [c["trade_id"] for c in body["cards"]] == ["t0", "t1", "t2"]
+    # Everything else about the payload is untouched.
+    assert body["job_id"] == "j1" and body["status"] == "complete"
+
+
+def test_deck_size_pin_zero_serves_an_empty_deck(deck_client):
+    deck_client.post("/__test__/pin/deck_size", json={"n": 0})
+    assert deck_client.get("/api/trades/status").get_json()["cards"] == []
+
+
+def test_deck_size_pin_respects_its_path_glob(deck_client):
+    """Default glob is /api/trades* (no slash — the bare /api/trades serves
+    pending cards too). A `cards` key on an unrelated route is not a deck and
+    must not be rewritten."""
+    deck_client.post("/__test__/pin/deck_size", json={"n": 1})
+    assert len(deck_client.get("/api/rankings").get_json()["cards"]) == 7
+    assert len(deck_client.get("/api/trades/status").get_json()["cards"]) == 1
+
+
+def test_deck_size_pin_is_cleared_by_reset(deck_client):
+    deck_client.post("/__test__/pin/deck_size", json={"n": 2})
+    pin = deck_client.get("/__test__/whoami").get_json()["pins"]["deck_size"]
+    assert pin["n"] == 2 and pin["pattern"] == "/api/trades*"
+    deck_client.post("/__test__/reset")
+    assert deck_client.get("/__test__/whoami").get_json()["pins"] == {}
+    assert len(deck_client.get("/api/trades/status").get_json()["cards"]) == 7
+
+
+def test_bad_pin_specs_rejected(deck_client):
+    assert deck_client.post("/__test__/pin/deck_size", json={}).status_code == 400
+    assert deck_client.post("/__test__/pin/deck_size",
+                            json={"n": -1}).status_code == 400
+    assert deck_client.post("/__test__/pin/deck_size",
+                            json={"n": "3"}).status_code == 400
+    assert deck_client.post("/__test__/pin/qc_trio",
+                            json={"rng_seed": "x"}).status_code == 400
+    assert deck_client.post("/__test__/pin/streak", json={}).status_code == 400
+    assert deck_client.post("/__test__/pin/streak",
+                            json={"current": 5, "longest": 2}).status_code == 400
+
+
+def test_qc_trio_pin_primes_the_per_session_throttle(client):
+    """server.py serves a QC trio only when the session's per-position counter
+    has reached QC_TRIO_INTERVAL. The pin raises it immediately before the
+    request routes — the throttle itself is never modified."""
+    interval = ts._qc_trio_interval()
+    sess = client._sessions["tok"]
+    assert "_qc_counters" not in sess
+
+    client.get("/api/trio")                      # unarmed: no priming
+    assert sess.get("_qc_counters") is None
+
+    client.post("/__test__/pin/qc_trio", json={"armed": True, "rng_seed": 1337})
+    client.get("/api/trio")
+    assert sess["_qc_counters"][""] == interval
+    assert sess["_qc_counters"]["QB"] == interval
+
+
+def test_qc_trio_pin_primes_only_the_trio_path(client):
+    client.post("/__test__/pin/qc_trio", json={"armed": True})
+    client.get("/api/anything")
+    assert client._sessions["tok"].get("_qc_counters") is None
+
+
+def test_qc_trio_pin_can_be_disarmed_and_is_reset(client):
+    client.post("/__test__/pin/qc_trio", json={"armed": True})
+    assert "qc_trio" in client.get("/__test__/whoami").get_json()["pins"]
+    client.post("/__test__/pin/qc_trio", json={"armed": False})
+    assert client.get("/__test__/whoami").get_json()["pins"] == {}
+    client.post("/__test__/pin/qc_trio", json={"armed": True})
+    client.post("/__test__/reset")
+    assert client.get("/__test__/whoami").get_json()["pins"] == {}
+
+
+def test_streak_pin_writes_the_users_columns(monkeypatch, tmp_path):
+    """The streak toast only fires when streak.current > 0, and no profile
+    seeds one (the counter is derived from rank-event history). The pin is a
+    DB write so /api/me/streak, the leaderboard and the post-rank response
+    cannot disagree on screen."""
+    import threading
+    from datetime import datetime as _dt, timedelta, timezone
+
+    from sqlalchemy import create_engine, insert, select
+
+    import backend.database as db
+    eng = create_engine(f"sqlite:///{tmp_path / 'pin.db'}",
+                        connect_args={"check_same_thread": False})
+    db.metadata.create_all(eng)
+    with eng.begin() as conn:
+        conn.execute(insert(db.users_table).values(
+            sleeper_user_id="u_pin", username="u_pin", created_at="2026-08-01"))
+    monkeypatch.setattr(db, "engine", eng)
+
+    app = Flask(__name__)
+    ts.install(app, sessions={}, sessions_lock=threading.Lock())
+    c = app.test_client()
+
+    r = c.post("/__test__/pin/streak", json={"current": 4, "user_id": "u_pin"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["current"] == 4 and body["longest"] == 4
+    # Defaults to yesterday IN UTC — a host at UTC-7 late in the evening
+    # would otherwise write a date two UTC days back, which the read-side
+    # decay (_streak_lapsed) reports as `current: 0`.
+    yesterday_utc = (_dt.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    assert body["last_rank_local_date"] == yesterday_utc
+
+    with eng.connect() as conn:
+        row = conn.execute(select(
+            db.users_table.c.current_streak, db.users_table.c.longest_streak,
+            db.users_table.c.last_rank_local_date)).fetchone()
+    assert row.current_streak == 4
+    assert row.longest_streak == 4
+    assert row.last_rank_local_date == body["last_rank_local_date"]
+
+    # No user_id ⇒ the only seeded user; unknown id ⇒ 404, never a silent no-op.
+    assert c.post("/__test__/pin/streak", json={"current": 9}).get_json()["user_id"] == "u_pin"
+    assert c.post("/__test__/pin/streak",
+                  json={"current": 1, "user_id": "nope"}).status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # 2. Subprocess tests (import-time env behavior of backend.server)
 # ---------------------------------------------------------------------------

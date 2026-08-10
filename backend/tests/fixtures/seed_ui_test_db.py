@@ -47,6 +47,25 @@ FTF_TEST_MODE); real names keep the fixtures valid against the live CSV too
 All writes go through backend.database helpers / SQLAlchemy table objects —
 never raw SQL — so schema migrations carry the seeder (LLD §6).
 
+Platforms and drafts
+--------------------
+A profile league may declare `platform: "espn"` and/or a `draft` block
+(sign-off ruling C, docs/plans/mobile-testing/capture-matrix-signoff.md).
+
+* A `draft` block (Sleeper only) generates a whole synthetic rookie draft —
+  the `drafts` list, the detail object, the pick list and both traded-pick
+  lists — from ONE plan (`World.draft_plan`), so the four cassettes cannot
+  disagree. Rosters for such a league are drawn from the VETERAN pool only
+  and the made picks are then placed on their picker's roster: the Draft
+  Room's undrafted list is `rookie_ids - drafted - ROSTERED`, so a rookie
+  class seeded onto rosters empties the board the profile exists to show.
+* An `espn` league is DB-only — `upsert_espn_league` + a membership replace,
+  plus the optional `pick_assignment` grid. It emits no Sleeper cassettes
+  (an ESPN league has no Sleeper URL space) beyond one explicit
+  `{"__http_error__": 404}` sentinel at `league/<id>`, because ESPN ids are
+  numeric and two Sleeper helpers gate only on `isdigit()`. Both halves are
+  enforced by `_verify_no_cassette_gap`.
+
 Determinism: all randomness flows through one seeded RNG, and every
 timestamp derives from a single anchored "now" (quantized to the hour for
 CLI runs; injectable for tests), so re-seeding with the same seed inside the
@@ -101,6 +120,17 @@ DEFAULT_OUT_DIR = "data/ui-test"
 DEFAULT_SEED = 1337
 SEASON = 2026
 POSITIONS = ("QB", "RB", "WR", "TE")
+
+# Platforms a profile league may declare. 'sleeper' is the default and the
+# only one that emits Sleeper cassettes; 'espn' rows are DB-only (the ESPN
+# read path has no fixture seam — see the espn profile's description).
+PLATFORMS = ("sleeper", "espn")
+
+# Sleeper draft `type` values the generator can emit.
+DRAFT_TYPES = ("snake", "linear")
+# Sleeper draft `status` values → the board's state enum lives in
+# draft_board_service.SLEEPER_STATUS_TO_STATE; these are the four real ones.
+DRAFT_STATUSES = ("pre_draft", "drafting", "paused", "complete")
 
 # The 13 flag-gated client surfaces from app-inventory-2026-07-10.md §5.
 # Every profile must carry an EXPLICIT decision for each (PRD R-07) — a new
@@ -255,6 +285,15 @@ def _validate_profile(p: dict) -> None:
                 _refuse(f"league missing {key!r}")
         if lg["format"] not in db.SCORING_FORMATS:
             _refuse(f"league {lg['league_id']}: unknown format {lg['format']!r}")
+        platform = lg.get("platform", "sleeper")
+        if platform not in PLATFORMS:
+            _refuse(f"league {lg['league_id']}: unknown platform {platform!r} "
+                    f"(have: {', '.join(PLATFORMS)})")
+        if platform == "espn" and not str(lg["league_id"]).isdigit():
+            _refuse(f"league {lg['league_id']}: an ESPN league id must be numeric "
+                    "(the PK column holds the platform-native id)")
+        _validate_draft(lg, _refuse)
+        _validate_assignment(lg, _refuse)
         for m in lg.get("members", []):
             if not m.get("username") or not m.get("user_id"):
                 _refuse(f"league {lg['league_id']}: member needs username + user_id")
@@ -262,6 +301,69 @@ def _validate_profile(p: dict) -> None:
             if roster != "generated:balanced":
                 _refuse(f"roster archetype {roster!r} not implemented in MVP "
                         "(balanced only; qb-heavy/thin/deep-32 are Phase 2)")
+
+
+def _validate_draft(lg: dict, _refuse) -> None:
+    """Optional `league.draft` block (the `draft` profile's whole point).
+
+    A Sleeper-only concept here: an ESPN league has no readable draft object,
+    which is exactly why pick-assignment exists (see `_validate_assignment`).
+    """
+    spec = lg.get("draft")
+    if spec is None:
+        return
+    lid = lg["league_id"]
+    if lg.get("platform", "sleeper") != "sleeper":
+        _refuse(f"league {lid}: a draft block is Sleeper-only "
+                f"(this league is {lg.get('platform')!r})")
+    if not isinstance(spec, dict):
+        _refuse(f"league {lid}: draft must be an object")
+    for key in ("rounds", "status", "picks_made"):
+        if key not in spec:
+            _refuse(f"league {lid}: draft missing {key!r}")
+    if spec["status"] not in DRAFT_STATUSES:
+        _refuse(f"league {lid}: draft status {spec['status']!r} "
+                f"(have: {', '.join(DRAFT_STATUSES)})")
+    dtype = spec.get("type", "snake")
+    if dtype not in DRAFT_TYPES:
+        _refuse(f"league {lid}: draft type {dtype!r} (have: {', '.join(DRAFT_TYPES)})")
+    rounds = int(spec["rounds"])
+    teams = int(lg["total_rosters"])
+    if rounds < 1 or rounds > 8:
+        # draft_status.ROOKIE_MAX_ROUNDS — above it the draft reads as a
+        # STARTUP and #207's rookie-shape test flips, which is a different
+        # fixture than the one anyone asking for `draft` wants.
+        _refuse(f"league {lid}: draft rounds must be 1..8 (rookie-shaped)")
+    made = int(spec["picks_made"])
+    if made < 0 or made > rounds * teams:
+        _refuse(f"league {lid}: picks_made {made} outside 0..{rounds * teams}")
+    if spec["status"] == "pre_draft" and made:
+        _refuse(f"league {lid}: pre_draft draft cannot have picks_made > 0")
+    if spec["status"] == "complete" and made != rounds * teams:
+        _refuse(f"league {lid}: a complete draft must have all "
+                f"{rounds * teams} picks made")
+    traded = int(spec.get("traded_picks", 0))
+    if traded < 0 or traded > rounds * teams:
+        _refuse(f"league {lid}: traded_picks {traded} outside 0..{rounds * teams}")
+    if spec.get("draft_order", True) is False and spec["status"] != "pre_draft":
+        _refuse(f"league {lid}: draft_order:false is only honest on a pre_draft draft")
+
+
+def _validate_assignment(lg: dict, _refuse) -> None:
+    """Optional `league.pick_assignment` block (ESPN pick-assignment grid)."""
+    spec = lg.get("pick_assignment")
+    if spec is None:
+        return
+    lid = lg["league_id"]
+    if not isinstance(spec, dict):
+        _refuse(f"league {lid}: pick_assignment must be an object")
+    for key in ("rounds", "order_type"):
+        if key not in spec:
+            _refuse(f"league {lid}: pick_assignment missing {key!r}")
+    if spec["order_type"] not in ("linear", "snake"):
+        _refuse(f"league {lid}: pick_assignment order_type must be linear|snake")
+    if not (1 <= int(spec["rounds"]) <= 8):
+        _refuse(f"league {lid}: pick_assignment rounds must be 1..8")
 
 
 def _resolve_trios(spec, threshold: int) -> int:
@@ -313,9 +415,21 @@ def _roster_quotas(roster_size: int) -> dict[str, int]:
 
 
 def _draft_rosters(pool: dict[str, dict], fmt: str, team_ids: list[str],
-                   roster_size: int) -> dict[str, list[str]]:
-    """Positional snake draft: balanced rosters, deterministic given inputs."""
+                   roster_size: int,
+                   exclude: set[str] | None = None) -> dict[str, list[str]]:
+    """Positional snake draft: balanced rosters, deterministic given inputs.
+
+    `exclude` withholds player ids from the draw. Its one caller is a league
+    with a `draft` block: a league mid-ROOKIE-draft has, by definition, not
+    yet placed this year's rookie class on rosters, and the Draft Room's
+    undrafted list is `rookie_ids - drafted - ROSTERED`. Seeding the class
+    onto rosters would therefore empty the very board this profile exists to
+    show, while looking like a working fixture.
+    """
     by_pos = _pool_by_position(pool, fmt)
+    if exclude:
+        by_pos = {pos: [pid for pid in ids if pid not in exclude]
+                  for pos, ids in by_pos.items()}
     quotas = _roster_quotas(roster_size)
     for pos, per_team in quotas.items():
         need = per_team * len(team_ids)
@@ -366,6 +480,7 @@ class World:
         self.leagues: dict[str, dict] = {}
         for lg in profile.get("leagues", []):
             self._build_league(lg)
+        self._place_drafted_rookies()
 
     # -- construction helpers ------------------------------------------------
 
@@ -382,32 +497,88 @@ class World:
 
     def _build_league(self, spec: dict) -> None:
         lid = spec["league_id"]
+        platform = spec.get("platform", "sleeper")
         member_order = [self.app_uid]
         ranked: list[str] = []
+        n_league = len(self.leagues) + 1
+        # Non-app members. On ESPN the counterparties are `espn:` synthetic
+        # ids — the SAME shape server._espn_member_id writes — and they are
+        # deliberately NOT registered in `self.users`: a synthetic ESPN
+        # manager has no Sleeper account, so emitting a `user/<name>`
+        # cassette for one would be a fixture that lies about the platform.
+        names: dict[str, str] = {}
         for m in spec.get("members", []):
             member_order.append(m["user_id"])
-            self._add_user(m["user_id"], m["username"], joined=True)
+            names[m["user_id"]] = m["username"]
+            if platform == "sleeper":
+                self._add_user(m["user_id"], m["username"], joined=True)
             if m.get("rankings") == "generated":
                 ranked.append(m["user_id"])
         # Fill the remaining seats with generated (not-signed-up) members.
-        n_league = len(self.leagues) + 1
         i = len(member_order)
         while len(member_order) < int(spec["total_rosters"]):
             i += 1
+            if platform == "espn":
+                uid = f"espn:{lid}.t{i:02d}"
+                names[uid] = f"ESPN Team {i:02d}"
+                member_order.append(uid)
+                continue
             uid = f"9000000000000{n_league:02d}0{i:02d}"
             self._add_user(uid, f"qa_l{n_league}_member_{i:02d}", joined=False)
             member_order.append(uid)
 
-        rosters = _draft_rosters(self.pool, spec["format"], member_order,
-                                 int(spec["roster_size"]))
-        for uid in member_order:
-            self.users[uid]["leagues"].append(lid)
+        rosters = _draft_rosters(
+            self.pool, spec["format"], member_order, int(spec["roster_size"]),
+            exclude=(set(self.rookie_ids(spec["format"])) if spec.get("draft")
+                     else None),
+        )
+        if platform == "sleeper":
+            for uid in member_order:
+                self.users[uid]["leagues"].append(lid)
         self.leagues[lid] = {
             "spec": spec,
+            "platform": platform,
             "member_order": member_order,
+            # user_id → display name, for the members whose name does not
+            # live in `self.users` (ESPN synthetics).
+            "names": names,
             "rosters": rosters,
             "ranked": ranked,
         }
+
+    def _place_drafted_rookies(self) -> None:
+        """Put every MADE pick on the picker's roster.
+
+        Sleeper does this the instant a pick lands, so a mid-draft league whose
+        rosters lacked its own completed picks would be a state no real league
+        can be in — and #207's rosters heuristic reads exactly this signal.
+        Runs after every league is built because `draft_plan` needs the seat
+        order the build establishes.
+        """
+        for lid, lg in self.leagues.items():
+            plan = self.draft_plan(lid)
+            if not plan:
+                continue
+            for pick in plan["picks"]:
+                roster = lg["rosters"][pick["picked_by"]]
+                if pick["player_id"] not in roster:
+                    roster.append(pick["player_id"])
+
+    # -- naming ---------------------------------------------------------------
+
+    def member_name(self, lid: str, uid: str) -> str:
+        """Display name for a league member on any platform."""
+        if uid in self.users:
+            return self.users[uid]["username"]
+        return self.leagues[lid]["names"].get(uid, uid)
+
+    def sleeper_leagues(self) -> dict[str, dict]:
+        return {lid: lg for lid, lg in self.leagues.items()
+                if lg["platform"] == "sleeper"}
+
+    def espn_leagues(self) -> dict[str, dict]:
+        return {lid: lg for lid, lg in self.leagues.items()
+                if lg["platform"] == "espn"}
 
     def _effective_flags(self) -> dict[str, bool]:
         flags = load_flag_set(self.profile.get("flags_base", "release"))
@@ -455,6 +626,162 @@ class World:
                                self.pool[pid]["dp_value_2qb"]), pid),
         )
         return {pid: float(i + 1) for i, pid in enumerate(ordered)}
+
+    # -- rookie class + draft -------------------------------------------------
+
+    def rookie_ids(self, fmt: str) -> list[str]:
+        """The pool's `season` rookie class, best consensus first.
+
+        Mirrors `database.load_rookie_player_ids` / `draft_status.is_rookie_row`
+        on the same rows `sync_players` will write — BOTH legs, in the same
+        order: the exact `metadata.rookie_year == season` test first (the pool
+        fixture backfilled that field for its 56-player class on 2026-08-06),
+        then the `years_exp == 0 AND team` proxy for rows Sleeper never
+        carried a class year for. If these predicates diverge, the board shows
+        picks of players the backend does not consider rookies and the
+        undrafted list stops shrinking as picks land —
+        `test_drafted_players_are_rookies_by_the_BACKENDS_predicate` pins them
+        together against the seeded DB.
+        """
+        vk = _value_key(fmt)
+
+        def is_rookie(rec: dict) -> bool:
+            meta = rec.get("metadata")
+            year = str((meta or {}).get("rookie_year") or "").strip()
+            if len(year) == 4 and year.isdigit() and year != "0000":
+                return year == str(SEASON)      # exact test wins outright
+            return rec.get("years_exp") == 0 and bool(rec.get("team") or "")
+
+        ids = [pid for pid, rec in self.pool.items() if is_rookie(rec)]
+        ids.sort(key=lambda pid: (-self.pool[pid][vk], pid))
+        return ids
+
+    def draft_plan(self, lid: str) -> dict | None:
+        """The full synthetic Sleeper draft for a league, or None.
+
+        Everything downstream (the `drafts` list, the detail object, the pick
+        list and both traded-pick lists) is derived from this one dict, so the
+        cassettes cannot disagree with each other the way four hand-authored
+        files would.
+        """
+        lg = self.leagues[lid]
+        spec = lg["spec"].get("draft")
+        if not spec:
+            return None
+        teams = len(lg["member_order"])
+        rounds = int(spec["rounds"])
+        made = int(spec["picks_made"])
+        dtype = spec.get("type", "snake")
+        status = spec["status"]
+
+        # slot → member. A ROTATION, not the identity: `slot_to_roster_id`
+        # below must not accidentally reproduce the ffv3 identity trap the
+        # draft corpora exist to pin (see fixtures/draft/README.md §2.1) —
+        # an identity map here would let a slot/roster confusion pass.
+        rotate = 5 % teams
+        uid_by_slot = {s: lg["member_order"][(s - 1 + rotate) % teams]
+                       for s in range(1, teams + 1)}
+        roster_id_by_uid = {uid: i + 1 for i, uid in enumerate(lg["member_order"])}
+
+        def slot_of(overall: int) -> int:
+            rnd = (overall - 1) // teams + 1
+            idx = (overall - 1) % teams
+            if dtype == "snake" and rnd % 2 == 0:
+                idx = teams - 1 - idx
+            return idx + 1
+
+        rookies = self.rookie_ids(lg["spec"]["format"])
+        if made > len(rookies):
+            raise SeederError(
+                EXIT_REFUSED,
+                f"refused: league {lid} draft wants {made} picks but the pool "
+                f"holds only {len(rookies)} {SEASON} rookies — lower picks_made "
+                "or grow player_pool_2026.json",
+            )
+
+        # Timestamps: Sleeper's are epoch-ms ints. Anchored to the world's
+        # `now` so a re-seed inside the same hour is byte-identical.
+        created_ms = int((self.now - timedelta(days=45)).timestamp() * 1000)
+        start_ms = (None if status == "pre_draft"
+                    else int((self.now - timedelta(hours=2)).timestamp() * 1000))
+
+        picks = []
+        for overall in range(1, made + 1):
+            slot = slot_of(overall)
+            uid = uid_by_slot[slot]
+            pid = rookies[overall - 1]
+            rec = self.pool[pid]
+            picks.append({
+                "draft_id":   "",          # filled below (needs draft_id)
+                "draft_slot": slot,
+                "is_keeper":  None,
+                "metadata": {
+                    "first_name":      rec["first_name"],
+                    "injury_status":   "",
+                    "last_name":       rec["last_name"],
+                    "news_updated":    str(created_ms),
+                    "number":          "",
+                    "player_id":       pid,
+                    "position":        rec["position"],
+                    "sport":           "nfl",
+                    "status":          rec.get("status") or "Active",
+                    "team":            rec.get("team") or "",
+                    "team_abbr":       "",
+                    "team_changed_at": "",
+                    "years_exp":       "0",
+                },
+                "pick_no":   overall,
+                "picked_by": uid,
+                "player_id": pid,
+                "reactions": None,
+                "roster_id": roster_id_by_uid[uid],
+                "round":     (overall - 1) // teams + 1,
+            })
+
+        # Traded picks. Sleeper's league-level rows carry no draft_id; the
+        # draft-level ones do, and both are emitted because both URLs exist.
+        n_traded = int(spec.get("traded_picks", 0))
+        traded = []
+        for i in range(n_traded):
+            orig_rid = (i % teams) + 1
+            new_rid = ((i + 3) % teams) + 1
+            if new_rid == orig_rid:                     # a self-trade is not a trade
+                new_rid = (new_rid % teams) + 1
+            traded.append({
+                "round":             (i % rounds) + 1,
+                "season":            str(SEASON),
+                "roster_id":         orig_rid,
+                "owner_id":          new_rid,
+                "previous_owner_id": orig_rid,
+            })
+
+        draft_id = str(int(lid) + 1)
+        for p in picks:
+            p["draft_id"] = draft_id
+
+        # `draft_order` is THE order gate (draft_board_service D5): non-null
+        # ⇒ order_confidence "assigned". A profile may set draft_order:false
+        # to reproduce the pre-draft "no order yet" board.
+        has_order = bool(spec.get("draft_order", True))
+        return {
+            "draft_id":   draft_id,
+            "league_id":  lid,
+            "teams":      teams,
+            "rounds":     rounds,
+            "type":       dtype,
+            "status":     status,
+            "created_ms": created_ms,
+            "start_ms":   start_ms,
+            "last_picked": (int((self.now - timedelta(minutes=8)).timestamp() * 1000)
+                            if made else None),
+            "draft_order": ({uid: s for s, uid in uid_by_slot.items()}
+                            if has_order else None),
+            "slot_to_roster_id": {str(s): roster_id_by_uid[uid_by_slot[s]]
+                                  for s in range(1, teams + 1)},
+            "picks":      picks,
+            "traded":     traded,
+            "undrafted":  rookies[made:],
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +831,74 @@ def _use_engine(db_path: Path, anchor: datetime):
 # DB seeding
 # ---------------------------------------------------------------------------
 
+def _seed_pick_assignment(world: World, lid: str, lg: dict) -> int:
+    """Seed the ESPN pick-assignment grid (draft-extensions W3 M-A).
+
+    Writes the STORED numbering settings first, deliberately: with an order
+    already saved, `server.pick_assignments_route` skips
+    `_espn_suggested_order` entirely — and that helper is the one code path on
+    this screen that would reach live ESPN. ESPN has no fixture seam, so a
+    profile without a stored order would make the pick-assignment screen the
+    only surface in the harness capable of real egress.
+
+    Returns the number of grid slots written.
+    """
+    spec = lg["spec"].get("pick_assignment")
+    if not spec:
+        return 0
+    # `_assignment_members` sorts member ids, and `_assignment_settings`
+    # appends any member missing from the stored order — so a stored order
+    # that is already the full membership is the only one that round-trips
+    # unchanged.
+    member_ids = sorted(lg["member_order"])
+    names = {uid: world.member_name(lid, uid) for uid in member_ids}
+    order = [uid for uid in lg["member_order"]]     # league seat order, not sorted
+    db.save_pick_assignment_settings(lid, {
+        "rounds":     int(spec["rounds"]),
+        "order_type": spec["order_type"],
+        "order":      order,
+    })
+    result = db.seed_pick_grid(
+        lid, member_ids, names,
+        actor_user_id=world.app_uid,
+        current_season=SEASON,
+        rounds=int(spec["rounds"]),
+        seasons_ahead=int(spec.get("seasons_ahead", 3)),
+        league_size=len(lg["member_order"]),
+        scoring_format=lg["spec"]["format"],
+        platform="espn",
+    )
+    return int(result.get("total") or result.get("seeded") or 0)
+
+
+def _seed_recorded_picks(world: World, lid: str, lg: dict) -> int:
+    """Offline pick recording (flag `draft.manual_picks`) — the rows the
+    record-picks screen resumes from. Runs AFTER `sync_players`, because
+    `record_draft_picks` rejects any row whose player_id is unknown."""
+    spec = lg["spec"].get("pick_assignment") or {}
+    n = int(spec.get("recorded_picks", 0))
+    if not n:
+        return 0
+    teams = len(lg["member_order"])
+    rookies = world.rookie_ids(lg["spec"]["format"])
+    rows = []
+    for overall in range(1, n + 1):
+        slot = (overall - 1) % teams + 1
+        rows.append({
+            "overall":         overall,
+            "round":           (overall - 1) // teams + 1,
+            "slot":            slot,
+            "player_id":       rookies[overall - 1],
+            "picking_team_id": lg["member_order"][slot - 1],
+        })
+    res = db.record_draft_picks(lid, SEASON, rows, recorded_by=world.app_uid)
+    if res.get("rejected"):
+        raise SeederError(EXIT_REFUSED,
+                          f"refused: league {lid} recorded picks rejected: "
+                          f"{res['rejected']}")
+    return int(res.get("accepted") or 0)
+
+
 def _seed_db(world: World, eng) -> dict[str, int]:
     """Write the world into the (already-pointed) engine. Returns row counts."""
     rng = world.rng
@@ -524,25 +919,40 @@ def _seed_db(world: World, eng) -> dict[str, int]:
         db.mark_format_unlocked(world.app_uid, fmt)
 
     # -- leagues + members ----------------------------------------------------
+    pick_slots = 0
     for lid, lg in world.leagues.items():
         spec = lg["spec"]
-        opponents = [
+        members = [
             {"user_id": uid,
-             "username": world.users[uid]["username"],
+             "username": world.member_name(lid, uid),
+             "display_name": world.member_name(lid, uid),
              "player_ids": lg["rosters"][uid]}
-            for uid in lg["member_order"] if uid != world.app_uid
+            for uid in lg["member_order"]
         ]
+        if lg["platform"] == "espn":
+            # The ESPN importer's own write path — platform='espn' + the
+            # espn_* binding columns, then a full membership replace. NOTHING
+            # here writes an espn_credentials row: `espn_auth: "public"` is
+            # the only auth mode representable in a fixture (R-11), and it is
+            # also the mode that keeps every ESPN read out of the harness.
+            db.upsert_espn_league(
+                lid, world.app_uid, spec["name"],
+                espn_season=SEASON,
+                espn_auth=spec.get("espn_auth", "public"),
+                espn_my_team_id=int(spec.get("espn_my_team_id", 1)),
+                total_rosters=int(spec["total_rosters"]),
+            )
+            db.replace_espn_league_members(lid, members)
+            db.set_league_scoring(lid, spec["format"])
+            pick_slots += _seed_pick_assignment(world, lid, lg)
+            continue
+
+        opponents = [m for m in members if m["user_id"] != world.app_uid]
         db.upsert_league(lid, world.app_uid, spec["name"], str(SEASON),
                          lg["rosters"][world.app_uid], opponents)
         db.set_league_scoring(lid, spec["format"])
         db.set_league_total_rosters(lid, int(spec["total_rosters"]))
-        db.upsert_league_members(lid, [
-            {"user_id": uid,
-             "username": world.users[uid]["username"],
-             "display_name": world.users[uid]["display_name"],
-             "player_ids": lg["rosters"][uid]}
-            for uid in lg["member_order"]
-        ])
+        db.upsert_league_members(lid, members)
 
     # -- app-user swipe history (drives replayed Elo + unlock counts) ---------
     swipe_rows = 0
@@ -626,9 +1036,9 @@ def _seed_db(world: World, eng) -> dict[str, int]:
                 db.create_trade_match(lid, partner, world.app_uid, receive, give)
             db.create_notification(
                 world.app_uid, "trade_match", "New trade match",
-                f"You and @{world.users[partner]['username']} liked the same trade.",
-                {"league_id": lid, "partner_username":
-                    world.users[partner]["username"]},
+                f"You and @{world.member_name(lid, partner)} liked the same trade.",
+                {"league_id": lid,
+                 "partner_username": world.member_name(lid, partner)},
             )
             matches += 1
         for i in range(int(seed_spec.get("awaiting", 0))):
@@ -692,10 +1102,17 @@ def _seed_db(world: World, eng) -> dict[str, int]:
     # -- players reference table ----------------------------------------------
     players_written = db.sync_players(_cache_shape(world), adp_map=world.adp_map())
 
+    # -- recorded picks (AFTER sync_players — the writer validates player ids) -
+    recorded = 0
+    for lid, lg in world.leagues.items():
+        recorded += _seed_recorded_picks(world, lid, lg)
+
     return {
         "users": sum(1 for u in world.users.values() if u["joined"]),
         "leagues": len(world.leagues),
         "league_members": sum(len(lg["member_order"]) for lg in world.leagues.values()),
+        "pick_assignment_slots": pick_slots,
+        "recorded_picks": recorded,
         "players": players_written,
         "swipe_rows": swipe_rows,
         "member_ranking_rows": mr_rows,
@@ -819,11 +1236,62 @@ def _sleeper_user_obj(u: dict) -> dict:
     }
 
 
+def _draft_summary(world: World, plan: dict) -> dict:
+    """The draft object as it appears BOTH in `league/<id>/drafts` and at
+    `draft/<id>` — Sleeper serves the same document at both URLs (verified
+    against fixtures/draft/lakeview-complete), so one builder emits both and
+    they cannot drift."""
+    lg = world.leagues[plan["league_id"]]
+    spec = lg["spec"]
+    sf = spec["format"] == "sf_tep"
+    return {
+        "created": plan["created_ms"],
+        "creators": [world.app_uid],
+        "draft_id": plan["draft_id"],
+        "draft_order": plan["draft_order"],
+        "last_message_id": None,
+        "last_message_time": None,
+        "last_picked": plan["last_picked"],
+        "league_id": plan["league_id"],
+        "metadata": {
+            "description": "",
+            "name": spec["name"],
+            "scoring_type": "dynasty_2qb" if sf else "dynasty_ppr",
+            "show_team_names": "0",
+        },
+        "season": str(SEASON),
+        "season_type": "regular",
+        "settings": {
+            "alpha_sort": 0,
+            "autopause_enabled": 1,
+            "autostart": 0,
+            "cpu_autopick": 1,
+            "enforce_position_limits": 0,
+            "nomination_timer": 60,
+            "pick_timer": 14400,
+            "player_type": 0,
+            "reversal_round": 0,
+            "rounds": plan["rounds"],
+            "teams": plan["teams"],
+        },
+        "slot_to_roster_id": plan["slot_to_roster_id"],
+        "sport": "nfl",
+        "start_time": plan["start_ms"],
+        "status": plan["status"],
+        "type": plan["type"],
+    }
+
+
 def build_cassettes(world: World) -> dict[str, object]:
-    """URL-path (relative to api.sleeper.app/v1/, no extension) → JSON doc."""
+    """URL-path (relative to api.sleeper.app/v1/, no extension) → JSON doc.
+
+    ESPN leagues emit NOTHING here on purpose: an ESPN league has no Sleeper
+    URL space, and inventing one would make the fixture claim a read the real
+    client never performs.
+    """
     cassettes: dict[str, object] = {}
 
-    league_meta = {lid: _league_meta(world, lid) for lid in world.leagues}
+    league_meta = {lid: _league_meta(world, lid) for lid in world.sleeper_leagues()}
 
     for u in world.users.values():
         cassettes[f"user/{u['username']}"] = _sleeper_user_obj(u)
@@ -834,7 +1302,7 @@ def build_cassettes(world: World) -> dict[str, object]:
     # backend maps to 404 (TC-SGN-03-style flows).
     cassettes[f"user/{UNKNOWN_USERNAME}"] = None
 
-    for lid, lg in world.leagues.items():
+    for lid, lg in world.sleeper_leagues().items():
         cassettes[f"league/{lid}"] = league_meta[lid]
         rosters = []
         for i, uid in enumerate(lg["member_order"]):
@@ -861,12 +1329,46 @@ def build_cassettes(world: World) -> dict[str, object]:
         ]
         # Owned-picks + draft-status features (both added after this fixture
         # set was written) fetch these on every league load. Empty arrays are
-        # the honest seeded answer — no picks have been traded and no draft
-        # exists — and they hold vcr_misses at 0 for EVERY profile. With
-        # `drafts` empty the backend falls back to its rosters_heuristic for
-        # draft status, which is what the seeded rosters already imply.
-        cassettes[f"league/{lid}/traded_picks"] = []
-        cassettes[f"league/{lid}/drafts"] = []
+        # the honest seeded answer for a league with no `draft` block — no
+        # picks have been traded and no draft exists — and they hold
+        # vcr_misses at 0 for EVERY profile. With `drafts` empty the backend
+        # falls back to its rosters_heuristic for draft status, which is what
+        # the seeded rosters already imply.
+        plan = world.draft_plan(lid)
+        if plan is None:
+            cassettes[f"league/{lid}/traded_picks"] = []
+            cassettes[f"league/{lid}/drafts"] = []
+            continue
+
+        summary = _draft_summary(world, plan)
+        did = plan["draft_id"]
+        cassettes[f"league/{lid}/drafts"] = [summary]
+        cassettes[f"draft/{did}"] = summary
+        cassettes[f"draft/{did}/picks"] = plan["picks"]
+        # League-level rows carry no draft_id; the draft-level ones do. Both
+        # URLs exist upstream, so both are emitted even though
+        # draft_board_service only reads the league-level list today — a
+        # future read must not become the harness's first vcr_miss.
+        cassettes[f"league/{lid}/traded_picks"] = plan["traded"]
+        cassettes[f"draft/{did}/traded_picks"] = [
+            {**t, "draft_id": int(did)} for t in plan["traded"]
+        ]
+
+    # ESPN league ids are NUMERIC, and two Sleeper-side helpers gate only on
+    # `league_id.isdigit()` (server._fetch_sleeper_league_meta and, behind
+    # `sleeper.trade_block`, trade_block_service.sync_league_trade_block —
+    # both docstrings claim to no-op for ESPN imports; neither does). So
+    # session-init on an ESPN league DOES reach for
+    # `https://api.sleeper.app/v1/league/<espn id>`, and without an answer
+    # here every ESPN run books a vcr_miss and the guardrail can't tell it
+    # from a real fixture gap. Sleeper answers 404 for an id that is not one
+    # of its leagues; the `__http_error__` sentinel replays exactly that, so
+    # the harness reproduces production rather than papering over it. NOT a
+    # league object — emitting one would claim an ESPN league exists on
+    # Sleeper, and `_verify_no_cassette_gap` refuses any other league/<id>
+    # path for an ESPN league.
+    for lid in world.espn_leagues():
+        cassettes[f"league/{lid}"] = {"__http_error__": 404}
 
     cassettes["players/nfl/adp"] = world.adp_map()
     # players/nfl is fetched outside the _sleeper_get seam today (raw urllib
@@ -882,9 +1384,33 @@ def _verify_no_cassette_gap(world: World, cassettes: dict[str, object]) -> None:
     for u in world.users.values():
         needed.append(f"user/{u['username']}")
         needed.append(f"user/{u['user_id']}/leagues/nfl/{SEASON}")
-    for lid in world.leagues:
+    for lid in world.sleeper_leagues():
         needed += [f"league/{lid}", f"league/{lid}/rosters", f"league/{lid}/users",
                    f"league/{lid}/traded_picks", f"league/{lid}/drafts"]
+        plan = world.draft_plan(lid)
+        if plan is not None:
+            did = plan["draft_id"]
+            needed += [f"draft/{did}", f"draft/{did}/picks",
+                       f"draft/{did}/traded_picks"]
+    # An ESPN league must NOT have leaked into the Sleeper URL space — the
+    # other half of the gap guard: a cassette nobody can legitimately request
+    # is as much a lie as a missing one. The single exception is the explicit
+    # 404 sentinel at `league/<id>`, which is what Sleeper really answers for
+    # an id that is not one of its leagues (see build_cassettes).
+    stray = []
+    for lid in world.espn_leagues():
+        for p in cassettes:
+            if not p.startswith(f"league/{lid}"):
+                continue
+            doc = cassettes[p]
+            if p == f"league/{lid}" and isinstance(doc, dict) \
+                    and set(doc) == {"__http_error__"}:
+                continue
+            stray.append(p)
+    if stray:
+        raise SeederError(EXIT_CASSETTE_GAP,
+                          f"internal cassette gap — ESPN leagues emitted Sleeper "
+                          f"cassettes: {stray}")
     missing = [p for p in needed if p not in cassettes]
     if missing:
         raise SeederError(EXIT_CASSETTE_GAP,
