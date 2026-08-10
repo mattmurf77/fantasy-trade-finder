@@ -206,6 +206,17 @@
 
 ---
 
+## D-024 — The Mock-Draft "Run" Is Engine-Internal, and Two Constants Are Load-Bearing in Opposite Directions
+**Date:** 2026-08-10 (feedback #290, flag `draft.mock` already ON)
+**Context:** The CPU pick model scored `rank - need_bonus - noise` where `rank` is *list position*; `row["value"]` was never read. A 3-slot reach therefore cost the same across a 5-Elo gap or a 300-Elo cliff, which is why the operator saw an implausible early pick. Measured on the shipped engine: 45.5% of round-1 CPU picks reach, and at pick 4 the modal consensus rank was only ~19% likely — near-flat across ranks 1-7.
+**Decision:** Partition the consensus pool by a **locally-significant value gap** (a "run": adaptive, vs a local median — not a fixed Elo threshold, because the value curve flattens in the tail) and compose it at the existing `reach_cap` seam via `min(round_reach_cap, run_offset)`, so the rule can only ever **tighten** the operator's verbatim W2e round-tiered policy and that policy's literal test stays untouched. "Tight groups of 4-5" is a target the gap rule *produces* (measured median 5.0 on both scoring formats), **not** a hard size clamp — a clamp would manufacture boundaries where the values have none.
+**Alternatives considered:** Reuse the 8-tier ladder — **rejected**, its bands are 200-300 Elo wide and it is a governed cross-client enum; #279 set the precedent for refusing exactly this, so this is the second time. A single tuned `m` — **rejected on measurement**: 27 configurations were swept and **none** clears the collapse on both formats while holding a 4-5 median. `m` was doing two unrelated jobs (where the runs are, a property of the data; how tight a wall may be, a behavioral choice), so the fix was to separate them, not to keep tuning.
+**Consequences:** `MOCK_RUN_GAP_MULTIPLE = 2.5` sets run tightness; `MOCK_RUN_MIN_OFFSET = 1` stops a singleton run from making the pick deterministic. **At `MIN_OFFSET = 0`, `sf_tep` forces pick 1.01 in 100% of mocks while `1qb_ppr` looks fine** — a parameter validated on one board and catastrophic on the other. `MIN_OFFSET` must also stay strictly below `round_reach_cap(1)` or the rule is inert in round 1 (`= 3` is a silent no-op). Both bounds are pinned by tests that fail on unfixed code. Separately, aggregating positional need with `max()` is **inert**: TE's `(S,B) = (1,0)` makes `severity("TE") == 1.0` for almost every August roster, so `need_pressure` is denominator-weighted. The guarding tests are two-sided by construction — the original one-sided bars (`P(#1 at 1.01) >= 0.43`, `>= 12 distinct orderings`) both **passed on the fully collapsed board** (1.000 and 24), and a collapsed `sf_tep` even scored *higher* variety than a healthy `1qb_ppr`. N is pinned at 1500 because the distinct-orderings statistic scales with N. The calibration tripwire (`test_w2_16` asserts `all_pass is False`) did not fire.
+**Status:** Active.
+**Related ADR:** — (feedback item `docs/feedback/items/290-mock-draft-engine/`)
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -233,6 +244,7 @@
 | D-021 | Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS | 2026-08-08 |
 | D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
 | D-023 | Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch | 2026-08-10 |
+| D-024 | The Mock-Draft "Run" Is Engine-Internal, and Two Constants Are Load-Bearing in Opposite Directions | 2026-08-10 |
 
 ---
 
