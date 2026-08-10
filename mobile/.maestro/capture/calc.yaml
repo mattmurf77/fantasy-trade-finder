@@ -1,0 +1,374 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-CALC
+# profile: standard
+# flags: release
+# captures: league-mode, live-populated, picker-open, verdict--live, one-sided-read, demo-verdict
+# source: mobile/src/screens/TradeCalculatorScreen.tsx, mobile/src/components/PlayerPickerModal.tsx, mobile/src/components/TradeSide.tsx, mobile/src/components/ConsensusVerdictCard.tsx, mobile/src/components/VerdictPanel.tsx, mobile/src/components/InLeagueCalculator.tsx
+# interactive-stop: live-populated
+#
+# Screen-library capture flow for the manual Trade Calculator + its
+# PlayerPickerModal (matrix rows 98-106).
+#
+# ENTRY — the deck's "Edit in calculator", and nothing else. Every other door
+# is shut under `release`:
+#   • trades.subnav.calculator — suppressed for every finder mode, and
+#     trades.finder_hub is ON so TradesHome mounts with mode:'guided'
+#     (TabNav.tsx:415, TradesScreen.tsx:3567).
+#   • trades.finder-mode.calc — TEMPLATED id (`trades.finder-mode.${key}`)
+#     with no testid-lint-allow.txt entry; referencing it fails the lint.
+#   • trades.home-utility.manual-calc — only for an ASSIGNED variant of
+#     experiment `trades_home_inline`; the hermetic backend leaves this unit
+#     on control, which is why the 2026-08-10 run never left TradesScreen.
+#   • deep links — DEAD on this harness (SpringBoard confirm), so the
+#     openLink fallback the first draft leaned on is gone.
+# trade-card.edit-in-calc (TradeCard.tsx:519) is a STATIC id, wired to the
+# deck's top card (TradesScreen.tsx:4676), and it arrives with a prefill —
+# which forces mode 'league' (TradeCalculatorScreen.tsx:146), so In-league is
+# captured on arrival for free.
+#
+# NOT CAPTURED — `live-loading` (row 99) and `live-error` (row 100), and the
+# reason is structural, not a timing miss. Both need TradeCalculatorScreen's
+# valuesQuery to be COLD (`isLoading`, and `isError && !data` respectively),
+# but THREE surfaces share the one `['calc-values', <format>]` cache key, and
+# the only reachable door warms it before we arrive:
+#   • TradesScreen.tsx:1807 — `enabled: deck.length > 0 || targetPickerOpen`.
+#     Generating the deck IS the entry, so the pool is fetched on the way in.
+#   • InLeagueCalculator.tsx:127 — unconditional on mount, same key; the
+#     prefill lands us in In-league mode, so it fetches again.
+#   • TradeCalculatorScreen.tsx:213 — by now a pure cache hit.
+# Run 20260810T073238 is the proof: flask.log shows /api/trade/values served
+# at 07:35:08 (1qb_ppr) and 07:35:23 (sf_tep), while the latency injection was
+# only armed at 07:35:35 — and no request followed it at all, because tapping
+# "Real values" never issued one. The captured failure frame shows both trade
+# sides already painted with no spinner in sight.
+# UNBLOCKER (not this agent's file): a door into the calculator that does not
+# pass through the deck — i.e. the P4 testid-lint-allow.txt sweep adding
+# `trades.finder-mode.*`, which makes the mode-bar Calc chip referenceable and
+# lands a NO-prefill mount (mode defaults to 'live', InLeagueCalculator never
+# mounts) before any deck exists. Until then these two rows have no honest
+# capture and are recorded as blocked rather than faked.
+tags: [capture, calc]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see league.yaml for the full finding: the tab
+# BAR paints before #244's launch routing resets the Rank stack, so a tab tap
+# fired on `tab.trades is visible` alone can be silently undone a second later.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.trades"
+# Preamble from trades.yaml: conditional first-run outlook sheet dismissal
+# (Contender pre-selected). Inert under release, where consolidateOn drops
+# OutlookSheet's mount entirely; kept so this survives a flag flip.
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 30000
+
+# ── league-mode ──────────────────────────────────────────────────────────
+# Generate a deck exactly as trades.yaml does — poll loop is 800→4000 ms with
+# jitter, so wait on trades.card-top, never a fixed sleep.
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 120000
+# The hand-off row sits at hint tier BELOW both trade sides — extendedWaitUntil
+# would happily "see" it off-screen and the tap would land on dead
+# coordinates, so scroll it into frame before touching it.
+- scrollUntilVisible:
+    element:
+      id: "trade-card.edit-in-calc"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+    visibilityPercentage: 100
+- tapOn:
+    id: "trade-card.edit-in-calc"
+# The mode tabs are the calculator's first row and render in every mode.
+- extendedWaitUntil:
+    visible:
+      id: "calc.mode-tab.live"
+    timeout: 30000
+# In-league delegates to InLeagueCalculator: the picker and BOTH TradeSides
+# unmount, which is the honest proof we are in Mode B rather than a slow
+# live paint. (calc.partner-collapsed only mounts once a partner collapses,
+# so it is not a reliable anchor.)
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.side-a-add"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: calc__league-mode
+
+# ── live-populated ───────────────────────────────────────────────────────
+# Both TradeSides mount, and the pool is a cache hit (see the cold-pool note
+# in the header), so the assertNotVisible on the loading card is what proves
+# this frame is the LOADED state rather than a spinner caught mid-fetch.
+- tapOn:
+    id: "calc.mode-tab.live"
+# IDEMPOTENT RE-TAP. Run 20260810T083716 logged this tap hitting the right
+# element ("Real values", correct bounds) and COMPLETED, yet the screen stayed
+# In-league — TradeCalculatorScreen.tsx:146 force-sets mode back to 'league'
+# whenever the prefill key changes, and the deck hand-off can re-assert its
+# params after we have already switched. A second tap costs nothing:
+# switchMode early-returns when the mode is already selected
+# (TradeCalculatorScreen.tsx:467), so this is a no-op on the run where the
+# first tap stuck.
+- runFlow:
+    when:
+      notVisible:
+        id: "calc.side-a-add"
+    commands:
+      - tapOn:
+          id: "calc.mode-tab.live"
+- extendedWaitUntil:
+    visible:
+      id: "calc.side-a-add"
+    timeout: 30000
+- assertNotVisible:
+    text: ".*Loading player values.*"
+- waitForAnimationToEnd
+- takeScreenshot: calc__live-populated
+
+# ── picker-open ──────────────────────────────────────────────────────────
+- tapOn:
+    id: "calc.side-a-add"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.search"
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: calc__picker-open
+
+# ── verdict--live ────────────────────────────────────────────────────────
+# Player 6770 = Joe Burrow — a fixture-pool member (real Sleeper id, present
+# in players-cache/standard.json and the DP values CSV), the same anchor
+# flows/smoke/07-calculator.yaml uses. One side is enough: the live verdict
+# branch is `anySide && evalQuery.data`, not `bothSides`. The evaluate call
+# sits behind a 250 ms debounce, which the wait (never a sleep) covers.
+- tapOn:
+    id: "calc.picker.search"
+# ERASE FIRST, ALWAYS. PlayerPickerModal keeps its `query` state across
+# open/close (the component stays mounted; only `visible` toggles), so a search
+# typed for one side is still filtering the list the next time that side's
+# picker opens. Run 20260810T081xxx failed on
+# "calc.picker.row.jchase is visible" for exactly this reason: the demo roster
+# was still filtered by "Burrow" from the live step above.
+- eraseText
+- inputText: "Burrow"
+# hideKeyboard IS correct here, and dropping it is what broke run
+# 20260810T080004: the result row sits directly under the search field, the
+# keyboard covers that band, and the tap landed on the keyboard instead — the
+# failure frame showed Side A still empty. This is a STANDARD single-line
+# TextInput, so hideKeyboard works; the field that rejects it is the feedback
+# sheet's multiline note (see sheets-feedback.yaml). Same order as the proven
+# flows/smoke/07-calculator.yaml.
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.6770"
+    timeout: 20000
+- tapOn:
+    id: "calc.picker.row.6770"
+- tapOn:
+    id: "calc.picker.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.picker.done"
+    timeout: 10000
+# BOTH sides, per matrix row 101. A one-sided package does satisfy the live
+# branch (`anySide && evalQuery.data`) but the card then reads a bare "Package
+# value" with 0 on the other rail — a poor reference frame for a library whose
+# job is showing what a verdict looks like. 7564 = Ja'Marr Chase, verified
+# present in this profile's own pool (data/ui-test/players-cache/standard.json)
+# alongside 6770 Burrow.
+- scrollUntilVisible:
+    element:
+      id: "calc.side-b-add"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+    visibilityPercentage: 100
+- tapOn:
+    id: "calc.side-b-add"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.search"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.search"
+- eraseText
+- inputText: "Chase"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.7564"
+    timeout: 20000
+- tapOn:
+    id: "calc.picker.row.7564"
+- tapOn:
+    id: "calc.picker.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.picker.done"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "calc.verdict"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: calc__verdict--live
+
+# ── one-sided-read ───────────────────────────────────────────────────────
+# Demo mode keeps its own send/receive lists, so switching starts from an
+# empty package. Ids are the seeded mock roster (data/tradeCalcMock.ts):
+# jchase = Ja'Marr Chase on Murph's Turf, jgibbs = Jahmyr Gibbs on Gridiron
+# Gurus (CALC_PARTNERS[0], the default partner).
+# SCROLL BACK UP FIRST. Run 20260810T08xxxx died here with "Element not
+# found: calc.mode-tab.demo" — the verdict scroll above left the mode tabs
+# above the viewport, and iOS drops off-screen nodes from the accessibility
+# hierarchy, so the tap had nothing to aim at. Element-anchored scroll, never
+# a bare swipe.
+- scrollUntilVisible:
+    element:
+      id: "calc.mode-tab.demo"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+    visibilityPercentage: 100
+- tapOn:
+    id: "calc.mode-tab.demo"
+# Same idempotent re-tap guard as the live switch above.
+- runFlow:
+    when:
+      visible:
+        id: "calc.verdict"
+    commands:
+      - tapOn:
+          id: "calc.mode-tab.demo"
+- scrollUntilVisible:
+    element:
+      id: "calc.side-a-add"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+    visibilityPercentage: 100
+- tapOn:
+    id: "calc.side-a-add"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.search"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.search"
+- eraseText
+- inputText: "Chase"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.jchase"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.row.jchase"
+- tapOn:
+    id: "calc.picker.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.picker.done"
+    timeout: 10000
+- assertNotVisible:
+    id: "calc.verdict"
+# The POINT of this state is the one-sided sentence ("That package is worth X
+# on your board and Y on <partner>'s"), which renders BELOW both trade sides —
+# the first capture cut it off entirely and was just a demo package with an
+# empty receive rail. The card carries no testID, so scroll to its copy. This
+# is a scroll ANCHOR, not a tap: text selectors are only banned for taps.
+- scrollUntilVisible:
+    element:
+      text: ".*on your board and.*"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- waitForAnimationToEnd
+- takeScreenshot: calc__one-sided-read
+
+# ── demo-verdict ─────────────────────────────────────────────────────────
+# Local dual-board math, no network — the verdict panel appears as soon as
+# both sides are non-empty.
+- scrollUntilVisible:
+    element:
+      id: "calc.side-b-add"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+    visibilityPercentage: 100
+- tapOn:
+    id: "calc.side-b-add"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.search"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.search"
+- eraseText
+- inputText: "Gibbs"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.jgibbs"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.row.jgibbs"
+- tapOn:
+    id: "calc.picker.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.picker.done"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "calc.verdict"
+    direction: DOWN
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: calc__demo-verdict

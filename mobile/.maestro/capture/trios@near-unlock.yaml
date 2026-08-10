@@ -78,10 +78,14 @@ tags: [capture, trios, near-unlock]
     timeout: 30000
 - tapOn:
     id: "leagues.row.*"
+# Launch routing settles only once the rank surface's own header control is up
+# (the tab BAR paints seconds earlier and #244 routing can steal a tab tap) —
+# same race agent B diagnosed on league.yaml.
 - extendedWaitUntil:
     visible:
-      id: "tab.rank"
-    timeout: 30000
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
 - tapOn:
     id: "tab.rank"
 - extendedWaitUntil:

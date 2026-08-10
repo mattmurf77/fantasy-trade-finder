@@ -1,0 +1,123 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-FREE-AGENTS
+# profile: standard
+# flags: release
+# captures: error--rosters-unavailable, populated
+# source: mobile/src/screens/FreeAgentsScreen.tsx, mobile/src/components/PlayerCard.tsx, mobile/src/components/TierBadge.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for the free-agent finder (matrix rows 129 +
+# 131). FreeAgents is a ROOT-stack push entered from League home's
+# league.free-agents-row, so leaving via free-agents.back-btn and re-entering
+# fully REMOUNTS the screen. That is what lets both states live in one launch:
+# an errored react-query has dataUpdatedAt 0, i.e. it is permanently stale, so
+# the remount refetches — by then the injection budget is spent and the same
+# request succeeds. Error therefore goes FIRST (the screen's own "Try again"
+# button carries no testID, so it is not a usable recovery affordance).
+tags: [capture, free-agents]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see league.yaml for the full finding. The tab
+# BAR paints well before #244's launch routing resets the Rank stack, so a
+# tab.league tap fired on `tab.trades is visible` alone gets silently undone a
+# second later. rank.more-ways is the rank surface's own header control: once
+# it is up the routing has run and the switch sticks. (Run 20260810T065647
+# failed this flow inside the preamble, on the tab.trades assert itself — that
+# cell's cold boot outran the old 30 s budget, hence 60 s here too.)
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.free-agents-row"
+    timeout: 30000
+
+# ── error--rosters-unavailable ───────────────────────────────────────────
+# The 503 body's `message` is surfaced VERBATIM by the screen (it special-
+# cases body.error === 'rosters_unavailable' before falling back to
+# readErrorCopy — FreeAgentsScreen.tsx:206-218), so the injection MUST carry
+# the real production body. Lifted from backend/server.py:19753-19758.
+#
+# COUNT=6, and the arithmetic matters — count=2 FAILED on run
+# 20260810T071243: flask.log showed the two injected 503s landing, then a
+# THIRD request sailing through with a 200 and the screen rendering the happy
+# list. There are TWO stacked retry layers, not one:
+#   • api/client.ts MAX_RETRIES=2 over RETRY_STATUSES {502,503,504}, for GETs
+#     not on NO_RETRY_PATHS → 3 attempts per call
+#   • react-query `retry: 1` (state/queryClient.ts:26)               → x2
+#   = 6 requests, and exactly 6 — so the injection is fully consumed and the
+#     re-entry below refetches cleanly with nothing left armed.
+# NOTE this is specific to 502/503/504: the client's retry layer ignores 500,
+# which is why the plain count=2 works for the 500 injections in matches.yaml
+# and calc.yaml, and count=4 (2 parallel queries x2) in league-summary.yaml.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/league/free-agents*"
+      INJECT_STATUS: "503"
+      INJECT_COUNT: "6"
+      INJECT_BODY: '{"error": "rosters_unavailable", "message": "Couldn''t load this league''s rosters, so the free-agent list can''t be built right now — try again shortly."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "league.free-agents-row"
+# Two stacked retry layers mean up to ~5 s of backoff before the query gives
+# up and paints the error, so this budget is generous on purpose.
+- extendedWaitUntil:
+    visible:
+      text: ".*free-agent list can.t be built right now.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: free-agents__error--rosters-unavailable
+
+# ── populated ────────────────────────────────────────────────────────────
+# Back out and re-push: the errored query is always stale, so the fresh mount
+# refetches and the (now spent) injection lets it through.
+- tapOn:
+    id: "free-agents.back-btn"
+- extendedWaitUntil:
+    visible:
+      id: "league.free-agents-row"
+    timeout: 30000
+- tapOn:
+    id: "league.free-agents-row"
+- extendedWaitUntil:
+    visible:
+      id: "free-agents.list"
+    timeout: 40000
+- assertNotVisible:
+    id: "free-agents.empty-text"
+- waitForAnimationToEnd
+- takeScreenshot: free-agents__populated

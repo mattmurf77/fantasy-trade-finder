@@ -1,0 +1,106 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE
+# profile: standard
+# flags: release
+# captures: first-paint-pending, populated
+# source: mobile/src/screens/LeagueScreen.tsx, mobile/src/components/LeagueProgressModule.tsx, mobile/src/components/MarketPulseStrip.tsx, mobile/src/components/ContrarianLeaderboard.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for the CLASSIC league page — LeagueHome
+# (matrix rows 124-125). Since #181 the League TAB lands on the rankings
+# root (LeagueRankings / LeagueSummaryScreen); this page is the pushed
+# sub-route reached from that root's league-summary.league-home row. The
+# stale flows/smoke/09-league.yaml taps tab.league and waits on league.hero
+# directly — that ordering predates #181 and is NOT copied here.
+#
+# LeagueScreen has NO error branch: every failed read degrades to em-dashes
+# (num() fallback), which is exactly what first-paint-pending photographs.
+# One launch is enough — the two states are the two halves of a single slow
+# first load, and the latency injection is armed before the page is entered.
+tags: [capture, league]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS. Run 20260810T065647 failed here with
+# "id: league-summary.league-home is visible" while the failure screenshot
+# showed the RANK tab still selected: tab.league was tapped 5 s after the
+# league pick, and #244's launch routing then reset the Rank stack to
+# QuickSetTiers, stealing the tab back. The tab BAR paints long before that
+# routing lands, so `tab.trades is visible` is not proof the app has settled.
+# rank.more-ways is the rank surface's own header control — once it is up the
+# launch routing has already run and the tab switch sticks.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+# ── first-paint-pending ──────────────────────────────────────────────────
+# Armed before the page mounts: summaryPending is `!summary && isLoading`,
+# so it exists only while the FIRST /api/league/summary is in flight. The
+# fnmatch runs against request.path (no query string), so the glob matches
+# `/api/league/summary` itself. 6000 ms per the pilot's trades__loading
+# finding — a ~4 s window is missable by hierarchy polling.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/league/summary*"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+# league.hero mounts unconditionally and above every data-dependent block,
+# so it anchors us INSIDE the pending window (name reads "Loading…", every
+# chip and count reads an em-dash, the coverage Meter is forced to 0).
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: league__first-paint-pending
+
+# ── populated ────────────────────────────────────────────────────────────
+# Settle anchor is the hero's team-count badge, NOT the Matches tile sub-line
+# the first draft used. "Liked by both sides" is static chrome: matchesZero is
+# `!!summary && ...`, so while the summary is still in flight the tiles render
+# anyway — the captured first-paint-pending.png shows that copy sitting right
+# above two em-dashes. It would have satisfied the wait instantly and shot the
+# PENDING frame under the name `populated`.
+#
+# The badge discriminates because it reads
+# `summary ? "<total_teams> teams" : "— teams"` — digits appearing IS summary
+# arrival. `standard` is a 12-team league. Text ASSERTION, never a tap.
+- extendedWaitUntil:
+    visible:
+      text: ".*12 teams.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: league__populated

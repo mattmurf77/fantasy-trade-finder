@@ -1,0 +1,80 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SHEETS-RANK-MENU
+# profile: standard
+# flags: release
+# captures: collapsed, more-expanded
+# source: mobile/src/navigation/TabNav.tsx (RankMenu + MoreWaysButton), mobile/src/navigation/rankChooserModel.ts
+# interactive-stop: collapsed
+#
+# Screen-library capture flow for the Rank menu sheet (matrix rows 144-145).
+#
+# ONE `rank.more-ways` NODE, not two. TabNav declares the id twice
+# (TabNav.tsx:148 in the shared MoreWaysButton, and again at :329 inline),
+# but the second is the `rankDest` FLAG-OFF branch. `ux.rank_tab_destination`
+# is TRUE in release.json, so only the shared header control renders and the
+# selector is unambiguous.
+#
+# The sheet renders the same rankChooserModel content as the RankHome
+# chooser: three primary rows always, the "More ways to rank" disclosure
+# collapsed on every open. Both lists reuse the same rankmenu.* ids, which is
+# exactly why the two states are captured as separate frames.
+tags: [capture, sheets, rank-menu]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+
+# ── collapsed ────────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 30000
+- tapOn:
+    id: "rank.more-ways"
+# rankmenu.more-toggle mounts with the sheet body, so it is the arrival
+# anchor; the disclosure below it is closed on every open (setMoreOpen(false)
+# on both pick and close paths).
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 15000
+- assertVisible:
+    id: "rankmenu.quickset"
+- assertNotVisible:
+    id: "rankmenu.anchors"
+- waitForAnimationToEnd
+- takeScreenshot: sheets-rank-menu__collapsed
+
+# ── more-expanded ────────────────────────────────────────────────────────
+# The disclosure's own rows (anchors / manual / trends) are the mount anchor —
+# waiting on one of them proves the expansion actually happened.
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.anchors"
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-rank-menu__more-expanded
