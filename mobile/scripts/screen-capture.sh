@@ -120,7 +120,7 @@ if [[ "$INTERACTIVE" -eq 1 ]]; then
   grep -q '^---' "$TRUNC" || { echo "truncation left no flow body — check --state '$STOP'" >&2; exit 5; }
 
   FLAGS_JSON=""
-  [[ -f "$FLAGS_DIR/$FLG.json" ]] && FLAGS_JSON="$(cat "$FLAGS_DIR/$FLG.json")"
+  [[ -f "$FLAGS_DIR/$FLG.json" ]] && FLAGS_JSON="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k:v for k,v in d.items() if not k.startswith('_')}))" "$FLAGS_DIR/$FLG.json")"
   echo "interactive: $(basename "$FLOW") → state '$STOP' (profile=$PROF flags=$FLG)"
   bash "$MOBILE/scripts/sim-run.sh" \
     --udid "$UDID" --app "$APP" --profile "$PROF" \
@@ -176,7 +176,7 @@ while IFS= read -r grp; do
 
   FLAGS_JSON=""
   if [[ -f "$FLAGS_DIR/$FLG.json" ]]; then
-    FLAGS_JSON="$(cat "$FLAGS_DIR/$FLG.json")"
+    FLAGS_JSON="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k:v for k,v in d.items() if not k.startswith('_')}))" "$FLAGS_DIR/$FLG.json")"
   else
     echo "WARN: no flag fixture $FLAGS_DIR/$FLG.json — falling back to the seeder's defaults" >&2
   fi
