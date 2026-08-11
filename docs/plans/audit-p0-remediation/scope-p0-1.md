@@ -200,8 +200,8 @@ question **Q4**.
 | `docs/cross-client-invariants.md` | **updated** | § Ranking method strings — contract shift recorded; string set unchanged. |
 | `docs/runbook.md` | **updated** | New § *Quick Set unlock backfill (P0-1, 2026-08-11)*: cohort, exclusion rationale, confirming `SELECT`, the boot log line that makes the undo expressible, the scoped reversal SQL, and the seed-fixture interaction. |
 | `living-memory/LLD.md` | **updated** | § Code Conventions — the conditional-write idiom and implicit save-handler column writes. |
-| `living-memory/DECISIONS.md` | **updated — D-025** (not D-011) | Full entry incl. the suppressed fan-out and the `'quickset'` labelling assumption. |
-| `living-memory/GOTCHAS.md` | **updated — G-032** | The conditional fired: *a boot-time backfill silently rewrites your seeded test fixtures*. |
+| `living-memory/DECISIONS.md` | **updated — D-026** (not D-011) | Full entry incl. the suppressed fan-out and the `'quickset'` labelling assumption. |
+| `living-memory/GOTCHAS.md` | **updated — G-034** | The conditional fired: *a boot-time backfill silently rewrites your seeded test fixtures*. |
 | `living-memory/CHANGELOG.md` | **updated** | Batch H2, P0-1 bullet. |
 | `screens/CLAUDE.md` | **deferred** | See below. |
 | `mobile/src/components/CLAUDE.md` | **n/a (revised)** | `rank.unlocked-banner` is a screen testID (`RankScreen.tsx`), not a component-map row; `testid-lint.sh` greps `mobile/src` and never opens this file, so nothing is load-bearing. |

@@ -1,5 +1,15 @@
 # #169 — League Summary redesign (bar chart + position filter + drill-in)
 
+> **2026-08-11 update:** the operator's frame decisions
+> ([`operator-frame-decisions-2026-08-11.md`](operator-frame-decisions-2026-08-11.md),
+> final at §7/§8) are **built and shipped** as `f27c0f5` (PR #107): frame-E
+> collapsed outlook strip (dark, `outlook.odds`) + Pass/Like inside the top
+> deck card + `outlook_strip_toggled` event. Doc set:
+> [`plan-e-and-card-2026-08-11.md`](plan-e-and-card-2026-08-11.md) and
+> siblings. Sim-gate deviation + owed follow-ups in
+> [`scope.md`](scope.md) §5. The status below describes the earlier
+> 2026-08-03 slice and predates this.
+
 **Covered feedback IDs:** 169
 **Scope shipped:** dynasty near-term slice (bar chart) + the **outlook-odds UI
 layer wired behind the DARK `outlook.odds` flag**. The odds layer binds to

@@ -138,7 +138,7 @@ tags: [trades, error]
 # to blink out is not (the injected 500 returns in milliseconds).
 # Real production body from handle_unexpected_error (law 12): it is what the
 # TOAST renders. The CARD deliberately shows DECK_FAIL_GENERIC instead — the
-# persistent surface never echoes a server string (D-025).
+# persistent surface never echoes a server string (D-026).
 - runScript:
     file: ../capture/helpers/inject.js
     env:

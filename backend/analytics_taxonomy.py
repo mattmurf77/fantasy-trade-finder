@@ -152,6 +152,11 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # trades-first hypothesis turns on — has never been readable in
     # production. Registration only: the emitter already exists.
     "deck_regenerated",
+    # League Summary outlook strip (#169 frame E, scope.md §1a; flag
+    # `outlook.odds`) — the collapsed-strip expand/collapse toggle. NOT
+    # funnel-critical; zero volume until the flag lights (specced now
+    # because the operator rejected the analytics waiver 2026-08-11).
+    "outlook_strip_toggled",
 })
 
 # ---------------------------------------------------------------------------
@@ -389,6 +394,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # sends: the Quick Set position that forced the regeneration and the
     # count of cards that were not in the pre-Quick-Set deck.
     "deck_regenerated":        frozenset({"position", "new_trades"}),
+    # Outlook strip (#169 frame E) — `expanded` is the RESULTING state.
+    "outlook_strip_toggled":  frozenset({"league_id", "expanded"}),
 }
 
 

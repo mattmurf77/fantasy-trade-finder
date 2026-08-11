@@ -6,7 +6,7 @@
 >
 > **Binding authority:** [`hld.md`](hld.md) is the batch authority. This LLD conforms to
 > §2 **S-08…S-12**, §3 **commit 11**, §4 **W2-TS**, §6 rows **5** and **10**, §7 (docs
-> rows `D-025` / `G-027` / `components.md`), §8 **R6** and **R13**, and §9 **LLD-2**.
+> rows `D-026` / `G-029` / `components.md`), §8 **R6** and **R13**, and §9 **LLD-2**.
 > Where this document refines the source plan, §12 says so explicitly; there are **no
 > deviations from the HLD**.
 >
@@ -539,7 +539,7 @@ Placement is doing three jobs at once and none of them is arbitrary:
 - **Before row 8** ⇒ the never-searched card is now genuinely never-searched. It keeps its
   `testID` and its copy (`trades.empty-text` is not renamed and not replaced).
 
-### 5.1 Row 4 — the `!deckFailure` guard (defect G-027)
+### 5.1 Row 4 — the `!deckFailure` guard (defect G-029)
 
 Current code (`:4819-4829`):
 
@@ -572,7 +572,7 @@ Current code (`:4819-4829`):
             // shows on first run. Falls through to the normal states if the
             // job completes empty or the silent auto-start gives up.
             //
-            // P0-2 / G-027: `!deckFailure` is NOT redundant with the
+            // P0-2 / G-029: `!deckFailure` is NOT redundant with the
             // `status !== 'error'` guard above it. The poll-abandon path sets
             // job to NULL (not to an errored snapshot), so `job?.status` is
             // `undefined`, the status guard misses, `autoGenFailed` is only
@@ -582,7 +582,7 @@ Current code (`:4819-4829`):
             <SkeletonTradeCard />
 ```
 
-**Why this is the whole fix for G-027** — the three blocking facts, each verified in this
+**Why this is the whole fix for G-029** — the three blocking facts, each verified in this
 worktree:
 
 - `setJob(null)` in the poll `catch` (`:1303`) ⇒ `job?.status` is `undefined`, so
@@ -767,7 +767,7 @@ and `normalizeJobSnapshot` (`mobile/src/api/trades.ts:251`) keeps it as
 (`mobile/src/shared/types.ts:293`).
 
 **This is a deliberate deviation from the audit handoff's "render the backend message",
-and it is recorded, not hidden:** HLD **S-08…S-12** and `D-025` (owned by W3-DOCS) both
+and it is recorded, not hidden:** HLD **S-08…S-12** and `D-026` (owned by W3-DOCS) both
 carry it. The handoff's intent — *tell the user what went wrong* — is better served by two
 mapped sentences than by a stack-trace fragment. Path A **is** echoed, because there the
 message comes from the API client's `parsed.message || parsed.error`, i.e. the curated
@@ -1214,7 +1214,7 @@ never observed the bug proves nothing** (HLD §8 R5).
 1. **Control run, before any edit:** run `capture/trades.yaml` on the unfixed tree — it
    must **pass**, ending on `trades.empty-text`. That is the recorded proof the flow was
    asserting the bug.
-2. **Control run, defect G-027:** fresh state, sign in, and inject
+2. **Control run, defect G-029:** fresh state, sign in, and inject
    `fail_next /api/trades/status* 500 count:4` before the first-run auto-start settles.
    Confirm the `SkeletonTradeCard` persists indefinitely with no recovery affordance.
    Record it — this is the evidence behind the GOTCHAS row W3-DOCS will write.
@@ -1227,12 +1227,12 @@ never observed the bug proves nothing** (HLD §8 R5).
    backend file**).
 8. Apply §9.3 to `capture/trades.yaml`; author §9.2's flow; run both on sim. Decide the
    leg-3 drain question on-sim and write the answer into the flow header.
-9. Re-run the G-027 repro from item 2: the skeleton must be **replaced by the error card**,
+9. Re-run the G-029 repro from item 2: the skeleton must be **replaced by the error card**,
    not merely unstuck.
 10. Eyeball every screenshot (law 23) — in particular that the deck-done summary, "That's
     all for now", and the never-searched card are **visually unchanged**, and that the
     toast now clears the mode-bar chips.
-11. Hand the docs rows to `W3-DOCS` via the scope block: `D-025`, `G-027`,
+11. Hand the docs rows to `W3-DOCS` via the scope block: `D-026`, `G-029`,
     `docs/design/components.md` (resolved — see §12.4), `NEXT.md` (the
     `find_trades_tapped` allowlist gap), `CHANGELOG.md`.
 
@@ -1258,7 +1258,7 @@ error and `DECK_FAIL_GENERIC` otherwise. The toast (unchanged) still carries `e.
 verbatim, so the curated server string is not lost to the user — it is on the transient
 surface, while the persistent card carries copy that is *always* actionable. This also
 removes the last route by which an unmapped server string could land on the persistent
-card, which is the spirit of `D-025`. Consequence for the flow: **leg 5 anchors on the
+card, which is the spirit of `D-026`. Consequence for the flow: **leg 5 anchors on the
 card's own copy** (`".*couldn't finish that search.*"`), not on the toast's
 `"Unexpected server error."` — the toast is transient and would make the assertion a
 race. The injected body still uses the real production shape (law 12) because the toast

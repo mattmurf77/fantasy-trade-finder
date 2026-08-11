@@ -42,7 +42,7 @@
 | **S-06** fixture / seeder / capture inversion ships in the same commit | §5. |
 | **S-07** old capture re-captured, not preserved | §8.2. |
 | **§10.3** `testid-lint.sh` does **not** read `CLAUDE.md` | §6 — the registry row is W3-DOCS's, and is **not** a wave-1 dependency. `plan-p0-1.md` change-list item 15 is dropped. |
-| **§7** docs | No `docs/**` or `living-memory/**` file is touched by this commit. Rows supplied to W3-DOCS in `prd-p0-1.md` §5; ids are **D-025** (not D-011) and, if needed, **G-027+**. |
+| **§7** docs | No `docs/**` or `living-memory/**` file is touched by this commit. Rows supplied to W3-DOCS in `prd-p0-1.md` §5; ids are **D-026** (not D-011) and, if needed, **G-029+**. |
 | **R1** line-number drift | Every anchor below carries a **grep string** as well as a line number. The build agent re-greps before editing and trusts the grep string. |
 
 **Files this commit touches** (exactly `hld.md` §4 W1-BE's P0-1 rows, minus the
@@ -361,7 +361,7 @@ Two properties worth stating so no one "improves" this later:
 **Permanent, deliberate consequence.** A backfilled user has spent `was_first`
 forever: a genuine later unlock in their *second* format will insert the format but
 will never emit `ranking_complete_first_time`. That is the price S-03 accepts, and
-it is recorded in `prd-p0-1.md` §8 and in the D-025 entry W3-DOCS writes.
+it is recorded in `prd-p0-1.md` §8 and in the D-026 entry W3-DOCS writes.
 
 ### 2.3 Call the backfill from `_migrate_db()`
 
@@ -1296,4 +1296,4 @@ numbered list left unpinned.
 `plan-p0-1.md` item 15 (the `mobile/src/components/CLAUDE.md` registration claimed
 to be a `testid-lint.sh` dependency). §6 follows the HLD; the plan's claim is false.
 Likewise the plan's `D-011`/`G-013` ids are stale — `hld.md` §10.4 assigns
-**D-025**, and W3-DOCS allocates it.
+**D-026**, and W3-DOCS allocates it.

@@ -154,3 +154,15 @@ Four client-fired events (`POST /api/events`) for the in-app ESPN login → nati
 | `espn_connect_abandoned` | screen left without a capture (header back / swipe) | `saw_otp` |
 
 > **No credential ever becomes a property.** The only data that leaves the WebView is the two cookie strings, and they go to `POST /api/espn/link`, never to analytics. `saw_otp` measures how often the emailed-code step gates the flow; the code value is never read (see DECISIONS.md D-021).
+
+---
+
+## Addendum 2026-08-11 — outlook strip toggle (feedback #169 frame E, flag `outlook.odds`)
+
+One client-fired event (`POST /api/events`) for the League Summary collapsed outlook strip (#169 frame E; scope `docs/feedback/items/169-outlook-league-summary/scope.md` §1a). Registered in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`); NOT `FUNNEL_CRITICAL`.
+
+| Event | Fires | Key props |
+|---|---|---|
+| `outlook_strip_toggled` | user taps the strip and the expand/collapse toggle applies (`LeagueSummary`) | `league_id`, `expanded` (the **resulting** state) |
+
+> **Ships dark by design.** The strip lives behind `outlook.odds` (and `track()` is a no-op unless `analytics.client_events` is on), so zero rows arrive until the flag lights. The operator rejected the analytics waiver 2026-08-11 — the instrumentation exists from day one of the strip (NULL-`platform`-incident lesson).

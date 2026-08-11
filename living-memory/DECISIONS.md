@@ -217,7 +217,15 @@
 
 ---
 
-## D-025 — `ranking_method` Is Written at the Point of Use, First-Use Wins
+## D-025 — The Trade Card Owns Its Disposition, and Absence Is the Card's Odds Design
+**Date:** 2026-08-11 (feedback #169 frame decisions, third pass)
+**Context:** The operator reviewed the #169 outlook-odds mockups and chose League-Summary frames B+C1+E and card frame C, with two placement corrections. Card frame D (week-6+ odds via a with-trade re-sim) was first selected, then dropped on seeing its backend cost. That left no frame covering week 6+ on the card; the IDP coverage caption's fate had been asked twice without an answer.
+**Decision:** Four rulings, all operator-explicit. (1) **The trade card shows no odds block at all, in any week, for now** — week 6+ is *deferred, not designed*; absence is the design year-round. (2) **Pass / Like is the deck disposition vocabulary** in every string surface including VoiceOver (the shipped "Accept this trade" labels violate it and were renamed), and the pair renders **inside the card directly beneath the player tiles** — with `TradeValueBar` below the pair and any future card odds block below the bar. (3) The League-Summary section defaults to a **collapsed one-line "your outlook" strip** (per-league, per-user persisted) with the full section one tap away. (4) The IDP coverage caption **stays**. Additionally the operator **rejected** the dark-flag analytics waiver: `outlook_strip_toggled` ships specced and wired on day one even though `outlook.odds` is dark.
+**Alternatives considered:** Card frame B (percentage framing, week 6+) — rejected with C1 chosen league-wide. Card frame D — dropped for its re-sim cost. Flagging the button move — rejected: a pure client reorder where `git revert` is the cheaper lever and a flag would be a dead surface. Deferring the analytics spec to lighting time — operator-rejected (NULL-`platform` lesson: instrumentation exists from day one).
+**Consequences:** The card change is client-only and off the bright line's schema/API/flag surfaces (the analytics allowlist is the one backend touch). "Value bar above the playoff outlook" is vacuous today and **binding on whoever designs the deferred week-6+ card treatment** — recorded in `docs/cross-client-invariants.md` § Deck disposition. Lighting `outlook.odds` owes a Maestro flow covering section + strip states and a seeded harness fixture (NEXT.md item 5); the strip's testID is unlintable until that flow exists.
+**Status:** Active (build 2026-08-11, branch `feedback-169-e-and-card`).
+**Related ADR:** — (feedback item `docs/feedback/items/169-outlook-league-summary/`, decisions record + doc set rev 2)
+## D-026 — `ranking_method` Is Written at the Point of Use, First-Use Wins
 **Date:** 2026-08-11 (P0-1, mobile UX audit 2026-08-09)
 **Context:** `users.ranking_method` was only ever written by the rank-home chooser. The unlock rule in `get_rankings_progress` branches on it, so a Quick Set user who finished all four positions without visiting the chooser fell to the trio branch and stayed locked out of the Trade Finder forever — along with the push primer that rides the unlock. The default path never completed its own progression.
 **Decision:** Four save routes record the method as a side effect of a successful save (`/api/tiers/save`, `/api/rank3`, `/api/rankings/reorder`, `/api/anchor/save`), through `set_ranking_method_if_unset` — a single conditional `UPDATE`, race-free, that writes **only where the column is unset**. **First-use wins, not last-use wins.** One exception: a completeness-marking tiers/quickset save may overwrite `'anchor'` and only `'anchor'`. Subset boards write nothing (rookie-scope saves, `via:'rookie_ranks'`, `via:'draft_room'`). A one-time boot backfill tags the pre-fix cohort `'quickset'`.
@@ -228,29 +236,29 @@
 
 ---
 
-## D-026 — A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed
+## D-027 — A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed
 **Date:** 2026-08-11 (P0-2, mobile UX audit 2026-08-09)
 **Context:** A trade search that failed looked identical to one that had never been run: same empty deck, same copy, no error, and a toast that was gone in seconds. Users had no way to tell "nothing found" from "it broke", and no retry.
 **Decision:** One named, **persistent** deck failure state with a working retry, driven by a single `deckFailure` state variable — one funnel, set from every failure path — rather than a render-time read of `job.status`. The backend's `job.error` is **mapped to app copy through `jobErrorCopy`, never echoed**.
 **Alternatives considered:** **Render the backend message** (the handoff's suggestion) — rejected on reading the field: `job.error` is `str(e)` of a server-side Python exception, or the literal string `"timeout"`. Showing it leaks internals and says nothing useful. **Read `job.status` at render time** — rejected: recency. The poll-abandon path sets `job` to `null`, so a render-time read cannot see the failure that just happened.
-**Consequences:** Partial decks keep their cards — the failure state is additive, not a replacement. The toast's existing wording is untouched. `trades-generation-failure.yaml` and `capture/trades.yaml` asserted the *old* behaviour and had to move in the same commit. Closes defect G-027.
+**Consequences:** Partial decks keep their cards — the failure state is additive, not a replacement. The toast's existing wording is untouched. `trades-generation-failure.yaml` and `capture/trades.yaml` asserted the *old* behaviour and had to move in the same commit. Closes defect G-029.
 **Status:** Active.
 **Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-2.md`)
 
 ---
 
-## D-027 — The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing
+## D-028 — The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing
 **Date:** 2026-08-11 (P0-3, mobile UX audit 2026-08-09)
 **Context:** The invite loop was broken at both ends — mobile never parsed the `?league=` parameter it emitted, and `invitedBy` lived in memory only, so an invite that required a sign-in (most of them) lost its context on the next launch.
 **Decision:** Three parts. (1) The legacy `/?league=<id>&ref=<u>` form is **parsed forever** by both clients and is not deprecated. (2) The new `/app/league/join/<id>` path **302s into the existing web landing** rather than getting its own page. (3) Invite context is a **14-day persisted intent** (`ftf_invite_intent`), not an in-memory value.
 **Alternatives considered:** **Deprecate the legacy form** — rejected: links live in group chats and screenshots indefinitely, and removing the parser silently breaks every invite already shared. **A new web join page** — rejected: the existing funnel already converts and already stores the referral; a second page is a second thing to keep correct. **Keep `invitedBy` in memory** — rejected, that *is* the bug.
-**Consequences:** Two accepted URL forms forever, recorded as a two-client contract in `cross-client-invariants.md`. The reader, the route and the AASA claim ship **unflagged and first**; only the emitter is behind `growth.invite_join_link`, because Apple's AASA CDN cache (~24 h) makes the natural order actively worse than shipping nothing (see D-027's runbook sequence). 302 not 301 — a permanent redirect would outlive any future landing-page change. TTL is evaluated on read, never by a timer.
+**Consequences:** Two accepted URL forms forever, recorded as a two-client contract in `cross-client-invariants.md`. The reader, the route and the AASA claim ship **unflagged and first**; only the emitter is behind `growth.invite_join_link`, because Apple's AASA CDN cache (~24 h) makes the natural order actively worse than shipping nothing (see D-028's runbook sequence). 302 not 301 — a permanent redirect would outlive any future landing-page change. TTL is evaluated on read, never by a timer.
 **Status:** Active (emitter dark).
 **Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-3.md`)
 
 ---
 
-## D-028 — Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag
+## D-029 — Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag
 **Date:** 2026-08-11 (P0-5, mobile UX audit 2026-08-09)
 **Context:** A whole sign-in branch — Apple/Google account-only, no linked Sleeper — landed in the tab stack with the `no_league` sentinel pinned, i.e. on empty tabs with no way forward. A live stranding bug in TestFlight.
 **Decision:** Route on the **sentinel**: if the pinned league is `no_league`, send the user to the league choice with a companion state that explains it. Extract the Sleeper-identity-link form from `SettingsScreen` into a single-owner `LinkSleeperSheet` component so the picker can offer it. **No new flag.**
@@ -261,7 +269,7 @@
 
 ---
 
-## D-029 — RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route
+## D-030 — RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route
 **Date:** 2026-08-11 (P0-6, mobile UX audit 2026-08-09)
 **Context:** `SendInSleeperButton` self-gated on `league_id.isdigit()`, which is true for MFL and Fleaflicker ids too — so those users got a live Send button that always 400s, and matched ESPN users got a match with no action and no explanation.
 **Decision:** A **platform-generic gate**: Sleeper leagues send; ESPN/MFL/Fleaflicker get a stated reason plus a working **Copy trade**. The clipboard write goes through React Native core's `Clipboard`, isolated behind a one-function `mobile/src/utils/clipboard.ts`. Separately, delete the unused mobile `setMatchDisposition` wrapper while **keeping the route** — it has a live web caller and ELO consequences.
@@ -272,7 +280,7 @@
 
 ---
 
-## D-030 — The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel
+## D-031 — The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel
 **Date:** 2026-08-11 (P0-7, mobile UX audit 2026-08-09)
 **Context:** Launch-day instrumentation was missing across navigation, the League surfaces and the entire send funnel — the north-star leg. Two candidate namings existed: `send_in_sleeper_*` (descriptive) and `sleeper_send_*` (reserved in `analytics_queries` on 2026-07-17 and never fired).
 **Decision:** Adopt the **reserved `sleeper_send_*` names**. Split the funnel: **success is server-fired** on `POST /api/trades/propose`; **attempt and failure are client-fired**.
@@ -283,7 +291,7 @@
 
 ---
 
-## D-031 — The Tour's Sign-Off Gate Is Beat Identity, Not Step Count
+## D-032 — The Tour's Sign-Off Gate Is Beat Identity, Not Step Count
 **Date:** 2026-08-11 (P0-8, mobile UX audit 2026-08-09)
 **Context:** The guided tour told users it was over before it had begun — the `s8.1` sign-off beat could fire on a session that had reached almost none of the tour. The audit counted 9 of 15 steps unreachable; the build's own sweep found **16 of 20**.
 **Decision:** Gate `s8.1` on **beat identity** — the S2.2 beat must actually have been seen — not on a count of steps seen.
@@ -294,7 +302,7 @@
 
 ---
 
-## D-032 — Request the Celebration First, Consume It Only on Success
+## D-033 — Request the Celebration First, Consume It Only on Success
 **Date:** 2026-08-11 (P0-8/9 defect D1)
 **Context:** The first-like celebration was consumed from its one-shot store *before* the bubble slot was checked for availability. When the slot was occupied, the celebration was silently spent and never shown again — the user's first-like moment vanished with no error anywhere.
 **Decision:** Request-first, consume-on-success: check the slot, render, and only then mark the one-shot as consumed. If the slot is busy, nothing is spent.
@@ -333,14 +341,15 @@
 | D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
 | D-023 | Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch | 2026-08-10 |
 | D-024 | The Mock-Draft "Run" Is Engine-Internal, and Two Constants Are Load-Bearing in Opposite Directions | 2026-08-10 |
-| D-025 | `ranking_method` Is Written at the Point of Use, First-Use Wins | 2026-08-11 |
-| D-026 | A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed | 2026-08-11 |
-| D-027 | The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing | 2026-08-11 |
-| D-028 | Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag | 2026-08-11 |
-| D-029 | RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route | 2026-08-11 |
-| D-030 | The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel | 2026-08-11 |
-| D-031 | The Tour's Sign-Off Gate Is Beat Identity, Not Step Count | 2026-08-11 |
-| D-032 | Request the Celebration First, Consume It Only on Success | 2026-08-11 |
+| D-025 | The Trade Card Owns Its Disposition, and Absence Is the Card's Odds Design | 2026-08-11 |
+| D-026 | `ranking_method` Is Written at the Point of Use, First-Use Wins | 2026-08-11 |
+| D-027 | A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed | 2026-08-11 |
+| D-028 | The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing | 2026-08-11 |
+| D-029 | Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag | 2026-08-11 |
+| D-030 | RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route | 2026-08-11 |
+| D-031 | The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel | 2026-08-11 |
+| D-032 | The Tour's Sign-Off Gate Is Beat Identity, Not Step Count | 2026-08-11 |
+| D-033 | Request the Celebration First, Consume It Only on Success | 2026-08-11 |
 
 ---
 

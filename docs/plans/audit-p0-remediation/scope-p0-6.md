@@ -155,8 +155,8 @@
 |---|---|---|
 | `mobile/src/components/CLAUDE.md` | **updated** | The misleading "self-gates to Sleeper leagues" replaced with the platform-generic gate, the fail-open note, the required `surface` prop, and both new testIDs (verified at `SendInSleeperButton.tsx:393/398`). |
 | `mobile/src/api/CLAUDE.md` | **n/a (verified)** | The file contains zero occurrences of `setMatchDisposition`; its `trades.ts` row is "Trade card fetch + decisions". Recorded as verified, closing the HLD's "check at build" row. |
-| `living-memory/DECISIONS.md` | **updated — D-029** | Both halves: RN-core `Clipboard` (with the `npm install`-unavailable constraint and the one-file migration seam) and deleting the wrapper while keeping the route. |
-| `living-memory/GOTCHAS.md` | **updated — G-028** | Numeric MFL/Fleaflicker ids vs `isdigit()`, cross-referenced to G-014 / #200 / #220 as the **third** instance of the class. |
+| `living-memory/DECISIONS.md` | **updated — D-030** | Both halves: RN-core `Clipboard` (with the `npm install`-unavailable constraint and the one-file migration seam) and deleting the wrapper while keeping the route. |
+| `living-memory/GOTCHAS.md` | **updated — G-030** | Numeric MFL/Fleaflicker ids vs `isdigit()`, cross-referenced to G-014 / #200 / #220 as the **third** instance of the class. |
 | `living-memory/NEXT.md` | **updated ×3** | Items 0e (accept/decline, with the evaluation), 0f (`is_linked_platform_league` guard), 0j (MFL/Fleaflicker harness profile). |
 | `living-memory/CHANGELOG.md` | **updated** | Batch H2 — the MFL/Fleaflicker behaviour change is named explicitly in the lede, not buried. |
 | `docs/cross-client-invariants.md` | **updated (revised from n/a)** | The `SendSurface` enum **did** become a cross-client constant once P0-7 put `surface` on three event names — recorded under § Client analytics event contract with `awaiting` ≠ `suggested` called out. `NO_SEND_REASON` copy remains mobile-only and is not recorded. |

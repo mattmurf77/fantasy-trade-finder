@@ -66,19 +66,21 @@
    or draft status, and d1/d2/d3 target a league in no profile. Either fund the
    seeder work or drop the flows so the gap is visible instead of implied.
 
-1. **Resolve the two conflicting ESPN pick-assignment designs.** *(author/operator decision, not a merge)* — `teardown-remediation` reimplements a problem `origin/main` already shipped differently. Detail: [`HANDOFF.md`](HANDOFF.md).
-2. **Execute the branch-triage verdicts.** *([`../docs/reviews/2026-08-08-branch-triage.md`](../docs/reviews/2026-08-08-branch-triage.md))* — 3 RECOVER are real gaps, 3 ASK need operator calls, 29 DELETEs pinned by worktrees.
+1. **Review + graduate `feat/send-in-mfl`.** *(built this session, unmerged)* — complete build (adapter, `/api/trades/propose-mfl`, `trade.send_in_mfl` OFF, platform-aware button fix, 2412 tests green). Blocked on the 8-item live-verification checklist + MFL client registration + 3 operator questions (MFL-login-as-verified?, single-linker leagues?, `trade_sent` event?). Detail: [`HANDOFF.md`](HANDOFF.md), scope: `../docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md`.
+2. **Decide the ESPN send NO-GO reversal + run probe #1.** *(operator)* — `spike/send-in-espn-write` scaffolds the write path (all football values UNVERIFIED, `espn.send` OFF + absent from `config/features.json`). First live probe = capture one real browser Propose-Trade in a throwaway ESPN dynasty league (resolves the `espn_id`==`playerId` load-bearer). Reversal is a hand-added `DECISIONS.md` D-entry, post-scorecard. Artifacts: `../docs/plans/espn-send-spike-verification-2026-08-11.md`, `...decision-reversal-draft-2026-08-11.md`.
+3. **Resolve the two conflicting ESPN pick-assignment designs.** *(author/operator decision, not a merge)* — `teardown-remediation` reimplements a problem `origin/main` already shipped differently. Detail: [`HANDOFF.md`](HANDOFF.md).
+4. **Execute the branch-triage verdicts.** *([`../docs/reviews/2026-08-08-branch-triage.md`](../docs/reviews/2026-08-08-branch-triage.md))* — 3 RECOVER are real gaps, 3 ASK need operator calls, 29 DELETEs pinned by worktrees.
 
 ### Near-term
 
-3. **Decide `trade.finder_config_consolidated` (flag false).** +716 lines of `TradesScreen.tsx` sit uncommitted; docs already updated as though shipped.
-4. **Graduate or kill `deck.value_model`.** The F8 replay harness runs nightly — the gate is checkable now.
-5. **Wire up `outlook.odds` or delete it.** Built on both ends, but unreachable — flag absent from defaults.
+5. **Decide `trade.finder_config_consolidated` (flag false).** +716 lines of `TradesScreen.tsx` sit uncommitted; docs already updated as though shipped.
+6. **Graduate or kill `deck.value_model`.** The F8 replay harness runs nightly — the gate is checkable now.
+7. **Light `outlook.odds` (decision + lighting checklist).** Corrected 2026-08-11 — the earlier claim that the flag was absent from `config/features.json` was stale: it is **present and `false`** there, so the endpoint is reachable, just flag-dark. Built on both ends (backend `/api/league/outlook` + LeagueSummary section; frame-E collapsed strip **shipped dark 2026-08-11**, `f27c0f5` — `docs/feedback/items/169-outlook-league-summary/`). Lighting owes: a Maestro flow for the section + strip states and a seeded outlook fixture for the harness (the `outlook_strip_toggled` event ships specced + wired with the strip build — operator rejected that waiver) — see `docs/feedback/items/169-outlook-league-summary/scope.md` §1/§3.
 
 ### Medium-term
 
-6. **First public App Store release.** Checklist in `docs/business/ops/`; TestFlight-only through v1.11.0.
-7. **Worktree/disk hygiene.** ~40+ worktrees (8.6 GB) already broke one EAS upload.
+8. **First public App Store release.** Checklist in `docs/business/ops/`; TestFlight-only through v1.11.0.
+9. **Worktree/disk hygiene.** ~40+ worktrees (8.6 GB) already broke one EAS upload.
 
 ### Reserved
 

@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-11 — #169 frame E + card frame C (sim gate DEVIATION mid-run, operator-directed)
+
+- **Change:** branch `feedback-169-e-and-card` — League Summary collapsed outlook strip (flag-dark, `outlook.odds`) + Pass/Like moved inside the top deck card + `outlook_strip_toggled` analytics event (taxonomy + tracking plan; operator rejected the dark-flag analytics waiver). Doc set (plan/HLD/LLD/PRD/scope rev 2, adversarially reviewed, 21 findings applied) in `docs/feedback/items/169-outlook-league-summary/`.
+- **Verified (merged tree):** `npx tsc --noEmit` clean; `testid-lint.sh` OK; `check-card-disposition.js` 10/10 **with double sabotage proof** (guard flip → FAIL; reintroduced TradesScreen testID → FAIL; restored → pass); taxonomy test 18/18 **with sabotage proof** (event removed from allowlist → FAIL → restored). Full `pytest backend/tests -q`: **2371 passed / 6 failed / 1 skipped** — all 6 in `test_rookie_scope.py`, **proven pre-existing and environmental** (fail with origin/main-identical backend bytes in the data-carrying main checkout; 34/34 pass in a clean worktree of the same commit; G-028, fix chip filed). CI on the PR is the clean-environment authority.
+- **Sim run: Tier-1 HALTED mid-gate by operator** ("proceed without sim testing — eating up too much usage"); push via `FTF_SKIP_SIM_GATE=1`; no `last-sim-run.json` written (not fabricated). **Partial on-sim evidence before the halt:** extended `06-trades-deck` positional `childOf` asserts PASSED (both disposition buttons proven inside `trades.card-top`, no scroll — fails by construction on the old layout); screenshot proof of the operator's layout; `01-signin` full pass in the final harness config; manual launch-health check. Suite-level failures across 4 attempts were ALL environmental, diagnosed in sequence: `# flags: release` fixture not loaded (guided-avatar tour overlay swallowed taps), backend process reaped by shell teardown, **disk exhaustion to 0 bytes** (25 launch crash-loops in Hermes init — G-027 adjacent; ~4 GB freed), stale Maestro XCTest driver after `simctl erase`. None traced to the change under test.
+- **Owed at next sim session:** green full-suite run; post-overlay like/pass tap-through of `06-trades-deck`; the four re-captures (`trades`, `matches`, `sheets-trade-dna`, `league-summary`) + `screen-freshness.sh` sweep; on-sim verification of the three re-derived `onboarding-tour@fresh` anchors.
+
 ## 2026-08-10 — Screen-library capture suite (sim gate tier-2 evidence)
 
 - Full consolidated sweep on FTF-iOS18 (iOS 18.4): 43 capture flows, 7 cells
@@ -21,9 +28,6 @@
   testid-lint green, screen-freshness green ×25, backend suite 2207 passed
   (fixtures commit). Mobile app-code delta this branch: testRouteEntry.ts +
   one RootNav line — exercised by every launch-arg capture cell above.
->>>>>>> 2e18e85 (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
->>>>>>> 36a033b (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
-
 ## 2026-08-10 — Feedback batch #289-#294 (sim gate DEVIATION, operator-directed bypass)
 
 - **SHIPPED 2026-08-10.** Squash-merged as `6c304c7` via PR #103; CI green (backend-tests, mobile-typecheck, maestro-testid-lint). Render deploy **verified by content**, not by uptime: `/api/feature-flags` serves `league.picks_always_counted = true` (155 flags), which only the new build can produce. iOS **1.12.0 build 98** uploaded to App Store Connect (submission `0095a36f`).

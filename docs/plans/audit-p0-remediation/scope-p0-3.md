@@ -132,8 +132,8 @@ double-count. *Reason recorded; operator sign-off requested.*
 | `docs/runbook.md` | **updated** | § Universal Links AASA extended with the seven-step ordering, including "if steps 2-5 fail, leave the flag OFF indefinitely" and why that costs nothing. |
 | `docs/glossary.md` | **updated** | **invite intent** — blob shape verified against `useSession.ts` (`{leagueId, invitedBy, leagueName, ts}`, `ftf_invite_intent`, 14-day TTL evaluated on read). |
 | `living-memory/LLD.md` | **updated** | Root-stack rule for signed-out deep-link destinations; imperative flag reads in shared emitters. |
-| `living-memory/DECISIONS.md` | **updated — D-027** | As specified. |
-| `living-memory/GOTCHAS.md` | **updated — G-031** (additive) | The `vcr_misses` rail and the single-call-site rule that keeps `invite-meta` off it. |
+| `living-memory/DECISIONS.md` | **updated — D-028** | As specified. |
+| `living-memory/GOTCHAS.md` | **updated — G-033** (additive) | The `vcr_misses` rail and the single-call-site rule that keeps `invite-meta` off it. |
 | `living-memory/NEXT.md` | **updated** | Item 0g — `invite_shared` not fired from `LeagueScreen.tsx`'s invite module. |
 | `living-memory/CHANGELOG.md` | **updated** | Batch H2, P0-3 bullet — names the web-already-parsed finding. |
 | `docs/architecture.md` · `living-memory/HLD.md` · `docs/data-dictionary.md` · `living-memory/DEPENDENCIES.md` | **n/a — confirmed** | As stated above. |

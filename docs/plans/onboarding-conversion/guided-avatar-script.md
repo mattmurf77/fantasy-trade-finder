@@ -105,9 +105,9 @@ Accepting routes into the same onboarding-mode Quick Set (suppressed finish-prom
 
 | # | Trigger | Pose | Line | Advance |
 |---|---|---|---|---|
-| S8.1 | next Trades focus after S5/S6 *(shipped gate, 2026-08-11: fires only once `guideSeen['s2.2'] && guideSeen['s6.1']` — beat identity, not step count; see living-memory D-031. The pre-fix code fired this off `s6.1` alone, announcing completion to users who had received no tour — audit P0-8)* | celebrate → neutral | "That's the tour. I'll keep modeling in the background — you'll see me when the numbers say something worth hearing." | tap → guide retires to reactive-only |
+| S8.1 | next Trades focus after S5/S6 *(shipped gate, 2026-08-11: fires only once `guideSeen['s2.2'] && guideSeen['s6.1']` — beat identity, not step count; see living-memory D-032. The pre-fix code fired this off `s6.1` alone, announcing completion to users who had received no tour — audit P0-8)* | celebrate → neutral | "That's the tour. I'll keep modeling in the background — you'll see me when the numbers say something worth hearing." | tap → guide retires to reactive-only |
 
-**Reactive-only mode (post-tour):** The Analyst appears ONLY for S5-style reveals after later Quick Set sessions and S7 exhausted states. *(The error-commentary beat — oops pose on `api_request_failed` bursts, "Something's broken on my end. Not your fault. Investigating." — was cut 2026-08-11: `err.burst` had zero call sites, and the Trades error surface is now the named P0-2 error card, not a mascot bubble. See D-031; revisit only if a chat assistant lands.)* This is the standing surface a future AI chat assistant plugs into — the avatar becomes the chat entry point.
+**Reactive-only mode (post-tour):** The Analyst appears ONLY for S5-style reveals after later Quick Set sessions and S7 exhausted states. *(The error-commentary beat — oops pose on `api_request_failed` bursts, "Something's broken on my end. Not your fault. Investigating." — was cut 2026-08-11: `err.burst` had zero call sites, and the Trades error surface is now the named P0-2 error card, not a mascot bubble. See D-032; revisit only if a chat assistant lands.)* This is the standing surface a future AI chat assistant plugs into — the avatar becomes the chat entry point.
 
 ## 4 · Edge rules
 

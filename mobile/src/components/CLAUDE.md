@@ -5,7 +5,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | Component | Use |
 |---|---|
 | `PlayerCard` | Player tile: name, position, value |
-| `TradeCard` | Give/receive summary card; swipe-deck variant adds keep-side, edit-in-calc, remove-asset, hide-strength/hide-lock props |
+| `TradeCard` | Give/receive summary card; swipe-deck variant adds keep-side, edit-in-calc, remove-asset, hide-strength/hide-lock props, and `disposition` (#169: Pass/Like render inside the card beneath the player tiles — top deck card only, never peek/match/featured; vocabulary + ordering are `docs/cross-client-invariants.md` § Deck disposition) |
 | `FeaturedTradeWindow` | Read-only featured-trade card for single-pin finder mode, back-chip history stack; exports `assetIdeaKey()` |
 | `AssetIdeasPanel` | Grouped Upgrade/Lateral/Downgrade ideas for the pinned asset (flag `trade.asset_ideas`); tap loads into `FeaturedTradeWindow` |
 | `RookieScopeControl` | Shared All/Rookies toggle on every rank surface (flag `ranks.rookie_subset`); also exports `RookieScopeEmpty` |

@@ -44,7 +44,7 @@ Two consequences, both real:
 
 1. **The user cannot tell "we tried and failed" from "you never searched."** The correct
    next action differs (retry vs. start), and the app gives the same instruction for both.
-2. **G-027 — an infinite skeleton.** On a *first run*, path C leaves a
+2. **G-029 — an infinite skeleton.** On a *first run*, path C leaves a
    `SkeletonTradeCard` on screen **forever**: the ladder's `job?.status !== 'error'` guard
    misses because path C sets `job` to `null`, `autoGenFailed` is only ever set from the
    POST path, and the auto-start effect refuses to re-kick. Found during re-verification;
@@ -63,7 +63,7 @@ is correct and lowering it would hide the message (HLD §10.6 item 5).
 distinguishable at a glance from every valid empty state, on every failure path.**
 
 Success is the audit's own criterion, met on **both** forced-failure paths, plus the
-G-027 addition:
+G-029 addition:
 
 > Force a generation failure and force a poll failure. Each must produce a **distinct,
 > named, persistent** state with a **working retry**. Neither may leave a first-run user on
@@ -102,7 +102,7 @@ not the never-searched card. The app *did* search on the user's behalf and showe
 skeleton; "Hit Find a Trade to start" is false either way, and only the card carries a
 retry.
 
-### FR-6 — G-027: no unresolving skeleton
+### FR-6 — G-029: no unresolving skeleton
 
 The first-run skeleton branch additionally excludes the failure state. A first-run user
 whose polling is abandoned sees the skeleton **replaced by** the failure card.
@@ -112,7 +112,7 @@ whose polling is abandoned sees the skeleton **replaced by** the failure card.
 The backend's `job.error` is `str(e)` of a server-side Python exception, or the reaper's
 literal `"timeout"`. It is mapped to shipped copy (§4) and **never rendered verbatim**.
 This is a deliberate, recorded deviation from the audit handoff's "render the backend
-message" (`D-025`).
+message" (`D-026`).
 
 ### FR-8 — Partial decks keep their cards (HLD **S-09**)
 
@@ -187,7 +187,7 @@ Each criterion names how it is proven. "Flow" = `trades-generation-failure.yaml`
 | **AC-3** | **Forced job error (path B)** produces the same named state with `DECK_FAIL_TIMEOUT` for `error:"timeout"`. | Flow leg 1 + manual M-8 |
 | **AC-4** | **Retry works from every path** — tapping `trades.deck-error.retry` starts a real search that populates the deck (`trades.card-top`). | Flow legs 2, 4, 6 |
 | **AC-5** | **The state is persistent** — it survives ≥30 s with no interaction and is not dismissed by the toast fading. | Manual M-13 |
-| **AC-6 (G-027)** | **First run + abandoned polling never leaves an infinite skeleton** — the `SkeletonTradeCard` is *replaced by* the failure card. Proven against the **pre-fix control**, where the skeleton persists indefinitely. | Manual M-10, run twice (before and after) |
+| **AC-6 (G-029)** | **First run + abandoned polling never leaves an infinite skeleton** — the `SkeletonTradeCard` is *replaced by* the failure card. Proven against the **pre-fix control**, where the skeleton persists indefinitely. | Manual M-10, run twice (before and after) |
 | **AC-7** | **No valid empty state changed** — never-searched card, deck-done summary, "That's all for now", and the running placeholder are pixel-unchanged and none is red. | `capture/trades.yaml` `empty` leg + screen-library diff + manual M-12 |
 | **AC-8** | **`job.error` is never echoed** — no rendered string on any path contains a Python exception fragment or the bare token `timeout`. | Code review of `jobErrorCopy` + flow leg 1 asserts the mapped copy |
 | **AC-9** | **The toast no longer overlaps the mode bar** on Trades; the chip labels are fully legible with a toast on screen. | Re-captured `screens/mobile/trades/error.png`, eyeballed (law 23) |
@@ -206,7 +206,7 @@ Explicitly out of scope. Each is a decision, not an omission.
 | **Any analytics event or taxonomy row** | HLD **S-12**. The retry reuses `find_trades_tapped`, whose prop allowlist is `frozenset()` server-side, so `source` is already stripped for the existing `'prefs_changed_strip'` call. Adding the prop is a taxonomy change and belongs on P0-7's commit. | P0-7 addendum "deliberately NOT here" + `NEXT.md` |
 | **A partial-deck inline note** ("Search stopped early — 3 trades found") | HLD **S-09**. Additive, not required by the acceptance criterion; the `deck.length > 0` branch already wins, so partial results still render. | Deferred |
 | **A feature flag** | HLD **S-10**. Its OFF position would be the bug — the acceptance criterion would be unmet in the default configuration. | §7, §10 |
-| **Rendering `job.error` verbatim** | FR-7. It is `str(e)` of a server-side exception. | `D-025` |
+| **Rendering `job.error` verbatim** | FR-7. It is `str(e)` of a server-side exception. | `D-026` |
 | **Changing any toast wording, tone, or hold** | The card is the new surface; widening the diff buys no acceptance. | — |
 | **A shared `ErrorState` component** | No shared error-state component exists in `mobile/src` today; the pattern is copy-pasted across six screens. Extracting one inside a P0 bug fix is a refactor with a blast radius of six screens. | `NEXT.md` candidate, not filed by this PRD |
 | **Any backend change** | The fix only *reads* `job.error`, which already ships in the job snapshot and is already typed client-side. | — |
@@ -239,8 +239,8 @@ root `CLAUDE.md`'s "next ID" columns are stale.**
 
 | Doc | Row |
 |---|---|
-| `living-memory/DECISIONS.md` | **`D-025`** — *"A failed trade search renders a named, persistent deck state; `job.error` is mapped, never echoed."* Records the deviation from the handoff's "render the backend message" and why (`str(e)` of a Python exception, or the literal `"timeout"`), and the one-funnel `deckFailure` choice over a render-time read of `job.status` (recency). |
-| `living-memory/GOTCHAS.md` | **`G-027`** — *"First run + four failed polls = a `SkeletonTradeCard` that never resolves."* The ladder's first-run branch excludes `job?.status === 'error'`, but the poll-abandon path sets `job` to `null`, so the guard misses; `autoGenFailed` is only set from the POST path; the auto-start effect refuses to re-kick. Closed by the `!deckFailure` guard. |
+| `living-memory/DECISIONS.md` | **`D-026`** — *"A failed trade search renders a named, persistent deck state; `job.error` is mapped, never echoed."* Records the deviation from the handoff's "render the backend message" and why (`str(e)` of a Python exception, or the literal `"timeout"`), and the one-funnel `deckFailure` choice over a render-time read of `job.status` (recency). |
+| `living-memory/GOTCHAS.md` | **`G-029`** — *"First run + four failed polls = a `SkeletonTradeCard` that never resolves."* The ladder's first-run branch excludes `job?.status === 'error'`, but the poll-abandon path sets `job` to `null`, so the guard misses; `autoGenFailed` is only set from the POST path; the auto-start effect refuses to re-kick. Closed by the `!deckFailure` guard. |
 | `living-memory/NEXT.md` | `source` prop missing from `find_trades_tapped`'s server-side allowlist — generation-failure rate and retry uptake are unmeasurable until it is added (server-side first). |
 | `living-memory/CHANGELOG.md` | At ship, in the batch's dated H2: a failed trade search now says so and offers a retry, instead of looking identical to never having searched. |
 | `docs/design/components.md` | **n/a because** the doc's § Feedback & status specs Toast's **visual** treatment and the CSS/component it replaces, not any React prop surface; `topOffset` defaults to today's `space.xxl`, so the specced visual is unchanged. *(Resolved by reading the file — this closes the HLD's "verify at build" row.)* |
@@ -273,7 +273,7 @@ root `CLAUDE.md`'s "next ID" columns are stale.**
 | M-7 | `fail_next /api/trades/generate 500 count:1`, tap **Find a Trade** | red **SEARCH FAILED** card carrying the mapped copy; **Try again** works; toast no longer covers the mode-bar chips |
 | M-8 | `fail_next /api/trades/status* 200 count:1` with an errored job body | card reads the timeout copy; **Try again** succeeds |
 | M-9 | `fail_next /api/trades/status* 500 count:4` | card reads the connection copy after ~12 s; **Try again** succeeds |
-| M-10 | **G-027, run twice.** Clear state, sign in fresh, force path C on the auto-started job — once on the **unfixed** tree, once on the fixed one | unfixed: skeleton persists indefinitely (record it). Fixed: skeleton is **replaced by** the failure card |
+| M-10 | **G-029, run twice.** Clear state, sign in fresh, force path C on the auto-started job — once on the **unfixed** tree, once on the fixed one | unfixed: skeleton persists indefinitely (record it). Fixed: skeleton is **replaced by** the failure card |
 | M-11 | VoiceOver | title and body are reachable in reading order; the retry announces as a button; the failure is not announced twice |
 | M-12 | Visual sweep of every deck-slot state | deck-done summary, "That's all for now", and the never-searched card are unchanged, and none is red |
 | M-13 | Leave the failure card idle ≥30 s | still on screen; the toast has long since faded |
@@ -305,7 +305,7 @@ express).
   `TradesScreen.tsx` + `Toast.tsx` + the two Maestro files; the LLD's §1.3 region map is
   the list of what to invert.
 - **Blast radius of a revert:** the deck slot returns to the never-searched card on
-  failure, G-027 returns, and the toast returns to `top: 32`. No data is written, no
+  failure, G-029 returns, and the toast returns to `top: 32`. No data is written, no
   schema or route changes, so there is **nothing to migrate back** and no server-side
   state to unwind.
 - **`capture/trades.yaml` must be reverted with the code.** Its post-fix error leg asserts

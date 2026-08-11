@@ -277,7 +277,7 @@ reaches Sleeper's roster space, even though `is_linked_platform_league` is impor
 Excluded because a backend + API-contract change is `CLAUDE.md`'s bright line, and P0-6's client fix
 is the whole of the acceptance criterion — after it, no FTF client can originate such a request.
 **Record:** `NEXT.md` item ("`is_linked_platform_league` guard on `/api/sleeper/propose`" — one line
-beside the existing `isdigit()` check, returning `400 bad_request`) plus `GOTCHAS.md` **G-028**
+beside the existing `isdigit()` check, returning `400 bad_request`) plus `GOTCHAS.md` **G-030**
 ("MFL/Fleaflicker league ids are numeric, so `league_id.isdigit()` does not exclude them from the
 Sleeper propose path"). Both rows are already in HLD §7 and owned by `W3-DOCS`. Operator waiver W3.
 
@@ -375,8 +375,8 @@ which are authoritative over the stale "next ID" columns in root `CLAUDE.md` (HL
 |---|---|---|
 | `mobile/src/components/CLAUDE.md` | `SendInSleeperButton` row currently reads "self-gates to Sleeper leagues" (`:29`) — misleading after the change. Replace with: platform-generic gate (Sleeper sends; ESPN/MFL/Fleaflicker get a stated reason + `Copy trade`), fail-open on an uncached league id. Register `send-in-sleeper.unavailable` and `send-in-sleeper.copy` in the `testID` registry | **updated** |
 | `mobile/src/api/CLAUDE.md` | **Verified n/a.** Its `trades.ts` row is "Trade card fetch + decisions" (`:13`) and the file never names `setMatchDisposition`. Record as verified rather than leaving "check at build" open | **n/a (verified)** |
-| `living-memory/DECISIONS.md` | **D-029** — (a) React Native core `Clipboard` over `expo-clipboard`, with the native-rebuild constraint and the one-function `utils/clipboard.ts` migration seam; (b) delete the mobile `setMatchDisposition` wrapper while keeping the route (live web caller + ELO consequences) and deferring accept/decline UX | **updated** |
-| `living-memory/GOTCHAS.md` | **G-028** — MFL/Fleaflicker league ids are numeric, so `league_id.isdigit()` at `backend/server.py:12336` does not exclude them from the Sleeper propose path; same bug class as `#200` / `#220` | **updated** |
+| `living-memory/DECISIONS.md` | **D-030** — (a) React Native core `Clipboard` over `expo-clipboard`, with the native-rebuild constraint and the one-function `utils/clipboard.ts` migration seam; (b) delete the mobile `setMatchDisposition` wrapper while keeping the route (live web caller + ELO consequences) and deferring accept/decline UX | **updated** |
+| `living-memory/GOTCHAS.md` | **G-030** — MFL/Fleaflicker league ids are numeric, so `league_id.isdigit()` at `backend/server.py:12336` does not exclude them from the Sleeper propose path; same bug class as `#200` / `#220` | **updated** |
 | `living-memory/NEXT.md` | Three items: match accept/decline UX (§6.1, with the evaluation) · MFL/Fleaflicker harness profile (waiver W2) · `is_linked_platform_league` guard on `/api/sleeper/propose` (§6.2, waiver W3) | **updated** |
 | `living-memory/CHANGELOG.md` | Dated H2 at ship. **Must name the MFL/Fleaflicker behaviour change explicitly** — this is not a purely additive change; a currently-tappable control is removed | **updated at ship** |
 | `living-memory/TEST_LEDGER.md` | Tier-1 sim run result **plus the manual clipboard paste, verbatim** (A-4) and the `#276` compact-mount verdict (A-6) | **updated at ship**, `W3-QA` |

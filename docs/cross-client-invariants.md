@@ -174,6 +174,34 @@ Row **order** is a sibling encoding: a surface presenting the rows as projected 
 
 ---
 
+## Deck disposition (Pass / Like) (#169)
+
+The trade deck's disposition control pair is named **Pass / Like** — operator
+decision ([`feedback/items/169-outlook-league-summary/operator-frame-decisions-2026-08-11.md`](feedback/items/169-outlook-league-summary/operator-frame-decisions-2026-08-11.md) §7 Q2).
+No client introduces "Accept/Decline", "Send offer", or any third vocabulary
+for this control, **in any string surface**: visible copy, testIDs, *and*
+accessibility/VoiceOver labels (the pre-#169 "Accept this trade" labels were
+renamed for exactly this rule).
+
+- **testIDs:** `trades.pass-btn` / `trades.like-btn` — the cross-client names
+  for the pair; Maestro flows and any future client bind to these.
+- **Card ordering rule (operator, same decision record §3/§8):** the
+  disposition pair sits **directly beneath the player tile section** inside
+  the deck card; `TradeValueBar` sits below the pair; **any future card
+  outlook/odds block mounts below `TradeValueBar`** ("value bar above the
+  playoff outlook" — vacuous while no card odds block exists, binding on
+  whoever designs the deferred week-6+ treatment).
+- "Send in Sleeper" is a separate action (proposal transport), not a
+  disposition — it keeps its own naming and placement outside this rule.
+
+**Locations to update together:** `mobile/src/components/TradeCard.tsx`
+(disposition row + a11y strings), `mobile/src/screens/TradesScreen.tsx`
+(`SwipableTopCard` a11y actions), `mobile/.maestro/flows/smoke/06-trades-deck.yaml`
++ `mobile/.maestro/capture/onboarding-tour@fresh.yaml` (the flows that tap
+the pair), and any future web/extension deck surface.
+
+---
+
 ## Team outlook modes
 
 Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
@@ -217,7 +245,7 @@ Canonical set: `market` (retuned default — NULL/unknown stored values read as 
 **Rules:**
 
 - **Routing keys off the SENTINEL, never off a user flag.** Post-auth destination is decided by "is the pinned league the sentinel", not by `user.account_only` — a user who has since linked ESPN/MFL/Fleaflicker is no longer stranded and must not be re-routed. Keying off the flag would send them back to the picker forever.
-- It is **never** passed to a platform API. A `GET /api/sleeper/leagues/acct_<id>`-style fetch on an account-only session proxies a synthetic id upstream: 503 `sleeper_unavailable` under the hermetic harness, `null` live (rendering as "No 2026 NFL leagues found"). See `GOTCHAS.md` G-030.
+- It is **never** passed to a platform API. A `GET /api/sleeper/leagues/acct_<id>`-style fetch on an account-only session proxies a synthetic id upstream: 503 `sleeper_unavailable` under the hermetic harness, `null` live (rendering as "No 2026 NFL leagues found"). See `GOTCHAS.md` G-032.
 - A screen that receives it must render a **companion state**, not an empty list.
 
 **Locations to change together:** `backend/server.py` (`ACCOUNT_NO_LEAGUE_ID`), `mobile/src/state/useSession.ts` (`NO_LEAGUE_ID`), `mobile/src/navigation/RootNav.tsx` (the relaunch predicate), `mobile/src/screens/LeaguePickerScreen.tsx` (the companion state).
@@ -337,7 +365,7 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
 
 **Web (`web/js/events.js`) and the extension (`extension/background.js`) fire NONE of the P0-batch names.** That omission is deliberate — these are mobile surfaces — and is stated here so a future reader reads it as a decision, not as drift.
 
-> ⚠️ **Default-deny is silent.** A client `track()` name absent from `analytics_taxonomy.py` is counted and dropped behind a **200**: no client error, no server error, a plausible dashboard with no rows. A 2026-08-11 sweep found **33 of 73** emitted mobile names unregistered; this batch fixed three (`invite_shared`, `deck_regenerated`, and `celebration_fired` by rename), leaving **29**. Register the name *before* shipping the emitter. See `GOTCHAS.md` G-029.
+> ⚠️ **Default-deny is silent.** A client `track()` name absent from `analytics_taxonomy.py` is counted and dropped behind a **200**: no client error, no server error, a plausible dashboard with no rows. A 2026-08-11 sweep found **33 of 73** emitted mobile names unregistered; this batch fixed three (`invite_shared`, `deck_regenerated`, and `celebration_fired` by rename), leaving **29**. Register the name *before* shipping the emitter. See `GOTCHAS.md` G-031.
 
 Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/api/session/demo` — the backend stitches device→identity in `identity_links`.
 

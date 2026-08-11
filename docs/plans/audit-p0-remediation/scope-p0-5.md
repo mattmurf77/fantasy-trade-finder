@@ -139,8 +139,8 @@ server-side **first**. Follow-through owner: P0-7.
 | `docs/glossary.md` | **updated** | **account-only session**. |
 | `docs/runbook.md` | **updated** | New § *Mobile UI-test identity seam — `FTFTestAppleSub`*, with both production gates and why neither alone is sufficient. Verified against `SignInScreen.tsx:35/195` and `server.py:_TEST_APPLE_TOKEN_PREFIX`. |
 | `living-memory/LLD.md` | **updated** | Sentinel-not-flag routing; root-stack rule; `LinkSleeperSheet` as single owner. |
-| `living-memory/DECISIONS.md` | **updated — D-028** (not D-011) | Incl. the rejected non-dismissible-sheet-over-`Main` alternative. |
-| `living-memory/GOTCHAS.md` | **updated — G-030** | The LLD's candidate promoted to a real entry: an account-only session must never trigger the Sleeper league fetch (503 under the harness, misleading "No 2026 NFL leagues found" live). |
+| `living-memory/DECISIONS.md` | **updated — D-029** (not D-011) | Incl. the rejected non-dismissible-sheet-over-`Main` alternative. |
+| `living-memory/GOTCHAS.md` | **updated — G-032** | The LLD's candidate promoted to a real entry: an account-only session must never trigger the Sleeper league fetch (503 under the harness, misleading "No 2026 NFL leagues found" live). |
 | `mobile/src/components/CLAUDE.md` | **updated** | New `LinkSleeperSheet` row, naming the 409 alert as the reason it must not be reimplemented. The five `leagues.empty.*` testIDs are screen-level (`LeaguePickerScreen.tsx`) and were verified present rather than added to the component map. |
 | `living-memory/CHANGELOG.md` | **updated** | Batch H2 — the retroactive route flip is named as a user-visible change. |
 | `screens/CLAUDE.md` | **deferred** | See below. |

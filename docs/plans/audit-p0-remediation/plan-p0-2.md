@@ -500,8 +500,8 @@ three failures — nice to have, not required for acceptance.
 | `docs/cross-client-invariants.md` | **no** | n/a — copy and colour are mobile-only; `semantic.neg` is an existing token, not a new shared constant. |
 | `docs/glossary.md` | **no** | n/a — no new domain term. |
 | `docs/design/components.md` | **maybe** | `Toast` gains a public prop (`topOffset`). If the doc specs Toast's prop surface, add the row; if it only specs the visual, n/a. Check at build time. |
-| ADR / `DECISIONS.md` | **yes** | New `D-025` — "A failed trade search renders a named, persistent deck state; `job.error` is mapped, never echoed." Records the deviation from the handoff and the reason (raw `str(e)`). Last id in the file is `D-024` (`living-memory/DECISIONS.md:209`). |
-| `living-memory/GOTCHAS.md` | **yes** | New `G-027` — "First-run + four failed polls = a `SkeletonTradeCard` that never resolves" (defect (i)). Last id is `G-026` (`GOTCHAS.md:200`). |
+| ADR / `DECISIONS.md` | **yes** | New `D-026` — "A failed trade search renders a named, persistent deck state; `job.error` is mapped, never echoed." Records the deviation from the handoff and the reason (raw `str(e)`). Last id in the file is `D-024` (`living-memory/DECISIONS.md:209`). |
+| `living-memory/GOTCHAS.md` | **yes** | New `G-029` — "First-run + four failed polls = a `SkeletonTradeCard` that never resolves" (defect (i)). Last id is `G-026` (`GOTCHAS.md:200`). |
 | `living-memory/CHANGELOG.md` | **yes** | At ship, with the rest of the P0 batch. |
 | `living-memory/TEST_LEDGER.md` | **yes** | Sim-run evidence (below). |
 

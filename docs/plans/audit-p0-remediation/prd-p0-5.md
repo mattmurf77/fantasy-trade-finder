@@ -236,7 +236,7 @@ Every row is owned by **`W3-DOCS`** (wave 3); P0-5 supplies content. Full table 
 | `docs/glossary.md` | **yes** | **account-only session** — the term is used throughout backend and mobile and appears in no glossary. |
 | `docs/runbook.md` | **yes** | The `FTFTestAppleSub` / `ftf-test-apple:<sub>` seam and both production gates, under the mobile UI-test harness section. |
 | `living-memory/LLD.md` | **yes** | Sentinel-not-flag routing convention; `LinkSleeperSheet` as the single owner of the Sleeper-link form. |
-| `living-memory/DECISIONS.md` | **yes — `D-028`** | Not `D-011`: root `CLAUDE.md`'s next-id column is stale (HLD §10.4). |
+| `living-memory/DECISIONS.md` | **yes — `D-029`** | Not `D-011`: root `CLAUDE.md`'s next-id column is stale (HLD §10.4). |
 | `screens/CLAUDE.md`, `mobile/src/components/CLAUDE.md` | **yes** | New capture + frame; new component row; five new `leagues.empty.*` testIDs. |
 | `living-memory/CHANGELOG.md`, `TEST_LEDGER.md` | **yes, at ship** | Behaviour change users will notice + tier-1 sim evidence. |
 | `docs/api-reference.md` | **n/a** | No route added, renamed, removed or contract-changed; the harness seam is unreachable in any deployed build → runbook instead. |

@@ -17,7 +17,7 @@
 >
 > **HLD corrections already absorbed (do not re-litigate):** `screen_viewed` is *already* emitted at
 > `RootNav.tsx:352` and `:376` (HLD §10.1) — plan §3.4's "missing" claim and open question **Q5**
-> are **dropped**; living-memory ids are **D-025+ / G-027+**, not `D-011` / `G-013`; `s8.1` is gated
+> are **dropped**; living-memory ids are **D-026+ / G-029+**, not `D-011` / `G-013`; `s8.1` is gated
 > on **beat identity** (`guideSeen['s2.2']`), never a step count (S-39); `err.burst` is **deleted**
 > (S-40); **D1 is IN SCOPE** (S-42); **D2 is a client rename, no taxonomy alias** (S-41); **D3 is
 > proven by a flag-pinned run during validation** (S-43); **no flag default changes anywhere**
@@ -419,7 +419,7 @@ are historical prose and stay).
 
 ### 4.3 A finding this rename surfaced — 33 client event names are being dropped, not one
 
-D2 is not the second or third occurrence of G-029; it is one of **thirty-three**. Sweeping every
+D2 is not the second or third occurrence of G-031; it is one of **thirty-three**. Sweeping every
 `track('<name>'` literal in `mobile/src` against `ALLOWED_CLIENT_EVENTS`:
 
 > 73 distinct client event names are emitted. **33 are absent from `analytics_taxonomy.py` and are
@@ -449,7 +449,7 @@ are registered — they are not**:
 HLD §4 Wave 0 enumerates commit 1's names *"in full"*. Registering `deck_regenerated` would be a
 one-row addition to a commit that is already a taxonomy commit and would make the S5 reveal
 readable — **recommended, not assumed**; it needs the orchestrator's yes (see §9, Deviation D-4).
-The full list goes to `NEXT.md` and reinforces `G-029` (§8.2).
+The full list goes to `NEXT.md` and reinforces `G-031` (§8.2).
 
 ---
 
@@ -667,7 +667,7 @@ Four, all recorded verbatim in `TEST_LEDGER.md` with a pass/fail verdict:
 | **`s2.wait` only renders under injected latency** | **Do not fix.** Record in the findings: "13 beats" overstates the real-world tour by one for a user on a warm pre-gen (plan R3). |
 | **`s7.1` un-walked** | Defer — needs a `/__test__` deck-size pin (capture-matrix ruling D). `NEXT.md`. |
 | **Copy, ordering, or pacing opinions** | Out of scope. P0-9 is validation, not a redesign. |
-| **`deck_regenerated` / `guide_tour_reenabled` / the other 29 dropped names** | **Not fixed here** — taxonomy is `W0-TAX`'s exclusive file. `NEXT.md` + `G-029`. |
+| **`deck_regenerated` / `guide_tour_reenabled` / the other 29 dropped names** | **Not fixed here** — taxonomy is `W0-TAX`'s exclusive file. `NEXT.md` + `G-031`. |
 | **FeedbackFAB overlap (audit A-34), swipe-vs-button harness limit, Quick Set payoff copy** | Explicitly out of scope (plan §3.3). |
 
 ---
@@ -1046,8 +1046,8 @@ and is not owned here.
 | `docs/runbook.md` | **New subsection: "Operator-only onboarding test (`trades_first_operator_test`)"** — §6 in full: the step-0 branch and the **one-way `stopped` door**, the create + transition calls, the `/api/feature-flags` pre-flight verification, the eight-key overlay with the two non-obvious values (`landing.try_before_sync` must be present; `onboarding.league_autoskip` must stay `false`), the device-id currency check, the one-call rollback, and the note that the recipe is **AASA-independent**. This knowledge currently exists only inside a feedback status doc for a *different* experiment (`docs/feedback/items/279-aggregate-tier-labels/status.md`). |
 | `docs/plans/onboarding-conversion/guided-avatar-script.md` | (a) `err.burst` is **deleted from the implementation** — the reactive-only-mode paragraph at `:110` describes a line that was never wired and no longer exists in `analystScript.ts`; keep the design intent, mark it unbuilt. (b) **S8.1 now requires the S2.2 beat** (`:104-108`) — the sign-off is gated on swipe coaching having been delivered and acted on. |
 | `docs/config-reference.md` | **Only if** the operator's device id is added to `config/tester_allowlist.json` — note the addition. **No flag row changes**: no default is flipped, no key added to `FLAG_KEYS`. |
-| `living-memory/DECISIONS.md` | **D-031** (id per HLD §7, **not** `D-011`) — beat-identity gate over step-count gate. Record the three reasons the count option fails: `stepsSeenCount` is in-memory zustand and resets on launch; `guideSeen` only records `once:true` steps, so a real tour that ended at `s5.5` records 7 keys while an empty release-flag session with two leagues records 3; any `N` is a magic number that silently changes meaning the next time a beat is added, removed, or has its `once` flag edited. Add **D-032 (candidate)**: "consume the celebration only when the bubble slot was free" (D1's request-first-consume-on-success idiom) — allocate the next free id if `W3-DOCS` finds `D-031` taken. |
-| `living-memory/GOTCHAS.md` | **G-029** (id per HLD §7, **not** `G-013`) — a client `track()` name absent from `backend/analytics_taxonomy.py` is counted and dropped in silence. **Strengthen the HLD's "third occurrence" wording: the sweep in §4.3 found 33 dropped names out of 73.** Name `celebration_fired` (fixed here), `invite_shared` (fixed in commit 1), and `deck_regenerated` + `guide_tour_reenabled` (**not** fixed — both are asserted as registered by `plan-p0-8-9.md` §3.4 and `scope-p0-8-9.md` §1 and are not). |
+| `living-memory/DECISIONS.md` | **D-032** (id per HLD §7, **not** `D-011`) — beat-identity gate over step-count gate. Record the three reasons the count option fails: `stepsSeenCount` is in-memory zustand and resets on launch; `guideSeen` only records `once:true` steps, so a real tour that ended at `s5.5` records 7 keys while an empty release-flag session with two leagues records 3; any `N` is a magic number that silently changes meaning the next time a beat is added, removed, or has its `once` flag edited. Add **D-033 (candidate)**: "consume the celebration only when the bubble slot was free" (D1's request-first-consume-on-success idiom) — allocate the next free id if `W3-DOCS` finds `D-032` taken. |
+| `living-memory/GOTCHAS.md` | **G-031** (id per HLD §7, **not** `G-013`) — a client `track()` name absent from `backend/analytics_taxonomy.py` is counted and dropped in silence. **Strengthen the HLD's "third occurrence" wording: the sweep in §4.3 found 33 dropped names out of 73.** Name `celebration_fired` (fixed here), `invite_shared` (fixed in commit 1), and `deck_regenerated` + `guide_tour_reenabled` (**not** fixed — both are asserted as registered by `plan-p0-8-9.md` §3.4 and `scope-p0-8-9.md` §1 and are not). |
 | `living-memory/NEXT.md` | (1) **Register the remaining 31 dropped client event names** (§4.3 list), starting with `deck_regenerated` — until it lands the S5 reveal's `new_trades` count is unreadable in production. (2) **D1 mechanism M-b** — re-arm `s6.1` through the chain effect so a swallowed celebration fires without needing a second like (§3.5). (3) `s7.1` has never been captured — needs a `/__test__/pin/deck_size` pin (capture-matrix ruling D). (4) `s2.wait` may be unreachable for real users on a warm pre-gen — decide whether the beat earns its place. |
 | `living-memory/CHANGELOG.md` | At ship, inside the batch's dated H2: the guided tour no longer announces completion after a single first-like celebration; the first-like celebration is no longer lost when the user's first disposition is a like; `celebration_shown` starts landing in `user_events` for the first time. |
 | `living-memory/TEST_LEDGER.md` | Owned by `W3-QA`: the tier-1 run, the **pre-fix control** result for `guide-no-false-signoff@release.yaml`, the four manual checks in §5.5 verbatim with verdicts, the D3 outcome (celebrate + N, or the escalation), and whether `s5-1.png` was harness-captured or hand-walked. |
@@ -1066,5 +1066,5 @@ and is not owned here.
 | **D-4** | **Recommendation, not action:** register `deck_regenerated` in commit 1 | HLD §4 Wave 0 enumerates commit 1's names "in full" | One `ALLOWED_CLIENT_EVENTS` row + one `CLIENT_EVENT_PROPS` row (`{position, new_trades}`) on a commit that is already the taxonomy commit; it makes the S5 reveal readable in production, which is the number the trades-first hypothesis turns on. **Not done here** — `analytics_taxonomy.py` is `W0-TAX`'s exclusive file. | **Yes — orchestrator + `W0-TAX`** |
 | **D-5** | The operator recipe gains a **step 0** (running-onboarding-experiment branch) and a **§6.4 pre-flight verification** that the plan's §3.2 does not have | plan §3.2 / R6 | R6 names the collision but not that `stopped` is a **one-way door** (`_LEGAL_EDGES` has no `stopped → running`), nor that pausing does not help (`_running_and_paused` counts paused rows), nor that a salt-less layer fails **silently** in `_evaluate`. Branch B may also mean the test needs **zero** writes. All four are load-bearing for an operator running this against prod. | No — additive rigour |
 | **D-6** | Q5 (`screen_viewed`) is **dropped**, not answered | plan §9 Q5, scope §1's ⚠ waiver | HLD §10.1: `screen_viewed` is already emitted at `RootNav.tsx:352`/`:376` for every route including tab switches, is in `ALLOWED_CLIENT_EVENTS` **and** in `NON_INTENT_EVENTS`. Time-to-first-value and the picker→Trades drop-off are readable today; P0-9's A6 is satisfiable now. **Tell the operator explicitly** — it removes the dependency the test was said to hang on. | No |
-| **D-7** | Living-memory ids are `D-031` / `G-029`, not the plan's `D-011` / `G-013` | plan §7, scope §4 | HLD §10.4: root `CLAUDE.md`'s "next ID" columns are stale; the real last ids are `D-024` and `G-026`. Five plans copied the same wrong numbers. | No |
+| **D-7** | Living-memory ids are `D-032` / `G-031`, not the plan's `D-011` / `G-013` | plan §7, scope §4 | HLD §10.4: root `CLAUDE.md`'s "next ID" columns are stale; the real last ids are `D-024` and `G-026`. Five plans copied the same wrong numbers. | No |
 | **D-8** | `s5-1.png` is a **new screen-library frame**, so the "capture delta: none" line in scope §3 is narrowed to "none **for the release path**" | scope §3 | Deleting an unreferenced entry and tightening a boolean changes no release-path pixels, which is what that line meant. The V2 run legitimately adds one frame the library has never had. | No |

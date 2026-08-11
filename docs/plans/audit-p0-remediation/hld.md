@@ -722,8 +722,8 @@ the "source" column says which build agent supplies the content in its scope blo
 | `living-memory/LLD.md` | Implicit column writes from save handlers + the `set_ranking_method_if_unset` conditional-write idiom. Deep-link destinations reachable signed-out belong on the **root** stack. Post-auth routing keys off the `no_league` sentinel, never `user.account_only`; `LinkSleeperSheet` is the single owner of the Sleeper-identity-link form. | P0-1, P0-3, P0-5 |
 | `living-memory/HLD.md` | **n/a** — every plan agrees: no new module, client, or major architectural flow. This document itself is the batch HLD and lives with the plans. | all |
 | `docs/architecture.md` | **n/a** — no module wiring or data-flow change in any of the seven. | all |
-| `living-memory/DECISIONS.md` | Last id is **`D-024`** (§10.4). New: **D-025** P0-1 first-use-wins + `'anchor'` exception + `'quickset'` labelling + suppressed fan-out · **D-026** P0-2 named persistent deck failure; `job.error` mapped, never echoed · **D-027** P0-3 legacy `?league=` parsed forever, 302 over a new web page, 14-day persisted intent · **D-028** P0-5 sentinel-not-flag routing predicate, `LinkSleeperSheet` extraction, no new flag · **D-029** P0-6 RN-core `Clipboard` over `expo-clipboard`, delete the mobile disposition wrapper · **D-030** P0-7 reserved `sleeper_send_*` names + the client/server split · **D-031** P0-8 beat-identity gate over step-count gate. | all |
-| `living-memory/GOTCHAS.md` | Last id is **`G-026`** (§10.4). **G-027** first-run + four failed polls = a `SkeletonTradeCard` that never resolves · **G-028** MFL/Fleaflicker league ids are numeric, so `league_id.isdigit()` does not exclude them from the Sleeper propose path · **G-029** a client `track()` name absent from `analytics_taxonomy.py` is counted and dropped in silence — third occurrence in this repo. | P0-2, P0-6, P0-8/9 |
+| `living-memory/DECISIONS.md` | Last id is **`D-024`** (§10.4). New: **D-026** P0-1 first-use-wins + `'anchor'` exception + `'quickset'` labelling + suppressed fan-out · **D-027** P0-2 named persistent deck failure; `job.error` mapped, never echoed · **D-028** P0-3 legacy `?league=` parsed forever, 302 over a new web page, 14-day persisted intent · **D-029** P0-5 sentinel-not-flag routing predicate, `LinkSleeperSheet` extraction, no new flag · **D-030** P0-6 RN-core `Clipboard` over `expo-clipboard`, delete the mobile disposition wrapper · **D-031** P0-7 reserved `sleeper_send_*` names + the client/server split · **D-032** P0-8 beat-identity gate over step-count gate. | all |
+| `living-memory/GOTCHAS.md` | Last id is **`G-026`** (§10.4). **G-029** first-run + four failed polls = a `SkeletonTradeCard` that never resolves · **G-030** MFL/Fleaflicker league ids are numeric, so `league_id.isdigit()` does not exclude them from the Sleeper propose path · **G-031** a client `track()` name absent from `analytics_taxonomy.py` is counted and dropped in silence — third occurrence in this repo. | P0-2, P0-6, P0-8/9 |
 | `living-memory/NEXT.md` | Match accept/decline UX (P0-6 option B, with the evaluation) · MFL/Fleaflicker harness profile · `is_linked_platform_league` guard on `/api/sleeper/propose` · `source` prop on `find_trades_tapped`'s allowlist (S-12) · `FUNNEL_CRITICAL` ↔ SDK-mirror drift (`app_opened_first`). | P0-6, P0-2, P0-7 |
 | `living-memory/CHANGELOG.md` | One dated H2 for the batch at ship, naming the two behaviour changes users will notice: account-only testers move to the picker at next launch; MFL/Fleaflicker users lose a tappable (always-failing) Send button. | all |
 | `living-memory/TEST_LEDGER.md` | Tier-1 sim run + the P0-7 row-landed verification + the P0-6 manual clipboard paste, verbatim. | W3-QA |
@@ -771,7 +771,7 @@ fixture/seeder/capture inversion.
 `mobile/src/screens/RankScreen.tsx`, `mobile/.maestro/flows/p0-1-quickset-unlock.yaml`,
 `mobile/.maestro/capture/league@quickset-done.yaml`.
 **Bound by:** §2 S-01…S-07 · §3 commit 2 · §4 W1-BE · §6 rows 1, 8 · §7 (api-reference,
-data-dictionary, cross-client-invariants, runbook, LLD.md, D-025) · §8 R7.
+data-dictionary, cross-client-invariants, runbook, LLD.md, D-026) · §8 R7.
 **Must specify:** the exact `unlocked_formats` pre-seed that suppresses the fan-out
 (S-03) — this is the one part of the backfill the plan describes only as an option;
 the `allow_over` signature; the conditional-`UPDATE` SQL; the inverted `_validate_quickset`
@@ -955,9 +955,9 @@ column from root `CLAUDE.md`.
 
 Verified against the files: `living-memory/DECISIONS.md`'s last entry is **`D-024`**
 (`:209`); `living-memory/GOTCHAS.md`'s highest id is **`G-026`** (`:200`). Only P0-2 read
-the actual files (it correctly proposes `D-025` / `G-027`).
+the actual files (it correctly proposes `D-026` / `G-029`).
 
-**Resolution:** the ids assigned in §7 (`D-025`…`D-031`, `G-027`…`G-029`) are
+**Resolution:** the ids assigned in §7 (`D-026`…`D-032`, `G-029`…`G-031`) are
 authoritative; `W3-DOCS` allocates them in that order. **Root `CLAUDE.md`'s "next ID"
 columns are stale and should be corrected in the same docs commit** — otherwise the next
 batch of parallel agents makes the identical mistake. (This is itself an instance of the
@@ -994,7 +994,7 @@ handoff's **A-33** class: a doc contradicting the artifact it describes.)
    4 excludes `job?.status === 'error'`, but Path C sets `job` to `null`, so the
    exclusion misses and a first-run user whose polling dies sees `SkeletonTradeCard`
    forever. Confirmed by reading `:1295-1307` and `:4819-4823`. It is fixed for free by
-   the row-4 guard and belongs in GOTCHAS (`G-027`).
+   the row-4 guard and belongs in GOTCHAS (`G-029`).
 7. **P0-6's `/api/sleeper/propose` finding is real and wider than P0-6** — MFL and
    Fleaflicker league ids are numeric, so `league_id.isdigit()` does not exclude them
    even though `is_linked_platform_league` is imported in the same file and used at five
