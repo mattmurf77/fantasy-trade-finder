@@ -39,6 +39,9 @@ import {
   setLinkFallbackNotifier,
   routeNotificationTap,
 } from '../utils/deepLinks';
+// Capture-harness launch-argument entry. Inert in production — the gate is
+// a build-time constant documented at the top of utils/testRouteEntry.ts.
+import { applyTestRouteEntry } from '../utils/testRouteEntry';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
 import { track } from '../api/events';
@@ -330,6 +333,15 @@ export default function RootNav({ booted }: { booted: boolean }) {
         // links) buffered while the container wasn't ready. Only flag-on
         // paths enqueue, so with flags off this is a no-op on an empty queue.
         flushPendingNavIntents();
+        // Capture harness only: `-FTFTestRoute <RouteName>` in the launch
+        // arguments jumps straight to a screen that has no tappable path
+        // under release flags. Runs AFTER auth restore (this whole subtree
+        // only mounts once `booted` is true) and ONLY when that restore
+        // landed on the authed tree — jumping into Main without a session
+        // would photograph a signed-out shell. Returns false (no navigator
+        // touch at all) in every production bundle: see the build-time gate
+        // in utils/testRouteEntry.ts.
+        if (initialRoute === 'Main') applyTestRouteEntry(navigationRef);
         // Hand the container ref to Sentry so it can tag spans by screen.
         // No-op when Sentry isn't initialized.
         navigationIntegration.registerNavigationContainer(navigationRef);

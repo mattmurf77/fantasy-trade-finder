@@ -2,10 +2,13 @@
 # Pre-ship simulator gate (docs/runbook.md § Pre-ship simulator gate).
 # Blocks a push to main containing mobile/src changes unless qa/sim-runs/last-sim-run.json
 # records a passing Maestro run on an ancestor of the pushed commit.
+# Also WARNS (never blocks) when the push changes mobile/src/screens/ without any
+# capture under screens/ — see docs/runbook.md § Screen library.
 # Install: git config core.hooksPath githooks
 # Escape hatch (operator decision, logged loudly): FTF_SKIP_SIM_GATE=1 git push ...
 
 MARKER="qa/sim-runs/last-sim-run.json"
+FRESHNESS="mobile/scripts/screen-freshness.sh"
 Z40="0000000000000000000000000000000000000000"
 
 if [ -n "$FTF_SKIP_SIM_GATE" ]; then
@@ -44,6 +47,25 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
         [ -n "$tested_sha" ] || fail "marker has no \"sha\" field."
         git merge-base --is-ancestor "$tested_sha" "$local_sha" 2>/dev/null \
             || fail "sim run was on $tested_sha, which is not an ancestor of the push — rerun on current code."
+    fi
+
+    # --- Screen-library freshness: WARN ONLY, never blocks (docs/runbook.md
+    # § Screen library). Screen source moved but no capture came along? Say so
+    # and let the push through — capture freshness is a design-truth
+    # obligation, not a ship gate.
+    changed=$(git diff --name-only "$range" 2>/dev/null)
+    if printf '%s\n' "$changed" | grep -q '^mobile/src/screens/' \
+       && ! printf '%s\n' "$changed" | grep -q '^screens/'; then
+        echo "⚠️  pre-push: this push changes mobile/src/screens/ but touches no capture under screens/." >&2
+        if [ -x "$FRESHNESS" ]; then
+            "$FRESHNESS" 2>&1 | sed 's/^/   /' >&2
+        elif [ -f "$FRESHNESS" ]; then
+            bash "$FRESHNESS" 2>&1 | sed 's/^/   /' >&2   # script is bash, not sh
+        else
+            echo "   ($FRESHNESS not found — skipping freshness report.)" >&2
+        fi
+        echo "   Refresh stale screens with: mobile/scripts/screen-capture.sh --screen <x>" >&2
+        echo "   (warning only — the push is not blocked)" >&2
     fi
 done
 

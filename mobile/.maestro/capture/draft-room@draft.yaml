@@ -1,0 +1,347 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-DRAFTROOM-DRAFT
+# profile: draft
+# flags: release
+# captures: populated, undrafted--my-board, loading, error--generic
+# source: mobile/src/screens/DraftRoomScreen.tsx, mobile/src/components/draft/DraftRows.tsx, mobile/src/navigation/TabNav.tsx
+# interactive-stop: populated
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this file carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split this profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# Screen-library capture flow for the Draft Room (capture-matrix-2026-08-09.md
+# deferred block, row "⚠ draft-room": "Registered and reachable, but no fixture
+# seeds a draft board — every state would be `unavailable` or a notice").
+# Sign-off ruling C authorised the `draft` profile, which is what closes that
+# gap: a 12-team SF TEP league MID-DRAFT — status `drafting`, a populated
+# `draft_order`, 18 of 48 picks made, 6 traded picks, 38 rookies still on the
+# board (pinned by backend/tests/test_seed_ui_test_db.py::
+# test_draft_league_rosters_hold_made_picks_and_no_undrafted_rookies).
+#
+# ENTRY — the seasonal Draft TAB, not a launch argument. `draft.tab` is TRUE in
+# backend/tests/fixtures/flags/release.json AND re-pinned by the profile, so
+# TabNav renders the third tab (`tabBarButtonTestID: 'tab.draft'`,
+# TabNav.tsx:696) hosting DraftStackNav → DraftRoom with `initialParams
+# {inTabs: true}`. That is the shipped path a real user takes in season, so it
+# is the one photographed. The root-stack registration is exercised by the
+# error leg below (launch argument), which is also the only way to reach this
+# screen with a COLD `['draft-board', …]` cache — see that section.
+#
+# WHAT THE PROFILE MAKES THIS SCREEN SAY (all read off DraftRoomScreen.tsx):
+#   · draft-room.state    → "Drafting now"  (STATE_LABEL[live]; Sleeper
+#                            status `drafting` maps to LIVE in
+#                            backend/draft_board_service.py:155)
+#   · BoardSection        → TickLabel "Board" (order_confidence `assigned`,
+#                            not "Round ownership"), one
+#                            draft-room.order-row.<round>-<slot> per slot
+#   · draft-room.rank-rookies renders — `ranks.rookie_subset` is ON
+#   · NO notice block. `board.notice` is null for an assigned, class-loaded
+#     Sleeper board, so every `draft-room.notice.<code>` row in the matrix
+#     (order_not_set / class_not_loaded / startup_draft / platform_unsupported
+#     / mfl_reconnect / picks_not_assigned) is UNREACHABLE on this profile and
+#     is recorded here rather than faked. `order_not_set` in particular cannot
+#     ever be seeded alongside made picks: the seeder refuses
+#     `draft_order:false` on anything but a `pre_draft` draft
+#     (seed_ui_test_db.py:348).
+#   · NO draft-room.assign-progress row — the `draft` profile carries no
+#     `pick_assignment` block, so GET /api/league/pick-assignments answers
+#     `seeded:false` and `assignProgress` stays null.
+#   · NO draft-room.record-picks row — that row requires `board.platform ===
+#     'espn'`. It is captured in capture/record-picks@espn.yaml instead.
+#   · NO draft-room.deep-link on the Draft TAB? It DOES render (Sleeper boards
+#     carry a deep_link) — it is simply below the fold and not tapped: the CTA
+#     opens sleeper.com in Safari, which would strand the run.
+#
+# THE MOCK SIDE IS NOT IN THIS FILE. It is now reachable — `draft-room.mode.*`
+# was added to scripts/testid-lint-allow.txt after the first pass flagged that
+# DraftModeToggle builds its ids from a VARIABLE prefix
+# (`testID={`${testIDPrefix}.real`}`, components/draft/MockChrome.tsx:78) — but
+# on THIS profile the mock entry is a dead card: `board.state === 'live'` hits
+# `mock-entry.blocked.live`, so there is nothing to photograph beyond the
+# refusal. The live mock surface is captured on the pre-draft twin, in
+# capture/mock-draft@draft-pre.yaml.
+tags: [capture, draft-room, draft]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml:
+# `inputText` occasionally races the field's focus and lands nowhere, and the
+# empty username box only surfaces 30 s later as a missing `leagues.row.*`.
+# `eraseText` makes the retry idempotent. No fixed sleeps.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - inputText: "qa_draft"
+      - assertVisible:
+          text: ".*qa_draft.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# Regex rather than the literal id, matching capture/portfolio@two-leagues.yaml
+# — the seeder gives this profile 990000000000000001 today, but a regex cannot
+# drift when a fixture renumbers.
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see capture/league.yaml for the full finding.
+# The tab BAR paints long before #244's launch routing finishes resetting the
+# Rank stack, and a tab.draft tap fired on `tab.trades is visible` alone gets
+# silently undone a second later. rank.more-ways is the rank surface's own
+# header control (`ux.rank_tab_destination` is ON): once it is up the routing
+# has run and the switch sticks.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+
+# ── populated ────────────────────────────────────────────────────────────
+# NO INJECTION IS ARMED FOR THIS LEG, and that is a RUN-4 FIX (runs
+# 20260810T162523 / T163628). The 6 s latency used to be armed before this tab
+# tap and, because injections persist until the end-of-cell reset, it then
+# taxed every later board read — including the 15 s `draft.live_poll`
+# refetches this profile enables (`board.state === 'live'`). That made the
+# interactive leg below flaky in two different ways on two consecutive runs: a
+# scrollUntilVisible whose progress was destroyed by a mid-scroll re-render,
+# and a my_board fetch racing api/client.ts's 15 s DEFAULT_TIMEOUT_MS while the
+# server was already pricing the whole pool. Both spinner states are now shot
+# on their own launch-argument legs further down, where a cold cache gives them
+# for free and no tap has to survive the delay.
+- tapOn:
+    id: "tab.draft"
+# Full-match regex, wrapped in `.*`. "Drafting now" is STATE_LABEL.live
+# (DraftRoomScreen.tsx:901) and is rendered by no other state — "Not started",
+# "Complete" and "Unavailable" are the alternatives — so its arrival IS the
+# board's arrival. Text ASSERTION, never a tap.
+- extendedWaitUntil:
+    visible:
+      text: ".*Drafting now.*"
+    timeout: 60000
+# The board itself. Wildcard because the qualifier is `${slot.round}-${slot.slot
+# ?? 'r'}` (DraftRoomScreen.tsx:1134) — a templated id whose literal form the
+# lint's source grep cannot verify.
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.order-row.*"
+    timeout: 20000
+# Proof this is the real board and not the notice/unavailable fallback.
+- assertNotVisible:
+    id: "draft-room.unavailable-text"
+- waitForAnimationToEnd
+- takeScreenshot: draft-room__populated
+
+# ── undrafted--my-board ──────────────────────────────────────────────────
+# The undrafted section sits below 48 order rows, i.e. far below the fold.
+# RUN-1 FIX pattern from capture/rank-home.yaml: a bare scrollUntilVisible does
+# NOT scroll, because iOS keeps off-screen ScrollView children in the hierarchy
+# and Maestro already considers them "visible" — the tap then fires at
+# off-screen coordinates. `visibilityPercentage: 100` + `centerElement: true`
+# forces a real scroll and parks the chip mid-screen where the tap can land.
+#
+# RUN-3 FIX: scroll+tap are wrapped in a retry. Even without the latency this
+# flow still polls every 15 s, and a refetch landing mid-scroll costs
+# scrollUntilVisible its progress across 48 rows. Repeating is safe because the
+# tap is the LAST command in the block — an attempt that had already tapped
+# would have succeeded and never retried.
+- retry:
+    maxRetries: 3
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: "draft-room.basis.my-board"
+          direction: DOWN
+          visibilityPercentage: 100
+          centerElement: true
+          timeout: 60000
+      # RUN-5 FIX. Three consecutive runs recorded ZERO `basis=my_board`
+      # requests in flask.log while the tap itself reported success — i.e. the
+      # tap was landing on a still-settling page rather than on the chip, and
+      # the inert undrafted rows underneath swallowed it silently. Letting the
+      # momentum scroll finish before the tap target is resolved is what fixes
+      # the stale bounds; BasisChip is an ordinary Pressable with a real
+      # onPress (components/draft/DraftRows.tsx:81), so a tap that actually
+      # lands always toggles.
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "draft-room.basis.my-board"
+      # The retry is only worth having if a MISSED tap re-runs the block, so
+      # the proof of the toggle lives INSIDE it. Without this the block always
+      # "succeeded" and the flow failed later, far from the cause.
+      - extendedWaitUntil:
+          visible:
+            text: ".*Ordered by your board.*"
+          timeout: 30000
+# RUN-4 FIX: the previous cut waited on `draft-room.state` here to prove the
+# board had re-rendered. That was wrong twice over — the status bar is at the
+# TOP of the ScrollView and is genuinely off-screen once the page is scrolled
+# to the chips (`assertVisible` DOES honour bounds, unlike scrollUntilVisible's
+# own predicate), and it says nothing about which basis is live. The fallback
+# note is the correct anchor: MY_BOARD_FALLBACK_COPY
+# (components/draft/DraftRows.tsx:43) renders ONLY on the my_board branch, so
+# scrolling to it proves the tap registered AND frames the thing this state is
+# about. If the tap silently no-ops, this step fails loudly instead of shooting
+# a consensus board under a my-board name.
+#
+# FRAMING — RUN-7 FIX, and the third attempt at this one frame, so the reason
+# is worth stating plainly. Twice the flow PASSED and shot the wrong picture:
+# scrolling DOWN to the chip (run T155324) and scrolling DOWN to the note
+# itself (run T170256) both left the basis toggle and the note ABOVE the
+# viewport, with only undrafted rows in the photograph. Maestro's
+# scrollUntilVisible treats off-screen ScrollView children as already visible,
+# so a DOWN scroll that starts below the target keeps going and overshoots, and
+# `centerElement` does not pull it back.
+#
+# By this point the retry above has already put us BELOW the note, so the
+# correct move is UP, not down — and the anchor is the chip ROW, because it is
+# the topmost thing this state needs in frame. Coming up to it puts the toggle,
+# the note directly beneath it, and the first undrafted rows all on screen.
+- scrollUntilVisible:
+    element:
+      id: "draft-room.basis.consensus"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 60000
+# Belt and braces: prove the my_board branch is still what is rendered, so a
+# scroll that somehow landed on a consensus board cannot be shot under this
+# name. MY_BOARD_FALLBACK_COPY (components/draft/DraftRows.tsx:43) renders on
+# no other branch. The source string uses a typographic apostrophe in
+# "haven’t"; `.` covers it.
+- assertVisible:
+    text: ".*Ordered by your board. Anyone you haven.t ranked falls back to the consensus value.*"
+- waitForAnimationToEnd
+- takeScreenshot: draft-room__undrafted--my-board
+
+
+# ── STOP THE POLL BEFORE ARMING ANYTHING ─────────────────────────────────
+# RUN-6 FIX (run 20260810T165229: the error leg's `draft-room.error-text` never
+# appeared). This profile is the only one in the block with a live poll —
+# `draft.live_poll` ON and `board.state === 'live'` means `refetchInterval`
+# fires every 15 s — and the Draft Room left open above kept polling while the
+# injections below were armed. Those polls ATE the fail_next budget (a failing
+# refetch retries too, so one poll can consume two), and the relaunch then
+# fetched a perfectly good board and never rendered the error card.
+#
+# The room's polling contract has four required conditions, and `isFocused` is
+# one of them (DraftRoomScreen.tsx refetchInterval), so simply leaving the tab
+# switches it off. The Rank tab is chosen because nothing under it reads
+# /api/draft/board, so the armed injections stay untouched until the relaunch
+# claims them.
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+# ── loading + error--generic (one launch, two frames) ────────────────────
+# Both injections cover the SAME first fetch: the 6 s delay IS the loading
+# window and the 404 lands at the end of it — the pattern
+# capture/pick-assignment@espn.yaml and capture/record-picks@espn.yaml use.
+# Merging them also means the fail_next budget is claimed by the relaunched
+# process and nothing else.
+#
+# Own launch, so the `['draft-board', leagueId, 'consensus']` cache is COLD.
+# That key is not in App.tsx:60's PERSIST_KEYS (rankings/progress/matches/
+# tiers-status/liked-trades), so `stopApp: true` alone empties it; `clearState:
+# false` keeps the session RootNav restores onto Main. It is ALSO what makes
+# the error branch reachable at all: `query.isError || !board`
+# (DraftRoomScreen.tsx:576) is an OR against the DATA, so a failing refetch
+# over a warm cache renders the populated board with stale data, never the
+# error card.
+#
+# `DraftRoom` is absent from testRouteEntry.ts's TAB_OF map, so it dispatches
+# as a ROOT-stack route — the registration RootNav carries unconditionally, and
+# the variant that mounts its own FeedbackFAB.
+#
+# fnmatch runs against request.path with the query string stripped
+# (backend/test_support.py `_before_request_hook`), so the bare path matches the
+# `?league_id=…&basis=consensus` call this screen makes. 6000 ms per the pilot's
+# trades__loading finding — a ~4 s window is missable by hierarchy polling.
+# NOTE latency delays SUM rather than replace (`for ms in delays: time.sleep`),
+# so this is armed exactly once for the whole file.
+#
+# COUNT=2, exactly: 404 is not in api/client.ts's RETRY_STATUSES {502,503,504}
+# (that layer is 5xx-gateway only), so the HTTP client attempts once per call
+# and react-query's `retry: 1` doubles it. Exact rather than generous ON
+# PURPOSE — sim-run.sh resets injections once at the END of the cell, not
+# between flows, so a leftover fail_next on this path would follow
+# capture/rookie-ranks@draft.yaml into its Draft Room and break it.
+#
+# BODY is the route's own 404 (backend/server.py:11295, `league_not_found`).
+# The screen renders `readErrorCopy(query.error, "Couldn't load the draft
+# room.")`, which returns the FALLBACK for anything that is not
+# `verification_required` — so the copy asserted below is the client's, and the
+# injected body is there for fidelity, not to be read back.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/draft/board"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/draft/board"
+      INJECT_STATUS: "404"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "league_not_found"}'
+- assertTrue: ${output.inject.ok}
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: DraftRoom
+# `draft-room.scroll` is the Shell's ScrollView (DraftRoomScreen.tsx:873) and
+# mounts in EVERY branch including the spinner, so it proves we are on the
+# screen. `draft-room.state` belongs to StatusBar, which renders only once
+# `board` exists — and the page is at the top here, so its ABSENCE really is
+# the loading branch rather than a scroll artefact.
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.scroll"
+    timeout: 60000
+- assertNotVisible:
+    id: "draft-room.state"
+- takeScreenshot: draft-room__loading
+# ~6 s of latency then the 404, twice — hence the generous budget.
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.error-text"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: ".*Couldn.t load the draft room.*"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: draft-room__error--generic

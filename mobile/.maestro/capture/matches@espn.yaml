@@ -1,0 +1,156 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MATCHES-ESPN
+# profile: espn
+# flags: release
+# captures: populated--espn-mutual, populated--espn-awaiting
+# source: mobile/src/screens/MatchesScreen.tsx, mobile/src/components/TradeCard.tsx, mobile/src/components/SendInSleeperButton.tsx
+# interactive-stop: populated--espn-mutual
+#
+# CAPTURE REQUEST #9 (mobile UX audit 2026-08-09, §2) — the highest-leverage
+# single capture in that list. P0-6's finding is that a user in an IMPORTED
+# ESPN league gets a mutual match with NO send action and no explanation; every
+# other match capture in the library is Sleeper, where Dismiss and Send both
+# render. P0-6 also needs a mockup, and screens/CLAUDE.md forbids redrawing a
+# mockup's "current" pane — so the fix is blocked on this frame existing.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# CRITICAL PRECONDITION: ENTER THROUGH THE LEAGUE PICKER.
+#
+# SendInSleeperButton.tsx:63-67 decides ESPN from the SESSION's league list:
+#
+#     const isEspn = leagues.some(
+#       (lg) => lg.league_id === leagueId && lg.platform === 'espn');
+#
+# and the comment two lines above says it FAILS OPEN — "a league id missing
+# from the cached list (demo league, stale cache) keeps the button". The only
+# writer of that cached list with `platform: 'espn'` stamped on it is
+# LeaguePickerScreen's merge of GET /api/espn/leagues. So a launch-argument
+# jump straight to the Matches tab, or any entry that skips the picker, would
+# photograph the button PRESENT — the exact opposite of the finding, under a
+# filename claiming to prove it. The sign-in → picker → league-row path below
+# is load-bearing, not preamble.
+#
+# The `assertNotVisible` before each shutter is the enforcement: if the cache
+# ever stops carrying the platform, this flow goes RED instead of quietly
+# producing a wrong-content capture.
+# ─────────────────────────────────────────────────────────────────────────
+#
+# NO INJECTIONS, and no ESPN egress. Matches reads /api/trades/matches/all and
+# /api/trades/awaiting — ordinary seeded backend routes, both served from the
+# fixture DB. The one screen in the harness with a live-ESPN seam is
+# pick-assignment (suggested pick order), which this flow never opens.
+#
+# `espn` seeds matches_seed {mutual: 1, awaiting: 1} in the 10-team
+# `platform='espn'` league, and `trade.send_in_sleeper` is TRUE in the release
+# flag fixture — so the button is enabled and would render but for the ESPN
+# gate. That is what makes the absence evidence rather than a flag artifact.
+#
+# Neither the match tile nor its CTAs carry a testID (TradeCard.tsx:564-585),
+# so the settle anchors are the tile's own header copy — text ASSERTIONS,
+# never text taps (lld.md §4.4 rule 1).
+tags: [capture, matches, espn]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble + the username assertion, copied verbatim
+# from capture/pick-assignment@espn.yaml (RAILS FIX, run 20260810T152819: a
+# raced inputText submitted a partial username and booked a vcr_miss, failing
+# the cell's rails audit even though the retry self-healed the flow).
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_espn"
+      - assertVisible:
+          text: ".*qa_espn.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# qa_espn has NO Sleeper leagues: GET /api/sleeper/leagues/<uid> serves [] and
+# the single row on this picker arrives from GET /api/espn/leagues
+# (LeaguePickerScreen.tsx:170-181), exactly as in production. THAT MERGE is
+# what stamps `platform: 'espn'` into the cached league list this whole
+# capture depends on. `onboarding.league_autoskip` is false in the release
+# flags, so the one-league picker does not auto-skip past it.
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see capture/league.yaml for the full finding
+# (#244's launch routing steals a tab tap fired too early).
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.matches"
+
+# ── populated--espn-mutual ───────────────────────────────────────────────
+# "New match with @<name>" is the mutual tile's header line and renders on no
+# other branch (skeleton, empty and error each render their own body).
+- extendedWaitUntil:
+    visible:
+      text: ".*New match with @.*"
+    timeout: 60000
+# Dismiss PRESENT + Send ABSENT is the finding, stated as two assertions so a
+# regression in either direction fails the capture instead of mislabelling it.
+# Dismiss is the match variant's unconditional CTA (TradeCard.tsx:570); the
+# Send label is "Send in Sleeper" in every non-transient state of
+# SendInSleeperButton (:275-278), and the component returns null outright on
+# an ESPN league (:272).
+- assertVisible:
+    text: ".*Dismiss.*"
+- assertNotVisible:
+    text: ".*Send in Sleeper.*"
+# RUN-1 FIX: the assertions were green and the CTA row was still half off the
+# bottom of the frame — a 2-for-1 match tile is taller than the viewport once
+# the topbar, title, segment toggle and chip row are above it, so the shutter
+# caught "Dismiss" sliced in half. The whole point of this capture is the
+# ACTION ROW (one full-width Dismiss where a Sleeper league shows two
+# buttons), so the row has to be framed, not merely mounted. The forced scroll
+# does it: `visibilityPercentage: 100` + `centerElement: true` parks the row
+# mid-screen. Unlike the ScrollView case, this genuinely scrolls on the first
+# try — the matches list is a virtualized FlatList, so its off-screen rows are
+# NOT in the hierarchy and Maestro cannot mistake one for visible. Text
+# selector on a scroll target, never on a tap.
+- scrollUntilVisible:
+    element:
+      text: ".*Dismiss.*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: matches__populated--espn-mutual
+
+# ── populated--espn-awaiting ─────────────────────────────────────────────
+# Cheap second frame: the awaiting segment is lazily fetched on first open
+# (awaitingQuery `enabled: segment === 'awaiting'`) against /api/trades/
+# awaiting, and `espn` seeds awaiting: 1. It documents the OTHER half of the
+# inbox under the same ESPN gate — the non-match TradeCard variant renders a
+# dedicated send ROW (TradeCard.tsx:586-595) which, here, collapses to
+# nothing at all.
+- tapOn:
+    id: "matches.segment.awaiting"
+- extendedWaitUntil:
+    visible:
+      text: ".*Waiting on @.*"
+    timeout: 30000
+- assertNotVisible:
+    text: ".*Send in Sleeper.*"
+- waitForAnimationToEnd
+- takeScreenshot: matches__populated--espn-awaiting

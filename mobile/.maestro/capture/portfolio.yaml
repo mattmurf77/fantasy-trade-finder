@@ -1,0 +1,92 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-PORTFOLIO
+# profile: standard
+# flags: release
+# captures: gate--single-league
+# source: mobile/src/screens/PortfolioScreen.tsx
+# interactive-stop: gate--single-league
+#
+# CAPTURE REQUEST #10 (mobile UX audit 2026-08-09, §2) — "both captures show
+# the 2-league populated state. The gate is the state the finding is about,
+# and it's what most users will actually hit."
+#
+# PortfolioScreen's FIRST branch (:53) is `if (!hasMultiLeague)` — a hard gate
+# on `useSession().leagues.length >= 2` that returns before the query is even
+# considered. `standard` seeds exactly one league, so this profile renders the
+# gate and can render nothing else; the populated / loading / error branches
+# are structurally unreachable here and belong to
+# capture/portfolio@two-leagues.yaml.
+#
+# ENTRY is the launch argument, for the same reason the two-leagues flow uses
+# it: the Acquire subnav's Portfolio pill only renders with ≥2 leagues AND no
+# finder mode, and `trades.finder_hub` (on in release) lands TradesHome
+# directly in the guided deck. On ONE league the pill is doubly unreachable —
+# the gate is a screen a real user reaches by deep link or by dropping to one
+# league, and the harness has no other way in. Mechanism and its production
+# gate: capture/rank-home.yaml's header.
+#
+# TWO-LAUNCH DANCE (rank-home.yaml): launch 1 signs in and picks a league the
+# normal way, which is what writes the session (SecureStore token +
+# AsyncStorage user/league/leagues). Launch 2 carries the argument with
+# `clearState: false` so that session restores — RootNav only honours the
+# argument once the restore has landed on Main, so a clearState:true launch
+# with the argument would sit on SignIn and do nothing. `stopApp: true` is
+# required: no fresh PROCESS, no new argv, no new container-ready.
+#
+# NO INJECTIONS: the gate is a pure session read with no query behind it.
+tags: [capture, portfolio]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble + username assertion — see
+# capture/rank-home.yaml (flake) and capture/pick-assignment@espn.yaml (rails).
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+
+# ── gate--single-league ──────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: Portfolio
+# Full-match regex. "Connect a second league" is the gate branch's own title
+# and is rendered by no other branch of this screen — the populated header
+# reads "<n> distinct players across <m> leagues", the empty list reads "No
+# exposure yet", and loading/error render their own bodies.
+- extendedWaitUntil:
+    visible:
+      text: ".*Connect a second league.*"
+    timeout: 60000
+# `portfolio.open-settings` is the gate's CTA and belongs to NO other branch
+# (PortfolioScreen.tsx:64). It is flag-gated on `ux.empty_state_ctas`, which
+# is TRUE in the release fixture — asserting it pins the frame to the shipping
+# gate rather than to a flag-off variant of it.
+- assertVisible:
+    id: "portfolio.open-settings"
+- waitForAnimationToEnd
+- takeScreenshot: portfolio__gate--single-league

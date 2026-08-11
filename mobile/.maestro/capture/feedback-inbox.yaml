@@ -1,0 +1,163 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-FEEDBACK-INBOX
+# profile: standard
+# flags: release
+# captures: empty, populated
+# source: mobile/src/screens/FeedbackInboxScreen.tsx, mobile/src/components/FeedbackSheet.tsx, mobile/src/components/FeedbackFAB.tsx, mobile/src/navigation/RootNav.tsx
+# interactive-stop: empty
+#
+# CAPTURE REQUEST #12 (mobile UX audit 2026-08-09, §2) — "`sheets-feedback` is
+# the FAB *capture* sheet — a different surface from the inbox with its
+# severity and lifecycle chips."
+#
+# ENTRY is the launch argument. `FeedbackInbox` is a ROOT-stack route
+# (RootNav.tsx:498) and is not listed in testRouteEntry's TAB_OF map, so it
+# takes the passthrough branch and is navigated to verbatim — no edit to that
+# file was needed. Its only shipped path is Settings → Test feedback, which is
+# reachable, but the launch argument keeps the two frames below independent of
+# Settings' own layout and scroll position. Mechanism and its production gate:
+# capture/rank-home.yaml's header.
+#
+# FOUR LAUNCHES, and each one is load-bearing:
+#   1. cold sign-in + league pick — the only thing that writes the session the
+#      later argument launches restore (rank-home.yaml's two-launch dance).
+#   2. argument → the inbox with nothing in it            → `empty`
+#   3. NO argument → back on the tab tree, where the FAB lives, to write one
+#      real note through the shipped capture sheet.
+#   4. argument → the inbox with that note in it          → `populated`
+# `clearState: false` throughout 2-4: the notes live in AsyncStorage
+# (useFeedback.hydrate), so a state wipe between 3 and 4 would empty the inbox
+# again and photograph `empty` twice.
+#
+# THIS FLOW WRITES — deliberately, and it is the only capture flow that does.
+# Save POSTs a feedback row into the seeded backend (capture/sheets/
+# sheets-feedback.yaml declined to, correctly: the sheet just dismisses on
+# success, so there was no frame to gain). Here the row IS the frame — the
+# severity chip, the screen tag, the relative time and the sync line only
+# exist once a note exists, and the fixture DB is discarded at the end of the
+# cell. No injections: both states are the app's own honest answers.
+#
+# KNOWN TRAP, inherited from sheets-feedback.yaml: on a freshly-erased
+# simulator iOS lays its one-time QuickPath keyboard tutorial over the bottom
+# ~45% of the frame the first time a text field focuses, and it cannot be
+# dismissed from a flow (its Continue button has no testID and text taps are
+# banned; `hideKeyboard` errors on this field). If it lands on the note field
+# it covers `feedback.save-btn` and the `populated` leg dies. `empty` is shot
+# BEFORE any of that, so a failure there costs the second frame only, never
+# the first.
+tags: [capture, feedback-inbox]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+
+# ── empty ────────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: FeedbackInbox
+# "No feedback yet" is the empty branch's own title (FeedbackInboxScreen.tsx
+# :150) and the list branch renders no such copy, so it discriminates. The
+# count line above it is the second half of the same claim.
+- extendedWaitUntil:
+    visible:
+      text: ".*No feedback yet.*"
+    timeout: 60000
+- assertVisible:
+    text: ".*0 notes saved on this device.*"
+- waitForAnimationToEnd
+- takeScreenshot: feedback-inbox__empty
+
+# ── populated ────────────────────────────────────────────────────────────
+# Back to the tab tree for the FAB. No argument on this launch — the argument
+# domain is volatile (it exists only for the process launched with it), so a
+# plain relaunch cannot inherit launch 2's route.
+- launchApp:
+    clearState: false
+    stopApp: true
+# SETTLE on the Rank surface's own header control before touching the FAB:
+# the tab bar paints long before #244's launch routing finishes, and the FAB
+# floats over whatever landed (capture/sheets/sheets-feedback.yaml finding).
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "feedback.fab"
+    timeout: 20000
+- tapOn:
+    id: "feedback.fab"
+- extendedWaitUntil:
+    visible:
+      id: "feedback.note-input"
+    timeout: 15000
+# The sheet auto-focuses the note field 250 ms after it opens
+# (FeedbackSheet.tsx:78), so the tap is a no-op in the common case and a
+# recovery when the timer has not fired yet. Severity stays Bug — the sheet's
+# initial state (FeedbackSheet.tsx:54) — which is what puts a severity chip in
+# the inbox row this capture is about.
+- tapOn:
+    id: "feedback.note-input"
+- inputText: "Progress ring reads 4/4 but matches are still locked."
+# Prove the text landed BEFORE submitting. Same rails lesson as the sign-in
+# preamble: a raced inputText would save an empty-ish note (or leave Save
+# disabled) and the failure would only surface as a missing row two launches
+# later. Assertion, never a tap.
+- assertVisible:
+    text: ".*Progress ring reads 4/4 but matches are still locked.*"
+- tapOn:
+    id: "feedback.save-btn"
+# The sheet dismisses on success — its own disappearance is the write receipt.
+- extendedWaitUntil:
+    notVisible:
+      id: "feedback.save-btn"
+    timeout: 20000
+- waitForAnimationToEnd
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: FeedbackInbox
+# Singular "1 note" is the count line agreeing that exactly one row hydrated;
+# it also rules out the empty branch without depending on row copy.
+- extendedWaitUntil:
+    visible:
+      text: ".*1 note saved on this device.*"
+    timeout: 60000
+- assertNotVisible:
+    text: ".*No feedback yet.*"
+# The severity chip the request names. SEV_LABEL[bug] = "Bug"
+# (FeedbackInboxScreen.tsx:21), rendered per row.
+- assertVisible:
+    text: ".*Bug.*"
+- waitForAnimationToEnd
+- takeScreenshot: feedback-inbox__populated

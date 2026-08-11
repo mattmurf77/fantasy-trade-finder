@@ -1,0 +1,153 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MATCHES
+# profile: standard
+# flags: release
+# captures: skeleton, populated--mutual, populated--awaiting, error
+# source: mobile/src/screens/MatchesScreen.tsx, mobile/src/components/TradeCard.tsx, mobile/src/components/LeagueProgressModule.tsx
+# interactive-stop: populated--mutual
+#
+# Screen-library capture flow for the Matches inbox (matrix rows 108-111).
+# No Trades crossing, so no OutlookSheet preamble is needed here (the tab is
+# entered directly, exactly as flows/smoke/08-matches.yaml does).
+#
+# TWO LAUNCHES, on purpose. The skeleton branch is
+# `data === undefined && isLoading` (MatchesScreen.tsx:495) — it can ONLY
+# render on a cold, never-resolved query. Once the list has data, a failed
+# refetch renders the isError branch with `isLoading` false, so skeleton is
+# unreachable after the first success; and once the query has ERRORED, its
+# status is 'error' (not 'pending'), so a refetching error state never shows
+# the skeleton either. Skeleton therefore owns launch 1 and the error owns
+# launch 2. There is no refresh CONTROL on this screen (pull-to-refresh only,
+# and coordinate swipes are banned), so an in-launch recovery is not
+# available the way it is on LeagueSummary's league-summary.refresh.
+#
+# /__test__/reset is never used mid-flow (it clears backend sessions = signs
+# us out); the latency armed in launch 1 stays armed through launch 2, which
+# only makes the injected 500 arrive ~6 s later — timeouts below absorb it.
+tags: [capture, matches]
+---
+# ── launch 1: skeleton → populated--mutual → populated--awaiting ──────────
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# ── skeleton ─────────────────────────────────────────────────────────────
+# Armed BEFORE the tab is entered: the three static tiles only exist while
+# the very first /api/trades/matches/all is in flight. 6000 ms (not 4000) per
+# the pilot finding on trades__loading — a ~4 s window is short enough for
+# Maestro's hierarchy polling to miss.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/trades/matches/all"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "tab.matches"
+# The header (title + segment toggle + chip row) mounts above the branch, so
+# this anchor lands us INSIDE the skeleton window rather than racing it.
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.mutual"
+    timeout: 20000
+- assertNotVisible:
+    id: "matches.empty-text"
+- waitForAnimationToEnd
+- takeScreenshot: matches__skeleton
+
+# ── populated--mutual ────────────────────────────────────────────────────
+# `standard` seeds matches_seed {mutual: 2}. Neither the match tile nor its
+# Dismiss/Send CTAs carry a testID (TradeCard.tsx:564-585 — the match variant
+# renders no id'd node), so the settle anchor is the tile's own header copy.
+# This is an ASSERTION on text, never a tap (lld.md §4.4 rule 1 bans text
+# SELECTORS for taps; assertions are how an id-less surface is anchored).
+- extendedWaitUntil:
+    visible:
+      text: ".*New match with @.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: matches__populated--mutual
+
+# ── populated--awaiting ──────────────────────────────────────────────────
+# Lazily fetched on first open (awaitingQuery `enabled: segment === 'awaiting'`),
+# against /api/trades/awaiting — a different path, so the latency above does
+# not apply. `standard` seeds awaiting: 1.
+- tapOn:
+    id: "matches.segment.awaiting"
+- extendedWaitUntil:
+    visible:
+      text: ".*Waiting on @.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: matches__populated--awaiting
+
+# ── launch 2: error ──────────────────────────────────────────────────────
+# clearState wipes the stored session, but the keychain keeps the last
+# username, so signin.hint-btn is a one-tap re-auth (SignInScreen.tsx:409).
+- launchApp:
+    clearState: true
+    clearKeychain: false
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.hint-btn"
+    timeout: 20000
+- tapOn:
+    id: "signin.hint-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+# COUNT=2, not 1: this is a react-query QUERY and the client's default is
+# `retry: 1` (state/queryClient.ts:26), so one armed failure is silently
+# swallowed by the retry. Mutations (retry: 0) are the count=1 case — see
+# trades.yaml's generate injection.
+# Body is the REAL production 500 from server.py's handle_unexpected_error
+# (backend/server.py:2070-2077).
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/matches/all"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "tab.matches"
+# MatchesScreen renders readErrorCopy(err, 'Could not load matches.') — the
+# helper only swaps in the verify prompt for the 403 read gate, so a 500
+# lands on the screen's own fallback copy (utils/verification.ts).
+- extendedWaitUntil:
+    visible:
+      text: ".*Could not load matches.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: matches__error

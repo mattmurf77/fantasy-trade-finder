@@ -1,0 +1,110 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SIGNIN
+# profile: standard
+# flags: release
+# captures: idle, error, busy, hint-prefill
+# source: mobile/src/screens/SignInScreen.tsx
+# interactive-stop: idle
+#
+# Screen-library capture flow for SignIn. Pre-auth screen — no league/tab
+# preamble. States are ordered so no /__test__/reset is ever needed mid-flow
+# (reset clears backend sessions, i.e. signs us out):
+#   idle          → clean launch, keychain cleared so no "Continue as" row
+#   error         → fail_next 404 on the auth endpoint (count self-decrements)
+#   busy          → latency on the auth endpoint, screenshot while the button
+#                   spinner is up (NO waitForAnimationToEnd — see the section
+#                   below), then let the real sign-in land
+#   hint-prefill  → relaunch WITHOUT clearKeychain: getLastUsername() repopulates
+#                   the field and renders signin.hint-btn
+tags: [capture, signin]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- assertNotVisible:
+    id: "signin.error-text"
+- takeScreenshot: signin__idle
+
+# ── error ────────────────────────────────────────────────────────────────
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_STATUS: "404"
+      INJECT_COUNT: "1"
+      # Real production 404 body (backend/server.py extension_auth) so the
+      # screen's err.message fallback renders the shipping copy:
+      INJECT_BODY: '{"error": "user_not_found", "message": "Sleeper user @qa_standard not found."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "signin.error-text"
+    timeout: 20000
+- takeScreenshot: signin__error
+
+# ── busy ─────────────────────────────────────────────────────────────────
+# WRONG-CONTENT FIX (mobile UX audit 2026-08-09 §3: "signin/busy.png — the
+# Choose-a-League screen, fully loaded. No spinner or busy indicator.").
+# Two independent causes, both addressed here:
+#
+#   1. `waitForAnimationToEnd` BETWEEN THE TAP AND THE SHUTTER. It polls for a
+#      visually stable screen — and this state's entire content is a spinning
+#      ActivityIndicator (SignInScreen.tsx:482), which never stabilises. So it
+#      did not "let the spinner settle": it waited OUT the request, the
+#      navigation to the picker, and that screen's paint, and the shutter
+#      fired on the first still frame available — the loaded picker. DELETED,
+#      not shortened. (Inverse of capture/sheets/sheets-feedback.yaml, where
+#      the sheet slides to a genuine rest and the wait is correct.)
+#   2. 4000 ms was too thin a window to survive hierarchy polling plus
+#      screenshot overhead once cause 1 was gone — the pilot's trades__loading
+#      finding put the floor at 6000. 9000 buys a wide, boring margin; the
+#      request then completes normally and the 40 s wait below absorbs it.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_MS: "9000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.continue-btn"
+# THE ANCHOR THAT PROVES WE ARE INSIDE THE WINDOW. `busy` swaps the button's
+# label Text for the ActivityIndicator, so the label's ABSENCE is the
+# spinner's presence — the spinner carries no testID and no text of its own.
+# The arrow is part of the match on purpose: the screen also renders a
+# lowercase "or continue with Sleeper" divider, which a case-insensitive
+# matcher would otherwise hit. This assert is what makes the shot
+# self-verifying — if the latency ever stops arming, the label is still up and
+# the flow goes RED instead of quietly re-photographing the picker.
+- assertNotVisible:
+    text: ".*Continue with Sleeper →.*"
+- takeScreenshot: signin__busy
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+
+# ── hint-prefill ─────────────────────────────────────────────────────────
+# setLastUsername() wrote the username to the keychain during the sign-in
+# above; clearing state but NOT the keychain returns us to SignIn with the
+# "Continue as @qa_standard" row rendered.
+- launchApp:
+    clearState: true
+    clearKeychain: false
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.hint-btn"
+    timeout: 20000
+- takeScreenshot: signin__hint-prefill

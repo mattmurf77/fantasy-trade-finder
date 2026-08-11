@@ -1,0 +1,216 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MOCKDRAFT-DRAFT
+# profile: draft
+# flags: release
+# captures: loading, error--generic, empty--no-active-mock
+# source: mobile/src/screens/MockDraftScreen.tsx, mobile/src/components/draft/MockChrome.tsx, backend/mock_draft_service.py
+# interactive-stop: empty--no-active-mock
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this file carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split this profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# Screen-library capture flow for the FTF-native mock draft
+# (capture-matrix-2026-08-09.md deferred block, row "⚠ mock-draft": "Only
+# reachable through the Draft Room's mock entry, which needs `draft.mock` + a
+# loaded rookie class — neither seeded"). Half of that is now false — the
+# `draft` profile pins `draft.mock: true` and loads a real 2026 rookie class —
+# and half is still true, for two reasons that are documented here rather than
+# worked around, because working around either would mean faking a state.
+#
+# ── FINDING 1: the ACTIVE mock is UNREACHABLE on every seeded profile ─────
+# The Draft Room's mock entry card is the only way to create a mock, and on
+# BOTH C-block profiles it is a DEAD, disabled card:
+#   · `draft`: the seeded draft is `status: "drafting"` → `state: "live"`
+#     (backend/draft_board_service.py:155), which hits DraftRoomScreen.tsx:334
+#     `mock-entry.blocked.live` — "Your real draft is running… we don't offer
+#     one mid-draft". `MockEntryPanel` renders the CTA `disabled` for any
+#     block, so `mock-entry.start` cannot be tapped and MockSetupSheet never
+#     opens.
+#   · `espn`: `assigned_board` derives state from the recorded picks
+#     (draft_board_service.py:1320) — 5 recorded of 40 slots ⇒ also `live` ⇒
+#     also blocked.
+# No seeder path writes a `mock_drafts` row either (there is no mock block in
+# the profile schema, and `_seed_recorded_picks` / `_seed_pick_assignment` are
+# the only draft-adjacent DB writers). So `GET /api/mock-draft` answers the
+# typed-empty `{empty: true, reason: "no_active_mock"}` capability probe
+# (backend/server.py:11683) on every profile that exists today.
+# CONSEQUENCE — these matrix states are NOT captured and are NOT fakeable with
+# the current fixture set: `recap`, `on-the-clock--you`, `on-the-clock--cpu`,
+# `pick-ticker`, `your-picks-chips`, `undrafted--consensus|my-board`,
+# `undrafted-empty`, `row-selected`, `confirm-bar`, `end-btn`. Closing them
+# needs a THIRD profile whose draft has `picks_made: 0` (`status: "pre_draft"`,
+# which the seeder does allow) so the room reports `upcoming` and the Start
+# button arms — or a seeded mock row. Either is a backend workstream, not a
+# flow-authoring one. `alert--end-mock` stays excluded by sign-off ruling B.
+#
+# ── FINDING 2 (RESOLVED since the first pass) ────────────────────────────
+# Reaching Mock mode needs a tap on `draft-room.mode.mock`, and reaching the
+# refusal card needs `mock-entry.blocked.*`. Both are built in ways
+# scripts/testid-lint.sh's source grep cannot resolve — a VARIABLE prefix
+# (`testID={`${testIDPrefix}.real`}`, components/draft/MockChrome.tsx:78) and a
+# plain object property rendered as `testID={block.testID}`
+# (DraftRoomScreen.tsx:340) — and text-selector taps are banned. Both are now
+# in scripts/testid-lint-allow.txt, so the blocked card IS capturable; it is
+# simply not worth its own frame here, because the ACTIVE mock it blocks is
+# captured properly on the pre-draft twin in capture/mock-draft@draft-pre.yaml.
+# `mock-entry.start` remains unresolvable for the same reason and is still
+# missing from the allowlist — which is what that sibling file needs.
+#
+# ── WHAT THIS FLOW THEREFORE CAPTURES ────────────────────────────────────
+# The three states MockDraftScreen really does reach on the `draft` profile,
+# entered by launch argument. `MockDraft` is absent from testRouteEntry.ts's
+# TAB_OF map, so it dispatches as a ROOT-stack route (RootNav registers it
+# unconditionally — app-inventory §1.1 — precisely so a stale link lands on an
+# honest state). The screen reads `leagueId` from the session when no param is
+# supplied (MockDraftScreen.tsx:110), so no FTFTestRouteParams are needed.
+#
+# `mock-draft.rail` is above the branch by construction and is in EVERY frame
+# below — that is the point of it (pinned by mobile/tests/
+# check-mock-mode-marker.js).
+tags: [capture, mock-draft, draft]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - inputText: "qa_draft"
+      - assertVisible:
+          text: ".*qa_draft.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+# Wait for the authed tree before relaunching — the league pick's AsyncStorage
+# writes are what the argument launches below restore. RootNav only honours
+# FTFTestRoute when the restore landed on Main.
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+# ── loading + error--generic (one launch, two frames) ────────────────────
+# Both injections are armed before the relaunch so they cover the SAME first
+# fetch: the 5 s delay is the loading window, and the 404 that lands at the end
+# of it is the error. `['mock-draft', …]` is not in App.tsx's PERSIST_KEYS, so
+# `stopApp: true` alone gives a cold cache; `clearState: false` keeps the
+# session.
+#
+# COUNT=2: 404 is not in api/client.ts's RETRY_STATUSES {502,503,504} (that
+# retry layer is 5xx-gateway only), so the HTTP client attempts once per call
+# and react-query's `retry: 1` doubles it. No sibling reads /api/mock-draft in
+# this launch — DraftRoomScreen's `mockQuery` is `enabled: !!leagueId &&
+# mockMode`, and the Draft Room is never opened here.
+#
+# BODY is the route's own 404, emitted by `_mock_resolve_league`
+# (backend/server.py:11670 → the `league_not_found` payload). MockDraftScreen
+# renders `readErrorCopy(query.error, "Couldn't load the mock draft.")`, which
+# returns the FALLBACK for anything that is not `verification_required`, so the
+# copy asserted below is the client's; the body is there for fidelity.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/mock-draft"
+      INJECT_MS: "5000"
+- assertTrue: ${output.inject.ok}
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/mock-draft"
+      INJECT_STATUS: "404"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "league_not_found"}'
+- assertTrue: ${output.inject.ok}
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: MockDraft
+# The rail is outside the ScrollView and renders unconditionally, so it proves
+# we are on the screen. The loading branch is the one where NEITHER the error
+# text NOR any typed-empty body has mounted — `mock-draft.empty.*` covers all
+# four reasons (the id is `mock-draft.empty.${emptyReason ?? 'unknown'}`,
+# MockDraftScreen.tsx:338, hence the wildcard the lint needs).
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.rail"
+    timeout: 60000
+- assertNotVisible:
+    id: "mock-draft.error-text"
+- assertNotVisible:
+    id: "mock-draft.empty.*"
+- takeScreenshot: mock-draft__loading
+# ~5 s of latency then the 404, twice — hence the generous budget.
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.error-text"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: ".*Couldn.t load the mock draft.*"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: mock-draft__error--generic
+
+# ── empty--no-active-mock ────────────────────────────────────────────────
+# Third launch: the fail_next budget is spent, the 5 s latency is still armed
+# (injections persist until reset, and this file never resets mid-flow), and
+# the cache is cold again because `mock-draft` is not persisted. The route
+# therefore answers the real capability probe — `{empty: true, reason:
+# "no_active_mock"}` (server.py:11683) — and `state` stays null, so
+# MockDraftScreen falls to its typed-empty branch.
+#
+# NOTE the copy: "This mock is over. Start another one from the draft room."
+# (MockDraftScreen.tsx:717). It reads as a post-mock message but is also what a
+# user who has NEVER started one sees — the route uses one `no_active_mock`
+# reason for both. That is a real product observation for the library, not a
+# harness artifact, so it is captured as-is.
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: MockDraft
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.empty.*"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: ".*Start another one from the draft room.*"
+    timeout: 20000
+- assertNotVisible:
+    id: "mock-draft.error-text"
+- waitForAnimationToEnd
+- takeScreenshot: mock-draft__empty--no-active-mock

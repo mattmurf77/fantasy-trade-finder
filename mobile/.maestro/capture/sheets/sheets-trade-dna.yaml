@@ -1,0 +1,108 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SHEETS-TRADE-DNA
+# profile: standard
+# flags: release
+# captures: open, fine-tuning
+# source: mobile/src/components/TradeDnaSheet.tsx, mobile/src/components/OutlookBiasReceipt.tsx, mobile/src/screens/TradesScreen.tsx
+# interactive-stop: open
+#
+# Screen-library capture flow for the Trade DNA sheet (matrix row 88).
+#
+# Under `release` this is the #257 FULL sheet: trades.edit_full_sheet is ON
+# and TradesHome mounts with mode:'guided', so `consolidateOn` is true and
+# TradesScreen passes the `full` prop (header reads "What are you after?",
+# with the demoted "Fine tuning" strip below a hairline).
+#
+# ENTRY, two paths, same destination:
+#  1. OutlookBiasReceipt's Change link — the shipping affordance, but the
+#     receipt returns null unless an outlook RESOLVES (declared, else the
+#     backend's inference), and the fixtures do not guarantee an inference.
+#  2. the legacy route param, still honoured at TradesScreen.tsx:582. Carried
+#     on the canonical deep link from the v2 route table (Main.Trades.
+#     TradeDeck = 'finder'; ux.deeplink_router_v2 is ON). `mode=guided` rides
+#     along on purpose — without it finderMode would be undefined,
+#     consolidateOn false, and the sheet would open in its LEGACY variant,
+#     which is a different state and would be mislabelled as this one.
+# The conditional is on `dna.done` (the sheet's own control), so path 2 only
+# fires when path 1 did not produce the sheet.
+tags: [capture, sheets, trade-dna]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+# Preamble from trades.yaml — conditional first-run outlook sheet dismissal
+# (Contender pre-selected). Inert under release, where consolidateOn removes
+# OutlookSheet's mount entirely; kept so the flow survives a flag flip.
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 30000
+
+# ── open ─────────────────────────────────────────────────────────────────
+- runFlow:
+    when:
+      visible:
+        id: "trades.outlook-receipt.change"
+    commands:
+      - tapOn:
+          id: "trades.outlook-receipt.change"
+      - waitForAnimationToEnd
+- runFlow:
+    when:
+      notVisible:
+        id: "dna.done"
+    commands:
+      - openLink: dtf://app/trades/finder?mode=guided&editDna=1
+- extendedWaitUntil:
+    visible:
+      id: "dna.done"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-trade-dna__open
+
+# ── fine-tuning ──────────────────────────────────────────────────────────
+# The sheet is a LONG scroll (matrix trap): the demoted engine levers sit
+# below the outlook grid, the chasing/shopping blocks and the untouchables
+# row. Scroll them into frame rather than shooting the same top-of-sheet
+# twice.
+- scrollUntilVisible:
+    element:
+      id: "dna.fine.fairness"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-trade-dna__fine-tuning

@@ -1,0 +1,116 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-QUICK-RANK
+# profile: standard
+# flags: release
+# captures: step-populated, step--clicked
+# source: mobile/src/screens/QuickRankScreen.tsx
+# interactive-stop: step-populated
+#
+# Screen-library capture flow for the Quick Rank within-tier walk (matrix rows
+# 59-60). QuickRank had ZERO coverage because its only in-app entries are (a)
+# the native Alert that fires when the Quick-set walk finishes — Maestro can
+# clear it, but only after driving the entire walk to its last tier — and (b)
+# a RankMenu row. Both are long, fixture-dependent preambles for a screen whose
+# pixels have nothing to do with either.
+#
+# ENTRY: launch argument (see capture/rank-home.yaml's header for the full
+# rationale — deep links are dead on iOS 18 in this harness). `-FTFTestRoute
+# QuickRank` pushes RankStack's QuickRank route at container-ready, gated on
+# the build-time `extra.testMode` constant.
+#
+# The screen opens on QB (`route.params?.position ?? 'QB'`) and derives its
+# step list from live tier membership: only tiers with 2+ players are walked.
+# The `standard` profile's seeded suggested tiers put multiple QBs in a tier,
+# so step 1 exists. If a future fixture change empties QB, this flow fails
+# LOUD on the save-btn anchor rather than silently photographing the
+# "No QB tier has two or more players" branch — that branch renders neither
+# quick-rank.save-btn nor quick-rank.search.
+tags: [capture, quick-rank]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# RUN-2 FIX: the shared sign-in preamble flakes — `inputText` occasionally
+# races the field's focus and lands nowhere, and the empty username box only
+# surfaces 30 s later as a missing `leagues.row.*` (observed once on this
+# flow, passing on the identical preamble in its sibling). The retry wraps the
+# whole sign-in leg and is idempotent: `eraseText` clears whatever a
+# half-landed attempt left in the field before retyping. No fixed sleeps.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+
+# ── step-populated ───────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: QuickRank
+# save-btn and search BOTH mount only on the walk branch (the loading,
+# scope-empty, error and no-walkable-tier branches all replace the body).
+# save-btn alone would be ambiguous with Quick Set's own save bar, so the
+# per-step search field is asserted too.
+- extendedWaitUntil:
+    visible:
+      id: "quick-rank.save-btn"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "quick-rank.search"
+    timeout: 30000
+# Full-match regex (Maestro text matchers are anchored) — the step header's
+# progress line, which exists only when a tier is actually being walked.
+- extendedWaitUntil:
+    visible:
+      text: ".*Tier 1 of.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: quick-rank__step-populated
+
+# ── step--clicked ────────────────────────────────────────────────────────
+# Matrix row 60: three chips stamped with rank badges. The chip testIDs are
+# player-id templated, so they are selected POSITIONALLY (`index`) off the
+# shared `quick-rank.chip.*` regex — tapping the regex three times without an
+# index would toggle the same first chip on/off/on. The tier is guaranteed to
+# hold at least 2 members (that is what makes it a step at all); a third tap
+# on a 2-player tier is a no-op miss rather than a wrong stamp, and the
+# accessibility-label assertion below only requires that rank 2 exists.
+- tapOn:
+    id: "quick-rank.chip.*"
+    index: 0
+- tapOn:
+    id: "quick-rank.chip.*"
+    index: 1
+- tapOn:
+    id: "quick-rank.chip.*"
+    index: 2
+# The chip's accessibility label flips to "<name>, ranked <n>" once stamped
+# (QuickRankScreen.tsx:274-276) — the fixture-independent proof that the click
+# order registered, rather than the badge merely being drawn.
+- extendedWaitUntil:
+    visible:
+      text: ".*, ranked 2"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: quick-rank__step--clicked

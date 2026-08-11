@@ -34,6 +34,19 @@ never freelance around it.
 3. Know the real surface: screen inventory in `mobile/src/screens/`, components in
    `mobile/src/components/`, web pages in `web/`. Design against what exists, not a
    remembered version of it.
+4. **Open the captures. Never design from memory.** (Added 2026-08-09 with the
+   screen library; see `screens/CLAUDE.md`.) Before designing any change to screen
+   X, open **every** PNG under `screens/mobile/<x>/` — that folder is the exact
+   ground truth for what the app looks like in each state. Reading source is not a
+   substitute; source tells you what renders, captures tell you what it looks like.
+   - If `screens/mobile/<x>/` is missing, or `mobile/scripts/screen-freshness.sh`
+     flags X as stale, **say so in the deliverable and request a capture run**
+     (`mobile/scripts/screen-capture.sh --screen <x>`, 4–7 min) before designing.
+     Do not proceed on a remembered version.
+   - Polish-lab and other mockups revising an existing screen embed the real
+     capture as the "current"/"before" pane, via a relative
+     `<img src="../../screens/mobile/<x>/<state>.png">` — never a redrawn
+     approximation. See `mockups/CLAUDE.md`.
 
 ## What you own
 

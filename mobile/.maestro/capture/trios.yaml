@@ -1,0 +1,144 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TRIOS
+# profile: standard
+# flags: release
+# captures: populated--unlocked, speed-mode-on, unlock-banner, scope-rookie--empty
+# source: mobile/src/screens/RankScreen.tsx, mobile/src/components/TrioPlayerCard.tsx, mobile/src/components/RookieScopeControl.tsx
+# interactive-stop: populated--unlocked
+#
+# Screen-library capture flow for the Trios surface (matrix rows 39-44).
+# Preamble copied from capture/trades.yaml through the league pick; no
+# OutlookSheet dismissal (that sheet belongs to the Acquire tab, which this
+# flow never visits). No /__test__/reset anywhere — reset clears backend
+# sessions, i.e. signs us out.
+#
+#   populated--unlocked → resting state; `standard` is unlocked in both
+#                         formats so the per-position n/threshold counters
+#                         are hidden (RankScreen.tsx:466)
+#   unlock-banner       → bottom-of-scroll banner; copy variant is the
+#                         `ux.outlook_inline_default` ON one (release)
+#   speed-mode-on       → trios.speed-toggle; PERSISTS to AsyncStorage, so
+#                         it is toggled straight back off afterwards
+#   scope-rookie--empty → `ranks.rookie_subset` is TRUE in the refreshed
+#                         backend/tests/fixtures/flags/release.json, so per
+#                         sign-off ruling A this row is captured — and what
+#                         it truthfully renders is the thin-pool notice
+#
+# NOT captured here, with reasons (reported to the orchestrator):
+#   info-sheet (row 42) — long-press, EXCLUDED per the sign-off (ruling E).
+#     Note the flag-on ⓘ twin (trios.info.a) DOES exist, but the row's
+#     state is the long-press sheet and it was ruled out of v1.
+#   toast--streak (row 44) — the seeder does not seed a streak, so the
+#     toast cannot fire (sign-off ruling C: needs the streak-seed pin).
+tags: [capture, trios]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trios"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trios"
+
+# ── populated--unlocked ──────────────────────────────────────────────────
+# trios.card.a mounts only on the loaded branch — the skeleton trio
+# (RankScreen.tsx:557) renders plain Views with no testIDs, so this anchor
+# cannot be satisfied by the loading state.
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: trios__populated--unlocked
+
+# ── speed-mode-on ────────────────────────────────────────────────────────
+# Local state + AsyncStorage write, no network — the toggle repaints
+# immediately, so settling the press animation is the whole wait.
+- tapOn:
+    id: "trios.speed-toggle"
+- waitForAnimationToEnd
+- takeScreenshot: trios__speed-mode-on
+# Restore the default so the states below are captured with speed OFF (the
+# toggle persists, and a stray "I AM SPEED — ON" in an unrelated capture is
+# exactly the kind of cross-state bleed the library must not ship).
+- tapOn:
+    id: "trios.speed-toggle"
+- waitForAnimationToEnd
+
+# ── unlock-banner ────────────────────────────────────────────────────────
+# Below the fold. `isUnlockedEverywhere` is true for `standard`, and with
+# ux.outlook_inline_default ON (release) the copy is the board-pricing
+# variant (RankScreen.tsx:687).
+#
+# RUN-4 FIX: `scrollUntilVisible` on that copy did NOT scroll — it matched
+# the element in the hierarchy while it was still off-screen and stopped, so
+# this capture came out byte-identical to `populated--unlocked`. An
+# element-anchored swipe actually moves the ScrollView (same fix as the
+# Tiers board's sticky-header). No coordinates — the ban is on start/end
+# point swipes.
+- swipe:
+    from:
+      id: "trios.speed-toggle"
+    direction: UP
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: trios__unlock-banner
+
+# ── scope-rookie ─────────────────────────────────────────────────────────
+# The shared All players | Rookies control sits above the position tabs, so
+# scroll back up to it. Flipping the scope re-keys the trio query.
+#
+# RUN-4 RESULT — the state is named for what it actually renders. The
+# fixture's QB rookie cohort cannot field three candidates, so the scoped
+# path returns its typed-empty response and the screen shows the honest
+# notice ("Not enough valued QB rookies to rank yet", RookieScopeEmpty via
+# RankScreen.tsx:551) rather than a rookie trio. That IS the release truth
+# for this profile; a rookie-trio variant needs a fixture with a fuller
+# rookie class (sign-off ruling C territory), so it is NOT faked here.
+# trios.scope-consolidated ("See all rookies in one list") renders as soon
+# as the scope flips, regardless of the fetch, so it is the anchor that
+# proves the flip landed. Placed last so a surprise costs no earlier
+# capture.
+- scrollUntilVisible:
+    element:
+      id: "trios.scope-rookie"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "trios.scope-rookie"
+- extendedWaitUntil:
+    visible:
+      id: "trios.scope-consolidated"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: trios__scope-rookie--empty

@@ -1,0 +1,120 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-RANK-HOME
+# profile: standard
+# flags: release
+# captures: populated, populated--more-expanded
+# source: mobile/src/screens/RankHomeScreen.tsx, mobile/src/navigation/rankChooserModel.ts
+# interactive-stop: populated
+#
+# Screen-library capture flow for the "Build your board" chooser (matrix rows
+# 17-18). RankHome had ZERO coverage for one reason only: under release flags
+# it is UNREACHABLE by tapping. `ux.rank_tab_destination` is on, so the shared
+# "More ways to rank" header control opens the RankMenu SHEET, and the sheet
+# does not list the chooser (TabNav.tsx RankMenu rows). The only in-app path
+# left is the flag-OFF header link.
+#
+# ENTRY: launch argument, not a deep link. `openLink dtf://…` raises an
+# undismissable SpringBoard "Open in DTF?" confirm on iOS 18 (proven warm AND
+# cold). `launchApp: arguments:` becomes argv `-FTFTestRoute RankHome`, which
+# iOS parses into NSUserDefaults' argument domain; the app reads it via
+# react-native's `Settings` module and jumps the navigator at container-ready.
+# The whole path is gated on the build-time `extra.testMode` constant
+# (mobile/src/utils/testRouteEntry.ts) and is dead code in any shipped bundle.
+#
+# TWO-LAUNCH DANCE: launch 1 signs in and picks a league the normal way, which
+# is what writes the session (SecureStore token + AsyncStorage user/league/
+# leagues). Launch 2 carries the argument with `clearState: false` so that
+# session restores — RootNav only honours the argument when the restore landed
+# on Main, so a clearState:true launch with the argument would land on SignIn
+# and do nothing. `stopApp: true` is required: without a fresh PROCESS there is
+# no new argv and no new container-ready.
+#
+# The screen itself is data-free (no queries), so nothing here can race a
+# fetch; the anchors below are pure render proofs.
+tags: [capture, rank-home]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# RUN-2 FIX: the shared sign-in preamble flakes — `inputText` occasionally
+# races the field's focus and lands nowhere, and the empty username box only
+# surfaces 30 s later as a missing `leagues.row.*` (observed once on this
+# flow, passing on the identical preamble in its sibling). The retry wraps the
+# whole sign-in leg and is idempotent: `eraseText` clears whatever a
+# half-landed attempt left in the field before retyping. No fixed sleeps.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+# Wait for the authed tree before relaunching — the league pick's AsyncStorage
+# writes are what launch 2 restores.
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+
+# ── populated ────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: RankHome
+# rank-home.card.* covers the three PRIMARY_METHODS cards, which render
+# unconditionally on this screen and nowhere else in the app.
+- extendedWaitUntil:
+    visible:
+      id: "rank-home.card.*"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "rank-home.more-toggle"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: rank-home__populated
+
+# ── populated--more-expanded ─────────────────────────────────────────────
+# The disclosure sits below the three cards, off-screen on the canonical
+# device (matrix row 18's "below the fold" note). RUN-1 FIX: a bare
+# scrollUntilVisible did NOT scroll — iOS keeps off-screen ScrollView children
+# in the hierarchy, so Maestro already considered the toggle "visible", the
+# tap fired at off-screen coordinates and the disclosure never opened.
+# `visibilityPercentage: 100` + `centerElement: true` forces a real scroll and
+# parks the control mid-screen, where the tap can actually land.
+- scrollUntilVisible:
+    element:
+      id: "rank-home.more-toggle"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "rank-home.more-toggle"
+# MORE_METHODS rows only mount while the disclosure is open, so any one of
+# them proves the expanded branch. Anchoring on the row list rather than the
+# chevron keeps this independent of the icon swap. Same forced scroll — the
+# newly-mounted rows extend below the fold, and the shutter has to see them.
+- scrollUntilVisible:
+    element:
+      id: "rank-home.card.anchor"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: rank-home__populated--more-expanded

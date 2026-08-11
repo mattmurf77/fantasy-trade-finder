@@ -1,0 +1,107 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SETTINGS
+# profile: standard
+# flags: release
+# captures: loading, populated, account-section
+# source: mobile/src/screens/SettingsScreen.tsx, mobile/src/components/TopBar.tsx, mobile/src/components/SteerSlider.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for Settings (matrix rows 135-136).
+#
+# LAYOUT. `account.settings_v2` is TRUE in backend/tests/fixtures/flags/
+# release.json, so this captures the v2 IA order (Leagues · Ranking ·
+# Notifications · Account · About · Sign out). The legacy order is the
+# flag-OFF branch and is out of scope under the sign-off's ruling A (the
+# library captures release truth); it is recorded as flag-blocked in the
+# capture report rather than pinned.
+#
+# The whole tree is absent until /api/notifications/prefs resolves
+# (SettingsScreen.tsx:694 — `prefsQuery.isLoading || !local`), which is what
+# makes `loading` a real state and not a flicker.
+tags: [capture, settings]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# ── loading ──────────────────────────────────────────────────────────────
+# Armed before the modal opens. 12000 ms, not the pilot's 6000: flask.log for
+# run 20260810T062632 showed the request only LEAVING ~4 s after the injection
+# was armed (topbar tap + modal mount) and landing at +10 s, so a 6 s window
+# had already closed before the shutter. The window has to outlast the whole
+# anchor chain, not just the paint. Ceiling on a latency injection is comfort,
+# not fidelity — the app cannot tell 6 s from 12 s.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/notifications/prefs*"
+      INJECT_MS: "12000"
+- assertTrue: ${output.inject.ok}
+- extendedWaitUntil:
+    visible:
+      id: "topbar.settings"
+    timeout: 20000
+- tapOn:
+    id: "topbar.settings"
+# settings.close-btn is the modal's own header control (RootNav.tsx:450) and
+# mounts with the modal, i.e. above the isLoading early-return — so it anchors
+# us INSIDE the spinner window. The paired assertNotVisible proves the body
+# has not painted yet.
+- extendedWaitUntil:
+    visible:
+      id: "settings.close-btn"
+    timeout: 20000
+- assertNotVisible:
+    id: "settings.link-espn"
+# NO waitForAnimationToEnd BEFORE A SPINNER — see league-summary.yaml for the
+# full finding. SettingsScreen's isLoading branch is a bare <ActivityIndicator>
+# (SettingsScreen.tsx:694-701); waiting for animations to end means waiting for
+# that spinner to be replaced, which is why the first settings__loading.png was
+# the fully painted Leagues/Ranking/Trade-values body. flask.log confirmed the
+# 6 s latency WAS applied — the wait simply outlived it.
+- takeScreenshot: settings__loading
+
+# ── populated ────────────────────────────────────────────────────────────
+# settings.link-espn is the first id'd row of the v2 Leagues group and only
+# exists once `local` is hydrated, so it is a true data-arrival anchor.
+# (`espn.link` is ON in release.json.)
+- extendedWaitUntil:
+    visible:
+      id: "settings.link-espn"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: settings__populated
+
+# ── account-section ──────────────────────────────────────────────────────
+# The matrix's trap holds: several Account rows appear only after their own
+# query resolves, so absence is not flag-off. settings.export-data
+# (`account.data_export` ON, non-demo session) sits directly above Delete
+# account and is the stable scroll target for the group.
+- scrollUntilVisible:
+    element:
+      id: "settings.export-data"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: settings__account-section

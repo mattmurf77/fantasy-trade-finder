@@ -1,0 +1,262 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-TIERS
+# profile: standard
+# flags: release
+# captures: populated, sticky-header, populated--all-tab, error, search-highlight, loading
+# source: mobile/src/screens/TiersScreen.tsx, mobile/src/components/PlayerCard.tsx, mobile/src/components/TierBadge.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for the Tiers board (matrix rows 45-54).
+# Preamble copied from capture/trades.yaml through the league pick; the
+# OutlookSheet dismissal is NOT needed (that sheet is an Acquire-tab
+# first-run surface and this flow never goes there). No /__test__/reset
+# anywhere — reset clears backend sessions, i.e. signs us out.
+#
+# FOUR run-1..3 lessons are baked into the ordering below:
+#
+# 1. `placeholderData: (prev) => prev` (TiersScreen.tsx:212) means the board
+#    NEVER unmounts on a key change — the previous rows stay on screen while
+#    the new position loads, and `loading` (= isLoading, :654) is true only
+#    on a mount with nothing cached. So: no unmount anchors anywhere.
+# 2. The query cache is PERSISTED (App.tsx:241 PersistQueryClientProvider
+#    over AsyncStorage) AND the Rank stack's root surface reads the same key
+#    Tiers does (QuickSetTiersScreen.tsx:141). So `loading` needs BOTH a
+#    clearState relaunch (nothing else is cold) and a latency long enough to
+#    outlast the whole sign-in → tab → menu → push sequence. It is captured
+#    last, for that reason.
+# 3. Maestro's `hideKeyboard` tap lands on the "Copy tier list from 1QB PPR"
+#    control that sits under the search box and opens a native confirm alert
+#    that then swallows every later tap. Never call it on this screen —
+#    `pressKey: Enter` blurs the search field safely instead.
+# 4. The keyboard covers the ENTIRE board on this layout, so no capture may
+#    be taken with it up — which is why the error state is captured BEFORE
+#    the search state, not after it.
+#
+# react-query retries once (state/queryClient.ts:26), so the error state
+# arms fail_next with count 2 — one per attempt. It is triggered by a
+# POSITION TAB switch, which involves no RankMenu prefetch, so 2 is exact.
+tags: [capture, tiers]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+# Every rank surface carries "More ways to rank" while
+# `ux.rank_tab_destination` is on (release), so this anchor holds whatever
+# surface #244's launch routing picked as the stack root.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.tiers"
+
+# ── populated ────────────────────────────────────────────────────────────
+# tiers.list mounts only on the loaded branch (TiersScreen.tsx:1356), so it
+# is the board's own "data is here" signal. Opens on QB (:65).
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: tiers__populated
+
+# ── sticky-header ────────────────────────────────────────────────────────
+# FB4-63's sticky tier banner is driven off viewability and is
+# `accessibilityElementsHidden` — invisible to the hierarchy, visible in a
+# screenshot, so there is nothing to anchor on. RUN-2 FIX: a bare `- scroll`
+# (and a screen-centre swipe) left the capture byte-identical to
+# `populated` — the board occupies a short window between the chrome and
+# the save bar, so the gesture has to START INSIDE the list. Anchoring the
+# swipe on tiers.list does that. No coordinates — the ban is on start/end
+# point swipes.
+- swipe:
+    from:
+      id: "tiers.list"
+    direction: UP
+    duration: 500
+- swipe:
+    from:
+      id: "tiers.list"
+    direction: UP
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: tiers__sticky-header
+
+# ── populated--all-tab ───────────────────────────────────────────────────
+# Warm the All board, then leave and come back so the switch reads from the
+# 30 s cache instead of racing the fetch (placeholderData would otherwise
+# leave QB rows sitting under an All tab). Re-entry resets the board to QB
+# (position is component state), which is what makes the second All tap a
+# pure cache read.
+- tapOn:
+    id: "tiers.pos-tab.all"
+- tapOn:
+    id: "stack.back-btn"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 30000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 60000
+- tapOn:
+    id: "tiers.pos-tab.all"
+- waitForAnimationToEnd
+- takeScreenshot: tiers__populated--all-tab
+
+# ── error ────────────────────────────────────────────────────────────────
+# Real production 500 body: backend/server.py:2071 handle_unexpected_error
+# is what an unhandled failure on /api/rankings actually returns. TE is the
+# one position this flow has not loaded, so the fetch is guaranteed; the
+# rendered copy is TiersScreen's own fixed string (:1332). Text matchers are
+# FULL-MATCH regex in Maestro — hence the .* wrappers (batch-A lesson).
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/rankings"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "tiers.pos-tab.te"
+- extendedWaitUntil:
+    visible:
+      text: ".*Could not load rankings.*"
+    timeout: 60000
+- takeScreenshot: tiers__error
+
+# Back to a loaded board before the search capture below (QB is cached, so
+# this repaints immediately) — the error state must not bleed into it.
+- tapOn:
+    id: "tiers.pos-tab.qb"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 60000
+- waitForAnimationToEnd
+
+
+# ── search-highlight ─────────────────────────────────────────────────────
+# `ux.board_search` is ON in release. The search NEVER filters: it scrolls
+# to the first name containing the query and rings that row
+# (TiersScreen.tsx:703-720, 989). WHICH real names land on this board is
+# seeder-dependent, so the query is a single letter — the weakest
+# assumption that still guarantees a match.
+#
+# RUN-3 FIX: the keyboard has to come DOWN or it covers the entire board
+# (the list occupies a short window between the chrome and the save bar) —
+# run-3's capture was all keyboard and no highlight. `hideKeyboard` is not
+# an option (lesson 3: it taps the copy-tiers control and opens a native
+# alert). Return blurs the field instead: the input is single-line, so RN's
+# default blurOnSubmit dismisses the keyboard, and the highlight survives
+# because it is derived from the search TEXT, not from focus (:703-710).
+- tapOn:
+    id: "tiers.search"
+- inputText: "a"
+- pressKey: Enter
+- waitForAnimationToEnd
+- takeScreenshot: tiers__search-highlight
+
+# ── loading ──────────────────────────────────────────────────────────────
+# LAST, because it needs a COLD cache and a long latency that would slow
+# every state above. Two run-3 findings force this shape:
+#   • The query cache is PERSISTED (App.tsx:241 PersistQueryClientProvider
+#     over an AsyncStorage persister), so relaunching with clearState:false
+#     restores the whole board instantly and no latency can ever produce a
+#     spinner. Only clearState:true — i.e. a full re-sign-in — is cold.
+#   • The Rank stack's root surface shares Tiers' query key, so the latency
+#     must outlast the ENTIRE tab → menu → push sequence, measured at ~6 s.
+#     6 s was a coin flip and lost; 20 s is not.
+# The chrome above the loading branch (tiers.pos-tab.qb, :1221) is the
+# anchor; assertNotVisible on tiers.list proves the spinner still owns the
+# body before the shutter.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/rankings"
+      INJECT_MS: "20000"
+- assertTrue: ${output.inject.ok}
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 20000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.pos-tab.qb"
+    timeout: 30000
+- assertNotVisible:
+    id: "tiers.list"
+- takeScreenshot: tiers__loading

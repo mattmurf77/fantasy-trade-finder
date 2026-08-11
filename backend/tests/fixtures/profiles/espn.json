@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "name": "espn",
+  "description": "A 10-team ESPN-imported league (platform='espn', espn_auth='public'), so LeagueScreen's ESPN branch \u2014 the platform badge, the read-only copy, `league.espn-resync` and the auth-expired variant driven by /__test__/fail_next on /api/espn/import \u2014 is reachable for the first time. Also seeds the pick-assignment grid (4 rounds x 4 seasons) WITH a stored order plus 5 recorded picks, which is what makes the ESPN-only pick-assignment and record-picks screens capturable. qa_espn has no Sleeper leagues: the Sleeper league list cassette is [] and the ESPN league arrives through GET /api/espn/leagues, exactly as it does in production. NOTE sleeper.trade_block is pinned OFF: session-init's FB-147 trade-block sync guards on `league_id.isdigit()`, and an ESPN league id IS numeric \u2014 so the sync fires against the Sleeper URL space for a league that has none, costing the run a vcr_miss. An ESPN league genuinely has no Sleeper trade block, so off is the honest fixture value; the guard itself wants is_linked_platform_league (server.py already uses that pairing elsewhere). Seeds 1 mutual trade_match + 1 awaiting like IN THE ESPN LEAGUE (audit P0-6, capture request #9 \u2014 the highest-leverage single capture in that list): trade_matches is league-scoped with no platform column, and load_matches resolves both partner names from league_members, so an ESPN match renders through the ordinary MatchesScreen path. That is the point \u2014 SendInSleeperButton returns NULL for a league whose cached platform is 'espn' (#146), so the card shows Dismiss and nothing else, with no copy explaining why. CAPTURE PRECONDITION: the button's ESPN test reads useSession().leagues and FAILS OPEN on a league id missing from that cache, so a flow must reach Matches through the league picker (which merges GET /api/espn/leagues) \u2014 a direct deep link leaves the cache empty and the Send button WOULD render, capturing the wrong state.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta": false,
+    "landing.try_before_sync": false,
+    "league.activity_feed": false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages": false,
+    "swipe.gesture_audit": true,
+    "swipe.qc_compliments": true,
+    "trade.finder_targeting": true,
+    "trade.preference_lists": true,
+    "trade.send_in_sleeper": true,
+    "trade_math.human_explanations": true,
+    "trades.new_partners_alerts": false,
+    "trades.queue_2k": false,
+    "espn.link": true,
+    "espn.webview_capture": true,
+    "espn.league_picker": false,
+    "picks.assign": true,
+    "picks.assign_tradeable": true,
+    "draft.manual_picks": true,
+    "draft.room": true,
+    "draft.mfl": false,
+    "sleeper.trade_block": false
+  },
+  "app_user": {
+    "username": "qa_espn",
+    "user_id": "900000000000000001",
+    "unlocked": true,
+    "rankings": {
+      "positions": [
+        "QB",
+        "RB",
+        "WR",
+        "TE"
+      ],
+      "trios_per_position": "threshold+2",
+      "history_days": 30,
+      "formats": [
+        "1qb_ppr",
+        "sf_tep"
+      ]
+    },
+    "tiers": "seeded-suggested",
+    "anchors": null
+  },
+  "extra_users": [],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "1189600",
+      "name": "QA ESPN League",
+      "platform": "espn",
+      "espn_auth": "public",
+      "espn_my_team_id": 1,
+      "total_rosters": 10,
+      "format": "1qb_ppr",
+      "roster_size": 20,
+      "members": [],
+      "pick_assignment": {
+        "rounds": 4,
+        "order_type": "linear",
+        "seasons_ahead": 3,
+        "recorded_picks": 5
+      },
+      "matches_seed": {
+        "mutual": 1,
+        "awaiting": 1
+      }
+    }
+  ],
+  "players_cache": "warm"
+}

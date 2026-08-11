@@ -1,0 +1,107 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MANUALRANKS-FRESH
+# profile: fresh
+# flags: release
+# captures: populated--unranked-order
+# source: mobile/src/screens/ManualRanksScreen.tsx, backend/ranking_service.py
+# interactive-stop: populated--unranked-order
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# MATRIX ROW 33 (`empty--filter`) IS NOT REACHABLE — ON ANY PROFILE. The row
+# assumed `fresh`'s `rankings: null` empties the board; it does not. The 2026-
+# 08-09 sim run failed asserting "No rankings yet", and the source says why:
+#   • ManualRanks fills `rows` from GET /api/rankings (:146-162), and
+#     RankingService.get_rankings (backend/ranking_service.py:685-713) returns
+#     the WHOLE position pool with seeded Elo, whatever the user has ranked.
+#     "rankings: null" means no user COMPARISONS, not no rows.
+#   • `visibleRows` is only ever narrowed by the POSITION filter (:169-171) —
+#     every position is stocked, so no filter empties it either.
+#   • Board search cannot empty it by design: it scrolls-and-highlights rather
+#     than filtering (:173-181, and the same note in the matrix trap for row
+#     71), so a no-match query leaves the full board on screen.
+# The empty branch (:650-656) therefore needs GET /api/rankings to return zero
+# rows, which no fixture produces. Reported to the orchestrator rather than
+# faked.
+#
+# What IS honest and worth a library row on `fresh`: the board at its
+# UNRANKED baseline — consensus Elo order, zero user comparisons behind it,
+# every save-pill state idle. That is what this cell captures.
+#
+# `manual-ranks.search` (the `ux.board_search` field, ON in release) renders
+# above the list in every non-error state and is the arrival anchor; the
+# presence of rows plus the ABSENCE of the empty headline is the state proof.
+#
+# Nav: Manual is behind the RankMenu's "More ways to rank" disclosure, so the
+# sheet needs `rankmenu.more-toggle` expanded before `rankmenu.manual` exists.
+tags: [capture, manual-ranks, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.manual"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.manual"
+
+# ── populated--unranked-order ────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "manual-ranks.search"
+    timeout: 30000
+# `manual-ranks.search` renders ABOVE the loading branch (:609 vs :627), so it
+# proves arrival but not data. The rank-control a11y label on row 1 (:473,
+# `Rank <n> — set rank for <name>`) only exists once rows are in the list, so
+# it is the positive proof; the two negatives rule out the states that would
+# otherwise be photographed silently.
+- extendedWaitUntil:
+    visible:
+      text: "Rank 1 .*"
+    timeout: 30000
+- assertNotVisible:
+    text: "No rankings yet"
+- assertNotVisible:
+    text: "Could not load rankings."
+- waitForAnimationToEnd
+- takeScreenshot: manual-ranks__populated--unranked-order

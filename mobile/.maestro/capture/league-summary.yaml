@@ -1,0 +1,132 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUE-SUMMARY
+# profile: standard
+# flags: release
+# captures: loading, populated, basis--personal, error
+# source: mobile/src/screens/LeagueSummaryScreen.tsx, mobile/src/components/PlayerCard.tsx, mobile/src/components/MemberEnteredMarker.tsx
+# interactive-stop: populated
+#
+# Screen-library capture flow for League rankings — the League TAB ROOT
+# (route LeagueRankings, #181), matrix rows 114-116 + 119.
+#
+# One launch. The screen holds BOTH bases at once (#248: two parallel queries
+# against /api/league/power-rankings), and it carries its own refresh control
+# (league-summary.refresh), so the error state is reachable WITHOUT a relaunch
+# and without a coordinate swipe: refetchBoth() re-fires both queries into an
+# armed injection. Ordering is forced by the branch shapes —
+#   loading   → `query.isLoading`, true only while the first fetch has no data
+#   populated → league-summary.updated-at mounts off query.data.updated_at
+#   personal  → same anchor, now fed by the personal payload
+#   error     → `query.isError`, checked BEFORE the chart, so stale
+#               placeholderData does not hide it
+tags: [capture, league-summary]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# ── loading ──────────────────────────────────────────────────────────────
+# Armed before the tab is entered — BOTH bases are fetched in parallel, so
+# this glob slows both. 6000 ms per the pilot's trades__loading finding.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/league/power-rankings*"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "tab.league"
+# The basis toggle mounts above the chart card's branch, so it anchors us
+# inside the spinner window instead of racing it.
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.basis.consensus"
+    timeout: 30000
+- assertNotVisible:
+    id: "league-summary.updated-at"
+# NO waitForAnimationToEnd BEFORE A SPINNER. Run 20260810T062xxx shipped a
+# league-summary__loading.png that was the fully painted chart: the branch here
+# is an <ActivityIndicator>, which never stops animating, so
+# waitForAnimationToEnd sits there until the spinner is REPLACED by static
+# content — i.e. it waits out the exact state it was supposed to hold still
+# for. Shoot immediately after the anchor, exactly as the trades.yaml pilot
+# does for trades__loading.
+# (Static skeletons are fine: matches__skeleton keeps its waitForAnimationToEnd
+# because those tiles are plain Views with no animation library behind them.)
+- takeScreenshot: league-summary__loading
+
+# ── populated ────────────────────────────────────────────────────────────
+# league-summary.updated-at renders ONLY from query.data?.updated_at, so it
+# is a true data-arrival anchor (not a chrome anchor that was always there).
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.updated-at"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: league-summary__populated
+
+# ── basis--personal ──────────────────────────────────────────────────────
+# Both payloads are already in cache; the toggle only swaps which one draws
+# the bars. Re-anchoring on updated-at is deliberate: if the personal query
+# had been denied by the P2.5 read gate, `query.data` would be undefined and
+# updated-at would UNMOUNT — the flow then fails loudly instead of shooting a
+# frame that is really the verification-error branch.
+- tapOn:
+    id: "league-summary.basis.personal"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.updated-at"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: league-summary__basis--personal
+
+# ── error ────────────────────────────────────────────────────────────────
+# Back to consensus first so the captured error is the default basis'.
+# COUNT=4: refetchBoth() fires TWO queries and the client default is
+# `retry: 1` (state/queryClient.ts:26) — 2 queries x 2 attempts. Real
+# production 500 body from server.py's handle_unexpected_error
+# (backend/server.py:2070-2077); this screen renders
+# `(query.error as any)?.message` verbatim, so the injected message IS the
+# shipping copy on screen.
+- tapOn:
+    id: "league-summary.basis.consensus"
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/league/power-rankings*"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "4"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "league-summary.refresh"
+# Still 6 s of latency per request, and up to 4 requests — hence the long
+# timeout rather than a sleep.
+- extendedWaitUntil:
+    visible:
+      text: ".*Unexpected server error.*"
+    timeout: 90000
+- waitForAnimationToEnd
+- takeScreenshot: league-summary__error

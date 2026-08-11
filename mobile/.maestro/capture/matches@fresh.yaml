@@ -1,0 +1,71 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MATCHES-FRESH
+# profile: fresh
+# flags: release
+# captures: empty--mutual
+# source: mobile/src/screens/MatchesScreen.tsx
+# interactive-stop: empty--mutual
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# Matrix row 38 — the zero-match state. `fresh` seeds matches_seed
+# {mutual: 0, awaiting: 0}, so the Mutual segment lands on `matches.empty-text`
+# and `matches.progress-module` renders beneath it once the summary + coverage
+# queries resolve (MatchesScreen.tsx:526/554).
+#
+# The progress module is NOT on the first frame and is gated on `emptyModule`
+# (MatchesScreen.tsx:383-388: ACTIVE league only, and only once the league data
+# has arrived). For THIS row the subject is the empty state, not the module, so
+# the module is a conditional settle rather than a hard gate — an unresolved
+# `emptyModule` on `fresh` must not fail a cell whose subject painted fine.
+# matches@near-unlock (row 154) keeps the hard wait, because there the module
+# IS the subject. Matrix trap: pull-to-refresh does NOT work on empty states,
+# so nothing here tries it.
+tags: [capture, matches, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.matches"
+    timeout: 30000
+- tapOn:
+    id: "tab.matches"
+
+# ── empty--mutual ────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "matches.empty-text"
+    timeout: 30000
+- assertVisible:
+    id: "matches.go-to-trades"
+- runFlow:
+    when:
+      visible:
+        id: "matches.progress-module"
+    commands:
+      - waitForAnimationToEnd
+- waitForAnimationToEnd
+- takeScreenshot: matches__empty--mutual

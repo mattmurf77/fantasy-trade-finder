@@ -1,0 +1,375 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-PICKASSIGNMENT-ESPN
+# profile: espn
+# flags: release
+# captures: grid--populated, setup--edit-order, season-tab--future, owner-sheet, loading, error--generic
+# source: mobile/src/screens/PickAssignmentScreen.tsx, mobile/src/screens/LeagueScreen.tsx, backend/server.py pick_assignments_route
+# interactive-stop: grid--populated
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this file carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split this profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# Screen-library capture flow for the ESPN pick-ownership grid
+# (capture-matrix-2026-08-09.md deferred block, row "⚠ pick-assignment:
+# ESPN-only. No ESPN fixture profile exists"). Sign-off ruling C authorised the
+# `espn` profile, which seeds exactly what this screen needs: a 10-team
+# `platform='espn'` league with a STORED numbering order plus a 4-round x
+# 4-season grid — 160 slots, pinned by backend/tests/test_seed_ui_test_db.py::
+# test_espn_pick_assignment_grid_is_seeded_with_a_stored_order.
+#
+# THE STORED ORDER IS LOAD-BEARING, not decoration. `pick_assignments_route`
+# only reaches `_espn_suggested_order` when the league has NO stored order
+# (backend/server.py:11289 in that handler), and that helper is the one code
+# path on this screen capable of live ESPN egress — ESPN has no fixture seam.
+# A profile without a stored order would make this the only surface in the
+# harness that can go out to the network. Two consequences for the captures
+# below: the grid is `seeded:true` so the screen opens straight into the GRID
+# view (`!data.seeded || setupOpen`, PickAssignmentScreen.tsx:624), and
+# `suggested_order*` is absent from the payload, so `pick-assignment.espn-
+# derived-note` is UNREACHABLE on this profile and is not faked.
+#
+# ENTRY — tap-nav for the grid states, launch argument for the cold-cache ones:
+#   · Grid leg: League tab → league-summary.league-home → LeagueHome →
+#     league.draft-picks-row. That is the shipped user path (the section
+#     renders on `picks.assign && isEspn`, LeagueScreen.tsx:580) and it is
+#     worth photographing that the row exists at all. The Draft Room's
+#     `draft-room.assign-progress` is the second shipped entry and is exercised
+#     by capture/record-picks@espn.yaml's neighbouring row instead.
+#   · Loading/error leg: launch argument. It HAS to be, and the reason is the
+#     shared cache — see that section.
+#
+# NOTHING IN THIS FLOW WRITES. `pick-assignment.setup-save` (POST
+# .../order) and `pick-assignment.owner-option.*` (PUT .../<pick_id>) are the
+# two mutating controls; the flow leaves setup by `setup-cancel` and ends ON
+# the owner sheet without choosing an owner. The sheet is deliberately the LAST
+# frame: its backdrop dismissal control carries no testID (only
+# accessibilityLabel "Close"), and text-selector taps are banned, so there is
+# no compliant way back out of it.
+#
+# NOT CAPTURED, with evidence:
+#   · Slot variants `deviation` / `contested` / `orphaned` / `member-entered` —
+#     `seed_pick_grid` writes a pristine grid (every team owns its own picks);
+#     `pick-assignment.traded-empty` renders, `traded-summary` and
+#     `traded-toggle` do not, and `pick-assignment.open-questions` needs
+#     `progress.contested > 0 || progress.orphaned > 0`. All would need a
+#     seeder that deviates some slots.
+#   · `conflict-sheet` (CAS 409) — needs a real PUT to lose an
+#     optimistic-concurrency race, i.e. a write. Excluded.
+#   · `season-confirmed` — local AsyncStorage set by tapping
+#     `confirm-season.<season>`; the tap is harmless but the id is templated
+#     per season (`pick-assignment.confirm-season.${season.season}`), which the
+#     lint's source grep cannot resolve for a literal year and the allowlist
+#     does not carry. Same allowlist gap as the season tabs (worked around
+#     below with an index selector, which does not work for a single-instance
+#     button).
+#   · `error--feature-disabled` — the OTHER error copy branch
+#     (`pickAssignmentErrorCode(...) === 'feature_disabled'` →  "Draft picks
+#     are not available for this league."). Only ONE error state is reachable
+#     per file: `query.isError || !data` is an OR against the DATA, so once a
+#     fetch succeeds the error branch is dead for the rest of the cache's life.
+#     It needs its own flags-off fixture row.
+tags: [capture, pick-assignment, espn]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - inputText: "qa_espn"
+      - assertVisible:
+          text: ".*qa_espn.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# qa_espn has NO Sleeper leagues: `GET /api/sleeper/leagues/<uid>` serves `[]`
+# and the single row on this picker arrives from `GET /api/espn/leagues`
+# (LeaguePickerScreen.tsx:170-181), exactly as it does in production. That merge
+# is also what stamps `platform: 'espn'` into the cached league list, which is
+# the ONLY thing LeagueScreen's `isEspn` reads. `onboarding.league_autoskip` is
+# false in the release flags, so the one-league picker does not auto-skip.
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see capture/league.yaml for the full finding.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+
+# ── grid--populated ──────────────────────────────────────────────────────
+# The Draft picks section is below Explore on a long page, so the forced-scroll
+# construction from capture/rank-home.yaml applies: iOS keeps off-screen
+# ScrollView children in the hierarchy, so a bare scrollUntilVisible would let
+# the tap fire at off-screen coordinates. visibilityPercentage: 100 +
+# centerElement: true forces a real scroll and parks the row mid-screen.
+- scrollUntilVisible:
+    element:
+      id: "league.draft-picks-row"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- tapOn:
+    id: "league.draft-picks-row"
+# `pick-assignment.screen` is the grid view's own SafeAreaView
+# (PickAssignmentScreen.tsx:666) and is rendered by NO other branch — the
+# unavailable / no-league / loading / error / setup branches each carry their
+# own distinct id. Its presence alone discriminates the populated grid.
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.screen"
+    timeout: 40000
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.progress"
+    timeout: 20000
+# Pristine grid: every team still owns its own picks, so the review summary is
+# the empty variant. Asserting it (rather than `traded-summary`) is what pins
+# this frame to the fixture's actual shape.
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.traded-empty"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.season-tabs"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: pick-assignment__grid--populated
+
+# ── setup--edit-order ────────────────────────────────────────────────────
+# Re-opening the numbering setter over an ALREADY-seeded board: same SetupView
+# the never-seeded league gets, but with `onCancel` wired (the cancel control
+# only renders when `data.seeded`, PickAssignmentScreen.tsx:641). Must happen
+# BEFORE the season switch below — `pick-assignment.edit-order` is hidden on a
+# future-season tab by design (#273: the order is one global setting, and
+# offering it from a future tab would read as "set THIS year's order").
+- scrollUntilVisible:
+    element:
+      id: "pick-assignment.edit-order"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "pick-assignment.edit-order"
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.setup"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.rounds-stepper"
+    timeout: 20000
+# The drag-order list. Its ROWS (`pick-assignment.order-row.<uid>`) are
+# drag-only — 180 ms long-press + 18 px activation, no a11y reorder action — so
+# the reordering gesture itself is out of scope per sign-off ruling E; the list
+# at rest is what this frame documents.
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.order-list"
+    timeout: 20000
+# `espn-derived-note` is deliberately NOT asserted: the server omits
+# `suggested_order` once an order is stored, which is the fixture's whole
+# point (see the header).
+- assertNotVisible:
+    id: "pick-assignment.espn-derived-note"
+- waitForAnimationToEnd
+- takeScreenshot: pick-assignment__setup--edit-order
+# Leave by CANCEL, never by save — `setup-save` POSTs .../order.
+#
+# RUN-1 FIX (run 20260810T151341, espn cell exit 1: "Element not found: Id
+# matching regex: pick-assignment.setup-cancel"). Both setup buttons live in
+# the `ListFooterComponent` of a DraggableFlatList (PickAssignmentScreen.tsx
+# :1231-1249, :1266). That is a VIRTUALIZED list, not a ScrollView — its footer
+# is genuinely absent from the hierarchy until it is scrolled near, so the
+# "iOS keeps off-screen ScrollView children in the tree" property this library
+# leans on elsewhere does NOT hold here and the tap had nothing to resolve
+# against. A forced scroll is mandatory, not defensive.
+- scrollUntilVisible:
+    element:
+      id: "pick-assignment.setup-cancel"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 30000
+- tapOn:
+    id: "pick-assignment.setup-cancel"
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.screen"
+    timeout: 20000
+
+# ── season-tab--future ───────────────────────────────────────────────────
+# `seasons` is always current+3 ascending (the payload's own contract), so
+# index 1 is the first FUTURE season — the #273 variant with no draft order at
+# all: no slot numbers, no linear/snake control, no edit-order link, rounds
+# sorted by the opaque original-team label.
+#
+# INDEX SELECTOR, not a literal year: the id is
+# `pick-assignment.season-tab.${s.season}` (PickAssignmentScreen.tsx:759), and
+# scripts/testid-lint.sh's source grep cannot resolve a literal
+# `…season-tab.2027` against a template literal, while `…season-tab.*` on its
+# own matches every tab.
+#
+# RUN-2 FIX (run 20260810T160024, espn cell exit 1: "pick-assignment.edit-order
+# is not visible" asserted false). `index: 1` did NOT land on 2027 — the
+# failure screenshot shows 2026 still selected. The reason is that the regex
+# `pick-assignment.season-tab.*` ALSO matches the CONTAINER
+# `pick-assignment.season-tabs` (PickAssignmentScreen.tsx:753) — `.` matches
+# the "s" and `*` matches empty — and the container precedes its children, so
+# index 0 is the container and index 1 was the 2026 tab.
+#
+# `index: 2` is therefore the first FUTURE tab, and it is robust to that
+# reading being wrong: with the container matched it selects 2027, without it
+# 2028 — both future seasons, which is all this state requires.
+- tapOn:
+    id: "pick-assignment.season-tab.*"
+    index: 2
+# A season tab tap resets every accordion (`setOpenRounds({})`), so round 1 is
+# open again by default and the round toggles are the stable anchor.
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.round-toggle.*"
+    timeout: 20000
+# The #273 assertion that makes this frame worth a separate capture.
+- assertNotVisible:
+    id: "pick-assignment.edit-order"
+- waitForAnimationToEnd
+- takeScreenshot: pick-assignment__season-tab--future
+
+# ── owner-sheet ──────────────────────────────────────────────────────────
+# LAST FRAME BY CONSTRUCTION — see the header: the sheet's backdrop has no
+# testID, so there is no compliant way to dismiss it.
+#
+# The wildcard taps the FIRST slot in the hierarchy (the same multiple-match
+# behaviour capture/portfolio@two-leagues.yaml relies on for `leagues.row.*`).
+# `pick_id` is an opaque server-side id, so a literal is neither knowable nor
+# lint-resolvable; the prefix is what the lint verifies.
+#
+# Tapping a SLOT only opens the picker — the write is the owner-option tap,
+# which this flow never makes.
+- scrollUntilVisible:
+    element:
+      id: "pick-assignment.slot.*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "pick-assignment.slot.*"
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.owner-sheet"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.owner-option.*"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: pick-assignment__owner-sheet
+
+# ── loading + error--generic (second launch, cold cache) ─────────────────
+# WHY A SECOND LAUNCH, AND WHY THE LAUNCH ARGUMENT. LeagueScreen holds the SAME
+# query key as this screen — `['pick-assignments', leagueId]`, deliberately, so
+# that opening the grid from that row renders off a warm cache instead of a
+# spinner (LeagueScreen.tsx:180-186). That design is exactly what makes
+# `pick-assignment.loading` unreachable through the tap path: by the time the
+# grid mounts, the data is already there. And `query.isError || !data` is an OR
+# against the DATA, so a failing refetch over a warm cache renders the grid,
+# never the error card. Both states need a cold key, i.e. a process restart
+# that never mounts LeagueHome.
+#
+# `pick-assignments` is not in App.tsx:60's PERSIST_KEYS, so `stopApp: true`
+# alone empties it; `clearState: false` keeps the session RootNav restores onto
+# Main. `PickAssignment` is absent from testRouteEntry.ts's TAB_OF map, so it
+# dispatches as a ROOT-stack route (registered unconditionally in RootNav).
+#
+# Both injections cover the same first fetch: the 5 s delay IS the loading
+# window and the 403 lands at the end of it.
+#
+# COUNT=2: 403 is not in api/client.ts's RETRY_STATUSES {502,503,504}, so the
+# HTTP client attempts once per call and react-query's `retry: 1` doubles it.
+# No sibling reads this route in this launch — LeagueScreen and the Draft Room
+# (the only other holders of the key) are never mounted.
+#
+# BODY is the route's own 403 (backend/server.py:10879, `not_in_league`).
+# PickAssignmentScreen special-cases only `feature_disabled`, so this renders
+# the generic branch — "Something went wrong reaching the server."
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/league/pick-assignments"
+      INJECT_MS: "5000"
+- assertTrue: ${output.inject.ok}
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/league/pick-assignments"
+      INJECT_STATUS: "403"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "not_in_league"}'
+- assertTrue: ${output.inject.ok}
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: PickAssignment
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.loading"
+    timeout: 60000
+- takeScreenshot: pick-assignment__loading
+# ~5 s of latency then the 403, twice — hence the generous budget.
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.error"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: ".*Something went wrong reaching the server.*"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "pick-assignment.retry"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: pick-assignment__error--generic

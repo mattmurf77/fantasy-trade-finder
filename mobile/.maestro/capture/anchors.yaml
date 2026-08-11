@@ -1,0 +1,180 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-ANCHORS
+# profile: standard
+# flags: release
+# captures: error, loading, question
+# source: mobile/src/screens/PickAnchorScreen.tsx, mobile/src/components/TierBadge.tsx, mobile/src/utils/anchorRows.ts
+# interactive-stop: question
+#
+# Screen-library capture flow for the Pick Anchors wizard (matrix rows
+# 61-65). Preamble copied from capture/trades.yaml through the league pick;
+# no OutlookSheet dismissal (Acquire tab is never visited). No
+# /__test__/reset anywhere — reset signs us out.
+#
+# ORDERING IS FORCED BY THE CACHE (run-1..3 lessons):
+#   • The queue is `staleTime: Infinity` (PickAnchorScreen.tsx:94) and the
+#     query cache is PERSISTED (App.tsx:241) — so once it has data, nothing
+#     ever refetches it and no injection can reach it. The error state must
+#     therefore be captured FIRST, on the cold query.
+#   • Re-entering after the error does NOT give a loading state either: an
+#     errored query keeps status 'error' while it refetches, so `isLoading`
+#     (:223) stays false and the screen re-renders its ERROR branch, not the
+#     spinner. The only honest spinner is a genuinely cold query — hence the
+#     clearState relaunch + re-sign-in before the loading/question block.
+#   • Unlike the Tiers board, nothing else preloads this key, so the fetch
+#     starts when the screen mounts and a 6 s latency is plenty.
+#
+# INJECTION BUDGET — count 4, not 2: RankMenu.go('Anchors') PREFETCHES
+# ['anchor-pool', fmt] (TabNav.tsx:812-820) whose key does NOT match the
+# screen's own ['anchor-pool', fmt, scope], so the two never dedupe. Each
+# fires 1 attempt + 1 react-query retry (state/queryClient.ts:26) = 4
+# requests, and the budget must cover all of them or the screen's retry
+# succeeds and the error state never renders.
+tags: [capture, anchors]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+
+# ── error ────────────────────────────────────────────────────────────────
+# Armed before the very first visit (see the ordering note above). Body is
+# the real production 500 (backend/server.py:2071 handle_unexpected_error);
+# the rendered copy is the screen's own fixed string (:262) — readErrorCopy
+# only diverges for verification 403s.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/rankings"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "4"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.anchors"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.anchors"
+- extendedWaitUntil:
+    visible:
+      text: ".*Pull down to refresh.*"
+    timeout: 60000
+- takeScreenshot: anchors__error
+
+# ── loading ──────────────────────────────────────────────────────────────
+# Cold restart so the queue query has neither data nor an error state, with
+# 6 s of latency armed first. PILOT LESSON (trades run 20260809T222219):
+# anchor on something that cannot be missed. The loading branch renders NO
+# chrome and no testID, so the anchor is the pushed screen's header title —
+# painted for the whole visit — after the menu sheet has closed. `(?i)`
+# because the Chalkline header uppercases through textTransform, and the
+# two-step wait is because the MENU ROW is also titled "Pick Anchors": match
+# it too early and the shutter fires on the closing sheet.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: latency
+      INJECT_PATH: "/api/rankings"
+      INJECT_MS: "6000"
+- assertTrue: ${output.inject.ok}
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 20000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.rank"
+    timeout: 60000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.more-toggle"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.more-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.anchors"
+    timeout: 15000
+- tapOn:
+    id: "rankmenu.anchors"
+- extendedWaitUntil:
+    notVisible:
+      id: "rankmenu.anchors"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: "(?i).*pick anchors.*"
+    timeout: 30000
+- takeScreenshot: anchors__loading
+
+# ── question ─────────────────────────────────────────────────────────────
+# The same fetch resolving. "Worth how much in draft capital?" renders only
+# on the loaded branch with a current player (:340) — loading and error both
+# return before it. (Anchored as text rather than anchors.scope-all because
+# that ID is templated in source and absent from
+# scripts/testid-lint-allow.txt, which this agent does not own. Trailing "?"
+# omitted — regex metacharacter.)
+- extendedWaitUntil:
+    visible:
+      text: ".*in draft capital.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: anchors__question

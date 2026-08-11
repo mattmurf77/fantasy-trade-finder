@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-08-10 — Screen-library capture suite (sim gate tier-2 evidence)
+
+- Full consolidated sweep on FTF-iOS18 (iOS 18.4): 43 capture flows, 7 cells
+  (5 profiles × release/onboarding-v2), **102 captures, rails all zero in every
+  cell** (vcr_misses / sleeper_live_egress_attempts / completed_proposes /
+  propose_route_hits). One flaky flow (trios@near-unlock, tab-race — settle fix
+  applied, still ~50% per run) recaptured green individually. tsc clean,
+  testid-lint green, screen-freshness green ×25, backend suite 2207 passed
+  (fixtures commit). Mobile app-code delta this branch: testRouteEntry.ts +
+  one RootNav line — exercised by every launch-arg capture cell above.
+>>>>>>> 2e18e85 (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
+>>>>>>> 36a033b (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
+
 ## 2026-08-10 — Feedback batch #289-#294 (sim gate DEVIATION, operator-directed bypass)
 
 - **SHIPPED 2026-08-10.** Squash-merged as `6c304c7` via PR #103; CI green (backend-tests, mobile-typecheck, maestro-testid-lint). Render deploy **verified by content**, not by uptime: `/api/feature-flags` serves `league.picks_always_counted = true` (155 flags), which only the new build can produce. iOS **1.12.0 build 98** uploaded to App Store Connect (submission `0095a36f`).

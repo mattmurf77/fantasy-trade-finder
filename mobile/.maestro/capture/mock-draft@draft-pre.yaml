@@ -1,0 +1,251 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-MOCKDRAFT-DRAFTPRE
+# profile: draft-pre
+# flags: release
+# captures: setup-sheet, active--on-the-clock, row-selected--confirm-bar
+# source: mobile/src/screens/MockDraftScreen.tsx, mobile/src/screens/DraftRoomScreen.tsx, mobile/src/components/draft/MockEntryPanel.tsx, mobile/src/components/draft/MockSetupSheet.tsx
+# interactive-stop: active--on-the-clock
+#
+# FLAGS HEADER: `release`, and it must stay a bare fixture NAME. screen-capture
+# .sh resolves it to backend/tests/fixtures/flags/<name>.json AND groups flows
+# into sim cells by (profile, flags) — an earlier revision of this block carried
+# a prose description there, which resolved to no fixture (silent fallback to
+# seeder defaults) and split each profile into one extra cell per distinct
+# string. The profile's own `flag_overrides` ride on top of `release` via the
+# seeder, so they need no mention here.
+#
+# The ACTIVE half of the mock draft — the states capture/mock-draft@draft.yaml
+# documents as unreachable and explains why. Its finding stands and is the
+# reason this file exists on a DIFFERENT profile: DraftRoomScreen refuses with
+# `mock-entry.blocked.live` whenever `board.state === 'live'`, and both original
+# C-block profiles are live (`draft` is `status: "drafting"`; `espn` derives
+# `live` from its recorded picks in `assigned_board`). `draft-pre` is the
+# pre-draft twin — same 12-team SF TEP league, same 4-round snake, `status:
+# "pre_draft"`, ZERO picks made, `draft_order` still populated — so the board
+# reports `upcoming`, no block applies, and `mock-entry.start` is finally
+# tappable. The retained `draft_order` also means the mock resolves a REAL
+# order (`order_source: platform`) rather than the seeded shuffle, which is
+# what `mock-setup.order-notice` discloses.
+#
+# THIS FLOW WRITES, DELIBERATELY — the one place in this block that does.
+# `mock-setup.start` POSTs /api/mock-draft, which creates a `mock_drafts` row.
+# That is not a rule being bent: the row IS the state, there is no read-only
+# path to an active mock, and the write is confined to the run's own disposable
+# seeded DB (unlike recorded picks or pick assignments, which would corrupt the
+# fixtures other captures in this block depend on). It does NOT reach a
+# platform: INV-10 snapshots the pool at creation and forbids any later
+# platform read, so `GET`, `/pick` and `/abandon` are DB-and-process-pool only.
+#
+# NO PICK IS CONFIRMED. `mock-draft.confirm.draft` would POST /api/mock-draft/
+# pick and hand the CPU the clock, and the CPU tail is seeded from
+# `random.randrange` server-side (the client cannot pass `rng_seed`), so every
+# frame after a pick is nondeterministic. Sign-off ruling D accepts
+# representative-not-byte-stable captures, but there is no reason to buy that
+# variance for states the confirm bar already documents. The flow stops with the
+# bar open.
+#
+# NOT CAPTURED, and now for a smaller reason than before:
+#   · `recap` / `complete` — needs a mock played to the final pick (~48 writes
+#     through a nondeterministic CPU).
+#   · `on-the-clock--cpu` — `advance_cpu` runs at creation until it is the
+#     USER's turn, so the post-create frame is always `--you`. Reaching a CPU
+#     turn means confirming a pick.
+#   · `pick-ticker` / `your-picks-chips` — both need at least one landed pick.
+#   · `alert--end-mock` — native Alert, excluded by sign-off ruling B.
+tags: [capture, mock-draft, draft-pre]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble, copied verbatim from capture/rank-home.yaml,
+# plus the rails fix below. `draft-pre` shares `qa_draft` with `draft`.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_draft"
+      # RAILS FIX (run 20260810T152819, cell exit 4): the raced first attempt
+      # this retry exists to absorb used to tap Continue with a PARTIAL username,
+      # which fired GET /v1/user/q and booked a vcr_miss — the flow self-healed on
+      # retry but the rails audit counts misses and failed the cell. Proving the
+      # text landed BEFORE the submit turns a raced attempt into a silent retry
+      # with zero network. Assertion, never a tap.
+      - assertVisible:
+          text: ".*qa_draft.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS — see capture/league.yaml for the full finding.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.draft"
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.scroll"
+    timeout: 60000
+# "Not started" is STATE_LABEL.upcoming — the whole reason this profile exists.
+# Asserting it here means a fixture that drifts back to a live board fails HERE,
+# naming the cause, instead of failing later on a disabled Start button.
+- extendedWaitUntil:
+    visible:
+      text: ".*Not started.*"
+    timeout: 40000
+
+# ── entry (normalise, either variant) ────────────────────────────────────
+# The Real|Mock segmented control at the top of the room (placement option C).
+# `draft-room.mode.*` is templated from a variable prefix (MockChrome.tsx:78)
+# and was lint-unresolvable when this block was first authored; it is now in
+# scripts/testid-lint-allow.txt, which is what makes this whole file possible.
+- tapOn:
+    id: "draft-room.mode.mock"
+# In Mock mode the body is ONLY the MockEntryPanel, and the pinned MockRail
+# sits above the scroll so the word MOCK is on screen at every scroll position
+# (obligation 1 of the three that justified option C). The rail is NOT asserted
+# by id here: `mock.rail` is a DEFAULT PARAMETER (MockChrome.tsx:41 `testID =
+# 'mock.rail'`), which scripts/testid-lint.sh's source grep cannot resolve and
+# the allowlist does not carry.
+#
+# `mock-entry.card` is the ENABLED card. Its presence is the assertion that no
+# refusal applied — the blocked variants render `mock-entry.blocked.<reason>`
+# instead, and the flow would rather fail here than proceed against a dead card.
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.card"
+    timeout: 30000
+- assertNotVisible:
+    id: "mock-entry.blocked.*"
+
+# ── RUN-9 FIX: THIS FLOW IS NOT IDEMPOTENT, SO IT NORMALISES FIRST ───────
+# Creating a mock writes a `mock_drafts` row, and the seeder does NOT clear
+# that table between runs (verified: after the first green run,
+# data/ui-test/draft-pre.db still held `(1, 990000000000000001, 'active')`).
+# So the card is the no-mock variant ONLY on a virgin database: every re-run
+# finds an active mock and renders Resume / Start over instead, whose ids are
+# `mock-entry.resume` / `mock-entry.start-over` — which is exactly how the
+# second run failed with "Element not found: mock-entry.start".
+#
+# Both variants route their "start a new one" action to the same `onStart`
+# handler, and POST /api/mock-draft abandons any prior active row for that
+# user+league in the SAME transaction (server.py mock_draft_route), so taking
+# either branch lands on an identical fresh mock. The conditionals below make
+# the flow deterministic from either starting state; the entry card itself is
+# therefore NOT captured here, because its content is a function of whether the
+# database has been used before and a screen library must not contain a frame
+# that changes with run order. The blocked variant of this card IS captured, on
+# the live-draft profile, in capture/mock-draft@draft.yaml.
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.start-over"
+    commands:
+      - tapOn:
+          id: "mock-entry.start-over"
+- runFlow:
+    when:
+      notVisible:
+        id: "mock-entry.start-over"
+    commands:
+      - tapOn:
+          id: "mock-entry.start"
+
+# ── setup-sheet ──────────────────────────────────────────────────────────
+# Rounds stepper + linear/snake + the order-source disclosure. Nothing here has
+# written yet — the sheet is local state until `mock-setup.start`.
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup-sheet"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup.rounds.value"
+    timeout: 20000
+# The order disclosure is ABSENT here, and its absence is the assertion.
+# `mock-setup.order-notice` renders only on `!orderAssigned`
+# (MockSetupSheet.tsx:165) — "Your league hasn't set a draft order, so we'll
+# shuffle one and label it." `draft-pre` keeps `draft_order` populated
+# precisely so the mock resolves the league's REAL order (`order_source:
+# platform`) instead of the seeded shuffle, so the honest render is no notice
+# at all. The first cut asserted it VISIBLE and failed — the fixture was right
+# and the assertion was backwards.
+- assertNotVisible:
+    id: "mock-setup.order-notice"
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup.start"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: mock-draft__setup-sheet
+
+# ── active--on-the-clock ─────────────────────────────────────────────────
+# THE WRITE (see the header). `mock-setup.start` POSTs /api/mock-draft; on
+# success DraftRoomScreen AUTO-NAVIGATES to MockDraft (DraftRoomScreen.tsx:288),
+# so no navigation step of our own is needed or wanted — racing that push with
+# a manual tap is exactly how a flow ends up on the wrong screen.
+#
+# A typed-empty refusal would land as `mock-entry.blocked.*` back on the room
+# instead of navigating; the rail assertion below is what distinguishes the two,
+# since MockDraftScreen's rail carries its own id.
+- tapOn:
+    id: "mock-setup.start"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.rail"
+    timeout: 60000
+# `advance_cpu` runs at creation until it is the USER's turn, so the first
+# frame of a fresh mock is always the user on the clock.
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.on-the-clock"
+    timeout: 40000
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.undrafted-row.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "mock-draft.empty.*"
+- waitForAnimationToEnd
+- takeScreenshot: mock-draft__active--on-the-clock
+
+# ── row-selected--confirm-bar ────────────────────────────────────────────
+# The two-step pick: selecting a row arms the confirm bar, and only
+# `mock-draft.confirm.draft` commits. This flow taps the row and STOPS — see the
+# header for why the confirm is deliberately not pressed.
+#
+# The wildcard taps the first undrafted row in the hierarchy (the multiple-match
+# behaviour capture/portfolio@two-leagues.yaml relies on for `leagues.row.*`);
+# `player_id` is opaque, so a literal is neither knowable nor lint-resolvable.
+# The rows sit directly under the on-the-clock card, so no forced scroll is
+# needed — but the confirm BAR is pinned outside the ScrollView, which is what
+# makes it photographable without one.
+- tapOn:
+    id: "mock-draft.undrafted-row.*"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.confirm"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.confirm.draft"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: mock-draft__row-selected--confirm-bar

@@ -1,0 +1,61 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SHEETS-LEAGUE-SWITCHER
+# profile: standard
+# flags: release
+# captures: open
+# source: mobile/src/components/LeagueSwitcherSheet.tsx, mobile/src/components/TopBar.tsx
+# interactive-stop: open
+#
+# Screen-library capture flow for the global league switcher (matrix row 161).
+#
+# #223 — there is exactly ONE mount of this sheet in the app, owned by TopBar,
+# and `topbar.league` (the whole left cluster of the bar) is its only opener.
+# It is available from every tab, so no tab crossing and no OutlookSheet
+# preamble are needed.
+#
+# `standard` is a single-league profile, so this captures the one-row shape;
+# the multi-row + platform-badge shape belongs to the `two-leagues` profile
+# (matrix row 157 block) and is not this agent's row. The league ROWS carry no
+# testIDs (LeagueSwitcherSheet.tsx renders them from the session list), so
+# league.switcher.add-league — the #199 pinned footer row — is the arrival
+# anchor. `switching-overlay` / `slow-switch-overlay` (rows 162-163) need a
+# second league to switch TO and likewise belong to `two-leagues`.
+tags: [capture, sheets, league-switcher]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# ── open ─────────────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "topbar.league"
+    timeout: 20000
+- tapOn:
+    id: "topbar.league"
+- extendedWaitUntil:
+    visible:
+      id: "league.switcher.add-league"
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-league-switcher__open

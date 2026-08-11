@@ -1,0 +1,97 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-SHEETS-FEEDBACK
+# profile: standard
+# flags: release
+# captures: open
+# source: mobile/src/components/FeedbackSheet.tsx, mobile/src/components/FeedbackFAB.tsx, mobile/src/navigation/RootNav.tsx
+# interactive-stop: open
+#
+# Screen-library capture flow for the feedback capture sheet (matrix row 142).
+#
+# #188 — the FAB floats over every tab screen from RootNav's single mount, so
+# any settled tab works as the host; the Rank tab landing is used because it
+# needs no OutlookSheet preamble. (The same FAB is why every OTHER capture in
+# the library has a bottom-right occlusion — that is a library-wide note, not
+# a defect of this flow.)
+#
+# NOT captured: the post-Save state. Save writes a real feedback row through
+# POST /api/feedback into the seeded backend; a capture flow has no business
+# creating server-side rows, and the sheet simply dismisses on success, so
+# there is no distinct frame to photograph.
+#
+# THE KEYBOARD IS PART OF THIS STATE, not a capture artifact: the sheet
+# auto-focuses the note field 250 ms after it opens (FeedbackSheet.tsx:78), so
+# an opened FeedbackSheet always has the keyboard up. An earlier run produced
+# a keyboard-free open.png — that was the shutter WINNING the race against the
+# focus timer, i.e. the less accurate frame. Severity reads Bug because that is
+# the initial state (FeedbackSheet.tsx:54), not something this flow selected.
+#
+# NOT captured: `filled` (note typed + Save enabled). It is reachable — run
+# 20260810T073012 produced it — but on a freshly booted simulator iOS lays its
+# one-time QuickPath tutorial ("Speed up your typing by sliding your finger…"
+# + Continue) over the bottom 45% of the frame, and it cannot be dismissed
+# here: Continue has no testID (text taps are banned) and hideKeyboard errors
+# on this field ("custom input / no standard dismiss"). Since `filled` differs
+# from `open` only by typed text and an enabled Save, it is not worth a frame
+# that is 45% OS chrome on any clean sim. The interstitial is one-time per sim
+# boot, which also makes it NON-deterministic — it did not recur on the run
+# that produced the capture above.
+# HARNESS FIX (not this agent's file): suppressing it once at boot, e.g.
+# `xcrun simctl spawn <udid> defaults write com.apple.keyboard.preferences
+# DidShowContinuousPathIntroduction -bool true` in sim-run.sh, would derisk
+# every keyboard frame in the library — including matrix row 4 (signin
+# `focused-keyboard`), which the same trap is waiting for.
+tags: [capture, sheets, feedback]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE. Run 20260810T071548 died right here on the 30 s budget — the tab BAR
+# paints early but #244's launch routing is still resetting the Rank stack
+# behind it, and this flow shoots a sheet that floats OVER whatever landed.
+# Waiting on the rank surface's own header control pins the host screen to the
+# settled Rank landing instead of a mid-transition frame.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+# ── open ─────────────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "feedback.fab"
+    timeout: 20000
+- tapOn:
+    id: "feedback.fab"
+# Save is disabled while the note is empty — that disabled primary is part of
+# what this frame documents. waitForAnimationToEnd is CORRECT here (unlike the
+# spinner states in settings.yaml / league-summary.yaml): it lets the sheet
+# slide up AND the auto-focus keyboard settle, so the frame is the state at
+# rest rather than a mid-presentation smear.
+- extendedWaitUntil:
+    visible:
+      id: "feedback.save-btn"
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: sheets-feedback__open

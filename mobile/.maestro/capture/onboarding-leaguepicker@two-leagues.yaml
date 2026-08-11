@@ -1,0 +1,76 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-ONBOARDING-LEAGUEPICKER
+# profile: two-leagues
+# flags: onboarding-v2
+# captures: s1-1
+# source: mobile/src/screens/LeaguePickerScreen.tsx,
+#         mobile/src/components/AnalystGuide.tsx, mobile/src/components/analystScript.ts,
+#         mobile/src/components/analyst/*, mobile/src/state/useGuide.ts
+# interactive-stop: s1-1
+#
+# THE ANALYST — guided onboarding, part 3 of 3. One scene: S1.1, the league
+# picker beat.
+#
+# WHY ITS OWN PROFILE. This scene started in onboarding-signin@fresh.yaml and
+# failed the 20260810T034335 run. It was not an anchor problem — the step is
+# gated on `cached.length < 2` (LeaguePickerScreen.tsx:116, "only for pickers
+# with a real choice"), which is the code saying exactly what the script says:
+# "multi-league only; auto-skip users jump to S2". `fresh` has one league, so
+# S1.1 can never fire there. `two-leagues` under the SAME onboarding-v2 flag
+# fixture gives the picker a real choice, and the scene fires.
+#
+# The S0 bubbles run first here too (this profile signs in through the same
+# landing) — they are advanced past without screenshots; part 1 owns those.
+# S0.1 is a 'tap' step so it mounts `guide.tap-catcher` over the whole screen,
+# which is why the username field cannot be typed into until it is cleared;
+# S0.2 is an 'action' step with no catcher, so the field stays live.
+#
+# S1.1 advances on the real row tap (LeaguePickerScreen.tsx:229), so there is
+# no catcher over the rows — the capture is taken before any tap.
+tags: [capture, onboarding, two-leagues]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "guide.tap-catcher"
+    timeout: 20000
+- waitForAnimationToEnd
+- tapOn:
+    id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+
+# ── S1.1 · pick the league that matters (point) ──────────────────────────
+# Both rows are awaited: the step is requested off `cached.length`, so a
+# half-rendered list is also a state where the bubble legitimately is not up
+# yet.
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 40000
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000002"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- assertVisible:
+    id: "guide.bubble"
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s1-1

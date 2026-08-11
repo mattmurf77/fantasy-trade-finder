@@ -1,0 +1,152 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-ONBOARDING-SIGNIN
+# profile: fresh
+# flags: onboarding-v2
+# captures: s0-1, s0-2, s0-err-notfound, s0-err-down
+# source: mobile/src/screens/SignInScreen.tsx, mobile/src/screens/LeaguePickerScreen.tsx,
+#         mobile/src/components/AnalystGuide.tsx, mobile/src/components/analystScript.ts,
+#         mobile/src/components/analyst/*, mobile/src/state/useGuide.ts
+# interactive-stop: s0-1
+#
+# SELECTOR: the league row is matched as `leagues.row.*` (Maestro ids are
+# regexes) rather than a literal id. The seeder writes `spec["league_id"]`
+# verbatim (seed_ui_test_db.py:499), so every profile currently shares
+# 990000000000000001 — but a profile-agnostic row selector cannot drift when
+# a fixture renumbers, and every profile this flow runs under has exactly one
+# league to pick (or wants the first one).
+#
+# THE ANALYST — guided onboarding, part 1 of 3 (operator directive, capture-
+# matrix-signoff.md). Script: docs/plans/onboarding-conversion/guided-avatar-
+# script.md §3, scene block S0 (landing). Part 2 (onboarding-tour@fresh.yaml)
+# carries S2–S8; S1 needs a different PROFILE and lives in
+# onboarding-leaguepicker@two-leagues.yaml — see the note at the end.
+#
+# FLAG FIXTURE — `backend/tests/fixtures/flags/onboarding-v2.json` (owned by
+# the backend agent; referenced here per the directive even though it may not
+# exist yet). Verified against source, this cell needs, on top of `release`:
+#   onboarding.v2            true  — master gate (useFeatureFlags.onboardingEnabled)
+#   onboarding.guided_avatar true  — guidedAvatarActive() (useGuide.ts:74)
+#   onboarding.landing       true  — S0 is gated on `landingOn` (SignInScreen.tsx:110)
+#   landing.try_before_sync  true  — launch pairing: without it /api/session/demo
+#                                    404s (config/features.json note)
+#   onboarding.league_autoskip FALSE — with autoskip on, a single-league picker
+#                                    self-dismisses before anything can be seen.
+# (onboarding.v2 + onboarding.guided_avatar are already true in the refreshed
+# release fixture; onboarding.landing is not.)
+#
+# POSE COVERAGE HERE: neutral (S0.1), point (S0.2), oops (S0.err-notfound and
+# S0.err-down — same pose, two distinct scenes with different dialogue).
+# computing / celebrate / thinking are covered in part 2.
+#
+# SELECTOR NOTE — `guide.avatar.<pose>` is built from a template literal
+# (AnalystGuide.tsx:142), so a fully-literal id would fail testid-lint's
+# source cross-check while the pose-agnostic prefix would lose the very thing
+# these rows record. The ids below are written as REGEXES
+# (`guide.avatar.*neutral`): Maestro matches the pose exactly, and the lint's
+# `${id%%\**}` prefix reduction resolves to the greppable `guide.avatar`. Same
+# device for `guide.cta.*` (AnalystGuide.tsx:164).
+#
+# NEVER-TRAP MECHANICS the flow depends on:
+#   • 'tap' steps mount `guide.tap-catcher` (absoluteFill, under the bubble) —
+#     that is how they advance, and it is why nothing else on screen is
+#     tappable while one is up.
+#   • 'action' steps mount NO catcher: the real UI stays live and the step
+#     advances from the app's own handler (S0.2 ← the submit at
+#     SignInScreen.tsx:215; S1.1 ← the row tap at LeaguePickerScreen.tsx:229).
+tags: [capture, onboarding, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+
+# ── S0.1 · landing intro (neutral) ───────────────────────────────────────
+# Requested on a 600ms mount timer (SignInScreen.tsx:113); waited on, never
+# slept through.
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*neutral"
+    timeout: 20000
+- assertVisible:
+    id: "guide.bubble"
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s0-1
+
+# ── S0.2 · point at the username field (point, spotlit) ──────────────────
+# Advancing S0.1 frees the slot; the chain effect (:116-118) then requests
+# S0.2, whose spotlight cuts out `signin.username-input` — the scrim panels
+# are pointerEvents:none, so the field itself stays live.
+- waitForAnimationToEnd
+- tapOn:
+    id: "guide.tap-catcher"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*point"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: onboarding__s0-2
+
+# ── S0.err-notfound · the team-name mistake (oops) ───────────────────────
+# Real production 404 body from backend/server.py extension_auth, so the
+# screen classifies it as `notfound` and The Analyst delivers the scripted
+# line instead of a harness placeholder. COUNT=1: /api/extension/auth is a
+# POST, so neither the client's GET-only retry nor react-query's mutation
+# retry (0) can consume a second unit.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_STATUS: "404"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "user_not_found", "message": "Sleeper user @qa_standard not found."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*oops"
+    timeout: 25000
+- assertVisible:
+    id: "signin.error-text"
+- takeScreenshot: onboarding__s0-err-notfound
+
+# ── S0.err-down · Sleeper unavailable (oops) ─────────────────────────────
+# Distinct SCENE, same pose: the 503 path classifies as `unavailable` and
+# carries different dialogue (analystScript.ts:24-27).
+- waitForAnimationToEnd
+- tapOn:
+    id: "guide.tap-catcher"
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/extension/auth"
+      INJECT_STATUS: "503"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "sleeper_unavailable", "message": "Sleeper is not responding right now."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*oops"
+    timeout: 25000
+- takeScreenshot: onboarding__s0-err-down
+
+# ── S1 IS NOT IN THIS FILE ───────────────────────────────────────────────
+# Scene S1.1 was captured here in the first draft and FAILED the 20260810T034335
+# run on `guide.avatar.*point`. Source says the flow was wrong, not the app:
+# LeaguePickerScreen.tsx:116 gates the request on `cached.length < 2` —
+# "only for pickers with a real choice" — which matches the script's own
+# "multi-league only; auto-skip users jump to S2". `fresh` seeds exactly one
+# league, so S1.1 CANNOT fire on this profile. It moved to
+# onboarding-leaguepicker@two-leagues.yaml, which is the same guided flags on
+# a profile that has a real choice to make.
