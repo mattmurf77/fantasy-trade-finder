@@ -1,11 +1,11 @@
 {
-  "app_sha": "c81753a3802aea70938633123b655bab284a0f6df31e9dc043c26aab1f03e12e",
+  "app_sha": "106c8e388cfdc8794b46f819fec91c063fe562c43e5a0b94bdaa041402dfac6d",
   "device": {
     "ios": "18.4",
     "name": "FTF-iOS18",
     "udid": "89EEFD08-1237-4CEB-8583-30AAF44419AD"
   },
-  "generated_at": "2026-08-10T23:42:47+00:00",
+  "generated_at": "2026-08-11T00:34:02+00:00",
   "screens": {
     "anchors": {
       "captures": [
@@ -132,8 +132,8 @@
     "draft-room": {
       "captures": [
         {
-          "bytes": 7856,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 9297,
+          "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/error--generic.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
@@ -145,8 +145,8 @@
           "state": "error--generic"
         },
         {
-          "bytes": 7604,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 7508,
+          "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
@@ -158,8 +158,8 @@
           "state": "loading"
         },
         {
-          "bytes": 48916,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 50137,
+          "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
@@ -171,8 +171,8 @@
           "state": "populated"
         },
         {
-          "bytes": 47164,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 48443,
+          "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/undrafted--my-board.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
@@ -189,7 +189,7 @@
         "mobile/src/components/draft/DraftRows.tsx",
         "mobile/src/navigation/TabNav.tsx"
       ],
-      "source_sha256": "3bdd399aafcabecba5ac584729a1e91293230f4d5a60b394f9411293377b497c"
+      "source_sha256": "13ec35038b319fb75656d19cae00712758fb9a697a7c6624fe40f20b3a430ccc"
     },
     "feedback-inbox": {
       "captures": [
@@ -394,8 +394,8 @@
     "league-summary": {
       "captures": [
         {
-          "bytes": 62525,
-          "captured_at": "2026-08-10T19:40:57+00:00",
+          "bytes": 62418,
+          "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/basis--personal.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -407,8 +407,8 @@
           "state": "basis--personal"
         },
         {
-          "bytes": 56068,
-          "captured_at": "2026-08-10T19:40:57+00:00",
+          "bytes": 56128,
+          "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -420,8 +420,8 @@
           "state": "error"
         },
         {
-          "bytes": 38139,
-          "captured_at": "2026-08-10T19:40:57+00:00",
+          "bytes": 38115,
+          "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -433,8 +433,8 @@
           "state": "loading"
         },
         {
-          "bytes": 56691,
-          "captured_at": "2026-08-10T19:40:57+00:00",
+          "bytes": 54668,
+          "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary.yaml",
@@ -446,8 +446,8 @@
           "state": "populated"
         },
         {
-          "bytes": 53717,
-          "captured_at": "2026-08-10T19:40:57+00:00",
+          "bytes": 52876,
+          "captured_at": "2026-08-11T00:34:02+00:00",
           "file": "mobile/league-summary/populated--single-format.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/league-summary@single-format.yaml",
@@ -457,11 +457,9 @@
         }
       ],
       "source": [
-        "mobile/src/screens/LeagueSummaryScreen.tsx",
-        "mobile/src/components/PlayerCard.tsx",
-        "mobile/src/components/MemberEnteredMarker.tsx"
+        "mobile/src/screens/LeagueSummaryScreen.tsx"
       ],
-      "source_sha256": "ed9ae1568401b33cf3d169dc87cbb0395ac99f604863b911af5435886fa5f75c"
+      "source_sha256": "d9d893d5803948157f3e0488b9b5eb31b093d5c14346fcb964c3be5556ec8399"
     },
     "leagues": {
       "captures": [
@@ -650,8 +648,8 @@
     "mock-draft": {
       "captures": [
         {
-          "bytes": 52489,
-          "captured_at": "2026-08-10T22:09:02+00:00",
+          "bytes": 52076,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/active--on-the-clock.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
@@ -660,8 +658,8 @@
           "state": "active--on-the-clock"
         },
         {
-          "bytes": 14098,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 14163,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/empty--no-active-mock.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
@@ -683,8 +681,8 @@
           "state": "entry--card"
         },
         {
-          "bytes": 12191,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 12201,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/error--generic.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
@@ -696,8 +694,8 @@
           "state": "error--generic"
         },
         {
-          "bytes": 9214,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 9841,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
@@ -709,8 +707,8 @@
           "state": "loading"
         },
         {
-          "bytes": 62527,
-          "captured_at": "2026-08-10T22:09:02+00:00",
+          "bytes": 60991,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/row-selected--confirm-bar.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
@@ -719,8 +717,8 @@
           "state": "row-selected--confirm-bar"
         },
         {
-          "bytes": 64276,
-          "captured_at": "2026-08-10T22:09:02+00:00",
+          "bytes": 67677,
+          "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/setup-sheet.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
@@ -731,11 +729,10 @@
       ],
       "source": [
         "mobile/src/screens/MockDraftScreen.tsx",
-        "mobile/src/screens/DraftRoomScreen.tsx",
-        "mobile/src/components/draft/MockEntryPanel.tsx",
-        "mobile/src/components/draft/MockSetupSheet.tsx"
+        "mobile/src/components/draft/MockChrome.tsx",
+        "backend/mock_draft_service.py"
       ],
-      "source_sha256": "0d755111d2a26cb88b363b2df841f19d08f0672efc4f005cde6584e6ce1dbcae"
+      "source_sha256": "7a0d2321863b3f073132144845942e8a4e84942081f1ce755ce53b214b694fe3"
     },
     "onboarding": {
       "captures": [
@@ -1139,8 +1136,8 @@
     "record-picks": {
       "captures": [
         {
-          "bytes": 7794,
-          "captured_at": "2026-08-10T21:47:02+00:00",
+          "bytes": 7879,
+          "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/error--generic.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
@@ -1152,8 +1149,8 @@
           "state": "error--generic"
         },
         {
-          "bytes": 7678,
-          "captured_at": "2026-08-10T21:47:02+00:00",
+          "bytes": 7748,
+          "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
@@ -1165,8 +1162,8 @@
           "state": "loading"
         },
         {
-          "bytes": 44230,
-          "captured_at": "2026-08-10T21:47:02+00:00",
+          "bytes": 45572,
+          "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/populated.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
@@ -1178,8 +1175,8 @@
           "state": "populated"
         },
         {
-          "bytes": 45839,
-          "captured_at": "2026-08-10T21:47:02+00:00",
+          "bytes": 46090,
+          "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/team-picker-expanded.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
@@ -1196,13 +1193,13 @@
         "mobile/src/screens/DraftRoomScreen.tsx",
         "backend/draft_board_service.py assigned_board"
       ],
-      "source_sha256": "cec82abee8ee2a8137dc089f4f3d8bf7cb298c77cbc3e7d7c13cc787e61b5d7e"
+      "source_sha256": "e543ec73996b24be4ee9ad9f8c3b45e900e2275180a85a5d59ecf970e7355628"
     },
     "rookie-ranks": {
       "captures": [
         {
-          "bytes": 38674,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 38700,
+          "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/error.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
@@ -1214,8 +1211,8 @@
           "state": "error"
         },
         {
-          "bytes": 59051,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 58602,
+          "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/filter--rb.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
@@ -1227,8 +1224,8 @@
           "state": "filter--rb"
         },
         {
-          "bytes": 35531,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 35487,
+          "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/loading.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
@@ -1240,8 +1237,8 @@
           "state": "loading"
         },
         {
-          "bytes": 58321,
-          "captured_at": "2026-08-10T21:59:12+00:00",
+          "bytes": 58295,
+          "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/populated--from-draft-room.png",
           "flags": "release",
           "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
@@ -1258,7 +1255,7 @@
         "mobile/src/components/RookieScopeControl.tsx",
         "mobile/src/screens/DraftRoomScreen.tsx"
       ],
-      "source_sha256": "a0d624f58b3fcd1fc7a50ba66793496e710ff870c90659c678c4c62965b8f0f6"
+      "source_sha256": "067f9b2cde0f86b8f5107c995bf0ca2e06045dc8a1d74e0da7854a5301043113"
     },
     "settings": {
       "captures": [
