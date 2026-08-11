@@ -11,6 +11,8 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-028 | Six rookie-scope tests fail only in checkouts carrying real data | Backend / tests / hermeticity |
+| G-027 | Sim build fails at CpResource on a dead `expo/node_modules/…` path after `npm ci` | Mobile / iOS build / CocoaPods |
 | G-026 | Half a roster silently prices at 0.0 in an IDP or K league | Backend / outlook / values |
 | G-025 | "No historical data exists" for a GitHub-hosted CSV | Research / external data |
 | G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion (fixed in `backend/outlook/` 2026-08-09; still live elsewhere) |
@@ -222,6 +224,22 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** TestFlight builds lag a long-lived unshipped branch by weeks. Items #208 and #262 were both already fixed in the repo when reported.
 - **Fix:** before writing any fix, ask whether it still reproduces on current code.
 - **Related:** `activeScreen` in a feedback report is a **route name, not a file** — grep the TabNav registrations before concluding a screen doesn't exist.
+
+---
+
+## 2026-08-11
+
+### G-028 — six rookie-scope tests fail only in checkouts that carry real data
+- **Symptom:** `backend/tests/test_rookie_scope.py` fails 6 tests (`KeyError: 'player_a'` from `/api/trio?scope=rookie`) in the main checkout, while the same commit passes 34/34 in a fresh worktree and CI. Looks like your diff broke it; it didn't.
+- **Cause:** the route's rookie-id resolution (`server.py:1923 _rookie_player_ids` → `load_rookie_player_ids`, memoized by `pool_generation()`) reads checkout-local player data the `client` fixture never pins — the fixture patches `db_module.engine` only. With the real 2026 class present, the rookie-id set no longer matches the fixture's synthetic ids.
+- **Fix (for a green run):** run the suite in a clean worktree; or prove innocence by `git checkout origin/main -- <your backend files>` and re-running in place (both done 2026-08-11).
+- **Prevention:** fixture should pin the data source (task chip filed 2026-08-11). Until then, don't chase these 6 in a data-carrying checkout.
+
+### G-027 — `npm ci` re-hoists packages and strands the Pods project on dead nested paths
+- **Symptom:** `sim-build.sh` fails at a `CpResource` step referencing `mobile/node_modules/expo/node_modules/<pkg>/…` (e.g. `expo-file-system`'s `PrivacyInfo.xcprivacy`) — a path that no longer exists.
+- **Cause:** the generated Pods project bakes in absolute package paths from the `pod install` that produced it. A later `npm ci` may hoist a previously-nested package to top level (`mobile/node_modules/<pkg>`), and the stale Pods reference dangles.
+- **Fix:** `cd mobile/ios && pod install`, then rebuild. CocoaPods itself crashes under a non-UTF-8 shell (`Unicode Normalization not appropriate for ASCII-8BIT`) — run it as `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install`.
+- **Prevention:** treat `npm ci` + sim build as a pair: if `npm ci` ran since the last `pod install`, re-run `pod install` before `sim-build.sh`. Also: capture the build's exit code directly — `sim-build.sh … | tail` reports `tail`'s exit 0 over a failed build (the maestro-test skill already warns about this; it still happened).
 
 ---
 
