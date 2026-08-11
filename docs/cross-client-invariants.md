@@ -421,16 +421,20 @@ A player holds at most one tag per (user, league). If you add a list type, updat
 
 The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/server.py:VALID_ANCHORS` and sent verbatim by mobile (`mobile/src/api/rankings.ts:AnchorKey`; the rung grid lives in `mobile/src/utils/anchorRows.ts` — extracted from `PickAnchorScreen` by draft-extensions W1 when the Draft Room's `AnchorSheet` became a second host, so a rung can never diverge between the two surfaces):
 
-| Key | Button label | Pins to |
-|---|---|---|
-| `4_firsts` | 4 1sts | value_to_elo(4 × value(Mid 1st)) ≈ Elo 1927 |
-| `3_firsts` | 3 1sts | value_to_elo(3 × value(Mid 1st)) ≈ Elo 1870 |
-| `2_firsts` | 2 1sts | value_to_elo(2 × value(Mid 1st)) ≈ Elo 1789 |
-| `1_first` | 1 1st | Mid 1st seed (Elo 1650) |
-| `1_second` | 1 2nd | Mid 2nd seed (Elo 1460) |
-| `1_third` | 1 3rd | Mid 3rd seed (Elo 1320) |
-| `1_fourth` | 1 4th | Mid 4th seed (Elo 1240) |
-| `no_value` | No value | Elo 1100 — below every band → unranked |
+| Key | Button label | Landing tier (default scale) | Pins to |
+|---|---|---|---|
+| `4_firsts` | 4+ 1sts | `firsts_4plus` | value_to_elo(4 × value(Mid 1st)) ≈ Elo 1927 |
+| `3_firsts` | 3 1sts | `firsts_3` | value_to_elo(3 × value(Mid 1st)) ≈ Elo 1870 |
+| `2_firsts` | 2 1sts | `firsts_2` | value_to_elo(2 × value(Mid 1st)) ≈ Elo 1789 |
+| `1_first` | 1 1st | `first_1` | Mid 1st seed (Elo 1650) |
+| `1_second` | 2nd | `second` | Mid 2nd seed (Elo 1460) |
+| `1_third` | 3rd | `third` | Mid 3rd seed (Elo 1320) |
+| `1_fourth` | 4th | `fourth` | Mid 4th seed (Elo 1240) |
+| `no_value` | FA | *(none — `tier: null`)* | Elo 1100 — below every band → unranked |
+
+**Button labels are DERIVED from `TIER_LABEL`, never authored (audit A-16 / P1-7, 2026-08-11).** The "Button label" column above is the *output* of `anchorLabel()` in `mobile/src/utils/anchorRows.ts`, which maps each key to its landing tier through `ANCHOR_TIER` and reads the tier's label. It is documentation of a derivation, not a second source of truth — **editing it does not change the app**, and re-authoring the strings in code re-creates the defect it fixed. Until P1-7 the grid carried its own hand-typed strings and **five of the eight had drifted** from the tier the answer lands in (`4 1sts`/`4+ 1sts`, `1 2nd`/`2nd`, `1 3rd`/`3rd`, `1 4th`/`4th`, `No value`/`FA`), so a user tapped "1 2nd" and read back "2nd" inside a single interaction. `mobile/tests/check-anchor-labels.js` (`npm run test:anchor-labels`) fails the build on any re-authored label, on a rung mapped to a non-existent tier, and on either host re-implementing the null-tier fallback. The landing-tier column holds **at the default anchor scale only** — see the per-user scale note below.
+
+**`no_value`: display tier vs pin Elo.** The server pins `no_value` at Elo **1100**, which is below the `waivers` floor of **1150**, so `RankingService.tier_for_elo` returns `None` and `POST /api/anchor/save` answers **`tier: null`**. Mobile's `tierForElo` (`mobile/src/utils/tierBands.ts`) has **no lower floor** — anything under `fourth` returns `'waivers'` — so the same player wears an **FA** badge on the Tiers board. The wizard's button and its confirmation line both display **FA** (one constant, `BELOW_LADDER_LABEL = TIER_LABEL.waivers`) so they agree with that badge, while `ANCHOR_TIER['no_value']` stays **`null`** so the code never asserts that `no_value` *is* `waivers`. **The mobile/backend banding gap is a known pre-existing issue**, not something P1-7 introduced: if mobile is ever made to honour the 1150 floor, `no_value` players become tier-less and this display promise must be revisited.
 
 **Anchor `via` (draft-extensions W1, 2026-08-06) — a SEPARATE whitelist from the tiers-save one.** `POST /api/anchor/save` accepts an optional `via` (alias `surface`) ∈ `{anchors, draft_room}` (`backend/server.py:_ANCHOR_VIA`; mobile `AnchorVia` in `mobile/src/api/rankings.ts`). It is **request-only** — it rides `anchor_answered`'s event props and the response is byte-unchanged — and an unrecognised value **falls back to `anchors`**, never 400s. It is deliberately not the `POST /api/tiers/save` `via` whitelist: that one gates the merged-band path, which the Draft Room's actions must never reach (pinned by `backend/tests/test_draft_extensions_w1.py`). Omitting `via` sends the pre-W1 body exactly.
 

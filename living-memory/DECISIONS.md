@@ -381,6 +381,33 @@
 **Related ADR:** — (spike: `docs/plans/espn-send-spike-verification-2026-08-11.md`; reversal draft: `docs/plans/espn-send-decision-reversal-draft-2026-08-11.md`)
 
 **Numbering note:** this entry was first drafted as *D-026* against a stale checkout. `origin/main` had meanwhile issued D-026 through D-038 from concurrent sessions, so it was renumbered to D-039 on write-back. Same lesson as D-038's meta-consequence: **claim an ID against `origin/main`, not your working tree.**
+## D-041 — Unlock Is Per-Method and Reads the Board, Not the Event Stream
+**Date:** 2026-08-11 (P1 remediation, P1-7; audit A-16/A-17; operator decision D-P1-10)
+**Context:** `get_rankings_progress`'s ladder branches on `ranking_method`. `'anchor'` had **no arm** and fell to the trio rule, which needs 10 swipe interactions per position — and `apply_anchor` writes Elo overrides and never a swipe, so that cohort could **never** unlock. `'manual'` had the opposite defect: `unlocked = True`, unconditionally, which post-P0-1 is reached by one drag on Manual Ranks or one Quick Rank step.
+**Decision:** Every method gets an explicit arm. `'anchor'` and `'manual'` unlock at `>= RankingService.{ANCHOR,MANUAL}_UNLOCK_MIN` **pool-resident** entries in the persisted board (`users.tier_overrides`, via the new `board_override_count()`), **or** the tiers rule. Both bars are 40, matching the trio bar so the product has one number to explain. `_tiers_rule()` is extracted as the shared seam. **`MANUAL_UNLOCK_MIN`'s value is a stated assumption awaiting operator confirmation; its shape is not.**
+**Alternatives considered:** *Add `'anchor'` to the tiers/quickset arm* — **inert**: that arm reads `tiers_saved`, which the anchor lane never writes and is forbidden from writing (`_ANCHOR_VIA`'s contract; `save_tiers_position` does not occur in `save_anchor_route`). *Bump the interaction counter in `apply_anchor`* — **non-durable**: `_interactions` is overwritten from persisted swipes at session build, so unlock on Tuesday, re-locked on Wednesday; and it would grant credit to the `via:'draft_room'` path P0-1 deliberately excludes, plus to NULL-method users, while mixing units (a trio *orders* three players, an anchor *prices* one). *An Elo fingerprint* recognising the eight rung values — rejected as a comment waiting to lie.
+**Consequences:** A draft-room-only anchorer **stays locked** — designed, not a bug: their method stays NULL so the arm is never entered, and their overrides count later if they ever answer one wizard question, because the predicate reads the board rather than the event stream. `ranking_complete_first_time` begins firing for the anchor cohort, a **step change in a shipped funnel series**. The manual arm is a tightening, made safe by the monotonic floor; a *strong* A-17 gate needs a product decision and a client payload change (the client posts the whole visible list on every drag) and remains P1-8's.
+**Status:** Active.
+
+---
+
+## D-042 — First-Unlock Fan-Out Is Suppressed by a Backfill, Not a Special Case
+**Date:** 2026-08-11 (P1 remediation, P1-7 RL-5)
+**Context:** Crossing the unlock bar takes a `was_first` branch that emits `ranking_complete_first_time` and pushes "@user just unlocked Trade Finder" to **every joined leaguemate**. Giving `'anchor'` a rule flips a pre-existing cohort locked→unlocked on their first poll after deploy, which would fan out retroactively for work nobody did that day. P0-1 faced the identical question.
+**Decision:** Match what P0-1 **did**, read from the merged code rather than from any plan: leave the `was_first` branch untouched and add a boot-time backfill (`database.backfill_anchor_unlocked_formats`) that pre-seeds `users.unlocked_formats` for the qualifying anchor cohort, so `mark_format_unlocked` short-circuits and neither the event nor the push fires. Not done for `'manual'`, which P1-7 only ever tightens.
+**Alternatives considered:** Suppressing inside the `was_first` branch for anchor users — rejected: it makes a permanent code special case out of a one-deploy problem, and it would also suppress *genuine* future unlocks. Doing nothing — rejected: the burst is the kind of thing that reads as spam to a whole league at once.
+**Consequences:** The backfill's cohort predicate is a deliberate **superset** of the runtime one — it counts stored overrides, while the runtime rule counts pool-resident ones, because the player pool is not a database concept. The direction is generous (grants an unlock a hair early, never locks), which is the right side to err on for a suppression pass. The affected user ids are logged, per the same rule P0-1's backfill set, so a scoped SQL undo stays expressible.
+**Status:** Active.
+
+---
+
+## D-043 — Shared Display Vocabularies Are Derived From One Constant and Pinned Structurally
+**Date:** 2026-08-11 (P1 remediation, P1-7; operator decision RL-6/RL-7)
+**Context:** The Pick Anchor rung grid authored its own eight label strings beside `TIER_LABEL`, which says the same eight things for the rest of the app. **Five of the eight had drifted** — a user tapped "1 2nd" and read back "2nd" inside one interaction.
+**Decision:** `TIER_LABEL` is canonical (~21 occurrences across four clients and the docs, versus `ANCHOR_ROWS`' one). Anchor labels are **derived** via `ANCHOR_TIER` + `anchorLabel()`, never authored. `no_value` displays **FA** (borrowing `TIER_LABEL.waivers`) while `ANCHOR_TIER['no_value']` stays **null**, so the display agrees with the badge the player wears on the Tiers board without the code asserting an equivalence the backend does not make. The guarantee is scoped **in writing** to the default `anchor_scale`.
+**Alternatives considered:** Conforming `TIER_LABEL` to the grid — rejected on weight of evidence. A ninth vocabulary item for `no_value` — rejected: it re-forks the thing being unified.
+**Consequences:** A change to the ladder's vocabulary now flows into the wizard automatically, which is the point. `mobile/tests/check-anchor-labels.js` (`npm run test:anchor-labels`) enforces it with five independently-failing AST assertions. **Its first cut was defeated by `label: key === '1_second' ? '1 2nd' : anchorLabel(key)`** — it inspected only the root of each initializer — and was fixed to walk the whole subtree; see G-035. Three copies of the ladder vocabulary remain in mobile (`TIER_LABEL`, `TierBadge.tsx`, `chalkline/Badge.tsx`); they agree today but are not derived, and are filed to `NEXT.md` together with the `tierForElo` floor gap.
+**Status:** Active.
 
 ---
 
@@ -428,6 +455,9 @@
 | D-038 | Adopt `league_team_opened` for the League Drill-In; Add Only an Exit Event | 2026-08-11 |
 | D-039 | Tier-Board Share Routes Get a Flag Whose Resting State Is OFF | 2026-08-11 |
 | D-040 | T1 Registers Four Analytics Names and Defers Four; the File Is Not Final | 2026-08-11 |
+| D-041 | Unlock Is Per-Method and Reads the Board, Not the Event Stream | 2026-08-11 |
+| D-042 | First-Unlock Fan-Out Is Suppressed by a Backfill, Not a Special Case | 2026-08-11 |
+| D-043 | Shared Display Vocabularies Are Derived From One Constant | 2026-08-11 |
 
 ---
 

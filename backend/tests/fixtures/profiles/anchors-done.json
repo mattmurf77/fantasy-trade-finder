@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "name": "anchors-done",
+  "description": "THE ANCHOR-UNLOCK STATE (mobile UX audit A-16 / P1-7). qa_anchors has priced 40 players through the Pick Anchor wizard in the league's format (sf_tep) — tier_overrides holds a real 40-player anchored board — with ZERO trio interactions and ZERO tiers_saved rows, because the anchor lane writes neither. ranking_method is 'anchor', which the wizard writes at the point of use (P0-1). Before P1-7 this user could NEVER unlock: 'anchor' had no arm in the unlock ladder and fell to the trio rule, which needs 10 swipe interactions per position that no amount of anchoring produces. unlocked is DELIBERATELY false here and must stay false: seeding it writes a users.unlocked_formats row, and get_rankings_progress applies its monotonic floor BEFORE the per-method ladder, so the fixture would answer unlocked:true whether or not the fix works. The assertion this profile exists to support is that the FIRST /api/rankings/progress call returns unlocked:true — which is only reachable through the new 'anchor' branch. See docs/plans/audit-p1-remediation/LLD-p1-7.md correction X-2.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta":         false,
+    "landing.try_before_sync":         false,
+    "league.activity_feed":            false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages":           false,
+    "swipe.gesture_audit":             true,
+    "swipe.qc_compliments":            true,
+    "trade.finder_targeting":          true,
+    "trade.preference_lists":          true,
+    "trade.send_in_sleeper":           true,
+    "trade_math.human_explanations":   true,
+    "trades.new_partners_alerts":      false,
+    "trades.queue_2k":                 false
+  },
+  "app_user": {
+    "username": "qa_anchors",
+    "user_id": "900000000000000010",
+    "unlocked": false,
+    "ranking_method": "anchor",
+    "rankings": null,
+    "tiers": null,
+    "anchors": { "count": 40, "formats": ["sf_tep"] }
+  },
+  "extra_users": [],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "990000000000000010",
+      "name": "QA Anchors League",
+      "total_rosters": 12,
+      "format": "sf_tep",
+      "roster_size": 26,
+      "members": [
+        { "username": "qa_opp_ranked",   "user_id": "900000000000000002", "rankings": "generated", "roster": "generated:balanced" },
+        { "username": "qa_opp_unranked", "user_id": "900000000000000003", "rankings": null,        "roster": "generated:balanced" }
+      ],
+      "matches_seed": { "mutual": 0, "awaiting": 0 }
+    }
+  ],
+  "players_cache": "warm"
+}

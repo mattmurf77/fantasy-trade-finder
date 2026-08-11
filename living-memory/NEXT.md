@@ -31,6 +31,8 @@
 
 0i. **Analytics prop gaps.** `source` is missing from `find_trades_tapped`'s server-side allowlist — generation-failure rate and retry uptake are unmeasurable until it is added (server side first). `unit` on `experiment_exposed` is registered but unemittable until `GET /api/feature-flags` returns `unit_type`. `FUNNEL_CRITICAL` and the mobile SDK mirror disagree on `app_opened_first` (in one, not the other, and in neither allowlist).
 
+0k. **Derive mobile's three ladder-vocabulary copies from one constant, and give `tierForElo` its floor.** *(mobile, M — raised by P1-7, deliberately NOT built there)* Two facts, one item. (a) `mobile/src/utils/tierBands.ts` `tierForElo` ignores the `waivers` **1150 floor** that `backend/tier_config.json` and `RankingService.tier_for_elo` enforce, so a `no_value`-anchored player (Elo 1100) badges **FA** on mobile while the API answers `tier: null`. Fixing it makes `tierForElo` nullable and ripples into `autoBucket`/`autoBucketMixed` and `TiersScreen`'s zone model (its existing `unassigned` zone is the natural home). **P1-7's "no_value displays FA" decision leans on the current behaviour** — see [D-043](DECISIONS.md) — so this must be revisited together with it, not silently. (b) Mobile carries **three** copies of the ladder labels — `TIER_LABEL` (`tierBands.ts`), `TierBadge.tsx`, `chalkline/Badge.tsx`. They agree today and are not derived from one another; `anchorRows.ts` now shows the pattern to follow.
+
 0j. **MFL / Fleaflicker harness profile.** No fixture profile covers them, so P0-6's non-Sleeper paths are proven by unit tests and one ESPN capture rather than by a flow. Waiver W2 in [`prd-p0-6.md`](../docs/plans/audit-p0-remediation/prd-p0-6.md).
 
 ---

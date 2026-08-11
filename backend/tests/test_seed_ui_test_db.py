@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.ranking_service import RankingService
+from backend.ranking_service import Player, RankingService
 from backend.tests.fixtures.seed_ui_test_db import (
     EXIT_REFUSED,
     EXIT_UNKNOWN_PROFILE,
@@ -1024,3 +1024,130 @@ def test_profiles_on_flags_turn_on_public_pages_only():
     assert differing == {"profiles.public_pages"}
     assert profiles_on["profiles.public_pages"] is True
     assert profiles_on["profiles.user_toggle"] is False
+
+
+# ---------------------------------------------------------------------------
+# (k) A-16 / P1-7 — the anchors-done profile
+#     RL-9: the unlock the audit found unreachable, made provable without a
+#     human. The ABSENCE of exactly this fixture is why the bug survived.
+# ---------------------------------------------------------------------------
+
+ANCHOR_UID = "900000000000000010"
+
+
+@pytest.fixture(scope="module")
+def anchors(tmp_path_factory):
+    out_dir = tmp_path_factory.mktemp("ui-test-anchors")
+    return out_dir, seed_profile("anchors-done", out_dir=out_dir, seed=SEED,
+                                 now=FIXED_NOW)
+
+
+def test_anchors_done_is_registered():
+    assert "anchors-done" in list_profiles()
+
+
+def test_anchors_done_seeds_a_board_and_nothing_else(anchors):
+    """The anchor lane's whole footprint is Elo overrides. If this profile
+    ever grew a tiers_saved row or a swipe, it would stop proving anything:
+    the `or _tiers_rule()` clause and the trio rule would each answer
+    unlocked:true without the 'anchor' branch being consulted."""
+    out_dir, manifest = anchors
+    with _connect(out_dir, "anchors-done") as con:
+        row = con.execute(
+            "SELECT username, ranking_method, unlocked_formats, tiers_saved, "
+            "       tier_overrides FROM users WHERE sleeper_user_id = ?",
+            (ANCHOR_UID,)).fetchone()
+        swipes = con.execute(
+            "SELECT COUNT(*) c FROM swipe_decisions WHERE user_id = ?",
+            (ANCHOR_UID,)).fetchone()["c"]
+
+    assert row["username"] == "qa_anchors"
+    assert row["ranking_method"] == "anchor"
+    assert swipes == 0
+    assert json.loads(row["tiers_saved"] or "{}") in ({}, {"1qb_ppr": [], "sf_tep": []})
+
+    overrides = json.loads(row["tier_overrides"])
+    assert len(overrides["sf_tep"]) == RankingService.ANCHOR_UNLOCK_MIN
+    assert manifest["counts"]["anchor_tier_overrides"] == \
+        RankingService.ANCHOR_UNLOCK_MIN
+
+
+def test_anchors_done_leaves_the_monotonic_floor_unseeded(anchors):
+    """LLD-p1-7 correction X-2, pinned. `unlocked_formats` must be EMPTY:
+    get_rankings_progress applies its monotonic floor before the per-method
+    ladder, so a seeded row answers unlocked:true whether or not the 'anchor'
+    branch works. A fixture that passes either way proves nothing."""
+    out_dir, _ = anchors
+    with _connect(out_dir, "anchors-done") as con:
+        uf = con.execute(
+            "SELECT unlocked_formats FROM users WHERE sleeper_user_id = ?",
+            (ANCHOR_UID,)).fetchone()[0]
+    assert json.loads(uf or "[]") == []
+
+
+def test_anchors_done_overrides_name_real_players(anchors):
+    out_dir, _ = anchors
+    with _connect(out_dir, "anchors-done") as con:
+        overrides = json.loads(con.execute(
+            "SELECT tier_overrides FROM users WHERE sleeper_user_id = ?",
+            (ANCHOR_UID,)).fetchone()[0])["sf_tep"]
+        known = {r["player_id"] for r in con.execute(
+            "SELECT player_id FROM players").fetchall()}
+    assert set(overrides) <= known
+    assert all(isinstance(v, (int, float)) for v in overrides.values())
+
+
+def test_anchors_with_unlocked_true_is_refused(tmp_path):
+    """The trap, refused at the seeder rather than left as a comment."""
+    with pytest.raises(SeederError) as e:
+        seed_profile(
+            _mutated_profile(tmp_path, "anchors-done",
+                             lambda d: d["app_user"].update(unlocked=True)),
+            out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
+    assert e.value.code == EXIT_REFUSED
+    assert "monotonic floor" in str(e.value)
+
+
+def test_anchors_under_an_incompatible_method_is_refused(tmp_path):
+    """An anchored board under ranking_method 'tiers' is not a state the app
+    can produce — the wizard writes 'anchor' at the point of use, first-use
+    wins."""
+    with pytest.raises(SeederError) as e:
+        seed_profile(
+            _mutated_profile(tmp_path, "anchors-done",
+                             lambda d: d["app_user"].update(ranking_method="tiers")),
+            out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
+    assert e.value.code == EXIT_REFUSED
+
+
+def test_anchors_done_actually_clears_the_unlock_bar(anchors):
+    """RL-9's whole point: the fixture must reach the predicate, not merely
+    look plausible next to it.
+
+    Builds a REAL RankingService from the seeded board and the seeded player
+    pool and asks it the question the 'anchor' branch of
+    get_rankings_progress asks. If this passes while
+    test_anchor_unlock.py::test_t2 passes, the fixture and the branch meet.
+    """
+    out_dir, _ = anchors
+    with _connect(out_dir, "anchors-done") as con:
+        overrides = json.loads(con.execute(
+            "SELECT tier_overrides FROM users WHERE sleeper_user_id = ?",
+            (ANCHOR_UID,)).fetchone()[0])["sf_tep"]
+        players = [
+            Player(id=r["player_id"], name=r["full_name"], position=r["position"],
+                   team=r["team"], age=None, years_experience=r["years_exp"])
+            for r in con.execute(
+                "SELECT player_id, full_name, position, team, years_exp "
+                "FROM players").fetchall()
+        ]
+
+    svc = RankingService(players=players)
+    svc._elo_overrides = dict(overrides)
+
+    # Every seeded override names a pool player, so the pool-restricted count
+    # is the full board — and it clears the bar.
+    assert svc.board_override_count() == len(overrides)
+    assert svc.board_override_count() >= RankingService.ANCHOR_UNLOCK_MIN
+    # …with none of the evidence the OTHER unlock rules read.
+    assert svc._interactions == {}

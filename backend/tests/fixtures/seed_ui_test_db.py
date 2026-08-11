@@ -276,6 +276,10 @@ def _validate_profile(p: dict) -> None:
     if not app.get("username") or not app.get("user_id"):
         _refuse("app_user needs username + user_id")
     rankings = app.get("rankings")
+    # Anchors first: an `anchors` block makes `unlocked:true` incoherent for a
+    # REASON the generic check below cannot state (the monotonic-floor trap),
+    # and the specific diagnosis is the useful one.
+    _validate_anchors(app, _refuse)
     if app.get("unlocked") and not rankings:
         # P0-1: a COMPLETE Quick Set board is now a legitimate basis for
         # unlocked:true — that is the whole fix. A trio block is no longer the
@@ -373,6 +377,63 @@ def _validate_quickset(app: dict, _refuse) -> None:
         )
 
 
+def _validate_anchors(app: dict, _refuse) -> None:
+    """`app_user.anchors` (audit A-16 / P1-7).
+
+    The key has been reserved as `null` in every profile since the seeder
+    shipped and was implemented by nothing. It exists now because the anchor
+    lane's unlock could not be proved without a fixture that reproduces it —
+    and the ABSENCE of exactly this fixture is why an unreachable unlock bar
+    survived to an audit.
+
+    An anchor board is a set of Elo overrides and NOTHING else: no
+    `tiers_saved` row, no rank swipe. That is the whole point, so an `anchors`
+    block is refused under any ranking_method that would make the seeded state
+    unreachable by the real app.
+    """
+    an = app.get("anchors")
+    if an is None:
+        return
+    if not isinstance(an, dict):
+        _refuse("app_user.anchors must be an object")
+
+    try:
+        count = int(an.get("count", 0))
+    except (TypeError, ValueError):
+        count = 0
+    if count < 1:
+        _refuse("app_user.anchors count must be >= 1")
+
+    formats = an.get("formats") or list(db.SCORING_FORMATS)
+    bad_fmt = [f for f in formats if f not in db.SCORING_FORMATS]
+    if bad_fmt:
+        _refuse(f"app_user.anchors unknown scoring formats {bad_fmt}")
+
+    method = app.get("ranking_method", _RANKING_METHOD_DEFAULT)
+    if method is not _RANKING_METHOD_DEFAULT and method not in (None, "anchor"):
+        _refuse(
+            f"app_user.anchors with ranking_method {method!r} is not a state "
+            "the app produces — the anchor wizard writes 'anchor' at the "
+            "point of use (P0-1), and first-use wins"
+        )
+
+    # THE TRAP (LLD-p1-7 correction X-2). `unlocked: true` seeds
+    # users.unlocked_formats, and get_rankings_progress applies a MONOTONIC
+    # FLOOR before the per-method ladder is consulted. A fixture that seeds
+    # the floor answers unlocked:true whether or not the 'anchor' arm works,
+    # so it would prove nothing while looking green. An anchors profile must
+    # let the branch compute it.
+    if app.get("unlocked"):
+        _refuse(
+            "app_user.anchors with unlocked:true cannot prove the anchor "
+            "unlock — the seeded unlocked_formats row short-circuits "
+            "get_rankings_progress's monotonic floor BEFORE the 'anchor' "
+            "branch is reached. Set unlocked:false and let the branch decide "
+            "(the user has no PRIOR unlock record either way; the row is "
+            "written on their first /api/rankings/progress)."
+        )
+
+
 def _validate_draft(lg: dict, _refuse) -> None:
     """Optional `league.draft` block (the `draft` profile's whole point).
 
@@ -463,6 +524,19 @@ def _value_key(fmt: str) -> str:
 def _seed_elo(value: float) -> float:
     """DynastyProcess value → seed Elo, mirroring data_loader's formula."""
     return round(1200.0 + (min(float(value), 10000.0) / 10000.0) * 600.0, 1)
+
+
+# Representative pick-anchor rung Elos at the DEFAULT anchor scale, cycled to
+# give a seeded anchor board a legible spread. These are illustrative values
+# taken from the constants the wizard's own math is documented against
+# (server.py § Pick-anchor wizard: a generic Mid 1st sits at Elo 1650, the
+# 4-firsts rung at ≈1927 after the #117 recalibration, and ANCHOR_NO_VALUE_ELO
+# is 1100) — NOT the output of server._anchor_target_elo, which needs the
+# generic-pick pool the seeder does not build. The unlock evidence is the
+# COUNT of overrides, so exact values are presentational here; anything that
+# asserts on a specific rung's Elo belongs in test_pick_anchor.py against the
+# real function.
+_ANCHOR_RUNG_ELOS = (1927.0, 1830.0, 1740.0, 1650.0, 1480.0, 1380.0, 1300.0, 1100.0)
 
 
 def _pool_by_position(pool: dict[str, dict], fmt: str) -> dict[str, list[str]]:
@@ -684,6 +758,17 @@ class World:
             "positions": list(qs.get("positions") or POSITIONS),
             "formats": list(qs.get("formats") or db.SCORING_FORMATS),
             "players_per_position": int(qs.get("players_per_position", 12)),
+        }
+
+    def anchors(self) -> dict | None:
+        """Normalised `app_user.anchors` (count / formats). See
+        _validate_anchors for why the block exists and what it may not say."""
+        an = self.profile["app_user"].get("anchors")
+        if not an:
+            return None
+        return {
+            "count": int(an.get("count", 0)),
+            "formats": list(an.get("formats") or db.SCORING_FORMATS),
         }
 
     def trios_per_position(self) -> int:
@@ -1048,6 +1133,39 @@ def _seed_db(world: World, eng) -> dict[str, int]:
                 db.save_tiers_position(world.app_uid, pos, scoring_format=fmt)
                 quickset_positions += 1
 
+    # -- Pick Anchor board (tier_overrides ONLY), audit A-16 / P1-7 ----------
+    # The anchor lane's entire footprint is Elo overrides. It writes no
+    # tiers_saved row and no rank swipe, which is exactly why it needed its
+    # own unlock rule — and why this block must NOT call save_tiers_position:
+    # a tiers_saved row would satisfy the `or _tiers_rule()` clause and mask
+    # the branch under test, the same way a pre-seeded unlocked_formats row
+    # would (see _validate_anchors).
+    anchor_overrides = 0
+    an = world.anchors()
+    if an:
+        for fmt in an["formats"]:
+            by_pos = _pool_by_position(world.pool, fmt)
+            # Top players by value across all four positions, interleaved, so
+            # the board reads like a real value-descending anchor walk rather
+            # than "the whole QB position".
+            queue: list[str] = []
+            depth = 0
+            while len(queue) < an["count"]:
+                added = False
+                for pos in POSITIONS:
+                    if depth < len(by_pos[pos]) and len(queue) < an["count"]:
+                        queue.append(by_pos[pos][depth])
+                        added = True
+                if not added:
+                    break
+                depth += 1
+            overrides = {
+                pid: _ANCHOR_RUNG_ELOS[i % len(_ANCHOR_RUNG_ELOS)]
+                for i, pid in enumerate(queue)
+            }
+            db.save_tier_overrides(world.app_uid, overrides, scoring_format=fmt)
+            anchor_overrides += len(overrides)
+
     # -- leagues + members ----------------------------------------------------
     pick_slots = 0
     for lid, lg in world.leagues.items():
@@ -1245,6 +1363,7 @@ def _seed_db(world: World, eng) -> dict[str, int]:
         "recorded_picks": recorded,
         "quickset_positions_saved": quickset_positions,
         "quickset_tier_overrides": quickset_overrides,
+        "anchor_tier_overrides": anchor_overrides,
         "players": players_written,
         "swipe_rows": swipe_rows,
         "member_ranking_rows": mr_rows,

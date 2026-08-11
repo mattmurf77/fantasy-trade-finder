@@ -11,6 +11,8 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-038 | A ranking method can be a permanent dead end, and nothing reports it | Backend / unlock ladder |
+| G-037 | An unlock-proving fixture that seeds `unlocked: true` proves nothing | Backend / test fixtures / monotonic floor |
 | G-036 | `league_id` analytics props store `"[scrubbed]"` for Sleeper leagues only | Backend / analytics ingest / PII scrub |
 | G-035 | A JSX "is this gated on X?" test passes on a build where X is ignored | Mobile / structural tests / AST |
 | G-034 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
@@ -292,6 +294,21 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** the assertion collected the conditions of *several* JSX ancestors and regex-matched the token anywhere in the concatenation. In `check-league-drill-in.js`, the relocated tier badge sits inside the cluster's own `posRank || (denseSingleLine && tier) ? …` ternary, so the token `denseSingleLine` was present in an ancestor regardless of the badge's own gate.
 - **Fix:** read the **innermost** conditional only, and stop walking at the enclosing JSX element boundary (`nearestConditionText()`, fixed in `ba30464`).
 - **Prevention:** run every new assertion against a deliberately sabotaged tree before trusting it. This one was found *only* because the falsification pass was executed — it would not have surfaced in review, and unfixed it would have shipped the Tiers and FreeAgents rows rendering the tier badge twice. Four false-passing tests were caught this way in the #297–#302 batch alone; treat "my test passes" as unproven until the sabotage fails it. See [D-036](DECISIONS.md).
+
+
+### G-037 — a fixture that seeds `unlocked: true` cannot prove an unlock
+- **Symptom:** you add a seed profile to prove a new unlock rule works. The test goes green immediately. It would also go green with the fix reverted.
+- **Cause:** `get_rankings_progress` applies a **monotonic floor** (`if not unlocked and fmt in unlocked_formats_list: unlocked = True`) *before* nothing — but crucially the floor is consulted after the per-method ladder and ORs into it, so any pre-seeded `users.unlocked_formats` row makes the answer `True` regardless of what the ladder decided. `seed_ui_test_db.py` calls `db.mark_format_unlocked` for every format in `world.unlocked_formats()`, which is non-empty exactly when the profile says `"unlocked": true`. The fixture therefore short-circuits the branch it exists to exercise.
+- **Fix:** seed `"unlocked": false` and let the branch compute it. This is also literally accurate — a user who has just crossed the bar has no *prior* unlock record; the row is written by `mark_format_unlocked` on their first `/api/rankings/progress` after the fix. `backend/tests/fixtures/profiles/anchors-done.json` is the worked example, and `_validate_anchors` now **refuses** the incoherent shape rather than leaving it as a comment.
+- **Prevention:** for any fixture whose purpose is "prove X unlocks", assert the floor is unseeded *in the test* (`unlocked_formats == []`), not just in the profile. Same family as G-035: a green structural test is unproven until you have watched it fail.
+
+---
+
+### G-038 — a ranking method can be a permanent dead end, and nothing reports it
+- **Symptom:** a cohort of users rank their whole board and Trade Finder never unlocks. No error, no log line, no analytics signal — the progress endpoint cheerfully answers `unlocked: false` forever. The League ring reads 0/4 and the push primer never arms, which looks like two more bugs rather than one.
+- **Cause:** `get_rankings_progress`'s unlock ladder is an `if/elif` chain **keyed on `ranking_method` strings**, with a trio-swipe rule in the `else`. `'anchor'` was a valid, first-class method with no arm, so it fell to the `else` — and the anchor lane writes Elo overrides and *never a swipe*, so the fallback rule was structurally unsatisfiable. Adding a method string is a one-line change; adding its unlock rule is a separate one nobody was prompted to make. P0-1 later widened the blast radius by writing methods at the point of use.
+- **Fix:** every method gets an explicit arm (P1-7). `'anchor'` and `'manual'` unlock on durable board evidence (`RankingService.board_override_count()`, counting pool-resident `users.tier_overrides`), or the tiers rule.
+- **Prevention:** the ladder's `else` is a **fallback for one specific method** (`'trio'`/null), not a default that suits everyone. Adding a value to `VALID` ranking methods without adding an arm makes it a dead end. Note the two traps in fixing it: the interaction counter is **rebuilt from persisted swipes on every session build**, so bumping it in a save handler evaporates on the next cold start; and a rule keyed on a shared write lane (`apply_anchor`) grants credit to surfaces that were deliberately excluded from writing the method at all.
 
 ---
 
