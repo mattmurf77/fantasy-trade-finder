@@ -48,8 +48,14 @@ import Constants from 'expo-constants';
 // its first line, `applyTestRouteEntry()` returns false without touching the
 // navigator, and the launch argument (which nothing in production supplies
 // anyway) is never even read. Behaviour change in production: zero.
+//
+// Exported since P0-5 (hld.md §5) so the SECOND consumer — SignInScreen's
+// Apple-credential substitution, via `testLaunchArg('FTFTestAppleSub')` —
+// reads this one definition instead of re-deriving the gate from
+// `Constants.expoConfig.extra`. One production kill switch, greppable in one
+// place.
 // ─────────────────────────────────────────────────────────────────────────
-const IS_TEST_BUILD =
+export const IS_TEST_BUILD =
   (Constants.expoConfig?.extra as { testMode?: boolean } | undefined)
     ?.testMode === true;
 
@@ -90,22 +96,35 @@ export interface TestRouteIntent {
 }
 
 /**
+ * A launch-argument value, or null. Null in every production build (see the
+ * gate above), on non-iOS, and whenever the argument is absent or blank.
+ *
+ * Naming convention for anything added later: `FTFTest<Thing>`, query-string
+ * values only, NEVER JSON — NSUserDefaults' argument-domain parser treats a
+ * leading `{` as an old-style plist and the value never reaches the app
+ * (observed live; see readTestRouteIntent's params note).
+ */
+export function testLaunchArg(name: string): string | null {
+  if (!IS_TEST_BUILD) return null;
+  if (Platform.OS !== 'ios') return null;
+  let raw: unknown;
+  try {
+    raw = Settings.get(name);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v ? v : null;
+}
+
+/**
  * The route the harness asked for, or null. Null in every production build
  * (see the gate above), on non-iOS, and whenever the launch argument is
  * absent or malformed.
  */
 export function readTestRouteIntent(): TestRouteIntent | null {
-  if (!IS_TEST_BUILD) return null;
-  if (Platform.OS !== 'ios') return null;
-
-  let raw: unknown;
-  try {
-    raw = Settings.get(ARG_ROUTE);
-  } catch {
-    return null;
-  }
-  if (typeof raw !== 'string') return null;
-  const route = raw.trim();
+  const route = testLaunchArg(ARG_ROUTE);
   if (!route) return null;
 
   // Optional route params, as a QUERY STRING:
@@ -119,8 +138,8 @@ export function readTestRouteIntent(): TestRouteIntent | null {
   // characters the plist parser claims. All values arrive as strings, which is
   // all any capture entry needs.
   let params: Record<string, string> | undefined;
-  const rawParams = Settings.get(ARG_PARAMS);
-  if (typeof rawParams === 'string' && rawParams.trim()) {
+  const rawParams = testLaunchArg(ARG_PARAMS);
+  if (rawParams) {
     const out: Record<string, string> = {};
     for (const pair of rawParams.split('&')) {
       if (!pair) continue;
@@ -142,20 +161,52 @@ export function readTestRouteIntent(): TestRouteIntent | null {
 }
 
 /**
+ * Root-stack routes the harness may enter on a SIGNED-OUT boot. A set, not a
+ * predicate: adding a second name later is a deliberate one-line decision,
+ * not an accident. Every member MUST be a root-stack route — a signed-out
+ * boot has no Main subtree, so tab-nested names are meaningless here.
+ */
+const SIGNED_OUT_ENTRY_ROUTES = new Set<string>(['LeagueJoin']);
+
+/**
  * Jump the navigator to the requested route. Returns true if a jump was
- * dispatched. Callers must only invoke this once the authed tree is the
- * live root (RootNav gates on `initialRoute === 'Main'`) — this helper
- * deliberately does not reach into session state.
+ * dispatched. The caller reports the auth state (`opts.authed`, true when
+ * RootNav's `initialRoute` resolved to 'Main'); THIS function owns the
+ * policy about what each state may enter — an authed boot may enter any
+ * route, a signed-out boot only the names on `SIGNED_OUT_ENTRY_ROUTES`.
+ * `opts` is required because there is exactly one call site: making the
+ * decision explicit costs nothing and leaves nobody guessing who decides.
  *
  * `navigate` (not `reset`) is used so the target keeps a real back stack.
  */
-export function applyTestRouteEntry(nav: {
-  isReady: () => boolean;
-  navigate: (...args: never[]) => void;
-}): boolean {
+export function applyTestRouteEntry(
+  nav: {
+    isReady: () => boolean;
+    navigate: (...args: never[]) => void;
+  },
+  opts: { authed: boolean },
+): boolean {
   const intent = readTestRouteIntent();
   if (!intent) return false;
   if (!nav.isReady()) return false;
+
+  // Signed out: only the allowlist, and always as a ROOT-stack route (there
+  // is no Main subtree to nest into). Until the allowlist's members are
+  // registered routes, `navigate` is a no-op against an unknown name —
+  // react-navigation warns, the catch swallows it, and the false return
+  // keeps the whole branch inert.
+  if (!opts.authed) {
+    if (!SIGNED_OUT_ENTRY_ROUTES.has(intent.route)) return false;
+    try {
+      (nav.navigate as unknown as (n: string, p?: object) => void)(
+        intent.route,
+        intent.params,
+      );
+    } catch {
+      return false;
+    }
+    return true;
+  }
 
   const tab = TAB_OF[intent.route];
   try {

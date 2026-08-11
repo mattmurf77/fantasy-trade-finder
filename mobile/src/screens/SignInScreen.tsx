@@ -25,6 +25,13 @@ import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTarget
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { getLastUsername, setLastUsername } from '../api/client';
+import { testLaunchArg } from '../utils/testRouteEntry';
+
+// Maestro seam (hld.md §5). `null` in every production bundle: testLaunchArg
+// returns null unless the build-time `extra.testMode` constant is true, which
+// only mobile/scripts/sim-build.sh produces. Read once at module load — the
+// argument domain is volatile and cannot be set at runtime.
+const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 
 interface Props {
   onSignedIn: () => void;
@@ -126,6 +133,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       .catch(() => setAppleAvailable(false));
   }, [accountsEnabled]);
 
+  // Test builds show the Apple entry even when the simulator reports Apple
+  // sign-in unavailable (no iCloud account) — the credential is substituted,
+  // so availability is irrelevant. Identical to `appleAvailable` in
+  // production, where TEST_APPLE_SUB is null.
+  const appleShown = appleAvailable || TEST_APPLE_SUB !== null;
+
   async function handleAppleSignIn() {
     if (busy || demoBusy || appleBusy) return;
     setAppleBusy(true);
@@ -133,12 +146,24 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     setErrorKind(null);
     track('signin_attempted', { method: 'apple' }, 'SignIn');
     try {
-      const cred = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
+      // Everything AFTER this line — the account_only branch, setUser,
+      // setLeague, onAccountSignedIn — is production code under test.
+      // Stubbing further up (seeding useSession directly) would test the
+      // harness instead of the branch. The explicit structural annotation is
+      // what lets an object literal stand in for an
+      // AppleAuthenticationCredential: only `identityToken` and `fullName`
+      // are read below.
+      const cred: {
+        identityToken: string | null;
+        fullName?: { givenName?: string | null; familyName?: string | null } | null;
+      } = TEST_APPLE_SUB
+        ? { identityToken: `ftf-test-apple:${TEST_APPLE_SUB}`, fullName: null }
+        : await AppleAuthentication.signInAsync({
+            requestedScopes: [
+              AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+              AppleAuthentication.AppleAuthenticationScope.EMAIL,
+            ],
+          });
       if (!cred.identityToken) throw new Error('Apple did not return an identity token.');
       // Apple sends the name only on FIRST authorization — forward it so
       // a brand-new account's users row has a display name.
@@ -378,7 +403,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 left off.
               </Text>
             ) : null}
-            {!landingOn && appleAvailable ? (
+            {!landingOn && appleShown ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
                     (HIG-required component). White variant — the HIG
@@ -516,7 +541,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
 
-            {landingOn && appleAvailable ? (
+            {landingOn && appleShown ? (
               // ADR-006: quiet re-entry door for existing Apple-bound
               // (P2.6 account-only) users — they may have no Sleeper
               // username to type. Text link by design: it must never

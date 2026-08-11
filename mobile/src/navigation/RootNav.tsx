@@ -336,12 +336,17 @@ export default function RootNav({ booted }: { booted: boolean }) {
         // Capture harness only: `-FTFTestRoute <RouteName>` in the launch
         // arguments jumps straight to a screen that has no tappable path
         // under release flags. Runs AFTER auth restore (this whole subtree
-        // only mounts once `booted` is true) and ONLY when that restore
-        // landed on the authed tree — jumping into Main without a session
-        // would photograph a signed-out shell. Returns false (no navigator
+        // only mounts once `booted` is true). Returns false (no navigator
         // touch at all) in every production bundle: see the build-time gate
         // in utils/testRouteEntry.ts.
-        if (initialRoute === 'Main') applyTestRouteEntry(navigationRef);
+        //
+        // A signed-out boot is no longer a blanket refusal — `testRouteEntry`
+        // owns the policy and allows only the names on its
+        // `SIGNED_OUT_ENTRY_ROUTES` allowlist (P0-3's `LeagueJoin`); every
+        // other name is still refused, because jumping into Main without a
+        // session would photograph a signed-out shell. Behaviour for every
+        // existing flow is unchanged.
+        applyTestRouteEntry(navigationRef, { authed: initialRoute === 'Main' });
         // Hand the container ref to Sentry so it can tag spans by screen.
         // No-op when Sentry isn't initialized.
         navigationIntegration.registerNavigationContainer(navigationRef);
