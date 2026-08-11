@@ -22,16 +22,20 @@
     deck-sourced sends land in the existing outcome spine.
   - Question answered: "are MFL sends happening, succeeding, failing, and why" — from
     `api_call` status/error-kind on `import.tradeProposal` plus route logs.
-- [x] (a) New events: ~~none~~ **`trade_sent` (added 2026-08-11 follow-up, operator-approved).**
+- [x] (a) New events: ~~none~~ **`trade_sent` (added 2026-08-11 follow-up, operator-approved;
+  rescoped to non-Sleeper platforms at the P0-7 merge the same day).**
   - The original partial waiver ("no dedicated `trade_sent` funnel event exists for
     Sleeper sends either; parity is deliberate") is **RESOLVED**: the operator approved
-    the send-leg event, spec'd ONCE for both platforms in one taxonomy change
-    (`backend/analytics_taxonomy.py` `SERVER_FIRED_EVENTS` + tracking plan v2 addendum
-    2026-08-11). Server-fired on the confirmed-success path of BOTH
-    `POST /api/trades/propose` and `POST /api/trades/propose-mfl`; never on validation
-    or hard-block failures. Props: `platform` (sleeper|mfl, **mandatory non-null** —
-    the NULL-`platform` incident), `give_count`/`receive_count`, `pick_count`
-    (Sleeper's side-unattributed picks), `outcome`. No player PII in props.
+    the send-leg event (`backend/analytics_taxonomy.py` `SERVER_FIRED_EVENTS` +
+    tracking plan v2 addendum 2026-08-11c). **Merge rescope:** audit P0-7 landed
+    `sleeper_send_succeeded` on the same Sleeper success path concurrently, so
+    `trade_sent` now fires ONLY on the confirmed-success path of
+    `POST /api/trades/propose-mfl` — never on `POST /api/trades/propose` (that would
+    double-count the send leg; one event per real occurrence), never on validation
+    or hard-block failures. Props: `platform` (`mfl`, **mandatory non-null** —
+    the NULL-`platform` incident), `give_count`/`receive_count` (MFL picks are
+    side-attributed and fold in), `outcome`. No player PII in props.
+    Cross-platform send counts = `sleeper_send_succeeded` ∪ `trade_sent`.
     (c) n/a.
 
 ## 2. Schema & flag scope
