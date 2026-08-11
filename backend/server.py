@@ -18322,6 +18322,34 @@ def _provider_auth_response(provider: str, claims: dict):
     return jsonify(out)
 
 
+_TEST_APPLE_TOKEN_PREFIX = "ftf-test-apple:"
+
+
+def _test_mode_identity(identity_token: str) -> dict | None:
+    """Harness only (HLD §5.3). `FTF_TEST_MODE=1` + 'ftf-test-apple:<sub>'
+    → {'sub': sub}. Returns None in every deployed configuration.
+
+    THE GATE IS THE MODULE CONSTANT, not os.environ: `_TEST_MODE` is evaluated
+    once at import (:486), which is also why the pytest that exercises the
+    seam monkeypatches `server._TEST_MODE` rather than the env var. Reading
+    the constant here is what makes those two agree.
+
+    This substitutes for `verify_apple_token` and NOTHING ELSE. Everything
+    downstream — `_provider_auth_response`, `_mint_account_only_session`, the
+    sentinel league, `verified_via='apple'` — is the real production path, so
+    the Maestro flow that rides this seam is testing production code rather
+    than the harness. `FTF_TEST_MODE` is never set in Render, and the
+    401-when-unset behaviour is ASSERTED by
+    backend/tests/test_account_only_harness.py, not assumed.
+    """
+    if not _TEST_MODE:
+        return None
+    if not identity_token.startswith(_TEST_APPLE_TOKEN_PREFIX):
+        return None
+    sub = identity_token[len(_TEST_APPLE_TOKEN_PREFIX):].strip()
+    return {"sub": sub} if sub else None
+
+
 @app.route("/api/auth/apple", methods=["POST"])
 def auth_apple():
     """Sign in with Apple — verify the identity token, find-or-create the
@@ -18333,11 +18361,13 @@ def auth_apple():
     if not token:
         return jsonify({"error": "missing_token",
                         "message": "identity_token required."}), 400
-    try:
-        claims = _accounts.verify_apple_token(token)
-    except _accounts.TokenVerificationError as e:
-        log.info("auth/apple: token rejected (%s)", e.reason)
-        return jsonify({"error": "invalid_token", "reason": e.reason}), 401
+    claims = _test_mode_identity(token)
+    if claims is None:
+        try:
+            claims = _accounts.verify_apple_token(token)
+        except _accounts.TokenVerificationError as e:
+            log.info("auth/apple: token rejected (%s)", e.reason)
+            return jsonify({"error": "invalid_token", "reason": e.reason}), 401
     return _provider_auth_response("apple", claims)
 
 
