@@ -100,6 +100,17 @@ list index), update the registry, and note that a rebuild is required.
   fail; select by the container's own testID, or add `accessible={false}`.
 - **Verify a tap NAVIGATED/acted** by asserting the destination state; a
   COMPLETED tap proves the element was hit, not that the app responded.
+- **Full authoring-law list lives in `mobile/.maestro/README.md` § Flow-authoring
+  laws** (2026-08-10, 23 laws from the screen-library build) — read it before
+  writing or fixing ANY flow. Highest-frequency additions since this list was
+  written: text matchers are FULL-MATCH regex (wrap `.*`); `visible:` counts
+  off-screen ScrollView children (scrollUntilVisible with
+  visibilityPercentage:100 before below-fold taps AND shutters); never
+  `waitForAnimationToEnd` before an ActivityIndicator shutter; loading states
+  need `clearState: true` cold starts (persisted query cache); injection
+  budgets 2/4/6/1 by retry stack; arm `fail_next` BEFORE opening the surface;
+  `# flags:` is a resolved fixture filename, never prose; deep links are dead
+  — use launch-argument entry; reset the simulator when cells slow 5-10x.
 - **Failure debugging:** `~/.maestro/tests/<latest>/` has the screenshot +
   hierarchy; `/tmp/mt-flask.log` shows what the app actually called — a flow
   bug usually diagnoses faster from the Flask side.
