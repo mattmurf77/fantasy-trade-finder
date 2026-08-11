@@ -773,6 +773,16 @@ export default function InLeagueCalculator({
               theirUserId={opponentId}
               givePlayerIds={giveIds}
               receivePlayerIds={receiveIds}
+              // audit P0-6 — same name resolution as ShareTradeImage's
+              // fallbackText below, so the calculator has one way of naming
+              // players. No leagueName: this component has a leagueId but no
+              // display name in scope, and the copy text drops that line
+              // cleanly. opponent?.username may be undefined — the formatter
+              // then omits the "To:" line rather than pasting "@them".
+              givePlayerNames={giveIds.map((id) => playerById[id]?.name ?? id)}
+              receivePlayerNames={receiveIds.map((id) => playerById[id]?.name ?? id)}
+              opponentUsername={opponent?.username}
+              surface="calculator"
             />
           ) : null}
           {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the

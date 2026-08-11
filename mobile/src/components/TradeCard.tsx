@@ -27,6 +27,10 @@ interface Props {
   // "Send in Sleeper" — flagged beta. When true, render the direct-propose
   // button (itself flag-gated, so it's a no-op when the flag is off).
   showSend?: boolean;
+  // audit P0-6 — league display name for the copy-trade fallback's first
+  // line. Matches passes TradeMatch/AwaitingTrade.league_name; every other
+  // caller omits it and the copy text drops the line.
+  leagueName?: string;
   // Untouchables (feedback #95, flag trade.preference_lists): ids of the
   // caller's players marked "never offer in trades". Marked give-side
   // players render an UNTOUCHABLE badge; long-pressing a give-side player
@@ -107,6 +111,7 @@ function TradeCardComp({
   onDismiss,
   acting,
   showSend = false,
+  leagueName,
   untouchableIds,
   onToggleUntouchable,
   onSwapPlayer,
@@ -561,9 +566,11 @@ function TradeCardComp({
         </View>
       )}
 
-      {/* Mutual-match CTAs: Dismiss (archive, ELO-neutral) + Send in Sleeper
-          (the real "execute the trade" action — flag-gated, renders null when
-          the beta flag is off, so a flag-off build shows Dismiss alone). */}
+      {/* Mutual-match CTAs: Dismiss (archive, ELO-neutral) + the send column.
+          Flag-gated: with trade.send_in_sleeper off the button renders null on
+          every platform, so a flag-off build shows Dismiss alone. On a
+          non-Sleeper league (audit P0-6) the same slot renders a stated reason
+          plus "Copy trade" instead of a send that cannot work. */}
       {variant === 'match' ? (
         <View style={styles.actions}>
           <Button
@@ -579,6 +586,11 @@ function TradeCardComp({
               theirUserId={data.opponent_user_id}
               givePlayerIds={data.give_player_ids}
               receivePlayerIds={data.receive_player_ids}
+              givePlayerNames={data.give_players.map((p) => p.name)}
+              receivePlayerNames={data.receive_players.map((p) => p.name)}
+              opponentUsername={data.opponent_username}
+              leagueName={leagueName}
+              surface="match"
               style={styles.actionBtn}
             />
           )}
@@ -591,6 +603,11 @@ function TradeCardComp({
               theirUserId={data.opponent_user_id}
               givePlayerIds={data.give_player_ids}
               receivePlayerIds={data.receive_player_ids}
+              givePlayerNames={data.give_players.map((p) => p.name)}
+              receivePlayerNames={data.receive_players.map((p) => p.name)}
+              opponentUsername={data.opponent_username}
+              leagueName={leagueName}
+              surface="awaiting"
             />
           </View>
         )

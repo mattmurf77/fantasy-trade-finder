@@ -1,0 +1,108 @@
+appId: com.fantasytradefinder.app
+# tc: TC-P0-6-ESPN-COPY
+# profile: espn
+# flags: release
+#
+# ACCEPTANCE, verbatim: "a matched ESPN user has a stated reason and at least
+# one useful action". This flow proves both halves on the mutual-match tile —
+# the reason (".*Sending is Sleeper-only.*") and the action (a real tap on
+# send-in-sleeper.copy, acknowledged by the "Copied" label flip).
+#
+# The sign-in preamble is copied VERBATIM from capture/matches@espn.yaml,
+# including its retry-hardened inputText block (law 10 — a raced inputText
+# submits a partial username and books a real VCR miss).
+#
+# ENTERING THROUGH THE LEAGUE PICKER IS LOAD-BEARING, not preamble.
+# utils/tradeText.resolveSendPlatform FAILS OPEN: a league id missing from the
+# session's cached league list resolves to 'sleeper' and keeps the Send button.
+# LeaguePickerScreen's merge of GET /api/espn/leagues is the only writer that
+# stamps `platform: 'espn'` into that cache, so a launch-argument jump straight
+# to Matches would test the SLEEPER branch under an ESPN filename.
+#
+# MAESTRO CANNOT READ THE iOS PASTEBOARD. This flow proves the affordance and
+# the acknowledgement; the copied STRING is proved by
+# mobile/tests/check-trade-text.js (28 cases over the pure formatter) plus one
+# manual paste recorded in living-memory/TEST_LEDGER.md.
+#
+# No injections and no ESPN egress — same reasoning as capture/matches@espn.yaml.
+tags: [p0, matches, espn]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_espn"
+      - assertVisible:
+          text: ".*qa_espn.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# THE MERGE THAT STAMPS platform: 'espn' — see the header.
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# SETTLE BEFORE SWITCHING TABS (law 8) — the tab bar paints seconds before
+# #244's launch routing settles, and the Rank stack steals a tap fired early.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.matches"
+
+# "New match with @<name>" is the mutual tile's header line and renders on no
+# other branch (skeleton, empty and error each render their own body).
+- extendedWaitUntil:
+    visible:
+      text: ".*New match with @.*"
+    timeout: 60000
+# The structural half: the fallback container mounted at all.
+- assertVisible:
+    id: "send-in-sleeper.unavailable"
+# THE STATED REASON half of acceptance.
+- assertVisible:
+    text: ".*Sending is Sleeper-only.*"
+# …and the send itself is still correctly absent on a non-Sleeper league.
+- assertNotVisible:
+    text: ".*Send in Sleeper.*"
+# FRAME the action row before tapping it: a 2-for-1 match tile is taller than
+# the viewport once the topbar, title, segment toggle and chip row are above it
+# (capture/matches@espn.yaml's RUN-1 finding), so the button can be mounted and
+# still off-screen. The matches list is a virtualized FlatList, so this
+# genuinely scrolls rather than matching a hierarchy ghost. id element, never
+# a text selector on a tap target.
+- scrollUntilVisible:
+    element:
+      id: "send-in-sleeper.copy"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+# THE USEFUL ACTION half of acceptance.
+- tapOn:
+    id: "send-in-sleeper.copy"
+# The 2.5s label flip. ASSERT IMMEDIATELY — no waitForAnimationToEnd and no
+# screenshot between the tap and this line; both spend part of the window
+# (COPIED_MS = 2500 in SendInSleeperButton.tsx).
+- assertVisible:
+    text: ".*Copied.*"
+# Law 23 — a green run is not a good capture; this frame gets eyeballed on the
+# tier-1 run.
+- takeScreenshot: p0-6-espn-copy-trade

@@ -7,23 +7,31 @@ appId: com.fantasytradefinder.app
 # interactive-stop: populated--espn-mutual
 #
 # CAPTURE REQUEST #9 (mobile UX audit 2026-08-09, §2) — the highest-leverage
-# single capture in that list. P0-6's finding is that a user in an IMPORTED
-# ESPN league gets a mutual match with NO send action and no explanation; every
+# single capture in that list. P0-6's finding was that a user in an IMPORTED
+# ESPN league got a mutual match with NO send action and no explanation; every
 # other match capture in the library is Sleeper, where Dismiss and Send both
-# render. P0-6 also needs a mockup, and screens/CLAUDE.md forbids redrawing a
-# mockup's "current" pane — so the fix is blocked on this frame existing.
+# render.
+#
+# P0-6 HAS NOW SHIPPED, so this frame is the AFTER evidence: an ESPN match
+# renders a stated reason plus a "Copy trade" action where it used to render
+# nothing. The pre-fix PNGs remain the before-evidence in git history and in
+# the screen library's committed frames — per screens/CLAUDE.md a mockup's
+# "current" pane is not redrawn, so the old frame keeps its job.
 #
 # ─────────────────────────────────────────────────────────────────────────
 # CRITICAL PRECONDITION: ENTER THROUGH THE LEAGUE PICKER.
 #
-# SendInSleeperButton.tsx:63-67 decides ESPN from the SESSION's league list:
+# SendInSleeperButton decides the platform from the SESSION's league list,
+# since audit P0-6 through the pure resolver utils/tradeText.resolveSendPlatform:
 #
-#     const isEspn = leagues.some(
-#       (lg) => lg.league_id === leagueId && lg.platform === 'espn');
+#     const platform = resolveSendPlatform(leagueId, leagues);
+#     const canSend  = platform === 'sleeper';
 #
-# and the comment two lines above says it FAILS OPEN — "a league id missing
-# from the cached list (demo league, stale cache) keeps the button". The only
-# writer of that cached list with `platform: 'espn'` stamped on it is
+# and that resolver still FAILS OPEN — a league id missing from the cached
+# list (demo league, stale cache) resolves to 'sleeper' and keeps the Send
+# button. The precondition is therefore MORE load-bearing after the fix, not
+# less: a cold cache would photograph Send where this frame claims the copy
+# fallback. The only writer of that cached list with `platform: 'espn'` on it is
 # LeaguePickerScreen's merge of GET /api/espn/leagues. So a launch-argument
 # jump straight to the Matches tab, or any entry that skips the picker, would
 # photograph the button PRESENT — the exact opposite of the finding, under a
@@ -108,14 +116,19 @@ tags: [capture, matches, espn]
     timeout: 60000
 # Dismiss PRESENT + Send ABSENT is the finding, stated as two assertions so a
 # regression in either direction fails the capture instead of mislabelling it.
-# Dismiss is the match variant's unconditional CTA (TradeCard.tsx:570); the
-# Send label is "Send in Sleeper" in every non-transient state of
-# SendInSleeperButton (:275-278), and the component returns null outright on
-# an ESPN league (:272).
+# Dismiss is the match variant's unconditional CTA; the Send label is "Send in
+# Sleeper" in every non-transient state of SendInSleeperButton, and the
+# component renders the P0-6 copy fallback on an ESPN league — "Send in
+# Sleeper" stays absent, and `send-in-sleeper.copy` must be present.
 - assertVisible:
     text: ".*Dismiss.*"
 - assertNotVisible:
     text: ".*Send in Sleeper.*"
+# audit P0-6 — the POSITIVE half. The assertNotVisible above passes before AND
+# after the fix (the new label is "Copy trade"), so on its own it is a
+# regression detector that can never go red. This id is the detector.
+- assertVisible:
+    id: "send-in-sleeper.copy"
 # RUN-1 FIX: the assertions were green and the CTA row was still half off the
 # bottom of the frame — a 2-for-1 match tile is taller than the viewport once
 # the topbar, title, segment toggle and chip row are above it, so the shutter
@@ -142,8 +155,8 @@ tags: [capture, matches, espn]
 # (awaitingQuery `enabled: segment === 'awaiting'`) against /api/trades/
 # awaiting, and `espn` seeds awaiting: 1. It documents the OTHER half of the
 # inbox under the same ESPN gate — the non-match TradeCard variant renders a
-# dedicated send ROW (TradeCard.tsx:586-595) which, here, collapses to
-# nothing at all.
+# dedicated send ROW which, here, renders the copy fallback instead of
+# collapsing to nothing.
 - tapOn:
     id: "matches.segment.awaiting"
 - extendedWaitUntil:
@@ -152,5 +165,9 @@ tags: [capture, matches, espn]
     timeout: 30000
 - assertNotVisible:
     text: ".*Send in Sleeper.*"
+# audit P0-6 — the POSITIVE half for the awaiting mount, same reasoning as the
+# mutual segment above.
+- assertVisible:
+    id: "send-in-sleeper.copy"
 - waitForAnimationToEnd
 - takeScreenshot: matches__populated--espn-awaiting

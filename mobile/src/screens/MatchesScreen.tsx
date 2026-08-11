@@ -616,6 +616,10 @@ export default function MatchesScreen() {
                 <TradeCardComp
                   variant="match"
                   data={matchToTradeCardShape(item, activeLeague?.league_id)}
+                  // audit P0-6 — names the league in the copy-trade fallback's
+                  // first line; optional all the way down, so a legacy
+                  // response without league_name degrades to "Trade proposal".
+                  leagueName={item.league_name}
                   onDismiss={() => handleDismiss(item)}
                   acting={dismissMutation.isPending}
                   showSend
@@ -706,6 +710,9 @@ export default function MatchesScreen() {
                 <TradeCardComp
                   variant="swipe"
                   data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
+                  // audit P0-6 — same as the mutual segment above: both mounts
+                  // render a SendInSleeperButton, so both name their league.
+                  leagueName={item.league_name}
                   showSend
                   // #249 — same call as the mutual list: no lock button
                   // anywhere on the Matches screen.

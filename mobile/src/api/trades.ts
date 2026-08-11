@@ -481,6 +481,10 @@ function normalizeTradeMatch(raw: any): TradeMatch {
     counterparty_user_id:        String(raw?.partner_id ?? ''),
     counterparty_username:       String(raw?.partner_name ?? raw?.partner_id ?? ''),
     created_at:                  String(raw?.matched_at ?? raw?.created_at ?? ''),
+    // Mobile READS dispositions and does not write them (audit P0-6): the
+    // client wrapper was unused and is gone; the writer is web/js/app.js
+    // (POST /api/trades/matches/<id>/disposition). Accept/decline UX on
+    // mobile is a NEXT.md item, not a missing call site.
     my_disposition:              decisionToDisposition(raw?.my_decision),
     their_disposition:           decisionToDisposition(raw?.their_decision),
   };
@@ -499,20 +503,6 @@ export async function getAllMatches(): Promise<TradeMatch[]> {
 export async function getMatches(): Promise<TradeMatch[]> {
   const res = await api.get<any>('/api/trades/matches');
   return asArray<any>(res).map(normalizeTradeMatch);
-}
-
-// POST /api/trades/matches/:id/disposition
-// Backend body shape: { decision: 'accept' | 'decline' }
-// Translate from the frontend's 'accepted'/'declined' vocabulary at the
-// API edge so screen code keeps its existing wording.
-export async function setMatchDisposition(
-  matchId: string,
-  disposition: 'accepted' | 'declined',
-) {
-  const decision = disposition === 'accepted' ? 'accept' : 'decline';
-  return api.post<any>(`/api/trades/matches/${matchId}/disposition`, {
-    decision,
-  });
 }
 
 // POST /api/trades/suppressions/undo — F3 (flag deck.fatigue). Lifts the

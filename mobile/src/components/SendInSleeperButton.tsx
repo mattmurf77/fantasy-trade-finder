@@ -1,7 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Linking, ViewStyle } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
+import { chalk, space, type } from '../theme/chalkline';
+import { copyText } from '../utils/clipboard';
+import {
+  formatTradeForClipboard,
+  resolveSendPlatform,
+  NO_SEND_REASON,
+  type SendSurface,
+} from '../utils/tradeText';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
@@ -15,10 +23,12 @@ import { ApiError } from '../api/client';
 
 // "Send in Sleeper". Renders on any real trade surface (found / matched /
 // suggested). Flag-gated: returns null when `trade.send_in_sleeper` is off.
-// Platform-gated too (#146): returns null when `leagueId` is an imported
-// ESPN league — the button proposes a REAL Sleeper trade, which is
-// meaningless there. Gated centrally here (every mount passes leagueId)
-// so future mounts can't forget it.
+// Platform-gated too (#146, widened by audit P0-6): the button proposes a
+// REAL Sleeper trade, which is meaningless on an imported ESPN / MFL /
+// Fleaflicker league. Those leagues now render a stated reason plus a
+// "Copy trade" action instead of nothing — the send path itself is
+// untouched and unreachable there. Gated centrally here (every mount
+// passes leagueId) so future mounts can't forget it.
 //
 // One button, two paths — chosen by whether the Sleeper account is linked in
 // this session (checked up front via GET /api/sleeper/link):
@@ -42,9 +52,29 @@ interface Props {
   onSent?: () => void;
   compact?: boolean;
   style?: ViewStyle;
+  // audit P0-6 — copy-trade fallback payload. Names are preferred; the
+  // formatter falls back per-index to givePlayerIds/receivePlayerIds, so a
+  // mount that forgets a prop degrades to ids, never to an empty clipboard.
+  // Undefined changes nothing on a Sleeper league (the branch never renders).
+  givePlayerNames?: string[];
+  receivePlayerNames?: string[];
+  opponentUsername?: string;
+  // Matches only — TradeMatch/AwaitingTrade carry league_name; the deck and
+  // the calculator do not, and the copy text drops the line when absent.
+  leagueName?: string;
+  // P0-7 (analytics): which mount this is. Declared HERE, in wave 1, so
+  // wave 2's instrumentation is a pure insertion into onPress/catch with no
+  // signature change. OPTIONAL in this commit because TradesScreen's mount is
+  // plumbed in a later commit; the close-out makes it required, at which point
+  // a missed mount is a compile error. P0-6 itself reads it nowhere and fires
+  // no events.
+  surface?: SendSurface;
 }
 
 type State = 'idle' | 'checking' | 'sending' | 'sent';
+
+// How long the "Copied" acknowledgement holds before reverting.
+const COPIED_MS = 2500;
 
 export default function SendInSleeperButton({
   leagueId,
@@ -55,20 +85,73 @@ export default function SendInSleeperButton({
   onSent,
   compact,
   style,
+  givePlayerNames,
+  receivePlayerNames,
+  opponentUsername,
+  leagueName,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read by P0-7's
+  // track() insertions in onPress/catch; destructured here so that commit is a
+  // pure insertion with no signature or scope change.
+  surface,
 }: Props) {
   const enabled = useFlag('trade.send_in_sleeper');
-  // #146 — reactive twin of api/espn.isEspnLeague: hide on imported ESPN
-  // leagues. Fail-open: a league id missing from the cached list (demo
-  // league, stale cache) keeps the button, matching pre-#146 behavior.
+  // #146 + audit P0-6 — reactive twin of api/espn.isEspnLeague, widened from
+  // "is it ESPN" to "which platform is it". Reactive (a useSession SELECTOR,
+  // not getState()) because this runs in render, unlike the imperative twins
+  // FreeAgentsScreen uses from callbacks. Fail-open, unchanged: a league id
+  // missing from the cached list (demo league, stale cache) resolves to
+  // 'sleeper' and keeps the button, matching pre-#146 behavior.
+  //
+  // The widening is a bug fix, not a generalization for its own sake: MFL and
+  // Fleaflicker league ids are NUMERIC, so POST /api/sleeper/propose's
+  // `league_id.isdigit()` check does not exclude them — those leagues rendered
+  // a live Send button that always 400s roster_not_found. Non-Sleeper leagues
+  // now render the copy fallback instead of a send that cannot work.
   const leagues = useSession((s) => s.leagues);
-  const isEspn = leagues.some(
-    (lg) => lg.league_id === leagueId && lg.platform === 'espn',
-  );
+  const platform = resolveSendPlatform(leagueId, leagues);
+  const canSend = platform === 'sleeper';
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
   // True while we're waiting for the user to come back from the connect
   // webview — the screen-focus handler consumes it to report the result.
   const awaitingLinkRef = useRef(false);
+  // Copy-affordance acknowledgement (audit P0-6). Local label flip, not a
+  // toast: this component mounts inside three different screens and has no
+  // toast host, and an Alert would put a dismiss between the user and their
+  // next action.
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  // No confirm — copying is non-destructive, instant, and reversible by not
+  // pasting. haptics.success() is honest here in a way it would not be for an
+  // async call: the write is synchronous and cannot fail. Re-tapping while
+  // "Copied" is showing re-arms the timer; the button is never disabled
+  // because, unlike the send path, there is no in-flight state to protect.
+  const onCopy = useCallback(() => {
+    copyText(
+      formatTradeForClipboard({
+        giveNames: givePlayerNames,
+        giveIds: givePlayerIds,
+        receiveNames: receivePlayerNames,
+        receiveIds: receivePlayerIds,
+        opponentUsername,
+        leagueName,
+      }),
+    );
+    haptics.success();
+    setCopied(true);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), COPIED_MS);
+  }, [
+    givePlayerNames, givePlayerIds, receivePlayerNames, receivePlayerIds,
+    opponentUsername, leagueName,
+  ]);
 
   // When the user returns from the login webview (success, failure, OR a manual
   // back-out), re-check the link from the server and tell them where they
@@ -270,7 +353,31 @@ export default function SendInSleeperButton({
     }
   }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
 
-  if (!enabled || isEspn) return null;
+  // The flag is still the kill switch for the WHOLE component on EVERY
+  // platform: off ⇒ null everywhere, i.e. exactly today's ESPN behaviour
+  // applied universally. That is why the copy fallback needs no flag of its
+  // own, and why `trade.send_in_sleeper` remains its rollback lever.
+  if (!enabled) return null;
+
+  // Non-Sleeper league: a send is impossible (ESPN/MFL/Fleaflicker are
+  // read-only imports and POST /api/sleeper/propose talks only to Sleeper's
+  // roster space). State the reason, offer the one action that works.
+  if (!canSend) {
+    return (
+      <View testID="send-in-sleeper.unavailable" style={[styles.unavailable, style]}>
+        <Text style={styles.reason} numberOfLines={2}>
+          {NO_SEND_REASON[platform]}
+        </Text>
+        <Button
+          testID="send-in-sleeper.copy"
+          label={copied ? 'Copied' : 'Copy trade'}
+          variant="ghost"
+          compact={compact}
+          onPress={onCopy}
+        />
+      </View>
+    );
+  }
 
   const label =
     state === 'sent' ? 'Proposal sent'
@@ -289,3 +396,11 @@ export default function SendInSleeperButton({
     />
   );
 }
+
+const styles = StyleSheet.create({
+  // Column, not row: the reason is a sentence and the action sits under it,
+  // so a narrow mount (the deck's compact action column) wraps the prose
+  // instead of squeezing the button.
+  unavailable: { gap: space.xs, alignItems: 'flex-start' },
+  reason: { ...type.bodySm, color: chalk.dim },
+});
