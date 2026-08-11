@@ -353,9 +353,9 @@ def respond_trade(cookie: str, host: str, year: int, league_id: str,
     """`import?TYPE=tradeResponse` — accept/reject/revoke a pending trade.
 
     Revoke is the near-term use (withdraw an offer FTF just sent); TRADE_ID
-    comes from `export?TYPE=pendingTrades` (owner-restricted). No route
-    exposes this yet — shipped alongside propose because the surface is
-    documented and the plumbing is identical."""
+    comes from `export?TYPE=pendingTrades` (owner-restricted —
+    mfl_service.fetch_pending_trades / GET /api/mfl/pending-trades). Routed
+    via POST /api/trades/respond-mfl (same flag + gates as propose)."""
     lid = str(league_id).strip()
     if not lid.isdigit():
         raise MflWriteError("league_id must be numeric", kind="input")

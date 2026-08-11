@@ -450,6 +450,68 @@ def fetch_rosters(league_id: str, year: int, host: str,
     return out if isinstance(out, dict) else {}
 
 
+def fetch_pending_trades(league_id: str, year: int, host: str,
+                         cookie: str, timeout: int = 15,
+                         _opener=None) -> dict:
+    """Fetch the `pendingTrades` export — the trade-lifecycle read surface
+    ("Send in MFL" follow-up: a sent proposal's status + its TRADE_ID for a
+    later `tradeResponse` revoke).
+
+    OWNER-RESTRICTED per MFL's Request Reference — unlike the other exports
+    this one requires the `MFL_USER_ID` cookie (no cookie → MflAuthError
+    without touching the network). Deliberately NOT best-effort like
+    `fetch_rosters`/`fetch_draft_results`: the caller is a user-facing route
+    that must distinguish an expired sign-in (re-prompt) from "no pending
+    trades" — degrading auth failures to `{}` would conflate the two.
+    """
+    if not str(league_id).strip().isdigit():
+        raise MflError(f"league_id must be numeric, got {league_id!r}",
+                       kind="input")
+    if not cookie:
+        raise MflAuthError("no MFL cookie")
+    return _fetch_one(host, year, "pendingTrades", league_id, cookie,
+                      timeout, _opener)
+
+
+def parse_pending_trades(raw_export: dict) -> list[dict]:
+    """Normalise a raw `pendingTrades` export to
+    [{"trade_id", "offering_team", "offered_to", "will_give_up" (list),
+      "will_receive" (list), "comments", "expires"}].
+
+    Asset lists are MFL asset ids from the OFFERING team's perspective
+    (players bare, picks `DP_…`/`FP_…`), split from MFL's comma-separated
+    strings (which carry trailing commas). TODO(live-verify): field names
+    follow MFL's Request Reference (`tradeProposal`'s param vocabulary:
+    offeringteam / offeredto / will_give_up / will_receive / comments /
+    expires) — no live owner-restricted capture exists yet; the operator
+    checklist in the send-in-mfl scope block covers capturing one and
+    aligning this parser if it disagrees.
+    """
+    def _assets(value) -> list[str]:
+        return [a.strip() for a in str(_txt(value) or "").split(",")
+                if a.strip()]
+
+    out: list[dict] = []
+    for tr in _as_list((raw_export or {}).get("pendingTrades", {})
+                       .get("pendingTrade")):
+        if not isinstance(tr, dict):
+            continue
+        trade_id = str(_txt(tr.get("trade_id")) or "").strip()
+        if not trade_id:
+            continue
+        expires_raw = str(_txt(tr.get("expires")) or "").strip()
+        out.append({
+            "trade_id":      trade_id,
+            "offering_team": str(_txt(tr.get("offeringteam")) or "").strip(),
+            "offered_to":    str(_txt(tr.get("offeredto")) or "").strip(),
+            "will_give_up":  _assets(tr.get("will_give_up")),
+            "will_receive":  _assets(tr.get("will_receive")),
+            "comments":      _clean_text(_txt(tr.get("comments"))) or None,
+            "expires":       int(expires_raw) if expires_raw.isdigit() else None,
+        })
+    return out
+
+
 def parse_roster_ids(raw_export: dict) -> dict[str, set]:
     """Normalise a raw `rosters` export to {franchise_id: {mfl_player_id,…}}."""
     out: dict[str, set] = {}

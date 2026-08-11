@@ -20,8 +20,17 @@ export interface ProposeMflTradePayload {
    *  synthetic `mfl:{league_id}.f{franchise_id}` id every non-linking member
    *  carries. The server parses + verifies the franchise id from it. */
   their_user_id: string;
-  give_player_ids: string[];     // FTF (Sleeper-space) ids — server reverse-maps
-  receive_player_ids: string[];  // and HARD-BLOCKS if any asset fails to map
+  /** MIXED asset arrays, exactly as every trade surface carries them:
+   *  players as FTF (Sleeper-space) ids AND picks as FTF pick ids
+   *  (`{league}_{season}_{round}_{orig_franchise}` owned picks,
+   *  `generic_pick_…` rungs). The server splits them: players reverse-map
+   *  through the crosswalk; owned picks encode to MFL `FP_…` strings against
+   *  the league's stored futureDraftPicks snapshot. ANY asset that fails to
+   *  map — including every generic rung, which names no concrete MFL pick —
+   *  HARD-BLOCKS the whole send (422 mfl_asset_unmapped); nothing is ever
+   *  silently dropped. */
+  give_player_ids: string[];
+  receive_player_ids: string[];
   comments?: string;
   // F1 signal spine (flag deck.signal_v2) — same contract as the Sleeper send.
   impression_id?: string;

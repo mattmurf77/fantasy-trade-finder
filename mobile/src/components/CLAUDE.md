@@ -27,7 +27,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `OutlookBiasReceipt` | One-line deck bias summary (flag `trade.outlook_direction`); Change opens `TradeDnaSheet` |
 | `TradeDnaSheet` | Trade DNA editor as a sheet over the guided deck: outlook + Chasing/Shopping + untouchables, autosaves every tap |
 | `SendInSleeperButton` | Flagged-beta Sleeper trade proposal AND the single platform router for the send action: mfl → `SendInMflButton`, other non-Sleeper platforms → null (structural test: `mobile/tests/check-send-button-platform.js`); pre-send validates via `/api/trades/validate`. testID `trades.send-sleeper-btn` |
-| `SendInMflButton` | Flagged (`trade.send_in_mfl`) MFL trade proposal via MFL's documented import API — mounted ONLY by `SendInSleeperButton`'s platform branch, never directly; same confirm/pre-flight/error-reconnect UX. testID `trades.send-mfl-btn` |
+| `SendInMflButton` | Flagged (`trade.send_in_mfl`) MFL trade proposal via MFL's documented import API — mounted ONLY by `SendInSleeperButton`'s platform branch, never directly; same confirm/pre-flight/error-reconnect UX. Asset arrays are mixed players + picks, passed verbatim — the server owns pick encoding and the never-drop-an-asset hard block. testID `trades.send-mfl-btn` |
 | `VerifyAccountBanner` | Dismissible "Verify your account" strip above the tab bar, unverified sessions only |
 | `SteerSlider` | Settings: 5-dot "We steer ↔ You steer" ranking-method selector |
 | `EspnLinkSheet` | Flag-gated (`espn.link`) link flow: ID/URL + cookie paste, or WebView sign-in (`espn.webview_capture`) → team match → summary |

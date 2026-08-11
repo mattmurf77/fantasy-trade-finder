@@ -168,3 +168,15 @@ One **server-fired** event (`SERVER_FIRED_EVENTS` in `backend/analytics_taxonomy
 `league_id` rides the envelope column (`record_event(league_id=…)`), not props. **No player ids and no PII in props** — counts and enums only. Trade-asset identity already lives in `deck_outcomes` (`propose` rows) where an `impression_id` is present.
 
 > **WAT note:** `trade_sent` is now *in the taxonomy* but deliberately **not** added to `WAT_LIVE` (`trade_proposed`/`match_swiped`/`calc_trade_evaluated`) — widening the WAT definition is a separate metric decision for the funnel owner, not part of this instrumentation change. The `metric:wat.sleeper_send` dark-caveat in `analytics_queries.py` remains accurate until that decision.
+
+---
+
+## Addendum 2026-08-11b — `trade_responded` (trade-lifecycle response leg, MFL)
+
+The response-leg sibling of `trade_sent`, added with the MFL trade-lifecycle routes (`POST /api/trades/respond-mfl`). Same taxonomy discipline: **server-fired** (`SERVER_FIRED_EVENTS`; `event_id=NULL`, never client-submittable), `platform` mandatory and non-null, counts/enums only.
+
+| Event | Fires | Props |
+|---|---|---|
+| `trade_responded` | **Confirmed success only** on `POST /api/trades/respond-mfl` — after MFL confirmed the `tradeResponse` import; never on validation, auth, or write failures. (No Sleeper respond route exists; if one ships, it reuses this event with `platform: "sleeper"`.) | `platform` (`mfl` — **required, never null**), `response` (`accept` \| `reject` \| `revoke` — the action requested), `outcome` (platform-confirmed result: `accepted` \| `rejected` \| `revoked`) |
+
+`league_id` rides the envelope column. **No trade contents, no MFL `trade_id`, no PII in props** — the funnel question is "are responses happening, and which kind", not which trade. Same WAT posture as `trade_sent`: in the taxonomy, not in `WAT_LIVE`.

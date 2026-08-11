@@ -22,14 +22,22 @@ import { ApiError } from '../api/client';
 //   • Reconnect = MFL sign-in (username/password via PlatformLinkSheet on
 //     the league picker), not a token-capture webview — so the reconnect
 //     CTA navigates to LeaguePicker rather than a dedicated connect screen.
-//   • The server HARD-BLOCKS on any asset the reverse crosswalk can't map
-//     (422 mfl_asset_unmapped) — surfaced honestly, nothing partial is sent.
+//   • The server HARD-BLOCKS on any asset it can't map (422
+//     mfl_asset_unmapped) — surfaced honestly, nothing partial is sent.
+//   • Picks ride along: the asset arrays every trade surface passes are
+//     MIXED (players + FTF pick ids). The server splits them and encodes
+//     owned picks to MFL `FP_…` strings against the league's stored
+//     futureDraftPicks snapshot; a pick it can't ground-truth (including
+//     generic "Early 1st" rungs) hard-blocks the send like any other
+//     unmapped asset. No client-side encoding, no client-side filtering.
 
 interface Props {
   leagueId: string;
   /** Synthetic MFL member id (`mfl:{league}.f{franchise}`) — what MFL league
    *  members carry as opponent_user_id on every trade surface. */
   theirUserId: string;
+  /** Mixed FTF asset ids (players + picks) — passed through verbatim; the
+   *  server owns all MFL encoding and the never-drop-an-asset hard block. */
   givePlayerIds: string[];
   receivePlayerIds: string[];
   impressionId?: string;

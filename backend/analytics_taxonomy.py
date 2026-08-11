@@ -128,6 +128,17 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     #   outcome       platform-confirmed status string ('proposed')
     # league_id rides the envelope column, not props. No player ids/PII.
     "trade_sent",
+    # trade_responded (2026-08-11, trade-lifecycle follow-up to trade_sent —
+    # tracking plan v2 addendum 2026-08-11): a CONFIRMED response to a
+    # pending platform trade. Fired server-side on the success path of
+    # POST /api/trades/respond-mfl only (no Sleeper respond route exists) —
+    # never on validation, auth, or write failures. Props (same discipline
+    # as trade_sent; `platform` mandatory and non-null):
+    #   platform  'mfl'  — REQUIRED, never null
+    #   response  accept | reject | revoke — the action the user requested
+    #   outcome   platform-confirmed result ('accepted'|'rejected'|'revoked')
+    # league_id rides the envelope column. No trade contents/ids/PII.
+    "trade_responded",
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",

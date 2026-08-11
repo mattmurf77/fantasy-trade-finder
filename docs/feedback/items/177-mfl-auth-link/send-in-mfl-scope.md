@@ -138,6 +138,41 @@
    `MFL_PASSWORD` / `MFL_VERIFY_LEAGUE_ID` from `secrets.local.env`); a real send fires
    only with `--send --offeredto --give --confirm`, and immediately revokes.
 
+## Trade-lifecycle follow-ups 2026-08-11 (branch `feat/mfl-trade-lifecycle`)
+
+All behind the SAME `trade.send_in_mfl` flag (deliberately no second knob); built dark,
+fixtures only, zero live MFL calls.
+
+1. **Draft picks in the send (asset coverage complete).** The mobile trade surfaces
+   already carry picks mixed into `give_player_ids`/`receive_player_ids`; the propose
+   route now splits them out (`server._is_ftf_pick_asset`) and encodes owned picks
+   (`{league}_{season}_{round}_{orig_franchise}`, `database.make_pick_id`) to MFL
+   `FP_FFFF_YYYY_R` strings via `server._mfl_encode_ftf_picks` — ground truth is the
+   stored `leagues.platform_future_picks` snapshot, never a client encoding. The
+   hard-block guarantee EXTENDS to picks: a pick absent from the snapshot, and every
+   generic `generic_pick_…` rung, 422s `mfl_asset_unmapped` (failing-first-proven in
+   `test_mfl_propose_route.py`). `/api/trades/validate`'s MFL branch mirrors it
+   (`asset_unmapped` now covers picks) and adds `pick_moved` (snapshot owner ≠
+   expected side — zero network). `DP_` current-year slot picks remain
+   pre-encoded-only (FTF picks carry no slot). Mobile change is contract-level only —
+   no client code filters or encodes picks.
+2. **`POST /api/trades/respond-mfl`** — routes the existing `mfl_write.respond_trade`
+   adapter (accept|reject|revoke; revoke = withdraw a sent offer). Same hard-verified
+   gate, cookie decrypt, credential-drop-on-auth-failure, and error codes as propose.
+   Fires the new server event `trade_responded` (taxonomy + tracking-plan addendum
+   2026-08-11b: `platform`/`response`/`outcome`, confirmed success only).
+3. **`GET /api/mfl/pending-trades`** — owner-restricted `export?TYPE=pendingTrades`
+   (`mfl_service.fetch_pending_trades` + `parse_pending_trades`; NOT best-effort so
+   auth failures surface as re-sign-in). Session-authed read. **Mobile surface
+   DEFERRED**: a pending-trades list is a new screen, not a small addition to the send
+   UX — follow-up once the lifecycle is live-verified.
+4. **Live-verify additions for the operator checklist:** (a) a live import accepting
+   the snapshot-derived `FP_` strings (the input shape WAS live-verified 2026-08-11:
+   `originalPickFor` 4-digit padded, round 1-based unpadded — league 62846/www45);
+   (b) a captured owner-restricted `pendingTrades` response body — the parser's field
+   vocabulary follows the Request Reference and carries TODO(live-verify);
+   (c) a live `tradeResponse` success/error body.
+
 ## Live-verification checklist (operator MUST run before ship — no live calls were made in this build)
 
 Against a real MFL **test league** (create one, or use the operator's own), with a real

@@ -40,6 +40,7 @@ why). Base URL builder: `mfl_service.export_url(host, year, type_, league_id)`
 | 7 | Players DB (id → name/position) | `https://{host}/{year}/export?TYPE=players&L={id}&JSON=1` | GET | `TYPE=players` | `fetch_league_bundle()` only — best-effort (degrades to `{}`) |
 | 8 | League rules (scoring config, for format detection #201) | `https://{host}/{year}/export?TYPE=rules&L={id}&JSON=1` | GET | `TYPE=rules` | `fetch_league_bundle()` (best-effort) and `fetch_scoring_inputs()` (best-effort) |
 | 9 | Draft results (draft-completion signal, #207) | `https://{host}/{year}/export?TYPE=draftResults&L={id}&JSON=1` | GET | `TYPE=draftResults` | `mfl_service.py:357` `fetch_draft_results()`; called from `server.py:11793` (`_detect_league_draft_status`, MFL branch, function starts `server.py:11745`) and `draft_board_service.py:311` (`PlatformFetchers.mfl_draft_results`) |
+| 10 | Pending trades (trade-lifecycle read, "Send in MFL" — **owner-restricted**, cookie required) | `https://{host}/{year}/export?TYPE=pendingTrades&L={id}&JSON=1` | GET | `TYPE=pendingTrades` + `Cookie: MFL_USER_ID=…` | `mfl_service.fetch_pending_trades()`; called from `server.py` `GET /api/mfl/pending-trades` (flag `trade.send_in_mfl`) — NOT best-effort: auth failures must surface as re-sign-in, not read as "no pending trades" |
 
 **Full call-site index (`file:line`):**
 
@@ -419,7 +420,7 @@ had already dropped from its export stayed in `platform_future_picks` until
 | # | Purpose | URL pattern | Method | Call site(s) |
 |---|---|---|---|---|
 | W1 | Propose a trade | `https://{host}/{year}/import?TYPE=tradeProposal&L={id}&OFFEREDTO={ffff}&WILL_GIVE_UP={a,b}&WILL_RECEIVE={c,d}&EXPIRES={unix}&JSON=1[&COMMENTS=…]` | GET | `mfl_write.propose_trade()`; called from `server.py` `POST /api/trades/propose-mfl` |
-| W2 | Respond to a pending trade | `https://{host}/{year}/import?TYPE=tradeResponse&L={id}&TRADE_ID={t}&RESPONSE=accept\|reject\|revoke&JSON=1` | GET | `mfl_write.respond_trade()` — **no route yet** (revoke is the near-term use) |
+| W2 | Respond to a pending trade | `https://{host}/{year}/import?TYPE=tradeResponse&L={id}&TRADE_ID={t}&RESPONSE=accept\|reject\|revoke&JSON=1` | GET | `mfl_write.respond_trade()`; called from `server.py` `POST /api/trades/respond-mfl` (same flag + hard-verified gate as propose; revoke is the near-term use — TRADE_ID comes from export #10, pendingTrades) |
 
 Both hit the league's assigned `wwwNN` host, same as exports (§1's gotcha —
 whether imports strictly require it is a TODO(live-verify), but the wwwNN host
@@ -443,16 +444,19 @@ API-key path for writes. The route decrypts via `server._mfl_cookie_for`
 | Asset | Format | Example | Notes |
 |---|---|---|---|
 | Player | bare MFL player id | `13130` | FTF works in Sleeper-id space; the route reverse-maps via the DP crosswalk (`by_mfl_sleeper` inverted, `server._sleeper_to_mfl_map`) and **HARD-BLOCKS** (422 `mfl_asset_unmapped`) if any asset fails — an offer never silently loses an asset |
-| Current-year pick | `DP_RR_SS`, **zero-based**, two-digit | `DP_02_05` = 3rd round, 6th pick | `mfl_write.encode_current_year_pick` |
-| Future pick | `FP_FFFF_YYYY_R` — **original-owner** franchise (4-digit zero-padded, matching `originalPickFor` in the §3 futureDraftPicks shape), year, 1-based round | `FP_0005_2027_1` | `mfl_write.encode_future_pick`; ground truth for construction lives in `leagues.platform_future_picks` |
+| Current-year pick | `DP_RR_SS`, **zero-based**, two-digit | `DP_02_05` = 3rd round, 6th pick | `mfl_write.encode_current_year_pick`. **Pre-encoded-only**: FTF's internal pick representation carries no draft SLOT, so no server path constructs `DP_` — only the `give_pick_assets` passthrough accepts it |
+| Future pick | `FP_FFFF_YYYY_R` — **original-owner** franchise (4-digit zero-padded, matching `originalPickFor` in the §3 futureDraftPicks shape), year, 1-based round | `FP_0005_2027_1` | `mfl_write.encode_future_pick`. **Wired end-to-end**: the propose/validate routes split FTF pick ids (`{league}_{season}_{round}_{orig_franchise}`, `database.make_pick_id`) out of the mixed asset arrays and encode them via `server._mfl_encode_ftf_picks` — ground truth is the stored `leagues.platform_future_picks` snapshot, NEVER a client encoding; a pick absent from the snapshot (or any generic `generic_pick_…` rung) hard-blocks the send |
 | Blind-bid dollars | `BB_10.50` | | documented by MFL, **not built** |
 
-**TODO(live-verify)** — the encodings match MFL's Request Reference examples
-but no live import has confirmed them: padding widths, `DP_` zero-basing in
-practice, and whether `JSON=1` applies to import responses are all on the
-operator checklist. `_parse_import_response` accepts both `<status>OK</status>`
-XML and `{"status":"OK"}` JSON and **refuses to report success on any
-ambiguous body**.
+**Shape verification status:** the `FP_` inputs were verified against a LIVE
+public `futureDraftPicks` export 2026-08-11 (league 62846, host `www45`):
+`originalPickFor` arrives 4-digit zero-padded (`"0001"`), `round` 1-based
+unpadded (`"1"`) — exactly what `encode_future_pick` emits. **Still
+TODO(live-verify)** (operator checklist): whether a live *import* accepts
+those `FP_` strings, `DP_` zero-basing in practice, and whether `JSON=1`
+applies to import responses. `_parse_import_response` accepts both
+`<status>OK</status>` XML and `{"status":"OK"}` JSON and **refuses to report
+success on any ambiguous body**.
 
 ### v1 limitation — single-linker leagues (operator-accepted 2026-08-11)
 
@@ -483,11 +487,38 @@ logged and never an `api_call` event property; observability rides
 `observe_call("mfl", "import.tradeProposal" | "import.tradeResponse")` with
 the same safe props as exports (league_id, host, status, latency, error kind).
 
+### Trade lifecycle (routes)
+
+The full lifecycle is routed, all behind the ONE `trade.send_in_mfl` flag:
+
+1. **Propose** — `POST /api/trades/propose-mfl` (W1). Fires the server-side
+   `trade_sent` event on confirmed success.
+2. **Read status** — `GET /api/mfl/pending-trades` (export #10,
+   owner-restricted, cookie-attached; `mfl_service.fetch_pending_trades` +
+   `parse_pending_trades`). Surfaces each pending trade's `trade_id`.
+   **TODO(live-verify):** the response field vocabulary (`trade_id` /
+   `offeringteam` / `offeredto` / `will_give_up` / `will_receive` /
+   `comments` / `expires`) follows MFL's Request Reference; no live
+   owner-restricted capture exists yet — capture one into
+   `docs/references/mfl/` and align the parser if it disagrees.
+3. **Respond** — `POST /api/trades/respond-mfl` (W2:
+   `RESPONSE=accept|reject|revoke`). Same hard-verified gate + error codes as
+   propose; fires the server-side `trade_responded` event
+   (`platform`/`response`/`outcome`) on confirmed success only.
+
+No mobile surface consumes 2–3 yet (deliberate: a pending-trades list is a
+new screen, deferred as a follow-up; the API contract ships first so the
+operator can verify the lifecycle live).
+
 ### Pre-flight (#180 parity)
 
 `POST /api/trades/validate` routes MFL-linked leagues to a fresh `rosters`
 export (`mfl_service.fetch_rosters` + `parse_roster_ids`, best-effort `{}`)
 and reports advisory `player_moved` / `roster_not_found` findings plus
-`asset_unmapped` (the advisory mirror of the propose route's hard block).
-Roster limits, deadlines and commissioner locks are delegated to MFL — its
-import enforces league rules, same philosophy as the Sleeper path.
+`asset_unmapped` (the advisory mirror of the propose route's hard block —
+players against the crosswalk AND picks against the stored futureDraftPicks
+snapshot) and `pick_moved` (the pick twin of `player_moved`: the snapshot
+says the pick's current owner isn't the expected side — zero-network, reads
+the stored snapshot only). Roster limits, deadlines and commissioner locks
+are delegated to MFL — its import enforces league rules, same philosophy as
+the Sleeper path.
