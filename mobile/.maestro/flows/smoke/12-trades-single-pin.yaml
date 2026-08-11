@@ -1,0 +1,165 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TRD-04
+# profile: standard
+# flags: release
+# tags: [smoke, trades]
+#
+# FEEDBACK #298 REGRESSION GUARD — "All versions should still have the find a
+# trade UI and let the user accept / decline the trades as any other suggested
+# trade."
+#
+# On v1.12.0, pinning exactly ONE asset flipped `singlePin` true and two null-
+# gates in TradesScreen.tsx removed (a) the Find-a-Trade button and (b) the
+# entire deck wrapper — which carried the swipe handlers, the
+# `trades.pass-btn` / `trades.like-btn` row and the VoiceOver like/pass
+# actions, every one of which funnels into `advance()`. This flow asserts all
+# three survive a single pin. Every assertion below FAILS on that build.
+#
+# ENTRY is the launch argument, not a tab tap. The TRADE AWAY / TRADE FOR
+# board is `finderMode === 'player'` only (TradesScreen.tsx:4167), and the
+# mode-bar chips that used to reach it are hidden under `trades.sheet_targeting`
+# (ON in release). Two-launch dance per capture/rank-home.yaml: launch 1 signs
+# in normally (that is what writes the session), launch 2 carries the argument
+# with `clearState: false` + `stopApp: true` so the session restores AND a
+# fresh process picks up new argv.
+#
+# `onboarding.trades_first` is FALSE in the release fixture, so `firstRun`
+# (TradesScreen.tsx:297) is false and the board renders — the pinned surface
+# is unreachable on a build where that flag is on.
+#
+# 60s budget on the generate covers the trade-job poll backoff (800→4000ms),
+# matching 06-trades-deck.yaml. Deck order is server-chosen: structural
+# assertions only, never a player name.
+tags: [smoke, trades]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in — a raced inputText submits a partial username and
+# books a real VCR miss (law 10). eraseText first makes the retry idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+
+# ── enter player mode, where a single asset can be pinned ────────────────
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: Trades
+      FTFTestRouteParams: 'mode=player'
+# First Trades visit auto-opens the team-outlook sheet (Contender pre-selected).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 30000
+
+# ── pin exactly one asset ────────────────────────────────────────────────
+# `visible:` counts off-screen ScrollView children (law 2), so scroll the
+# board into full view before tapping it.
+- scrollUntilVisible:
+    element:
+      id: "trades.board.add-away"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "trades.board.add-away"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.*"
+    timeout: 20000
+# The picker keeps the sheet open after a pick so targets can be stacked;
+# Done closes it. Exactly ONE pick — two would clear `singlePin` and this
+# flow would assert the ordinary multi-pin deck instead of the pinned one.
+- tapOn:
+    id: "calc.picker.row.*"
+- tapOn:
+    id: "calc.picker.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "calc.picker.done"
+    timeout: 10000
+
+# ── #298 assertion 1: the CTA survives the pin ───────────────────────────
+# On v1.12.0 this element is `null` (TradesScreen.tsx:4232, the
+# `{!firstRun && singlePin ? null : (…)}` gate) and this step fails.
+- scrollUntilVisible:
+    element:
+      id: "trades.find-btn"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible:
+    id: "trades.find-btn"
+- tapOn:
+    id: "trades.find-btn"
+
+# ── #298 assertion 2: a pinned deck renders, with its position counter ───
+# On v1.12.0 the whole deck wrapper is gated out (TradesScreen.tsx:4569), so
+# generated cards had nowhere to render and `trades.card-top` never appears.
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+- assertVisible:
+    id: "trades.single-pin-deck-count"
+
+# ── #298 assertion 3: accept/decline are back on the pinned surface ──────
+# Both buttons live inside the gated-out wrapper on v1.12.0. Assert BOTH
+# exist, then exercise the accept path — the reporter's "let the user accept
+# / decline the trades as any other suggested trade", verbatim.
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-btn"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible:
+    id: "trades.pass-btn"
+- assertVisible:
+    id: "trades.like-btn"
+- tapOn:
+    id: "trades.like-btn"
+# advance() dispositions the card and fronts the next one; the CTA is still
+# on screen either way (it is no longer conditional on the pin).
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- takeScreenshot: smoke-12-trades-single-pin
