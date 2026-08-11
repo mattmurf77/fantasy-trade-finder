@@ -20750,11 +20750,13 @@ def mfl_auth_import():
 
 @app.route("/api/trades/validate", methods=["POST"])
 def trades_validate():
-    """Pre-send checks for a Sleeper trade. Body mirrors /api/trades/propose:
-    {league_id, their_user_id (or their_roster_id), give_player_ids[],
+    """Pre-send checks for a Sleeper OR MFL trade. Body mirrors the propose
+    routes: {league_id, their_user_id (or their_roster_id), give_player_ids[],
     receive_player_ids[]}. → {ok, checked, warnings:[{code,severity,message}]}.
-    `checked:false` = Sleeper data unreachable (nothing validated)."""
-    if not is_enabled("trade.send_in_sleeper"):
+    `checked:false` = platform data unreachable (nothing validated). An
+    MFL-linked league (flag `trade.send_in_mfl`) validates against a fresh MFL
+    `rosters` export; everything else takes the Sleeper path unchanged."""
+    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")
@@ -20769,6 +20771,18 @@ def trades_validate():
     receive = [str(p) for p in (body.get("receive_player_ids") or [])]
     if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
         return jsonify({"error": "bad_request"}), 400
+
+    # ── "Send in MFL" branch: an MFL-linked league id (numeric, same as
+    # Sleeper's — the #149/#150/#200 misroute class) must never fall through
+    # to the Sleeper fetches below. Server-authoritative platform routing via
+    # the leagues row, mirroring is_linked_platform_league's discrimination.
+    if is_enabled("trade.send_in_mfl"):
+        from .database import get_platform_league as _gpl
+        _mfl_row = _gpl(league_id, "mfl")
+        if _mfl_row:
+            return _validate_mfl_trade(sess, user_id, _mfl_row, league_id,
+                                       their_user_id, body.get("their_franchise_id"),
+                                       give, receive)
 
     warnings: list[dict] = []
 
@@ -20854,6 +20868,287 @@ def trades_validate():
                 })
 
     return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+
+# ── "Send in MFL" (flag `trade.send_in_mfl`) ─────────────────────────────────
+#
+# The MFL analogue of "Send in Sleeper" — but riding MFL's DOCUMENTED import
+# API (`import?TYPE=tradeProposal`, sanctioned for third-party clients) with
+# the `MFL_USER_ID` cookie #177 already stores, so the risk profile is the
+# inverse of the Sleeper path. Adapter: backend/mfl_write.py (pure,
+# opener-injectable). Scope block + live-verification checklist:
+# docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md.
+
+#: Reverse crosswalk cache: {sleeper_id: mfl_id}, rebuilt only when the shared
+#: DP crosswalk object itself refreshes (espn_service's 24h TTL).
+_mfl_reverse_xwalk_cache: tuple | None = None
+
+
+def _sleeper_to_mfl_map() -> dict:
+    """Sleeper player id → MFL player id, inverted from the shared crosswalk's
+    `by_mfl_sleeper` (mfl_id is DP's primary key, so coverage is near-total).
+    First-wins on the rare many-MFL-ids-to-one-sleeper collision, matching the
+    forward map's own setdefault semantics."""
+    global _mfl_reverse_xwalk_cache
+    xw = _shared_crosswalk()
+    cached = _mfl_reverse_xwalk_cache
+    if cached is not None and cached[0] is xw:
+        return cached[1]
+    inv: dict = {}
+    for mid, sid in xw.by_mfl_sleeper.items():
+        inv.setdefault(sid, mid)
+    _mfl_reverse_xwalk_cache = (xw, inv)
+    return inv
+
+
+def _mfl_franchise_from_member_id(league_id: str, member_id) -> str | None:
+    """Parse the franchise id out of a synthetic MFL member id
+    (`mfl:{league_id}.f{franchise_id}` — server._mfl_member_id's format).
+    None when the value isn't a synthetic id for THIS league."""
+    m = re.match(rf"^mfl:{re.escape(str(league_id))}\.f(\d+)$",
+                 str(member_id or ""))
+    return m.group(1) if m else None
+
+
+def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
+                        their_franchise_in, give, receive):
+    """#180-parity pre-flight for an MFL send: advisory only, never blocks.
+    Checks the reverse crosswalk (mirror of the propose route's hard block)
+    and each side's players against a fresh MFL `rosters` export."""
+    from . import mfl_service as _mfl
+    from . import mfl_write as _mfl_write
+
+    warnings: list[dict] = []
+    norm = _mfl_write.normalize_franchise_id
+
+    my_fid = row.get("platform_my_team")
+    their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
+                 else _mfl_franchise_from_member_id(league_id, their_user_id))
+    if not my_fid or not their_fid:
+        return jsonify({"ok": True, "checked": True, "warnings": [{
+            "code": "roster_not_found", "severity": "blocking",
+            "message": "Couldn't match one of the teams to a franchise in "
+                       "this MFL league — a re-sync may be needed.",
+        }]})
+
+    # Advisory mirror of the propose route's reverse-crosswalk HARD block.
+    inverse = _sleeper_to_mfl_map()
+    unmapped = [p for p in give + receive if p not in inverse]
+    if unmapped:
+        n = len(unmapped)
+        warnings.append({
+            "code": "asset_unmapped", "severity": "blocking",
+            "message": (f"{n} asset{'s' if n != 1 else ''} in this trade "
+                        "couldn't be matched to an MFL player id — the send "
+                        "will be blocked rather than dropping them."),
+        })
+
+    year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    host = row.get("platform_host")
+    cookie = (_mfl_cookie_for(sess, user_id)
+              if row.get("platform_auth") == "cookie" else None)
+    rosters: dict = {}
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+        rosters = _mfl.parse_roster_ids(
+            _mfl.fetch_rosters(league_id, year, host, cookie=cookie))
+    except _mfl.MflError:
+        rosters = {}
+    if not rosters:
+        # MFL unreachable — nothing roster-checkable. checked reflects whether
+        # the crosswalk pass at least ran to a finding.
+        return jsonify({"ok": True, "checked": bool(warnings),
+                        "warnings": warnings})
+
+    by_norm = {norm(fid): ids for fid, ids in rosters.items() if fid}
+    mine = by_norm.get(norm(my_fid))
+    theirs = by_norm.get(norm(their_fid))
+    if mine is None or theirs is None:
+        warnings.append({
+            "code": "roster_not_found", "severity": "blocking",
+            "message": "Couldn't match one of the teams to a roster in this "
+                       "MFL league — a re-sync may be needed.",
+        })
+        return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+    moved = [p for p in give if p in inverse and inverse[p] not in mine]
+    moved += [p for p in receive if p in inverse and inverse[p] not in theirs]
+    if moved:
+        n = len(moved)
+        warnings.append({
+            "code": "player_moved", "severity": "blocking",
+            "message": (f"{n} player{'s' if n != 1 else ''} in this trade "
+                        "are no longer on the expected roster (dropped or "
+                        "already traded) — MFL will reject the offer."),
+        })
+    # Roster limits / trade deadline / commissioner locks are delegated to
+    # MFL (its import enforces league rules), same philosophy as Sleeper.
+    return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+
+@app.route("/api/trades/propose-mfl", methods=["POST"])
+def propose_trade_to_mfl():
+    """Send a built trade into MyFantasyLeague as a real pending proposal.
+
+    Body: {league_id, their_user_id (the synthetic `mfl:{L}.f{FFFF}` member id
+           every MFL counterparty carries) or their_franchise_id,
+           give_player_ids[], receive_player_ids[]   (FTF/Sleeper-space ids),
+           give_pick_assets?[], receive_pick_assets?[]  (pre-encoded MFL
+           `DP_RR_SS` / `FP_FFFF_YYYY_R` strings — no mobile sender yet),
+           comments?, expires?, impression_id?}
+    Success → {status:"proposed"}. Structured errors (client maps to
+    reconnect / fallback UX):
+      404 feature_disabled | 403 verification_required | 404 mfl_not_linked
+      409 mfl_franchise_unknown | 409 mfl_not_connected | 409 mfl_auth_expired
+      422 mfl_asset_unmapped (+ unmapped[]) | 502 mfl_write_failed
+      400 bad_request
+
+    Sibling of POST /api/trades/propose (Sleeper) rather than a platform
+    switch on it: both platforms' league ids are numeric (#149/#150/#200
+    misroute class), so platform routing is explicit — the client picks the
+    route by the league's platform, and each route re-verifies its own
+    platform server-side via the leagues row.
+    """
+    if _TEST_MODE:
+        # Fail closed: there is no legitimate automated send (mirrors the
+        # Sleeper propose route's 599 under the UI-test harness).
+        return jsonify({"error": "test_mode_propose_disabled"}), 599
+    if not is_enabled("trade.send_in_mfl"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    # Same P1 hard gate as the Sleeper propose route: this writes into the
+    # user's REAL MFL league — only a session that proved control of this
+    # user_id may fire it. No grace period.
+    if not sess.get("verified"):
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=hard_route", user_id, request.method, request.path)
+        return jsonify({"error": "verification_required"}), 403
+
+    from . import mfl_service as _mfl
+    from . import mfl_write as _mfl_write
+    from .database import get_platform_league, delete_mfl_credential
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    their_member_id = body.get("their_user_id")
+    their_franchise_in = body.get("their_franchise_id")
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    give_picks = [str(p) for p in (body.get("give_pick_assets") or [])]
+    receive_picks = [str(p) for p in (body.get("receive_pick_assets") or [])]
+    if not league_id.isdigit() or \
+            (their_member_id is None and their_franchise_in is None):
+        return jsonify({"error": "bad_request"}), 400
+    if not (give or receive or give_picks or receive_picks):
+        return jsonify({"error": "bad_request"}), 400
+    for p in give_picks + receive_picks:
+        if not _mfl_write.is_pick_asset_id(p):
+            return jsonify({"error": "bad_request",
+                            "message": f"bad pick asset encoding: {p}"}), 400
+
+    # Server-authoritative platform + franchise resolution from the leagues
+    # row — the client never asserts its own franchise id.
+    row = get_platform_league(league_id, "mfl")
+    if not row:
+        return jsonify({"error": "mfl_not_linked",
+                        "message": "Link this MFL league first."}), 404
+    if str(row.get("user_id") or "") != str(user_id):
+        # One linker per platform-league row; only the linker has a franchise
+        # binding, so nobody else can send from it.
+        return jsonify({"error": "mfl_not_linked",
+                        "message": "This MFL league isn't linked to your "
+                                   "account."}), 404
+    my_fid = str(row.get("platform_my_team") or "").strip()
+    if not my_fid:
+        return jsonify({"error": "mfl_franchise_unknown",
+                        "message": "Couldn't determine your franchise — "
+                                   "re-link this league."}), 409
+
+    their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
+                 else _mfl_franchise_from_member_id(league_id, their_member_id))
+    if not their_fid or not str(their_fid).isdigit():
+        return jsonify({"error": "bad_request",
+                        "message": "Couldn't resolve the counterparty "
+                                   "franchise."}), 400
+    try:
+        if (_mfl_write.normalize_franchise_id(their_fid)
+                == _mfl_write.normalize_franchise_id(my_fid)):
+            return jsonify({"error": "bad_request",
+                            "message": "You can't send a trade to your own "
+                                       "franchise."}), 400
+    except _mfl_write.MflWriteError:
+        return jsonify({"error": "bad_request"}), 400
+
+    cookie = _mfl_cookie_for(sess, user_id)
+    if not cookie:
+        return jsonify({"error": "mfl_not_connected",
+                        "message": "Sign in with MFL first."}), 409
+
+    # Reverse crosswalk (FTF/Sleeper ids → MFL ids) — HARD BLOCK on any miss.
+    # An offer must never silently drop an asset: a partially-mapped trade is
+    # a DIFFERENT trade, so the send refuses instead.
+    inverse = _sleeper_to_mfl_map()
+    unmapped = [p for p in give + receive if p not in inverse]
+    if unmapped:
+        return jsonify({"error": "mfl_asset_unmapped",
+                        "unmapped": unmapped,
+                        "message": "Some assets couldn't be matched to MFL "
+                                   "player ids, so nothing was sent."}), 422
+
+    year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    host = row.get("platform_host")
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+    except _mfl.MflError as e:
+        return _platform_error_response(e, "mfl")
+
+    expires = body.get("expires")
+    req = _mfl_write.ProposeTradeRequest(
+        league_id=league_id,
+        offered_to=their_fid,
+        will_give_up=[inverse[p] for p in give] + give_picks,
+        will_receive=[inverse[p] for p in receive] + receive_picks,
+        comments=(str(body.get("comments") or "").strip() or None),
+        expires=int(expires) if expires is not None else None,
+    )
+    try:
+        result = _mfl_write.propose_trade(cookie, host, year, req)
+    except _mfl_write.MflWriteAuthError as e:
+        # Dead/rejected cookie — drop the stored credential so the client
+        # re-prompts MFL sign-in (same treatment as mfl_auth_import).
+        log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
+        try:
+            delete_mfl_credential(user_id)
+        except Exception:
+            log.exception("mfl propose: credential delete failed")
+        sess.pop("mfl_cookie", None)
+        return jsonify({
+            "error": "mfl_auth_expired",
+            "message": "Your MFL sign-in expired — sign in again.",
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 409
+    except _mfl_write.MflWriteError as e:
+        log.warning("mfl propose write-failed [%s]: %s", e.kind,
+                    getattr(e, "detail", None))
+        return jsonify({
+            "error": "mfl_write_failed",
+            "kind": e.kind,
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 502
+
+    # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
+    # route; additive/optional, only reached on a successful MFL import.
+    _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    log.info("mfl propose: user=%s league=%s offered_to=f%s assets=%d/%d",
+             user_id, league_id, their_fid,
+             len(give) + len(give_picks), len(receive) + len(receive_picks))
+    return jsonify({"status": "proposed", "mfl_status": result.get("status")})
 
 
 # ── Fleaflicker ──────────────────────────────────────────────────────────────

@@ -421,6 +421,40 @@ def fetch_future_draft_picks(league_id: str, year: int, host: str,
     return out if isinstance(out, dict) else {}
 
 
+def fetch_rosters(league_id: str, year: int, host: str,
+                  cookie: str | None = None, timeout: int = 15,
+                  _opener=None) -> dict:
+    """Fetch the `rosters` export on its own — the "Send in MFL" pre-flight
+    (#180 parity: /api/trades/validate re-checks that each traded asset is
+    still on the expected franchise before the handoff).
+
+    Best-effort like `fetch_draft_results`/`fetch_future_draft_picks`: any
+    MflError degrades to `{}` — validation then reports `checked: false`
+    rather than blocking a send on a flaky read. Same export
+    `fetch_league_bundle` pulls at link time (endpoint #5, integrations doc)."""
+    if not str(league_id).strip().isdigit():
+        return {}
+    try:
+        out = _fetch_one(host, year, "rosters", league_id, cookie,
+                         timeout, _opener)
+    except MflError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def parse_roster_ids(raw_export: dict) -> dict[str, set]:
+    """Normalise a raw `rosters` export to {franchise_id: {mfl_player_id,…}}."""
+    out: dict[str, set] = {}
+    for fr in _as_list((raw_export or {}).get("rosters", {}).get("franchise")):
+        if not isinstance(fr, dict):
+            continue
+        fid = fr.get("id")
+        ids = {str(e.get("id")) for e in _as_list(fr.get("player"))
+               if isinstance(e, dict) and e.get("id")}
+        out[fid] = ids
+    return out
+
+
 def fetch_scoring_inputs(league_id: str, year: int, host: str,
                          cookie: str | None = None, timeout: int = 15,
                          _opener=None) -> dict:
