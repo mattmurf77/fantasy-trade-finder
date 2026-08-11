@@ -94,20 +94,29 @@ function propsOf(node) {
   }
   return names;
 }
-/** The nearest enclosing JSX expression text, up to `levels` parents. */
-function enclosingConditionText(node, levels = 6) {
-  let out = '';
-  let p = node.parent;
-  for (let i = 0; p && i < levels; i += 1, p = p.parent) {
-    if (ts.isConditionalExpression(p)) out += p.condition.getText() + '\n';
+/** The condition of the INNERMOST conditional (`? :` or `&&`) that wraps
+ *  `node` — and only that one.
+ *
+ *  This deliberately does NOT accumulate ancestor conditions. An earlier
+ *  version walked six parents and concatenated them, and it FALSE-PASSED the
+ *  sabotage that makes the relocated tier badge unconditional: the badge sits
+ *  inside the cluster's own `posRank || (denseSingleLine && tier) ? …`
+ *  ternary, so the ancestor text contained "denseSingleLine" no matter what
+ *  the badge's own gate said. A gate assertion has to read the gate. */
+function nearestConditionText(node) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isConditionalExpression(p)) return p.condition.getText();
     if (
       ts.isBinaryExpression(p) &&
       p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
     ) {
-      out += p.left.getText() + '\n';
+      return p.left.getText();
     }
+    // Don't escape the enclosing element: if we reach a JSX element boundary
+    // without finding a conditional, this node is unconditional.
+    if (ts.isJsxElement(p) || ts.isJsxFragment(p)) return '';
   }
-  return out;
+  return '';
 }
 
 const CARD_REL = 'src/components/PlayerCard.tsx';
@@ -184,7 +193,7 @@ const line2 = findAll(
 assert(!!line2, '#299 the dense line-2 View is findable');
 if (line2) {
   assert(
-    /denseSingleLine/.test(enclosingConditionText(line2)),
+    /denseSingleLine/.test(nearestConditionText(line2)),
     '#299 line 2 renders only when NOT in single-line mode',
     'an unconditional line 2 inside a 32pt box clips the tier badge',
   );
@@ -213,7 +222,7 @@ if (cluster) {
   );
   if (badges.length === 1) {
     assert(
-      /denseSingleLine/.test(enclosingConditionText(badges[0])),
+      /denseSingleLine/.test(nearestConditionText(badges[0])),
       '#299 the relocated badge is gated on `denseSingleLine`',
       'unconditional would double-render the badge for Tiers/FA rows, which still have it on line 2',
     );
@@ -317,7 +326,7 @@ const inCardBack = findAll(
 assert(!!inCardBack, '#302 the in-card back link still exists for the root-stack push');
 if (inCardBack) {
   assert(
-    /!isTabRoot/.test(enclosingConditionText(inCardBack)),
+    /!isTabRoot/.test(nearestConditionText(inCardBack)),
     '#302 the in-card back link does NOT render on the tab root',
     'it would be a second, duplicate back control — and a duplicate testID on screen',
   );
