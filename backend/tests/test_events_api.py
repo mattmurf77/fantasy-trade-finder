@@ -249,11 +249,15 @@ def test_unknown_type_dropped(harness):
         _envelope(1, event_type="screen_viewed"),
         _envelope(2, event_type="totally_made_up", props={}),
         _envelope(3, event_type="find_trades_tapped", props={}),
+        # A name that LOOKS right — the single-`c` misspelling of the P0-7
+        # send leg. The guard has to be armed against plausible typos, not
+        # only against "totally_made_up".
+        _envelope(4, event_type="sleeper_send_suceeded", props={}),
     ], token=TOKEN)
     body = r.get_json()
-    # accepted counts the dropped-unknown (accepted-and-dropped); dropped=1
-    assert body["accepted"] == 3 and body["dropped"] == 1 and body["deduped"] == 0
-    _assert_invariant(body, 3)
+    # accepted counts the dropped-unknown (accepted-and-dropped); dropped=2
+    assert body["accepted"] == 4 and body["dropped"] == 2 and body["deduped"] == 0
+    _assert_invariant(body, 4)
     types = [row._mapping["event_type"] for row in _rows(engine)]
     assert types == ["screen_viewed", "find_trades_tapped"]   # unknown never landed
 
@@ -376,3 +380,102 @@ def test_guide_events_accepted(harness):
     ]).get_json()
     _assert_invariant(body, 3)
     assert body["accepted"] == 3 and body["dropped"] == 0
+
+
+# --- P0 remediation batch (2026-08-11 addendum) ---------------------------
+
+def test_p0_remediation_events_accepted(harness):
+    """All 16 P0-batch client events land with their full prop sets.
+
+    dropped == 0 AND an exact set(by_type) are the two assertions a
+    default-deny allowlist can otherwise fail silently — this is the test
+    that would have caught invite_shared, deck_regenerated and
+    celebration_fired.
+    """
+    client, engine = harness
+    specs = [
+        ("tab_selected",  {"tab": "league", "from_tab": "trades",
+                           "refocus": False, "intercepted": False}),
+        ("league_view",   {"surface": "league_rankings", "state": "ready",
+                           "platform": "sleeper", "team_count": 12,
+                           "basis": "consensus", "subset": "all",
+                           "starters_available": True, "outlook_shown": False,
+                           "is_tab_root": True}),
+        ("league_basis_changed",   {"basis": "personal", "from": "consensus",
+                                    "boards_differ": True,
+                                    "team_focused": False}),
+        ("league_subset_changed",  {"subset": "starters", "from": "all",
+                                    "source": "chart", "filter_count": 0,
+                                    "picks_stripped": False}),
+        ("league_team_opened",     {"via": "row", "rank": 3,
+                                    "basis": "consensus", "subset": "all",
+                                    "filter_count": 0}),
+        ("league_home_action_tapped", {"action": "find_trades"}),
+        ("sleeper_send_attempted", {"surface": "deck", "give_n": 2,
+                                    "receive_n": 1, "from_deck": True,
+                                    "has_target": True}),
+        ("sleeper_send_failed",    {"surface": "awaiting",
+                                    "error_code": "sleeper_rejected",
+                                    "status": 409, "kind": "graphql",
+                                    "give_n": 2, "receive_n": 1,
+                                    "from_deck": False}),
+        ("invite_shared",          {"league_id": "123456789012345678"}),
+        ("invite_link_opened",     {"league_id": "123456789012345678",
+                                    "has_ref": True, "format": "legacy",
+                                    "auth_state": "account_only"}),
+        ("invite_league_pinned",   {"league_id": "123456789012345678",
+                                    "source": "picker_autopin",
+                                    "ms_since_open": 4200}),
+        ("invite_pin_failed",      {"league_id": "123456789012345678",
+                                    "reason": "not_member"}),
+        ("experiment_exposed",     {"experiment": "onboarding_v2_rollout",
+                                    "variant": "v2", "unit": "device",
+                                    "key": "onboarding.trades_first"}),
+        ("quickset_step_advanced", {"position": "QB", "tier_index": 2,
+                                    "tier_count": 8, "seeded_accepted": True,
+                                    "picked_n": 3, "via": "save", "ms": 5100}),
+        ("quickset_abandoned",     {"position": "QB", "tier_index": 3,
+                                    "tiers_done": 2, "ms": 41000,
+                                    "reason": "nav"}),
+        ("deck_regenerated",       {"position": "QB", "new_trades": 7}),
+    ]
+    body = _post(client, [
+        _envelope(i, event_type=t, props=p) for i, (t, p) in enumerate(specs)
+    ]).get_json()
+    _assert_invariant(body, len(specs))
+    assert body["accepted"] == len(specs) and body["dropped"] == 0
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    assert set(by_type) == {t for t, _ in specs}          # every one LANDED
+    # Spot-check that props survived the per-event allowlist intact.
+    assert json.loads(by_type["league_view"]["props"])["team_count"] == 12
+    assert json.loads(
+        by_type["sleeper_send_failed"]["props"])["error_code"] == "sleeper_rejected"
+    assert json.loads(
+        by_type["experiment_exposed"]["props"])["experiment"] == "onboarding_v2_rollout"
+    assert json.loads(by_type["deck_regenerated"]["props"])["new_trades"] == 7
+
+
+def test_sleeper_send_succeeded_is_not_client_submittable(harness):
+    """The success leg is server-authoritative — a client POST is dropped."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="sleeper_send_succeeded",
+                  props={"give_n": 1, "receive_n": 1}),
+    ]).get_json()
+    assert body["accepted"] == 1 and body["dropped"] == 1
+    assert _rows(engine) == []
+
+
+def test_p0_events_reject_device_platform_prop(harness):
+    """No P0 event carries a DEVICE platform prop — the column is derived
+    server-side from the batch body / X-Device headers. A bogus one is
+    stripped."""
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="league_view",
+                  props={"surface": "league_home", "state": "ready",
+                         "platform": "espn", "device_platform": "ios"}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["platform"] == "espn"          # LEAGUE platform survives
+    assert "device_platform" not in props       # device prop stripped

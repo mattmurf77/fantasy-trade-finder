@@ -96,6 +96,62 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # WebView, and they go to POST /api/espn/link, not analytics.
     "espn_connect_opened", "espn_connect_otp_step",
     "espn_connect_captured", "espn_connect_abandoned",
+    # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
+    # Plans: docs/plans/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
+    # Tracking-plan addendum (the precondition this module's docstring
+    # demands): docs/business/analytics/2026-08-11-p0-7-addendum.md.
+    #
+    # REGISTERED BEFORE ANY EMITTER SHIPS. This registry is default-deny
+    # behind a 200 (analytics_ingest.py counts + drops), so a name that
+    # lands after its track() call is a silent data loss with a
+    # success-shaped response. Four instances of exactly that already
+    # exist in this tree: the NULL-`platform` incident, `invite_shared`
+    # and `deck_regenerated` (both below), and `celebration_fired` (a
+    # typo the CLIENT fixes by rename — no alias here).
+    #
+    # `tab_selected`, `league_view`, `experiment_exposed` and
+    # `quickset_abandoned` are ALSO added to
+    # analytics_queries.NON_INTENT_EVENTS — INTENT is a deny-list, so
+    # without that these impression-class names would step-change DAU/WAU
+    # on ship day and break every retention series at that seam.
+    #
+    # P0-7 — navigation + League surfaces (mobile only; web and the
+    # extension fire none of these).
+    "tab_selected",
+    "league_view", "league_basis_changed", "league_subset_changed",
+    "league_team_opened", "league_home_action_tapped",
+    # P0-7 — Send in Sleeper. The ATTEMPT and the FAILURE are client-only
+    # signals: a tap that never reaches the server, a network/timeout
+    # error, and the pre-identity refusals (feature_disabled, no_user,
+    # test_mode_propose_disabled) the server cannot attribute to a user.
+    # The SUCCESS is server-fired — see SERVER_FIRED_EVENTS below.
+    "sleeper_send_attempted", "sleeper_send_failed",
+    # P0-3 — the invite loop. `invite_shared` is NOT new: it has been
+    # fired by InviteLeaguematesBanner.tsx since it shipped and dropped
+    # on the floor every time, which is why "the invite loop converts
+    # zero" has never actually been measurable. Registering it is a bug
+    # fix, not an addition.
+    "invite_shared", "invite_link_opened", "invite_league_pinned",
+    "invite_pin_failed",
+    # P0-7 §6 F1 — exposure, not assignment. `experiment_exposed` is
+    # already in FUNNEL_CRITICAL (below) and in the mobile SDK's mirror
+    # (events.ts) but was NEVER in this allowlist, so anything that fired
+    # it was dropped: a live instance of this file's own trap.
+    # backend/experiments.py uses assignment as an exposure proxy and
+    # reports the dilution; every A/B read is diluted until this lands.
+    "experiment_exposed",
+    # P0-7 §6 F3/F4 — the Quick Set per-rung drop-off curve. quickset_
+    # completed is server-fired PER COMPLETED POSITION, so a user who does
+    # three rungs of QB and quits is invisible today. quickset_step_
+    # advanced stays INTENT (it is real ranking intent); quickset_
+    # abandoned is an outcome/impression signal and is NON_INTENT.
+    "quickset_step_advanced", "quickset_abandoned",
+    # P0-8/9 D-4 (approved fold-in) — the post-Quick-Set deck reveal
+    # counter. Fired by TradesScreen.tsx's diff-banner effect since it
+    # shipped and dropped every time, so the S5 reveal — the number the
+    # trades-first hypothesis turns on — has never been readable in
+    # production. Registration only: the emitter already exists.
+    "deck_regenerated",
 })
 
 # ---------------------------------------------------------------------------
@@ -113,6 +169,18 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
     "trade_accepted", "trade_declined", "trade_ratified", "counter_sent",
     "trade_match", "trades_generated", "calc_trade_evaluated",
+    # P0-7 — the north-star SEND leg. analytics_queries reserved this and
+    # its two client siblings in WAT_DARK on 2026-07-17 and nothing ever
+    # fired them; the same commit as this one moves all three to WAT_LIVE.
+    # FUNNEL_STAGES stage 8 and FEATURE_VERTICALS["send_in_sleeper"]
+    # already reference this exact string and light up on their own.
+    # SERVER-fired because POST /api/trades/propose is the only place the
+    # send is KNOWN to have landed in Sleeper — a client-forgeable success
+    # would sit in WAT and funnel stage 8 next to server-authoritative
+    # trade_ratified. NOT added to database._EVENT_TO_USER_COL: bumping
+    # last_trade_proposed_at would change notification gating, which is
+    # out of scope for an instrumentation item (hld.md S-34).
+    "sleeper_send_succeeded",
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",
@@ -252,6 +320,75 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),
     "espn_connect_abandoned": frozenset({"saw_otp"}),
+    # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
+    # NOTE `platform` on league_view is the LEAGUE platform (sleeper /
+    # espn / mfl / fleaflicker), matching league_selected's precedent
+    # above. It is NOT the device platform — that is a user_events COLUMN
+    # derived server-side in analytics_ingest.py from the batch body /
+    # X-Device headers (the NULL-`platform` incident). No event in this
+    # block carries a device-platform prop, and the prop-stripping test in
+    # test_events_api.py pins that.
+    "tab_selected":            frozenset({"tab", "from_tab", "refocus",
+                                          "intercepted"}),
+    "league_view":             frozenset({"surface", "state", "platform",
+                                          "team_count", "basis", "subset",
+                                          "starters_available",
+                                          "outlook_shown", "is_tab_root"}),
+    "league_basis_changed":    frozenset({"basis", "from", "boards_differ",
+                                          "team_focused"}),
+    "league_subset_changed":   frozenset({"subset", "from", "source",
+                                          "filter_count", "picks_stripped"}),
+    # `is_self` is deliberately ABSENT (hld.md S-33): session-user ↔
+    # PowerRankedTeam.user_id identity was never proven, and a guessed
+    # prop is worse than a missing one. Adding it later is a one-line
+    # taxonomy change plus one client line — do that only with the
+    # identity proven.
+    "league_team_opened":      frozenset({"via", "rank", "basis", "subset",
+                                          "filter_count"}),
+    "league_home_action_tapped": frozenset({"action"}),
+    # `surface` ∈ deck | match | awaiting | calculator — the four
+    # SendInSleeperButton mounts (P0-6 SEND_SURFACES; 'awaiting' is the
+    # Matches non-match send row, NOT 'suggested').
+    "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
+                                          "from_deck", "has_target"}),
+    # `error_code` is a CLOSED enum: the 12 server codes of
+    # /api/trades/propose plus network | timeout | unknown. 15 values,
+    # forever. `kind` is SleeperWriteError.kind, present only on
+    # sleeper_rejected / sleeper_write_failed.
+    "sleeper_send_failed":     frozenset({"surface", "error_code", "status",
+                                          "kind", "give_n", "receive_n",
+                                          "from_deck"}),
+    # P0-3 invite loop. `league_id` is a Sleeper/platform league id, not a
+    # person; no user identifier rides in any of these four. `auth_state`
+    # ∈ signed_out | authed_member | authed_non_member | account_only —
+    # the fourth value is the HLD S-17 account-only case (lld-p0-3 D-8);
+    # values are not constrained by this registry, so it is the addendum
+    # that carries the enum.
+    "invite_shared":           frozenset({"league_id"}),
+    "invite_link_opened":      frozenset({"league_id", "has_ref", "format",
+                                          "auth_state"}),
+    "invite_league_pinned":    frozenset({"league_id", "source",
+                                          "ms_since_open"}),
+    "invite_pin_failed":       frozenset({"league_id", "reason"}),
+    # `unit` (account|device) is registered but NOT emitted today: the
+    # client cannot derive it — GET /api/feature-flags returns the merged
+    # experiments/configs maps without the unit_type that
+    # experiments.resolve_for_unit knew server-side. Registered now so
+    # adding it later is a server change alone, never a taxonomy change.
+    # `key` is the flag key whose first consumption triggered the
+    # exposure, which is what makes an exposure auditable back to a
+    # surface.
+    "experiment_exposed":      frozenset({"experiment", "variant", "unit",
+                                          "key"}),
+    "quickset_step_advanced":  frozenset({"position", "tier_index",
+                                          "tier_count", "seeded_accepted",
+                                          "picked_n", "via", "ms"}),
+    "quickset_abandoned":      frozenset({"position", "tier_index",
+                                          "tiers_done", "ms", "reason"}),
+    # P0-8/9 D-4 — the two props the shipped TradesScreen emitter already
+    # sends: the Quick Set position that forced the regeneration and the
+    # count of cards that were not in the pre-Quick-Set deck.
+    "deck_regenerated":        frozenset({"position", "new_trades"}),
 }
 
 

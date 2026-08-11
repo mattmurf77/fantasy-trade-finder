@@ -46,11 +46,14 @@ from .analytics_taxonomy import ALLOWED_CLIENT_EVENTS, SERVER_FIRED_EVENTS
 # Canonical event sets (exact taxonomy strings)
 # ---------------------------------------------------------------------------
 
-# North star — Weekly Active Traders. The send leg is dark-and-absent (not yet
-# in the taxonomy); WAT computes on its 3 live feeders with a "dark" caveat.
-WAT_LIVE = frozenset({"trade_proposed", "match_swiped", "calc_trade_evaluated"})
-WAT_DARK = frozenset({"sleeper_send_attempted", "sleeper_send_succeeded",
+# North star — Weekly Active Traders. The send leg went LIVE 2026-08-11 (P0-7,
+# docs/business/analytics/2026-08-11-p0-7-addendum.md): historical rows carry
+# none of these names, so past WAT is unchanged and only the forward series
+# gains the leg.
+WAT_LIVE = frozenset({"trade_proposed", "match_swiped", "calc_trade_evaluated",
+                      "sleeper_send_attempted", "sleeper_send_succeeded",
                       "sleeper_send_failed"})
+WAT_DARK = frozenset()
 WAT_EVENTS = WAT_LIVE | WAT_DARK
 
 # Pure lifecycle/impression noise — excluded from DAU/WAU/MAU, churn, retention.
@@ -60,6 +63,15 @@ WAT_EVENTS = WAT_LIVE | WAT_DARK
 NON_INTENT_EVENTS = frozenset({
     "app_opened", "app_backgrounded", "app_open", "screen_viewed",
     "push_sent", "client_error", "api_call", "api_request",
+    # P0 remediation 2026-08-11 — impression / navigation / outcome class.
+    # INTENT is a deny-list (see INTENT_EVENTS below), so taxonomy growth is
+    # intent-by-default: without these four lines, a tab tap and a League
+    # mount would make DAU/WAU ≈ app-open count from ship day and every
+    # retention and churn series would break at that seam, permanently and
+    # silently. Seam date is recorded in
+    # docs/business/analytics/2026-08-11-p0-7-addendum.md.
+    "tab_selected", "league_view", "experiment_exposed",
+    "quickset_abandoned",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
@@ -92,7 +104,7 @@ FEATURE_VERTICALS = {
     "matches":        ["match_viewed", "trade_ratified", "match_dismissed"],
     "leagues":        ["league_synced"],
     "feedback":       ["feedback_submitted"],
-    "send_in_sleeper":["sleeper_send_succeeded"],   # dark
+    "send_in_sleeper":["sleeper_send_succeeded"],   # live 2026-08-11 (P0-7)
 }
 
 VALID_REPORTS = ("overview", "waterfall", "time", "bottlenecks", "churn",
@@ -494,8 +506,11 @@ def report_engagement(conn, start_day, end_day, include_demo, row_cap, **_):
             "wat": ({"value": None, "n": None, "caveat": "dark"} if wat_dark
                     else {"value": wat_n, "n": wau, "caveat": None}),
         })
-    caveats.append(_dark_caveat("metric:wat.sleeper_send",
-                                "send-leg WAT events not in taxonomy yet; WAT = trade_proposed/match_swiped/calc_trade_evaluated only"))
+    # The unconditional "send leg not in taxonomy yet" caveat was deleted with
+    # P0-7 (2026-08-11): the three sleeper_send_* names are in WAT_LIVE, so a
+    # window with no send rows already renders per-week caveat "dark" through
+    # wat_dark above. A second is_dark() call would re-query for a caveat the
+    # rows already carry.
     if push_dark:
         caveats.append(_dark_caveat("metric:push.opened",
                                     "push_opened is a dark client event; open-rate renders — until the SDK ships"))

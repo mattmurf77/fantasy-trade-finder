@@ -457,8 +457,44 @@ def test_live_taxonomy_is_disjoint():
     # The moved allowlist kept every v0 name (incl. onboarding-conversion).
     assert {"app_opened", "signin_attempted", "quickset_prompt_shown",
             "trade_card_shared", "deck_exhausted_viewed"} <= tax.ALLOWED_CLIENT_EVENTS
+    # P0 remediation batch, 2026-08-11 — all 16 client names registered
+    # before their emitters ship (hld.md S-36).
+    assert {"tab_selected", "league_view", "league_basis_changed",
+            "league_subset_changed", "league_team_opened",
+            "league_home_action_tapped", "sleeper_send_attempted",
+            "sleeper_send_failed", "invite_shared", "invite_link_opened",
+            "invite_league_pinned", "invite_pin_failed",
+            "experiment_exposed", "quickset_step_advanced",
+            "quickset_abandoned", "deck_regenerated"} <= tax.ALLOWED_CLIENT_EVENTS
+    # The SEND leg is server-authoritative and must never be client-fireable.
+    assert "sleeper_send_succeeded" in tax.SERVER_FIRED_EVENTS
+    assert "sleeper_send_succeeded" not in tax.ALLOWED_CLIENT_EVENTS
     # P1: the ingest pipeline (not server.py) owns the allowlist import.
     assert ingest.ALLOWED_CLIENT_EVENTS is tax.ALLOWED_CLIENT_EVENTS
+
+
+def test_p0_impression_events_are_non_intent():
+    """A tab tap / League mount / exposure / abandon must never read as
+    intent — INTENT_EVENTS is a deny-list, so this is the only thing standing
+    between the batch and a DAU/WAU step-change on ship day."""
+    import backend.analytics_queries as q
+    for name in ("tab_selected", "league_view", "experiment_exposed",
+                 "quickset_abandoned"):
+        assert name in q.NON_INTENT_EVENTS
+        assert name not in q.INTENT_EVENTS
+    # …and the interaction events deliberately DO count as intent.
+    for name in ("league_basis_changed", "league_team_opened",
+                 "sleeper_send_attempted", "quickset_step_advanced"):
+        assert name in q.INTENT_EVENTS
+
+
+def test_wat_send_leg_is_live():
+    """The north star's send leg left WAT_DARK with the P0-7 registration."""
+    import backend.analytics_queries as q
+    assert q.WAT_DARK == frozenset()
+    assert {"sleeper_send_attempted", "sleeper_send_succeeded",
+            "sleeper_send_failed"} <= q.WAT_LIVE
+    assert q.WAT_EVENTS == q.WAT_LIVE
 
 
 # ---------------------------------------------------------------------------
