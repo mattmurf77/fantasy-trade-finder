@@ -91,6 +91,14 @@ buttons named **Pass / Like**) + `mockups/polish-lab-2026-08-11/trades-single-pi
       `trades.find-btn` survives the pin, a deck renders (`trades.card-top` +
       `trades.single-pin-deck-count`), and `trades.pass-btn` / `trades.like-btn` are both
       present and the accept path works.
+- [x] **New structural test:** `mobile/tests/check-single-pin-actions.js` (house
+      `mobile/tests/check-*.js` convention; `npm run test:single-pin-actions`). AST check
+      over `TradesScreen.tsx` pinning four invariants — no `singlePin ? null` gate may
+      exclude any action control, `singlePinDeckActive` is keyed on `deck.length` not
+      `topCard`, `FeaturedTradeWindow` stays gated on `!singlePinDeckActive` (#241), and
+      both disposition buttons dispatch `advance()`. **All five of its sabotages were
+      executed and each failed as intended** — output in `status.md` §4a. It needs no
+      simulator, so unlike the Maestro flow it could be, and was, verified here.
 - **`testID`s added:** `trades.single-pin-deck-count` (TradesScreen.tsx:4647),
   `calc.lineup-impact-unavailable` (InLeagueCalculator.tsx:1024). No renames, no
   removals — every existing id on this surface is preserved deliberately, because #298's
@@ -106,6 +114,10 @@ buttons named **Pass / Like**) + `mockups/polish-lab-2026-08-11/trades-single-pi
   strip, the deck wrapper and the featured block all evaluate exactly as before. Expected
   still-green; must be re-run in the QA round (see `status.md` QA checklist), not claimed
   here.
+- **CI gap found in passing:** none of the eight `mobile/tests/check-*.js` invariant
+  tests run in `.github/workflows/ci.yml` today — they are `npm run`-only. Pre-existing,
+  not caused here; proposed wiring in `status.md` §5.5 (I did not edit `ci.yml`, it is
+  shared this batch).
 - **Backend: no pytest files added or updated** — WAIVED because no backend file is
   touched. The `_starter_impact` / `_sleeper_lineup_slots` behaviour #297 explains is
   pre-existing and already correct; the change is client copy for a case the server

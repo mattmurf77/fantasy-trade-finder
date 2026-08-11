@@ -111,7 +111,7 @@ no blur, ≥11px, `chalk.faint` tick (neutral — not a new accent).
    every changed line falls back to the unconditional CTA + deck. Server-side,
    deploy-free, already live.
 
-The exact five-file diff to add a dedicated flag anyway is in §5.5 below, ready to apply
+The exact five-file diff to add a dedicated flag anyway is in §5.6 below, ready to apply
 if the orchestrator or operator overrules this.
 
 ---
@@ -133,6 +133,23 @@ testid-lint OK
 LINT_EXIT=0
 ```
 
+```
+$ cd mobile && node tests/check-single-pin-actions.js; echo "EXIT=$?"
+PASS  1 — trades.find-btn (2 mounts) is not gated out by the raw `singlePin` predicate
+PASS  1 — trades.pass-btn (1 mount) is not gated out by the raw `singlePin` predicate
+PASS  1 — trades.like-btn (1 mount) is not gated out by the raw `singlePin` predicate
+PASS  2a — `singlePinDeckActive` is keyed on `deck.length`
+PASS  2b — `singlePinDeckActive` does NOT depend on `topCard`
+PASS  3 — `FeaturedTradeWindow` is gated on `singlePinDeckActive`
+PASS  4 — every trades.pass-btn mount dispatches advance('pass')
+PASS  4 — every trades.like-btn mount dispatches advance('like')
+
+All single-pin-actions checks passed.
+EXIT=0
+```
+(also `npm run test:single-pin-actions` → exit 0. Five sabotage runs, each proven to fail
+— full output in §4a.)
+
 **pytest: not run — no Python file was touched.** `git diff origin/main --stat` covers
 `mobile/` only.
 
@@ -153,34 +170,84 @@ LINT_EXIT=0
 
 ## 4. Tests and the sabotage each detects
 
-One behavioural test: `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml`.
+Two tests, one of which I could actually execute — including its sabotages.
 
-**Honest caveat, stated up front: I did not execute this flow, and I did not execute a
-sabotaged build.** Running Maestro was explicitly forbidden for this agent. What follows
-is the sabotage each assertion detects *by construction* — for each, the exact line whose
-reversion makes it fail, traced through source. **The QA round must actually run the
-sabotage column before this flow is trusted** (§6 step 7); a prior batch shipped three
-tests that passed on the very defect they were meant to catch, and nothing below is
-exempt from that lesson.
+### 4a. `mobile/tests/check-single-pin-actions.js` — structural, **sabotage-proven for real**
 
-| Assertion (flow line) | Sabotage it detects | Why it fails, by construction |
+A TypeScript-AST check over `TradesScreen.tsx`, in the house
+`mobile/tests/check-*.js` style (`check-picks-subset-invariance.js`,
+`check-member-entered-marker.js`). No simulator, no backend, no seed — so unlike the
+Maestro flow, **I ran it, and I ran every sabotage.** Registered as
+`npm run test:single-pin-actions`.
+
+Clean tree:
+
+```
+$ node tests/check-single-pin-actions.js
+PASS  1 — trades.find-btn (2 mounts) is not gated out by the raw `singlePin` predicate
+PASS  1 — trades.pass-btn (1 mount) is not gated out by the raw `singlePin` predicate
+PASS  1 — trades.like-btn (1 mount) is not gated out by the raw `singlePin` predicate
+PASS  2a — `singlePinDeckActive` is keyed on `deck.length`
+PASS  2b — `singlePinDeckActive` does NOT depend on `topCard`
+PASS  3 — `FeaturedTradeWindow` is gated on `singlePinDeckActive`
+PASS  4 — every trades.pass-btn mount dispatches advance('pass')
+PASS  4 — every trades.like-btn mount dispatches advance('like')
+
+All single-pin-actions checks passed.
+EXIT=0
+```
+
+Five sabotages applied one at a time to a clean tree, each reverted with
+`git checkout --` before the next. **Actual output:**
+
+| Sabotage | Edit applied | Result |
 |---|---|---|
-| `assertVisible: trades.find-btn` after the pin | Restore the gate at `TradesScreen.tsx:4291` (or `:4106`) to `{!firstRun && singlePin ? null : (…)}` | With exactly one pin, `singlePin` is non-null and `firstRun` is false (`onboarding.trades_first: false` in the release fixture), so the gate evaluates `null` and no element carries that testID. `extendedWaitUntil`/`assertVisible` fail. **This is the literal v1.12.0 defect.** |
-| `extendedWaitUntil: trades.card-top` | Restore the deck-wrapper gate at `:4635` to `{!firstRun && singlePin ? null : (…)}` | `SwipableTopCard` (which owns `testID="trades.card-top"`) lives inside that wrapper. Gate restored ⇒ the wrapper is `null` ⇒ the generated cards render nowhere. This is the *other* v1.12.0 defect and the one that took accept/decline with it. |
-| `assertVisible: trades.single-pin-deck-count` | Delete `:4645-4656`, **or** change `singlePinDeckActive` (`TradesScreen.tsx:1059`) to key on `topCard` instead of `deck.length` and then swipe past the last card | Direct assertion on the new element. The second sabotage is the subtler one: keyed on `topCard`, the counter and the whole deck slot would vanish the moment the deck is exhausted and the surface would snap back to the featured window mid-session. |
-| `assertVisible: trades.pass-btn` **and** `trades.like-btn` | Restore `:4635`; or delete the disposition row inside the wrapper | Both ids exist only inside the deck wrapper. Asserting **both** (not just the one tapped) is deliberate: a fix that restored only the accept path would satisfy a like-only test while still failing the reporter's sentence, which names both. |
-| `tapOn: trades.like-btn` → `extendedWaitUntil: trades.find-btn` | Wire the restored buttons to anything other than `advance()` | `advance()` is what dispositions the card, fires `swipe`, and fronts the next one. A cosmetic button that renders but does not advance leaves the deck frozen; the CTA assertion afterwards is the liveness check that the screen survived the tap. |
-| The flow reaching the board at all (`trades.board.add-away`) | — | Not an assertion about my change; it is the flow's precondition. If it fails, the flow is wrong, not the fix. Fallback in §6. |
+| **A** — the literal v1.12.0 deck defect | `:4635` gate back to `{!firstRun && singlePin ? null : (…)}` | `test-exit=1`<br>`FAIL 1 — trades.pass-btn (1 mount) …: element at line 4812 gated at line 4635: !firstRun && singlePin ? … : …`<br>`FAIL 1 — trades.like-btn (1 mount) …: element at line 4829 gated at line 4635: …` |
+| **B** — the literal v1.12.0 CTA defect, **consolidated arm only** | wrap `:4291`'s Button in `{!firstRun && singlePin ? null : (…)}` | `test-exit=1`<br>`FAIL 1 — trades.find-btn (2 mounts) …: element at line 4292 gated at line 4291: …` |
+| **C** — the subtle one | `singlePinDeckActive = singlePinFeatured && !!topCard` | `test-exit=1`<br>`FAIL 2a …: saw: singlePinFeatured && !!topCard`<br>`FAIL 2b — … does NOT depend on topCard` |
+| **D** — #241 comes back | drop `&& !singlePinDeckActive` from the `FeaturedTradeWindow` gate | `test-exit=1`<br>`FAIL 3 — FeaturedTradeWindow is gated on singlePinDeckActive` |
+| **E** — cosmetic buttons | `trades.like-btn` `onPress` repointed from `advance('like')` to `setJob(null)` | `test-exit=1`<br>`FAIL 4 — every trades.like-btn mount dispatches advance('like'): line 4829 does not` |
+| **control** | clean tree | `test-exit=0`, no `FAIL` lines |
 
-**What this flow deliberately does NOT assert**, so the QA round knows the gaps: the
-**swipe** path (Maestro gesture on `SwipableTopCard` — the button path and the swipe path
-share `advance()`, but the gesture is untested here), the **VoiceOver** custom actions
-(`SwipableTopCard`'s `accessibilityActions`, `:5509-5516` — no VoiceOver in the harness), and **#298b** (the team-pill
-regenerate; it needs the strip variant and a second opponent, and is a manual check —
-§6 step 5). **#297's row has no automated coverage at all** — it needs a non-Sleeper
-league in the fixture, which `standard` does not have (§6 step 6).
+**Sabotage B is why this section exists at all, and it is worth reading twice.** The first
+draft of the test used `elementWithTestId(id)[0]` — the *first* element with each testID.
+Sabotage B reintroduced the exact reported defect on the consolidated layout's CTA and the
+test **came back green**, because it was still looking at the legacy arm's copy. That is
+the same failure mode as the prior batch's three tests that passed on the defect they were
+meant to catch. The test now checks **every** mount (`elementsWithTestId`), which is what
+makes B fail. Had I only reasoned about the sabotage instead of running it, this file would
+have shipped as a decoration.
 
----
+### 4b. `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml` — behavioural, **NOT executed**
+
+**Honest caveat: I did not run this flow, and I did not run it against a sabotaged
+build.** Running Maestro was explicitly forbidden for this agent (parallel agents
+contending for one simulator and one harness Flask reseed each other's DBs). What follows
+is the sabotage each assertion detects *by construction*. **The QA round must actually
+execute the sabotage column before this flow is trusted** (§6 step 7) — 4a above is the
+proof that "reasoned about" and "verified" are not the same thing.
+
+| Assertion (flow step) | Sabotage it detects | Why it fails, by construction |
+|---|---|---|
+| `assertVisible: trades.find-btn` after the pin | Restore the gate at `TradesScreen.tsx:4291` (or `:4106`) | With exactly one pin, `singlePin` is non-null and `firstRun` is false (`onboarding.trades_first: false` in the release fixture), so the gate evaluates `null` and no element carries that testID. **This is the literal v1.12.0 defect.** |
+| `extendedWaitUntil: trades.card-top` | Restore the deck-wrapper gate at `:4635` | `SwipableTopCard` (which owns `testID="trades.card-top"`) lives inside that wrapper. Gate restored ⇒ the wrapper is `null` ⇒ generated cards render nowhere. This is the other v1.12.0 defect, the one that took accept/decline with it. |
+| `assertVisible: trades.single-pin-deck-count` | Delete `:4645-4656`, **or** apply sabotage C | Direct assertion on the new element. Under C the counter and the whole deck slot vanish the moment the deck is exhausted — which this flow, tapping like once, would still miss. **4a covers C; this flow does not.** |
+| `assertVisible: trades.pass-btn` **and** `trades.like-btn` | Restore `:4635`, or delete the disposition row | Both ids exist only inside the deck wrapper. Asserting **both** (not just the one tapped) is deliberate: a fix restoring only the accept path would satisfy a like-only test while still failing the reporter's sentence, which names both. |
+| `tapOn: trades.like-btn` → `extendedWaitUntil: trades.find-btn` | Sabotage E — buttons that render but do not dispatch | `advance()` dispositions the card, fires `swipe`, and fronts the next one. A cosmetic button leaves the deck frozen; the CTA assertion afterwards is the liveness check that the screen survived the tap. |
+| Reaching the board (`trades.board.add-away`) | — | Not an assertion about the fix; it is the flow's precondition. If it fails, the flow is wrong, not the code. Fallback in §6. |
+
+### What neither test covers — stated so the QA round knows the gaps
+
+- **The swipe gesture.** Both the button path and the gesture share `advance()`, and 4a
+  pins the button wiring, but no test drives the actual pan gesture on `SwipableTopCard`.
+- **The VoiceOver custom actions** (`SwipableTopCard`'s `accessibilityActions`,
+  `:5509-5516`) — no VoiceOver in the harness. Manual, §6 step 8.
+- **#298b entirely.** The team-pill regenerate needs the strip variant and a second
+  opponent; it is a manual check, §6 step 5.
+- **#297's row entirely.** It needs a league whose id is non-numeric, which the `standard`
+  fixture does not have. Manual, §6 step 6. There is no structural test for it either —
+  the invariant ("never render a bare `null` here") is a judgement about copy, not a shape
+  an AST check can pin without becoming a change-detector.
 
 ## 5. Proposed edits to files I do not own
 
@@ -287,7 +354,29 @@ league in the fixture, which `standard` does not have (§6 step 6).
 > `12-trades-single-pin.yaml` + `05-trades-render.yaml` + `06-trades-deck.yaml`, with the
 > §4 sabotage column executed before the new flow is trusted.
 
-### 5.5 If a dedicated flag is wanted after all — the exact five touches
+### 5.5 `.github/workflows/ci.yml` — make the structural tests actually gate
+
+**Pre-existing gap, not caused by this change, but it now has a victim.** CI runs pytest,
+`npx tsc --noEmit` and `mobile/scripts/testid-lint.sh` — and **none** of the eight
+`mobile/tests/check-*.js` invariant tests. They are all `npm run`-only, so every one of
+them (including `check-picks-subset-invariance.js`, written for exactly this reason) is a
+test nothing executes unless a human remembers. I did not edit `ci.yml`: it is a shared
+file three agents could touch this batch. Proposed addition to the mobile job, after the
+`testid-lint.sh` step:
+
+```yaml
+      - name: mobile invariant checks
+        working-directory: mobile
+        run: |
+          for t in tests/check-*.js; do
+            echo "── $t"
+            node "$t" || exit 1
+          done
+```
+
+A loop rather than eight named steps so the next `check-*.js` is wired up by existing.
+
+### 5.6 If a dedicated flag is wanted after all — the exact five touches
 
 Name: `trades.single_pin_deck_actions`. Default **true** (a kill switch, not a dark launch
 — default-false would ship the bug).
@@ -321,9 +410,11 @@ three-branch client change — which is the point made in D-0NN+1.
 Run on the `standard` profile with the `release` flag fixture unless noted.
 **Nothing below has been executed by me.**
 
-1. **Static re-check on the merged branch** — `npx tsc --noEmit` (expect exit 0) and
-   `mobile/scripts/testid-lint.sh` (expect `testid-lint OK`). Both were clean in isolation;
-   re-run after the parallel agent's work merges.
+1. **Static re-check on the merged branch** — `npx tsc --noEmit` (expect exit 0),
+   `mobile/scripts/testid-lint.sh` (expect `testid-lint OK`), and
+   `npm run test:single-pin-actions` (expect 8 PASS, exit 0). All three were clean in
+   isolation; re-run after the parallel agent's work merges. **Note the third does not run
+   in CI today** — see the proposed `ci.yml` wiring in §5.5.
 2. **New flow** — `maestro test .maestro/flows/smoke/12-trades-single-pin.yaml`.
    Law 23: **eyeball `smoke-12-trades-single-pin.png`**, do not trust the green. The frame
    must show one trade card with the `Featured trade · n of m` label above it and the
