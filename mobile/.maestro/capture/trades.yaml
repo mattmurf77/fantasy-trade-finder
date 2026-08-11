@@ -15,9 +15,16 @@ appId: com.fantasytradefinder.app
 #   empty      → resting state after the preamble (trades.empty-text)
 #   error      → fail_next 500 (real production body) on POST
 #                /api/trades/generate; count=1 so it self-clears before the
-#                real run below
+#                real run below. P0-2: the leg now ENDS on the persistent
+#                trades.deck-error card (it no longer decays back to the
+#                never-searched card), and it deliberately does NOT tap
+#                "Try again" — a retry would populate the deck, and a
+#                populated deck outranks every placeholder in the ladder, so
+#                the `loading` state below could never render. The retry
+#                itself is asserted three times in
+#                flows/trades-generation-failure.yaml.
 #   loading    → latency on the status poll holds the running-job UI open;
-#                anchored on trades.empty-text UNMOUNTING (see below)
+#                anchored on trades.deck-error UNMOUNTING (see below)
 #   populated  → the same (slowed) job completes into the deck
 tags: [capture, trades]
 ---
@@ -69,12 +76,16 @@ tags: [capture, trades]
 - takeScreenshot: trades__empty
 
 # ── error ────────────────────────────────────────────────────────────────
-# The failure surfaces as a Toast, which carries no testID today, so there is
-# nothing to wait on — we settle the tap animation and shoot. Body is the REAL
-# production shape from server.py's handle_unexpected_error (errorhandler at
+# P0-2: a failed generate now renders a NAMED persistent state in the deck
+# slot (trades.deck-error, red "SEARCH FAILED" + Try again), not just a Toast
+# that fades back to the never-searched card. We anchor the shutter on that id
+# — no blind waitForAnimationToEnd needed. Body is the REAL production shape
+# from server.py's handle_unexpected_error (errorhandler at
 # backend/server.py:2070), so the toast renders shipping copy ("Unexpected
 # server error.") instead of the injector's "ftf_injected" placeholder:
-# client.ts:552 builds the message as parsed.message || parsed.error.
+# client.ts builds the message as parsed.message || parsed.error. (The CARD's
+# own copy is DECK_FAIL_GENERIC — readErrorCopy's fallback — so the card never
+# echoes a raw server string; the toast keeps the curated one.)
 - runScript:
     file: helpers/inject.js
     env:
@@ -86,12 +97,15 @@ tags: [capture, trades]
 - assertTrue: ${output.inject.ok}
 - tapOn:
     id: "trades.find-btn"
-- waitForAnimationToEnd
-- takeScreenshot: trades__error
 - extendedWaitUntil:
     visible:
-      id: "trades.empty-text"
+      id: "trades.deck-error"
     timeout: 20000
+- assertVisible:
+    id: "trades.deck-error.retry"
+- assertNotVisible:
+    id: "trades.empty-text"
+- takeScreenshot: trades__error
 
 # ── loading ──────────────────────────────────────────────────────────────
 # PILOT FINDING (run 20260809T222219): do NOT anchor this state on
@@ -102,11 +116,17 @@ tags: [capture, trades]
 # (The strip itself is fine and does appear in the capture below; it was a
 # race, not a layout problem.)
 #
-# The robust anchor is the empty-state headline DISAPPEARING: trades.empty-text
-# unmounts the instant the running placeholder replaces it, it is always in
-# view, and it cannot be missed the way a transient mount can. 6 s of latency
-# per status poll widens the running window as well, without changing what the
-# job ultimately returns.
+# The robust anchor is the resting headline DISAPPEARING: it unmounts the
+# instant the running placeholder replaces it, it is always in view, and it
+# cannot be missed the way a transient mount can. 6 s of latency per status
+# poll widens the running window as well, without changing what the job
+# ultimately returns.
+#
+# P0-2: the resting state entering this leg is now trades.deck-error, not
+# trades.empty-text (the error leg above leaves the failure card mounted, and
+# handleFindTrades clears deckFailure as its FIRST statement, so the card
+# unmounts on this very tap). Anchoring on the id that is actually on screen
+# is what keeps this a real wait instead of a vacuously-true one.
 - runScript:
     file: helpers/inject.js
     env:
@@ -118,7 +138,7 @@ tags: [capture, trades]
     id: "trades.find-btn"
 - extendedWaitUntil:
     notVisible:
-      id: "trades.empty-text"
+      id: "trades.deck-error"
     timeout: 30000
 - takeScreenshot: trades__loading
 

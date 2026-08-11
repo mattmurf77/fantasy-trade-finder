@@ -1,0 +1,210 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TRD-ERR-01
+# profile: standard
+# flags: release
+#
+# P0-2 — a failed trade search must be distinguishable from never having
+# searched. All three failure paths write ONE state (deckFailure) and the deck
+# slot renders ONE named card (trades.deck-error) with ONE working retry:
+#
+#   Path B  job snapshot reports status:'error'  → jobErrorCopy('timeout')
+#   Path A  the generate POST itself fails       → readErrorCopy fallback
+#   Path C  polling abandoned after 4 failures   → DECK_FAIL_NETWORK
+#
+# Each leg asserts the CARD's own copy (not the toast's — the toast is
+# transient and racing it would make the assertion luck) and asserts that
+# `trades.empty-text`, the never-searched card, is NOT what we are looking at.
+# That pairing is the whole finding: "we tried and failed" ≠ "you have never
+# searched".
+#
+# INJECTOR PATH: `../capture/helpers/inject.js`. helpers/ lives under
+# .maestro/capture/ and runScript paths are relative to THIS file; this is the
+# first flow outside capture/ to use the injector.
+#
+# ORDERING IS LOAD-BEARING, and it is not the obvious order:
+#   • Paths B and A are injected at the POST, so NEITHER creates a server-side
+#     job. The trade-job cache (_trade_job_is_fresh, 30-min TTL keyed on
+#     fairness/outlook/intent) would otherwise return a cached `complete` job
+#     to every later generate — polling would never happen again and Path C
+#     would be unreachable. Path C therefore runs LAST and gets the session's
+#     first real generate, which is the only guaranteed polling window.
+#   • Every retry is armed with the NEXT failure before it is tapped, so the
+#     deck never populates mid-flow. A populated deck outranks every
+#     placeholder in the render ladder (partial results are still results,
+#     S-09), so trades.deck-error can only be asserted while the deck is empty.
+#   • The final retry is the only unarmed one — it recovers into a real deck,
+#     which is the acceptance criterion for "the retry works".
+#   • INJECT_KIND: reset is NEVER used mid-flow (law 14 — it clears backend
+#     sessions and signs the app out).
+#
+# R13 (injection leakage out of the Path-C leg), resolved by argument rather
+# than by a whoami probe: INJECT_COUNT 4 == MAX_POLL_FAILURES exactly, and the
+# poll loop decrements one per failure. Reaching the Path-C assertion at all
+# PROVES all four were consumed (three would not have abandoned the poll), so
+# nothing can leak into the final leg. A residual of ≤3 would in any case be
+# benign — the loop only abandons on four CONSECUTIVE failures.
+#
+# 500 (not 502/503/504) on the status poll: client.ts retries only
+# RETRY_STATUSES {502,503,504} on GETs, so 500 maps 1:1 to poll attempts
+# (law 11). Using a retried status would silently triple the budget.
+tags: [trades, error]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+# Law 10 — a raced inputText submits a partial name and books a real VCR miss.
+- assertVisible:
+    text: ".*qa_standard.*"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+# First Trades visit auto-opens the team-outlook sheet (first-run prompt) —
+# dismissed conditionally via outlook.save-btn (Contender pre-selected).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- assertVisible:
+    id: "trades.empty-text"
+
+# ── Leg 1 · Path B — the job snapshot reports status:'error' ─────────────
+# A 200 whose BODY is an errored snapshot (fail_next allows any status,
+# including 2xx). normalizeJobSnapshot maps status/error through verbatim
+# (api/trades.ts), so the mirror effect writes {kind:'job_error'} exactly as
+# it would from a poll — the same transition site, with no server-side job
+# created and the job cache left cold for Leg 3.
+# `error: "timeout"` is the reaper's literal, the one value jobErrorCopy maps
+# to a distinct sentence; anything else would be indistinguishable from
+# Path A's copy and the assertion would prove less.
+- runScript:
+    file: ../capture/helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/generate"
+      INJECT_STATUS: "200"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"job_id":"ftf_injected","status":"error","error":"timeout","cards":[],"opponents_done":0,"opponents_total":0}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.deck-error"
+    timeout: 30000
+- assertVisible:
+    id: "trades.deck-error.retry"
+- assertVisible:
+    text: ".*took too long.*"
+- assertNotVisible:
+    id: "trades.empty-text"
+- takeScreenshot: trades-err-job
+
+# ── Leg 2 · the retry, armed into Path A — the POST itself fails ─────────
+# Two assertions in one tap: the retry re-enters the search (deckFailure is
+# cleared as handleFindTrades' first statement), and a POST failure renders
+# its own copy. The discriminator is the COPY CHANGING — Path A's card
+# replacing Path B's — which is race-free in a way that waiting for the card
+# to blink out is not (the injected 500 returns in milliseconds).
+# Real production body from handle_unexpected_error (law 12): it is what the
+# TOAST renders. The CARD deliberately shows DECK_FAIL_GENERIC instead — the
+# persistent surface never echoes a server string (D-025).
+- runScript:
+    file: ../capture/helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/generate"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.deck-error.retry"
+- extendedWaitUntil:
+    visible:
+      text: ".*couldn't finish that search.*"
+    timeout: 30000
+- assertVisible:
+    id: "trades.deck-error"
+- assertNotVisible:
+    text: ".*took too long.*"
+- assertNotVisible:
+    id: "trades.empty-text"
+- takeScreenshot: trades-err-generate
+
+# ── Leg 3 · the retry, armed into Path C — polling abandoned ─────────────
+# This retry's POST is the session's FIRST real generate: legs 1-2 were both
+# intercepted at the POST, so no server job exists and no cache can short the
+# poll. The job comes back `running`, four consecutive status polls 500, and
+# the loop gives up — clearing the local job (the server worker keeps going,
+# which is why the next tap can hit the warm cache) while deckFailure keeps
+# the evidence that a search happened at all.
+# No waitForAnimationToEnd anywhere near this leg (law 5): it passes through
+# the "Looking for trades…" ActivityIndicator, which the wait can never
+# stabilise on. Timeout 45000 ≈ 3× the 10-15 s the four polls take at
+# 800 ms → ×1.5 backoff (cap 4000 ms) ±10% jitter.
+- runScript:
+    file: ../capture/helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/status*"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "4"
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "trades.deck-error.retry"
+- extendedWaitUntil:
+    visible:
+      text: ".*lost the connection.*"
+    timeout: 45000
+- assertVisible:
+    id: "trades.deck-error"
+- assertNotVisible:
+    text: ".*couldn't finish that search.*"
+- assertNotVisible:
+    id: "trades.empty-text"
+- takeScreenshot: trades-err-poll
+
+# ── Leg 4 · the unarmed retry recovers ───────────────────────────────────
+# Nothing injected. The retry finds the warm server-side job from leg 3 (or
+# polls a fresh one) and the deck lands — the failure card is gone and it did
+# not leave the never-searched card behind it either.
+- tapOn:
+    id: "trades.deck-error.retry"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 120000
+- assertNotVisible:
+    id: "trades.deck-error"
+- takeScreenshot: trades-err-recovered

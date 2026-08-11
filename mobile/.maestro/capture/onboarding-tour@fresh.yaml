@@ -265,9 +265,18 @@ tags: [capture, onboarding, fresh]
 - waitForAnimationToEnd
 - takeScreenshot: onboarding__s4-1
 
-# Walk the eight tier rungs (utils/tierBands.ts:23-32) with empty saves: with
-# zero chips selected the primary composes as a Skip (QuickSetTiersScreen
-# :646-660), and the chip ids are player-id templated — unusable as selectors.
+# Walk the eight tier rungs (utils/tierBands.ts:23-32) with REAL selections.
+# D3 (P0-9): this loop used to save each rung EMPTY, and with zero chips
+# selected the primary composes as a Skip (QuickSetTiersScreen :646-660) — the
+# board never moved, the forced regen re-priced to the same deck, `fresh === 0`
+# and S5 landed on s5.0 every single time, which is why s5-1.png has never
+# existed in the library. The `fresh` profile seeds a ZERO user board, so
+# promoting three players into Tier 1 is the largest board delta this fixture
+# can produce. Chip ids are player-id templated, so they are selected
+# POSITIONALLY off the shared regex; tapping the bare regex three times would
+# toggle the SAME chip on/off/on (the trap capture/quick-rank.yaml records).
+# A rung with fewer than three chips makes the extra index taps misses, not
+# failures — the same tolerance quick-rank.yaml relies on.
 # Loop shape (Maestro 2.5.1 rejects `maxRuns` — it aborts the whole staged
 # cell at PARSE time, which is what swallowed the first onboarding run): a
 # BOUNDED `repeat: times:` whose body is conditional on the button still being
@@ -294,6 +303,15 @@ tags: [capture, onboarding, fresh]
             visible:
               id: "quick-set.save-btn"
           commands:
+            - tapOn:
+                id: "quick-set.chip.*"
+                index: 0
+            - tapOn:
+                id: "quick-set.chip.*"
+                index: 1
+            - tapOn:
+                id: "quick-set.chip.*"
+                index: 2
             - tapOn:
                 id: "quick-set.save-btn"
             - waitForAnimationToEnd
@@ -379,8 +397,15 @@ tags: [capture, onboarding, fresh]
 
 # ── S8.1 · sign-off (celebrate) ──────────────────────────────────────────
 # S6.2 hands off to the Apple sheet; declining it frees the slot, and the
-# chain effect (:2455-2459) then requests S8.1 — after which completeTour()
-# puts The Analyst into reactive-only mode.
+# chain effect then requests S8.1 — after which completeTour() puts The
+# Analyst into reactive-only mode.
+#
+# PRECONDITION (P0-8): S8.1 now additionally requires guideSeen['s2.2'] — the
+# sign-off is gated on the swipe-coaching beat having been delivered AND acted
+# on, so a user who saw nothing but the first-like celebration is never told
+# the tour is over. That makes THIS flow's S2.2 leg a precondition of this
+# leg, not an ordering coincidence: removing or reordering the S2.2 steps
+# above would break S8.1 for a reason that has nothing to do with S8.1.
 - runFlow:
     when:
       visible:

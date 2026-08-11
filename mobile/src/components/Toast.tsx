@@ -20,6 +20,11 @@ interface Props {
   /** Optional trailing action button (teardown S3 PRD-03 — e.g. Undo).
    *  Pressing it fires `onPress` then dismisses the toast. */
   action?: { label: string; onPress: () => void };
+  /** Distance from the top of the host view. Defaults to space.xxl (32) —
+   *  every existing call site is byte-identical. Screens whose top content
+   *  starts above 32pt (TradesScreen's mode bar) pass a measured offset so
+   *  the bubble clears it instead of clipping it. */
+  topOffset?: number;
 }
 
 // Animated toast banner. Fades in/out, optionally auto-dismisses. Used
@@ -45,6 +50,7 @@ export default function Toast({
   onDismiss,
   holdMs = 1500,
   action,
+  topOffset,
 }: Props) {
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(-20);
@@ -98,7 +104,7 @@ export default function Toast({
   return (
     <Animated.View
       pointerEvents="box-none"
-      style={[styles.wrap, animatedStyle]}
+      style={[styles.wrap, { top: topOffset ?? space.xxl }, animatedStyle]}
     >
       <Pressable
         onPress={onDismiss}
@@ -143,7 +149,6 @@ function railColor(tone: NonNullable<Props['tone']>): string {
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    top: space.xxl,
     left: 0,
     right: 0,
     alignItems: 'center',

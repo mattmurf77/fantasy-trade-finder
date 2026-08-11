@@ -1,0 +1,154 @@
+appId: com.fantasytradefinder.app
+# tc: TC-GUIDE-NO-FALSE-SIGNOFF
+# profile: fresh
+# flags: release
+#
+# NAMING: the `@release` suffix names the FLAG FIXTURE, not a profile — unlike
+# the capture/ convention (`<screen>[@profile].yaml`). This file lives under
+# flows/, whose runner reads the `# profile:` and `# flags:` headers
+# explicitly, so there is no ambiguity; the filename is fixed by the HLD. The
+# next reader will assume otherwise, hence this note.
+#
+# P0-8 — the guided tour must not announce its own completion to a user who
+# has been taught exactly one line. Under RELEASE flags `onboarding.landing`,
+# `onboarding.trades_first`, `onboarding.quickset_prompt` and
+# `onboarding.apple_save_moment` are all off, so s2.1/s2.2/s2.3, s3.x and
+# s5.x can never fire — but `onboarding.guided_avatar` is on, so the first
+# like still fires s6.1 (celebrate). Before the fix, s6.1's 2200 ms
+# auto-advance freed the bubble slot and the chain effect immediately
+# requested s8.1 ("That's the tour.") — the only satisfiable branch in the
+# file. Sign-off ~2.2 s after one like, on a tour that never happened.
+#
+# THIS IS THE BATCH'S ONLY TRUE REGRESSION TEST: it FAILS on the unfixed tree
+# (leg 8 times out — s8.1 is advance:'tap' with no auto, so its bubble
+# persists indefinitely) and PASSES on the fixed one. Run it on the unfixed
+# tree first and record the failure; a regression test that never observed the
+# bug proves nothing.
+#
+# WHY LEG 8 IS PRECISE RATHER THAN LUCKY: under release, after a first like,
+# s6.1 is the ONLY beat that can be showing. s6.2 needs apple_save_moment
+# (off), s7.1 needs an exhausted deck, s2.*/s3.*/s5.* need trades_first /
+# quickset_prompt (off), and s1.1 needs two cached leagues (the `fresh`
+# profile has one). So "no bubble after s6.1" is exactly "no false sign-off".
+# AnalystGuide returns null when no step is active, so guide.bubble unmounts
+# the moment the slot empties.
+#
+# No testIDs are added or renamed by this flow; every selector already exists.
+tags: [smoke, onboarding, guide]
+---
+# Law 6 — the react-query cache is PERSISTED and this flow depends on a
+# genuinely first-run ftf_onboarding_state (guideSeen empty,
+# celebrationsShown.first_like false). A warm relaunch proves nothing.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+# Law 10 — assert the typed username before submitting; a raced inputText
+# submits a partial name and books a real VCR miss.
+- assertVisible:
+    text: ".*qa_standard.*"
+- tapOn:
+    id: "signin.continue-btn"
+# Under release `onboarding.landing` is off, so there is no S0 bubble here and
+# no tap-catcher preamble is needed before the sign-in fields.
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.*"
+    timeout: 40000
+- tapOn:
+    id: "leagues.row.*"
+# Law 8 — tab taps race #244 launch routing: the tab bar paints seconds before
+# routing settles and the Rank stack steals the tap back. Settle on the Rank
+# surface's own header control first.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 40000
+- tapOn:
+    id: "tab.trades"
+# First Trades visit auto-opens the team-outlook sheet (first-run prompt) —
+# dismissed conditionally via outlook.save-btn (Contender pre-selected).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+# Law 9 — the guide coach-mark swallows the first tap on cold starts
+# (guide.tap-catcher, absolute-fill), and its bubbles spring in over 250 ms.
+# Bounded conditional dismissal, never an unconditional tap.
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "guide.tap-catcher"
+          commands:
+            - waitForAnimationToEnd
+            - tapOn:
+                id: "guide.tap-catcher"
+
+# ── The deck must be ASKED for ───────────────────────────────────────────
+# Under release `firstRun` is false, so there is no first-run auto-generate.
+# trades.find-btn is not unlock-gated. 60 s covers the poll backoff
+# (800 → 4000 ms).
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+
+# ── One like ─────────────────────────────────────────────────────────────
+# Law 2 — the disposition row sits BELOW the card, so the scroll is mandatory,
+# not cosmetic: `visible:` counts off-screen ScrollView children and the tap
+# would otherwise land on dead coordinates.
+- scrollUntilVisible:
+    element:
+      id: "trades.like-btn"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "trades.like-btn"
+
+# ── s6.1 STILL fires (the guard against over-gating) ─────────────────────
+# P08-A1. The fix tightens the s8.1 branch only; if it ever suppressed the
+# celebration itself, this wait fails and says so.
+- extendedWaitUntil:
+    visible:
+      id: "guide.avatar.*celebrate"
+    timeout: 30000
+- takeScreenshot: guide-release-s6-1
+
+# ── …and NOTHING replaces it ─────────────────────────────────────────────
+# P08-A2, the regression assertion. s6.1 is advance:'auto', autoMs 2200, so
+# the slot empties on its own; 8000 ms is ~3.5× that. Under the bug s8.1 takes
+# the slot and its bubble never leaves, so this wait times out and the flow
+# fails.
+- extendedWaitUntil:
+    notVisible:
+      id: "guide.bubble"
+    timeout: 8000
+- assertNotVisible:
+    id: "guide.bubble"
+# Law 23 — a green run is not a good capture. This frame is the run record:
+# the deck, no bubble, no sign-off.
+- takeScreenshot: guide-release-no-signoff

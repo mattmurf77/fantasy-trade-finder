@@ -160,6 +160,8 @@ import {
   FIRST_SESSION_MIN_SHARED_LIKES,
   type FirstSessionLike,
 } from '../utils/firstSessionMoment';
+// P0-2 — the read gate's 403 gets its own copy on the deck-failure card.
+import { readErrorCopy } from '../utils/verification';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -226,6 +228,34 @@ let appleAskShownThisSession = false;
 // app session (module-level so a tab remount / regenerate can't re-fire it
 // — "at most once per first session" with margin).
 let adaptationMomentShownThisSession = false;
+
+// ── P0-2: the failed-search state ────────────────────────────────────
+// Three independent failure paths (POST error, job errors during polling,
+// polling abandoned after MAX_POLL_FAILURES) previously all left the deck
+// slot on the never-searched card, so "we tried and failed" and "you have
+// never searched" were the same pixels. One funnel, LAST WRITE WINS, so the
+// deck slot can render a named persistent state with a working retry.
+//
+// `message` is ALWAYS shipped user copy. job.error is never routed here
+// verbatim — see jobErrorCopy below.
+type DeckFailure = {
+  kind: 'generate' | 'job_error' | 'poll_abandoned';
+  message: string;
+} | null;
+
+const DECK_FAIL_GENERIC =
+  "We couldn't finish that search — the server may still be waking up. Try again.";
+const DECK_FAIL_NETWORK =
+  'We lost the connection while searching. Your league is fine — try again.';
+const DECK_FAIL_TIMEOUT =
+  'That search took too long. The server may still be waking up — try again.';
+
+// Maps the job snapshot's `error` field onto shipped copy. The raw value is
+// str(e) of a server-side Python exception, or the reaper's literal
+// "timeout"; neither is user-facing.
+function jobErrorCopy(raw?: string | null): string {
+  return raw === 'timeout' ? DECK_FAIL_TIMEOUT : DECK_FAIL_GENERIC;
+}
 
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
@@ -380,6 +410,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // behind a 1-player top) can't leak its extra tile out from under the
   // top card. Updated via onLayout on every top-card mount/re-layout.
   const [topCardH, setTopCardH] = useState<number | null>(null);
+  // P0-2 — bottom edge of the mode-bar region in ScrollView content
+  // coordinates, so the Toast can clear it instead of clipping the chips.
+  // 0 = not measured yet / not mounted ⇒ Toast keeps its 32pt default.
+  const [modeBarBottom, setModeBarBottom] = useState(0);
   const [toast, setToast] = useState<{
     msg: string;
     tone?: 'success' | 'warn' | 'error';
@@ -730,6 +764,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // button in both flag states, and the "Preferences changed" strip)
   // clears the refresh nudge the same way.
   function handleFindTrades(source?: string) {
+    setDeckFailure(null); // P0-2 — a search in flight has no failure
     track('find_trades_tapped', source ? { source } : undefined, 'Trades');
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
@@ -750,6 +785,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckIdx(0);
     setLaneFilter(null);
     setJob(null);
+    setDeckFailure(null); // P0-2 — the deck AND the reason it failed
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
@@ -1152,6 +1188,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // the progress strip ("4/11 opponents searched").
   const [job, setJob] = useState<TradeJobSnapshot | null>(null);
 
+  // P0-2 — the last search's failure, or null. Set by all three failure
+  // paths, cleared by every path that starts or invalidates a search.
+  const [deckFailure, setDeckFailure] = useState<DeckFailure>(null);
+
   const generateMutation = useMutation({
     // `auto` marks the onboarding first-run auto-start (item 4): its
     // failures stay silent (retry below) instead of toasting. Manual taps
@@ -1196,6 +1236,7 @@ export default function TradesScreen({ navigation, route }: any) {
     },
     onSuccess: (snapshot) => {
       setJob(snapshot);
+      setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
       // For instant cache-hit responses (status === 'complete') the deck
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
@@ -1223,8 +1264,9 @@ export default function TradesScreen({ navigation, route }: any) {
       if (vars?.auto) {
         // First-run auto-start failed — most likely the LeaguePicker
         // background session_init hasn't landed yet. Retry once, quietly;
-        // a second failure surfaces the normal manual empty state (the
-        // Find a Trade button is the recovery path).
+        // a second failure surfaces the P0-2 deck-failure card (S-08), whose
+        // "Try again" is the recovery path. Auto failures stay toast-free —
+        // the card is the whole surface.
         if (autoGenRef.current === 'kicked') {
           autoGenRef.current = 'retrying';
           autoRetryTimer.current = setTimeout(() => {
@@ -1234,10 +1276,12 @@ export default function TradesScreen({ navigation, route }: any) {
         } else {
           autoGenRef.current = 'failed';
           setAutoGenFailed(true);
+          setDeckFailure({ kind: 'generate', message: DECK_FAIL_GENERIC });
         }
         return;
       }
       setToast({ msg: e.message || 'Generate failed', tone: 'warn' });
+      setDeckFailure({ kind: 'generate', message: readErrorCopy(e, DECK_FAIL_GENERIC) });
     },
   });
 
@@ -1245,10 +1289,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // exponential backoff (INIT-13): starts at 800ms, resets on progress,
   // backs off to 4000ms when the backend isn't advancing.
   //
-  // Failure handling: after MAX_POLL_FAILURES consecutive errors we
-  // surface a toast and clear the local job so the UI returns to its
-  // pre-tap state. The server-side worker keeps running so the next tap
-  // can hit the warm cache.
+  // Failure handling: after MAX_POLL_FAILURES consecutive errors we surface
+  // a toast, clear the local job (the server-side worker keeps running so the
+  // next tap can hit the warm cache) and record a `poll_abandoned` deckFailure
+  // so the deck slot shows the named failure state rather than the
+  // never-searched card (P0-2).
   //
   // Shallow-equal guard (FR-3 / INIT-11a FR-W2-5): skip setJob when
   // nothing the UI reads has actually changed, avoiding a re-render on
@@ -1301,6 +1346,7 @@ export default function TradesScreen({ navigation, route }: any) {
             tone: 'warn',
           });
           setJob(null);
+          setDeckFailure({ kind: 'poll_abandoned', message: DECK_FAIL_NETWORK });
         } else if (!cancelled) {
           setTimeout(tick, intervalMs);
         }
@@ -1313,6 +1359,24 @@ export default function TradesScreen({ navigation, route }: any) {
       clearTimeout(firstTimer);
     };
   }, [job?.job_id, job?.status]);
+
+  // P0-2 — mirror a job-level failure into the one-funnel deckFailure state.
+  //
+  // Why an EFFECT and not a render-time read of `job?.status === 'error'`:
+  // RECENCY. `job` is not cleared when a retry's POST fails (the onError
+  // handler writes deckFailure and leaves `job` alone, deliberately — the
+  // skeleton row's guard and the Find-a-Trade button both still read it). A
+  // render-time read would therefore resurrect the OLD job's message over the
+  // NEW failure the user just caused. Mirroring makes every path a write into
+  // one slot, so last-write-wins is the whole conflict-resolution rule.
+  //
+  // One-directional by design: this effect only SETS. Clearing lives on the
+  // transition sites above — a clear here would fight `handleFindTrades` on
+  // the retry tick (job still 'error', deckFailure just cleared).
+  useEffect(() => {
+    if (job?.status !== 'error') return;
+    setDeckFailure({ kind: 'job_error', message: jobErrorCopy(job.error) });
+  }, [job?.status, job?.error]);
 
   // Deck maintenance: append new cards as the snapshot grows, dedup by
   // trade_id so re-rendering doesn't duplicate. Don't reset the index —
@@ -1364,6 +1428,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setLaneFilter(null);
     setTradeIntent(null); // #172 — a declared shape is league-specific
     setJob(null);
+    setDeckFailure(null); // P0-2 — last league's failure never follows you
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
@@ -2453,8 +2518,19 @@ export default function TradesScreen({ navigation, route }: any) {
       }
       return;
     }
-    // s6.1 seen → S8 sign-off (tour complete)
-    if (ob.guideSeen['s6.1'] && !ob.guideSeen['s8.1'] && !ob.guideTourCompleted) {
+    // s2.2 (swipe coaching, ACTED ON) + s6.1 seen → S8 sign-off.
+    // s2.2 is the precondition, not decoration: it is the tour's only
+    // advance:'action' teaching beat, it is chained on s2.1 (⇒ firstRun ⇒
+    // onboarding.trades_first), and guideSeen is durable. Without it a user
+    // who saw nothing but the first-like celebration was told the tour was
+    // over, having been taught one line — the P0-8 finding. The gate reads
+    // product state, never a flag, so it is correct under both flag sets.
+    if (
+      ob.guideSeen['s2.2'] &&
+      ob.guideSeen['s6.1'] &&
+      !ob.guideSeen['s8.1'] &&
+      !ob.guideTourCompleted
+    ) {
       requestGuideStep(GUIDE.s8_1());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2544,7 +2620,7 @@ export default function TradesScreen({ navigation, route }: any) {
           tone: 'success',
         });
         patchOnboardingState({ celebrationsShown: { first_quickset_save: true } });
-        track('celebration_fired', { beat: 'first_quickset_save' }, 'Trades');
+        track('celebration_shown', { beat: 'first_quickset_save' }, 'Trades');
       }
       maybeAskApple('quickset_save');
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3130,10 +3206,18 @@ export default function TradesScreen({ navigation, route }: any) {
         // Guided arm: s6.1 celebrate replaces the toast; the honest Apple
         // setup line (s6.2) precedes the system sheet, which opens after
         // the auto-step clears (never two overlapping surfaces).
-        if (firstLike) {
+        //
+        // REQUEST FIRST, CONSUME ON SUCCESS (P0-9 D1). When the like is the
+        // user's FIRST disposition, s2.3 was requested ~115 lines above and
+        // owns the bubble slot, so requestStep refuses (useGuide.ts:93-94).
+        // Marking the celebration spent before knowing that lost the beat
+        // permanently: firstLike went false, s6.1 was never requested again,
+        // guideSeen['s6.1'] was never written, and the tour had no ending.
+        // The && short-circuits, so a non-first like still never requests.
+        const shown = firstLike && requestGuideStep(GUIDE.s6_1());
+        if (shown) {
           patchOnboardingState({ celebrationsShown: { first_like: true } });
-          track('celebration_fired', { beat: 'first_like' }, 'Trades');
-          requestGuideStep(GUIDE.s6_1());
+          track('celebration_shown', { beat: 'first_like' }, 'Trades');
         } else {
           setToast({ msg: 'Liked', tone: 'success' });
         }
@@ -3141,7 +3225,7 @@ export default function TradesScreen({ navigation, route }: any) {
           setTimeout(() => {
             requestGuideStep(GUIDE.s6_2());
             setTimeout(() => maybeAskApple('like'), 2800);
-          }, firstLike ? 2400 : 0);
+          }, shown ? 2400 : 0);
         } else {
           maybeAskApple('like');
         }
@@ -3150,7 +3234,7 @@ export default function TradesScreen({ navigation, route }: any) {
         if (guidedOn && firstLike) {
           likeToast = 'First target logged. Your front office is open for business.';
           patchOnboardingState({ celebrationsShown: { first_like: true } });
-          track('celebration_fired', { beat: 'first_like' }, 'Trades');
+          track('celebration_shown', { beat: 'first_like' }, 'Trades');
         }
         setToast({ msg: likeToast, tone: 'success' });
         maybeAskApple('like');
@@ -3320,6 +3404,7 @@ export default function TradesScreen({ navigation, route }: any) {
         holdMs={toast?.holdMs ?? 1500}
         action={toast?.action}
         onDismiss={() => setToast(null)}
+        topOffset={modeBarBottom > 0 ? modeBarBottom + space.sm : undefined}
       />
 
       {/* #257 — cut entirely when the full sheet consolidates the Controls
@@ -3433,49 +3518,66 @@ export default function TradesScreen({ navigation, route }: any) {
             verbatim) and adds the League/Trading-with pill strip (#270
             verbatim, second sentence). Control (or any non-guided mode)
             renders `TradeFinderModeBar` exactly as before — byte-identical. */}
-        {finderMode ? (
-          showInlineHome ? (
-            <TradeHomeUtilityRow
-              onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
-              onManualCalc={() => navigation?.navigate?.('TradeCalculator')}
-              onDraft={
-                draftRoomOn
-                  ? () => navigation?.navigate?.('DraftRoom')
-                  : undefined
-              }
+        {/* P0-2 — one conditional host View so the mode-bar region can be
+            measured (onLayout) and the Toast can clear it instead of clipping
+            the chips. The condition is HOISTED onto the wrapper: an
+            unconditional wrapper would still be a flex child when both slots
+            are null, and the ScrollView's own `gap` would then apply on both
+            sides of a zero-height view. `modeBarWrap`'s gap replicates the
+            content container's gap between the two slots it now contains. */}
+        {finderMode || showInlineHome ? (
+          <View
+            style={styles.modeBarWrap}
+            onLayout={(e) => {
+              const { y, height } = e.nativeEvent.layout;
+              setModeBarBottom(y + height);
+            }}
+          >
+          {finderMode ? (
+            showInlineHome ? (
+              <TradeHomeUtilityRow
+                onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+                onManualCalc={() => navigation?.navigate?.('TradeCalculator')}
+                onDraft={
+                  draftRoomOn
+                    ? () => navigation?.navigate?.('DraftRoom')
+                    : undefined
+                }
+              />
+            ) : (
+              <TradeFinderModeBar
+                mode={finderMode}
+                teamName={scopedOpponentName}
+                onSwitch={switchFinderMode}
+                onCalculator={() => navigation?.navigate?.('TradeCalculator')}
+                onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+                // rookie-draft placement, option B (operator decision
+                // 2026-08-06): the Draft chip is the draft's PERMANENT home and
+                // LEADS the strip. Passing the handler is what creates the chip,
+                // so `draft.room` off ⇒ five chips exactly as today.
+                onDraft={
+                  draftRoomOn
+                    ? () => navigation?.navigate?.('DraftRoom')
+                    : undefined
+                }
+                showHint={deck.length === 0}
+                // #269 — Team and Player selection moved into the full sheet;
+                // only hide the chips when that sheet actually exists (also
+                // requires `consolidateOn`) so there's always a way to reach
+                // them.
+                hideTeamAndPlayer={sheetTargetingOn && consolidateOn}
+              />
+            )
+          ) : null}
+          {showInlineHome ? (
+            <TradingWithStrip
+              leagueName={league?.league_name ?? null}
+              opponentName={scopedOpponentName ?? null}
+              onOpenLeaguePicker={openLeaguePickerFromStrip}
+              onOpenTeamPicker={openTeamPickerFromStrip}
             />
-          ) : (
-            <TradeFinderModeBar
-              mode={finderMode}
-              teamName={scopedOpponentName}
-              onSwitch={switchFinderMode}
-              onCalculator={() => navigation?.navigate?.('TradeCalculator')}
-              onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
-              // rookie-draft placement, option B (operator decision
-              // 2026-08-06): the Draft chip is the draft's PERMANENT home and
-              // LEADS the strip. Passing the handler is what creates the chip,
-              // so `draft.room` off ⇒ five chips exactly as today.
-              onDraft={
-                draftRoomOn
-                  ? () => navigation?.navigate?.('DraftRoom')
-                  : undefined
-              }
-              showHint={deck.length === 0}
-              // #269 — Team and Player selection moved into the full sheet;
-              // only hide the chips when that sheet actually exists (also
-              // requires `consolidateOn`) so there's always a way to reach
-              // them.
-              hideTeamAndPlayer={sheetTargetingOn && consolidateOn}
-            />
-          )
-        ) : null}
-        {showInlineHome ? (
-          <TradingWithStrip
-            leagueName={league?.league_name ?? null}
-            opponentName={scopedOpponentName ?? null}
-            onOpenLeaguePicker={openLeaguePickerFromStrip}
-            onOpenTeamPicker={openTeamPickerFromStrip}
-          />
+          ) : null}
+          </View>
         ) : null}
         {/* #231 — outlook bias receipt (self-contained; single-line mount).
             #246: Change opens the DNA sheet over the deck. Also stands in
@@ -4715,6 +4817,10 @@ export default function TradesScreen({ navigation, route }: any) {
                 theirUserId={topCard.opponent_user_id}
                 givePlayerIds={topCard.give_player_ids}
                 receivePlayerIds={topCard.receive_player_ids}
+                givePlayerNames={topCard.give_players.map((p) => p.name)}
+                receivePlayerNames={topCard.receive_players.map((p) => p.name)}
+                opponentUsername={topCard.opponent_username}
+                surface="deck"
                 impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
                 onSent={
                   // F10 — deck-done summary "proposed" tally.
@@ -4820,12 +4926,21 @@ export default function TradesScreen({ navigation, route }: any) {
             deck.length === 0 &&
             job?.status !== 'complete' &&
             job?.status !== 'error' &&
-            !autoGenFailed ? (
+            !autoGenFailed &&
+            !deckFailure ? (
             // Onboarding item 4 — first-run skeleton deck: generation was
             // auto-started (or pregenerated at auth-return) and cards are
             // streaming in; the manual "Hit Find a Trade" empty state never
             // shows on first run. Falls through to the normal states if the
             // job completes empty or the silent auto-start gives up.
+            //
+            // P0-2 / G-027: `!deckFailure` is NOT redundant with the
+            // `status !== 'error'` guard above it. The poll-abandon path sets
+            // job to NULL (not to an errored snapshot), so `job?.status` is
+            // `undefined`, the status guard misses, `autoGenFailed` is only
+            // ever set from the POST path, and the auto-start effect refuses
+            // to re-kick (autoGenRef.current !== 'idle'). Before this guard a
+            // first-run user whose polling died sat on this skeleton FOREVER.
             <SkeletonTradeCard />
           ) : generateMutation.isPending || job?.status === 'running' ? (
             // Job is running but no cards have arrived yet (first ~3s of
@@ -4905,6 +5020,24 @@ export default function TradesScreen({ navigation, route }: any) {
                     invite leaguemates to unlock more.
                   </Text>
                 )}
+              </View>
+            </Card>
+          ) : deckFailure ? (
+            // P0-2 — the last search FAILED, and this is the only state that
+            // says so. Sits below row 7 (deck.length > 0) so a job that errors
+            // after banking cards keeps its partial deck (S-09), and above the
+            // never-searched fallback so that card now means what it says.
+            <Card>
+              <View style={styles.emptyInner} testID="trades.deck-error">
+                <Text style={styles.deckErrorTitle}>Search failed</Text>
+                <Text style={styles.emptyBody}>{deckFailure.message}</Text>
+                <Button
+                  testID="trades.deck-error.retry"
+                  label="Try again"
+                  variant="secondary"
+                  compact
+                  onPress={() => handleFindTrades('deck_error_retry')}
+                />
               </View>
             </Card>
           ) : (
@@ -5819,6 +5952,19 @@ const styles = StyleSheet.create({
     ...type.heading,
     textAlign: 'center',
   },
+  // P0-2 — the ONLY red headline in the deck slot. Same display ramp as
+  // emptyTitle so the failure state reads in the same voice as "DECK DONE";
+  // semantic.neg is what makes it non-confusable with a valid empty state at
+  // a glance, before the copy is even read.
+  deckErrorTitle: {
+    ...type.heading,
+    textAlign: 'center',
+    color: semantic.neg,
+  },
+  // P0-2 — host view for the mode-bar measurement. `gap` REPLICATES the
+  // ScrollView content container's gap between the two slots this wrapper
+  // now contains; without it the strip would sit flush against the chip row.
+  modeBarWrap: { gap: space.lg },
   emptyBody: {
     ...type.bodySm,
     textAlign: 'center',

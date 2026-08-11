@@ -103,10 +103,6 @@ export const S = {
     id: 's8.1', screen: 'Trades', pose: 'celebrate', advance: 'tap', once: true,
     line: "That's the tour. I'll keep modeling in the background — you'll see me when the numbers say something worth hearing.",
   }),
-  err_burst: (): GuideStep => ({
-    id: 'err.burst', screen: 'Trades', pose: 'oops', advance: 'tap',
-    line: "Something's broken on my end. Not your fault. Investigating.",
-  }),
 } as const;
 
 /** Fixed leverage order for the S5.5 next-position ask (client-side proxy
