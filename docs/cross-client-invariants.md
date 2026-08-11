@@ -318,6 +318,22 @@ Minimum rank decisions per position before Trade Finder unlocks. Tracked per sco
 
 ---
 
+## Trade disposition control names
+
+The two deck controls are named **Pass** and **Like** (operator decision, 2026-08-11, taken on the #169 thread and reaffirmed for #298 — it is the same control). Not "Accept/Decline", not "Send offer". Every client uses this vocabulary in copy, in accessibility labels and in analytics:
+
+| Concept | testID | a11y label | Glyph / colour |
+|---|---|---|---|
+| Pass | `trades.pass-btn` | "Pass on this trade" | `x`, `semantic.neg` |
+| Like | `trades.like-btn` | "Accept this trade" | `check`, `semantic.pos` |
+| Third option | — | "Queue this trade" | `plus` / `check` when queued |
+
+Swipe right = Like, swipe left = Pass; the hint string is "Swipe right to like · Swipe left to pass". The VoiceOver custom actions on the top card mirror the two buttons exactly and share their `advance()` handler — a change to one is a change to all three, and any surface that shows a trade card must carry all three or none.
+
+Since #169 the controls live in `TradeCard.tsx`, wired through a `disposition` prop that the host threads down; `TradesScreen` maps them to `advance('pass'|'like')`. A card mounted without that prop renders **no** disposition row at all, which is invisible to `tsc` — `mobile/tests/check-single-pin-actions.js` pins the whole chain, not the co-location.
+
+**The a11y-label asymmetry is intentional and pre-existing:** the Like button's label is "Accept this trade" while its visible name is "Like". Do not "fix" one without the other — `docs/design/components.md` and the Maestro flows both depend on the current strings.
+
 ## user_events taxonomy
 
 See [data-dictionary.md](data-dictionary.md#user_events). When adding a new event_type, add it to that list and to any client that emits it.
@@ -346,7 +362,10 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
 - Lifecycle/nav: `app_opened`, `app_backgrounded`, `screen_viewed`, `client_error`
 - Pre-auth funnel: `signin_attempted`, `signin_succeeded`, `signin_failed`, `league_selected`, `demo_entered`
 - Ranking: `rank_method_selected`
-- Trades: `find_trades_tapped`, `trade_card_viewed`, `trade_flagged`, `match_opened`
+- Trades: `find_trades_tapped`, `trade_card_viewed`, `trade_flagged`, `match_opened`. **`find_trades_tapped` and `trade_card_viewed` both carry `mode` ∈ `single_pin` | `deck`** (#298, 2026-08-11) — the pinned-surface discriminator; a `find_trades_tapped{mode:single_pin}` with no following `trade_card_viewed{mode:single_pin}` is #298 reappearing. `find_trades_tapped` also carries `source` ∈ `prefs_changed_strip` | `deck_error_retry` | absent, which the client had been sending since #257 into an empty prop registry that popped it on every row.
+- **Feedback #297/#299/#302 batch (2026-08-11 — [addendum](feedback/items/297-lineup-impact-single-pin/analytics.md)); mobile only:**
+  - Calculator: `lineup_impact_unavailable` — the honest-empty "Starting lineup" row impression. `platform` is the **LEAGUE** platform (`sleeper` | `espn` | `mfl` | `fleaflicker` | `unknown`), read from the session league cache. **Never inferred from the league id's shape: ESPN and MFL league ids CAN be numeric** (MFL `990062846` is live in this project's DB), so an `isdigit()` read labels them `sleeper`. `_sleeper_lineup_slots`' docstring implies otherwise and is wrong — those leagues fail at the meta-fetch gate, not the digit gate.
+  - League drill-in: `league_team_closed` — the EXIT half. The ENTER half is **`league_team_opened` (P0-7), reused unchanged**; there is deliberately **no** `league_team_focused` / `league_team_unfocused` pair, because two events for one interaction on this screen is the two-sources-of-truth bug #208/#248/#293 are a catalog of. `via` is a closed 5-value enum, one per exit control: **`header_back` | `in_card_link` | `hardware_back` | `tab_retap` | `refocus`**. Adding an exit control means adding a value here **and** a `closeTeam('<via>')` call — the screen's single choke point, pinned by `mobile/tests/check-analytics-297-302.js`. A `league_team_opened` with no matching close is "abandoned by navigating away", measured by absence on purpose.
 - Engagement: `push_opened`
 - Onboarding plan ([plan](plans/onboarding-conversion/plan.md)): `apple_prompt_shown`, `apple_prompt_accepted`, `apple_prompt_declined`, `apple_prompt_dismissed`, `quickset_prompt_shown`, `quickset_prompt_accepted`, `quickset_prompt_snoozed`, `trade_card_shared`, `coach_mark_shown`, `coach_mark_dismissed`, `celebration_shown`, `deck_exhausted_viewed`
 - **P0 remediation batch (2026-08-11 — [addendum](business/analytics/2026-08-11-p0-7-addendum.md)); mobile only:**
@@ -361,7 +380,7 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
 
 **`celebration_shown`, never `celebration_fired`.** The registered name has always been `celebration_shown`; the client emitted `celebration_fired` and every one of those events was dropped. Fixed 2026-08-11 by **renaming the client**, deliberately **without an alias** — an alias would make the taxonomy the place typos go to live.
 
-**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum.
+**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum. `lineup_impact_unavailable` (impression) and `league_team_closed` (terminator/dismissal, like `quickset_abandoned`) are classified **non-intent** for the same reason, added in the same commit as their allowlist entries. `league_team_opened` **stays intent** — the enter half is the value moment and already counts the user once, so admitting its terminator too would only ever add user-days where the opener was lost to queue overflow.
 
 **Web (`web/js/events.js`) and the extension (`extension/background.js`) fire NONE of the P0-batch names.** That omission is deliberate — these are mobile surfaces — and is stated here so a future reader reads it as a decision, not as drift.
 

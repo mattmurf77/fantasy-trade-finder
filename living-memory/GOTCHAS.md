@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-035 | A JSX "is this gated on X?" test passes on a build where X is ignored | Mobile / structural tests / AST |
 | G-034 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
 | G-033 | A sim run goes red on an unrelated screen after adding one API call | Mobile / Maestro harness / VCR |
 | G-032 | Account-only session shows "No 2026 NFL leagues found" (or a 503) | Mobile / account auth / Sleeper |
@@ -284,6 +285,12 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** `backfill_ranking_method_from_tiers()` runs inside `_migrate_db()`, which runs on **every** Flask boot — including the seeded UI-test backend. It rewrites the seeded `quickset-done` user before the first test request arrives.
 - **Fix:** ship the fixture in the **post**-backfill shape and invert the seeder guard (`_validate_quickset`) and the capture in the **same commit** as the migration. Three coupled edits, not one.
 - **Prevention:** any migration that runs at boot is part of the test-fixture contract. When adding one, grep `backend/tests/fixtures/` for rows in its cohort and move them with it — otherwise a green flow documents behaviour that no longer exists, or a red one has no visible cause. See [D-026](DECISIONS.md).
+
+### G-035 — a JSX "is this gated on X?" test that walks ancestors will false-pass
+- **Symptom:** a structural test asserting some element is conditional on a prop passes on a build where that element is deliberately unconditional. Nothing looks wrong in review.
+- **Cause:** the assertion collected the conditions of *several* JSX ancestors and regex-matched the token anywhere in the concatenation. In `check-league-drill-in.js`, the relocated tier badge sits inside the cluster's own `posRank || (denseSingleLine && tier) ? …` ternary, so the token `denseSingleLine` was present in an ancestor regardless of the badge's own gate.
+- **Fix:** read the **innermost** conditional only, and stop walking at the enclosing JSX element boundary (`nearestConditionText()`, fixed in `ba30464`).
+- **Prevention:** run every new assertion against a deliberately sabotaged tree before trusting it. This one was found *only* because the falsification pass was executed — it would not have surfaced in review, and unfixed it would have shipped the Tiers and FreeAgents rows rendering the tier badge twice. Four false-passing tests were caught this way in the #297–#302 batch alone; treat "my test passes" as unproven until the sabotage fails it. See [D-036](DECISIONS.md).
 
 ---
 
