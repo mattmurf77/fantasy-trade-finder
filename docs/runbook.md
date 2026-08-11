@@ -29,6 +29,7 @@ Operational procedures. Add to this as you learn things.
 - [Mobile UI-test harness (partial — pre-Maestro state, 2026-07-11)](#mobile-ui-test-harness-partial-pre-maestro-state-2026-07-11)
   - [Harness build gotchas (2026-07-11)](#harness-build-gotchas-2026-07-11)
   - [Draft replay corpora (rookie-draft M1, 2026-08-06)](#draft-replay-corpora-rookie-draft-m1-2026-08-06)
+- [App Store pre-submission checklist (MANDATORY)](#app-store-pre-submission-checklist-mandatory)
 - [Sign in with Apple — App Store Connect / Apple Developer setup (account-auth P2, 2026-07-11)](#sign-in-with-apple-app-store-connect-apple-developer-setup-account-auth-p2-2026-07-11)
 - [Pick-value tier ladder migration (2026-07-11)](#pick-value-tier-ladder-migration-2026-07-11)
 - [8-tier ladder + consensus seed recalibration (2026-07-12, feedback #117/#118)](#8-tier-ladder-consensus-seed-recalibration-2026-07-12-feedback-117118)
@@ -349,13 +350,40 @@ The same `FTF_SLEEPER_FIXTURES_DIR` seam backs the Draft Room's offline test mat
 - **Sleeper picks have no timestamps** (live-verified). `last_picked` exists only on the detail object, so the replayer synthesises a monotonic ladder anchored to the recorded value; `truncate_picks(total)` reproduces the cassette byte-for-byte.
 - **Known-red, on purpose:** `test_m1_04_bulk_players_fetch_is_intercepted_by_the_fixture_seam` is a `strict=True` xfail. `_ensure_sleeper_cache_populated` fetches the ~5 MB `/v1/players/nfl` dump with raw `urllib`, so the fixture seam cannot see it ([RV-3]). M0's one-line fix — route it through `_sleeper_get` — flips it to XPASS, which under `strict=True` fails the suite until the marker is deleted. That is the handoff, not a bug.
 
+## App Store pre-submission checklist (MANDATORY)
+
+*Created 2026-08-11 (P1-3). The runbook had no such section, so requirements with no
+deploy-time trigger had nowhere to live and were carried in people's heads.*
+
+**Every item here is mandatory and blocks the submission, not the deploy.** Data
+practices change on `main` continuously; the App Store privacy label is only ever
+corrected at a submission, so drift between the two is invisible until Apple finds it.
+Wrong privacy label = rejection or removal.
+
+Walk this list before every App Store Connect submission. When a change lands that
+alters the data surface, **add the row here in the same commit** rather than trusting
+that the next submitter will re-derive it.
+
+| # | Action | Why / added | Status |
+|---|---|---|---|
+| 1 | **App Privacy → Contact Info → Email Address**, marked **linked to the user**, purposes **App Functionality** + **Developer Communications**. | `auth.email_capture` went true 2026-08-11 (P1-3): the provider-supplied address is stored in plaintext on `accounts.email`. Collection is server-side and already live — the binary predates the label. | **OPEN** — action at next submission |
+| 2 | **App Privacy → Identifiers → User ID**, linked to the user. | Apple/Google `sub` + `account_id` (account-auth P2). | carried from the Sign in with Apple section, step 3 |
+| 3 | **App Privacy → Usage Data**, linked to the user. | First-party `user_events` ingestion; no third-party ad SDK, no IDFA, so **no ATT prompt**. | see `docs/plans/analytics-platform/prd.md` NFR-4 |
+| 4 | Confirm `web/privacy.html` (the App Store Connect privacy URL) matches what the labels declare, **and** matches the code. | The policy and the labels are two separate published claims about the same facts; they drift independently. | every submission |
+| 5 | **Account deletion** — point the reviewer at Settings → Account → Delete account (Guideline 5.1.1(v)); it is deliberately not flag-gated. | | every submission |
+| 6 | If Google sign-in has shipped, confirm Apple ships in the same release (Guideline 4.8). | | conditional |
+
+**If a send path for email is ever built**, item 1 gains a purpose and this checklist
+gains an unsubscribe row — `email_unsubscribed_at` currently has no writer, and the
+privacy policy promises no unsubscribe precisely because of that.
+
 ## Sign in with Apple — App Store Connect / Apple Developer setup (account-auth P2, 2026-07-11)
 
 The `auth.accounts` surface ships dark. Before flipping the flag ON (and before any TestFlight build exercises the Apple button), the operator must complete these one-time steps — none of them are automatable from this repo:
 
 1. **App ID capability** — [developer.apple.com](https://developer.apple.com/account) → Certificates, Identifiers & Profiles → Identifiers → `com.fantasytradefinder.app` → check **Sign In with Apple** (as primary App ID) → Save. Without this, `AppleAuthentication.signInAsync` fails with an entitlement error on device.
 2. **Rebuild via EAS** — the `expo-apple-authentication` plugin + `ios.usesAppleSignIn: true` in `app.json` add the `com.apple.developer.applesignin` entitlement; EAS regenerates the provisioning profile automatically on the next `eas build` after step 1. No Services ID or Sign-in-with-Apple *key* is needed for the native-app flow (those are only for web/Android OAuth redirects).
-3. **App Store Connect privacy** — App Privacy section: declare the new identifier data ("User ID" linked to the user) and update `web/privacy.html` to cover Apple/Google `sub` storage (plan §4 → #114 owner). The current privacy policy states "no email addresses" — we store only a SHA-256 `email_hash`, never the raw email; keep it that way or amend the policy.
+3. **App Store Connect privacy** — App Privacy section: declare the new identifier data ("User ID" linked to the user) and update `web/privacy.html` to cover Apple/Google `sub` storage (plan §4 → #114 owner). **The hash-only posture ended 2026-08-11**: `auth.email_capture` is now `true`, the provider-supplied address is stored in plaintext on `accounts.email`, and the policy was amended in the same commit to say so — the instruction that used to live here ("keep it that way or amend the policy") is spent. The label consequence is a **mandatory** submission-time action: see [App Store pre-submission checklist](#app-store-pre-submission-checklist-mandatory).
 4. **Guideline 4.8 pairing** — if Google sign-in ever ships (`GOOGLE_OAUTH_CLIENT_ID` + un-stubbing the mobile flow), Apple must be live in the same release.
 5. **Account deletion review note** — Guideline 5.1.1(v): point the reviewer at Settings → Account → Delete account (works regardless of the `auth.accounts` flag).
 
