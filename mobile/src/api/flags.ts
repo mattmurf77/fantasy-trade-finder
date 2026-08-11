@@ -19,6 +19,15 @@ import type { FlagMap } from '../shared/types';
 // "fetch succeeded — replace flags". Without this, a failure looked
 // identical to a successful empty-flag-set response, which silently hid
 // every gated feature on net error.
+/** P0-7 F1 — flag-key → the experiment overlay it came from.
+ *  Rebuilt on every successful fetch and never persisted: it describes the
+ *  CURRENT assignment, and a stale one would attribute an exposure to an
+ *  experiment the unit is no longer in. Module-level, deliberately not in
+ *  the store — it must not cause a re-render. */
+export type FlagProvenance = Record<string, { experiment: string; variant: string }>;
+let _provenance: FlagProvenance = {};
+export function flagProvenance(): FlagProvenance { return _provenance; }
+
 export async function loadFeatureFlags(
   opts: { throwOnError?: boolean } = {},
 ): Promise<FlagMap> {
@@ -42,13 +51,25 @@ export async function loadFeatureFlags(
     // MERGED map, so an assigned unit keeps its variant flags across
     // offline boots; assignment changes reconcile on the next fetch.
     const configs = res?.configs || {};
+    const exps = res?.experiments || {};
+    const provenance: FlagProvenance = {};
     let merged = base;
     for (const key of Object.keys(configs)) {
       const overlay = configs[key]?.flags;
       if (overlay && typeof overlay === 'object' && !Array.isArray(overlay)) {
         merged = { ...merged, ...overlay };
+        // P0-7 F1 — remember WHICH experiment/variant supplied each key so
+        // useFeatureFlags can emit an exposure on first consumption. Last
+        // writer wins, exactly like the merge above, so provenance can
+        // never disagree with the value the app is actually using.
+        for (const fk of Object.keys(overlay)) {
+          provenance[fk] = { experiment: key, variant: exps[key] ?? 'unknown' };
+        }
       }
     }
+    // Success path only: a failed fetch leaves the previous map intact,
+    // matching revalidateFlags' "keep cached flags" contract.
+    _provenance = provenance;
     return merged;
   } catch (err) {
     if (opts.throwOnError) throw err;

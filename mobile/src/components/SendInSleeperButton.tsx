@@ -20,6 +20,7 @@ import {
   validateTradeSend,
 } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
+import { track } from '../api/events';
 
 // "Send in Sleeper". Renders on any real trade surface (found / matched /
 // suggested). Flag-gated: returns null when `trade.send_in_sleeper` is off.
@@ -224,8 +225,25 @@ export default function SendInSleeperButton({
         { text: 'OK', onPress: () => void maybeRequestReview('send_in_sleeper') },
       ]);
     } catch (err) {
-      setState('idle');
       const body = err instanceof ApiError ? (err.body as any) : undefined;
+      // P0-7 — the FAILURE leg. Client-fired because this is the ONLY
+      // place that sees network errors, timeouts, and the pre-identity
+      // refusals (feature_disabled / no_user / test_mode_propose_disabled)
+      // the server cannot attribute to a user — and the only place that
+      // knows `surface`. Closed enum: 12 server codes ∪ network | timeout
+      // | unknown = 15 values, forever.
+      track('sleeper_send_failed', {
+        surface,
+        error_code: err instanceof ApiError
+          ? (err.isTimeout ? 'timeout' : (body?.error ?? 'unknown'))
+          : 'network',
+        status: err instanceof ApiError ? (err.status ?? null) : null,
+        kind: body?.kind ?? null,
+        give_n: givePlayerIds.length,
+        receive_n: receivePlayerIds.length,
+        from_deck: !!impressionId,
+      });
+      setState('idle');
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail;
 
@@ -313,6 +331,20 @@ export default function SendInSleeperButton({
 
   const onPress = useCallback(async () => {
     if (state !== 'idle') return;
+    // P0-7 — the ATTEMPT leg. Fired in the HANDLER, never at render:
+    // after P0-6 a non-Sleeper mount renders a copy affordance rather
+    // than a send button, so a mount-time impression event would conflate
+    // copy-affordance impressions with send impressions and corrupt the
+    // send-funnel denominator (hld.md §1.4).
+    // has_target=false means this tap becomes the openInSleeper() handoff
+    // below, NOT a real send — the denominator needs that distinction.
+    track('sleeper_send_attempted', {
+      surface,
+      give_n: givePlayerIds.length,
+      receive_n: receivePlayerIds.length,
+      from_deck: !!impressionId,
+      has_target: !!leagueId && !!theirUserId,
+    });
     // Routed through utils/haptics (W1B handoff): pickup = impact-medium,
     // the same physical feedback as the previous direct expo-haptics call.
     haptics.pickup();

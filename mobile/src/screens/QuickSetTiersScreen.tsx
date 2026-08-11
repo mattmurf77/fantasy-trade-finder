@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   LayoutChangeEvent,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
@@ -125,6 +126,53 @@ export default function QuickSetTiersScreen() {
   const [savedByTier, setSavedByTier] = useState<Partial<Record<Tier, string[]>>>({});
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
+  // ── P0-7 F3/F4 · Quick Set per-rung telemetry ───────────────────────
+  // Refs, not state: none of this renders, and a blur/unmount handler
+  // reads them at a moment when a closed-over state value would be stale.
+  const stepStartRef = React.useRef(Date.now());       // reset on every advance
+  const walkStartRef2 = React.useRef(Date.now());      // whole-walk clock for F4
+  const abandonRef = React.useRef({ tierIdx: 0, tiersDone: 0, position });
+  const completedRef = React.useRef(false);            // set in goTo's done branch
+  const abandonFiredRef = React.useRef(false);         // blur AND unmount both fire
+
+  React.useEffect(() => {
+    abandonRef.current = {
+      tierIdx,
+      tiersDone: Object.keys(savedByTier).length,
+      position,
+    };
+  }, [tierIdx, savedByTier, position]);
+
+  // P0-7 F4 — the drop-off curve. `screen_left` gives dwell but not WHERE
+  // in the ladder they stopped, which is the whole question. Fires on
+  // blur (the reliable signal: completion navigates to another TAB, which
+  // does not unmount this screen) and on unmount, deduped, and only when
+  // there is progress to report and the walk did not complete.
+  React.useEffect(() => {
+    const fire = (reason: 'nav' | 'background') => {
+      if (abandonFiredRef.current || completedRef.current) return;
+      const { tierIdx: ti, tiersDone, position: pos } = abandonRef.current;
+      if (ti === 0 && tiersDone === 0) return;      // never started — not an abandon
+      abandonFiredRef.current = true;
+      track('quickset_abandoned', {
+        position: pos,
+        tier_index: ti,
+        tiers_done: tiersDone,
+        ms: Date.now() - walkStartRef2.current,
+        reason,
+      }, 'QuickSetTiers');
+    };
+    const unsubBlur = navigation.addListener('blur', () => fire('nav'));
+    const appSub = AppState.addEventListener('change', (st) =>
+      st === 'background' ? fire('background') : undefined,
+    );
+    return () => {
+      unsubBlur();
+      appSub.remove();
+      fire('nav');                                  // unmount without a blur
+    };
+  }, [navigation]);
+
   const tier = TIERS[tierIdx];
   const isLastTier = tierIdx === TIERS.length - 1;
 
@@ -229,11 +277,37 @@ export default function QuickSetTiersScreen() {
     haptics.selection();
   }, []);
 
+  // P0-7 F3 — `seeded_accepted` is the operator's fairness point: the grid
+  // arrives pre-seeded from consensus (gridPlayers are the players whose
+  // CURRENT tier is this rung or unclaimed), so a rung can clear in one tap
+  // and "32 taps" overstates the work. True <=> the user saved EXACTLY the
+  // consensus-seeded set for this rung — no additions, no omissions.
+  const trackStepAdvanced = (ids: string[], via: 'save' | 'skip' | 'empty') => {
+    const seeded = gridPlayers
+      .filter((p) => tierForElo(p.elo, position, fmt) === tier)
+      .map((p) => p.id);
+    const same =
+      ids.length > 0 &&
+      ids.length === seeded.length &&
+      ids.every((id) => seeded.includes(id));
+    track('quickset_step_advanced', {
+      position,
+      tier_index: tierIdx,
+      tier_count: TIERS.length,
+      seeded_accepted: same,
+      picked_n: ids.length,
+      via,
+      ms: Date.now() - stepStartRef.current,
+    }, 'QuickSetTiers');
+    stepStartRef.current = Date.now();
+  };
+
   // Move the walk to `idx`, pre-selecting whatever that tier already got
   // this run. Past the last tier → done, back to the Tiers board.
   const goTo = useCallback(
     (idx: number, savedMap: Partial<Record<Tier, string[]>>) => {
       if (idx >= TIERS.length) {
+        completedRef.current = true;   // P0-7 F4 — walked the ladder; not an abandon
         // rookie-draft M2 (the client mirror of server invariant I-4): a
         // ROOKIES-ONLY walk has not completed the position, so it must not
         // write the completion record. `quicksetCompletedPositions` feeds
@@ -315,6 +389,7 @@ export default function QuickSetTiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
       queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
       haptics.success();
+      trackStepAdvanced(ids, 'save');   // P0-7 F3 — after a SUCCESSFUL save only
       goTo(tierIdx + 1, nextSaved);
     },
     onError: (e: Error) => {
@@ -331,6 +406,7 @@ export default function QuickSetTiersScreen() {
       // Nothing picked and nothing to un-pick — same as Skip (a save with
       // no assignments and no clears is a 400 on the backend). Skip ≠
       // demote (#161): only an explicit save with picks demotes anyone.
+      trackStepAdvanced([], 'empty');   // P0-7 F3
       goTo(tierIdx + 1, savedByTier);
       return;
     }
@@ -362,7 +438,10 @@ export default function QuickSetTiersScreen() {
     saveMutation.mutate({ ids, cleared, demoted });
   }, [gridPlayers, selected, savedByTier, tier, tierIdx, goTo, saveMutation, position, fmt]);
 
-  const onSkip = useCallback(() => goTo(tierIdx + 1, savedByTier), [tierIdx, savedByTier, goTo]);
+  const onSkip = useCallback(() => {
+    trackStepAdvanced([], 'skip');      // P0-7 F3
+    goTo(tierIdx + 1, savedByTier);
+  }, [tierIdx, savedByTier, goTo]);
   const onBack = useCallback(() => goTo(tierIdx - 1, savedByTier), [tierIdx, savedByTier, goTo]);
 
   // Position switch restarts the walk for the new position. Committed

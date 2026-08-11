@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadFeatureFlags } from '../api/flags';
+import { loadFeatureFlags, flagProvenance } from '../api/flags';
+import { track } from '../api/events';
 import type { FlagMap } from '../shared/types';
 
 // AsyncStorage key for the last successfully-fetched feature flag map.
@@ -102,8 +103,38 @@ export const useFeatureFlags = create<FlagState>((set, get) => ({
   },
 }));
 
+// ── P0-7 F1 · experiment_exposed ───────────────────────────────────────
+// EXPOSURE, not assignment. backend/experiments.py uses assignment as a
+// proxy and reports the dilution; for a first-session test the gap is
+// large AND arm-correlated, so an assignment-based read is biased, not
+// merely noisy.
+//
+// Fired at most ONCE PER FLAG KEY PER SESSION, and always DEFERRED —
+// `useFlag` runs during render, and calling track() there would queue an
+// AsyncStorage write from a render body. setTimeout(0) moves it to the
+// next tick, after the commit.
+const _exposed = new Set<string>();
+function noteFlagConsumed(key: string): void {
+  if (_exposed.has(key)) return;
+  const p = flagProvenance()[key];
+  if (!p) return;                 // not an overlaid key — no experiment, no exposure
+  _exposed.add(key);              // claim BEFORE the deferral: two consumers in
+                                  // one render must not queue two events
+  setTimeout(() => {
+    track('experiment_exposed', {
+      experiment: p.experiment,
+      variant: p.variant,
+      key,
+      // `unit` is registered in the taxonomy but not emitted: the client
+      // cannot derive account-vs-device (the flag endpoint returns the
+      // merged maps without unit_type). Adding it is a server change.
+    });
+  }, 0);
+}
+
 /** Convenience hook: `useFlag("swipe.community_compare")` returns bool. */
 export function useFlag(key: string): boolean {
+  noteFlagConsumed(key);                       // no-op unless key is overlaid
   return useFeatureFlags((s) => !!s.flags[key]);
 }
 
@@ -115,11 +146,15 @@ export function useFlag(key: string): boolean {
 
 /** Hook form: `useOnboardingFeature("onboarding.trades_first")`. */
 export function useOnboardingFeature(key: string): boolean {
+  noteFlagConsumed('onboarding.v2');
+  noteFlagConsumed(key);
   return useFeatureFlags((s) => !!s.flags['onboarding.v2'] && !!s.flags[key]);
 }
 
 /** Non-hook form for imperative code paths (nav handlers, api modules). */
 export function onboardingEnabled(key: string): boolean {
+  noteFlagConsumed('onboarding.v2');
+  noteFlagConsumed(key);
   const flags = useFeatureFlags.getState().flags;
   return !!flags['onboarding.v2'] && !!flags[key];
 }
