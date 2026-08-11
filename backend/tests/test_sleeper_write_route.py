@@ -270,7 +270,12 @@ def _trade_sent_rows():
     return [dict(r._mapping) for r in rows]
 
 
-def test_propose_success_fires_trade_sent_platform_sleeper(client):
+def test_propose_success_fires_no_trade_sent_on_sleeper(client):
+    """Analytics dedup (MFL merge, 2026-08-11): a confirmed Sleeper send is
+    measured by `sleeper_send_succeeded` (P0-7, funnel stage 8 — covered in
+    test_analytics_p0.py) and must NOT also land a `trade_sent` row —
+    one event per real occurrence. `trade_sent` is the non-Sleeper
+    confirmed-send event (POST /api/trades/propose-mfl only)."""
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
     rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
@@ -282,16 +287,7 @@ def test_propose_success_fires_trade_sent_platform_sleeper(client):
             "give_player_ids": ["100", "101"], "receive_player_ids": ["200"],
             "draft_picks": ["2027_1"]}))
     assert r.status_code == 200, r.get_data(as_text=True)
-    rows = _trade_sent_rows()
-    assert len(rows) == 1
-    assert rows[0]["user_id"] == USER
-    assert rows[0]["league_id"] == LEAGUE
-    props = json.loads(rows[0]["props"])
-    assert props["platform"] == "sleeper"             # mandatory, non-null
-    assert props["give_count"] == 2
-    assert props["receive_count"] == 1
-    assert props["pick_count"] == 1                   # side-unattributed picks
-    assert props["outcome"] == "proposed"
+    assert _trade_sent_rows() == []
 
 
 def test_propose_failure_fires_no_trade_sent(client):
