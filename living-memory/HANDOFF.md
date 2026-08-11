@@ -15,6 +15,43 @@
 
 ---
 
+## 2026-08-11 — P0 remediation batch shipped (sim gate skipped, owed next session)
+
+### Where things stand
+- **The eight-P0 audit remediation batch is merged to `main` and pushed** from branch
+  `p0-remediation-2026-08-10` (15 code commits + the #169 merge). Render auto-deploys
+  from `main`; verify the deploy dashboard on next session start.
+- Suite at ship: **2448 passed / 1 skipped**, tsc clean, testid-lint OK, both node
+  test suites green. Full planning corpus in `docs/plans/audit-p0-remediation/`.
+- **Living-memory ID collision resolved at merge:** #169's session claimed D-025 and
+  G-027/G-028 first; this batch's entries were renumbered to **D-026..D-033 and
+  G-029..G-034** across all 26 referencing files. Root CLAUDE.md's "next ID" note
+  already says grep-first.
+
+### What's owed (highest priority first)
+1. **The tier-1 sim run** — skipped by operator direction (usage). Full owed list in
+   TEST_LEDGER's 2026-08-11 P0-batch entry: six new flows, five modified captures,
+   the P0-9 beat validation, analytics destination checks, freshness sweep.
+2. **`growth.invite_join_link` stays OFF** until AASA propagation is verified
+   (~24h CDN) — the operator sequence is in `prd-p0-3.md` §4. The reader/route/claim
+   shipped unflagged and are live.
+3. **The operator's P0-9 test** — zero-code recipe in `prd-p0-8-9.md` §5
+   (experiment overlay, device allowlist; confirm the operator device id in
+   `config/tester_allowlist.json` is current first).
+4. **Pre-merge experiment readback was documentary, not live** — the one-line
+   authenticated `GET /api/admin/experiments` check (no live experiment targets
+   `ranking_method`) is still worth running once against prod.
+
+### Environment notes
+- Worktree `ftf-p0-remediation` at `/Users/teresadickens/Documents/Claude/Projects/`
+  now carries a REAL `mobile/node_modules` (npm ci) — the symlink convention is dead,
+  see TEST_LEDGER. Sweep the worktree per the recovery-ledger convention once content
+  is verified on `origin/main`.
+- A P1 planning session ("Ping") was handed the 8-item P1 batch with the same
+  pipeline; its plans should rebase on this merge.
+
+---
+
 ## 2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged
 
 ### Where I am right now
