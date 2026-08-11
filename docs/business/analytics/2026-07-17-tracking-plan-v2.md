@@ -194,3 +194,31 @@ The response-leg sibling of `trade_sent`, added with the MFL trade-lifecycle rou
 | `trade_responded` | **Confirmed success only** on `POST /api/trades/respond-mfl` — after MFL confirmed the `tradeResponse` import; never on validation, auth, or write failures. (No Sleeper respond route exists; if one ships, it reuses this event with `platform: "sleeper"` — no Sleeper-named sibling to collide with.) | `platform` (`mfl` — **required, never null**), `response` (`accept` \| `reject` \| `revoke` — the action requested), `outcome` (platform-confirmed result: `accepted` \| `rejected` \| `revoked`) |
 
 `league_id` rides the envelope column. **No trade contents, no MFL `trade_id`, no PII in props** — the funnel question is "are responses happening, and which kind", not which trade. Same WAT posture as `trade_sent`: in the taxonomy, not in `WAT_LIVE`.
+## Addendum 2026-08-11 — P1 remediation, commit T1 (share loop + invite CTA)
+
+Registration-only. Four client-fired names and **two extended prop rows** landed in `backend/analytics_taxonomy.py` **before any P1 emitter shipped**, because that registry is default-deny behind a 200 (`analytics_ingest.py` counts + drops an unknown `event_type`, and pops an unregistered prop, with no error on either side). Plans: `docs/plans/audit-p1-remediation/` (`HLD-p1.md` §A.2, `LLD-p1-1-2.md` §10, `LLD-p1-5.md` §8). Binding decisions: `DECISIONS-p1.md`.
+
+| Event | Class | Fires | Key props |
+|---|---|---|---|
+| `calc_trade_shared` | **INTENT** | user completes a share from the trade calculator | `mode` (live\|demo), `landing`, `surface` |
+| `share_package_created` | **NON_INTENT** | a share-package mint attempt reaches the server — system side effect of the same tap, dismissal-independent | `surface`, `give_n`, `receive_n`, `outcome` (ok\|rate_limited\|demo\|failed) |
+| `invite_cta_shown` | **NON_INTENT** | the promoted invite card renders | `surface`, `not_joined`, `total_mates`, `platform` |
+| `invite_cta_tapped` | **INTENT** | user taps it | same four |
+
+**Extended rows (modified in place, never re-added):**
+
+- `invite_shared` — P0-3's `{league_id}` gains `surface`, `not_joined`, `total_mates`, `platform`. `surface` is a closed 4-value enum: `league_home | matches_empty | trades_banner | members_overlay` (the last per operator decision PR-9).
+- `trade_card_shared` — `{trade_id, channel}` gains `landing`, `surface`. `landing` had been **sent by the client and stripped at ingest since it shipped**, so no row has ever carried it; there is no historical series to reconcile.
+
+**Deliberately not registered.** `tier_board_shared` is **cancelled** (D-P1-12 — sharing rankings/tier boards is not a product surface; its routes are now flag-off by default). `email_captured` is **cancelled** (AN-6). The four `sleeper_connect_*` events are **deferred, not cancelled** — naming decision AN-1 is still open with the operator, so **a T1 amendment commit is required** before P1-10's client wiring ships. The taxonomy file is not final.
+
+**No baseline for two of these.** `calc_trade_shared` has been fired-and-dropped by `TradeCalculatorScreen.tsx` since it shipped, so post-ship reads are absolute numbers, never a lift over history. Same for `trade_card_shared.landing`.
+
+**`platform` means the LEAGUE platform** (`sleeper|espn|mfl|fleaflicker|unknown`), matching `league_selected` / `league_view`. Device platform is a server-derived **column**, never a prop — the NULL-`platform` incident. Pinned by a test that sends a bogus `device_platform` and asserts it is stripped.
+
+**DAU/WAU seam.** `share_package_created` and `invite_cta_shown` are in `analytics_queries.NON_INTENT_EVENTS`. `INTENT_EVENTS` is a **deny-list** (`(SERVER_FIRED | ALLOWED_CLIENT) - NON_INTENT`), so an impression or system-outcome name left out of it step-changes active-user and retention series on the day its emitter ships — silently, permanently, and indistinguishably from real growth after the fact.
+
+**Two caveats to carry, so the numbers are not over-read:**
+
+1. **`invite_cta_shown{surface: matches_empty}` is a mount counter, not an impression.** The Matches empty state has no scroll container, so the block can land in an already-clipped region (D-P1-04, `HLD-p1.md` §H OG-12). The `league_home` surface is unaffected and its rate is sound.
+2. **`league_id` does not survive ingest for Sleeper leagues.** `analytics_ingest._PII_VALUE_RES` redacts any 16+ digit run; Sleeper league ids are 18 digits, so `invite_shared.league_id` (and `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`, `outlook_strip_toggled`) store `"[scrubbed]"`. Pre-existing, not introduced by T1, and **not fixed by it** — per-league invite analysis is not currently possible from these rows. Shorter ESPN ids pass through, which is why a spot-check on the wrong league makes it look fine. Pinned by `test_p1_t1_league_id_is_redacted_by_the_pii_scrubber`.

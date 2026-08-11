@@ -515,6 +515,21 @@ def test_live_taxonomy_is_disjoint():
     assert "outlook_strip_toggled" in tax.ALLOWED_CLIENT_EVENTS
     assert tax.CLIENT_EVENT_PROPS["outlook_strip_toggled"] == frozenset(
         {"league_id", "expanded"})
+    # P1 remediation commit T1, 2026-08-11 — four names registered before
+    # any P1 emitter ships, plus the two EXTENDED prop rows. The extensions
+    # are asserted here as well as in test_events_api.py because a
+    # three-way merge can resolve an extended row back to its pre-existing
+    # value: that leaves the NAME working and hollows out every row, with no
+    # error anywhere.
+    assert {"calc_trade_shared", "share_package_created",
+            "invite_cta_shown", "invite_cta_tapped"} <= tax.ALLOWED_CLIENT_EVENTS
+    assert {"surface", "not_joined", "total_mates", "platform"} <= \
+        tax.CLIENT_EVENT_PROPS["invite_shared"]
+    assert {"landing", "surface"} <= tax.CLIENT_EVENT_PROPS["trade_card_shared"]
+    # Cancelled outright by D-P1-12 — tier-board sharing is not a product
+    # surface. The sleeper_connect_* names are DEFERRED pending AN-1 and are
+    # pinned absent in test_events_api.py.
+    assert "tier_board_shared" not in tax.ALLOWED_CLIENT_EVENTS
 
 
 def test_p0_impression_events_are_non_intent():

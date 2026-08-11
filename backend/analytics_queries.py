@@ -112,6 +112,29 @@ NON_INTENT_EVENTS = frozenset({
     # only through openTeam, so every pin is preceded in the same session
     # by a league_team_opened that already counts the user.
     "league_pos_candidates_viewed",
+    # P1 remediation commit T1, 2026-08-11 — added in the SAME commit that
+    # added them to ALLOWED_CLIENT_EVENTS, for the reason stated above.
+    # Operator decision AN-4 (DECISIONS-p1.md D-P1-13). Per-event reasoning:
+    #
+    #   share_package_created — a SYSTEM OUTCOME, not the user action that
+    #     provoked it. The tap is already counted by calc_trade_shared /
+    #     trade_card_shared (both INTENT), so admitting this row adds no
+    #     user-day DAU has not already seen — it only double-counts. It is
+    #     also fired dismissal-INDEPENDENTLY (the mint resolves whether or
+    #     not the user goes through with the share), so under the eager-mint
+    #     variant it can fire with no completed user gesture at all.
+    #
+    #   invite_cta_shown — an IMPRESSION, fired on League Home and Matches
+    #     mounts. The user did nothing. Leaving it INTENT would make DAU/WAU
+    #     approximate app-open count from the day its emitter ships and
+    #     break every retention and churn series at that seam, silently and
+    #     permanently. Its tapped counterpart carries the intent.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: calc_trade_shared
+    # (a user tapped share and completed it) and invite_cta_tapped (a real
+    # decision, and the growth action this whole round exists to measure).
+    "share_package_created",
+    "invite_cta_shown",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

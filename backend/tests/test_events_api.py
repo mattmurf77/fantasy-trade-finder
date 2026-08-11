@@ -714,3 +714,241 @@ def test_feedback_300_mints_no_duplicate_of_a_shipped_league_event():
     for minted in ("league_candidate_opened", "league_divider_shown",
                    "league_candidate_viewed", "league_band_shown"):
         assert minted not in t.ALLOWED_CLIENT_EVENTS
+# --- P1 remediation, commit T1 (2026-08-11) -------------------------------
+# Plans: docs/plans/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md §10,
+# LLD-p1-5.md §8}; operator decisions DECISIONS-p1.md (AN-4, PR-9, D-P1-12).
+#
+# T1 registers names BEFORE their emitters ship. NAME survival and PROP
+# survival are separate silent failures on this endpoint, so they get
+# separate tests: a merge that resolves an EXTENDED prop row back to its
+# pre-existing value leaves the name working and delivers every row
+# hollowed out, which no name-level assertion can see.
+
+def test_p1_t1_share_and_invite_events_accepted(harness):
+    """NAME survival: all four T1 names land, with dropped == 0."""
+    client, engine = harness
+    specs = [
+        ("calc_trade_shared",     {"mode": "live", "landing": True,
+                                   "surface": "calc_live"}),
+        ("share_package_created", {"surface": "trades_liked", "give_n": 2,
+                                   "receive_n": 1, "outcome": "ok"}),
+        ("invite_cta_shown",      {"surface": "league_home", "not_joined": 9,
+                                   "total_mates": 11, "platform": "sleeper"}),
+        ("invite_cta_tapped",     {"surface": "matches_empty",
+                                   "not_joined": 7, "total_mates": 9,
+                                   "platform": "espn"}),
+    ]
+    body = _post(client, [
+        _envelope(i, event_type=t, props=p) for i, (t, p) in enumerate(specs)
+    ]).get_json()
+    _assert_invariant(body, len(specs))
+    # An UNKNOWN type still counts in `accepted`, so accepted alone proves
+    # nothing — dropped == 0 is what proves the names registered.
+    assert body["accepted"] == len(specs) and body["dropped"] == 0
+    assert {r._mapping["event_type"] for r in _rows(engine)} == {
+        t for t, _ in specs}
+
+
+def test_p1_t1_every_declared_prop_survives_the_round_trip(harness):
+    """PROP survival: every declared prop is read back out of user_events.
+
+    Driven off CLIENT_EVENT_PROPS itself rather than a hand-copied list, so
+    a row that is narrowed later fails here instead of quietly hollowing out
+    production rows.
+    """
+    from backend import analytics_taxonomy as tax
+    client, engine = harness
+    sent = {
+        "calc_trade_shared":     {"mode": "demo", "landing": False,
+                                  "surface": "calc_in_league"},
+        "share_package_created": {"surface": "calc_live", "give_n": 0,
+                                  "receive_n": 5, "outcome": "rate_limited"},
+        "invite_cta_shown":      {"surface": "matches_empty",
+                                  "not_joined": 3, "total_mates": 12,
+                                  "platform": "mfl"},
+        "invite_cta_tapped":     {"surface": "members_overlay",
+                                  "not_joined": 1, "total_mates": 10,
+                                  "platform": "fleaflicker"},
+        # The two MODIFIED rows — the dangerous half of T1.
+        "invite_shared":         {"league_id": "123456789012345678",
+                                  "surface": "trades_banner",
+                                  "not_joined": None, "total_mates": None,
+                                  "platform": "sleeper"},
+        "trade_card_shared":     {"trade_id": "t-42", "channel": "imessage",
+                                  "landing": True, "surface": "trades_liked"},
+    }
+    # Each payload must exercise the row COMPLETELY, or a prop could be
+    # dropped from the registry without this test noticing.
+    for name, props in sent.items():
+        assert set(props) == set(tax.CLIENT_EVENT_PROPS[name]), name
+
+    body = _post(client, [
+        _envelope(i, event_type=t, props=p)
+        for i, (t, p) in enumerate(sent.items())
+    ]).get_json()
+    _assert_invariant(body, len(sent))
+    assert body["accepted"] == len(sent) and body["dropped"] == 0
+
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    # `invite_shared.league_id` is the ONE prop whose VALUE legitimately does
+    # not round-trip — see
+    # test_p1_t1_league_id_is_redacted_by_the_pii_scrubber below. Key
+    # survival is still asserted for it; only value equality is exempted,
+    # and only there.
+    value_exempt = {("invite_shared", "league_id")}
+    for name, props in sent.items():
+        stored = json.loads(by_type[name]["props"])
+        for k, v in props.items():
+            assert k in stored, f"{name}.{k} was STRIPPED at ingest"
+            if (name, k) in value_exempt:
+                continue
+            assert stored[k] == v, f"{name}.{k} changed value"
+
+
+def test_p1_t1_invite_shared_row_was_extended_not_replaced(harness):
+    """The single highest-value assertion in the round.
+
+    P0-3 registered `invite_shared` with `{league_id}`; T1 EXTENDS that row.
+    A merge that takes the pre-existing row keeps the name working — the
+    event still lands, still 200s — and silently delivers every invite row
+    without the four props the whole measurement depends on.
+    """
+    from backend import analytics_taxonomy as tax
+    assert "league_id" in tax.CLIENT_EVENT_PROPS["invite_shared"]   # not lost
+    assert {"surface", "not_joined", "total_mates", "platform"} <= \
+        tax.CLIENT_EVENT_PROPS["invite_shared"]
+
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="invite_shared", screen="League",
+                  props={"league_id": "990000000000000001",
+                         "surface": "members_overlay",
+                         "not_joined": 4, "total_mates": 12,
+                         "platform": "sleeper"}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    # members_overlay exists as a surface only because of operator decision
+    # PR-9; if that reverses, the enum shrinks in the comment AND the code.
+    assert props["surface"] == "members_overlay"
+    assert props["not_joined"] == 4 and props["total_mates"] == 12
+    # The KEY survives the allowlist — that is what this test is about. Its
+    # VALUE is redacted by the PII scrubber; see the next test.
+    assert "league_id" in props
+
+
+def test_p1_t1_league_id_is_redacted_by_the_pii_scrubber(harness):
+    """PRE-EXISTING BEHAVIOUR, found while writing T1 and pinned here so it
+    is not rediscovered as a mystery. NOT introduced by T1 and NOT fixed by
+    it — the prop belongs to P0-3's row.
+
+    `analytics_ingest._PII_VALUE_RES` includes `\\b\\d(?:[ -]?\\d){15,}\\b`
+    (a 16+ digit run, aimed at card numbers). **Sleeper league ids are 18
+    digits**, so every `league_id` string prop stores the literal
+    "[scrubbed]" rather than the id — on `invite_shared`, and equally on
+    `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed` and
+    `outlook_strip_toggled`. Per-league invite analysis is therefore not
+    possible from these rows today, however the taxonomy reads.
+
+    An ESPN league id (short, numeric) is unaffected, which is why this can
+    look like it works when spot-checked on the wrong league.
+    """
+    client, engine = harness
+    _post(client, [
+        # 18 digits — the real shape of a Sleeper league id.
+        _envelope(0, event_type="invite_shared",
+                  props={"league_id": "990000000000000001"}),
+        # 6 digits — the real shape of an ESPN league id.
+        _envelope(1, event_type="invite_link_opened",
+                  props={"league_id": "184622"}),
+    ])
+    rows = {r._mapping["event_type"]: json.loads(r._mapping["props"])
+            for r in _rows(engine)}
+    assert rows["invite_shared"]["league_id"] == "[scrubbed]"
+    assert rows["invite_link_opened"]["league_id"] == "184622"
+
+
+def test_p1_t1_trade_card_shared_landing_is_no_longer_stripped(harness):
+    """`landing` shipped as a client prop and was popped on every row.
+
+    This is the in-tree example the whole T1 ceremony exists to prevent, so
+    it gets its own regression test rather than living only inside the bulk
+    round-trip above.
+    """
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="trade_card_shared",
+                  props={"trade_id": "t-7", "landing": True}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["landing"] is True
+    assert props["trade_id"] == "t-7"
+
+
+def test_p1_t1_share_events_reject_device_platform_prop(harness):
+    """`platform` means the LEAGUE platform. The device platform is a
+    server-derived COLUMN and must never arrive as a prop — the NULL-
+    `platform` incident is why this is pinned per batch."""
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="invite_cta_shown",
+                  props={"surface": "league_home", "not_joined": 2,
+                         "total_mates": 8, "platform": "espn",
+                         "device_platform": "ios", "os": "ios"}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["platform"] == "espn"          # LEAGUE platform survives
+    assert "device_platform" not in props       # device prop stripped
+    assert "os" not in props
+
+
+def test_p1_t1_default_deny_is_still_armed(harness):
+    """A near-miss name is counted-and-dropped, proving the allowlist is
+    doing work and these tests are not passing vacuously."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="calc_trade_share", props={"mode": "live"}),
+        _envelope(1, event_type="invite_cta_shwon",
+                  props={"surface": "league_home"}),
+    ]).get_json()
+    assert body["accepted"] == 2 and body["dropped"] == 2
+    assert _rows(engine) == []
+
+
+def test_p1_t1_intent_classification(harness):
+    """AN-4, in code. INTENT_EVENTS is a DENY-list — silence ships an event
+    as INTENT, so every NON_INTENT member is an explicit entry or the active
+    -user and retention series step-change permanently on ship day."""
+    from backend import analytics_queries as q
+    non_intent = {"share_package_created", "invite_cta_shown"}
+    assert non_intent <= q.NON_INTENT_EVENTS
+    assert not (non_intent & q.INTENT_EVENTS)
+    # The user ACTIONS stay intent — this is the half a blanket
+    # "exclude everything new" would have got wrong.
+    assert "calc_trade_shared" in q.INTENT_EVENTS
+    assert "invite_cta_tapped" in q.INTENT_EVENTS
+    assert "invite_shared" in q.INTENT_EVENTS
+    assert "trade_card_shared" in q.INTENT_EVENTS
+
+
+def test_p1_t1_registers_exactly_the_agreed_names():
+    """T1's scope, pinned. Three sets of names are absent ON PURPOSE, and a
+    future reader must not 'fix' that by adding them.
+
+    `sleeper_connect_*` in particular is DEFERRED, not cancelled: its
+    naming decision (AN-1) is open with the operator and a T1 AMENDMENT
+    COMMIT is required before P1-10's client wiring can ship.
+    """
+    from backend import analytics_taxonomy as tax
+    assert {"calc_trade_shared", "share_package_created",
+            "invite_cta_shown", "invite_cta_tapped"} <= tax.ALLOWED_CLIENT_EVENTS
+    # D-P1-12 — tier-board sharing is not a product surface at all.
+    assert "tier_board_shared" not in tax.ALLOWED_CLIENT_EVENTS
+    # AN-6 — the operator skipped the email-capture event.
+    assert "email_captured" not in tax.SERVER_FIRED_EVENTS
+    assert "email_captured" not in tax.ALLOWED_CLIENT_EVENTS
+    # AN-1 open ⇒ deferred to a T1 amendment. Guessing a name here would be
+    # worse than waiting: this registry is default-deny and silent.
+    for name in ("sleeper_connect_opened", "sleeper_connect_failed",
+                 "sleeper_connect_captured", "sleeper_connect_abandoned"):
+        assert name not in tax.ALLOWED_CLIENT_EVENTS, (
+            f"{name} landed without AN-1 being answered")
