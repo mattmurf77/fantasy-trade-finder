@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { ink, chalk, ice, fonts, radii } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
-import { useSession } from '../state/useSession';
+import { useSession, NO_LEAGUE_ID } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
@@ -50,7 +50,14 @@ import { navigationIntegration } from '../observability/sentry';
 type AuthStack = {
   SignIn: undefined;
   // #130 — `espnLink: true` auto-opens the ESPN link sheet (Settings CTA).
-  LeaguePicker: { espnLink?: boolean } | undefined;
+  // P0-5/P0-3 — optional invite context. When an invited user arrives with
+  // an account-only session, LeagueJoinScreen (P0-3, commit 12) replaces into
+  // this screen carrying the inviter + league name; the picker's companion
+  // state renders them as its lead copy. Nothing supplies them in wave 1 and
+  // the companion state renders its generic copy when they are absent.
+  LeaguePicker:
+    | { espnLink?: boolean; invitedBy?: string; invitedLeagueName?: string }
+    | undefined;
   Main: undefined;
   Settings: undefined;
   Profile: { username: string };
@@ -292,11 +299,21 @@ export default function RootNav({ booted }: { booted: boolean }) {
 
   // Decide initial stop based on what's persisted.
   // - No user  → SignIn
-  // - User + no league (or no token) → LeaguePicker
-  // - User + league + token → Main tabs
+  // - User + no REAL league (or no token) → LeaguePicker
+  // - User + real league + token → Main tabs
+  //
+  // P0-5: an account-only session pins the `no_league` SENTINEL, which is a
+  // league object and therefore passed the old `!league` test — so relaunch
+  // stranded the user on empty tabs even after the sign-in route was fixed.
+  // Key off the sentinel, NEVER off `user.account_only`: account_only stays
+  // true after an ESPN/MFL link (it is cleared only by linking a Sleeper
+  // username, SettingsScreen's link-Sleeper card), so an account_only
+  // predicate would trap a well-provisioned user in the picker forever.
+  // `setLeague(real)` overwrites the sentinel, which is what ends this state.
+  const hasRealLeague = !!league && league.league_id !== NO_LEAGUE_ID;
   const initialRoute: keyof AuthStack = !user
     ? 'SignIn'
-    : !league || !hasToken
+    : !hasRealLeague || !hasToken
     ? 'LeaguePicker'
     : 'Main';
 
@@ -410,9 +427,12 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // Demo flow already pinned a synthetic league + token in
               // useSession.startDemoSession, so we jump straight to Main.
               onDemoStarted={() => navigation.replace('Main')}
-              // Account-first (P2.6): account-only sessions have no leagues
-              // to pick — the sentinel league is already pinned.
-              onAccountSignedIn={() => navigation.replace('Main')}
+              // Account-first (P2.6) + P0-5: an account-only session holds the
+              // `no_league` sentinel, NOT a league — it has nothing to show in
+              // the tabs. Route to the picker, whose companion state leads with
+              // "Connect Sleeper, ESPN or MFL". `replace`, not `navigate`: the
+              // SignIn screen's session is spent and must not stay on the stack.
+              onAccountSignedIn={() => navigation.replace('LeaguePicker')}
             />
           )}
         </Stack.Screen>
@@ -427,6 +447,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // #130 — Settings' "Link an ESPN league" row lands here with
               // the sheet already open (flag-gated inside the screen).
               autoOpenEspnLink={route.params?.espnLink === true}
+              // P0-3 (commit 12) — invite context, when the arrival came from
+              // LeagueJoin. Unset by every wave-1 entry; the companion state
+              // renders its generic copy when they are null.
+              invitedBy={route.params?.invitedBy ?? null}
+              invitedLeagueName={route.params?.invitedLeagueName ?? null}
             />
           )}
         </Stack.Screen>

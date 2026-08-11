@@ -1,0 +1,54 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CAP-LEAGUES-ACCOUNT-ONLY
+# profile: fresh
+# flags: release
+# captures: account-only
+# source: mobile/src/screens/LeaguePickerScreen.tsx
+#
+# Screen-library frame for the P0-5 companion state — the league picker as an
+# account-only (Apple) session sees it: "Connect a League", one primary
+# Connect Sleeper action and the flag-gated platform actions, no league rows,
+# no error. It is a new VISUAL state, not a variant of `leagues@fresh` — that
+# capture photographs the Sleeper-keyed empty picker and asserts its literal
+# "No 2026 NFL leagues found for this account." sentence, which this state
+# must never show. Both frames exist so a future edit cannot quietly merge
+# them.
+#
+# ENTRY: the harness credential seam, identical to
+# flows/p0-5-account-only-picker.yaml leg 1 —
+# `arguments: {FTFTestAppleSub: qa-apple-p05}` makes SignInScreen send
+# `ftf-test-apple:qa-apple-p05` instead of calling Apple's SDK, and the
+# server mints a REAL account-only session through the production path
+# (FTF_TEST_MODE gate server-side, build-time `extra.testMode` gate
+# client-side; neither exists in a shipped build). No seeder profile: a
+# fixture account-only user would photograph the fixture.
+#
+# The shutter waits on `leagues.empty.link-espn` and only then
+# waitForAnimationToEnd — this screen's sole animation is the arrival
+# transition, not a spinner, so law 5 is satisfied.
+tags: [capture, leagues, fresh]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+    arguments:
+      FTFTestAppleSub: qa-apple-p05
+- extendedWaitUntil:
+    visible:
+      id: "signin.apple-btn"
+    timeout: 15000
+- tapOn:
+    id: "signin.apple-btn"
+
+# ── account-only ─────────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "leagues.empty.link-espn"
+    timeout: 30000
+- assertVisible:
+    id: "leagues.empty.body"
+- assertNotVisible:
+    id: "leagues.row.*"
+- waitForAnimationToEnd
+- takeScreenshot: leagues__account-only

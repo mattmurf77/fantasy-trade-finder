@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
@@ -19,12 +20,13 @@ import { S as GUIDE } from '../components/analystScript';
 import { getLeagues } from '../api/sleeper';
 import { getEspnLeagues } from '../api/espn';
 import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
-import { buildSessionInitBody, submitSessionInit } from '../api/auth';
+import { buildSessionInitBody, submitSessionInit, type LinkSleeperResponse } from '../api/auth';
 import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import RankChipBadge from '../components/RankChipBadge';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
+import LinkSleeperSheet from '../components/LinkSleeperSheet';
 import type { LeagueSummary } from '../shared/types';
 
 // Platform → league-list badge text (ESPN keeps 'ESPN'; MFL/Fleaflicker are
@@ -41,11 +43,24 @@ interface Props {
   /** #130 — open the ESPN link sheet on mount (Settings CTA). Honored only
    *  while the `espn.link` flag is on. */
   autoOpenEspnLink?: boolean;
+  /** P0-3 (commit 12) — invite context for an account-only arrival via
+   *  LeagueJoin. Optional and unset in wave 1; when present the companion
+   *  state names the inviter and league instead of its generic copy. Never
+   *  used to PIN a league: an acct_ user has no Sleeper roster in an invited
+   *  Sleeper league (see hld.md §1.3). */
+  invitedBy?: string | null;
+  invitedLeagueName?: string | null;
 }
 
 // Show user's leagues → tap one → run sessionInit against it → done.
 // Matches the web app's selectLeague flow but without the overlay modals.
-export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpenEspnLink }: Props) {
+export default function LeaguePickerScreen({
+  onLeaguePicked,
+  onSignOut,
+  autoOpenEspnLink,
+  invitedBy,
+  invitedLeagueName,
+}: Props) {
   // #266 — needed for the transition-settled auto-open below. Typed loose
   // like the rest of the screens; only addListener('transitionEnd') is used.
   const navigation = useNavigation<any>();
@@ -53,6 +68,9 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   const cached = useSession((s) => s.leagues);
   const setLeagues = useSession((s) => s.setLeagues);
   const setLeague = useSession((s) => s.setLeague);
+  // P0-5 — the Sleeper-identity link (companion state) re-keys the session.
+  const setUser = useSession((s) => s.setUser);
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(cached.length === 0);
   const [selectingId, setSelectingId] = useState<string | null>(null);
@@ -62,9 +80,26 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   const espnEnabled = useFlag('espn.link');
   const mflEnabled = useFlag('mfl.link');
   const fleaflickerEnabled = useFlag('fleaflicker.link');
+  // P0-5 — the Sleeper *identity* link. Gated on the same flag that must be
+  // on for an account-only session to exist at all, so the Sleeper button is
+  // gated symmetrically with the three platform buttons.
+  const sleeperLinkEnabled = useFlag('auth.accounts');
   const [espnOpen, setEspnOpen] = useState(false);
   // Which zero-auth platform sheet is open (MFL / Fleaflicker), if any.
   const [platformOpen, setPlatformOpen] = useState<LinkPlatform | null>(null);
+  const [sleeperOpen, setSleeperOpen] = useState(false);
+
+  // P0-5 — the companion state: a session-holder with no league to pick and
+  // no Sleeper identity to look one up with. Detected from DATA (account_only
+  // + an empty list), not from a navigation param, so it is equally correct
+  // on a first sign-in, a cold relaunch, and an arrival from Settings.
+  //
+  // `canLink` is a deliberate floor: with every link flag off the companion
+  // state would be a heading, a sentence and nothing to press, so the screen
+  // falls back to today's empty sentence instead — which is also what keeps
+  // "the existing flags are the per-platform rollback lever" honest.
+  const canLink = sleeperLinkEnabled || espnEnabled || mflEnabled || fleaflickerEnabled;
+  const accountOnlyEmpty = !!user?.account_only && cached.length === 0 && canLink;
 
   // #130 — Settings' ESPN CTA lands here with `espnLink: true`; open the
   // sheet once the flag confirms. Effect (not initial state) because the
@@ -154,7 +189,15 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     setLoading(true);
     setError(null);
     try {
-      const lgs = await getLeagues(user.user_id);
+      // P0-5 — NEVER ask Sleeper about a synthetic id. An account-only user's
+      // user_id is `acct_<account_id>`; GET /api/sleeper/leagues/acct_… proxies
+      // that key to Sleeper, which returns null live (→ the "No 2026 NFL
+      // leagues found" sentence) and raises a fixture-miss 599 under the VCR
+      // harness (→ 503 sleeper_unavailable → "Couldn't reach Sleeper"). Both
+      // blame Sleeper or the user for a situation that is neither. The platform
+      // merges below are session-scoped and MUST still run: an account-only
+      // user who already linked ESPN from Settings has leagues to list.
+      const lgs = user.account_only ? [] : await getLeagues(user.user_id);
       // Merge in imported non-Sleeper leagues (each flag-gated; backend 404s
       // dark). Best-effort — a hiccup on one platform must not hide the rest.
       const merged: LeagueSummary[] = [...lgs];
@@ -224,6 +267,25 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     await pickLeague(summary);
   }
 
+  // The Sleeper *identity* link (not league linking): the session stops being
+  // account-only and becomes keyed to a real Sleeper user. Drop the sentinel
+  // league and let the existing [user?.user_id] effect re-run refresh() — with
+  // account_only now falsy, the Sleeper fetch happens and the real list paints
+  // IN PLACE. No navigation: the user asked for their leagues and this screen
+  // is where leagues live. (Settings' copy of this handler navigates because
+  // it is not the picker; see LinkSleeperSheet's header.)
+  async function onSleeperLinked(res: LinkSleeperResponse) {
+    setSleeperOpen(false);
+    await setUser({
+      user_id:      res.sleeper_user_id,
+      username:     res.username,
+      display_name: res.display_name || res.username,
+      avatar_id:    res.avatar ?? null,
+    });
+    await setLeague(null);
+    queryClient.invalidateQueries({ queryKey: ['account'] });
+  }
+
   async function pickLeague(lg: LeagueSummary, opts?: { auto?: boolean }) {
     if (!user || selectingId) return;
     if (!opts?.auto) advanceGuideIfActive('s1.1');
@@ -290,7 +352,9 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title} accessibilityRole="header">Choose a League</Text>
+          <Text style={styles.title} accessibilityRole="header">
+            {accountOnlyEmpty ? 'Connect a League' : 'Choose a League'}
+          </Text>
           <Text style={styles.sub}>Leagues for {user?.display_name || '…'}</Text>
         </View>
         <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
@@ -304,6 +368,52 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
               ? 'Waking up server — first request after a quiet period can take 30s.'
               : 'Loading your leagues…'}
           </Text>
+        </View>
+      ) : accountOnlyEmpty ? (
+        // P0-5 — the companion state. Sits ABOVE `error` deliberately: after
+        // the Sleeper skip in refresh() the only error reachable here is a
+        // local persistence failure whose "Try again" would retry nothing the
+        // user needs, and these three buttons are the screen's only
+        // actionable content. It sits BELOW `loading` so it never flashes
+        // before the platform merges resolve.
+        <View style={styles.centered}>
+          <Text testID="leagues.empty.body" style={styles.emptyBody}>
+            {invitedBy
+              ? `@${invitedBy} invited you to ${invitedLeagueName || 'their league'}. ` +
+                'Connect Sleeper, ESPN or MFL to join.'
+              : 'Connect Sleeper, ESPN or MFL to see your leagues.'}
+          </Text>
+          {sleeperLinkEnabled ? (
+            <Button
+              testID="leagues.empty.link-sleeper"
+              label="Connect Sleeper"
+              onPress={() => setSleeperOpen(true)}
+            />
+          ) : null}
+          {espnEnabled ? (
+            <Button
+              testID="leagues.empty.link-espn"
+              label="Connect ESPN"
+              variant="secondary"
+              onPress={() => setEspnOpen(true)}
+            />
+          ) : null}
+          {mflEnabled ? (
+            <Button
+              testID="leagues.empty.link-mfl"
+              label="Connect MFL"
+              variant="secondary"
+              onPress={() => setPlatformOpen('mfl')}
+            />
+          ) : null}
+          {fleaflickerEnabled ? (
+            <Button
+              testID="leagues.empty.link-fleaflicker"
+              label="Connect Fleaflicker"
+              variant="secondary"
+              onPress={() => setPlatformOpen('fleaflicker')}
+            />
+          ) : null}
         </View>
       ) : error ? (
         <View style={styles.centered}>
@@ -382,8 +492,11 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
 
       {/* Flag-gated link affordances. Each platform gates on its own flag and
           appears in every non-loading state — including "no leagues found",
-          where a non-Sleeper-only manager would otherwise dead-end. */}
-      {!loading && (espnEnabled || mflEnabled || fleaflickerEnabled) ? (
+          where a non-Sleeper-only manager would otherwise dead-end.
+          Suppressed in the P0-5 companion state, which offers the same
+          platforms as full-width primary actions — rendering both would show
+          every button twice. */}
+      {!loading && !accountOnlyEmpty && (espnEnabled || mflEnabled || fleaflickerEnabled) ? (
         <View style={styles.espnFooter}>
           {espnEnabled ? (
             <Button
@@ -433,6 +546,17 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
           onLinked={onLeagueLinked}
         />
       ) : null}
+      {/* Mounted CONDITIONALLY, like PlatformLinkSheet above and for the same
+          reason: the sibling-modal wedge documented at the top of this file.
+          A third always-mounted <Modal> on this screen re-opens that hazard
+          for no benefit. */}
+      {sleeperOpen ? (
+        <LinkSleeperSheet
+          visible
+          onClose={() => setSleeperOpen(false)}
+          onLinked={onSleeperLinked}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -459,6 +583,9 @@ const styles = StyleSheet.create({
   },
   loadingText: { ...type.bodySm, textAlign: 'center' },
   error: { ...type.bodySm, color: semantic.neg, textAlign: 'center' },
+  // P0-5 companion-state copy. Not `error` — that one is semantic.neg (red)
+  // and this is not a failure.
+  emptyBody: { ...type.body, textAlign: 'center' },
   list: { paddingVertical: space.sm },
   row: {
     flexDirection: 'row',

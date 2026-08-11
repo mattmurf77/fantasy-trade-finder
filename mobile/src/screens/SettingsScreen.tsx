@@ -24,7 +24,12 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
-import { appleSignIn, deleteAccount, getAccount, linkSleeperUsername } from '../api/auth';
+import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
+// P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
+// with LeaguePicker's account-only companion state. Settings mounts the FORM
+// (its surface is this inline card, not a modal); the picker mounts the
+// sheet. The 409 two-boards Alert lives in that component.
+import { LinkSleeperForm } from '../components/LinkSleeperSheet';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
@@ -414,63 +419,11 @@ export default function SettingsScreen({ navigation }: any) {
 
   // ── Link Sleeper username (account-first P2.6) ─────────────────────────
   // Shown for account-only users (Apple/Google account, no Sleeper source).
-  // Merge rules live server-side; a 409 merge_choice_required means both
-  // the account board AND the Sleeper username's board have data — the
-  // user must pick a side explicitly (no silent data loss).
-  const [linkUsername, setLinkUsername] = useState('');
-  const [linkBusy, setLinkBusy] = useState(false);
-
-  async function handleLinkSleeper(strategy?: 'keep_sleeper' | 'keep_account') {
-    const uname = linkUsername.trim();
-    if (!uname || linkBusy) return;
-    setLinkBusy(true);
-    try {
-      const res = await linkSleeperUsername(uname, strategy);
-      // Session is now keyed to the real Sleeper user — update the saved
-      // user, drop the sentinel league, and send them to the league picker.
-      await setUser({
-        user_id:      res.sleeper_user_id,
-        username:     res.username,
-        display_name: res.display_name || res.username,
-        avatar_id:    res.avatar ?? null,
-      });
-      await setLeague(null);
-      queryClient.invalidateQueries({ queryKey: ['account'] });
-      navigation.replace?.('LeaguePicker');
-    } catch (e: any) {
-      const body = e instanceof ApiError ? (e.body as any) : null;
-      if (body?.error === 'merge_choice_required') {
-        const acctSwipes = body.account_board?.swipes ?? 0;
-        const slpSwipes = body.sleeper_board?.swipes ?? 0;
-        Alert.alert(
-          'Two boards found',
-          `Your account has rankings here (${acctSwipes} comparisons) and ` +
-            `@${uname} already has rankings too (${slpSwipes} comparisons). ` +
-            'Which board do you want to keep? The other is deleted.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Keep this board',
-              onPress: () => void handleLinkSleeper('keep_account'),
-            },
-            {
-              text: `Keep @${uname}'s board`,
-              onPress: () => void handleLinkSleeper('keep_sleeper'),
-            },
-          ],
-        );
-      } else if (body?.error === 'sleeper_already_claimed') {
-        setToast({
-          msg: 'That Sleeper account is already verified by another sign-in.',
-          tone: 'warn',
-        });
-      } else {
-        setToast({ msg: e?.message || "Couldn't link that username.", tone: 'warn' });
-      }
-    } finally {
-      setLinkBusy(false);
-    }
-  }
+  // The form itself — including the 409 merge_choice_required Alert — moved
+  // to components/LinkSleeperSheet.tsx (P0-5 / S-20) so the account-only
+  // league picker can offer the identical flow. What stays here is the card
+  // that hosts it and the post-success work below, which is the CALLER's:
+  // this screen replaces into LeaguePicker, the picker does not navigate.
 
   // ── Verified-session step-up (S6A-09 / teardown 06-02) ─────────────────
   // Account-data actions 403 `verification_required` when the account is
@@ -1209,28 +1162,24 @@ export default function SettingsScreen({ navigation }: any) {
           ) : null}
           {accountQuery.data?.account_only ? (
             <Card>
-              <View style={styles.connectBody}>
-                <Text style={styles.connectHelp}>
-                  Link your Sleeper username to load your leagues. Your
-                  rankings come with you.
-                </Text>
-                <TextInput
-                  testID="settings.link-sleeper-input"
-                  value={linkUsername}
-                  onChangeText={setLinkUsername}
-                  placeholder="Sleeper username"
-                  placeholderTextColor={chalk.faint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!linkBusy}
-                  style={styles.connectInput}
-                />
-                <Button
-                  label={linkBusy ? 'Linking…' : 'Link Sleeper username'}
-                  onPress={() => void handleLinkSleeper()}
-                  disabled={!linkUsername.trim() || linkBusy}
-                />
-              </View>
+              <LinkSleeperForm
+                onNotice={(msg, tone) => setToast({ msg, tone })}
+                onLinked={async (res) => {
+                  // Session is now keyed to the real Sleeper user — update
+                  // the saved user, drop the sentinel league, and send them
+                  // to the league picker (which, after P0-5, is a screen
+                  // that receives these users properly).
+                  await setUser({
+                    user_id:      res.sleeper_user_id,
+                    username:     res.username,
+                    display_name: res.display_name || res.username,
+                    avatar_id:    res.avatar ?? null,
+                  });
+                  await setLeague(null);
+                  queryClient.invalidateQueries({ queryKey: ['account'] });
+                  navigation.replace?.('LeaguePicker');
+                }}
+              />
             </Card>
           ) : null}
         </>

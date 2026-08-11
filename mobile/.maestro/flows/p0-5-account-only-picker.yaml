@@ -1,0 +1,107 @@
+appId: com.fantasytradefinder.app
+# tc: TC-P05-01
+# profile: fresh
+# flags: release
+#
+# P0-5 — an account-only (Apple) sign-in must reach a platform/league choice.
+# Before the fix it landed on empty Main tabs, and a cold relaunch put it
+# back there; the only way out was a Settings visit nobody is told about.
+#
+# ENTRY — THE HARNESS SEAM (hld.md §5, lld-p0-5.md §9). There is no way to
+# perform a real Sign in with Apple on a simulator, so ONE call is
+# substituted: `launchApp: arguments: {FTFTestAppleSub: qa-apple-p05}`
+# becomes argv `-FTFTestAppleSub qa-apple-p05`, which iOS parses into
+# NSUserDefaults' argument domain; SignInScreen reads it through
+# `testLaunchArg` (mobile/src/utils/testRouteEntry.ts) and sends the identity
+# token `ftf-test-apple:qa-apple-p05` instead of calling
+# AppleAuthentication.signInAsync. The server accepts that token shape ONLY
+# under FTF_TEST_MODE=1 (backend/tests/test_account_only_harness.py asserts a
+# 401 when it is unset) and then runs the ordinary production mint —
+# _provider_auth_response → _mint_account_only_session, sentinel league,
+# verified_via='apple'.
+#
+# EVERYTHING AFTER THE CREDENTIAL IS PRODUCTION CODE: the account_only
+# branch, setUser, setLeague, onAccountSignedIn, RootNav's routing predicate
+# and the picker's companion state are all the real thing. Both gates are
+# build-time/deploy-time constants (`extra.testMode` is false in every EAS
+# bundle; FTF_TEST_MODE is never set in Render), so none of this exists in a
+# shipped app.
+#
+# Leg 4 deliberately relaunches with `clearState: false` (law 6): PERSISTENCE
+# is what it tests. A one-line fix to the sign-in route alone passes legs 1-3
+# and fails leg 4 — the sentinel-aware `initialRoute` predicate is the half
+# that makes the fix survive a relaunch (and retroactive for testers already
+# stranded on TestFlight).
+#
+# Leg 5 stops at "the sheet opened": completing an MFL import needs live MFL
+# egress, which the hermetic rails audit forbids and for which no fixture
+# exists (waiver W-2). Completion is a manual TestFlight leg.
+tags: [p0, signin, leagues]
+---
+# ── 1. fresh Apple sign-in ───────────────────────────────────────────────
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+    arguments:
+      FTFTestAppleSub: qa-apple-p05
+- extendedWaitUntil:
+    visible:
+      id: "signin.apple-btn"
+    timeout: 15000
+- tapOn:
+    id: "signin.apple-btn"
+
+# ── 2. the acceptance criterion ──────────────────────────────────────────
+# A brand-new Apple identity reaches a platform/league choice with no
+# Settings visit. The body text matcher is wrapped in `.*` (law 1) and is
+# worded so the same matcher hits the invited variant P0-3 adds later.
+- extendedWaitUntil:
+    visible:
+      id: "leagues.empty.link-espn"
+    timeout: 30000
+- assertVisible:
+    id: "leagues.empty.link-sleeper"
+- assertVisible:
+    id: "leagues.empty.link-mfl"
+- assertVisible:
+    text: ".*Connect Sleeper, ESPN or MFL.*"
+
+# ── 3. pinned from both sides ────────────────────────────────────────────
+# It is the companion state and not something that merely looks like it: no
+# league rows, neither of the two wrong copies the old code produced (the
+# live "no leagues" sentence and the harness-only false 503), and — the
+# finding itself — it did NOT route to the tabs.
+- assertNotVisible:
+    id: "leagues.row.*"
+- assertNotVisible:
+    text: ".*No 2026 NFL leagues found.*"
+- assertNotVisible:
+    text: ".*Couldn't reach Sleeper.*"
+- assertNotVisible:
+    id: "tab.trades"
+- takeScreenshot: p0-5-account-only-picker
+
+# ── 4. relaunch (design part b) ──────────────────────────────────────────
+# Same session, new process. The sentinel IS a league object, so the old
+# `!league` predicate sent this launch to Main; keying off the `no_league`
+# sentinel is what keeps it here.
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "leagues.empty.link-espn"
+    timeout: 30000
+- assertNotVisible:
+    id: "tab.trades"
+
+# ── 5. link entry ────────────────────────────────────────────────────────
+# The companion buttons drive the SAME PlatformLinkSheet the footer already
+# used — reused, not rebuilt.
+- tapOn:
+    id: "leagues.empty.link-mfl"
+- extendedWaitUntil:
+    visible:
+      id: "platform-link.input"
+    timeout: 20000
