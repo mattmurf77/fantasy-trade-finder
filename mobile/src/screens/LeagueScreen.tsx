@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -52,6 +52,7 @@ import { ApiError } from '../api/client';
 import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { track } from '../api/events';
 import { useWhatsNew } from '../hooks/useWhatsNew';
 import RankChipBadge from '../components/RankChipBadge';
 import LeaderboardsSection from '../components/LeaderboardsSection';
@@ -133,6 +134,10 @@ export default function LeagueScreen() {
   const [resyncAuthFail, setResyncAuthFail] = useState(false);
 
   async function resyncEspn() {
+    // P0-7 OPTIONAL-A — counted INSIDE the function so the guard below
+    // still governs the work, but a tap on a guard-disabled control is
+    // still a user telling us something.
+    tapAction('espn_resync');
     if (!leagueId || !user || resyncing) return;
     setResyncing(true);
     setResyncMsg(null);
@@ -275,6 +280,36 @@ export default function LeagueScreen() {
     tiersStatusQuery.refetch();
   };
 
+  // ── P0-7 · league_view (surface: league_home) ───────────────────────
+  // Once per mount, never per re-render: `firedRef` is the guard and
+  // `summaryQuery.isFetched` is the trigger, so the row carries settled
+  // data rather than a first-paint skeleton. Declared ABOVE the
+  // `if (!leagueId)` early return — hooks may not sit below it, and the
+  // no-league state is one of the four states this event exists to count.
+  // NON_INTENT server-side: a mount is an impression.
+  const viewFiredRef = useRef(false);
+  useEffect(() => {
+    if (viewFiredRef.current) return;
+    if (leagueId && !summaryQuery.isFetched) return;   // wait for settle
+    viewFiredRef.current = true;
+    const s = summaryQuery.data as any;
+    track('league_view', {
+      surface: 'league_home',
+      state: !leagueId ? 'no_league'
+             : summaryQuery.isError ? 'error'
+             : s ? 'ready' : 'empty',
+      platform: cachedLeagues.find((lg) => lg.league_id === leagueId)
+                  ?.platform ?? 'unknown',
+      team_count: typeof s?.total_teams === 'number' ? s.total_teams : null,
+      basis: null,                 // League Home has no basis control
+      subset: null,                // …nor a subset control
+      starters_available: null,    // …nor a starters split
+      outlook_shown: null,         // …nor the season-outlook layer
+      is_tab_root: false,          // LeagueHome is a stack push, never the tab root
+    }, 'LeagueHome');
+  }, [leagueId, summaryQuery.isFetched, summaryQuery.isError, summaryQuery.data,
+      cachedLeagues]);
+
   // No league yet — funnel back to the picker. Should be rare since the
   // tab nav only renders this when the user is signed in.
   if (!leagueId) {
@@ -363,8 +398,16 @@ export default function LeagueScreen() {
     ? num(summary.total_teams, num((summary as any)?.leaguemates_total) + 1)
     : 0;
 
-  const goRank = () => navigation.navigate('Rank');
-  const goFindTrade = () => navigation.navigate('Trades', { screen: 'TradesHome' });
+  // P0-7 OPTIONAL-A — League Home's exit paths are the only question this
+  // screen answers. One closed enum, one prop, ~12 one-line inserts.
+  const tapAction = (action: string) =>
+    track('league_home_action_tapped', { action }, 'LeagueHome');
+
+  const goRank = () => { tapAction('rank'); navigation.navigate('Rank'); };
+  const goFindTrade = () => {
+    tapAction('find_trades');
+    navigation.navigate('Trades', { screen: 'TradesHome' });
+  };
 
   // Module "Invite leaguemates" — the OS share sheet with the same
   // referral URL the InviteLeaguematesBanner builds (?league=&ref=).
@@ -403,6 +446,7 @@ export default function LeagueScreen() {
             testID="league.whats-new"
             text={whatsNew.headline}
             onDismiss={() => {
+              tapAction('whats_new');
               dismissWhatsNew();
               if (whatsNew.route) navigation.navigate(whatsNew.route);
             }}
@@ -449,7 +493,7 @@ export default function LeagueScreen() {
                     "Not joined" rows) and returns the moment one joins. */}
                 {joinedZero ? null : (
                   <Pressable
-                    onPress={() => setMembersOpen(true)}
+                    onPress={() => { tapAction('members'); setMembersOpen(true); }}
                     hitSlop={12}
                     style={({ pressed: p }) => [styles.joinedChip, p && styles.joinedChipPressed]}
                     accessibilityRole="button"
@@ -508,14 +552,14 @@ export default function LeagueScreen() {
                 sub="Liked by both sides"
                 value={summaryPending ? '—' : matchesMutual}
                 icon="match"
-                onPress={() => navigation.navigate('Matches', { segment: 'mutual', at: Date.now() })}
+                onPress={() => { tapAction('matches_mutual'); navigation.navigate('Matches', { segment: 'mutual', at: Date.now() }); }}
               />
               <StatCard
                 label="Awaiting them"
                 sub="Your like, waiting on theirs"
                 value={summaryPending ? '—' : matchesAwaiting}
                 icon="eye"
-                onPress={() => navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() })}
+                onPress={() => { tapAction('matches_awaiting'); navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() }); }}
               />
             </View>
           </>
@@ -537,7 +581,7 @@ export default function LeagueScreen() {
             label="Rankings"
             sub="Every team ranked"
             accessibilityLabel="League rankings"
-            onPress={() => navigation.navigate('LeagueRankings')}
+            onPress={() => { tapAction('rankings'); navigation.navigate('LeagueRankings'); }}
           />
           <ExploreTile
             testID="league.free-agents-row"
@@ -545,7 +589,7 @@ export default function LeagueScreen() {
             label="Free agents"
             sub="Best available"
             accessibilityLabel="Free agents"
-            onPress={() => navigation.navigate('FreeAgents')}
+            onPress={() => { tapAction('free_agents'); navigation.navigate('FreeAgents'); }}
           />
           {/* Third tile, one slot, two occupants (rookie-draft O1):
               `draft.room` ON  → "Rookie draft" → the root-stack DraftRoom
@@ -561,7 +605,7 @@ export default function LeagueScreen() {
               label="Rookie draft"
               sub="Board & who's left"
               accessibilityLabel="Rookie draft room"
-              onPress={() => navigation.navigate('DraftRoom')}
+              onPress={() => { tapAction('draft_room'); navigation.navigate('DraftRoom'); }}
             />
           ) : showRookieBoard ? (
             <ExploreTile
@@ -570,7 +614,7 @@ export default function LeagueScreen() {
               label="Rookie board"
               sub="Pre-draft prospects"
               accessibilityLabel="Rookie draft board"
-              onPress={() => setRookieOpen(true)}
+              onPress={() => { tapAction('rookie_board'); setRookieOpen(true); }}
             />
           ) : null}
         </View>
@@ -595,7 +639,7 @@ export default function LeagueScreen() {
             <TickLabel>Draft picks</TickLabel>
             <Pressable
               testID="league.draft-picks-row"
-              onPress={() => navigation.navigate('PickAssignment')}
+              onPress={() => { tapAction('draft_picks'); navigation.navigate('PickAssignment'); }}
               accessibilityRole="button"
               accessibilityLabel="Draft picks"
               accessibilityHint="Set who owns each rookie pick"

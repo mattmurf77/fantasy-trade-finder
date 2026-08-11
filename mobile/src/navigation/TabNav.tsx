@@ -12,6 +12,7 @@ import { useSession } from '../state/useSession';
 import { nextQuicksetPosition } from '../state/quicksetProgress';
 import { onboardingEnabled, useFeatureFlags, useFlag } from '../state/useFeatureFlags';
 import { requestScrollToTop } from './scrollToTop';
+import { track } from '../api/events';
 import { getOnboardingState } from '../state/useOnboardingState';
 import {
   MORE_METHODS,
@@ -583,6 +584,25 @@ export default function TabNav() {
     () => !!useFeatureFlags.getState().flags['draft.tab'],
   );
 
+  // P0-7 — tab_selected. `from_tab` is the tab that OWNED the bar at press
+  // time; optional-chained throughout because a null is honest and a throw
+  // is not (track swallows anyway, but a throw inside a listener would take
+  // the tap with it). NON_INTENT server-side: a tab tap is navigation, not
+  // intent (analytics_queries.NON_INTENT_EVENTS).
+  const trackTab = (
+    tab: string,
+    navigation: any,
+    opts?: { intercepted?: boolean },
+  ) => {
+    const st = navigation?.getState?.();
+    track('tab_selected', {
+      tab,
+      from_tab: st?.routes?.[st.index]?.name?.toLowerCase() ?? null,
+      refocus: !!navigation?.isFocused?.(),
+      intercepted: !!opts?.intercepted,
+    });
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: ink.ink0 }}>
       {/* Global top bar — sits above the tab navigator on every authed
@@ -629,15 +649,17 @@ export default function TabNav() {
                   // surface. Mode switching lives in the surfaces' "More
                   // ways to rank" header control.
                   tabPress: () => {
+                    trackTab('rank', navigation);
                     if (!navigation.isFocused()) return;
                     popNestedToTop(navigation, route);
                   },
                 })
-              : () => ({
+              : ({ navigation }) => ({
                   // Intercept the tap on the Rank tab — open the action sheet
                   // instead of jumping into a sub-screen. We still keep the tab
                   // active visually so the user knows where they are.
                   tabPress: (e) => {
+                    trackTab('rank', navigation, { intercepted: true });
                     e.preventDefault();
                     setRankMenuOpen(true);
                   },
@@ -665,6 +687,7 @@ export default function TabNav() {
             // prefetch when no league is active (the screen's query is
             // `enabled: !!leagueId`).
             tabPress: () => {
+              trackTab('trades', navigation);
               // PRD 01-05 (flag `ux.retap_active_tab`): focused re-tap pops
               // the Trades stack (Portfolio/Calculator → TradesHome); at
               // root, ask the screen to scroll its deck/list to top.
@@ -699,6 +722,7 @@ export default function TabNav() {
               // Same focused-re-tap contract as the other stack tabs
               // (PRD 01-05): pop back to the stack root.
               tabPress: () => {
+                trackTab('draft', navigation);
                 if (retapOn && navigation.isFocused()) {
                   popNestedToTop(navigation, route);
                 }
@@ -716,6 +740,7 @@ export default function TabNav() {
             // in-flight request on mount. Fire-and-forget; errors surface on
             // the screen's own query.
             tabPress: () => {
+              trackTab('matches', navigation);
               // PRD 01-05: no nested stack — focused re-tap scrolls to top.
               if (retapOn && navigation.isFocused()) requestScrollToTop('Matches');
               void queryClient.prefetchQuery({
@@ -735,6 +760,7 @@ export default function TabNav() {
             // LeagueHome back to the rankings root; at root, scroll to top
             // (the rankings screen registers the 'League' handler).
             tabPress: () => {
+              trackTab('league', navigation);
               if (retapOn && navigation.isFocused()) {
                 if (!popNestedToTop(navigation, route)) requestScrollToTop('League');
               }

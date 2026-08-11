@@ -37,6 +37,7 @@ import {
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 
@@ -743,7 +744,20 @@ export default function LeagueSummaryScreen() {
   // selection would zero bars. This strip is SYNCHRONOUS; the ON→OFF
   // reconciliation effect above runs after a render and covers a different
   // case (the flag changing under a mounted screen). Both are needed.
-  const switchSubset = (s: Subset) => {
+  const switchSubset = (s: Subset, source: 'chart' | 'roster' = 'chart') => {
+    // P0-7 — guarded on a real change; the auto-fallback effect above calls
+    // setSubset DIRECTLY and is deliberately silent (a server-driven
+    // fallback is not a user switching a subset).
+    if (s !== subset) {
+      track('league_subset_changed', {
+        subset: s,
+        from: subset,
+        source,
+        filter_count: posFilter.size,
+        // The synchronous OFF-path PICKS strip below actually fired.
+        picks_stripped: !picksAlwaysCounted && s !== 'all' && posFilter.has('PICKS'),
+      }, route.name);
+    }
     setSubset(s);
     if (!picksAlwaysCounted && s !== 'all') {
       setPosFilter((prev) => {
@@ -753,6 +767,64 @@ export default function LeagueSummaryScreen() {
         return next;
       });
     }
+  };
+
+  // ── P0-7 · league_view (surface: league_rankings) ───────────────────
+  // ONCE per mount. This screen holds two parallel queries with
+  // placeholderData (#248), so it re-renders constantly and a naive
+  // effect would double-fire; the firedRef is the guard and
+  // query.isFetched is the trigger. Declared above the `if (!leagueId)`
+  // early return — hooks may not sit below it.
+  const viewFiredRef = useRef(false);
+  useEffect(() => {
+    if (viewFiredRef.current) return;
+    if (leagueId && !query.isFetched) return;
+    viewFiredRef.current = true;
+    track('league_view', {
+      surface: 'league_rankings',
+      state: !leagueId ? 'no_league'
+             : query.isError ? 'error'
+             : teams.length > 0 ? 'ready' : 'empty',
+      platform: useSession.getState().leagues
+                  .find((lg) => lg.league_id === leagueId)?.platform ?? 'unknown',
+      team_count: teams.length || null,
+      basis,
+      subset,
+      starters_available: startersAvailable,
+      // outlook.odds is OFF in config/features.json, so this is `false` on
+      // every row until the flag flips. That is correct and honest — do
+      // not read the constant as a bug (plan-p0-7 §10.2).
+      outlook_shown: oddsEnabled && outlookSupported,
+      is_tab_root: isTabRoot,
+    }, route.name);
+  }, [leagueId, query.isFetched, query.isError, teams.length, basis, subset,
+      startersAvailable, oddsEnabled, outlookSupported, isTabRoot, route.name]);
+
+  // P0-7 — the two BasisChips called setBasis directly; route both through
+  // one helper so the event has a single choke point. Guarded on a real
+  // change, so re-tapping the active chip emits nothing (a no-op row is
+  // noise in a funnel).
+  const changeBasis = (b: UiBasis) => {
+    if (b === basis) return;
+    track('league_basis_changed', {
+      basis: b,
+      from: basis,
+      boards_differ: boardsDiffer,
+      team_focused: selectedId !== null,
+    }, route.name);
+    setBasis(b);
+  };
+
+  // P0-7 — the two drill-in entry points. `rank` is the 1-based ON-SCREEN
+  // rank under the active filters (what the user actually tapped), never
+  // the server's unfiltered team.rank. `is_self` is deliberately absent:
+  // session-user ↔ PowerRankedTeam.user_id identity was never proven and a
+  // guessed prop is worse than a missing one (hld.md S-33).
+  const openTeam = (id: string, via: 'bar' | 'row', rank: number) => {
+    track('league_team_opened', {
+      via, rank, basis, subset, filter_count: posFilter.size,
+    }, route.name);
+    setSelectedId(id);
   };
 
   const fmtKey = query.data?.scoring_format ?? '';
@@ -832,13 +904,13 @@ export default function LeagueSummaryScreen() {
             testID="league-summary.basis.consensus"
             label={boardsDiffer ? 'Consensus sorts' : 'Consensus'}
             active={basis === 'consensus'}
-            onPress={() => setBasis('consensus')}
+            onPress={() => changeBasis('consensus')}
           />
           <BasisChip
             testID="league-summary.basis.personal"
             label={boardsDiffer ? 'My board sorts' : 'My board'}
             active={basis === 'personal'}
-            onPress={() => setBasis('personal')}
+            onPress={() => changeBasis('personal')}
           />
           <BasisChip
             testID="league-summary.basis.redraft"
@@ -944,6 +1016,7 @@ export default function LeagueSummaryScreen() {
               idPrefix="league-summary.subset"
               subset={subset}
               onSwitch={switchSubset}
+              source="chart"
             />
           ) : null}
 
@@ -1045,7 +1118,7 @@ export default function LeagueSummaryScreen() {
                         picksAlwaysCounted={picksAlwaysCounted}
                         focused={selectedId === id}
                         grayed={!!selectedId && selectedId !== id}
-                        onPress={() => setSelectedId(id)}
+                        onPress={() => openTeam(id, 'bar', idx + 1)}
                         showDeltaRow={ticksOn}
                         tickPct={
                           other && other.active > 0
@@ -1158,6 +1231,7 @@ export default function LeagueSummaryScreen() {
                 idPrefix="league-summary.roster-subset"
                 subset={subset}
                 onSwitch={switchSubset}
+                source="roster"
               />
             ) : null}
             <PosFilterPills
@@ -1291,7 +1365,7 @@ export default function LeagueSummaryScreen() {
                     ? r.tc.team.total_value_label
                     : undefined
                 }
-                onPress={() => setSelectedId(r.tc.team.user_id)}
+                onPress={() => openTeam(r.tc.team.user_id, 'row', idx + 1)}
               />
             ))}
           </View>
@@ -1368,10 +1442,14 @@ function BasisChip({ label, active, onPress, disabled, testID }: {
 // chart card (idPrefix league-summary.subset) and the drill-in roster panel
 // (idPrefix league-summary.roster-subset). One shared `subset` state drives
 // both instances, so they always match.
-function SubsetControl({ idPrefix, subset, onSwitch }: {
+function SubsetControl({ idPrefix, subset, onSwitch, source }: {
   idPrefix: string;
   subset: Subset;
-  onSwitch: (s: Subset) => void;
+  onSwitch: (s: Subset, source: 'chart' | 'roster') => void;
+  // P0-7 — which of the two mirrored control instances was touched. The
+  // two share ONE state (#237), so without this the event cannot tell the
+  // chart control from the drill-in roster control.
+  source: 'chart' | 'roster';
 }) {
   return (
     <View
@@ -1385,7 +1463,7 @@ function SubsetControl({ idPrefix, subset, onSwitch }: {
           <Pressable
             key={s.key}
             testID={`${idPrefix}.${s.key}`}
-            onPress={() => onSwitch(s.key)}
+            onPress={() => onSwitch(s.key, source)}
             accessibilityRole="button"
             accessibilityLabel={`Show ${s.label.toLowerCase()} value`}
             accessibilityState={{ selected: on }}
