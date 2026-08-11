@@ -344,8 +344,14 @@ assert(
   /BackHandler\.addEventListener\('hardwareBackPress'/.test(screenText),
   '#302 an Android hardware-back handler is registered',
 );
+// #299/#302 analytics (2026-08-11): the four exit controls no longer call
+// setSelectedId(null) directly — they route through the single `closeTeam`
+// choke point, which emits league_team_closed AND clears the selection. The
+// second half of that chain (closeTeam ⇒ setSelectedId(null), exactly one
+// bare clear in the file) is pinned by check-analytics-297-302.js; this file
+// keeps pinning that each CONTROL reaches it.
 assert(
-  /BackHandler\.addEventListener\('hardwareBackPress',\s*\(\)\s*=>\s*\{\s*\n\s*setSelectedId\(null\);\s*\n\s*return true;/.test(
+  /BackHandler\.addEventListener\('hardwareBackPress',\s*\(\)\s*=>\s*\{\s*\n\s*closeTeam\('hardware_back'\);\s*\n\s*return true;/.test(
     screenText,
   ),
   '#302 hardware back clears the focused team and CONSUMES the event',
@@ -357,7 +363,7 @@ assert(
   'always-on would swallow back on the all-teams view too',
 );
 assert(
-  /registerScrollToTop\('League', \(\) => \{[\s\S]{0,600}?setSelectedId\(null\);/.test(screenText),
+  /registerScrollToTop\('League', \(\) => \{[\s\S]{0,600}?closeTeam\('tab_retap'\);/.test(screenText),
   '#302 re-tapping the active League tab also clears the focused team',
   'scroll-to-top alone is half a reset — the user stays inside the drill-in',
 );

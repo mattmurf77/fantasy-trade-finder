@@ -364,6 +364,57 @@ export default function LeagueSummaryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute();
   const isTabRoot = route.name === 'LeagueRankings';
+
+  // ── #299/#302 analytics — the drill-in EXIT half ──────────────────────
+  // The ENTER half is `league_team_opened` (P0-7, `openTeam` below) and is
+  // reused as-is. There is deliberately no second "focused" event: one
+  // interaction gets one enter event and one exit event, because two names
+  // for one interaction on this screen is the two-sources-of-truth bug
+  // #208/#248/#293 are a catalog of.
+  //
+  // The focus interval lives in a REF, not state, for a concrete reason:
+  // two of the five exit controls are registered inside effects whose dep
+  // arrays deliberately exclude `selectedId` (the tab-retap handler below,
+  // deps [isTabRoot, retapOn]; the BackHandler, deps [selectedId] but
+  // registered once per focus). A closure over state would report the
+  // focus that was live when the handler was REGISTERED. A ref cannot go
+  // stale. `rank` is captured AT OPEN so it joins to
+  // league_team_opened.rank even if the user changes basis mid-focus.
+  //
+  // Declared here — above every consumer — so no dep array references it
+  // before initialization.
+  const focusRef = useRef<{ id: string; at: number; rank: number } | null>(null);
+  type CloseVia =
+    | 'header_back'
+    | 'in_card_link'
+    | 'hardware_back'
+    | 'tab_retap'
+    | 'refocus';
+  // Pure emitter. No-ops when nothing is focused, so an exit control tapped
+  // in the unfocused state can never invent a row.
+  const emitTeamClosed = React.useCallback(
+    (via: CloseVia) => {
+      const f = focusRef.current;
+      focusRef.current = null;
+      if (!f) return;
+      track(
+        'league_team_closed',
+        { via, dwell_ms: Date.now() - f.at, rank: f.rank },
+        route.name,
+      );
+    },
+    [route.name],
+  );
+  // The single exit choke point: every control that ends the drill-in calls
+  // this, and nothing else calls setSelectedId(null).
+  const closeTeam = React.useCallback(
+    (via: CloseVia) => {
+      emitTeamClosed(via);
+      setSelectedId(null);
+    },
+    [emitTeamClosed],
+  );
+
   // S1 PRD-05 (flag ux.retap_active_tab) — as the League tab's root, this
   // screen owns the tab's focused-re-tap scroll-to-top handler (moved here
   // from LeagueScreen with #181). The root-stack variant must NOT register:
@@ -379,11 +430,11 @@ export default function LeagueSummaryScreen() {
             // roster is only half of that: the user is still inside a
             // drill-in they have no other way out of once they've scrolled.
             // Clear the focus first, then scroll.
-            setSelectedId(null);
+            closeTeam('tab_retap');
             scrollRef.current?.scrollTo({ y: 0, animated: true });
           })
         : undefined,
-    [isTabRoot, retapOn],
+    [isTabRoot, retapOn, closeTeam],
   );
   const [basis, setBasis] = useState<UiBasis>('consensus');
   // Empty set = "All" (unfiltered). Non-empty = single/multi position select.
@@ -741,7 +792,7 @@ export default function LeagueSummaryScreen() {
         headerLeft: () => (
           <Pressable
             testID="league-summary.roster-close"
-            onPress={() => setSelectedId(null)}
+            onPress={() => closeTeam('header_back')}
             hitSlop={space.md}
             accessibilityRole="button"
             accessibilityLabel="Back to all teams"
@@ -761,7 +812,7 @@ export default function LeagueSummaryScreen() {
         headerLeft: undefined,
       });
     }
-  }, [isTabRoot, navigation, focusedTeamName]);
+  }, [isTabRoot, navigation, focusedTeamName, closeTeam]);
 
   // #302 — Android hardware/gesture back. There were ZERO BackHandler
   // registrations in this file, so on Android the drill-in swallowed the
@@ -771,11 +822,11 @@ export default function LeagueSummaryScreen() {
   useEffect(() => {
     if (!selectedId) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSelectedId(null);
+      closeTeam('hardware_back');
       return true; // handled — do not fall through to the navigator
     });
     return () => sub.remove();
-  }, [selectedId]);
+  }, [selectedId, closeTeam]);
 
   // The single shared pill factory — both pill rows use it, so the drill-in
   // panel mirrors the chart card automatically.
@@ -904,9 +955,20 @@ export default function LeagueSummaryScreen() {
   // session-user ↔ PowerRankedTeam.user_id identity was never proven and a
   // guessed prop is worse than a missing one (hld.md S-33).
   const openTeam = (id: string, via: 'bar' | 'row', rank: number) => {
+    // #299/#302 — jumping straight from one focused team to another (the
+    // chart bars stay tappable while focused) ends the first focus without
+    // touching any exit control. Terminate that interval before the new
+    // one starts, or its dwell silently absorbs the next team's.
+    // Re-tapping the SAME team is not a close: the interval continues, so
+    // dwell still measures from the first open.
+    const same = focusRef.current?.id === id;
+    if (focusRef.current && !same) emitTeamClosed('refocus');
     track('league_team_opened', {
       via, rank, basis, subset, filter_count: posFilter.size,
     }, route.name);
+    // On a same-team re-tap keep the ORIGINAL `at`, so dwell still measures
+    // from the first open rather than restarting.
+    focusRef.current = { id, at: focusRef.current?.at ?? Date.now(), rank };
     setSelectedId(id);
   };
 
@@ -1064,7 +1126,7 @@ export default function LeagueSummaryScreen() {
                  renders, so the ids stay unique on screen. */
               <Pressable
                 testID="league-summary.roster-close"
-                onPress={() => setSelectedId(null)}
+                onPress={() => closeTeam('in_card_link')}
                 hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel="Back to all teams"
