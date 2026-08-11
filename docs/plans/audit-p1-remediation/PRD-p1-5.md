@@ -16,6 +16,7 @@
 
 ## Table of contents
 
+- [0. Build addendum — 2026-08-11 (as built)](#0-build-addendum--2026-08-11-as-built)
 - [1. Problem](#1-problem)
 - [2. Goals and non-goals](#2-goals-and-non-goals)
 - [3. Before / after — League Home](#3-before--after--league-home)
@@ -29,6 +30,111 @@
 - [11. Release risk — this item ships live on merge](#11-release-risk--this-item-ships-live-on-merge)
 - [12. Rollback](#12-rollback)
 - [13. Residual risks accepted](#13-residual-risks-accepted)
+
+---
+
+## 0. Build addendum — 2026-08-11 (as built)
+
+> Added by the P1-5 build agent after implementation. Where this section
+> contradicts anything below it, **this section describes what shipped.**
+
+### 0.1 ⚠ The Matches-surface impression metric is UNRELIABLE — do not read it as an impression rate
+
+**This is the record D-P1-04 requires.** `invite_cta_shown` with
+`surface: 'matches_empty'` is a **mount counter, not an impression counter**, and
+**any tap-through rate computed from it is invalid** until the Matches empty state gets
+a scroll container.
+
+**Mechanism.** The mutual-empty branch has no scrollable ancestor — it is a plain
+`<View style={styles.centered}>` (`flex: 1` + `justifyContent: 'center'`), and the only
+`ScrollView` on `MatchesScreen` is the horizontal filter-chip row. On smaller devices
+that column is already taller than the viewport, so content below "Find a trade" is
+clipped off-screen and unreachable to both a user and a camera. The event fires on
+mount regardless.
+
+**Scope of the damage, precisely.** The build places the *leading* action above the
+clipping boundary (see §0.2), so the clipped element is whichever action does **not**
+lead. The metric is therefore least trustworthy for the non-leading surface and its
+tap-through will read artificially low.
+
+**Accepted knowingly by the operator (D-P1-04), to be verified on TestFlight. Fixing
+the scroll container is explicitly out of P1-5's scope** and belongs with the A-34
+layout family. Maestro cannot detect the failure either — off-screen children remain in
+the view hierarchy, so `assertVisible` passes whether or not anything is on screen.
+
+**`invite_cta_shown` with `surface: 'league_home'` is unaffected and IS a real
+impression** — that surface has a real `ScrollView`. Comparisons between the two
+surfaces are not valid until the clipping is fixed.
+
+The same warning is carried as a code comment at the emission site in
+`mobile/src/screens/MatchesScreen.tsx`, so it cannot be lost by anyone reading only the
+code.
+
+### 0.2 PR-6 as built — conditional on league penetration
+
+Reversed from this document's §4 and from gate OG-2. Which action leads on the Matches
+empty state depends on `leaguemates_joined / leaguemates_total`:
+
+| Penetration | Leads (primary, placed first) | Follows (secondary) |
+|---|---|---|
+| **< 50% joined** | Invite leaguemates | Find a trade |
+| **≥ 50% joined** | Find a trade | Invite leaguemates |
+
+Rationale: below half, an empty inbox is a *population* problem; at or above half the
+boards mostly exist and it is a *discovery* problem. There is never more than one
+primary on the surface.
+
+### 0.3 PR-7 as built — **no platform gate**. The card ships on every platform
+
+**§2's non-goal ("withhold the promoted CTA on ESPN/MFL leagues"), render-ladder branch
+L2, AC-20…AC-22 and Maestro File B block 4 are all withdrawn.** D-P1-14 was right that
+the premise was never verified; the invite path has now been traced end to end and the
+finding is more specific than either position:
+
+| Leg | Sleeper | ESPN / MFL / Fleaflicker |
+|---|---|---|
+| `buildInviteUrl` emission | works | **works — no platform branch exists** |
+| `/app/league/join/<id>` → 302 (`backend/server.py`) | works | works — no lookup, no validation |
+| Mobile deep-link capture (`utils/deepLinks.ts` `?league=` reader, `LeagueJoinScreen`) | works | works — no platform branch |
+| Mobile auto-pin (`LeaguePickerScreen`) | works | **only if the invitee has independently linked that platform themselves** |
+| Web auto-select (`web/js/app.js` `findIndex` over `/api/sleeper/leagues`) | works | **hard dead end** — `backend/database.py:6107` keeps only non-numeric league ids, and platform leagues are stored under their numeric platform-native id, so the id can never match. Web sign-in also demands a Sleeper username |
+| Invite banner names the league (`/api/league/invite-meta`) | works | always "their league" — `backend/server.py:682-683` returns `None` for `is_linked_platform_league`, as its own docstring states |
+
+**Why the card ships anyway.** The outcome the card asks for is still reachable on
+mobile: an ESPN leaguemate who installs the app and links their own ESPN account lands
+in the same league and increments `leaguemates_joined`. Gating the card would suppress a
+*working* outcome while the legacy inline link — which emits the byte-identical URL —
+stayed put, so the gate would not have prevented the degraded journey, only the promoted
+one. Every invite event carries the league `platform` prop, which turns "do ESPN invites
+convert?" into a measured question rather than an assumed one.
+
+**Two real follow-ups this trace surfaced, neither in P1-5's scope:**
+
+1. `mobile/src/screens/LeaguePickerScreen.tsx` — the terminal copy for a failed auto-pin
+   says *"join the league on Sleeper and open the invite again"*, which is simply wrong
+   for an ESPN/MFL invitee. Cheap copy fix, different file owner.
+2. Web is a genuine dead end for non-Sleeper invitees (both the league-list filter and
+   the Sleeper-only sign-in). Worth fixing or worth an explicit "open this in the app"
+   interstitial.
+
+### 0.4 Other deltas from this document
+
+- **`inviteSocialProof` lives in `mobile/src/utils/inviteSocialProof.ts`**, not appended
+  to `leagueUnlocks.ts` — a new file rather than an edit to a shared one. It keeps the
+  same zero-runtime-imports discipline and has its own harness,
+  `mobile/tests/check-invite-social-proof.js` (13 cases, wired as
+  `npm run test:invite-social-proof`). **Waiver W3 is withdrawn**, as §8 requires.
+- **`shareInvite` lives in `InviteLeaguematesBanner.tsx`**, beside `buildInviteUrl`, not
+  in a new `utils/inviteShare.ts`. LLD §3's placement would have created a require cycle
+  (`utils/inviteShare` → banner → `utils/inviteShare`) the moment the banner delegated
+  to it. Same module ⇒ `buildInviteUrl` is called directly and still never copied.
+- **OG-13 resolved as (a')**: the card's CTA is `variant="secondary"`. League Home's
+  existing `league.action.find` keeps the only primary on the screen.
+- **PR-9 shipped**: `league.members-invite`, secondary weight, in the members-overlay
+  footer, gated on the same visibility predicate as the card.
+- **The `platform` prop resolves absent ⇒ `'unknown'`**, matching P0-7's `league_view`
+  call on the same screen, rather than LLD §5's `?? 'sleeper'`. With no platform gate the
+  value is purely telemetry, and honest beats fail-open.
 
 ---
 
