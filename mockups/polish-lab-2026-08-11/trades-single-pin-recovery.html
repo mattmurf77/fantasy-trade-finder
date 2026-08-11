@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Single-pin trade surface (#298 · #297)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t-4plus:#F87171; --t-2:#FBBF24; --t-1st:#2DD4BF; --t-2nd:#38BDF8; --t-3rd:#F472B6;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1360px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:6px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .negbox{border-left:3px solid var(--neg);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:28px 0 4px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-items:flex-start;width:100%}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .scroll{position:relative;height:662px;overflow:hidden;padding:14px 16px 0}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* strip */
+  .strip{display:flex;gap:8px;margin-bottom:10px}
+  .strippill{flex:1;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+    padding:7px 10px;display:flex;flex-direction:column;gap:1px;min-width:0}
+  .strippill .k{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .strippill .v{font:600 13px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .utilrow{display:flex;gap:8px;margin-bottom:12px}
+  .utilbtn{flex:1;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;height:52px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    color:var(--chalk-dim);font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase}
+
+  /* pin summary */
+  .pinrow{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+    display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .pinrow .lbl{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .pinchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--wr);border-radius:4px;
+    padding:3px 8px;font:600 12px var(--ui);color:var(--chalk)}
+  .pinchip .dot{width:6px;height:6px;border-radius:1px;background:var(--wr)}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px;
+    margin-bottom:12px}
+  .cardlbl{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim);
+    margin-bottom:8px}
+  .cols{display:flex;gap:10px}
+  .col{flex:1;min-width:0}
+  .colhd{display:flex;align-items:center;gap:6px;font:600 11px var(--ui);letter-spacing:.1em;
+    text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px}
+  .colhd::before{content:"";width:3px;height:11px;background:var(--ice)}
+  .mini{background:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;
+    position:relative;overflow:hidden;margin-bottom:6px}
+  .mini .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .mini .bd{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--ui);
+    letter-spacing:.06em;display:inline-block;margin-bottom:4px}
+  .mini .nm{font:600 13px var(--ui);color:var(--chalk)}
+  .mini .mt{font:400 11px var(--ui);color:var(--chalk-dim);margin-top:1px}
+
+  .valbar{margin-top:10px}
+  .valbar .h{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .valbar .v{font:600 17px var(--ui);color:var(--chalk);margin:3px 0}
+  .valbar .s{font:400 12px var(--ui);color:var(--chalk-dim)}
+  .track{height:9px;background:var(--ink-3);border-radius:2px;margin:8px 0 4px;position:relative}
+  .track .mk{position:absolute;top:-2px;width:4px;height:13px;background:var(--ice);border-radius:1px;left:49%}
+  .scale{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--chalk-faint)}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:7px;height:44px;border-radius:4px;
+    font:600 12px var(--ui);letter-spacing:.06em;text-transform:uppercase}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+  .btn.ghost{border:1px solid var(--line-strong);color:var(--chalk-dim)}
+  .btn.full{width:100%;margin-bottom:10px}
+
+  .actionrow{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .circ{width:52px;height:52px;border-radius:4px;border:1px solid;display:flex;align-items:center;
+    justify-content:center;flex:0 0 auto}
+  .circ.no{border-color:var(--neg);color:var(--neg)}
+  .circ.yes{border-color:var(--pos);color:var(--pos)}
+  .circ.mid{flex:1;height:52px;width:auto;border-color:var(--line-strong);color:var(--chalk-dim);
+    font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase}
+  .swipehint{text-align:center;font:400 11px var(--ui);color:var(--chalk-faint);margin-top:8px}
+
+  .idea{background:var(--ink-1);border:1px solid var(--line);border-radius:6px;padding:9px 11px;
+    display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .idea .t{flex:1;min-width:0;font:400 12px var(--ui);color:var(--chalk-dim)}
+  .idea .t b{color:var(--chalk);font-weight:600}
+  .idea .g{font:500 11px var(--mono);color:var(--pos);flex:0 0 auto}
+
+  .missing{border:1px dashed var(--neg);border-radius:6px;padding:9px 11px;margin-bottom:12px;
+    font:400 11.5px/1.5 var(--ui);color:var(--neg);background:rgba(239,68,68,.05)}
+  .added{border:1px dashed var(--ice);border-radius:6px;padding:9px 11px;margin-bottom:12px;
+    font:400 11.5px/1.5 var(--ui);color:var(--ice);background:rgba(86,217,236,.05)}
+  .honest{background:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;
+    font:400 12px/1.5 var(--ui);color:var(--chalk-dim);margin-top:10px}
+  .honest b{color:var(--chalk)}
+
+  /* lineup impact table */
+  .lit{margin-top:12px}
+  .lit .h{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px}
+  .litrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .litslot{width:38px;font:600 11px var(--mono);color:var(--chalk-dim);flex:0 0 auto}
+  .litbef{flex:1;min-width:0;font:400 12px var(--ui);color:var(--chalk-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .litar{color:var(--chalk-faint);flex:0 0 auto}
+  .litaft{flex:1;min-width:0;font:600 12px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .vtbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .vtbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .vtbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .vtbl td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+  .vtbl tr.rec td{background:rgba(86,217,236,.06)}
+  .vtbl tr.rec td:first-child{color:var(--ice)}
+  .vtbl tr.no td:first-child{color:var(--chalk-faint)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:300px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Single-pin trade surface — #298 (repro) · #297 (not a regression)</h1>
+    <p class="q"><b>#298</b> (TradesHome, bug): "The UI when selecting a team or player is regressing. All
+      versions should still have the find a trade UI and let the user accept / decline the trades as any
+      other suggested trade."</p>
+    <p class="q"><b>#297</b> (TradesHome, bug): "The summary of a trade seems to have regressed. The
+      lineup change feature that shows the players traded and the impact on starting lineup doesn't
+      appear anymore."</p>
+    <p style="margin-top:10px">Both filed 2026-08-10 against shipped v1.12.0. They land on the
+      <strong>same surface</strong> — the single-pin featured-trade view on TradesHome — which is why they
+      share a page. Their causes are unrelated, and <strong>neither is what the reports (or the
+      pre-briefed leads) say it is.</strong></p>
+
+    <h2>#298 — reproduces, but the experiment is not the cause</h2>
+    <p>The lead pointed at the <code>trades_home_inline</code> experiment
+      (<code>TradesScreen.tsx:468-481</code>), on the theory that the operator's <code>strip</code>
+      variant rebuilt this surface. It did not. <code>showInlineHome</code>
+      (<code>:507</code>) only swaps <code>TradeFinderModeBar</code> for
+      <code>TradeHomeUtilityRow</code> and mounts <code>TradingWithStrip</code>
+      (<code>:3436-3479</code>) — both branches render inside the same
+      <code>{finderMode ? … : null}</code>, and <strong>neither touches the deck or the CTA</strong>.
+      <code>TradeBuildCanvas</code> is <code>canvas</code>-only and explicitly additive.</p>
+    <div class="negbox"><strong>The actual cause is two <code>singlePin</code> null-gates that fire
+      identically in the control group.</strong> <code>singlePin</code> is true when exactly one asset is
+      pinned (<code>TradesScreen.tsx:1038-1045</code>). Both of these read
+      <code>{!firstRun &amp;&amp; singlePin ? null : (…)}</code>:
+      <ul style="margin-top:6px">
+        <li><code>TradesScreen.tsx:4232</code> — removes the <strong>Find a Trade</strong> button
+          (<code>testID="trades.find-btn"</code>).</li>
+        <li><code>TradesScreen.tsx:4569</code> — removes the <strong>entire deck wrapper</strong>, and
+          with it every accept/decline path: the swipe handlers
+          (<code>SwipableTopCard onLike/onPass</code>, <code>:4641-4642</code>), the
+          <code>trades.pass-btn</code> / <code>trades.like-btn</code> row (<code>:4734-4767</code>), and
+          the VoiceOver actions (<code>:5426-5433</code>). All of them funnel into
+          <code>advance('like'|'pass')</code> at <code>:2979</code>.</li>
+      </ul>
+      What replaces them (<code>:4314-4340</code>) is <code>FeaturedTradeWindow</code> +
+      <code>AssetIdeasPanel</code>. With <code>trades.player_offers_calc</code> on
+      (<code>config/features.json:186</code>) the featured window renders an
+      <code>InLeagueCalculator</code>, whose only actions are <strong>Send in Sleeper</strong> and
+      <strong>Clear trade</strong>. <code>AssetIdeasPanel</code> has zero accept/decline affordances.
+      That is the reporter's sentence, verbatim, in code.</div>
+    <p><strong>Reverting the experiment will not fix this.</strong> Pin one player in the control group
+      and the same thing happens.</p>
+
+    <h2>#298, second half — the team path has a different bug</h2>
+    <p>Selecting a team via the strip's "Trading with" pill calls <code>pickSheetOpponent</code>
+      (<code>:618-623</code>, reached from <code>:653-656</code>), which changes
+      <code>scopedOpponent</code> and fires the effect at <code>:1918-1926</code>. That effect calls
+      <code>resetDeckForNewTargets()</code> — <code>setDeck([]); setJob(null)</code> — but only
+      auto-regenerates when <code>finderMode === 'team'</code>. The strip keeps the user in
+      <code>'guided'</code>. <strong>So picking a team silently empties the deck and regenerates
+      nothing</strong>, dropping the user to "Hit &quot;Find a Trade&quot; to start"
+      (<code>:4913</code>). The "Preferences changed — tap to refresh" strip can't rescue it: it is only
+      set in <code>handleEditSheetClose</code> (<code>:567-580</code>), which this path never calls.
+      Here the strip variant <em>is</em> implicated — not as the cause, but because it puts a
+      pre-existing footgun one tap from the deck.</p>
+
+    <h2>#297 — not a regression. It was never on this surface.</h2>
+    <p><code>LineupImpactTable</code> is defined at
+      <code>mobile/src/components/InLeagueCalculator.tsx:999</code> and is
+      <strong>not exported</strong> — the file's only export is the default
+      <code>InLeagueCalculator</code>. It has exactly one render site, the guard at
+      <code>InLeagueCalculator.tsx:947-953</code>. There are <strong>zero</strong> occurrences of
+      <code>LineupImpactTable</code>, <code>starter_impact</code> or any lineup string in
+      <code>TradesScreen.tsx</code>, <code>TradeCard.tsx</code>, <code>AssetIdeasPanel.tsx</code>,
+      <code>web/</code> or <code>extension/</code>.</p>
+    <p><code>git log -S "LineupImpactTable"</code> and <code>-S "starter_impact"</code> return
+      <strong>only additive commits</strong> — <code>c5f6f9c</code> created the table for the calculator
+      on 2026-08-03, <code>29a25c0</code> extended it for #169 on 2026-08-09. Nothing was ever deleted,
+      and there was never a mount on the deck or on a read-only trade card. #238's own record says so:
+      <span class="q" style="display:block;margin-top:6px">"Out of scope (phase 2) — Deck/featured
+      <code>TradeCard</code> mounts: <code>/api/trades/generate</code> and the asset-ideas endpoint don't
+      compute <code>starter_impact</code>…"</span></p>
+    <div class="verdict"><strong>Most likely what the operator actually saw.</strong> The table
+      <em>is</em> reachable from TradesHome today — via the featured window's calculator. But
+      <code>_starter_impact</code> returns <code>None</code> when there is no Sleeper lineup template:
+      <code>backend/server.py:1152-1154</code> bails on <code>_sleeper_lineup_slots(league_id)</code>,
+      and that helper (<code>:19058-19079</code>) returns <code>None</code> for any non-numeric league id
+      — <strong>ESPN, MFL, Fleaflicker, demo</strong>. <strong>v1.12.0 is the build that shipped MFL
+      support.</strong> On a non-Sleeper league the field is simply absent and the guard at
+      <code>InLeagueCalculator.tsx:953</code> renders <code>null</code> — <strong>silently, with no
+      copy at all</strong>. A feature that vanishes without a word is indistinguishable from a
+      regression. That silence is the real defect in #297, and it is cheap to fix.</div>
+    <p>Two lesser possibilities worth ruling out with the operator: the featured-window calculator
+      requires <em>exactly one</em> pin (going to zero or two removes it), and the
+      <code>TradeBuildCanvas</code> mount is <code>canvas</code>-variant only — if the experiment moved
+      the operator from <code>canvas</code> to <code>strip</code>, that calculator (and its table) would
+      genuinely disappear from TradesHome with no code change.</p>
+  </div>
+
+  <!-- ══ CAPTURE ANCHOR ══ -->
+  <div class="sec">Capture anchor <span class="fb">screens/mobile/trades/populated.png</span></div>
+  <div class="note">
+    <div class="anchor">
+      <img class="anchorimg" src="../../screens/mobile/trades/populated.png"
+           alt="Real capture: TradesHome, populated deck">
+      <div class="anchortxt">
+        <h2 style="margin-top:0">What "as any other suggested trade" means</h2>
+        <p>This is the real capture of the working path — a generated deck card. It is the standard
+          #298 asks the single-pin surface to meet. Note what it has that the single-pin view does not:
+          a full <b>You send / You get</b> two-column summary, the <b>Dynasty value swing</b> verdict with
+          its −1st…+1st scale, <b>Why?</b>, and — below this fold — the
+          <code>trades.pass-btn</code> / <code>trades.like-btn</code> row plus the swipe hint.</p>
+        <p><strong>Coverage gap:</strong> <code>screens/manifest.json</code> lists seven
+          <code>trades</code> states (<code>loading</code>, <code>empty</code>, <code>empty--cold</code>,
+          <code>error</code>, <code>generating</code>, <code>format-gate</code>,
+          <code>populated</code>) — <strong>none of them single-pin</strong>, and all were captured with
+          the <code>release</code> flag fixture, i.e. the <code>control</code> variant. There is no
+          capture of the surface either item is about. The single-pin frames below are
+          <strong>reconstructions from source</strong>. Request
+          <code>mobile/scripts/screen-capture.sh --screen trades --state single-pin</code> before build.</p>
+        <p><strong>Exact vocabulary</strong> (for whoever builds this): CTA <code>Find a Trade</code> /
+          <code>Find more trades</code>; decline = <code>x</code> glyph in <code>semantic.neg</code>,
+          a11y "Pass on this trade"; accept = <code>check</code> in <code>semantic.pos</code>, a11y
+          "Accept this trade"; third option <code>Queue</code>; hint "Swipe right to like · Swipe left to
+          pass"; tertiary "Bad trade?".</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ CURRENT vs PROPOSED ══ -->
+  <div class="sec">#298 — current vs. proposed <span class="fb">one player pinned, guided mode</span></div>
+  <div class="row3">
+
+    <!-- CURRENT -->
+    <div class="slot">
+      <div class="slotlbl cur">Current — one player pinned (v1.12.0)</div>
+      <div class="hchip bad"><b>No Find a Trade · no accept/decline</b></div>
+      <div class="phone">
+        <div class="status"><span>7:42</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="scroll">
+          <div class="strip">
+            <div class="strippill"><span class="k">League</span><span class="v">QA Standard League</span></div>
+            <div class="strippill"><span class="k">Trading with</span><span class="v">Any league-mate</span></div>
+          </div>
+          <div class="utilrow">
+            <div class="utilbtn"><svg class="i" width="26" height="26" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+            <div class="utilbtn"><svg class="i" width="26" height="26" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>Free agents</div>
+            <div class="utilbtn"><svg class="i" width="26" height="26" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18"/><path d="M8 7h8M8 11h3M8 15h3M14 11v6"/></svg>Calculator</div>
+          </div>
+          <div class="pinrow">
+            <span class="lbl">Targeting</span>
+            <span class="pinchip"><span class="dot"></span>Tee Higgins</span>
+          </div>
+          <div class="missing">Find a Trade button removed here —
+            <code>TradesScreen.tsx:4232</code>, <code>!firstRun &amp;&amp; singlePin ? null : …</code></div>
+          <div class="card">
+            <div class="cardlbl">Featured trade</div>
+            <div class="cols">
+              <div class="col"><div class="colhd">You send</div>
+                <div class="mini"><div class="rail" style="background:var(--wr)"></div>
+                  <span class="bd" style="border-color:var(--wr);color:var(--wr)">WR</span>
+                  <div class="nm">Tee Higgins</div><div class="mt">CIN · 27 yo</div></div></div>
+              <div class="col"><div class="colhd">You get</div>
+                <div class="mini"><div class="rail" style="background:var(--te)"></div>
+                  <span class="bd" style="border-color:var(--te);color:var(--te)">TE</span>
+                  <div class="nm">Tyler Warren</div><div class="mt">IND · 23 yo</div></div></div>
+            </div>
+            <div class="valbar">
+              <div class="h">Dynasty value swing</div>
+              <div class="v">Even</div>
+              <div class="s">Within a rounding error — 110 apart (≈ 0.1 firsts)</div>
+              <div class="track"><div class="mk"></div></div>
+              <div class="scale"><span>−1st</span><span>Even</span><span>+1st</span></div>
+            </div>
+            <div class="missing" style="margin-top:12px;margin-bottom:0">#297 — lineup impact would render
+              here, but <code>starter_impact</code> is absent on non-Sleeper leagues and the guard at
+              <code>InLeagueCalculator.tsx:953</code> renders <b>nothing at all</b></div>
+            <div class="btn ice full" style="margin-top:12px;margin-bottom:8px">Send in Sleeper</div>
+            <div class="btn ghost full" style="margin-bottom:0">Clear trade</div>
+          </div>
+          <div class="missing">No accept/decline anywhere — the whole deck block is gone
+            (<code>TradesScreen.tsx:4569</code>)</div>
+          <div class="cardlbl">More trades</div>
+          <div class="idea"><span class="t"><b>Tee Higgins</b> → Ladd McConkey</span><span class="g">+420</span></div>
+          <div class="idea"><span class="t"><b>Tee Higgins</b> → 2027 1st (early)</span><span class="g">+180</span></div>
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Pin one player and the surface becomes a <b>calculator with a suggestion
+        list</b>. Both the way to get more trades and the way to act on this one are gone. The only exits
+        are Send in Sleeper (irreversible, external) or Clear trade.</div>
+    </div>
+
+    <!-- V1 RECOMMENDED -->
+    <div class="slot">
+      <div class="slotlbl">V1 — featured window keeps the deck's actions · <b>RECOMMENDED</b></div>
+      <div class="hchip rec">Restores both · no new surface</div>
+      <div class="phone">
+        <div class="status"><span>7:42</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="scroll">
+          <div class="strip">
+            <div class="strippill"><span class="k">League</span><span class="v">QA Standard League</span></div>
+            <div class="strippill"><span class="k">Trading with</span><span class="v">Any league-mate</span></div>
+          </div>
+          <div class="pinrow">
+            <span class="lbl">Targeting</span>
+            <span class="pinchip"><span class="dot"></span>Tee Higgins</span>
+          </div>
+          <div class="btn ice full">Find more trades</div>
+          <div class="added">Restored: CTA relabelled for the pinned context
+            (<code>trades.find-btn</code> kept)</div>
+          <div class="card">
+            <div class="cardlbl">Featured trade · 1 of 6</div>
+            <div class="cols">
+              <div class="col"><div class="colhd">You send</div>
+                <div class="mini"><div class="rail" style="background:var(--wr)"></div>
+                  <span class="bd" style="border-color:var(--wr);color:var(--wr)">WR</span>
+                  <div class="nm">Tee Higgins</div><div class="mt">CIN · 27 yo</div></div></div>
+              <div class="col"><div class="colhd">You get</div>
+                <div class="mini"><div class="rail" style="background:var(--te)"></div>
+                  <span class="bd" style="border-color:var(--te);color:var(--te)">TE</span>
+                  <div class="nm">Tyler Warren</div><div class="mt">IND · 23 yo</div></div></div>
+            </div>
+            <div class="valbar">
+              <div class="h">Dynasty value swing</div>
+              <div class="v">Even</div>
+              <div class="s">Within a rounding error — 110 apart (≈ 0.1 firsts)</div>
+              <div class="track"><div class="mk"></div></div>
+              <div class="scale"><span>−1st</span><span>Even</span><span>+1st</span></div>
+            </div>
+            <div class="lit">
+              <div class="h">Starting lineup</div>
+              <div class="litrow"><span class="litslot">TE</span><span class="litbef">Cade Otton · TE21</span>
+                <svg class="i litar" width="12" height="12" viewBox="0 0 24 24"><path d="M4 12h14l-4-4M18 12l-4 4"/></svg>
+                <span class="litaft">Tyler Warren · TE6</span></div>
+              <div class="litrow"><span class="litslot">WR2</span><span class="litbef">Tee Higgins · WR14</span>
+                <svg class="i litar" width="12" height="12" viewBox="0 0 24 24"><path d="M4 12h14l-4-4M18 12l-4 4"/></svg>
+                <span class="litaft">Rome Odunze · WR38</span></div>
+            </div>
+            <div class="actionrow">
+              <div class="circ no"><svg class="i" width="22" height="22" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+              <div class="circ mid">Queue</div>
+              <div class="circ yes"><svg class="i" width="22" height="22" viewBox="0 0 24 24"><path d="M5 12l5 5 9-11"/></svg></div>
+            </div>
+            <div class="swipehint">Swipe right to like · Swipe left to pass</div>
+          </div>
+          <div class="added">Restored: the deck's own accept/decline row + swipe — same
+            <code>advance('like'|'pass')</code> path, same testIDs</div>
+          <div class="foldmark"><span>"More trades" list continues below</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">The featured window <b>becomes</b> a deck card for the pinned asset:
+        same summary, same accept/decline row, same swipe, <b>"1 of 6"</b> so it reads as a browsable
+        deck rather than a dead end. The utility row moves below the fold — the pinned flow doesn't need
+        Draft/FA/Calculator above a trade. Editing still lives behind the card's own edit action.</div>
+    </div>
+
+    <!-- V2 -->
+    <div class="slot">
+      <div class="slotlbl warn">V2 — keep the calculator, restore the deck beneath it</div>
+      <div class="hchip">Least code · two summaries on one screen</div>
+      <div class="phone">
+        <div class="status"><span>7:42</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="scroll">
+          <div class="strip">
+            <div class="strippill"><span class="k">League</span><span class="v">QA Standard League</span></div>
+            <div class="strippill"><span class="k">Trading with</span><span class="v">Any league-mate</span></div>
+          </div>
+          <div class="pinrow"><span class="lbl">Targeting</span>
+            <span class="pinchip"><span class="dot"></span>Tee Higgins</span></div>
+          <div class="btn ice full">Find more trades</div>
+          <div class="card" style="padding:12px">
+            <div class="cardlbl">Build it yourself</div>
+            <div class="cols">
+              <div class="col"><div class="colhd">You send</div>
+                <div class="mini" style="padding:6px 8px"><div class="rail" style="background:var(--wr)"></div>
+                  <div class="nm" style="font-size:12px">Tee Higgins</div></div></div>
+              <div class="col"><div class="colhd">You get</div>
+                <div class="mini" style="padding:6px 8px"><div class="rail" style="background:var(--te)"></div>
+                  <div class="nm" style="font-size:12px">Tyler Warren</div></div></div>
+            </div>
+            <div class="btn ice full" style="margin-top:10px;margin-bottom:0;height:38px">Send in Sleeper</div>
+          </div>
+          <div class="cardlbl">Suggested trades</div>
+          <div class="card">
+            <div class="cols">
+              <div class="col"><div class="colhd">You send</div>
+                <div class="mini"><div class="rail" style="background:var(--wr)"></div>
+                  <span class="bd" style="border-color:var(--wr);color:var(--wr)">WR</span>
+                  <div class="nm">Tee Higgins</div><div class="mt">CIN · 27 yo</div></div></div>
+              <div class="col"><div class="colhd">You get</div>
+                <div class="mini"><div class="rail" style="background:var(--wr)"></div>
+                  <span class="bd" style="border-color:var(--wr);color:var(--wr)">WR</span>
+                  <div class="nm">Ladd McConkey</div><div class="mt">LAC · 24 yo</div></div></div>
+            </div>
+            <div class="valbar">
+              <div class="h">Dynasty value swing</div>
+              <div class="v">You win slightly</div>
+              <div class="track"><div class="mk" style="left:62%"></div></div>
+              <div class="scale"><span>−1st</span><span>Even</span><span>+1st</span></div>
+            </div>
+            <div class="actionrow">
+              <div class="circ no"><svg class="i" width="22" height="22" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+              <div class="circ mid">Queue</div>
+              <div class="circ yes"><svg class="i" width="22" height="22" viewBox="0 0 24 24"><path d="M5 12l5 5 9-11"/></svg></div>
+            </div>
+          </div>
+          <div class="foldmark"><span>deck continues</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Simply delete both <code>singlePin</code> null-gates and shrink the calculator
+        to a compact "build it yourself" card above the restored deck. <b>Smallest diff by far.</b> Cost:
+        two trade summaries stacked on one screen, and the featured/calculator trade is not the same trade
+        as the deck's top card — a real "which one am I looking at?" risk.</div>
+    </div>
+  </div>
+
+  <!-- ══ #297 DATA NOTES ══ -->
+  <div class="sec">#297 — data notes <span class="fb">what would have to produce the missing field</span></div>
+  <div class="note">
+    <h2>The field, and who does or doesn't produce it</h2>
+    <table class="vtbl">
+      <tr><th>Surface</th><th>Endpoint</th><th><code>starter_impact</code>?</th></tr>
+      <tr><td>Calculator (in-league)</td><td><code>POST /api/trade/evaluate</code> — Mode B only,
+        <code>server.py:8541-8552</code></td><td><b style="color:var(--pos)">Yes</b> — the only producer.
+        Documented at <code>docs/api-reference.md:286</code>.</td></tr>
+      <tr><td>Featured window (single pin)</td><td>same — it mounts <code>InLeagueCalculator</code></td>
+        <td><b style="color:var(--pos)">Yes</b>, when <code>trades.player_offers_calc</code> is on
+          <em>and</em> the league is Sleeper.</td></tr>
+      <tr class="no"><td>Swipe deck card</td><td><code>POST /api/trades/generate</code> →
+        <code>_public_job</code> (<code>:2699-2727</code>) → <code>trade_card_to_dict</code>
+        (<code>:9352</code>)</td><td><b style="color:var(--neg)">No.</b> The card's complete key set is
+        <code>trade_id, league_id, target_user_id, target_username, give, receive, mismatch_score,
+        fairness_score, composite_score, basis, decision, expires_at</code>. No lineup field.</td></tr>
+      <tr class="no"><td>"More trades" idea rows</td><td><code>/api/trades/asset-ideas</code>
+        (<code>:9621</code>)</td><td><b style="color:var(--neg)">No.</b> Never computed it.</td></tr>
+    </table>
+    <div class="warnbox" style="margin-top:12px"><strong>Hard precondition, independent of any endpoint:</strong>
+      <code>_starter_impact</code> returns <code>None</code> unless
+      <code>_sleeper_lineup_slots(league_id)</code> yields a lineup template
+      (<code>server.py:1152-1154</code>). That helper returns <code>None</code> for any non-numeric league
+      id — every ESPN, MFL, Fleaflicker and demo league (<code>:19058-19079</code>) — and also when either
+      roster is missing from <code>league_members</code> (<code>:1160-1161</code>). <strong>No amount of
+      client work makes the table appear on a non-Sleeper league.</strong></div>
+
+    <h2>The cheap fix — and it may be the whole of #297</h2>
+    <p>Before any deck work, close the silence. Today the third branch of
+      <code>InLeagueCalculator.tsx:947-953</code> renders <code>null</code>: the section simply isn't
+      there, with nothing to explain why. One honest row turns a phantom regression into a known
+      limitation:</p>
+    <div style="max-width:420px;margin-top:8px">
+      <div class="honest"><b>Starting lineup</b><br>
+        Lineup impact needs a Sleeper league — this league is on MFL, so FTF can't read its starting-slot
+        template.</div>
+    </div>
+    <p style="margin-top:10px">Copy is illustrative; the platform name comes from data the client already
+      has. If the operator's league turns out to be Sleeper after all, this row still costs nothing and
+      the investigation moves to the <code>singlePin</code> / experiment-assignment possibilities above.</p>
+
+    <h2>If the operator does want it on the deck (true phase 2)</h2>
+    <ol>
+      <li><strong>Batch the computation.</strong> <code>_starter_impact</code> is a single-trade,
+        on-demand call that runs <code>optimal_starters</code> twice per side and needs
+        <code>_pool_players</code> plus both rosters. The deck generates many candidates per opponent per
+        sweep. Hoist <code>_sleeper_lineup_slots</code> and the roster fetch out of the loop and memoize
+        the caller's "before" lineup once per sweep — it is constant across every card. This is the perf
+        pass #238 explicitly deferred.</li>
+      <li><strong>Serialize it</strong> in <code>trade_card_to_dict</code> (<code>server.py:9352</code>)
+        so it survives into <code>_public_job</code>'s <code>cards</code>, and mirror it in
+        <code>/api/trades/asset-ideas</code> if the idea rows should carry it too.
+        Updates <code>docs/api-reference.md</code>.</li>
+      <li><strong>Flag it</strong> — new gate (e.g. <code>trade.deck_lineup_impact</code>), four touches
+        per convention: <code>backend/feature_flags.py</code>, <code>config/features.json</code>,
+        <code>backend/tests/fixtures/flags/release.json</code>, <code>docs/config-reference.md</code>.</li>
+      <li><strong>Client.</strong> <code>LineupImpactTable</code> is local and unexported and closes over
+        module-local <code>styles</code>, <code>slotShortLabel</code>, <code>posRankLabel</code> and
+        <code>SLOT_SHORT</code> — lift it into its own component file, add <code>starter_impact</code> to
+        the <code>TradeCard</code> type in <code>mobile/src/shared/types.ts</code>, then mount it.</li>
+      <li><strong>Prefer the one-line hook on deck cards.</strong> #169's approved lab
+        (<code>mockups/polish-lab-2026-08/trade-position-impact.html</code>) already recommends a
+        single-line tier framing ("TE: 4th → 1 1st") for card real estate rather than the full 7-slot
+        table. The V1 frame above uses a <strong>2-row changed-slots-only</strong> variant, which is the
+        same argument applied to the featured window's larger surface.</li>
+    </ol>
+    <p style="margin-top:8px"><strong>This is a schema + API-contract + flag change</strong>, so by the
+      CLAUDE.md bright line it is not a "quick fix" and cannot go express without an explicit confirming
+      yes from the operator.</p>
+  </div>
+
+  <!-- ══ VERDICT ══ -->
+  <div class="sec">Recommendation</div>
+  <div class="note">
+    <table class="vtbl">
+      <tr><th>Item</th><th>Verdict</th><th>Action</th></tr>
+      <tr class="rec"><td>#298 — player path</td><td><b>Reproduces.</b> Not the experiment.</td>
+        <td><b>V1.</b> Make the single-pin featured window a deck card for the pinned asset: restore the
+          CTA (relabelled "Find more trades") and the accept/decline row + swipe, reusing
+          <code>advance('like'|'pass')</code> and the existing testIDs. Remove the null-gates at
+          <code>TradesScreen.tsx:4232</code> and <code>:4569</code> — but keep the featured window as the
+          top card rather than reverting to the plain deck, since #211/#216 deliberately built it.</td></tr>
+      <tr><td>#298 — team path</td><td><b>Partial repro.</b> Strip aggravates it.</td>
+        <td>Separate one-line fix: widen <code>finderMode === 'team'</code> at
+          <code>TradesScreen.tsx:1921</code> to "an opponent is scoped", or set
+          <code>showPrefsChangedStrip</code> on the strip path so the emptied deck explains itself.
+          Not a design question — no mock needed.</td></tr>
+      <tr class="rec"><td>#297</td><td><b>Not a regression.</b> Never built on this surface; nothing was
+        removed.</td>
+        <td><b>Ship the honest row first</b> (replace the silent <code>null</code> at
+          <code>InLeagueCalculator.tsx:953</code>). Confirm the operator's league platform before
+          committing to anything else — if it is non-Sleeper, that row <em>is</em> the fix. Deck mounts
+          remain genuine phase-2 backend work and should be a separate, flagged item.</td></tr>
+      <tr class="no"><td>Experiment revert</td><td>Would not fix either item.</td>
+        <td>Do not revert <code>trades_home_inline</code> on the strength of these reports.</td></tr>
+    </table>
+    <h2>Open question for the operator</h2>
+    <p><strong>Which league were you in when the lineup table disappeared?</strong> This single answer
+      splits #297 into two very different pieces of work — a copy change, or a batched backend
+      computation plus a new flag and API contract.</p>
+  </div>
+
+</div>
+</body>
+</html>

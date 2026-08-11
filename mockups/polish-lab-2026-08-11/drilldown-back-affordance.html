@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Back to all teams (#302)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t-4plus:#F87171; --t-2:#FBBF24; --t-1st:#2DD4BF; --t-2nd:#38BDF8; --t-3rd:#F472B6;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1360px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:6px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:28px 0 4px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-items:flex-start;width:100%}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (390×844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+
+  /* stack header — fixed, does not scroll */
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:center;position:relative;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .hleft{position:absolute;left:12px;display:flex;align-items:center;gap:4px;
+    color:var(--ice);font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+  .navhdr.lit{background:var(--ink-1)}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  /* sticky focus bar (V1) */
+  .stickybar{position:sticky;top:0;z-index:3;margin:-16px -16px 8px;padding:0 16px;
+    height:38px;display:flex;align-items:center;gap:8px;background:var(--ink-0);
+    border-bottom:1px solid var(--line)}
+  .stickybar .bk{display:flex;align-items:center;gap:4px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .stickybar .sep{width:1px;height:14px;background:var(--line-strong);flex:0 0 auto}
+  .stickybar .tm{font:600 13px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+
+  /* floating pill (V3) */
+  .floatpill{position:absolute;left:16px;bottom:14px;z-index:4;display:inline-flex;align-items:center;
+    gap:5px;height:36px;padding:0 14px;border-radius:4px;background:var(--ink-2);
+    border:1px solid var(--ice);color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:12px 16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;justify-content:center}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--ice);color:var(--ice)} .pill.all.on{background:var(--ice);color:var(--on-ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)}
+  .pill.te{border-color:var(--te);color:var(--te)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px}
+  .grouplabel{font:700 12px var(--ui);letter-spacing:.06em}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+
+  .tilewrap{margin-bottom:4px}
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;height:60px;
+        display:flex;align-items:center;position:relative;overflow:hidden}
+  .tile.slim{height:32px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .l2{display:flex;align-items:center;gap:8px;margin-top:3px}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+
+  /* scroll-depth annotation */
+  .depthtag{position:absolute;right:8px;top:8px;z-index:5;font:500 11px var(--mono);
+    color:var(--flare);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px;
+    background:var(--ink-0)}
+  .gone{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:5;
+    font:600 11px var(--mono);color:var(--neg);border:1px dashed var(--neg);border-radius:3px;
+    padding:2px 8px;background:var(--ink-0);white-space:nowrap}
+
+  .vtbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .vtbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .vtbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .vtbl td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+  .vtbl tr.rec td{background:rgba(86,217,236,.06)}
+  .vtbl tr.rec td:first-child{color:var(--ice)}
+  .vtbl tr.no td:first-child{color:var(--chalk-faint)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:290px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Back to all teams — League drill-in exit (#302)</h1>
+    <p class="q">"The nav to get back to all teams view after drilling down on one specific team is too
+      hard to navigate to." — feedback #302, screen LeagueRankings, polish, 2026-08-10, v1.12.0</p>
+
+    <h2>There IS a back control. Four reasons it doesn't work.</h2>
+    <p>The affordance exists and is correctly labelled:
+      <code>mobile/src/screens/LeagueSummaryScreen.tsx:902-914</code> renders a
+      <code>Pressable</code> with <code>testID="league-summary.roster-close"</code>,
+      <code>accessibilityLabel="Back to all teams"</code>, a <code>chevron-left</code> icon in
+      <code>ice.base</code>, and the text "All teams". It shipped with #243 (it replaced an X).
+      So this is <strong>not a missing-control problem — it is a findability problem</strong>, and the
+      four causes are separable:</p>
+    <ol>
+      <li><strong>It scrolls away — the dominant cause.</strong> The control lives inside the chart
+        card's header (<code>styles.cardHead</code>, <code>:866</code>), which sits at the very top of the
+        <code>ScrollView</code>. The roster panel it introduces (<code>:1133-1280</code>) is
+        <strong>1,600pt+ of player tiles</strong> for a 26-man roster (60pt tile + 4pt margin, see the
+        #299 page in this lab). The moment the user does the thing they drilled in to do — scroll the
+        roster — the only exit leaves the screen. There is nothing sticky, nothing pinned.</li>
+      <li><strong>It's on the wrong side.</strong> The control is right-aligned, in the slot where the
+        unfocused state puts the <em>refresh</em> button (<code>:916-926</code>). iOS puts back at
+        top-left, and this app already agrees with iOS everywhere else — <code>subScreenOptions</code>
+        mounts <code>HeaderBack</code> as <code>headerLeft</code>
+        (<code>mobile/src/navigation/TabNav.tsx:131-135</code>). This screen is the exception.</li>
+      <li><strong>It has the visual weight of a caption.</strong> <code>backLinkText</code> is
+        <code>type.label</code> — 11px uppercase Archivo SemiBold, 0.88 letterspacing — the same style the
+        app uses for passive section labels. It sits beside a 16px team-name title that dominates it. It
+        is ice-colored, which is the only thing marking it as interactive.</li>
+      <li><strong>No system back works, because this isn't navigation.</strong> The drill-in is component
+        state — <code>const [selectedId, setSelectedId] = useState&lt;string | null&gt;(null)</code>
+        (<code>:386</code>). So: the stack header has no back button (LeagueRankings is the stack root,
+        and <code>TabNav.tsx:440-446</code> comments this deliberately — "never a back button to nowhere");
+        iOS edge-swipe does nothing; and <code>grep</code> confirms <strong>no
+        <code>BackHandler</code> is registered anywhere in the file</strong>. Every instinct a user has
+        for "go back" fails silently.</li>
+    </ol>
+    <div class="warnbox"><strong>A fifth, aggravating factor.</strong> #243 hid the "League home" row
+      while focused (<code>:805</code>, <code>isTabRoot &amp;&amp; !selected</code>) — sensible on its own
+      terms, but it removes the other visible landmark, so the focused state reads as a screen with no
+      exits at all.</div>
+    <div class="verdict"><strong>Note for the orchestrator:</strong> the pre-briefed lead pointed at
+      <code>subScreenOptions('League home', 'LeagueRankings')</code> at <code>TabNav.tsx:460</code>.
+      That is a different navigation — it is the back control on the <em>pushed</em>
+      <code>LeagueHome</code> screen (the classic league page reached from the "League home" row), and it
+      works fine. It has nothing to do with the team drill-in, which never leaves
+      <code>LeagueRankings</code>. #302 is entirely in-screen.</div>
+  </div>
+
+  <!-- ══ CAPTURE ANCHOR ══ -->
+  <div class="sec">Capture anchor <span class="fb">screens/mobile/league-summary/populated.png</span></div>
+  <div class="note">
+    <div class="anchor">
+      <img class="anchorimg" src="../../screens/mobile/league-summary/populated.png"
+           alt="Real capture: League rankings, populated, unfocused">
+      <div class="anchortxt">
+        <h2 style="margin-top:0">Same coverage gap as #299</h2>
+        <p>The real capture is the <strong>unfocused</strong> state — note the refresh control in the
+          card header's top-right corner, which is the exact slot the "All teams" back link occupies once
+          a team is focused. <code>screens/manifest.json</code> has no focused/drill-in capture for
+          <code>league-summary</code> (states: <code>loading</code>, <code>error</code>,
+          <code>populated</code>, <code>basis--personal</code>,
+          <code>populated--single-format</code>), and the capture flow never taps a bar.</p>
+        <p>The focused frames below are therefore <strong>token-exact reconstructions from source</strong>,
+          not captures. Request
+          <code>mobile/scripts/screen-capture.sh --screen league-summary --state drill-in</code>
+          (needs a new flow state) before build — one capture unblocks both this page and the #299 page.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ THE PROBLEM, DEMONSTRATED ══ -->
+  <div class="sec">The problem <span class="fb">two scroll depths in the same focused state</span></div>
+  <div class="row3">
+
+    <div class="slot">
+      <div class="slotlbl cur">Current — at the top of the drill-in</div>
+      <div class="hchip win"><b>Back control visible</b> — top-right of the card</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="depthtag">scroll 0pt</div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">Kirbys Krew</div>
+                <div class="c">Consensus rank 3/12 · My board rank 4/12</div></div>
+              <div class="backlink" style="outline:1px dashed var(--ice);outline-offset:3px">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All teams</div>
+            </div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:94%"></div>
+              <div class="c on" style="height:89%"></div><div class="c" style="height:84%"></div>
+              <div class="c" style="height:80%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:72%"></div><div class="c" style="height:68%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:56%"></div><div class="c" style="height:52%"></div>
+            </div>
+          </div>
+          <div class="drillsub">#3 of 12 (consensus) · ≈14 firsts value</div>
+          <div class="subsetrow" style="margin-top:8px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span>
+          </div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--qb)">QB</span>
+            <span class="groupmeta">2 · 12.8K</span></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--qb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jayden Daniels</span><span class="tm">WAS</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--qb)">QB2</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--qb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Bo Nix</span><span class="tm">DEN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--qb)">QB18</span></div></div></div>
+          <div class="foldmark"><span>1,500pt+ of roster continues below</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">At rest the control is there — an 11px ice micro-label in the card's top-right,
+        where the unfocused state keeps <b>refresh</b>. Even here it reads as a caption more than a button.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl warn">Current — scrolled to review the roster</div>
+      <div class="hchip bad"><b>Back control gone</b> — this is #302</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="depthtag">scroll 740pt</div>
+          <div class="gone">no exit on screen</div>
+          <div class="grouphead" style="margin-top:20px"><span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">7 · 21.4K</span></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR1</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR38</span></div></div></div>
+          <div class="foldmark"><span>roster continues — and continues</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Nothing on this screen says which team you're looking at, and nothing offers a
+        way out. The header still says "League rankings". Edge-swipe does nothing. The only recovery is
+        to scroll ~740pt back up — or tap the League tab, which
+        <b>scrolls to top but does not clear focus</b> (<code>registerScrollToTop</code>,
+        <code>:370-377</code>).</div>
+    </div>
+  </div>
+
+  <!-- ══ VARIANTS ══ -->
+  <div class="sec">Proposals <span class="fb">#302 · three ways to make the exit persistent</span></div>
+  <div class="row3">
+
+    <!-- V1 -->
+    <div class="slot">
+      <div class="slotlbl warn">V1 — sticky in-content focus bar</div>
+      <div class="hchip"><b>−38pt</b> of roster · always visible</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="depthtag">scroll 740pt</div>
+          <div class="stickybar">
+            <span class="bk"><svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All teams</span>
+            <span class="sep"></span>
+            <span class="tm">Kirbys Krew · #3 of 12</span>
+          </div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">7 · 21.4K</span></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR1</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="foldmark"><span>roster continues</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">A 38pt bar pinned to the top of the scroll area while focused: back on the
+        <b>left</b>, plus the team name — which also fixes the "which team am I looking at?" gap at depth.
+        Cost: 38pt of permanent vertical, and RN <code>ScrollView</code> needs
+        <code>stickyHeaderIndices</code> (or a hoist out of the scroll) to pin it.</div>
+    </div>
+
+    <!-- V2 RECOMMENDED -->
+    <div class="slot">
+      <div class="slotlbl">V2 — into the nav header · <b>RECOMMENDED</b></div>
+      <div class="hchip rec"><b>0pt</b> cost · iOS convention · always visible</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr lit">
+          <span class="hleft" style="outline:1px dashed var(--ice);outline-offset:3px">
+            <svg class="i" width="13" height="13" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All teams</span>
+          <span class="t">Kirbys Krew</span>
+        </div>
+        <div class="scroll">
+          <div class="depthtag">scroll 740pt</div>
+          <div class="grouphead" style="margin-top:4px"><span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">7 · 21.4K</span></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR1</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR38</span></div></div></div>
+          <div class="foldmark"><span>roster continues</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">While a team is focused, the stack header gains a <code>headerLeft</code>
+        "‹ All teams" and its title swaps to the team name. The header is <b>already fixed</b> — it never
+        scrolls — so the exit is permanent at zero vertical cost, in the exact slot iOS and the rest of
+        this app put back. The in-card link at <code>:902</code> is then removed as a duplicate.</div>
+    </div>
+
+    <!-- V3 -->
+    <div class="slot">
+      <div class="slotlbl warn">V3 — floating back pill</div>
+      <div class="hchip"><b>0pt</b> layout cost · overlays content</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="depthtag">scroll 740pt</div>
+          <div class="grouphead" style="margin-top:4px"><span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">7 · 21.4K</span></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR1</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="tilewrap"><div class="tile"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div>
+              <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div></div>
+            <div class="right"><span class="pr" style="color:var(--wr)">WR38</span></div></div></div>
+          <div class="floatpill">
+            <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All teams</div>
+          <div class="foldmark"><span>roster continues</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Bottom-left floating pill, mirroring <code>FeedbackFAB</code> on the right.
+        Thumb-reachable and unmissable, but it <b>covers roster rows</b>, adds a second piece of floating
+        chrome to a screen that already has one, and still doesn't say which team is focused.</div>
+    </div>
+  </div>
+
+  <!-- ══ VERDICT ══ -->
+  <div class="sec">Recommendation</div>
+  <div class="note">
+    <table class="vtbl">
+      <tr><th>Variant</th><th>Cost</th><th>Tradeoff</th></tr>
+      <tr class="rec"><td>V2 — nav-header back + title swap</td><td>0pt</td>
+        <td><b>Recommended.</b> Fixes all four causes at once: permanent (the header is fixed), top-left
+          (matches iOS and this app's own <code>subScreenOptions</code> pattern), full-size header control
+          rather than an 11px caption, and the title swap answers "which team?" at any scroll depth.
+          Implemented with <code>navigation.setOptions</code> in an effect on <code>selectedId</code>;
+          delete the in-card link at <code>:902-914</code> once it lands.</td></tr>
+      <tr><td>V1 — sticky in-content bar</td><td>38pt</td>
+        <td>Also always-visible and also carries the team name, and stays inside the screen's own layout
+          (no navigator coupling). But it spends 38pt of every focused screen, and needs
+          <code>stickyHeaderIndices</code> on a <code>ScrollView</code> whose children are conditional —
+          fiddly. Take this if the operator objects to the header title changing on a tab root.</td></tr>
+      <tr><td>V3 — floating pill</td><td>0pt layout</td>
+        <td>Cheapest to build and the most thumb-reachable, but it occludes content, doubles the floating
+          chrome next to <code>FeedbackFAB</code>, and leaves the header still reading "League rankings"
+          while you look at one team's roster.</td></tr>
+      <tr class="no"><td>V4 — make the drill-in a real push</td><td>—</td>
+        <td><b>Considered and rejected.</b> Pushing a route would give header back, edge-swipe and Android
+          back for free. But the inline drill-in is deliberate: the 2026-07-26 League Analyzer treatment
+          keeps the grayscale chart visible above the roster (<code>:1129-1132</code>), and #237 binds the
+          panel's filters to the chart's shared state (<code>:386-388</code>). A push breaks both. Not
+          worth it for #302.</td></tr>
+    </table>
+    <h2>Build notes</h2>
+    <ul>
+      <li><strong>Keep the testID.</strong> <code>league-summary.roster-close</code> is referenced by
+        Maestro flows; whichever control survives should carry it, exactly as #243 did when it turned the
+        X into the link.</li>
+      <li><strong>Android hardware back.</strong> Whatever ships, register a <code>BackHandler</code>
+        while <code>selectedId</code> is set so the OS back gesture clears focus instead of leaving the
+        tab. There is none today.</li>
+      <li><strong>Tab re-tap.</strong> <code>registerScrollToTop('League', …)</code>
+        (<code>:370-377</code>) scrolls to top but leaves the team focused — worth also clearing
+        <code>selectedId</code> so re-tapping the active tab returns to the all-teams view, which is what
+        the gesture implies.</li>
+      <li><strong>Ships well with #299.</strong> Halving the tiles shortens the roster the user has to
+        scroll back through, which reduces how often the exit is off-screen at all. The two items
+        attack the same complaint from opposite ends; neither replaces the other.</li>
+      <li><strong>No API or flag surface.</strong> Pure navigation/presentation.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

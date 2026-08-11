@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — League roster tile density (#299)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md). */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1360px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:28px 0 4px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-items:flex-start;width:100%}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390×844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:center;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Focused slim strip (#243 shipped state) ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;justify-content:center}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--ice);color:var(--ice)} .pill.all.on{background:var(--ice);color:var(--on-ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)}
+  .pill.te{border-color:var(--te);color:var(--te)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px}
+  .grouplabel{font:700 12px var(--ui);letter-spacing:.06em}
+  .groupmetarow{display:flex;align-items:center;gap:8px}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense (mobile/src/components/PlayerCard.tsx) ── */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .l2{display:flex;align-items:center;gap:8px;margin-top:3px}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  /* Badge primitive — components/chalkline/Badge.tsx: 1px border in encode color,
+     chalk text, radius 2, padding 6/2, type.label 11px. */
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  /* Height variants */
+  .tile.cur{height:60px}      /* cardDense: height 60 — SHIPPED */
+  .tile.v1{height:32px}       /* V1 — single line */
+  .tile.v2{height:30px}       /* V2 — true half */
+  .tile.v3{height:32px}       /* V3 — tick instead of badge */
+  .bdg.tight{padding:1px 6px;line-height:14px}   /* V2 only */
+  /* V3 tick */
+  .tick{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+  .tick .bar{width:3px;height:13px;border-radius:1px}
+  .tick .tx{font:600 11px var(--ui);letter-spacing:.5px;color:var(--chalk);white-space:nowrap}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-46px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .tbl th:nth-child(n+2),.tbl td:nth-child(n+2){text-align:right}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .tbl td:first-child{color:var(--chalk);font-weight:600;text-align:left}
+  .tbl td:nth-child(n+2){font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+
+  .vtbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .vtbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .vtbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .vtbl td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+  .vtbl tr.rec td{background:rgba(86,217,236,.06)}
+  .vtbl tr.rec td:first-child{color:var(--ice)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:300px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>League roster tile density — #299</h1>
+    <p class="q">"I want to reduce the height of the player tiles on the league summary. Move the tier
+      value to the right, presenting it to the left of the position. This should cut the tiles to about
+      half of their current height." — feedback #299, screen LeagueRankings, polish, 2026-08-10, v1.12.0</p>
+
+    <h2>Does it reproduce? Yes — and the spec is achievable with no information loss</h2>
+    <p>The tiles are <code>PlayerCard</code> in its <code>dense</code> branch
+      (<code>mobile/src/components/PlayerCard.tsx</code>), mounted by the League-rankings drill-in roster
+      panel at <code>mobile/src/screens/LeagueSummaryScreen.tsx:1210-1229</code>. The height is a hard
+      constant — <code>cardDense: { height: 60 }</code> (<code>PlayerCard.tsx</code>, dense styles) — plus
+      <code>rosterRow: { marginBottom: space.xs }</code> = 4pt
+      (<code>LeagueSummaryScreen.tsx:2228</code>). <strong>Pitch today = 64pt per player.</strong></p>
+    <p>The 60pt buys two lines. But look at what <em>this</em> caller passes
+      (<code>LeagueSummaryScreen.tsx:1212-1227</code>): <code>dense</code>, <code>player</code>,
+      <code>tier</code>, <code>posRank</code> — and <strong>no <code>statsSlot</code></strong>. In
+      <code>PlayerCard</code>'s dense branch, line 2 is
+      <code>{tier &amp;&amp; &lt;TierChalkBadge/&gt;}{statsSlot}</code>. With no
+      <code>statsSlot</code>, <strong>line 2 of every tile on this screen holds exactly one small
+      badge and nothing else</strong> — roughly 23pt of the 60 spent on a single chip that has a whole
+      row to itself. That is the density the operator is reacting to, and it is specific to this screen:
+      the Tiers board, the other dense caller, does pass a <code>statsSlot</code> and genuinely needs
+      line 2.</p>
+    <div class="verdict"><strong>So the operator's instruction is exactly right, and it is free.</strong>
+      Moving the tier badge into the existing right cluster — left of <code>posRank</code>, which is the
+      "position" the report refers to (<code>densePosRank</code>, the position-colored mono "WR4") —
+      empties line 2 entirely, and the tile collapses to one line.
+      <strong>Nothing is dropped.</strong> Name, team, RK and injury micro-tags, tier and positional
+      rank all survive.</div>
+
+    <h2>The tile is not a tap target here — which is what makes 32pt safe</h2>
+    <p><code>LeagueSummaryScreen</code> passes <strong>no <code>onPress</code></strong> to these cards
+      (<code>:1212-1227</code>), so <code>PlayerCard</code> leaves
+      <code>accessibilityRole</code> undefined and the row is inert. The 44pt minimum touch target does
+      not bind. On the Tiers board — where rows <em>are</em> pressable and draggable — it would, so
+      <strong>this change must stay scoped to the League drill-in caller, not applied to the shared
+      dense branch wholesale.</strong> The cleanest shape is a new opt-in prop on
+      <code>PlayerCard</code> (e.g. <code>denseSingleLine</code>) that the League screen sets and the
+      Tiers board does not.</p>
+
+    <h2>Before / after, in points</h2>
+    <p>Measured from the real component, not estimated. Content heights: name Archivo SemiBold 15
+      (~20pt box), <code>TierChalkBadge</code> = <code>Badge</code> at
+      <code>type.label</code> 11/14 + 2pt padding + 1pt border each side = <strong>20pt</strong>,
+      <code>posRank</code> IBM Plex Mono SemiBold 14 (~18pt). The single-line row is therefore
+      constrained by the 20pt badge, +6pt padding top and bottom = <strong>32pt</strong>.</p>
+    <table class="tbl">
+      <tr><th>Measure</th><th>Today</th><th>V1 (rec.)</th><th>V2</th><th>V3</th></tr>
+      <tr><td>Tile height</td><td>60pt</td><td>32pt</td><td>30pt</td><td>32pt</td></tr>
+      <tr><td>+ row margin</td><td>4pt</td><td>4pt</td><td>4pt</td><td>4pt</td></tr>
+      <tr class="win"><td>Pitch per player</td><td>64pt</td><td>36pt</td><td>34pt</td><td>36pt</td></tr>
+      <tr class="win"><td>Reduction vs. tile</td><td>—</td><td>−47%</td><td>−50%</td><td>−47%</td></tr>
+      <tr><td>26-player roster</td><td>1,664pt</td><td>936pt</td><td>884pt</td><td>936pt</td></tr>
+      <tr class="win"><td>Vertical reclaimed</td><td>—</td><td>728pt</td><td>780pt</td><td>728pt</td></tr>
+      <tr class="win"><td>Players in first viewport*</td><td>4</td><td>8</td><td>9</td><td>8</td></tr>
+    </table>
+    <p style="margin-top:8px">* 618pt scroll viewport (390×844 − 47 safe top − 52 TopBar − 44 stack header
+      − 83 tab bar + home indicator), less the #243 focused slim strip, the drill sub-line, the mirrored
+      subset control and the position pills (~300pt), leaving ~318pt of roster before the fold.</p>
+    <div class="warnbox"><strong>On "about half":</strong> V1 lands at 32pt, a 47% cut — "about half" in
+      the plain-English sense, and it touches nothing shared. Literal half (30pt) is V2, and it costs a
+      variant of the shared <code>Badge</code> primitive
+      (<code>components/chalkline/Badge.tsx</code>, <code>paddingVertical</code> 2 → 1). That primitive
+      renders position, tier, rookie and injury badges on every screen in the app. <strong>Two points is
+      not worth a shared-primitive fork</strong> — but the operator asked for half, so V2 is drawn
+      honestly rather than argued away.</div>
+  </div>
+
+  <!-- ══ CAPTURE ANCHOR + COVERAGE GAP ══════════════════════════════════ -->
+  <div class="sec">Capture anchor <span class="fb">screens/mobile/league-summary/populated.png</span></div>
+  <div class="note">
+    <div class="anchor">
+      <img class="anchorimg" src="../../screens/mobile/league-summary/populated.png"
+           alt="Real capture: League rankings, populated, unfocused">
+      <div class="anchortxt">
+        <h2 style="margin-top:0">Screen-library coverage gap — flagged per <code>screens/CLAUDE.md</code></h2>
+        <p>The real capture on the left is the League-rankings screen in its <strong>unfocused</strong>
+          state. It is embedded here as the screen-identity anchor, per the one hard rule in
+          <code>mockups/CLAUDE.md</code>.</p>
+        <p><strong>But the state this item is about — a team focused, roster panel open — has no
+          capture.</strong> <code>screens/manifest.json</code> lists exactly five states for
+          <code>league-summary</code>: <code>loading</code>, <code>error</code>, <code>populated</code>,
+          <code>basis--personal</code>, <code>populated--single-format</code>. There is no
+          <code>drill-in</code> / focused state, and the capture flow
+          (<code>mobile/.maestro/capture/league-summary.yaml</code>) never taps a bar. The drill-in is
+          not a WebView, so by <code>screens/CLAUDE.md</code> this is a
+          <strong>coverage gap worth requesting, not a policy exclusion</strong>.</p>
+        <p>Consequence for this page, stated plainly: the "Current" frame below is a
+          <strong>token-exact reconstruction from source</strong> (every dimension cited to
+          <code>file:line</code> above), <em>not</em> a capture. Before this ships, request:
+          <code>mobile/scripts/screen-capture.sh --screen league-summary --state drill-in</code>
+          — which needs a new flow state added to the capture yaml first. The same capture unblocks
+          the #302 page in this lab.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FRAMES ═════════════════════════════════════════════════════════ -->
+  <div class="sec">Current vs. proposed <span class="fb">#299 · drill-in roster panel, team focused</span></div>
+  <div class="row3">
+
+    <!-- ── CURRENT ── -->
+    <div class="slot">
+      <div class="slotlbl cur">Current — shipped v1.12.0</div>
+      <div class="hchip"><b>64pt</b> pitch · 4 players before the fold</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain">
+            <div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <!-- #243 focused slim strip -->
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div>
+                <div class="t">Kirbys Krew</div>
+                <div class="c">Consensus rank 3/12 · My board rank 4/12</div>
+              </div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                All teams
+              </div>
+            </div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:94%"></div>
+              <div class="c on" style="height:89%"></div><div class="c" style="height:84%"></div>
+              <div class="c" style="height:80%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:72%"></div><div class="c" style="height:68%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:56%"></div><div class="c" style="height:52%"></div>
+            </div>
+          </div>
+          <div class="drillsub">#3 of 12 (consensus) · ≈14 firsts value</div>
+          <div class="subsetrow" style="margin-top:8px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <div class="groupmetarow">
+              <span class="groupmeta">7 · 21.4K</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span>
+            </div>
+          </div>
+
+          <div class="tilewrap measure" data-h="60pt">
+            <div class="tile cur">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main">
+                <div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div>
+                <div class="l2"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span></div>
+              </div>
+              <div class="right"><span class="pr" style="color:var(--wr)">WR1</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile cur">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main">
+                <div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span></div>
+                <div class="l2"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span></div>
+              </div>
+              <div class="right"><span class="pr" style="color:var(--wr)">WR8</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile cur">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main">
+                <div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span><span class="tag q">Q</span></div>
+                <div class="l2"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span></div>
+              </div>
+              <div class="right"><span class="pr" style="color:var(--wr)">WR14</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile cur">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main">
+                <div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div>
+                <div class="l2"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span></div>
+              </div>
+              <div class="right"><span class="pr" style="color:var(--wr)">WR26</span></div>
+            </div>
+          </div>
+          <div class="tilewrap" style="opacity:.35">
+            <div class="tile cur">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main">
+                <div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div>
+                <div class="l2"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span></div>
+              </div>
+              <div class="right"><span class="pr" style="color:var(--wr)">WR33</span></div>
+            </div>
+          </div>
+          <div class="foldmark"><span>fold — 4 players visible</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Line 2 of every tile carries <b>one badge and nothing else</b> — this caller
+        passes no <code>statsSlot</code>. Four players fit before the fold on a 26-man roster.</div>
+    </div>
+
+    <!-- ── V1 RECOMMENDED ── -->
+    <div class="slot">
+      <div class="slotlbl">V1 — tier into the right cluster · <b>RECOMMENDED</b></div>
+      <div class="hchip rec"><b>36pt</b> pitch · 8 players · nothing dropped</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain">
+            <div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div>
+                <div class="t">Kirbys Krew</div>
+                <div class="c">Consensus rank 3/12 · My board rank 4/12</div>
+              </div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                All teams
+              </div>
+            </div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:94%"></div>
+              <div class="c on" style="height:89%"></div><div class="c" style="height:84%"></div>
+              <div class="c" style="height:80%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:72%"></div><div class="c" style="height:68%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:56%"></div><div class="c" style="height:52%"></div>
+            </div>
+          </div>
+          <div class="drillsub">#3 of 12 (consensus) · ≈14 firsts value</div>
+          <div class="subsetrow" style="margin-top:8px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <div class="groupmetarow">
+              <span class="groupmeta">7 · 21.4K</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span>
+            </div>
+          </div>
+
+          <div class="tilewrap measure" data-h="32pt">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span><span class="pr" style="color:var(--wr)">WR1</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span><span class="pr" style="color:var(--wr)">WR8</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span><span class="tag q">Q</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span><span class="pr" style="color:var(--wr)">WR14</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span><span class="pr" style="color:var(--wr)">WR26</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span><span class="pr" style="color:var(--wr)">WR33</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span><span class="pr" style="color:var(--wr)">WR38</span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Adonai Mitchell</span><span class="tm">IND</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-4th)">4th</span><span class="pr" style="color:var(--wr)">WR61</span></div>
+            </div>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--te)">TE</span>
+            <div class="groupmetarow">
+              <span class="groupmeta">3 · 9.1K</span>
+              <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">6/12</span>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile v1">
+              <div class="rail" style="background:var(--te)"></div>
+              <div class="main"><div class="l1"><span class="nm">Tyler Warren</span><span class="tm">IND</span><span class="tag rk">RK</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span><span class="pr" style="color:var(--te)">TE6</span></div>
+            </div>
+          </div>
+          <div class="foldmark"><span>fold — 8 players + a group header visible</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Exactly the operator's spec: tier badge to the right, immediately
+        <b>left of the positional rank</b>. Line 2 disappears; nothing else moves. Doubles the roster
+        above the fold and reaches a second position group on the first screen.</div>
+    </div>
+
+    <!-- ── V2 ── -->
+    <div class="slot">
+      <div class="slotlbl warn">V2 — literal half (30pt)</div>
+      <div class="hchip"><b>34pt</b> pitch · forks a shared primitive</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain">
+            <div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div>
+                <div class="t">Kirbys Krew</div>
+                <div class="c">Consensus rank 3/12 · My board rank 4/12</div>
+              </div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                All teams
+              </div>
+            </div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:94%"></div>
+              <div class="c on" style="height:89%"></div><div class="c" style="height:84%"></div>
+              <div class="c" style="height:80%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:72%"></div><div class="c" style="height:68%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:56%"></div><div class="c" style="height:52%"></div>
+            </div>
+          </div>
+          <div class="drillsub">#3 of 12 (consensus) · ≈14 firsts value</div>
+          <div class="subsetrow" style="margin-top:8px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <div class="groupmetarow">
+              <span class="groupmeta">7 · 21.4K</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span>
+            </div>
+          </div>
+          <div class="tilewrap measure" data-h="30pt">
+            <div class="tile v2">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div></div>
+              <div class="right"><span class="bdg tight" style="border-color:var(--t-4plus)">4+ 1sts</span><span class="pr" style="color:var(--wr)">WR1</span></div>
+            </div>
+          </div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-2)">2 1sts</span><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-1st)">1 1st</span><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-2nd)">2nd</span><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-3rd)">3rd</span><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-3rd)">3rd</span><span class="pr" style="color:var(--wr)">WR38</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Adonai Mitchell</span><span class="tm">IND</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-4th)">4th</span><span class="pr" style="color:var(--wr)">WR61</span></div></div></div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--te)">TE</span>
+            <div class="groupmetarow"><span class="groupmeta">3 · 9.1K</span>
+              <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">6/12</span></div>
+          </div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--te)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tyler Warren</span><span class="tm">IND</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-1st)">1 1st</span><span class="pr" style="color:var(--te)">TE6</span></div></div></div>
+          <div class="tilewrap"><div class="tile v2"><div class="rail" style="background:var(--te)"></div>
+            <div class="main"><div class="l1"><span class="nm">Colston Loveland</span><span class="tm">CHI</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="bdg tight" style="border-color:var(--t-2nd)">2nd</span><span class="pr" style="color:var(--te)">TE13</span></div></div></div>
+          <div class="foldmark"><span>fold — 9 players visible</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Identical to V1 except the tier badge loses 1pt of vertical padding each side.
+        Hits the literal "half" (30pt) and one extra row — but the badge is the shared
+        <code>Badge</code> primitive, so this needs a <b>dense variant added to a component used on every
+        screen</b>. Two points of gain for app-wide blast radius.</div>
+    </div>
+
+    <!-- ── V3 ── -->
+    <div class="slot">
+      <div class="slotlbl warn">V3 — tier as a color tick</div>
+      <div class="hchip"><b>36pt</b> pitch · +24pt name width · breaks the #277 idiom</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain">
+            <div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div>
+                <div class="t">Kirbys Krew</div>
+                <div class="c">Consensus rank 3/12 · My board rank 4/12</div>
+              </div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                All teams
+              </div>
+            </div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:94%"></div>
+              <div class="c on" style="height:89%"></div><div class="c" style="height:84%"></div>
+              <div class="c" style="height:80%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:72%"></div><div class="c" style="height:68%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:56%"></div><div class="c" style="height:52%"></div>
+            </div>
+          </div>
+          <div class="drillsub">#3 of 12 (consensus) · ≈14 firsts value</div>
+          <div class="subsetrow" style="margin-top:8px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <div class="groupmetarow"><span class="groupmeta">7 · 21.4K</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span></div>
+          </div>
+          <div class="tilewrap measure" data-h="32pt">
+            <div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div></div>
+              <div class="right"><span class="tick"><span class="bar" style="background:var(--t-4plus)"></span><span class="tx">4+ 1sts</span></span><span class="pr" style="color:var(--wr)">WR1</span></div></div>
+          </div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-2)"></span><span class="tx">2 1sts</span></span><span class="pr" style="color:var(--wr)">WR8</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-1st)"></span><span class="tx">1 1st</span></span><span class="pr" style="color:var(--wr)">WR14</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-2nd)"></span><span class="tx">2nd</span></span><span class="pr" style="color:var(--wr)">WR26</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-3rd)"></span><span class="tx">3rd</span></span><span class="pr" style="color:var(--wr)">WR33</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-3rd)"></span><span class="tx">3rd</span></span><span class="pr" style="color:var(--wr)">WR38</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Adonai Mitchell</span><span class="tm">IND</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-4th)"></span><span class="tx">4th</span></span><span class="pr" style="color:var(--wr)">WR61</span></div></div></div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--te)">TE</span>
+            <div class="groupmetarow"><span class="groupmeta">3 · 9.1K</span>
+              <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">6/12</span></div>
+          </div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--te)"></div>
+            <div class="main"><div class="l1"><span class="nm">Tyler Warren</span><span class="tm">IND</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-1st)"></span><span class="tx">1 1st</span></span><span class="pr" style="color:var(--te)">TE6</span></div></div></div>
+          <div class="foldmark"><span>fold — 8 players + a group header visible</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Same height as V1 but the badge border/padding become a 3pt color tick, buying
+        ~24pt of horizontal room for long names. Cost: <b>#277 shipped <code>TierBadge</code> chips
+        app-wide</b> as the value display — this screen would be the only place tier reads differently.</div>
+    </div>
+  </div>
+
+  <!-- ══ WIDTH STRESS ══════════════════════════════════════════════════ -->
+  <div class="sec">Width stress test <span class="fb">the real risk in V1 — not height, width</span></div>
+  <div class="note">
+    <p>Collapsing to one line moves the tier badge from a row of its own into competition with the name.
+      Content width is <strong>358pt</strong> (390 − <code>scroll: { padding: space.lg }</code> = 16 each
+      side, <code>LeagueSummaryScreen.tsx:1956</code>). Budget for V1:</p>
+    <table class="tbl">
+      <tr><th>Element</th><th>Width</th></tr>
+      <tr><td>Rail + left inset (<code>paddingLeft: 13</code>)</td><td>16pt</td></tr>
+      <tr><td>Team code ("ARI") + gap</td><td>28pt</td></tr>
+      <tr><td>RK tag + gap (when present)</td><td>28pt</td></tr>
+      <tr><td>Injury tag + gap (when present)</td><td>26pt</td></tr>
+      <tr><td>Tier badge — worst case "4+ 1sts"</td><td>60pt</td></tr>
+      <tr><td>posRank "WR61" + gaps + right margin</td><td>52pt</td></tr>
+      <tr class="win"><td>Remaining for the name — clean row</td><td>202pt (~26 chars)</td></tr>
+      <tr><td>Remaining — name + RK + injury both</td><td>148pt (~19 chars)</td></tr>
+    </table>
+    <p style="margin-top:10px">Longest names in a dynasty pool run ~19–21 characters ("Marvin Harrison Jr.",
+      "Christian McCaffrey", "Amon-Ra St. Brown"). The clean row is comfortable. <strong>The
+      worst case — a long-named rookie carrying an injury tag and a top-tier badge — ellipsizes.</strong>
+      <code>denseName</code> already sets <code>flexShrink: 1</code>, so it truncates gracefully rather
+      than pushing the badges off, but it does truncate. Two frames below.</p>
+    <div class="row3" style="margin-top:14px">
+      <div class="slot" style="width:390px">
+        <div class="slotlbl cur">V1 — worst case, as it would render</div>
+        <div style="padding:0 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px;padding-top:12px;padding-bottom:12px">
+          <div class="tilewrap"><div class="tile v1"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span><span class="pr" style="color:var(--wr)">WR61</span></div></div></div>
+          <div class="tilewrap"><div class="tile v1"><div class="rail" style="background:var(--rb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Christian McCaffrey</span><span class="tm">SF</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span><span class="pr" style="color:var(--rb)">RB12</span></div></div></div>
+          <div class="tilewrap"><div class="tile v1"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Amon-Ra St. Brown</span><span class="tm">DET</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-3)">3 1sts</span><span class="pr" style="color:var(--wr)">WR4</span></div></div></div>
+        </div>
+        <div class="caption">Truncation is confined to the tail of the surname and only fires when
+          <b>both</b> micro-tags are present on a long name. Acceptable — the positional rank on the right
+          disambiguates.</div>
+      </div>
+      <div class="slot" style="width:390px">
+        <div class="slotlbl">V3 — same rows, tick instead of badge</div>
+        <div style="padding:0 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px;padding-top:12px;padding-bottom:12px">
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-4plus)"></span><span class="tx">4+ 1sts</span></span><span class="pr" style="color:var(--wr)">WR61</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--rb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Christian McCaffrey</span><span class="tm">SF</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-2)"></span><span class="tx">2 1sts</span></span><span class="pr" style="color:var(--rb)">RB12</span></div></div></div>
+          <div class="tilewrap"><div class="tile v3"><div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Amon-Ra St. Brown</span><span class="tm">DET</span></div></div>
+            <div class="right"><span class="tick"><span class="bar" style="background:var(--t-3)"></span><span class="tx">3 1sts</span></span><span class="pr" style="color:var(--wr)">WR4</span></div></div></div>
+        </div>
+        <div class="caption">The tick recovers the badge's 12pt padding + 2pt border + a little
+          letterspacing — enough that the worst case stops truncating. This is V3's only real argument.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VERDICT ═══════════════════════════════════════════════════════ -->
+  <div class="sec">Recommendation</div>
+  <div class="note">
+    <table class="vtbl">
+      <tr><th>Variant</th><th>Height</th><th>Tradeoff</th></tr>
+      <tr class="rec"><td>V1 — tier into the right cluster</td><td>60 → <b>32pt</b> (−47%)</td>
+        <td><b>Recommended.</b> Exactly the operator's spec, no information dropped, no shared primitive
+          touched. Scoped via a new opt-in prop so the Tiers board — where rows are pressable and need the
+          44pt target and the <code>statsSlot</code> — is unaffected. Doubles roster visible above the fold.</td></tr>
+      <tr><td>V2 — literal half</td><td>60 → 30pt (−50%)</td>
+        <td>Satisfies "half" arithmetically and buys one more row. Requires a dense variant of the shared
+          <code>Badge</code> primitive, which renders on every screen. Take this only if the operator wants
+          the literal number and accepts an app-wide component change for 2pt.</td></tr>
+      <tr><td>V3 — tier as a color tick</td><td>60 → 32pt (−47%)</td>
+        <td>Same height as V1, ~24pt more room for names, fixes the worst-case truncation. But #277
+          deliberately standardised <code>TierBadge</code> chips as the value display app-wide; this makes
+          the League drill-in the one screen that renders tier differently. Only worth it if truncation
+          proves annoying in the sim.</td></tr>
+    </table>
+    <h2>Build notes</h2>
+    <ul>
+      <li><strong>Scope the prop.</strong> Add <code>denseSingleLine</code> (or equivalent) to
+        <code>PlayerCard</code>; branch <code>cardDense</code> height 60 → 32 and render
+        <code>tier</code> in <code>denseNums</code> before <code>posRank</code>. Only
+        <code>LeagueSummaryScreen.tsx:1212</code> passes it.</li>
+      <li><strong>Do not change the Tiers board.</strong> It passes <code>statsSlot</code>, its rows are
+        pressable and drag-liftable, and 44pt applies there.</li>
+      <li><strong>Draft-capital rows are a separate style.</strong> <code>styles.pickRow</code>
+        (<code>LeagueSummaryScreen.tsx:2232</code>) renders the "Draft capital" group and is not a
+        <code>PlayerCard</code> — it will not shrink with this change and will look tall beside the new
+        tiles. Worth matching in the same pass; not drawn here because #299 names player tiles only.</li>
+      <li><strong>No API or flag surface.</strong> Pure presentation; <code>r.tier</code> and
+        <code>playerPosRank</code> are already on the payload. No <code>docs/api-reference.md</code> row moves.</li>
+      <li><strong>Capture first.</strong> Request the <code>drill-in</code> state before build so the
+        before/after can be verified against a real frame (see the coverage-gap note above).</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
