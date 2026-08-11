@@ -1,0 +1,154 @@
+appId: com.fantasytradefinder.app
+# tc: feedback #302 (drill-in exit) — T1 permanent header exit, T2 tab re-tap
+# profile: standard
+# flags: release
+#
+# WHAT THIS PROVES. The League drill-in is COMPONENT STATE (`selectedId`,
+# LeagueSummaryScreen.tsx), not a stack push, so the OS gives the user no way
+# back: LeagueRankings is the stack root (no stack back, no iOS edge-swipe)
+# and there was no BackHandler. The only exit was an 11px caption in the chart
+# card's top-RIGHT — inside the ScrollView, above 1,600pt of roster — so it
+# scrolled away the moment the user reviewed the roster they drilled in for.
+#
+# #302 V2 moves the exit onto the ALREADY-FIXED stack header (`headerLeft`
+# "‹ All teams" + the title swapping to the team name) at zero vertical cost.
+#
+# HOW THIS FLOW DISCRIMINATES (flow-authoring law 2 is the whole problem here).
+# `visible:` counts off-screen ScrollView children, so simply asserting
+# `league-summary.roster-close` is visible after scrolling PASSES ON THE
+# UNFIXED BUILD — the in-card link stays in the hierarchy with dead
+# coordinates. Two assertions do the discriminating instead:
+#   · `league-summary.header-title` DOES NOT EXIST before this change. It is
+#     rendered by the native stack header, never by the ScrollView, so it is
+#     immune to law 2 in both directions.
+#   · The exit is TAPPED at depth with no scroll-back. On the unfixed build
+#     that tap lands on dead coordinates and the all-teams landmarks below
+#     never appear.
+#
+# LANDMARKS USED, and why each is unambiguous (all read off the source):
+#   league-summary.league-home    renders only when `isTabRoot && !selected`
+#   league-summary.refresh        renders only when `!selected`
+#   league-summary.focus-caption  renders only when `selected`
+#   league-summary.header-title   the swapped stack-header title (new)
+tags: [league, nav]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+# Law 10 — a raced inputText submits a partial name and books a real VCR miss.
+- assertVisible: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+# Law 8 — the tab bar paints before #244 launch routing settles. Settle on a
+# surface control before touching a tab.
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+
+# ── T1: the exit is permanent, and it names the team ─────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.subset.all"
+    timeout: 20000
+# Unfocused: the League-home row is present and the header carries no back
+# control. Establishes the baseline the exit has to return us to.
+- assertVisible:
+    id: "league-summary.league-home"
+- assertVisible:
+    id: "league-summary.refresh"
+- assertNotVisible:
+    id: "league-summary.roster-close"
+
+- tapOn:
+    id: "league-summary.bar..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.focus-caption"
+    timeout: 20000
+# The title swapped to the team name. ABSENT ENTIRELY on origin/main — the
+# header there is a static "League rankings" with no testID.
+- assertVisible:
+    id: "league-summary.header-title"
+- assertVisible:
+    id: "league-summary.roster-close"
+# Focused: the other landmarks are gone (#243 hides League home while focused).
+- assertNotVisible:
+    id: "league-summary.league-home"
+- assertNotVisible:
+    id: "league-summary.refresh"
+- takeScreenshot: league-05-drill-in-top
+
+# Now do the thing the user drilled in to do. No stable bottom anchor exists
+# in the hermetic world — the Draft-capital group is absent there (seed writes
+# zero draft_picks; see flows/league/01's Tier-B note), and roster rows carry
+# no testIDs — so this is a bare `scroll`, not `scrollUntilVisible`. Bare
+# `scroll` is not a banned pattern (the ban is on fixed sleeps and coordinate
+# taps); it is the honest option when there is nothing to anchor on.
+- scroll
+- scroll
+- scroll
+- scroll
+- scroll
+- scroll
+- takeScreenshot: league-05-scrolled-deep
+
+# THE ASSERTION #302 IS ABOUT: after a deep scroll the exit is still there and
+# still says which team. The stack header is not a ScrollView child, so unlike
+# the old in-card link this is genuinely on screen, not merely in the tree.
+- assertVisible:
+    id: "league-summary.header-title"
+- assertVisible:
+    id: "league-summary.roster-close"
+
+# Tapped AT DEPTH, with no scroll-back. On origin/main the in-card link is
+# ~740pt above the viewport and this tap hits dead coordinates, so the
+# all-teams landmarks below never appear.
+- tapOn:
+    id: "league-summary.roster-close"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- assertVisible:
+    id: "league-summary.refresh"
+# The header reverted with the state — a stale "All teams" control on the
+# all-teams view would be a back button to nowhere.
+- assertNotVisible:
+    id: "league-summary.roster-close"
+- takeScreenshot: league-05-back-on-all-teams
+
+# ── T2: re-tapping the active tab leaves the drill-in, not just the scroll ──
+# `ux.retap_active_tab` is ON in the release fixture. Before this change the
+# handler scrolled to the top and left the team focused — half a reset.
+- tapOn:
+    id: "league-summary.bar..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.focus-caption"
+    timeout: 20000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- assertNotVisible:
+    id: "league-summary.focus-caption"
+- takeScreenshot: league-05-retap-cleared-focus

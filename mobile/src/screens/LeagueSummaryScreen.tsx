@@ -7,6 +7,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import {
   space,
   radii,
   type,
+  fonts,
   position as positionColors,
 } from '../theme/chalkline';
 import { Badge, Icon, TickLabel } from '../components/chalkline';
@@ -371,9 +373,15 @@ export default function LeagueSummaryScreen() {
   useEffect(
     () =>
       isTabRoot && retapOn
-        ? registerScrollToTop('League', () =>
-            scrollRef.current?.scrollTo({ y: 0, animated: true }),
-          )
+        ? registerScrollToTop('League', () => {
+            // #302 — re-tapping the ACTIVE tab means "put this tab back to
+            // its root state". Scrolling to the top of a focused team's
+            // roster is only half of that: the user is still inside a
+            // drill-in they have no other way out of once they've scrolled.
+            // Clear the focus first, then scroll.
+            setSelectedId(null);
+            scrollRef.current?.scrollTo({ y: 0, animated: true });
+          })
         : undefined,
     [isTabRoot, retapOn],
   );
@@ -695,6 +703,80 @@ export default function LeagueSummaryScreen() {
       ? otherByTeam.get(selected.tc.team.user_id) ?? null
       : null;
 
+  // ── #302 — the drill-in exit lives on the fixed stack header ──────────
+  // The drill-in is component state (`selectedId`), not a stack push, so
+  // NOTHING in the OS gives the user a way back: no stack back (this is the
+  // stack root), no iOS edge-swipe, and — until the BackHandler below — no
+  // Android back either. The only control was an 11px caption in the chart
+  // card's top-RIGHT, above 1,600pt of roster, so it scrolled away the
+  // moment the user did the thing they drilled in for.
+  //
+  // The fix costs zero vertical space: while a team is focused the already-
+  // fixed header takes a `headerLeft` "‹ All teams" — top-LEFT, matching iOS
+  // and this app's own `subScreenOptions` (TabNav.tsx) — and its title swaps
+  // to the team name, which also answers "which team am I looking at?" at
+  // any scroll depth.
+  //
+  // TAB ROOT ONLY. The legacy root-stack registration ('LeagueSummary',
+  // RootNav.tsx:508-530, reached by deep link) already owns its `headerLeft`
+  // — the explicit JS back control that exists because native back is dead
+  // over `headerShown: false` (RNS#3294). Overwriting it would strip the
+  // screen's own exit, and it cannot be restored from here. That variant
+  // keeps the in-card link below instead; the two are mutually exclusive, so
+  // there is never a second back control on screen.
+  const focusedTeamName = selected
+    ? selected.tc.team.display_name ||
+      selected.tc.team.username ||
+      selected.tc.team.user_id
+    : null;
+  useEffect(() => {
+    if (!isTabRoot) return;
+    if (focusedTeamName) {
+      navigation.setOptions({
+        title: focusedTeamName,
+        headerTitle: () => <StackHeaderTitle>{focusedTeamName}</StackHeaderTitle>,
+        // Keeps testID `league-summary.roster-close` — same function as the
+        // control it replaces (#243 did the same when it turned the X into
+        // the link), so existing Maestro flows keep working.
+        headerLeft: () => (
+          <Pressable
+            testID="league-summary.roster-close"
+            onPress={() => setSelectedId(null)}
+            hitSlop={space.md}
+            accessibilityRole="button"
+            accessibilityLabel="Back to all teams"
+            style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
+          >
+            <Icon name="chevron-left" size={16} color={chalk.base} />
+            <Text testID="league-summary.back-all-teams" style={styles.headerBackText}>
+              All teams
+            </Text>
+          </Pressable>
+        ),
+      });
+    } else {
+      navigation.setOptions({
+        title: 'League rankings',
+        headerTitle: () => <StackHeaderTitle>League rankings</StackHeaderTitle>,
+        headerLeft: undefined,
+      });
+    }
+  }, [isTabRoot, navigation, focusedTeamName]);
+
+  // #302 — Android hardware/gesture back. There were ZERO BackHandler
+  // registrations in this file, so on Android the drill-in swallowed the
+  // system back gesture's meaning entirely: back left the tab (or the app)
+  // rather than returning to all teams. Registered only while focused, so
+  // unfocused back keeps its normal navigator behaviour.
+  useEffect(() => {
+    if (!selectedId) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelectedId(null);
+      return true; // handled — do not fall through to the navigator
+    });
+    return () => sub.remove();
+  }, [selectedId]);
+
   // The single shared pill factory — both pill rows use it, so the drill-in
   // panel mirrors the chart card automatically.
   //
@@ -969,11 +1051,17 @@ export default function LeagueSummaryScreen() {
                 </>
               )}
             </View>
-            {selected ? (
+            {selected && !isTabRoot ? (
               /* #243 slim strip — the close control is a "‹ All teams" back
                  affordance (approved mock, V1 frame). Same function as the
                  old X, so it KEEPS testID league-summary.roster-close; the
-                 label carries the new back-affordance id. */
+                 label carries the new back-affordance id.
+                 #302 — on the TAB ROOT this moved to the stack header (see
+                 the setOptions effect above): in the card it sat above
+                 1,600pt of roster and scrolled away. It survives only on the
+                 legacy root-stack push, whose headerLeft is already taken by
+                 that screen's own back control. Exactly one of the two
+                 renders, so the ids stay unique on screen. */
               <Pressable
                 testID="league-summary.roster-close"
                 onPress={() => setSelectedId(null)}
@@ -987,7 +1075,7 @@ export default function LeagueSummaryScreen() {
                   All teams
                 </Text>
               </Pressable>
-            ) : (
+            ) : selected ? null : (
               <Pressable
                 testID="league-summary.refresh"
                 onPress={refetchBoth}
@@ -1288,6 +1376,14 @@ export default function LeagueSummaryScreen() {
                       <View key={r.player_id} style={styles.rosterRow}>
                         <PlayerCard
                           dense
+                          // #299 — this caller passes no `statsSlot`, so the
+                          // dense row's line 2 held one tier badge and
+                          // nothing else. `denseSingleLine` moves the badge
+                          // into the right cluster (left of `posRank`) and
+                          // drops line 2: 60pt → 32pt, 64pt → 36pt pitch,
+                          // nothing dropped. Opt-in on purpose — the Tiers
+                          // board and the FA list keep the 60pt two-line row.
+                          denseSingleLine
                           player={{
                             id: r.player_id,
                             name: r.name,
@@ -2182,8 +2278,46 @@ function OutlookUnsupportedRow() {
   );
 }
 
+// #302 — stack-header title rendered by this screen, because the title has to
+// swap to the focused team's name. Deliberately a LOCAL copy of TabNav's
+// private `HeaderTitle` (same Barlow-Condensed-caps style): importing it from
+// '../navigation/TabNav' would close the cycle TabNav → LeagueSummaryScreen →
+// TabNav. Native-stack `headerTitleStyle` can't express letterSpacing or
+// textTransform, which is why the title is a component at all.
+function StackHeaderTitle({ children }: { children: string }) {
+  return (
+    <Text
+      testID="league-summary.header-title"
+      numberOfLines={1}
+      style={styles.headerTitle}
+    >
+      {children}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
+
+  // #302 — stack-header controls. Mirrors TabNav's `headerBack` / `headerTitle`
+  // so the League tab's focused header is indistinguishable from every other
+  // pushed sub-screen's: chevron + chalk label (never the greyed native
+  // arrow), condensed-caps title scaled to the native bar.
+  headerBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingVertical: space.xs,
+    paddingRight: space.md,
+  },
+  headerBackText: { color: chalk.base, fontFamily: fonts.uiSemi, fontSize: 14 },
+  headerTitle: {
+    fontFamily: fonts.displaySemi,
+    fontSize: 18,
+    letterSpacing: 0.54,
+    textTransform: 'uppercase',
+    color: chalk.base,
+  },
   scroll: { padding: space.lg, paddingBottom: space.xxl },
 
   // #181 — League home entry row (LeagueRow construction, mirrors
@@ -2460,11 +2594,16 @@ const styles = StyleSheet.create({
   // The label column became a stack when the W3 M-C provenance marker
   // joined it; with no marker it renders exactly as the single Text did.
   pickRowBody: { flex: 1, gap: space.xs },
+  // #299 — the draft-capital rows are NOT PlayerCards, so they don't shrink
+  // with the tiles. Brought into proportion with the new 32pt tile (was 40)
+  // so the picks group doesn't read as conspicuously tall beside the roster.
+  // `minHeight`, not `height`: with a MemberEnteredMarker in the body the row
+  // is legitimately taller and must still grow.
   pickRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 40,
+    minHeight: 32,
     paddingHorizontal: space.md,
     borderBottomWidth: 1,
     borderBottomColor: ink.line,
