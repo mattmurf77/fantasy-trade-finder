@@ -217,6 +217,94 @@
 
 ---
 
+## D-025 — `ranking_method` Is Written at the Point of Use, First-Use Wins
+**Date:** 2026-08-11 (P0-1, mobile UX audit 2026-08-09)
+**Context:** `users.ranking_method` was only ever written by the rank-home chooser. The unlock rule in `get_rankings_progress` branches on it, so a Quick Set user who finished all four positions without visiting the chooser fell to the trio branch and stayed locked out of the Trade Finder forever — along with the push primer that rides the unlock. The default path never completed its own progression.
+**Decision:** Four save routes record the method as a side effect of a successful save (`/api/tiers/save`, `/api/rank3`, `/api/rankings/reorder`, `/api/anchor/save`), through `set_ranking_method_if_unset` — a single conditional `UPDATE`, race-free, that writes **only where the column is unset**. **First-use wins, not last-use wins.** One exception: a completeness-marking tiers/quickset save may overwrite `'anchor'` and only `'anchor'`. Subset boards write nothing (rookie-scope saves, `via:'rookie_ranks'`, `via:'draft_room'`). A one-time boot backfill tags the pre-fix cohort `'quickset'`.
+**Alternatives considered:** **Last-use wins** — rejected: the unlock rule is method-dependent, so overwriting an established method can **re-lock** a user who already qualified, the exact regression the monotonic `unlocked_formats` floor was added for (`server.py:6177-6187`). **A feature flag** — rejected: the OFF position would be the known bug, which is not a rollback lever worth shipping. **Lazy on-read repair** or a one-shot script instead of a startup migration — rejected: on-read repair puts a write in a hot GET, and a script is a thing someone has to remember to run.
+**Consequences:** `'anchor'` is the only upgradable value, because it is the only method whose unlock rule can never succeed. The backfill labels the cohort **`'quickset'`** even though which flow they actually used is unrecoverable — an explicit, recorded assumption, and method-segmented analytics show a step change (NULL collapses, `'quickset'` jumps) across the deploy boundary that cannot be backfilled away. The backfill **pre-seeds `unlocked_formats`**, which suppresses the retroactive push fan-out; permanent consequence: that cohort never receives the unlock push for the backfilled format. The backfill also rewrites the seeded `quickset-done` UI-test user on every boot, so the fixture, the seeder guard and the capture all ship inverted **in the same commit** as the fix.
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-1.md`)
+
+---
+
+## D-026 — A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed
+**Date:** 2026-08-11 (P0-2, mobile UX audit 2026-08-09)
+**Context:** A trade search that failed looked identical to one that had never been run: same empty deck, same copy, no error, and a toast that was gone in seconds. Users had no way to tell "nothing found" from "it broke", and no retry.
+**Decision:** One named, **persistent** deck failure state with a working retry, driven by a single `deckFailure` state variable — one funnel, set from every failure path — rather than a render-time read of `job.status`. The backend's `job.error` is **mapped to app copy through `jobErrorCopy`, never echoed**.
+**Alternatives considered:** **Render the backend message** (the handoff's suggestion) — rejected on reading the field: `job.error` is `str(e)` of a server-side Python exception, or the literal string `"timeout"`. Showing it leaks internals and says nothing useful. **Read `job.status` at render time** — rejected: recency. The poll-abandon path sets `job` to `null`, so a render-time read cannot see the failure that just happened.
+**Consequences:** Partial decks keep their cards — the failure state is additive, not a replacement. The toast's existing wording is untouched. `trades-generation-failure.yaml` and `capture/trades.yaml` asserted the *old* behaviour and had to move in the same commit. Closes defect G-027.
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-2.md`)
+
+---
+
+## D-027 — The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing
+**Date:** 2026-08-11 (P0-3, mobile UX audit 2026-08-09)
+**Context:** The invite loop was broken at both ends — mobile never parsed the `?league=` parameter it emitted, and `invitedBy` lived in memory only, so an invite that required a sign-in (most of them) lost its context on the next launch.
+**Decision:** Three parts. (1) The legacy `/?league=<id>&ref=<u>` form is **parsed forever** by both clients and is not deprecated. (2) The new `/app/league/join/<id>` path **302s into the existing web landing** rather than getting its own page. (3) Invite context is a **14-day persisted intent** (`ftf_invite_intent`), not an in-memory value.
+**Alternatives considered:** **Deprecate the legacy form** — rejected: links live in group chats and screenshots indefinitely, and removing the parser silently breaks every invite already shared. **A new web join page** — rejected: the existing funnel already converts and already stores the referral; a second page is a second thing to keep correct. **Keep `invitedBy` in memory** — rejected, that *is* the bug.
+**Consequences:** Two accepted URL forms forever, recorded as a two-client contract in `cross-client-invariants.md`. The reader, the route and the AASA claim ship **unflagged and first**; only the emitter is behind `growth.invite_join_link`, because Apple's AASA CDN cache (~24 h) makes the natural order actively worse than shipping nothing (see D-027's runbook sequence). 302 not 301 — a permanent redirect would outlive any future landing-page change. TTL is evaluated on read, never by a timer.
+**Status:** Active (emitter dark).
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-3.md`)
+
+---
+
+## D-028 — Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag
+**Date:** 2026-08-11 (P0-5, mobile UX audit 2026-08-09)
+**Context:** A whole sign-in branch — Apple/Google account-only, no linked Sleeper — landed in the tab stack with the `no_league` sentinel pinned, i.e. on empty tabs with no way forward. A live stranding bug in TestFlight.
+**Decision:** Route on the **sentinel**: if the pinned league is `no_league`, send the user to the league choice with a companion state that explains it. Extract the Sleeper-identity-link form from `SettingsScreen` into a single-owner `LinkSleeperSheet` component so the picker can offer it. **No new flag.**
+**Alternatives considered:** **Key off `user.account_only`** — rejected: a user who has since linked ESPN/MFL/Fleaflicker is no longer stranded, and a flag-keyed predicate would send them back to the picker forever. The sentinel is the *fact*; the flag is a *label*. **A non-dismissible sheet over `Main`** — rejected: it leaves the user technically inside a stack that has nothing in it, and every back gesture becomes a special case. **A skip affordance** — rejected, it recreates the dead end.
+**Consequences:** Retroactive for existing TestFlight account-only users — anyone sitting on empty tabs lands on the picker at next launch. That is the fix working, and it is a release-notes line. The `LinkSleeperSheet` move carries the 409 `merge_choice_required` alert whose failure mode is deleting the wrong ranking board, so it moved **verbatim**, keeping `testID="settings.link-sleeper-input"` so the existing capture and the testID lint keep pointing at it. The picker's companion state ships with `invitedBy` / `invitedLeagueName` props that nothing supplied in wave 1 — that is the seam P0-3 renders into.
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-5.md`)
+
+---
+
+## D-029 — RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route
+**Date:** 2026-08-11 (P0-6, mobile UX audit 2026-08-09)
+**Context:** `SendInSleeperButton` self-gated on `league_id.isdigit()`, which is true for MFL and Fleaflicker ids too — so those users got a live Send button that always 400s, and matched ESPN users got a match with no action and no explanation.
+**Decision:** A **platform-generic gate**: Sleeper leagues send; ESPN/MFL/Fleaflicker get a stated reason plus a working **Copy trade**. The clipboard write goes through React Native core's `Clipboard`, isolated behind a one-function `mobile/src/utils/clipboard.ts`. Separately, delete the unused mobile `setMatchDisposition` wrapper while **keeping the route** — it has a live web caller and ELO consequences.
+**Alternatives considered:** **`expo-clipboard`** — rejected on constraints, not preference: `npm install` is unavailable to this build (`mobile/node_modules` is a symlink), and adding a native module would put a DEPENDENCIES entry and a native-build risk into a Bug/effort-S item. **Delete the disposition route with the wrapper** — rejected: web still calls it. **Build accept/decline match UX now** — deferred with the evaluation on the record (see `NEXT.md`).
+**Consequences:** RN-core `Clipboard` is deprecated and will be removed from react-native; because the whole surface is one function, migrating is a one-file edit at the next scheduled native rebuild. This change is **not purely additive** — a currently-tappable control disappears for MFL/Fleaflicker users. It always 400s today, so no capability is lost, but it is named in the CHANGELOG rather than discovered. The gate **fails open** on an uncached league id (pre-existing #146 contract): failing closed would hide Send on real Sleeper leagues whenever the platform cache is cold, which is strictly worse.
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-6.md`)
+
+---
+
+## D-030 — The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel
+**Date:** 2026-08-11 (P0-7, mobile UX audit 2026-08-09)
+**Context:** Launch-day instrumentation was missing across navigation, the League surfaces and the entire send funnel — the north-star leg. Two candidate namings existed: `send_in_sleeper_*` (descriptive) and `sleeper_send_*` (reserved in `analytics_queries` on 2026-07-17 and never fired).
+**Decision:** Adopt the **reserved `sleeper_send_*` names**. Split the funnel: **success is server-fired** on `POST /api/trades/propose`; **attempt and failure are client-fired**.
+**Alternatives considered:** **`send_in_sleeper_*`** — rejected: `WAT_DARK`, `FUNNEL_STAGES` stage 8 and `FEATURE_VERTICALS["send_in_sleeper"]` already reference the reserved strings, so the reserved spelling lights all three up with zero query edits, and the alternative would have meant renaming them anyway. **All three client-fired** — rejected: a client-forgeable success would sit in WAT and funnel stage 8 next to server-authoritative `trade_ratified`. **All three server-fired** — impossible: a tap that never reaches the server, a network timeout, and the pre-identity refusals (`feature_disabled`, `no_user`, `test_mode_propose_disabled`) are invisible server-side.
+**Consequences:** The two namespaces are disjoint by an import-time assertion, so `sleeper_send_succeeded` can never be added to the client allowlist. `sleeper_send_succeeded` is deliberately **not** in `database._EVENT_TO_USER_COL` — bumping `last_trade_proposed_at` would change notification gating, out of scope for an instrumentation item. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` had to be added to `NON_INTENT_EVENTS` in the **same commit**, or DAU/WAU would step-change on ship day and break every retention series at that seam. `is_self` on `league_team_opened` was deliberately omitted — the identity was never proven, and a guessed prop is worse than a missing one.
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-7.md`, `docs/business/analytics/2026-08-11-p0-7-addendum.md`)
+
+---
+
+## D-031 — The Tour's Sign-Off Gate Is Beat Identity, Not Step Count
+**Date:** 2026-08-11 (P0-8, mobile UX audit 2026-08-09)
+**Context:** The guided tour told users it was over before it had begun — the `s8.1` sign-off beat could fire on a session that had reached almost none of the tour. The audit counted 9 of 15 steps unreachable; the build's own sweep found **16 of 20**.
+**Decision:** Gate `s8.1` on **beat identity** — the S2.2 beat must actually have been seen — not on a count of steps seen.
+**Alternatives considered:** **A step-count threshold (`stepsSeenCount >= N`)** — rejected for three independent reasons: `stepsSeenCount` is in-memory zustand and resets on launch; `guideSeen` only records `once:true` steps, so a real tour that ended at `s5.5` records 7 keys while an empty release-flag session with two leagues records 3; and any `N` is a magic number whose meaning changes silently the next time a beat is added, removed, or has its `once` flag edited.
+**Consequences:** The gate is legible and survives script edits. `err.burst` was deleted from the implementation in the same pass (design intent kept in the script doc, marked unbuilt).
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-8-9.md`)
+
+---
+
+## D-032 — Request the Celebration First, Consume It Only on Success
+**Date:** 2026-08-11 (P0-8/9 defect D1)
+**Context:** The first-like celebration was consumed from its one-shot store *before* the bubble slot was checked for availability. When the slot was occupied, the celebration was silently spent and never shown again — the user's first-like moment vanished with no error anywhere.
+**Decision:** Request-first, consume-on-success: check the slot, render, and only then mark the one-shot as consumed. If the slot is busy, nothing is spent.
+**Alternatives considered:** Queue the celebration for a later slot — rejected as scope: it introduces a lifetime question ("later" meaning what?) for a moment whose whole value is immediacy.
+**Consequences:** Generalizable idiom for every one-shot moment gated on a shared UI slot. `celebration_shown` starts landing at the same time (it was firing as `celebration_fired` and being dropped).
+**Status:** Active.
+**Related ADR:** — (`docs/plans/audit-p0-remediation/lld-p0-8-9.md` §D1)
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -245,6 +333,14 @@
 | D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
 | D-023 | Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch | 2026-08-10 |
 | D-024 | The Mock-Draft "Run" Is Engine-Internal, and Two Constants Are Load-Bearing in Opposite Directions | 2026-08-10 |
+| D-025 | `ranking_method` Is Written at the Point of Use, First-Use Wins | 2026-08-11 |
+| D-026 | A Failed Trade Search Renders a Named, Persistent Deck State; `job.error` Is Mapped, Never Echoed | 2026-08-11 |
+| D-027 | The Legacy `?league=` Invite Form Is Parsed Forever; the New Path 302s Into the Existing Landing | 2026-08-11 |
+| D-028 | Post-Auth Routing Keys Off the `no_league` Sentinel, Never Off a User Flag | 2026-08-11 |
+| D-029 | RN-Core `Clipboard` Over `expo-clipboard`; Delete the Mobile Disposition Wrapper, Keep the Route | 2026-08-11 |
+| D-030 | The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel | 2026-08-11 |
+| D-031 | The Tour's Sign-Off Gate Is Beat Identity, Not Step Count | 2026-08-11 |
+| D-032 | Request the Celebration First, Consume It Only on Success | 2026-08-11 |
 
 ---
 

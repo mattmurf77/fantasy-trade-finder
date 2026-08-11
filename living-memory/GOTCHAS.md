@@ -11,6 +11,12 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-032 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
+| G-031 | A sim run goes red on an unrelated screen after adding one API call | Mobile / Maestro harness / VCR |
+| G-030 | Account-only session shows "No 2026 NFL leagues found" (or a 503) | Mobile / account auth / Sleeper |
+| G-029 | Client events look wired, land nowhere, and every response is 200 | Backend / analytics taxonomy |
+| G-028 | MFL/Fleaflicker leagues take the Sleeper-only code path | Mobile / platform routing |
+| G-027 | Trade deck stuck on a skeleton card that never resolves | Mobile / TradesScreen |
 | G-026 | Half a roster silently prices at 0.0 in an IDP or K league | Backend / outlook / values |
 | G-025 | "No historical data exists" for a GitHub-hosted CSV | Research / external data |
 | G-024 | Sleeper W/L is double the games played | Backend / Sleeper ingestion (fixed in `backend/outlook/` 2026-08-09; still live elsewhere) |
@@ -222,6 +228,49 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** TestFlight builds lag a long-lived unshipped branch by weeks. Items #208 and #262 were both already fixed in the repo when reported.
 - **Fix:** before writing any fix, ask whether it still reproduces on current code.
 - **Related:** `activeScreen` in a feedback report is a **route name, not a file** — grep the TabNav registrations before concluding a screen doesn't exist.
+
+---
+
+## 2026-08-11
+
+### G-027 — first run + four failed polls = a skeleton card that never resolves
+- **Symptom:** on a first-ever trade search that fails, `TradesScreen` renders a `SkeletonTradeCard` forever. No error, no empty state, no retry — the app just looks like it is still thinking.
+- **Cause:** three things line up. The deck ladder's first-run branch excludes `job?.status === 'error'`, but the poll-abandon path sets `job` to **`null`**, so that guard never matches. `autoGenFailed` is only set from the POST path, not the poll path. And the auto-start effect refuses to re-kick once it has fired. Nothing in the chain can move the screen off the skeleton.
+- **Fix:** the `!deckFailure` guard on the ladder's first-run branch (P0-2). `deckFailure` is set from **every** failure path, including poll-abandon, so it sees what `job` cannot.
+- **Prevention:** when a guard tests a *status field*, check what the abandon/timeout path actually writes. A path that nulls the whole object defeats every field-level guard downstream. See [D-026](DECISIONS.md).
+- **History:** found by the P0-2 build's pre-fix control run — the audit's own repro did not surface it, which is the argument for control runs.
+
+### G-028 — MFL and Fleaflicker league ids are numeric, so `isdigit()` does not exclude them
+- **Symptom:** an MFL or Fleaflicker user sees a live "Send in Sleeper" button that always fails with a 400.
+- **Cause:** the client gated on `league_id.isdigit()` as a proxy for "this is a Sleeper league". Sleeper ids are numeric — but so are MFL's and Fleaflicker's. The predicate tests the wrong property.
+- **Fix:** gate on the league's **platform**, not the shape of its id (P0-6, `resolveSendPlatform`). Backend equivalent: `backend/server.py:12336`.
+- **Prevention:** **this is the third instance of the same bug class in this repo** — see G-014, feedback #200 and #220. Any `isdigit()` / numeric-shape test standing in for "Sleeper" is wrong. There is a platform field; use it.
+- **Related:** the propose route still lacks an `is_linked_platform_league` guard — see [`NEXT.md`](NEXT.md).
+
+### G-029 — a client `track()` name absent from the taxonomy is counted and dropped in silence
+- **Symptom:** instrumentation looks correct in the client, `POST /api/events` returns **200**, and the dashboard has no rows. No client error, no server error, no log line anyone reads.
+- **Cause:** `backend/analytics_taxonomy.py`'s `ALLOWED_CLIENT_EVENTS` is **default-deny**. An unregistered `event_type` is counted into a drop counter and discarded behind the 200. Registered-but-unspecced *props* are stripped the same way.
+- **Fix:** register the name in `ALLOWED_CLIENT_EVENTS` (and its props in `CLIENT_EVENT_PROPS`) **before** shipping the emitter, and write the tracking-plan addendum first — the registry's own comments make the addendum the stated precondition.
+- **Prevention:** the scale of this is the point. A 2026-08-11 sweep of every `track('<name>'` literal in `mobile/src` found **33 of 73 emitted names unregistered**. This batch fixed three (`invite_shared`, `deck_regenerated`, and `celebration_fired` by renaming the client to the registered `celebration_shown`), leaving **29** — full list in [`NEXT.md`](NEXT.md) and `docs/plans/audit-p0-remediation/lld-p0-8-9.md` §4.3. Note `quickset_completed` cannot be fixed by registration: it is server-authoritative, and the two namespaces are disjoint by an import-time assertion, so the client emitter has to go.
+- **History:** G-016 and G-017 are the same failure mode one layer up (flag registered but inert; analytics wired but zero rows). This is its third recorded occurrence.
+
+### G-030 — an account-only session must never trigger the Sleeper league fetch
+- **Symptom:** a user who signed in with Apple/Google and has no linked Sleeper account sees "No 2026 NFL leagues found" live, or a 503 `sleeper_unavailable` under the hermetic test harness.
+- **Cause:** account-only users carry the synthetic working key `acct_<account_id>`. `GET /api/sleeper/leagues/<user_id>` proxies that id straight to Sleeper, which has never heard of it. The failure is honest at the network layer and completely misleading at the UI layer — it reads as "you have no leagues" rather than "you have no Sleeper account".
+- **Fix:** gate the fetch on the `no_league` sentinel. An account-only session renders the picker's companion state instead of calling out.
+- **Prevention:** any call that takes `user_id` and forwards it to a platform API needs an `acct_` check. The sentinel is documented in [`../docs/cross-client-invariants.md`](../docs/cross-client-invariants.md#no_league--the-account-only-league-sentinel).
+
+### G-031 — one new API call on any screen can turn a whole sim run red
+- **Symptom:** a Maestro sim run fails after a change that touched an unrelated screen, with no assertion failure in the flow itself.
+- **Cause:** the harness is hermetic. `mobile/scripts/sim-run.sh:178` **fails the run when `vcr_misses > 0`**, and an unseeded Sleeper id raises 599 and increments that counter (`server.py:529-536`). Any new client call site that reaches Sleeper with an id the seeder did not write breaks every flow in the run, not just its own.
+- **Fix:** either seed the id in the fixture profile, or keep the call to a **single call site** whose ids are always seeded and cache the result for downstream screens. P0-3 took the second route: `fetchInviteMeta` has exactly one call site (the sign-in banner) and caches the resolved name into the persisted invite intent, because the non-member leg walks unseeded ids.
+- **Prevention:** `vcr_misses` is a **load-bearing rail, not a warning**. Before adding a platform-touching call, ask which fixture profile covers the ids that screen can see. A reviewer adding a second `invite-meta` call site would reintroduce this.
+
+### G-032 — a boot-time backfill silently rewrites your seeded test fixtures
+- **Symptom:** a Maestro flow or capture that asserts a pre-fix state fails on the seeded backend, and the fixture JSON on disk looks correct.
+- **Cause:** `backfill_ranking_method_from_tiers()` runs inside `_migrate_db()`, which runs on **every** Flask boot — including the seeded UI-test backend. It rewrites the seeded `quickset-done` user before the first test request arrives.
+- **Fix:** ship the fixture in the **post**-backfill shape and invert the seeder guard (`_validate_quickset`) and the capture in the **same commit** as the migration. Three coupled edits, not one.
+- **Prevention:** any migration that runs at boot is part of the test-fixture contract. When adding one, grep `backend/tests/fixtures/` for rows in its cohort and move them with it — otherwise a green flow documents behaviour that no longer exists, or a red one has no visible cause. See [D-025](DECISIONS.md).
 
 ---
 

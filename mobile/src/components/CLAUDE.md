@@ -26,7 +26,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `OutlookSheet` | Team-outlook sheet; reached from TradesScreen (hub no longer mounts it) |
 | `OutlookBiasReceipt` | One-line deck bias summary (flag `trade.outlook_direction`); Change opens `TradeDnaSheet` |
 | `TradeDnaSheet` | Trade DNA editor as a sheet over the guided deck: outlook + Chasing/Shopping + untouchables, autosaves every tap |
-| `SendInSleeperButton` | Flagged-beta Sleeper trade proposal; self-gates to Sleeper leagues; pre-send validates via `/api/trades/validate` |
+| `SendInSleeperButton` | Flagged-beta trade send. **Platform-generic gate (P0-6):** Sleeper leagues send (pre-send validates via `/api/trades/validate`); ESPN/MFL/Fleaflicker get a stated reason + `Copy trade`. Fails **open** to Sleeper on an uncached league id (#146 contract). Requires `surface` ∈ `deck\|match\|awaiting\|calculator` — it rides the `sleeper_send_*` events. testIDs: `send-in-sleeper.unavailable`, `send-in-sleeper.copy` |
 | `VerifyAccountBanner` | Dismissible "Verify your account" strip above the tab bar, unverified sessions only |
 | `SteerSlider` | Settings: 5-dot "We steer ↔ You steer" ranking-method selector |
 | `EspnLinkSheet` | Flag-gated (`espn.link`) link flow: ID/URL + cookie paste, or WebView sign-in (`espn.webview_capture`) → team match → summary |
@@ -38,7 +38,8 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `IdentityConfirmStrip` | First-run "Trading as @user — not you?" strip |
 | `QuickSetPromptCard` | Inline deck-slot prompt nudging to Quick Set (flag `onboarding.quickset_prompt`) |
 | `AppleSaveMomentSheet` | Save-moment Apple sign-in ask modal (flag `onboarding.apple_save_moment`) |
-| `Toast` | Transient notification; VoiceOver announce + Reduce Motion fallback; optional action slot (e.g. Undo) |
+| `Toast` | Transient notification; VoiceOver announce + Reduce Motion fallback; optional action slot (e.g. Undo). Optional `topOffset` (defaults to `space.xxl` = today's position) so a host screen can clear its own mode bar |
+| `LinkSleeperSheet` | **Single owner** of the Sleeper-identity-link form (extracted from `SettingsScreen`, P0-5). Mounted by Settings and by the `LeaguePicker` companion state. Carries the 409 `merge_choice_required` alert — whose wrong branch deletes a ranking board — so it must never be reimplemented elsewhere. testID: `settings.link-sleeper-input` (kept verbatim through the move; `capture/settings.yaml` + the testID lint point at it) |
 | `PlayerContextMenu` | Shared long-press sheet (flag `ux.player_context_menu`); caller-supplied command rows; also exports `LockGlyph` |
 | `AnchorSheet` | Inline anchor-value sheet (flag `draft.rank_inline`): value a player in pick terms without leaving the host screen |
 | `draft/DraftRows` | Shared Draft Room/Mock row pieces: styles, `BasisChip`, position/slot helpers, fallback copy |

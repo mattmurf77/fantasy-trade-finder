@@ -50,6 +50,9 @@ Operational procedures. Add to this as you learn things.
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
 - [Pick-assignment recovery (draft-extensions W3 M-A, 2026-08-08)](#pick-assignment-recovery-draft-extensions-w3-m-a-2026-08-08)
 - [Pick-recording queue integrity (draft-extensions W3 M-D, 2026-08-08)](#pick-recording-queue-integrity-draft-extensions-w3-m-d-2026-08-08)
+- [Quick Set unlock backfill (P0-1, 2026-08-11)](#quick-set-unlock-backfill-p0-1-2026-08-11)
+- [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
+- [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
 
 ---
 
@@ -410,6 +413,76 @@ This repo uses the Expo **bare workflow** — `mobile/ios/` is tracked in git an
 ## Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)
 
 Apple fetches `/.well-known/apple-app-site-association` through its own CDN, not from the device, so AASA changes take up to ~24h to reach installed apps and MUST be deployed on Render **before** the next iOS build is installed (install-time is when iOS validates the entitlement against the live file); for immediate on-device testing, set Developer mode's "Associated Domains Development" toggle or use the `?mode=developer` entitlement suffix, and sanity-check the served file with an AASA validator (e.g. Branch's) after deploy.
+
+**Ordering for the P0-3 invite join claim (`/app/league/join/*`, 2026-08-11).** The claim, the server 302 and both clients' parsers are **unflagged and already deployed**; only mobile's emitter is behind `growth.invite_join_link` (default OFF). Flip the flag in a **separate session, after on-device verification** — never as part of the build. The sequence, each step a gate on the next:
+
+1. **Deploy** the backend carrying the AASA claim (already in `main`). Confirm `GET /.well-known/apple-app-site-association` returns 200 `application/json`, no redirect, and lists `/app/league/join/*` in both `components` and `paths`.
+2. **Wait ≥24 h** for Apple's CDN. There is no way to shorten this for installed apps.
+3. **Validate externally** — run the live URL through an AASA validator (Branch's). A validator failure here means stop; do not proceed.
+4. **Ship an iOS build installed AFTER step 1's deploy.** iOS validates the entitlement against the live file at install time, so a build installed before the deploy will not have the claim regardless of what the file says now.
+5. **Prove it on device:** tap a `https://<host>/app/league/join/<a real league id>?ref=<username>` link from Messages. It must open the app on the join screen, not Safari.
+6. **Only then** flip `growth.invite_join_link` to `true`.
+7. **If steps 2–5 fail, leave the flag OFF indefinitely.** That costs nothing: the legacy `/?league=<id>&ref=<u>` URL is still emitted, is parsed forever by both clients, and the whole invite loop already works through it. Flipping early is the only way to make things worse — every invite would open Safari for up to ~24 h.
+
+**Rollback** is flipping the flag back to `false`. Links already shared in the new format keep working, because the 302 and the parsers are unflagged.
+
+## Quick Set unlock backfill (P0-1, 2026-08-11)
+
+**What runs.** `database.backfill_ranking_method_from_tiers()`, called from `_migrate_db()` — so it runs **at every Flask boot**, including the seeded UI-test backend.
+
+**What it touches.** Two columns on `users`, in one `UPDATE` per row: `ranking_method` → `'quickset'`, and `unlocked_formats` merged with every qualifying format.
+
+**Cohort.** `ranking_method IS NULL` (or `''`) **AND** all four of QB/RB/WR/TE present in `tiers_saved` for at least one scoring format. Users with a *partial* tier board are deliberately excluded: tagging them would move them from the trio unlock rule to the tiers rule and could **re-lock** them. Strictly improving for every row it does touch. **Idempotent by predicate** — after the first successful run the cohort is empty. Chunked at 500. Never raises; a failure prints and returns what it wrote, so it can never break boot.
+
+**Expected one-time row count.** Small — the whole cohort is pre-fix TestFlight users who finished a Quick Set board. **Dry-run the count against a prod replica before merge** (pre-merge checklist item).
+
+**Confirming query** (should return 0 after a successful run):
+
+```sql
+SELECT count(*) FROM users
+WHERE (ranking_method IS NULL OR ranking_method = '')
+  AND tiers_saved IS NOT NULL;
+```
+
+**The affected ids are printed to the boot log** — `[backfill] ranking_method: tagged N/M user(s) 'quickset' — cohort: [...]`. **That log line is what makes the undo expressible**; without it there is no way to scope a reversal. Capture it from the Render log on the first boot after deploy.
+
+**Reversal** (scoped to the logged cohort, never blanket):
+
+```sql
+UPDATE users SET ranking_method = NULL WHERE sleeper_user_id IN (<ids from the boot log>);
+```
+
+Note this does **not** un-write `unlocked_formats` — that column is a monotonic floor by design and reversing it would take an unlock away from a user who can see it.
+
+**The `unlocked_formats` pre-seed is fan-out suppression, not cosmetics.** The unlock ladder pushes a notification when a format transitions locked → unlocked. Without the pre-seed, a whole cohort transitions at once on the first boot after deploy and every one of them gets a retroactive push. Permanent consequence, accepted: those users never receive the "Trade Finder unlocked" push for the backfilled format.
+
+**Seed-fixture interaction — the non-obvious one.** The backfill **rewrites the seeded `quickset-done` user on every UI-test boot**. That is why `backend/tests/fixtures/profiles/quickset-done.json` ships already in the *post*-backfill shape and `seed_ui_test_db.py`'s `_validate_quickset` guard asserts the unlocked state. A fixture written in the pre-fix shape will be silently mutated at boot and the flow asserting the old behaviour will fail with no obvious cause.
+
+## Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)
+
+Account-only sign-in cannot be driven by a UI test through real Sign in with Apple, so the harness substitutes an identity: `mobile/src/screens/SignInScreen.tsx` reads the launch argument `FTFTestAppleSub` (`testLaunchArg`) and, when present, posts `identityToken: "ftf-test-apple:<sub>"` instead of a real Apple token; `backend/server.py`'s `_test_mode_identity` accepts that prefix.
+
+**Two production gates, both required — neither alone is sufficient:**
+
+1. **Client:** `testLaunchArg` reads process launch arguments, which are only reachable from a simulator/`xcrun simctl` launch. A shipped build has no way to set one.
+2. **Server:** `_test_mode_identity` is gated on `FTF_TEST_MODE=1`, which is never set in normal operation and never on Render.
+
+A `ftf-test-apple:` token hitting a production server is rejected as a malformed Apple token. Empty/whitespace subs return `None` (covered by `backend/tests/test_account_only_harness.py`). The seam substitutes for `verify_apple_token` and **nothing else** — session creation, account linking and routing all run the real code paths.
+
+**Why this is a runbook entry and not an api-reference row:** it adds no route and is unreachable in any deployed build.
+
+## Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)
+
+**The full seven-step recipe — collision check, experiment body, the eight-key overlay, the pre-flight verification call and the one-call rollback — is in [`plans/audit-p0-remediation/prd-p0-8-9.md` §5](plans/audit-p0-remediation/prd-p0-8-9.md), with per-claim code citations in `lld-p0-8-9.md` §6.** It is reproduced there rather than here because it is a one-off operator procedure with a defined end state. The load-bearing points, so they are not lost if the plan folder is archived:
+
+- **`CRON_SECRET` lives in `secrets.local.env`.** Read it from there; never paste it into chat.
+- **Step 0 is a collision check, not a formality.** `validate_spec(for_launch=True)` rejects a launch whose buckets overlap any **running *or paused*** experiment in the same layer, and `onboarding_v2_rollout` occupies the whole `onboarding` range. If it is already running with a matching overlay, **create nothing** — skip to the device-id step.
+- **`stopped` is a one-way door.** There is no `stopped → running` transition. Before stopping an incumbent, `GET /api/admin/experiments/<key>` and **save the full row** — that response is the only restore spec, and restarting means a `revise` to a new version plus a `transition`, with metrics reset.
+- **Two non-obvious overlay values.** `onboarding.league_autoskip` must be **false** (with it on, a single-league user skips the picker and the `s1.1` beat is unreachable), and `landing.try_before_sync` must be **true** even though it is not an `onboarding.*` key — without it `/api/session/demo` 404s and the landing's demo link is a dead end.
+- **Verify before touching the phone.** `GET /api/feature-flags` with `X-Device-Id: <id, no `device:` prefix>` must show `experiments.trades_first_operator_test == "treatment"` and the eight-key `configs` overlay. This one unauthenticated call proves allowlist match, layer salt, bucket resolution, targeting and variant config — **all of which otherwise fail silently.**
+- **Device ids rotate.** `config/tester_allowlist.json` carries them (entries use the `device:` prefix; the header does not). The device pseudo-id is minted client-side into SecureStore, so a reinstall that clears the keychain rotates it. The file exists because Render does not apply `render.yaml` `envVars` to a dashboard-created service (observed 2026-07-19).
+- **`reseed-layers` refuses once any experiment has assigned a unit** — run it *before* launching, never after.
+- **Rollback is one call:** transition the experiment to `stopped`. No flag default changes, no deploy.
 
 ## Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)
 

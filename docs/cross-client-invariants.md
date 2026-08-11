@@ -206,6 +206,37 @@ Canonical set: `market` (retuned default — NULL/unknown stored values read as 
 
 **Locations:** `backend/server.py` (`/api/ranking-method` whitelist), `mobile/src/api/rankings.ts` (`setRankingMethod` union), `mobile/src/state/useSession.ts` (`RankMethodPref` — the device-local launch-routing preference), `mobile/src/navigation/TabNav.tsx` (`PREF_ROUTE` map), `mobile/src/screens/RankHomeScreen.tsx` + `mobile/src/components/SteerSlider.tsx` (the two pickers). Add a method in all of these together.
 
+**The CONTRACT shifted on 2026-08-11 (P0-1); the string set did not.** It used to mean *"the chooser recorded the user's stated preference"*. It now means *"written at the point of USE, first-use wins"* — four save routes record it as a side effect of a successful save (`/api/tiers/save`, `/api/rank3`, `/api/rankings/reorder`, `/api/anchor/save`), and `'anchor'` is the single upgradable value (a completeness-marking tiers/quickset save may overwrite it, because `'anchor'` can never satisfy an unlock branch). Subset boards — rookie-scope tier saves, `via:'rookie_ranks'`, `via:'draft_room'` — write nothing. **This belongs here and not only in the backend docs because the value is read by two clients:** the unlock ladder in `get_rankings_progress` branches on it, and `web/js/app.js:866` reads it for truthiness. A pre-fix cohort was backfilled to `'quickset'` — see [data-dictionary § users](data-dictionary.md#users). Full rationale: [api-reference § Progress / method](api-reference.md#progress--method).
+
+---
+
+## `no_league` — the account-only league sentinel
+
+`no_league` is a **shared constant**, not a league id. The backend emits it as the session's league when an authenticated account has no bound league source (`backend/server.py` `ACCOUNT_NO_LEAGUE_ID = "no_league"`, plus the two `"reason": "no_league"` responses); mobile consumes it as `NO_LEAGUE_ID` in `mobile/src/state/useSession.ts` and as the routing predicate in `mobile/src/navigation/RootNav.tsx`. It has been on the wire since account-only sign-in shipped and was documented nowhere until P0-5.
+
+**Rules:**
+
+- **Routing keys off the SENTINEL, never off a user flag.** Post-auth destination is decided by "is the pinned league the sentinel", not by `user.account_only` — a user who has since linked ESPN/MFL/Fleaflicker is no longer stranded and must not be re-routed. Keying off the flag would send them back to the picker forever.
+- It is **never** passed to a platform API. A `GET /api/sleeper/leagues/acct_<id>`-style fetch on an account-only session proxies a synthetic id upstream: 503 `sleeper_unavailable` under the hermetic harness, `null` live (rendering as "No 2026 NFL leagues found"). See `GOTCHAS.md` G-030.
+- A screen that receives it must render a **companion state**, not an empty list.
+
+**Locations to change together:** `backend/server.py` (`ACCOUNT_NO_LEAGUE_ID`), `mobile/src/state/useSession.ts` (`NO_LEAGUE_ID`), `mobile/src/navigation/RootNav.tsx` (the relaunch predicate), `mobile/src/screens/LeaguePickerScreen.tsx` (the companion state).
+
+---
+
+## Invite URL format — a two-client contract
+
+The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInviteUrl`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`deepLinks.ts`). Two forms are accepted:
+
+| Form | Emitted when | Parsed |
+|---|---|---|
+| `/?league=<league_id>&ref=<username>` | `growth.invite_join_link` **off** (today's default) | **Forever, by both clients** |
+| `/app/league/join/<league_id>?ref=<username>` | `growth.invite_join_link` **on** | Web → server 302 back into form 1; mobile → Universal Link, AASA `/app/league/join/*` |
+
+**The legacy form is parsed forever and is not deprecated.** Links already shared live in group chats, screenshots and pinned messages indefinitely; a parser removal would silently break every one of them. `ref` is optional in both forms (mobile omits it when the username is unknown — FB #239), which is why the AASA `components` matcher must match on `league` alone.
+
+**Ordering rule:** the reader, the mobile route, the server 302 and the AASA claim are all **unflagged and ship first**; only the emitter is flagged. Apple's AASA CDN cache (~24 h) makes the reverse order actively worse than shipping nothing. See [config-reference § `growth.invite_join_link`](config-reference.md#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans).
+
 ---
 
 ## Position color tokens (segmented progress bar)
@@ -290,6 +321,23 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
 - Trades: `find_trades_tapped`, `trade_card_viewed`, `trade_flagged`, `match_opened`
 - Engagement: `push_opened`
 - Onboarding plan ([plan](plans/onboarding-conversion/plan.md)): `apple_prompt_shown`, `apple_prompt_accepted`, `apple_prompt_declined`, `apple_prompt_dismissed`, `quickset_prompt_shown`, `quickset_prompt_accepted`, `quickset_prompt_snoozed`, `trade_card_shared`, `coach_mark_shown`, `coach_mark_dismissed`, `celebration_shown`, `deck_exhausted_viewed`
+- **P0 remediation batch (2026-08-11 — [addendum](business/analytics/2026-08-11-p0-7-addendum.md)); mobile only:**
+  - Navigation + League: `tab_selected`, `league_view`, `league_basis_changed`, `league_subset_changed`, `league_team_opened`, `league_home_action_tapped`
+  - Send in Sleeper: `sleeper_send_attempted`, `sleeper_send_failed` — **client-fired.** The success leg `sleeper_send_succeeded` is **server**-fired on `POST /api/trades/propose` and is therefore NOT in this list (the two namespaces are disjoint by an import-time assertion in `analytics_taxonomy.py`)
+  - Invite loop: `invite_shared`, `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`. `invite_shared` is **not new** — it had been fired by `InviteLeaguematesBanner.tsx` since it shipped and dropped every time; registering it is a bug fix
+  - Experiments: `experiment_exposed` (exposure, not assignment)
+  - Quick Set funnel: `quickset_step_advanced`, `quickset_abandoned`
+  - Deck: `deck_regenerated`
+
+**Canonical send names + the `surface` enum.** The reserved names are `sleeper_send_attempted` / `sleeper_send_failed` / `sleeper_send_succeeded` — **not** `send_in_sleeper_*`. `analytics_queries` reserved this exact trio in 2026-07-17 and `FUNNEL_STAGES` stage 8 + `FEATURE_VERTICALS["send_in_sleeper"]` already reference the succeeded name, so the reserved spelling lights those up without a query edit. Every one of them carries `surface` ∈ **`deck` | `match` | `awaiting` | `calculator`** — the four `SendInSleeperButton` mounts. Canonical definition: `SendSurface` / `SEND_SURFACES` in `mobile/src/utils/tradeText.ts`; mirrored in `CLIENT_EVENT_PROPS`. **`awaiting` is the Matches non-match send row — it is NOT `suggested`.** Adding a mount means adding a value in both places.
+
+**`celebration_shown`, never `celebration_fired`.** The registered name has always been `celebration_shown`; the client emitted `celebration_fired` and every one of those events was dropped. Fixed 2026-08-11 by **renaming the client**, deliberately **without an alias** — an alias would make the taxonomy the place typos go to live.
+
+**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum.
+
+**Web (`web/js/events.js`) and the extension (`extension/background.js`) fire NONE of the P0-batch names.** That omission is deliberate — these are mobile surfaces — and is stated here so a future reader reads it as a decision, not as drift.
+
+> ⚠️ **Default-deny is silent.** A client `track()` name absent from `analytics_taxonomy.py` is counted and dropped behind a **200**: no client error, no server error, a plausible dashboard with no rows. A 2026-08-11 sweep found **33 of 73** emitted mobile names unregistered; this batch fixed three (`invite_shared`, `deck_regenerated`, and `celebration_fired` by rename), leaving **29**. Register the name *before* shipping the emitter. See `GOTCHAS.md` G-029.
 
 Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/api/session/demo` — the backend stitches device→identity in `identity_links`.
 

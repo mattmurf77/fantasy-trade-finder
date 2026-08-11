@@ -26,6 +26,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
+- [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
   - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
@@ -330,6 +331,16 @@ Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recor
 | Flag | Default | Gates |
 |---|---|---|
 | `obs.api_events` | **true** in `config/features.json` (registered default false) | `backend/api_observability.py` — inbound + outbound API event capture into `user_events` as server-fired `api_call`/`api_request` rows (taxonomy: `OBS_EVENT_PROPS` in `backend/analytics_taxonomy.py`; query surface: `GET /api/admin/analytics/apihealth`). Outbound: every external egress chokepoint (Sleeper REST + GraphQL incl. the trade-block/trade-capture bypass sites, ESPN, MFL, Fleaflicker, DynastyProcess CSVs, KTC scrape, Anthropic, Expo push, Apple/Google sign-in verification). Inbound: Flask hooks recording route PATTERN/method/status/latency for `/api/*` (static assets and `/api/events` excluded). Volume policy: errors always, successes 1-in-N (`obs_success_sample_n`); retention `FTF_OBS_RETENTION_DAYS` (30 d). This key is the **kill switch**: OFF ⇒ zero event writes, zero overhead beyond a flag check, byte-identical responses. Per-service redaction rules in `docs/integrations/` are enforced structurally (key denylist + value-shape scrub + prop-spec strip). |
+
+---
+
+## Flags — P0 remediation (2026-08-11 mobile UX audit; [plans](plans/audit-p0-remediation/))
+
+| Flag | Default | Gates |
+|---|---|---|
+| `growth.invite_join_link` | **false** | **Emitter only.** ON: `mobile/src/utils/deepLinks.ts` `buildInviteUrl` emits `/app/league/join/<league_id>?ref=<username>`. OFF (default): today's `/?league=<id>&ref=<username>`. **It never gates the reader, the route, or the claim** — the `?league=` parser, the `LeagueJoin` mobile route, the server 302 at `GET /app/league/join/<id>` and the AASA `/app/league/join/*` claim are all **unflagged** and ship ahead of it. **Why the ordering is inverted from the usual pattern:** Apple caches `/.well-known/apple-app-site-association` on its own CDN for up to ~24 h, so a build that emitted the new URL before the claim propagated would open every invite in Safari — strictly worse than the legacy URL. Parsers-first also means links shared *before* this build keep working forever. **Graduation criteria (all three):** (1) the live AASA validates externally and lists `/app/league/join/*`, (2) ≥24 h of CDN propagation has elapsed since that deploy, (3) a TestFlight build installed *after* that deploy demonstrably opens the app on a tapped `/app/league/join/…` link. Procedure: [runbook § Universal Links AASA](runbook.md#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02). **Rollback = flip back to false**; the legacy URL is parsed forever by both clients, so nothing already in the wild breaks. `buildInviteUrl` reads the flag **imperatively** (`useFeatureFlags.getState()`) so multiple call sites cannot drift. |
+
+**No other P0 finding added a flag.** P0-1, P0-2, P0-5, P0-6, P0-7 and P0-8/9 ship unflagged by design — for P0-1 and P0-2 a flag's OFF position would be the known bug, which is not a rollback lever worth shipping. Rollback for those is `git revert` of the named commit; the levers are enumerated per finding in each PRD's *Rollback* section.
 
 ---
 

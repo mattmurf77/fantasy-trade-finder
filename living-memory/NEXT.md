@@ -9,8 +9,29 @@
 ---
 
 ## Table of Contents
+- [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-11 — P0 remediation status + deferrals
+
+**Item 0 — the audit's nine launch blockers are settled.** Eight are **resolved** on `p0-remediation-2026-08-10` (commits 1-13); **P0-4 was withdrawn** by the operator before the build (the Mock Draft "dead end" was a stale config comment, not a dead end — see [`../docs/business/product/2026-08-09-mobile-ux-audit/06-resolutions.md`](../docs/business/product/2026-08-09-mobile-ux-audit/06-resolutions.md)). **P0-9 landed as test *preparation*, not the 32-tap first-session redesign** — the validation pass plus an operator runbook for the `trades_first_operator_test` experiment, in [`../docs/plans/audit-p0-remediation/prd-p0-8-9.md`](../docs/plans/audit-p0-remediation/prd-p0-8-9.md) §5 (summary in [`../docs/runbook.md`](../docs/runbook.md)). Running that first-session test is the operator's next move; the 32-tap question is still open and still wants pressure-testing before anyone acts on it.
+
+**Deferred by this build, each with the evaluation on the record:**
+
+0e. **Decide match accept/decline UX.** *(operator/product call)* — P0-6 option B. The route exists and web calls it; mobile has no accept/decline surface, so a matched user's only action is Send or Copy. Evaluation: [`lld-p0-6.md`](../docs/plans/audit-p0-remediation/lld-p0-6.md) §6.1. **The mobile `setMatchDisposition` wrapper was deleted; the route was deliberately kept** — deleting it would break the live web caller and the ELO consequences that ride it.
+
+0f. **Add the `is_linked_platform_league` guard to `POST /api/sleeper/propose`.** *(backend, S)* — the client no longer offers Send on non-Sleeper leagues, but the route will still accept one and 400 late. Server-side is where the guarantee belongs. [`prd-p0-6.md`](../docs/plans/audit-p0-remediation/prd-p0-6.md) §6.2.
+
+0g. **Fire `invite_shared` from the League tab's Invite module** (`LeagueScreen.tsx` `inviteLeaguemates`) — the name is registered now, but only the banner emits it, so **roughly half the invite volume is still unmeasured**.
+
+0h. **Register the 29 remaining dropped client `track()` names.** A sweep found 33 of 73 unregistered; this batch fixed 3. Full list: [`lld-p0-8-9.md`](../docs/plans/audit-p0-remediation/lld-p0-8-9.md) §4.3 and the [P0-7 addendum](../docs/business/analytics/2026-08-11-p0-7-addendum.md). Start with `guide_tour_reenabled` (blocks a manual QA check). **`quickset_completed` is different** — it is server-authoritative and the namespaces are disjoint by assertion, so the fix is to **remove the client emitter** (`QuickSetTiersScreen.tsx:330`), not register the name. Its client emission was dropped from this build for that reason. [G-029]
+
+0i. **Analytics prop gaps.** `source` is missing from `find_trades_tapped`'s server-side allowlist — generation-failure rate and retry uptake are unmeasurable until it is added (server side first). `unit` on `experiment_exposed` is registered but unemittable until `GET /api/feature-flags` returns `unit_type`. `FUNNEL_CRITICAL` and the mobile SDK mirror disagree on `app_opened_first` (in one, not the other, and in neither allowlist).
+
+0j. **MFL / Fleaflicker harness profile.** No fixture profile covers them, so P0-6's non-Sleeper paths are proven by unit tests and one ESPN capture rather than by a flow. Waiver W2 in [`prd-p0-6.md`](../docs/plans/audit-p0-remediation/prd-p0-6.md).
 
 ---
 
