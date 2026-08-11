@@ -47,3 +47,4 @@ session) removed from tracking via `git rm --cached` on branch
 `screen-library-2026-08-09`; dir is now gitignored. Files remain on disk in any
 checkout that had them; historical blobs remain in git history. Replacement:
 the `screens/` library (see `screens/CLAUDE.md`).
+| `dc91a91` | `screen-library-2026-08-09` (20 commits) | Squash-merged via PR #106 (`6b8270b`, CI green); worktree ~/ftf-worktrees/screens-wt removed + branch deleted 2026-08-10 |
