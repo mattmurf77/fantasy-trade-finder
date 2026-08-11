@@ -37,6 +37,8 @@ import {
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { useOutlookStripExpanded } from '../state/outlookStrip';
+import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 
@@ -852,10 +854,12 @@ export default function LeagueSummaryScreen() {
             Rendered only when the flag is on; the fetch is likewise gated so
             nothing fires while dark. Basis-driven (shares the toggle above).
             A non-Sleeper league gets the honest unavailable row instead of the
-            section — and no request. */}
+            section — and no request. Frame E: the layer mounts collapsed as a
+            one-line strip; OutlookStripAndSection owns the strip/section
+            switch so this mount site stays one expression. */}
         {oddsEnabled ? (
           outlookSupported ? (
-            <SeasonOutlookSection query={outlookQuery} />
+            <OutlookStripAndSection query={outlookQuery} leagueId={leagueId} />
           ) : (
             <OutlookUnsupportedRow />
           )
@@ -1765,6 +1769,167 @@ function coverageCaption(meta: OutlookMeta): string | null {
   return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} FTF can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
 }
 
+// THE ORDER IS THE PRODUCT. Sort by projected seed ascending so the rows
+// literally are the projected standings — the payload's own ordering is by
+// playoff_pct, which is nearly but not exactly the same thing, and "nearly"
+// would put a team below the cutline above one that is projected to finish
+// ahead of it. Ties resolve on playoff odds then roster_id so the order is
+// deterministic across refetches. Shared by the section's rows AND the
+// strip's "projected Nth" phrase (frame E) so strip-vs-section divergence is
+// structurally impossible.
+function orderOutlookTeams(teams: OutlookTeam[]): OutlookTeam[] {
+  return [...teams].sort(
+    (a, b) =>
+      a.odds.projected_seed - b.odds.projected_seed ||
+      b.odds.playoff_pct - a.odds.playoff_pct ||
+      a.roster_id - b.roster_id,
+  );
+}
+
+// Tiny ordinal helper for the strip's "projected Nth" phrase — 1st/2nd/3rd
+// with the 11/12/13 exception (11th, never 11st). No library.
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+// Frame E (#169): the collapsed one-liner — your own outlook at a glance,
+// the full section one tap away. The label restates TickLabel's tick+label
+// construction locally rather than reusing the component: TickLabel
+// hardcodes accessibilityRole="header" (wrong inside a button) and takes no
+// other a11y props. The Pressable is the accessible unit; the band chip
+// inside is NOT separately accessible and carries NO testID (an accessible
+// container collapses its subtree on iOS — flow-authoring law 3; the band is
+// asserted via the strip's accessibilityLabel at lighting time). Chevron
+// swaps, never rotates (AdjustmentsDisclosure precedent).
+function OutlookStrip({
+  you,
+  rank,
+  count,
+  expanded,
+  onToggle,
+}: {
+  you: OutlookTeam;
+  rank: number;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const band = playoffBand(you.odds.playoff_pct);
+  return (
+    <Pressable
+      testID="league-summary.odds.strip"
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityState={{ expanded }}
+      accessibilityLabel={`Season outlook. ${PLAYOFF_BAND_LABEL[band]} to make the playoffs. Projected ${ordinal(rank)} of ${count}.`}
+      style={({ pressed }) => [
+        styles.oddsStrip,
+        expanded && styles.oddsStripExpanded,
+        pressed && { opacity: 0.6 },
+      ]}
+    >
+      <View style={styles.oddsStripTick} />
+      <Text style={styles.oddsStripLabel}>Season outlook</Text>
+      <View style={[styles.oddsBand, { borderColor: PLAYOFF_BAND_COLOR[band] }]}>
+        <Text style={[styles.oddsBandText, { color: PLAYOFF_BAND_COLOR[band] }]}>
+          {PLAYOFF_BAND_LABEL[band]}
+        </Text>
+      </View>
+      <Text style={[type.bodySm, styles.oddsStripPhrase]} numberOfLines={1}>
+        {`for the playoffs · projected ${ordinal(rank)} of ${count}`}
+      </Text>
+      <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={chalk.dim} />
+    </Pressable>
+  );
+}
+
+// Strip-height loading shell (frame E degenerate state): label + a small
+// warn spinner, no value text, not tappable. Stands in for the section's
+// full-height loading branch in the collapsed default so the fold position
+// doesn't jump when data lands. No testID — the ledger's
+// `league-summary.odds.strip` names the tappable strip Pressable only.
+function OutlookStripLoadingShell() {
+  return (
+    <View style={styles.oddsStrip}>
+      <View style={styles.oddsStripTick} />
+      <Text style={styles.oddsStripLabel}>Season outlook</Text>
+      <View style={styles.oddsStripSpacer} />
+      <ActivityIndicator size="small" color={semantic.warn} />
+    </View>
+  );
+}
+
+// Frame E owner (#169): decides strip vs. full section so the mount site
+// stays one expression. Collapsed by default (absent storage entry);
+// per-user, per-league memory via useOutlookStripExpanded. While expanded
+// the strip stays mounted (it is the collapse affordance) and the unchanged
+// SeasonOutlookSection renders directly beneath it. Degenerate states:
+// loading with no data → the strip-height shell (plus the section's own
+// loading branch when expanded); no data / empty league post-load → null,
+// exactly as today; no `is_you` team → full section with no strip (the
+// strip's content is "your" outlook — without an identified user row it has
+// nothing true to say).
+function OutlookStripAndSection({
+  query,
+  leagueId,
+}: {
+  query: UseQueryResult<LeagueOutlookResponse>;
+  leagueId: string | null;
+}) {
+  const userId = useSession((s) => s.user?.user_id ?? null);
+  const [expanded, setExpanded] = useOutlookStripExpanded(userId, leagueId);
+  const data = query.data;
+
+  if (query.isLoading && !data) {
+    return (
+      <>
+        <OutlookStripLoadingShell />
+        {expanded ? <SeasonOutlookSection query={query} /> : null}
+      </>
+    );
+  }
+
+  if (!data || data.teams.length === 0) return null;
+
+  const you = data.teams.find((t) => t.is_you);
+  if (!you) return <SeasonOutlookSection query={query} />;
+
+  const rank = orderOutlookTeams(data.teams).findIndex((t) => t.is_you) + 1;
+  const onToggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    track(
+      'outlook_strip_toggled',
+      { league_id: leagueId, expanded: next },
+      'LeagueSummary',
+    );
+  };
+
+  return (
+    <>
+      <OutlookStrip
+        you={you}
+        rank={rank}
+        count={data.teams.length}
+        expanded={expanded}
+        onToggle={onToggle}
+      />
+      {expanded ? <SeasonOutlookSection query={query} /> : null}
+    </>
+  );
+}
+
 // The merged season-outlook section: projected standings (row order + cutline)
 // and playoff odds (band chip) as ONE thing. Rendered only when `outlook.odds`
 // is on; degrades quietly (renders nothing) while the endpoint is dark/404s so
@@ -1792,18 +1957,7 @@ function SeasonOutlookSection({
   if (!data || data.teams.length === 0) return null;
 
   const { meta, teams } = data;
-  // THE ORDER IS THE PRODUCT. Sort by projected seed ascending so the rows
-  // literally are the projected standings — the payload's own ordering is by
-  // playoff_pct, which is nearly but not exactly the same thing, and "nearly"
-  // would put a team below the cutline above one that is projected to finish
-  // ahead of it. Ties resolve on playoff odds then roster_id so the order is
-  // deterministic across refetches.
-  const ordered = [...teams].sort(
-    (a, b) =>
-      a.odds.projected_seed - b.odds.projected_seed ||
-      b.odds.playoff_pct - a.odds.playoff_pct ||
-      a.roster_id - b.roster_id,
-  );
+  const ordered = orderOutlookTeams(teams);
   // `meta.beta` is the two-state switch — see the header comment. It is false
   // only from `completed_weeks >= 6`.
   const showRecords = !meta.beta;
@@ -2264,6 +2418,30 @@ const styles = StyleSheet.create({
   betaRibbonText: { ...type.label, color: semantic.warn },
   oddsSource: { marginTop: space.sm, color: chalk.dim },
   oddsLoading: { paddingVertical: space.xl, alignItems: 'center' },
+
+  // Frame E collapsed strip (#169) — full-width warn-tinted row, mounted
+  // where the section mounts. Collapsed it keeps the section's bottom rhythm
+  // (space.lg before the chart card); expanded the section follows directly,
+  // so the margin tightens.
+  oddsStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: semantic.warn,
+    borderRadius: radii.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    marginBottom: space.lg,
+  },
+  oddsStripExpanded: { marginBottom: space.md },
+  // The label restates TickLabel's 3×14 tick + uppercase-label construction
+  // in the warn voice (see OutlookStrip for why the component isn't reused).
+  oddsStripTick: { width: 3, height: 14, backgroundColor: semantic.warn },
+  oddsStripLabel: { ...type.label, color: semantic.warn },
+  oddsStripPhrase: { flex: 1, color: chalk.dim },
+  oddsStripSpacer: { flex: 1 },
 
   oddsList: { marginTop: space.md },
   // Single-line rows: numeral · name · (record from week 6) · band chip. The
