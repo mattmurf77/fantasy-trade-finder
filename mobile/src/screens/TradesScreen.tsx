@@ -4640,6 +4640,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
+                dispositionDisabled={swipeMutation.isPending}
                 untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
                 onToggleUntouchable={
                   untouchablesEnabled ? handleToggleUntouchable : undefined
@@ -4726,46 +4727,6 @@ export default function TradesScreen({ navigation, route }: any) {
                 compact
                 style={styles.sendInSleeper}
               />
-              {/* Check / X disposition buttons — same outcome as swiping
-                  right/left. Both wire to advance() so deck-advance, haptics,
-                  and the API call are identical to the swipe path. Disabled
-                  while a swipe mutation is in flight to prevent double-firing. */}
-              <View style={styles.dispositionRow}>
-                <Pressable
-                  testID="trades.pass-btn"
-                  onPress={() => advance('pass')}
-                  disabled={swipeMutation.isPending}
-                  style={({ pressed }) => [
-                    styles.dispositionBtn,
-                    styles.dispositionBtnPass,
-                    pressed && styles.dispositionBtnPassPressed,
-                    swipeMutation.isPending && styles.dispositionDisabled,
-                  ]}
-                  accessibilityLabel="Pass on this trade"
-                  accessibilityRole="button"
-                >
-                  {({ pressed }) => (
-                    <Icon name="x" color={pressed ? ink.ink0 : semantic.neg} />
-                  )}
-                </Pressable>
-                <Pressable
-                  testID="trades.like-btn"
-                  onPress={() => advance('like')}
-                  disabled={swipeMutation.isPending}
-                  style={({ pressed }) => [
-                    styles.dispositionBtn,
-                    styles.dispositionBtnLike,
-                    pressed && styles.dispositionBtnLikePressed,
-                    swipeMutation.isPending && styles.dispositionDisabled,
-                  ]}
-                  accessibilityLabel="Accept this trade"
-                  accessibilityRole="button"
-                >
-                  {({ pressed }) => (
-                    <Icon name="check" color={pressed ? ink.ink0 : semantic.pos} />
-                  )}
-                </Pressable>
-              </View>
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
@@ -4777,10 +4738,11 @@ export default function TradesScreen({ navigation, route }: any) {
                   Hold a player for options — info, untouchable, swap.
                 </Text>
               ) : null}
-              {/* Bad-trade flag (feedback #85) — tertiary to like/pass, so it
-                  sits below the disposition row at hint-level prominence.
-                  Tapping files an engine-quality flag (operator review, not
-                  an ELO signal) and advances the deck like a pass. */}
+              {/* Bad-trade flag (feedback #85) — tertiary to like/pass (which
+                  live inside the card since #169), so it sits below the deck
+                  at hint-level prominence. Tapping files an engine-quality
+                  flag (operator review, not an ELO signal) and advances the
+                  deck like a pass. */}
               <Pressable
                 onPress={handleFlagBadTrade}
                 disabled={swipeMutation.isPending}
@@ -5316,6 +5278,9 @@ interface SwipableProps {
   onCardLayout: (e: LayoutChangeEvent) => void;
   onLike: () => void;
   onPass: () => void;
+  // #169 — disables the card's in-card Pass/Like row while a swipe
+  // mutation is in flight (the same condition the old below-deck row used).
+  dispositionDisabled?: boolean;
   untouchableIds?: ReadonlySet<string>;
   onToggleUntouchable?: (player: Player) => void;
   // Player-swap (feedback #86) — pass-throughs to TradeCard.
@@ -5345,6 +5310,7 @@ function SwipableTopCard({
   onCardLayout,
   onLike,
   onPass,
+  dispositionDisabled,
   untouchableIds,
   onToggleUntouchable,
   onSwapPlayer,
@@ -5424,7 +5390,7 @@ function SwipableTopCard({
         // pass as VoiceOver custom actions on the card itself, mirroring
         // the visible check/X buttons (identical advance() handlers).
         accessibilityActions={[
-          { name: 'like', label: 'Accept this trade' },
+          { name: 'like', label: 'Like this trade' },
           { name: 'pass', label: 'Pass on this trade' },
         ]}
         onAccessibilityAction={({ nativeEvent }) => {
@@ -5434,6 +5400,9 @@ function SwipableTopCard({
       >
         <TradeCardComp
           data={card}
+          // #169 — the in-card Pass/Like row; top card only (the peek card
+          // and every other mount get no `disposition`).
+          disposition={{ onPass, onLike, disabled: dispositionDisabled }}
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}
@@ -6121,37 +6090,9 @@ const styles = StyleSheet.create({
   queueSheetCancel: { flex: 1 },
   queueSheetSend: { flex: 2 },
 
-  // FB-05 — check / x disposition button row beneath the top trade card.
-  // Icon-button construction (components.md → Buttons): square radius,
-  // 1px semantic border; pressed = semantic fill + ink icon (color-only
-  // state change, no transforms). 56px keeps the touch floor.
-  dispositionRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: space.xl,
-    marginTop: space.lg,
-  },
-  dispositionBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  dispositionBtnPass: {
-    borderColor: semantic.neg,
-  },
-  dispositionBtnPassPressed: {
-    backgroundColor: semantic.neg,
-  },
-  dispositionBtnLike: {
-    borderColor: semantic.pos,
-  },
-  dispositionBtnLikePressed: {
-    backgroundColor: semantic.pos,
-  },
+  // FB-05 — the check / x disposition row moved inside the card (#169,
+  // TradeCard's `disposition` prop). Only the shared in-flight opacity
+  // stays here — the Bad-trade flag below the deck still uses it.
   dispositionDisabled: {
     opacity: 0.45,
   },

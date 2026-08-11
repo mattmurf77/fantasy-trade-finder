@@ -96,6 +96,11 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # WebView, and they go to POST /api/espn/link, not analytics.
     "espn_connect_opened", "espn_connect_otp_step",
     "espn_connect_captured", "espn_connect_abandoned",
+    # League Summary outlook strip (#169 frame E, scope.md §1a; flag
+    # `outlook.odds`) — the collapsed-strip expand/collapse toggle. NOT
+    # funnel-critical; zero volume until the flag lights (specced now
+    # because the operator rejected the analytics waiver 2026-08-11).
+    "outlook_strip_toggled",
 })
 
 # ---------------------------------------------------------------------------
@@ -252,6 +257,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),
     "espn_connect_abandoned": frozenset({"saw_otp"}),
+    # Outlook strip (#169 frame E) — `expanded` is the RESULTING state.
+    "outlook_strip_toggled":  frozenset({"league_id", "expanded"}),
 }
 
 

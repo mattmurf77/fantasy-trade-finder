@@ -52,7 +52,7 @@
 
 3. **Decide `trade.finder_config_consolidated` (flag false).** +716 lines of `TradesScreen.tsx` sit uncommitted; docs already updated as though shipped.
 4. **Graduate or kill `deck.value_model`.** The F8 replay harness runs nightly — the gate is checkable now.
-5. **Wire up `outlook.odds` or delete it.** Built on both ends, but unreachable — flag absent from defaults.
+5. **Light `outlook.odds` (decision + lighting checklist).** Corrected 2026-08-11 — the earlier claim that the flag was absent from `config/features.json` was stale: it is **present and `false`** there, so the endpoint is reachable, just flag-dark. Built on both ends (backend `/api/league/outlook` + LeagueSummary section; a frame-E collapsed strip is planned — `docs/feedback/items/169-outlook-league-summary/`). Lighting owes: a Maestro flow for the section + strip states and a seeded outlook fixture for the harness (the `outlook_strip_toggled` event ships specced + wired with the strip build — operator rejected that waiver) — see `docs/feedback/items/169-outlook-league-summary/scope.md` §1/§3.
 
 ### Medium-term
 
