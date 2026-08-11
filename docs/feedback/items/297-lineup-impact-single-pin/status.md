@@ -174,49 +174,107 @@ Two tests, one of which I could actually execute — including its sabotages.
 
 ### 4a. `mobile/tests/check-single-pin-actions.js` — structural, **sabotage-proven for real**
 
-A TypeScript-AST check over `TradesScreen.tsx`, in the house
-`mobile/tests/check-*.js` style (`check-picks-subset-invariance.js`,
-`check-member-entered-marker.js`). No simulator, no backend, no seed — so unlike the
-Maestro flow, **I ran it, and I ran every sabotage.** Registered as
-`npm run test:single-pin-actions`.
+A TypeScript-AST check in the house `mobile/tests/check-*.js` style. No simulator, no
+backend, no seed — so unlike the Maestro flow, **I ran it, and I ran every sabotage.**
+Registered as `npm run test:single-pin-actions`.
 
-Clean tree:
+#### Rewritten 2026-08-11 (integration round) — and deliberately made stronger, not green
+
+**#169 (`f27c0f5`) moved `trades.pass-btn` / `trades.like-btn` out of `TradesScreen.tsx`
+and into `TradeCard.tsx`** (`:538`, `:555`), wired as `onPress={disposition.onPass|onLike}`.
+The behaviour is correct and complementary to #298 — the deck is ungated, so the card
+renders, and the card now carries the controls. But this test asserted the two ids existed
+*in `TradesScreen.tsx`*, so it went **4 PASS / 4 FAIL on a good build**.
+
+**Repointing the ids at `TradeCard.tsx` would have been a quiet weakening.** Co-location
+was never the claim. Two buttons can exist in `TradeCard.tsx`, render perfectly, and be
+wired to nothing at all — and every one of the old assertions would have passed. On the
+new base the claim spans two files, so the test now pins the **chain**:
+
+```
+TradesScreen  onLike={() => advance('like')}       ← host wires        (:4836)
+     │        onPass={() => advance('pass')}
+     ▼
+SwipableTopCard  disposition={{ onPass, onLike }}  ← host threads      (:5638)
+     │
+     ▼
+TradeCard    testID="trades.like-btn"              ← card renders      (:555)
+             onPress={disposition.onLike}
+```
+
+Mounts are located by **shape**, never by component name: the `disposition` prop (which is
+what `TradeCard` gates its Pass/Like row on), and "any JSX element carrying both `onLike`
+and `onPass`". A rename of `SwipableTopCard` therefore cannot blind the check, and the
+existence assertions scan every `.tsx` under `mobile/src` rather than one hard-coded path —
+#169 already moved these controls once, and moving them is not a regression.
+
+| Assertion | What it pins | Stronger than what it replaced because… |
+|---|---|---|
+| **1** | the controls exist *somewhere* under `mobile/src` | the old check hard-coded `TradesScreen.tsx` and went red on a correct refactor. This one survives relocation and still fails on deletion. |
+| **2** | each button dispatches **its own** callback and not the other | **new.** The old test only checked `advance('like'\|'pass')` inside the screen. It could not see a crossed wire at the card — an X button that likes the trade. `tsc` cannot either (both are `() => void`), and a Maestro flow that taps like and asserts the deck advanced would pass. |
+| **3a/3b** | the host actually **threads** `disposition` into the card, carrying both callbacks | **new.** This is the seam #169 created. Drop the prop and `TradeCard`'s `{disposition ? … : null}` renders no row at all — buttons gone, with the old test none the wiser. |
+| **4a/4b** | the host maps those callbacks to `advance()`, **uncrossed** | strengthened: the old version checked only that `advance('x')` appeared in the button's own `onPress`. It had no notion of "and not the opposite", so a crossed host wire was invisible. |
+| **5a/5b** | the **VoiceOver** custom actions are uncrossed | **new.** The third disposition path #298 named. Nothing else covers it — there is no VoiceOver in the Maestro harness. |
+| **6a/6b/6c** | neither the deck's card mount nor `trades.find-btn` is enclosed by a raw-`singlePin` null gate | **this is the actual #298 regression**, and it is now anchored on the *card mount* rather than on buttons that no longer live in this file. Assertions 1–5 can all pass on a build where the entire surface is unreachable the moment a pin is set; only 6 sees that. |
+| **7a/7b** | `singlePinDeckActive` keyed on `deck.length`, never `topCard` | unchanged — still the subtle one (see sabotage C). |
+| **8** | `FeaturedTradeWindow` still yields to the deck | unchanged — #241's no-two-cards invariant. |
+
+Clean tree, current base:
 
 ```
 $ node tests/check-single-pin-actions.js
-PASS  1 — trades.find-btn (2 mounts) is not gated out by the raw `singlePin` predicate
-PASS  1 — trades.pass-btn (1 mount) is not gated out by the raw `singlePin` predicate
-PASS  1 — trades.like-btn (1 mount) is not gated out by the raw `singlePin` predicate
-PASS  2a — `singlePinDeckActive` is keyed on `deck.length`
-PASS  2b — `singlePinDeckActive` does NOT depend on `topCard`
-PASS  3 — `FeaturedTradeWindow` is gated on `singlePinDeckActive`
-PASS  4 — every trades.pass-btn mount dispatches advance('pass')
-PASS  4 — every trades.like-btn mount dispatches advance('like')
+PASS  1 — trades.pass-btn exists somewhere under mobile/src
+PASS  2 — every trades.pass-btn mount (1) dispatches `onPass` and not `onLike` [src/components/TradeCard.tsx:538]
+PASS  1 — trades.like-btn exists somewhere under mobile/src
+PASS  2 — every trades.like-btn mount (1) dispatches `onLike` and not `onPass` [src/components/TradeCard.tsx:555]
+PASS  3a — the host threads a `disposition` prop into a trade card
+PASS  3b — the `disposition` prop at src/screens/TradesScreen.tsx:5638 carries both callbacks
+PASS  4a — the host mounts a card supplying both `onLike` and `onPass`
+PASS  4b — src/screens/TradesScreen.tsx:4836 `onLike` dispatches advance('like'), not advance('pass')
+PASS  4b — src/screens/TradesScreen.tsx:4836 `onPass` dispatches advance('pass'), not advance('like')
+PASS  5a — the host handles VoiceOver like/pass actions
+PASS  5b — VoiceOver 'like'→onLike and 'pass'→onPass, uncrossed (src/screens/TradesScreen.tsx:5633)
+PASS  6a — the deck's card mount at src/screens/TradesScreen.tsx:4836 is not gated out by the raw `singlePin` predicate
+PASS  6b — trades.find-btn exists in the host
+PASS  6c — trades.find-btn (2 mounts) is not gated out by the raw `singlePin` predicate
+PASS  7a — `singlePinDeckActive` is keyed on `deck.length`
+PASS  7b — `singlePinDeckActive` does NOT depend on `topCard`
+PASS  8 — `FeaturedTradeWindow` is gated on `singlePinDeckActive`
 
 All single-pin-actions checks passed.
 EXIT=0
 ```
 
-Five sabotages applied one at a time to a clean tree, each reverted with
-`git checkout --` before the next. **Actual output:**
+#### Sabotage suite — nine, all re-run on the new base
 
-| Sabotage | Edit applied | Result |
-|---|---|---|
-| **A** — the literal v1.12.0 deck defect | `:4635` gate back to `{!firstRun && singlePin ? null : (…)}` | `test-exit=1`<br>`FAIL 1 — trades.pass-btn (1 mount) …: element at line 4812 gated at line 4635: !firstRun && singlePin ? … : …`<br>`FAIL 1 — trades.like-btn (1 mount) …: element at line 4829 gated at line 4635: …` |
-| **B** — the literal v1.12.0 CTA defect, **consolidated arm only** | wrap `:4291`'s Button in `{!firstRun && singlePin ? null : (…)}` | `test-exit=1`<br>`FAIL 1 — trades.find-btn (2 mounts) …: element at line 4292 gated at line 4291: …` |
-| **C** — the subtle one | `singlePinDeckActive = singlePinFeatured && !!topCard` | `test-exit=1`<br>`FAIL 2a …: saw: singlePinFeatured && !!topCard`<br>`FAIL 2b — … does NOT depend on topCard` |
-| **D** — #241 comes back | drop `&& !singlePinDeckActive` from the `FeaturedTradeWindow` gate | `test-exit=1`<br>`FAIL 3 — FeaturedTradeWindow is gated on singlePinDeckActive` |
-| **E** — cosmetic buttons | `trades.like-btn` `onPress` repointed from `advance('like')` to `setJob(null)` | `test-exit=1`<br>`FAIL 4 — every trades.like-btn mount dispatches advance('like'): line 4829 does not` |
-| **control** | clean tree | `test-exit=0`, no `FAIL` lines |
+Applied one at a time to a clean tree, each reverted with `git checkout --` before the
+next. **Actual output**, abridged to the FAIL lines:
 
-**Sabotage B is why this section exists at all, and it is worth reading twice.** The first
-draft of the test used `elementWithTestId(id)[0]` — the *first* element with each testID.
-Sabotage B reintroduced the exact reported defect on the consolidated layout's CTA and the
-test **came back green**, because it was still looking at the legacy arm's copy. That is
-the same failure mode as the prior batch's three tests that passed on the defect they were
-meant to catch. The test now checks **every** mount (`elementsWithTestId`), which is what
-makes B fail. Had I only reasoned about the sabotage instead of running it, this file would
-have shipped as a decoration.
+| # | Sabotage | Edit | Result |
+|---|---|---|---|
+| **A** | the literal v1.12.0 deck defect | `:4758` gate → `{!firstRun && singlePin ? null : (…)}` | `exit=1` · `FAIL 6a — the deck's card mount at …:4836 …: gated at …:4758: !firstRun && singlePin ? … : …` |
+| **B** | the literal v1.12.0 CTA defect, **consolidated arm only** | wrap the consolidated `<Button testID="trades.find-btn">` in the same gate | `exit=1` · `FAIL 6c — trades.find-btn (2 mounts) …: …:4415 gated at …:4414` |
+| **C** | the subtle one | `singlePinDeckActive = singlePinFeatured && !!topCard` | `exit=1` · `FAIL 7a …: saw: singlePinFeatured && !!topCard` · `FAIL 7b — … does NOT depend on topCard` |
+| **D** | #241 comes back | drop `&& !singlePinDeckActive` from the `FeaturedTradeWindow` gate | `exit=1` · `FAIL 8 — FeaturedTradeWindow is gated on singlePinDeckActive` |
+| **E** | a control disappears | `testID="trades.like-btn"` → `"trades.like-btn-GONE"` | `exit=1` · `FAIL 1 — trades.like-btn exists somewhere under mobile/src: no element carries this testID in any .tsx — the control is gone` |
+| **F** ★new seam | **card-side crossing** | `TradeCard.tsx` pass button → `onPress={disposition.onLike}` | `exit=1` · `FAIL 2 — every trades.pass-btn mount (1) …: …:538: onPress={disposition.onLike} — references `onLike`, the OTHER decision` |
+| **G** ★new seam | **host-side crossing** | `onLike={() => advance('pass')}` | `exit=1` · `FAIL 4b — …:4836 `onLike` dispatches advance('like'), not advance('pass'): saw: onLike={() => advance('pass')}` |
+| **H** ★new seam | **prop dropped** — the card's buttons wired to nothing | delete the `disposition={{ onPass, onLike, … }}` line | `exit=1` · `FAIL 3a — the host threads a `disposition` prop into a trade card: no JSX element in src/screens/TradesScreen.tsx passes `disposition=` — the card renders no Pass/Like row at all` |
+| **I** ★new seam | **VoiceOver crossed** | swap `onLike()`/`onPass()` in `onAccessibilityAction` | `exit=1` · `FAIL 5b — VoiceOver 'like'→onLike and 'pass'→onPass, uncrossed (…:5633)` |
+| — | **control** | clean tree | `exit=0`, no FAIL lines |
+
+**H is the sabotage that justifies the rewrite.** It is the exact failure mode a
+"repoint the ids at `TradeCard.tsx`" repair would have shipped blind: both buttons present,
+both correctly wired to `disposition.onPass` / `disposition.onLike`, assertions 1 and 2
+green — and no `disposition` prop reaching them, so the row never renders. A test that
+passes when the card's buttons are wired to nothing is worse than no test.
+
+**Historical note, kept because it is the reason this section exists.** The first version
+of this file used `elementWithTestId(id)[0]` — the *first* element per testID. Sabotage B
+reintroduced the reported defect on the consolidated layout's CTA and the test **came back
+green**, because it was still looking at the legacy arm's copy. Same failure mode as the
+prior batch's three tests that passed on the defect they were meant to catch. Reasoning
+about a sabotage is not running one.
 
 ### 4b. `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml` — behavioural, **NOT executed**
 
