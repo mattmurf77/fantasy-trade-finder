@@ -765,7 +765,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // clears the refresh nudge the same way.
   function handleFindTrades(source?: string) {
     setDeckFailure(null); // P0-2 — a search in flight has no failure
-    track('find_trades_tapped', source ? { source } : undefined, 'Trades');
+    // #298 — `mode` always present; `source` only when a caller named one.
+    // `source` has been sent here since #257 and STRIPPED on every row by
+    // an empty prop registry until 2026-08-11; it is registered now.
+    track('find_trades_tapped',
+          source ? { source, mode: deckMode } : { mode: deckMode },
+          'Trades');
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     pendingScrollToDeckRef.current = true; // #276
@@ -1093,6 +1098,16 @@ export default function TradesScreen({ navigation, route }: any) {
   // featured window mid-session.
   const singlePinFeatured = !firstRun && !!singlePin;
   const singlePinDeckActive = singlePinFeatured && deck.length > 0;
+  // #298 analytics — ONE derivation of the `mode` prop, read by both
+  // find_trades_tapped and trade_card_viewed. Deliberately a property on
+  // two events that already fire here, not a new event name: #298 is a
+  // regression in WHERE existing controls render, so the question is "do
+  // the existing events still fire from the pinned surface", and a new name
+  // could not answer that (it would have no pre-fix baseline).
+  // Two find_trades_tapped emitters exist below (:768 handleFindTrades and
+  // the legacy `!consolidateOn` arm's inline track) — both read THIS const,
+  // so the two arms can never disagree about the mode.
+  const deckMode: 'single_pin' | 'deck' = singlePinFeatured ? 'single_pin' : 'deck';
   const assetIdeasQuery = useQuery({
     queryKey: [
       'asset-ideas',
@@ -2372,6 +2387,12 @@ export default function TradesScreen({ navigation, route }: any) {
     const props: Record<string, unknown> = {
       card_index: deckIdx,
       trade_id: topTradeId,
+      // #298 — the OUTCOME half of the mode pair. Read at the moment the
+      // card was FRONTED (this effect only re-runs on a new trade_id), so
+      // it records the surface the card actually rendered on. A
+      // find_trades_tapped{mode:single_pin} with no matching
+      // trade_card_viewed{mode:single_pin} is #298 reappearing.
+      mode: deckMode,
     };
     if (deckIdx === 0) {
       props.ms_since_open = msSinceOpen();
@@ -4215,7 +4236,7 @@ export default function TradesScreen({ navigation, route }: any) {
             }
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => {
-              track('find_trades_tapped', undefined, 'Trades');
+              track('find_trades_tapped', { mode: deckMode }, 'Trades');
               generateMutation.mutate({});
             }}
             style={styles.findBtn}
