@@ -30,6 +30,7 @@ import SendInSleeperButton from './SendInSleeperButton';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
+import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
@@ -738,7 +739,12 @@ export default function InLeagueCalculator({
       ) : null}
 
       {anySide && evalQ.data ? (
-        <LeagueVerdict ev={evalQ.data} oppName={opponent?.username ?? 'them'} stale={evalQ.isFetching} />
+        <LeagueVerdict
+          ev={evalQ.data}
+          oppName={opponent?.username ?? 'them'}
+          stale={evalQ.isFetching}
+          leagueId={leagueId}
+        />
       ) : anySide && evalQ.isLoading ? (
         <Card>
           <View style={styles.row}>
@@ -868,12 +874,34 @@ function LeagueVerdict({
   ev,
   oppName,
   stale,
+  leagueId,
 }: {
   ev: CalcEvaluationInLeague;
   oppName: string;
   stale: boolean;
+  leagueId: string;
 }) {
   const both = ev.give_value > 0 && ev.receive_value > 0;
+  // #297 analytics — the honest-empty lineup row is an IMPRESSION, and only
+  // the client knows it rendered. The server knows it omitted
+  // `starter_impact`; it does not know the user reached the both-sides-
+  // populated state below that actually draws the row (and it omits the
+  // field in Mode A too, where this component never runs). Keyed on `ev`,
+  // so it is one event per EVALUATION that showed the row — not one per
+  // mount, and not one per re-render.
+  const lineupUnavailable = both && !ev.starter_impact;
+  useEffect(() => {
+    if (!lineupUnavailable) return;
+    // LEAGUE platform, from the same cached list league_view reads. Never
+    // the device platform (that is a server-derived COLUMN), and never
+    // inferred from the league id's shape: ESPN and MFL league ids CAN be
+    // numeric (a live MFL id in this project's DB is 990062846), so an
+    // isdigit() read would label them 'sleeper'.
+    const platform =
+      useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+        ?.platform ?? 'unknown';
+    track('lineup_impact_unavailable', { platform }, 'TradeCalculator');
+  }, [lineupUnavailable, ev, leagueId]);
   const youGain = ev.your_value_delta > 0;
   const theyGain = ev.their_value_delta > 0;
   // Two-board headline — only meaningful on a two-sided divergence read.
