@@ -175,17 +175,16 @@ tags: [capture, onboarding, fresh]
 - takeScreenshot: onboarding__s2-2
 
 # ── S2.3 · the provenance beat (neutral) ─────────────────────────────────
-# S2.2 advances on a REAL disposition, and getting one took two tries:
-#   • tapping `trades.pass-btn` outright → "Element not found"
-#     (20260810T040051): the disposition row sits BELOW the card and the page
-#     is scrolled to the spotlit card, so the buttons are off-screen.
-#   • an element-anchored LEFT swipe on `trades.card-top` → no-op
-#     (20260810T042920): the failure screenshot shows the SAME card still on
-#     screen. The deck's PanResponder does not accept Maestro's synthetic
-#     directional swipe.
-# What works is scrolling the buttons into view and pressing one: decide() is
-# shared by both paths — TradesScreen.tsx:3008-3014 calls it "swipe or button"
-# — so the disposition, the analytics and the guide advance are identical.
+# S2.2 advances on a REAL disposition. Buttons are the tour's disposition
+# path: an element-anchored LEFT swipe on `trades.card-top` is a no-op
+# (20260810T042920 — the deck's pan rejects Maestro's synthetic directional
+# swipe). #169 moved the Pass/Like row INSIDE the top card, beneath the
+# player tiles — the old off-screen-below-the-deck failure (20260810T040051)
+# is gone, but a tall card can still hold the row below the fold, so the
+# scroll-into-view stays; it self-no-ops when the button is already visible.
+# ON-SIM (#169 Tier-1): re-derive this anchor — drop the scroll if it proves
+# a no-op. advance() takes the disposition "swipe or button"
+# (TradesScreen.tsx) — analytics and the guide advance are identical.
 - scrollUntilVisible:
     element:
       id: "trades.pass-btn"
@@ -204,6 +203,8 @@ tags: [capture, onboarding, fresh]
 # Trigger (:2482): first PASS once totalSwipes >= 2. The pass above was swipe
 # 1; this one is swipe 2 and fires the prompt path, which in the guided arm
 # requests S3.1 and arms S3.2.
+# #169: the X button is in-card now — scroll anchor kept as a self-no-op
+# guard (see S2.3); ON-SIM re-derive.
 - repeat:
     times: 3
     commands:
@@ -351,6 +352,8 @@ tags: [capture, onboarding, fresh]
     visible:
       id: "trades.card-top"
     timeout: 60000
+# #169: the Check button is in-card now — scroll anchor kept as a self-no-op
+# guard (see S2.3); ON-SIM re-derive.
 - scrollUntilVisible:
     element:
       id: "trades.like-btn"
