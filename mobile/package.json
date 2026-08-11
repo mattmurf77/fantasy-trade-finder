@@ -16,7 +16,8 @@
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
-    "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js"
+    "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",
+    "test:single-pin-actions": "node tests/check-single-pin-actions.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
