@@ -437,6 +437,45 @@ def test_calc_trade_evaluated_fires_for_device_identity(route_harness):
 
 
 # ---------------------------------------------------------------------------
+# (e2) P0-7 — the server-fired send-success leg
+# ---------------------------------------------------------------------------
+
+def test_record_send_success_writes_server_fired_row(tmp_path):
+    """P0-7 — the propose route fail-closes under FTF_TEST_MODE (599), so
+    the send-success event is proven at its extracted helper (hld.md S-35)."""
+    import backend.server as server
+    eng = _file_engine(tmp_path)
+    with patch.object(db_module, "engine", eng):
+        server._record_send_success(
+            "u_send", "123456789012345678",
+            give=["a", "b"], receive=["c"], picks=["2027_1_5"],
+            transaction_id="txn-9", from_deck=True,
+        )
+    rows = _ue_rows(eng, "sleeper_send_succeeded")
+    assert len(rows) == 1
+    assert rows[0]["event_id"] is None            # server-authoritative
+    assert rows[0]["league_id"] == "123456789012345678"
+    assert json.loads(rows[0]["props"]) == {
+        "give_n": 2, "receive_n": 1, "pick_n": 1,
+        "from_deck": True, "transaction_id": "txn-9",
+    }
+
+
+def test_record_send_success_never_raises(tmp_path):
+    """A completed Sleeper trade must never be undone by an analytics write."""
+    import backend.server as server
+    with patch.object(server, "record_event", side_effect=RuntimeError("boom")):
+        server._record_send_success("u", "1", [], [], [], None, False)   # no raise
+
+
+def test_send_success_does_not_bump_last_trade_proposed_at():
+    """hld.md S-34 — bumping the denorm column would change notification
+    gating, which is out of scope for an instrumentation item."""
+    from backend.database import _EVENT_TO_USER_COL
+    assert "sleeper_send_succeeded" not in _EVENT_TO_USER_COL
+
+
+# ---------------------------------------------------------------------------
 # (f) taxonomy namespace assertion
 # ---------------------------------------------------------------------------
 

@@ -12415,6 +12415,44 @@ def sleeper_link():
     })
 
 
+def _record_send_success(user_id: str, league_id: str, give: list[str],
+                         receive: list[str], picks: list[str],
+                         transaction_id: str | None,
+                         from_deck: bool) -> None:
+    """P0-7 — the north-star SEND leg (analytics_queries.WAT_LIVE, funnel
+    stage 8, FEATURE_VERTICALS["send_in_sleeper"]).
+
+    Extracted rather than inlined because /api/trades/propose fail-closes
+    under FTF_TEST_MODE (see the guard at the top of the route), so the
+    route cannot be driven end-to-end in a test; this helper is the honest
+    seam and keeps the route body to one line (hld.md S-35).
+
+    Server-fired: the row carries event_id=NULL and is not client-forgeable.
+    NO user identifier of the counterparty rides in props — `transaction_id`
+    is a Sleeper transaction id, which the runbook's reconciliation path
+    wants; `their_user_id` is deliberately excluded.
+
+    Never raises: record_event already swallows its own failures, and the
+    outer guard covers anything upstream of it. A completed Sleeper trade
+    must never be undone by an analytics write.
+    """
+    try:
+        record_event(
+            user_id, "sleeper_send_succeeded",
+            league_id=league_id,
+            source="api",
+            props={
+                "give_n": len(give),
+                "receive_n": len(receive),
+                "pick_n": len(picks),
+                "from_deck": from_deck,
+                "transaction_id": transaction_id,
+            },
+        )
+    except Exception as ev_err:
+        log.warning("record_event(sleeper_send_succeeded) failed: %s", ev_err)
+
+
 @app.route("/api/trades/propose", methods=["POST"])
 def propose_trade_to_sleeper():
     """Send a built trade to Sleeper as a real proposal.
@@ -12525,6 +12563,14 @@ def propose_trade_to_sleeper():
     # sourced this send carried an impression_id. Additive/optional; only
     # reached on a successful Sleeper propose.
     _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    # P0-7 — the send actually landed in Sleeper. This is the ONLY place
+    # in the product that knows that, which is why the success leg is
+    # server-fired while attempt/failure are client-fired (hld.md S-30).
+    _record_send_success(
+        user_id, league_id, give, receive, picks,
+        result.get("transaction_id"),
+        bool(body.get("impression_id")),
+    )
     return jsonify({
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
