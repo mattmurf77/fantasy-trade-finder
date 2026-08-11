@@ -174,6 +174,34 @@ Row **order** is a sibling encoding: a surface presenting the rows as projected 
 
 ---
 
+## Deck disposition (Pass / Like) (#169)
+
+The trade deck's disposition control pair is named **Pass / Like** — operator
+decision ([`feedback/items/169-outlook-league-summary/operator-frame-decisions-2026-08-11.md`](feedback/items/169-outlook-league-summary/operator-frame-decisions-2026-08-11.md) §7 Q2).
+No client introduces "Accept/Decline", "Send offer", or any third vocabulary
+for this control, **in any string surface**: visible copy, testIDs, *and*
+accessibility/VoiceOver labels (the pre-#169 "Accept this trade" labels were
+renamed for exactly this rule).
+
+- **testIDs:** `trades.pass-btn` / `trades.like-btn` — the cross-client names
+  for the pair; Maestro flows and any future client bind to these.
+- **Card ordering rule (operator, same decision record §3/§8):** the
+  disposition pair sits **directly beneath the player tile section** inside
+  the deck card; `TradeValueBar` sits below the pair; **any future card
+  outlook/odds block mounts below `TradeValueBar`** ("value bar above the
+  playoff outlook" — vacuous while no card odds block exists, binding on
+  whoever designs the deferred week-6+ treatment).
+- "Send in Sleeper" is a separate action (proposal transport), not a
+  disposition — it keeps its own naming and placement outside this rule.
+
+**Locations to update together:** `mobile/src/components/TradeCard.tsx`
+(disposition row + a11y strings), `mobile/src/screens/TradesScreen.tsx`
+(`SwipableTopCard` a11y actions), `mobile/.maestro/flows/smoke/06-trades-deck.yaml`
++ `mobile/.maestro/capture/onboarding-tour@fresh.yaml` (the flows that tap
+the pair), and any future web/extension deck surface.
+
+---
+
 ## Team outlook modes
 
 Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.

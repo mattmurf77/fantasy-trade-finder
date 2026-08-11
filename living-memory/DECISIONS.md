@@ -217,6 +217,17 @@
 
 ---
 
+## D-025 — The Trade Card Owns Its Disposition, and Absence Is the Card's Odds Design
+**Date:** 2026-08-11 (feedback #169 frame decisions, third pass)
+**Context:** The operator reviewed the #169 outlook-odds mockups and chose League-Summary frames B+C1+E and card frame C, with two placement corrections. Card frame D (week-6+ odds via a with-trade re-sim) was first selected, then dropped on seeing its backend cost. That left no frame covering week 6+ on the card; the IDP coverage caption's fate had been asked twice without an answer.
+**Decision:** Four rulings, all operator-explicit. (1) **The trade card shows no odds block at all, in any week, for now** — week 6+ is *deferred, not designed*; absence is the design year-round. (2) **Pass / Like is the deck disposition vocabulary** in every string surface including VoiceOver (the shipped "Accept this trade" labels violate it and were renamed), and the pair renders **inside the card directly beneath the player tiles** — with `TradeValueBar` below the pair and any future card odds block below the bar. (3) The League-Summary section defaults to a **collapsed one-line "your outlook" strip** (per-league, per-user persisted) with the full section one tap away. (4) The IDP coverage caption **stays**. Additionally the operator **rejected** the dark-flag analytics waiver: `outlook_strip_toggled` ships specced and wired on day one even though `outlook.odds` is dark.
+**Alternatives considered:** Card frame B (percentage framing, week 6+) — rejected with C1 chosen league-wide. Card frame D — dropped for its re-sim cost. Flagging the button move — rejected: a pure client reorder where `git revert` is the cheaper lever and a flag would be a dead surface. Deferring the analytics spec to lighting time — operator-rejected (NULL-`platform` lesson: instrumentation exists from day one).
+**Consequences:** The card change is client-only and off the bright line's schema/API/flag surfaces (the analytics allowlist is the one backend touch). "Value bar above the playoff outlook" is vacuous today and **binding on whoever designs the deferred week-6+ card treatment** — recorded in `docs/cross-client-invariants.md` § Deck disposition. Lighting `outlook.odds` owes a Maestro flow covering section + strip states and a seeded harness fixture (NEXT.md item 5); the strip's testID is unlintable until that flow exists.
+**Status:** Active (build 2026-08-11, branch `feedback-169-e-and-card`).
+**Related ADR:** — (feedback item `docs/feedback/items/169-outlook-league-summary/`, decisions record + doc set rev 2)
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -245,6 +256,7 @@
 | D-022 | MFL Draft Room Names Resolve in Four Ordered Tiers, and Never Render a Bare Id | 2026-08-10 |
 | D-023 | Draft-Pick Value Is Subset- and Filter-Independent, Behind a Kill Switch | 2026-08-10 |
 | D-024 | The Mock-Draft "Run" Is Engine-Internal, and Two Constants Are Load-Bearing in Opposite Directions | 2026-08-10 |
+| D-025 | The Trade Card Owns Its Disposition, and Absence Is the Card's Odds Design | 2026-08-11 |
 
 ---
 
