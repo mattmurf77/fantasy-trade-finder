@@ -16838,7 +16838,18 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
 
 @app.route("/og/tiers/<pos>/<username>.png")
 def og_tier_card(pos, username):
-    """Render a user's tier snapshot for a position as a 1200x630 PNG."""
+    """Render a user's tier snapshot for a position as a 1200x630 PNG.
+
+    404s while `growth.tier_board_share` is dark, which is its DEFAULT and
+    its intended resting state. Sharing of rankings / tier boards is not a
+    product surface (DECISIONS-p1.md D-P1-12): until that ruling is
+    reversed by the operator, this route is public exposure — it needs no
+    session and no in-app link, so any username's board was fetchable by
+    URL guess. The guard mirrors the package routes below (`/s/p/<id>`,
+    `/og/p/<id>.png`), which have always closed this way.
+    """
+    if not is_enabled("growth.tier_board_share"):
+        return jsonify({"error": "not_found"}), 404
     if _og_image is None:
         return _og_unavailable_response()
     # Attempt to detect the user's active format for nicer subtitle. Since
@@ -16934,7 +16945,15 @@ def _share_html(
 
 @app.route("/s/tiers/<pos>/<username>")
 def share_tiers_page(pos, username):
-    """HTML wrapper with OG tags for a tier snapshot share link."""
+    """HTML wrapper with OG tags for a tier snapshot share link.
+
+    404s while `growth.tier_board_share` is dark (its default). Same
+    reasoning as `og_tier_card` above — D-P1-12 rules tier-board sharing
+    out as a product surface, and this page leaked the same board with the
+    username spelled out in the title.
+    """
+    if not is_enabled("growth.tier_board_share"):
+        return jsonify({"error": "not_found"}), 404
     fmt = request.args.get("fmt", "1qb_ppr")
     if fmt not in SCORING_FORMATS:
         fmt = DEFAULT_SCORING

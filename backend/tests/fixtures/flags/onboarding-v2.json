@@ -127,6 +127,7 @@
   "notif.honest_winbacks": true,
   "growth.share_landing": true,
   "growth.rating_prompt": true,
+  "growth.tier_board_share": false,
   "growth.invite_join_link": false,
   "account.data_export": true,
   "account.sleeper_disconnect": true,

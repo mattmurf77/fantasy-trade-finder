@@ -287,6 +287,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "notif.honest_winbacks",       # 05-04b: winback_dormant truthful copy + lifetime stop
     "growth.share_landing",
     "growth.rating_prompt",
+    # ── Tier-board sharing — OFF, and meant to stay off ─────────────────
+    # P1 audit remediation, operator decision D-P1-12
+    # (docs/plans/audit-p1-remediation/DECISIONS-p1.md): "sharing of
+    # rankings must not be live in any form." Sharing a tier board is not
+    # a product surface. Gates GET /og/tiers/<pos>/<username>.png and
+    # GET /s/tiers/<pos>/<username>; both 404 while dark, matching how the
+    # package routes close behind growth.share_landing. Those two routes
+    # shipped with NO guard at all — sessionless, no in-app link required,
+    # so any username's board was fetchable by guessing the URL. Default
+    # False here AND false in config/features.json: two independent OFFs.
+    # Do not flip without an explicit operator reversal of D-P1-12.
+    "growth.tier_board_share",
     # P0-3 (2026-08-09 mobile UX audit) — EMITTER ONLY. On: buildInviteUrl
     # emits /app/league/join/<id>?ref=<u>. Off (default): today's
     # /?league=<id>&ref=<u>, byte-identical. Never gates the ?league= reader,
