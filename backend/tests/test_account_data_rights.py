@@ -255,7 +255,9 @@ def test_aasa_served_as_json_with_app_id(client, monkeypatch):
     assert {"/": "/u/*"} in detail["components"]
     assert {"/": "/s/*"} in detail["components"]
     assert {"/": "/", "?": {"ref": "?*"}} in detail["components"]
-    assert detail["paths"] == ["/u/*", "/s/*"]
+    # Exact contract, in the order the route emits. P0-3 appended the invite
+    # JOIN path (/app/league/join/*) — see backend/tests/test_invite_links.py.
+    assert detail["paths"] == ["/u/*", "/s/*", "/app/league/join/*"]
 
 
 def test_aasa_team_id_env_override(client, monkeypatch):

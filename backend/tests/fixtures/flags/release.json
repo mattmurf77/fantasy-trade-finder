@@ -125,6 +125,8 @@
   "notif.honest_winbacks": true,
   "growth.share_landing": true,
   "growth.rating_prompt": true,
+  "_comment_growth_invite_join_link": "P0-3 invite deep link. EMITTER ONLY, default OFF. Graduate to true only after: (1) the AASA file at /.well-known/apple-app-site-association validates live and lists /app/league/join/*, (2) >=24h of Apple CDN propagation has elapsed since that deploy, (3) a TestFlight build installed AFTER that deploy demonstrably opens the app on a tapped /app/league/join/... link. Flipping early sends every invite to Safari. Rollback = flip back to false; the legacy /?league= URL is parsed forever by both clients.",
+  "growth.invite_join_link": false,
   "account.data_export": true,
   "account.sleeper_disconnect": true,
   "account.settings_v2": true,

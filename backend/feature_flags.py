@@ -271,7 +271,15 @@ FLAG_KEYS: tuple[str, ...] = (
     "notif.honest_winbacks",       # 05-04b: winback_dormant truthful copy + lifetime stop
     "growth.share_landing",
     "growth.rating_prompt",
-    "account.data_export",         # 06-02: GET /api/account/export JSON archive
+    # P0-3 (2026-08-09 mobile UX audit) — EMITTER ONLY. On: buildInviteUrl
+    # emits /app/league/join/<id>?ref=<u>. Off (default): today's
+    # /?league=<id>&ref=<u>, byte-identical. Never gates the ?league= reader,
+    # the LeagueJoin route, the AASA claim or the 302 — those are additive and
+    # must be live BEFORE any new-format link exists. Graduation: AASA
+    # validated live + >=24h CDN propagation + a post-deploy install proves a
+    # tapped link opens the app (docs/runbook.md § AASA).
+    "growth.invite_join_link",
+    "account.data_export",       # 06-02: GET /api/account/export JSON archive
     "account.sleeper_disconnect",
     "account.settings_v2",
     "profiles.user_toggle",

@@ -7,8 +7,9 @@ HTTP 200 with no redirect, Content-Type application/json, and an `applinks`
 block whose appID matches <TeamID>.<bundle id>.
 
 Scope matters: the components must claim ONLY the shared surfaces (profiles,
-share landings, invite/referral roots) — never "/" unqualified — so the rest
-of the web app keeps opening in the browser.
+share landings, invite/referral roots, and the P0-3 invite JOIN path
+/app/league/join/*) — never "/" unqualified and never the whole /app/* tree —
+so the rest of the web app keeps opening in the browser.
 
 Broader account-surface coverage lives in test_account_data_rights.py; this
 file pins the invite-link matchers specifically.

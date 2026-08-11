@@ -41,7 +41,9 @@ import urllib.request
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, g, jsonify, make_response, request, send_from_directory
+from flask import (
+    Flask, g, jsonify, make_response, redirect, request, send_from_directory,
+)
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes to stdout AND keeps a ring-buffer for /api/debug/log
@@ -8143,6 +8145,37 @@ def terms_page():
     return send_from_directory(app.static_folder, "terms.html")
 
 
+@app.route("/app/league/join/<league_id>")
+def league_join_redirect(league_id):
+    """Web fallback for the mobile invite deep link (P0-3).
+
+    iOS resolves Universal Links against AASA BEFORE any HTTP request, so on a
+    device with the app installed this route is never reached. It exists for
+    the recipient in Safari (no app, or a desktop browser): 302 straight into
+    the web landing that already completes the journey —
+    web/js/app.js captureReferralFromUrl() stores ftf_invited_by /
+    ftf_invited_league, renders "Invited by @<ref>", and auto-selects the
+    league once the Sleeper list loads (app.js:589-601).
+
+    Deliberately NOT a new web page: the existing funnel converts and this
+    hands off to it unchanged. Unflagged — the parsers must be live before any
+    new-format link exists in the wild.
+
+    THE LOCATION IS ALWAYS RELATIVE and always built from a hard-coded "/?"
+    plus urlencode() of a dict we constructed, so no user-supplied string can
+    reach the scheme or host position. Never build this with an f-string.
+    Only `league` and `ref` survive; unknown params are dropped so the
+    redirect stays a closed contract. 302, not 301: a permanent redirect
+    would be cached by browsers and CDNs and outlive any future change to the
+    landing page.
+    """
+    params = {"league": str(league_id)}
+    ref = (request.args.get("ref") or "").strip()
+    if ref:
+        params["ref"] = ref
+    return redirect("/?" + urllib.parse.urlencode(params), code=302)
+
+
 # Apple team id for Universal Links. The repo's canonical value lives in
 # mobile/eas.json (`appleTeamId`); env override so a fork/team change never
 # needs a code edit. Read at request time, not import time.
@@ -8164,6 +8197,17 @@ def apple_app_site_association():
     username is unknown, so `league` must match on its own). `components`
     is the modern matcher (iOS 13+; required for the query matches);
     `paths` is the legacy fallback for the path-only patterns.
+
+    /app/league/join/* (P0-3) — the invite JOIN path. Claimed here
+    UNFLAGGED and AHEAD of the client emitter (`growth.invite_join_link`,
+    default OFF): Apple's CDN caches this file for up to ~24h, so a build
+    that emitted the new URL before this claim propagated would send every
+    invite to Safari — strictly worse than the legacy URL. Flag graduation
+    requires an external AASA validator plus a device check. See
+    docs/runbook.md § AASA. Deliberately NOT broadened to /app/*: the
+    mobile route table owns a dozen /app/… screens the server does not
+    serve, and claiming them would turn an honest Safari 404 into an
+    app-open with no destination.
     """
     team_id = os.environ.get("APPLE_TEAM_ID") or _APPLE_TEAM_ID_DEFAULT
     app_id = f"{team_id}.{_accounts.APPLE_AUDIENCE}"
@@ -8176,10 +8220,14 @@ def apple_app_site_association():
                 "components": [
                     {"/": "/u/*"},
                     {"/": "/s/*"},
+                    # Path matchers stay grouped ahead of the query matchers:
+                    # iOS evaluates `components` in order, and a path matcher
+                    # never shadows a query matcher on "/".
+                    {"/": "/app/league/join/*"},
                     {"/": "/", "?": {"ref": "?*"}},
                     {"/": "/", "?": {"league": "?*"}},
                 ],
-                "paths": ["/u/*", "/s/*"],
+                "paths": ["/u/*", "/s/*", "/app/league/join/*"],
             }],
         },
     })
@@ -17472,6 +17520,47 @@ def parse_league_url():
         "league_id": league_id,
         "name":      name,
         "supported": platform == "sleeper",
+    })
+
+
+@app.route("/api/league/invite-meta")
+def league_invite_meta():
+    """Public, read-only league name for an invite banner (P0-3).
+
+    PRIVACY CONSTRAINT — the name is resolved from Sleeper's PUBLIC API only,
+    never from our `leagues` table. That is why ESPN/MFL/Fleaflicker leagues
+    return null: their names live only in our DB, and this endpoint is
+    unauthenticated, so serving them would make every imported league name
+    enumerable by id. Sleeper league names are already public at
+    https://api.sleeper.app/v1/league/<id>, so this endpoint discloses nothing
+    that the id alone did not already disclose. (`_fetch_sleeper_league_meta`
+    does read `leagues` — via is_linked_platform_league — but that read is how
+    the constraint is ENFORCED; no value from that table reaches the response.)
+
+    Degrades, never fails: any resolution problem is a 200 with
+    league_name: null, and the client's banner falls back to "their league".
+    The P0-3 acceptance criterion (inviter named) is met WITHOUT this route.
+
+    NO RATE LIMIT, deliberately: a thin cache-friendly proxy of data Sleeper
+    already serves publicly and unauthenticated, storing nothing and mutating
+    nothing. The hourly limiter pattern needs a user id this route
+    deliberately does not have. If abuse appears, the lever is
+    `_fetch_sleeper_league_meta`'s upstream, not this route.
+    """
+    league_id = (request.args.get("league_id") or "").strip()
+    if not league_id:
+        return jsonify({"error": "missing_league_id"}), 400
+    name = None
+    try:
+        meta = _fetch_sleeper_league_meta(league_id)
+        if meta:
+            name = meta.get("name") or None
+    except Exception as e:                       # pragma: no cover - defensive
+        log.info("invite-meta: lookup failed (non-fatal) league_id=%s: %s", league_id, e)
+    return jsonify({
+        "league_id":   league_id,
+        "league_name": name,
+        "platform":    "sleeper" if name else None,
     })
 
 
