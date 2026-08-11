@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
+import SendInMflButton from './SendInMflButton';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
@@ -13,12 +14,18 @@ import {
 } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 
-// "Send in Sleeper". Renders on any real trade surface (found / matched /
-// suggested). Flag-gated: returns null when `trade.send_in_sleeper` is off.
-// Platform-gated too (#146): returns null when `leagueId` is an imported
-// ESPN league — the button proposes a REAL Sleeper trade, which is
-// meaningless there. Gated centrally here (every mount passes leagueId)
-// so future mounts can't forget it.
+// "Send in Sleeper" — and the single PLATFORM ROUTER for the send action.
+// Renders on any real trade surface (found / matched / suggested).
+// Flag-gated: returns null when `trade.send_in_sleeper` is off.
+//
+// Platform-gated centrally here (every mount passes leagueId) so no mount
+// can fire the wrong platform's API (#146, extended for Send-in-MFL):
+//   • sleeper (or unknown/missing from the cache — fail-open, pre-#146
+//     behavior) → this button, Sleeper propose
+//   • mfl → SendInMflButton (flag `trade.send_in_mfl`; MFL's documented
+//     import API — previously this button WRONGLY rendered on MFL leagues
+//     and a tap would have fired at Sleeper's API and failed)
+//   • espn / fleaflicker / anything else non-Sleeper → null (no write path)
 //
 // One button, two paths — chosen by whether the Sleeper account is linked in
 // this session (checked up front via GET /api/sleeper/link):
@@ -57,13 +64,13 @@ export default function SendInSleeperButton({
   style,
 }: Props) {
   const enabled = useFlag('trade.send_in_sleeper');
-  // #146 — reactive twin of api/espn.isEspnLeague: hide on imported ESPN
-  // leagues. Fail-open: a league id missing from the cached list (demo
-  // league, stale cache) keeps the button, matching pre-#146 behavior.
+  // Platform routing — reactive twin of api/espn.isEspnLeague etc. Fail-open
+  // for Sleeper: a league id missing from the cached list (demo league,
+  // stale cache) keeps this button, matching pre-#146 behavior. Any league
+  // the cache DOES know as non-Sleeper never reaches the Sleeper API.
   const leagues = useSession((s) => s.leagues);
-  const isEspn = leagues.some(
-    (lg) => lg.league_id === leagueId && lg.platform === 'espn',
-  );
+  const platform =
+    leagues.find((lg) => lg.league_id === leagueId)?.platform ?? 'sleeper';
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
   // True while we're waiting for the user to come back from the connect
@@ -270,7 +277,24 @@ export default function SendInSleeperButton({
     }
   }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
 
-  if (!enabled || isEspn) return null;
+  // Platform routing (see header). MFL leagues delegate to the MFL twin —
+  // one mount point, so the reconnect/confirm/pre-flight UX stays per
+  // platform while no surface can pick the wrong API.
+  if (platform === 'mfl') {
+    return (
+      <SendInMflButton
+        leagueId={leagueId}
+        theirUserId={theirUserId}
+        givePlayerIds={givePlayerIds}
+        receivePlayerIds={receivePlayerIds}
+        impressionId={impressionId}
+        onSent={onSent}
+        compact={compact}
+        style={style}
+      />
+    );
+  }
+  if (!enabled || platform !== 'sleeper') return null;
 
   const label =
     state === 'sent' ? 'Proposal sent'
@@ -280,6 +304,7 @@ export default function SendInSleeperButton({
 
   return (
     <Button
+      testID="trades.send-sleeper-btn"
       label={label}
       variant="secondary"
       compact={compact}
