@@ -23,25 +23,74 @@ buttons named **Pass / Like**) + `mockups/polish-lab-2026-08-11/trades-single-pi
 
 ## 1. Analytics scope
 
-- [x] **(b) Existing events cover it.** No new events. Every restored control already
-      emits through paths this change does not modify:
+**REWRITTEN 2026-08-11 from waiver to spec — the operator rejected the #297 waiver
+below and made analytics the top priority of this batch.** Built by the analytics
+instrumentation agent. Full tracking-plan addendum, including intent-vs-non-intent
+reasoning and the sabotage matrix: **[`analytics.md`](analytics.md)**.
 
-  | Event | Registered at | Question it answers post-fix |
-  |---|---|---|
-  | `find_trades_tapped` | `backend/analytics_taxonomy.py:51`, props `frozenset()` (`:191`) | Are pinned users generating decks again? Pre-fix this could not fire in single-pin mode at all — the button did not exist. A non-zero count from a pinned session is itself the fix's telemetry. |
-  | `swipe` | `analytics_taxonomy.py:111` | Are pinned users dispositioning trades? Emitted from `advance()`, which every restored control (swipe, `trades.pass-btn`/`trades.like-btn`, VoiceOver actions) funnels into. |
-  | `trade_keep_side_tapped` | emitted at `TradesScreen.tsx:2004` | Unchanged; it is the main route *into* single-pin mode. |
+- [x] **(a) New events specced against the taxonomy.**
 
-  No taxonomy edit needed, so the DEFAULT-DENY drop path is not in play: every event
-  this change can cause is already registered and will be accepted server-side.
+  | Event | New? | Fires from | Trigger | Props | Intent? |
+  |---|---|---|---|---|---|
+  | `lineup_impact_unavailable` | **new name** | `InLeagueCalculator.tsx` → `LeagueVerdict` | The honest-empty "Starting lineup" row renders (`both && !ev.starter_impact`), keyed on `ev` so it is one row per **evaluation**, not per mount | `platform` (LEAGUE platform: `sleeper`\|`espn`\|`mfl`\|`fleaflicker`\|`unknown`) | **NON-INTENT** |
+  | `find_trades_tapped` | no — props widened | `TradesScreen.tsx` ×2 emitters | unchanged | **+`mode`** (`single_pin`\|`deck`), **+`source`** | INTENT, unchanged |
+  | `trade_card_viewed` | no — props widened | `TradesScreen.tsx:2380` | unchanged | **+`mode`** | INTENT, unchanged |
 
-- **WAIVED for #297** — the new `calc.lineup-impact-unavailable` row emits **no event**.
-  Reason: it is a static explanatory row with no interaction. Instrumenting an
-  impression would require a new registered event, a taxonomy edit in `backend/`
-  (out of scope for this agent), and would answer a question — "how many users hit a
-  non-Sleeper league in the calculator" — that is already answerable from the
-  `platform` column on the leagues table without any client work. Recommend the
-  orchestrator route that question to `/an-user-data` instead of new instrumentation.
+  - **`mode` is a property, not a new event, on purpose.** #298 is a regression in
+    *where existing controls render*. The question is "do the events that always fired
+    on this path still fire from the pinned surface" — only a property on those same
+    events can answer it, because a new name would have no pre-fix baseline. All three
+    emitters read one `const deckMode`, so the legacy and consolidated CTA arms cannot
+    disagree.
+  - **`source` is a bug fix.** `handleFindTrades` has sent it since #257 and the empty
+    prop registry (`frozenset()`) popped it on **every row** — the live twin of
+    `trade_card_shared`'s discarded `landing`. Name survival and prop survival are
+    separate silent failures on this endpoint.
+  - **`platform` is the LEAGUE platform**, read from the session's cached league list —
+    never from the league id's shape, because **ESPN and MFL ids can be numeric** (MFL
+    `990062846` is live in this project's DB). Device platform is a server-derived
+    *column*, never a prop (the NULL-`platform` incident).
+  - **DAU guard.** `INTENT_EVENTS` is derived by SUBTRACTION, so taxonomy growth is
+    intent-by-default. `lineup_impact_unavailable` was added to
+    `analytics_queries.NON_INTENT_EVENTS` in the **same commit** as its allowlist entry
+    — it is a passive impression, and the evaluation that produced it already counts
+    the user via the server-fired `calc_trade_evaluated`. #298 added no event name, so
+    it cannot perturb the series at all.
+  - **#169 re-check.** #169 moved the Pass/Like *controls* into `TradeCard.tsx`; it did
+    **not** move the `trade_card_viewed` emitter (still `TradesScreen.tsx:2380`) or
+    change `advance()`'s server-fired `swipe`. Verified by call-site grep, so the
+    property placement holds.
+
+  Still true from the original spec, unchanged by this work: `swipe` (server-fired,
+  from `advance()`, which every restored control funnels into) and
+  `trade_keep_side_tapped` (`TradesScreen.tsx`) cover the disposition and the route
+  *into* single-pin mode.
+
+- **Deliberately NOT instrumented:** the server-side cause split on
+  `calc_trade_evaluated` (`no_slot_template` vs `roster_missing`). It needs a
+  `server.py` edit outside the analytics agent's ownership, `platform` already answers
+  the product question, and the residual (`platform:sleeper` rows on the new event) is
+  itself the signal that the finer split is worth adding. Cost to add later: one prop
+  on one server `record_event` call. Reasoning in `analytics.md` §2.
+
+- **Pre-wiring gate, owed at ship:** the deploy-then-probe check in `analytics.md` §7 —
+  one hand-rolled `POST /api/events` per new name with its full property set, asserting
+  `dropped == 0` **and** every property echoed back from `user_events.props`. Not run
+  here; it needs a deploy.
+
+<details><summary>Superseded — the original #297 waiver (rejected by the operator 2026-08-11)</summary>
+
+> **WAIVED for #297** — the new `calc.lineup-impact-unavailable` row emits **no event**.
+> Reason: it is a static explanatory row with no interaction. Instrumenting an
+> impression would require a new registered event, a taxonomy edit in `backend/`
+> (out of scope for this agent), and would answer a question — "how many users hit a
+> non-Sleeper league in the calculator" — that is already answerable from the
+> `platform` column on the leagues table without any client work.
+
+Rejected because the leagues table answers "how many users *have* a non-Sleeper
+league", not "how many users hit the wall in the calculator" — the impression is the
+thing #297's fix creates, and only the client can witness it.
+</details>
 
 ## 2. Schema & flag scope
 

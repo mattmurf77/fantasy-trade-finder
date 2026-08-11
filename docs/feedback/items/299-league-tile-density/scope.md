@@ -11,17 +11,90 @@ Design contract: `mockups/polish-lab-2026-08-11/OPERATOR-DECISIONS.md` (#299 →
 
 ## 1. Analytics scope
 
-- [x] **(c) WAIVED — no analytics needed because:**
+**REWRITTEN 2026-08-11 from waiver to spec — the operator rejected the waiver below
+and made analytics the top priority of this batch.** Built by the analytics
+instrumentation agent. Full tracking-plan addendum, including intent-vs-non-intent
+reasoning and the sabotage matrix, lives with the batch's lowest ID:
+**[`../297-lineup-impact-single-pin/analytics.md`](../297-lineup-impact-single-pin/analytics.md)**.
 
-Both items are presentation/navigation polish on an existing surface. Nothing new is collected, no new decision point is introduced, and no existing funnel changes shape: the drill-in is still `selectedId` component state, entered by the same bar tap and exited by a control that already existed.
+- [x] **(a) One new event specced against the taxonomy. The enter half was already
+  registered and is ADOPTED, not duplicated.**
 
-Checked against `backend/analytics_taxonomy.py` (**default-deny** — an unregistered `type` is counted and dropped server-side, never 4xx'd, so a speculative event would have been silently discarded):
+  | Event | New? | Fires from | Trigger | Props | Intent? |
+  |---|---|---|---|---|---|
+  | `league_team_opened` | **no — already shipped (P0-7, `b904ff2`)** | `openTeam` in `LeagueSummaryScreen.tsx` | Drill-in opens, from the chart bar or the list row | `via` (`bar`\|`row`), `rank`, `basis`, `subset`, `filter_count` — **unchanged** | INTENT, unchanged |
+  | `league_team_closed` | **new name** | `emitTeamClosed(via)` — the single exit choke point | Focus ends through any of its five controls | `via`, `dwell_ms`, `rank` | **NON-INTENT** |
 
-- **No registered event covers the League drill-in at all.** `league_selected` (`:185`) is league *selection* at sign-in, with properties `{league_index, league_count, platform, auto, league_type}` — a different moment. There is no `team_focused`, no `drill_in_*`, no screen-view event for `LeagueRankings`.
-- Measuring #302's actual success claim — "the user leaves the drill-in deliberately instead of rage-scrolling back up" — would need a **new registered pair** (focus-entered / focus-exited with an exit-method property). That is a tracking-plan change: `analytics_taxonomy.py` + `docs/data-dictionary.md` + the taxonomy doc, i.e. the "bright line" surface CLAUDE.md says is never a quick fix.
+  **The waiver's central premise is now false.** It said "no registered event covers
+  the League drill-in at all" — true when it was written, and false by the time it
+  shipped: `origin/main` gained 17 client events in the interim, including the whole
+  P0-7 League family. `league_team_opened` is fired from the same `openTeam` helper
+  both drill-in entry points route through, and it **fully covers the enter half**,
+  including the same bar-vs-row `via` the waiver proposed re-minting as
+  `chart_bar | list_row`.
 
-**Recommendation, explicitly out of scope here:** if the operator wants the #302 fix measured rather than asserted, file it as its own item —
-`league_team_focused {league_id_hash, team_rank}` and `league_team_unfocused {exit_method: header_back | hardware_back | tab_retap | in_card_link, scroll_depth_bucket}`. `exit_method` is the whole point: it is the only way to learn whether the header control is the one people find. **Not built.** Adding it unilaterally would put an unregistered event on a default-deny endpoint and change an analytics surface inside a polish item.
+  **So the focused/unfocused PAIR was not built.** Two events for one interaction on
+  this screen is the two-sources-of-truth bug #208/#248/#293 are a catalog of.
+  `mobile/tests/check-analytics-297-302.js` fails if `league_team_focused` or
+  `league_team_unfocused` reappears in the screen **or** the taxonomy (sabotage J12).
+
+  **The genuine gap was the EXIT, and it takes one event.** The drill-in is component
+  state, not a stack push, so it emits no `screen_left` and no navigation event —
+  there is no way to know whether a user leaves deliberately at all (literally #302's
+  claim), which of the five exits they use, or how long a drill-in lasts.
+
+  - `via` is a **closed 5-value enum**, one per control, each asserted to appear
+    exactly once in the file: `header_back` (#302's stack-header control),
+    `in_card_link` (the #243 link, root-stack push only), `hardware_back` (#302's
+    `BackHandler`), `tab_retap` (#302's active-tab re-tap), `refocus` (opened a
+    different team without leaving the panel).
+  - **The only bare `setSelectedId(null)` in the file is the one inside `closeTeam`**
+    — asserted, and sabotage-proven (J1). Any control that clears focus without
+    routing through the choke point would vanish from the data while the UI kept
+    working: a silent hole, not a visible bug.
+  - The focus interval lives in a **ref, not state**: two of the five controls are
+    registered in effects whose deps deliberately exclude `selectedId`, so a state
+    closure would report the focus live when the handler was *registered*.
+  - **The sixth case is measured by absence, deliberately.** A `league_team_opened`
+    with no matching close before the next `screen_left` is "abandoned by navigating
+    away" — the stranded-user state #302 exists to fix. No unmount-cleanup emitter,
+    because it would double-fire on React strict-mode remounts and invent dwell.
+    Exit rate = `count(closed) / count(opened)`; the shortfall is the abandon rate.
+  - **DAU guard.** `INTENT_EVENTS` is derived by SUBTRACTION, so taxonomy growth is
+    intent-by-default. `league_team_closed` went into
+    `analytics_queries.NON_INTENT_EVENTS` in the **same commit** as its allowlist
+    entry: it is a terminator, dismissal-class like `quickset_abandoned`, and every
+    close is preceded by an opener that already counts the user. `league_team_opened`
+    **stays INTENT, untouched.**
+  - No `league_id` / `league_id_hash` prop, by decision: client rows carry
+    `league_id=NULL` by ingest contract, and a per-user league hash is unbounded
+    cardinality for no question anyone asked. No `scroll_depth_bucket` either — it was
+    never derivable from the screen's state.
+
+- **Test delta:** `mobile/tests/check-league-drill-in.js` stays at **30 assertions,
+  30 PASS** — two regexes repointed from `setSelectedId(null)` to the choke-point
+  call; none added, none removed. New: `mobile/tests/check-analytics-297-302.js`
+  (`npm run test:analytics-297-302`), a client↔taxonomy cross-check with 12
+  executed sabotage proofs.
+
+- **Pre-wiring gate, owed at ship:** the deploy-then-probe check in `analytics.md` §7.
+  Not run here; it needs a deploy.
+
+<details><summary>Superseded — the original waiver (rejected by the operator 2026-08-11)</summary>
+
+> - [x] **(c) WAIVED — no analytics needed because:**
+>
+> Both items are presentation/navigation polish on an existing surface. Nothing new is collected, no new decision point is introduced, and no existing funnel changes shape.
+>
+> - **No registered event covers the League drill-in at all.** There is no `team_focused`, no `drill_in_*`, no screen-view event for `LeagueRankings`.
+> - Measuring #302's actual success claim would need a **new registered pair** (focus-entered / focus-exited with an exit-method property).
+>
+> **Recommendation, explicitly out of scope here:** `league_team_focused {league_id_hash, team_rank}` and `league_team_unfocused {exit_method, scroll_depth_bucket}`.
+
+Rejected on both counts: the premise was stale (`league_team_opened` and
+`league_view` shipped in P0-7), and the recommended pair would have duplicated the
+enter half.
+</details>
 
 ## 2. Schema & flag scope
 
