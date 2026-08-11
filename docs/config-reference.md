@@ -146,6 +146,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | Flag | Default | Gates |
 |---|---|---|
 | `trade.send_in_sleeper` | false | ⚠️ **ToS-adverse.** `POST/GET/DELETE /api/sleeper/link` + `POST /api/trades/propose` (all 404 when off) — sends trades through Sleeper's *undocumented* private write API (`propose_trade` GraphQL mutation). Requires `SLEEPER_TOKEN_KEY`. Adapter: `backend/sleeper_write.py`; token store: `sleeper_credentials`. Capture + ToS/risk (C4): [runbook](plans/sleeper-write-capture-runbook.md). |
+| `trade.send_in_mfl` | false | "Send in MFL" — `POST /api/trades/propose-mfl` + the MFL branch of `POST /api/trades/validate` + the mobile send button on MFL leagues (404 / unmounted when off). Rides MFL's **documented** import API (`import?TYPE=tradeProposal`) with the #177 `MFL_USER_ID` cookie (`mfl_credentials`; requires `SLEEPER_TOKEN_KEY` for at-rest encryption). Adapter: `backend/mfl_write.py`. **Keep off until the operator live-verification checklist passes** (import response shape, wwwNN import host, pick encodings, MFL client registration): [scope block](feedback/items/177-mfl-auth-link/send-in-mfl-scope.md). |
 
 ## Flags — Account auth (account-auth plan P2 — ships dark)
 

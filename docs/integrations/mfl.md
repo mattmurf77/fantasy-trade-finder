@@ -1,9 +1,11 @@
 # MyFantasyLeague (MFL) integration — reference
 
 > Feeds an instrumentation build agent. Scope: the full MFL surface as it exists
-> in code today (2026-08-09), not the roadmap. Primary module:
+> in code today (2026-08-11), not the roadmap. Primary modules:
 > [`backend/mfl_service.py`](../../backend/mfl_service.py) (pure/offline-testable
-> HTTP client + parsers). All call sites live in `backend/server.py`,
+> HTTP client + parsers, reads) and
+> [`backend/mfl_write.py`](../../backend/mfl_write.py) (writes — "Send in MFL",
+> flag `trade.send_in_mfl`). Call sites live in `backend/server.py`,
 > `backend/draft_board_service.py`, `backend/draft_status.py`, and
 > `backend/database.py`.
 
@@ -15,6 +17,7 @@
 4. [Error modes](#4-error-modes)
 5. [Call frequency / caching](#5-call-frequency--caching)
 6. [Instrumentation guidance](#6-instrumentation-guidance)
+7. [Write surface — "Send in MFL"](#7-write-surface--send-in-mfl)
 
 ---
 
@@ -390,3 +393,80 @@ had already dropped from its export stayed in `platform_future_picks` until
   stdout) but should not land in a persistent structured-log sink without
   going through `_clean_text` first, to avoid HTML-ish fragments in log
   storage.
+
+## 7. Write surface — "Send in MFL"
+
+> Added 2026-08-11 (flag `trade.send_in_mfl`, default OFF — built dark, no live
+> import has been fired yet). Module: [`backend/mfl_write.py`](../../backend/mfl_write.py)
+> — pure, opener-injectable, no Flask/DB imports, same design contract as
+> `sleeper_write.py`. Feature scope + the operator live-verification checklist
+> that gates flag graduation:
+> [docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md](../feedback/items/177-mfl-auth-link/send-in-mfl-scope.md).
+
+### Endpoints
+
+| # | Purpose | URL pattern | Method | Call site(s) |
+|---|---|---|---|---|
+| W1 | Propose a trade | `https://{host}/{year}/import?TYPE=tradeProposal&L={id}&OFFEREDTO={ffff}&WILL_GIVE_UP={a,b}&WILL_RECEIVE={c,d}&EXPIRES={unix}&JSON=1[&COMMENTS=…]` | GET | `mfl_write.propose_trade()`; called from `server.py` `POST /api/trades/propose-mfl` |
+| W2 | Respond to a pending trade | `https://{host}/{year}/import?TYPE=tradeResponse&L={id}&TRADE_ID={t}&RESPONSE=accept\|reject\|revoke&JSON=1` | GET | `mfl_write.respond_trade()` — **no route yet** (revoke is the near-term use) |
+
+Both hit the league's assigned `wwwNN` host, same as exports (§1's gotcha —
+whether imports strictly require it is a TODO(live-verify), but the wwwNN host
+is correct either way). `EXPIRES` defaults to now + 7 days
+(`DEFAULT_EXPIRES_SECONDS`), stated explicitly rather than leaning on MFL's
+own one-week default.
+
+### Auth
+
+Imports require the **`MFL_USER_ID` session cookie** (§2's credential — the
+one `mfl_credentials` stores Fernet-encrypted). MFL's api_info is explicit
+that APIKEY auth works for exports only, **not imports** — there is no
+API-key path for writes. The route decrypts via `server._mfl_cookie_for`
+(encrypted row first, in-memory session fallback); a rejected cookie
+(HTTP 401/403 **or** an auth-flavored `<error>` body) raises
+`MflWriteAuthError`, the route drops the stored credential and returns
+409 `mfl_auth_expired` → the client re-prompts the #177 sign-in.
+
+### Asset ids (`WILL_GIVE_UP` / `WILL_RECEIVE`, comma-separated)
+
+| Asset | Format | Example | Notes |
+|---|---|---|---|
+| Player | bare MFL player id | `13130` | FTF works in Sleeper-id space; the route reverse-maps via the DP crosswalk (`by_mfl_sleeper` inverted, `server._sleeper_to_mfl_map`) and **HARD-BLOCKS** (422 `mfl_asset_unmapped`) if any asset fails — an offer never silently loses an asset |
+| Current-year pick | `DP_RR_SS`, **zero-based**, two-digit | `DP_02_05` = 3rd round, 6th pick | `mfl_write.encode_current_year_pick` |
+| Future pick | `FP_FFFF_YYYY_R` — **original-owner** franchise (4-digit zero-padded, matching `originalPickFor` in the §3 futureDraftPicks shape), year, 1-based round | `FP_0005_2027_1` | `mfl_write.encode_future_pick`; ground truth for construction lives in `leagues.platform_future_picks` |
+| Blind-bid dollars | `BB_10.50` | | documented by MFL, **not built** |
+
+**TODO(live-verify)** — the encodings match MFL's Request Reference examples
+but no live import has confirmed them: padding widths, `DP_` zero-basing in
+practice, and whether `JSON=1` applies to import responses are all on the
+operator checklist. `_parse_import_response` accepts both `<status>OK</status>`
+XML and `{"status":"OK"}` JSON and **refuses to report success on any
+ambiguous body**.
+
+### Error modes
+
+`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input'`) +
+`MflWriteAuthError`. Route mapping (`POST /api/trades/propose-mfl`): full
+table in [docs/api-reference.md](../api-reference.md) § Send in MFL —
+notably 422 `mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed),
+409 `mfl_auth_expired` (credential dropped), 502 `mfl_write_failed`
+(carries `kind`/`detail`; HTTP 429 throttling surfaces as `kind: "network"`).
+
+### Rate limits / hygiene
+
+Same posture as reads: `MFL_USER_AGENT` on every request, module-level ≥1s
+spacing on the live path (`_REQUEST_SPACING_SECONDS`), no retry on failure.
+Client registration (§2's note) is **still pending** and matters more here —
+unregistered write traffic is the most throttle-exposed. The cookie is never
+logged and never an `api_call` event property; observability rides
+`observe_call("mfl", "import.tradeProposal" | "import.tradeResponse")` with
+the same safe props as exports (league_id, host, status, latency, error kind).
+
+### Pre-flight (#180 parity)
+
+`POST /api/trades/validate` routes MFL-linked leagues to a fresh `rosters`
+export (`mfl_service.fetch_rosters` + `parse_roster_ids`, best-effort `{}`)
+and reports advisory `player_moved` / `roster_not_found` findings plus
+`asset_unmapped` (the advisory mirror of the propose route's hard block).
+Roster limits, deadlines and commissioner locks are delegated to MFL — its
+import enforces league rules, same philosophy as the Sleeper path.

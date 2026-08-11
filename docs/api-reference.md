@@ -86,7 +86,7 @@ Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/impor
 | Unverified, no controller, grace (`auth.enforce_verified_writes` false) | allow + one `AUTH-GRACE` log line (runbook monitors the funnel) |
 | Unverified, no controller, enforcement on | **403 `verification_required`** |
 
-Hard-verified regardless of grace: `POST /api/sleeper/link` (carries its own proof — see Send in Sleeper below), `POST /api/trades/propose`, `POST /api/account/reset-rankings`.
+Hard-verified regardless of grace: `POST /api/sleeper/link` (carries its own proof — see Send in Sleeper below), `POST /api/trades/propose`, `POST /api/trades/propose-mfl`, `POST /api/account/reset-rankings`.
 
 ### The read gate (account-auth P2.5 — read privacy)
 
@@ -205,6 +205,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 | POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match (records an ELO signal). Re-sending the **same** decision is idempotent → `200 {ok, idempotent: true, both_decided, outcome}` with **no** `matches` key and no second ELO signal (feedback #77 — clients ≤1.3.0 render Accept/Decline on already-decided tiles); a **conflicting** decision → 409 |
 | POST | `/api/trades/matches/<match_id>/dismiss` | Archive a match from the caller's inbox only — persisted, per-user, **ELO-neutral** (not a decline). Powers the mobile "Dismiss" CTA. 404 if the caller isn't a participant. |
 | POST | `/api/trades/propose` | **Flagged beta** (`trade.send_in_sleeper`, default off). Send a built trade to Sleeper as a real proposal — see [Send in Sleeper](#send-in-sleeper-flagged-beta) |
+| POST | `/api/trades/propose-mfl` | **Flagged** (`trade.send_in_mfl`, default off). Send a built trade into MyFantasyLeague via MFL's *documented* import API — see [Send in MFL](#send-in-mfl-flagged) |
 
 **Deck order is not strictly score-sorted.** With `trade.thompson_deck` on (prod default), the returned card order is Thompson-sampled (bounded 0.5–1.5× multiplier on `composite_score`) and `trade.deck_diversity` can demote league-saturated targets — so order is intentionally stochastic and varies run-to-run. Clients must not assume `cards[0]` is the strict `composite_score` max. With both flags off the deck is composite-sorted descending (TC-ENG-001 / TC-E2E-001).
 
@@ -295,7 +296,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | GET | `/api/sleeper/link` | Link status (never returns the token): `{connected, sleeper_user_id, expires_at, expired}` |
 | DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}`. Standard write gate (grace applies) |
 | POST | `/api/trades/propose` | Send a trade. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — highest blast radius (writes into the user's real Sleeper league). Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], draft_picks?[], impression_id?}`. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. → `{status: "proposed", transaction_id}`. **F1 (flag `deck.signal_v2`):** on success, an optional `impression_id` appends a `propose` `deck_outcomes` row |
-| POST | `/api/trades/validate` | **#180 pre-send validation** (same flag; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (players only). Re-fetches live Sleeper league meta + rosters and reports advisory findings → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Codes: `league_archived` (season `complete`), `player_moved` (a traded player is no longer on the expected roster), `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`. `checked:false` = Sleeper data unreachable / non-Sleeper league — nothing validated. Everything else (locks, deadline, veto, FAAB) is delegated to Sleeper. See [items/180](feedback/items/180-trade-send-validation/status.md) |
+| POST | `/api/trades/validate` | **#180 pre-send validation** (gated on `trade.send_in_sleeper` OR `trade.send_in_mfl`; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (players only). **Platform-routed server-side:** an MFL-linked league id (flag `trade.send_in_mfl`) validates against a fresh MFL `rosters` export (codes: `asset_unmapped` — advisory mirror of the propose route's reverse-crosswalk hard block — plus `player_moved`, `roster_not_found`); every other league takes the Sleeper path: re-fetches live Sleeper league meta + rosters → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Sleeper codes: `league_archived` (season `complete`), `player_moved`, `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`. `checked:false` = platform data unreachable — nothing validated. Everything else (locks, deadline, veto, FAAB, roster limits on MFL) is delegated to the platform. See [items/180](feedback/items/180-trade-send-validation/status.md) |
 
 `/api/trades/propose` error contract (client maps these to a reconnect prompt / deep-link fallback):
 
@@ -311,6 +312,31 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league |
 
 **v1 scope:** players (+ FAAB) only; draft picks are accepted only pre-encoded as `"orig,season,round,from,to"` strings.
+
+## Send in MFL (flagged)
+
+The MFL analogue of Send in Sleeper — but riding MFL's **documented, sanctioned** import API (`{wwwNN host}/{year}/import?TYPE=tradeProposal`), so the risk profile is the inverse of the Sleeper path. Gated everywhere by `trade.send_in_mfl` (default **false**; 404 when off). Auth is the `MFL_USER_ID` session cookie the #177 auth-link flow already stores (Fernet-encrypted, `mfl_credentials` — MFL's APIKEY works for exports only, never imports). Adapter: `backend/mfl_write.py` (pure, opener-injectable). Feature scope + the **live-verification checklist that must run before the flag graduates** (import response shape, `wwwNN`-host requirement for imports, pick-asset encodings): [feedback/items/177-mfl-auth-link/send-in-mfl-scope.md](feedback/items/177-mfl-auth-link/send-in-mfl-scope.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/trades/propose-mfl` | Send a trade into MFL as a real pending proposal. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — same blast-radius bar as the Sleeper propose. Body `{league_id, their_user_id (the synthetic mfl:{L}.f{FFFF} member id — or their_franchise_id), give_player_ids[], receive_player_ids[], give_pick_assets?[], receive_pick_assets?[] (pre-encoded MFL DP_RR_SS / FP_FFFF_YYYY_R strings), comments?, expires? (unix; default now+7d), impression_id?}`. Server-authoritative: the caller's franchise comes from the leagues row (`platform_my_team`, linker-only), the counterparty's is parsed+validated from the synthetic member id, and every player id is **reverse-crosswalked Sleeper→MFL with a HARD BLOCK** — any unmapped asset → 422 `mfl_asset_unmapped` (+ `unmapped[]`), nothing sent, no asset ever silently dropped. Sibling route rather than a platform switch on `/api/trades/propose` because both platforms' league ids are numeric (the #149/#150/#200 misroute class) — routing is explicit and re-verified server-side. → `{status: "proposed", mfl_status: "OK"}`. **F1 (flag `deck.signal_v2`):** optional `impression_id` appends a `propose` `deck_outcomes` row |
+| POST | `/api/trades/validate` | Shared with Sleeper (row above): MFL-linked leagues take the MFL branch — fresh `rosters` export + reverse-crosswalk advisory findings |
+
+`/api/trades/propose-mfl` error contract:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 404 | `feature_disabled` | Flag off |
+| 403 | `verification_required` | Session not verified (P1 hard gate) |
+| 404 | `mfl_not_linked` | League isn't a linked MFL league, or is linked by a different FTF user (only the linker has a franchise binding) |
+| 409 | `mfl_franchise_unknown` | League row has no `platform_my_team` → re-link |
+| 409 | `mfl_not_connected` | No stored/session MFL cookie → prompt MFL sign-in (#177 flow) |
+| 409 | `mfl_auth_expired` | MFL rejected the cookie (HTTP 401/403 or auth-flavored error body) — stored credential dropped → prompt re-sign-in. Carries `detail` |
+| 422 | `mfl_asset_unmapped` | ≥1 asset failed the reverse crosswalk — hard block, carries `unmapped[]` |
+| 502 | `mfl_write_failed` | MFL refused or the transport failed (non-auth) — carries `kind` (`error`\|`network`\|`input`) + `detail` (incl. HTTP 429 throttling as `network`) |
+| 400 | `bad_request` | Malformed body / unparseable counterparty / self-trade / malformed pick asset |
+
+**v1 scope:** players fully wired end-to-end (mobile sends players only, mirroring Sleeper v1); picks are accepted pre-encoded (`DP_`/`FP_`) but no client sends them yet — the encodings carry TODO(live-verify) markers pending the operator checklist. `import?TYPE=tradeResponse` (accept/reject/revoke) is implemented in the adapter (`mfl_write.respond_trade`) with no route yet.
 
 **`POST /api/calc/score`** — body `{give_player_ids: [...], receive_player_ids: [...], scoring_format?: "1qb_ppr"|"sf_tep"}`. At least one side must be non-empty (both empty → 400). Unknown format falls back to `1qb_ppr`. Response:
 
