@@ -459,6 +459,11 @@ def test_live_taxonomy_is_disjoint():
             "trade_card_shared", "deck_exhausted_viewed"} <= tax.ALLOWED_CLIENT_EVENTS
     # P1: the ingest pipeline (not server.py) owns the allowlist import.
     assert ingest.ALLOWED_CLIENT_EVENTS is tax.ALLOWED_CLIENT_EVENTS
+    # #169 frame E — the outlook strip toggle is allowlisted (client-fired,
+    # NOT funnel-critical) with its two specced props.
+    assert "outlook_strip_toggled" in tax.ALLOWED_CLIENT_EVENTS
+    assert tax.CLIENT_EVENT_PROPS["outlook_strip_toggled"] == frozenset(
+        {"league_id", "expanded"})
 
 
 # ---------------------------------------------------------------------------
