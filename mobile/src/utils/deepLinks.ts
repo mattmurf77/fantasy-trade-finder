@@ -2,6 +2,7 @@ import * as Linking from 'expo-linking';
 import { getActionFromState, getStateFromPath } from '@react-navigation/native';
 import { useSession } from '../state/useSession';
 import { useFeatureFlags } from '../state/useFeatureFlags';
+import { track } from '../api/events';
 import { navigationRef } from '../navigation/RootNav';
 
 // ── Bundle 8 + teardown PRD 01-04: Deep link handling ─────────────────────
@@ -97,6 +98,12 @@ const V2_SCREENS = {
   LeaguePicker: 'leagues',
   Settings: 'settings',
   Profile: 'u/:username',
+  // P0-3 — invite JOIN interstitial. ROOT stack on purpose: the invitee is
+  // usually SIGNED OUT, and a route resolving inside `Main` would drop a
+  // session-less user into empty tabs (exactly the failure P0-5 fixes).
+  // Emitted only while `growth.invite_join_link` is on; parsed always, and
+  // the legacy `/?league=` form is parsed forever (HLD S-13).
+  LeagueJoin: 'app/league/join/:leagueId',
   // Root-stack league-wide surfaces (#142/#143) — pushed over the tabs.
   LeagueSummary: 'app/league/summary',
   FreeAgents: 'app/league/free-agents',
@@ -343,6 +350,42 @@ export function handleDeepLink(url: string | null | undefined): void {
   const refStr = Array.isArray(ref) ? ref[0] : ref;
   if (typeof refStr === 'string' && refStr.trim()) {
     useSession.getState().setInvitedBy(refStr);
+  }
+
+  // Invited league: ?league=<id> (P0-3). The invite URL mobile has emitted
+  // since FB #239 is `<base>/?league=<id>&ref=<u>` — a bare-path URL, so the
+  // v2 short-circuit below returns before anything reads it and the league
+  // has been dropped on the floor on every invite ever sent. Read it HERE,
+  // above that return, in both router modes: this one block repairs every
+  // link already sitting in a Sleeper chat, and it ships UNFLAGGED (HLD
+  // S-13). The path form /app/league/join/:leagueId does NOT go through
+  // here — LeagueJoinScreen owns that form's intent (one owner per form).
+  //
+  // `void` because setInvitedLeague is async (it writes AsyncStorage) and
+  // handleDeepLink must stay sync — App.tsx calls it from a Linking listener
+  // and from getInitialURL().then(...). No decodeURIComponent: Linking.parse
+  // already decoded queryParams. Idempotent: a repeat call with the same URL
+  // rewrites the same blob.
+  const lg = parsed.queryParams?.league;
+  const lgStr = Array.isArray(lg) ? lg[0] : lg;
+  if (typeof lgStr === 'string' && lgStr.trim()) {
+    const leagueId = lgStr.trim();
+    const st = useSession.getState();
+    void st.setInvitedLeague(leagueId);
+    // `has_ref`, never the username: the inviter's handle is an attribution
+    // field (session_init.invited_by), not an analytics dimension.
+    track('invite_link_opened', {
+      league_id:  leagueId,
+      has_ref:    !!(typeof refStr === 'string' && refStr.trim()),
+      format:     'legacy',
+      auth_state: !st.user
+        ? 'signed_out'
+        : st.user.account_only
+        ? 'account_only'
+        : st.leagues.some((l) => l.league_id === leagueId)
+        ? 'authed_member'
+        : 'authed_non_member',
+    });
   }
 
   const path = (parsed.path || '').replace(/^\/+/, '');

@@ -24,6 +24,7 @@ import { getOnboardingState } from '../state/useOnboardingState';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
+import { fetchInviteMeta } from '../api/league';
 import { getLastUsername, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
 
@@ -93,6 +94,40 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // hint is one-shot (consumed at mount) so an ordinary later visit to
   // SignIn doesn't re-show it. Only ever set while the flag is on.
   const [reauthNotice] = useState(() => consumeAppleReauthHint());
+
+  // ── P0-3 — the invited banner ─────────────────────────────────────────
+  // Subscribed selectors, so the copy upgrades in place when the name lands.
+  const invitedBy = useSession((s) => s.invitedBy);
+  const invitedLeagueId = useSession((s) => s.invitedLeagueId);
+  const invitedLeagueName = useSession((s) => s.invitedLeagueName);
+
+  // Resolve the invited league's name ONCE, for the banner. The result is
+  // cached into the persisted invite intent so the LeaguePicker companion
+  // state (P0-5) can name the league without a second call site — see the
+  // vcr_misses rail in lld-p0-3 §2.0. THIS IS THE APP'S ONLY INVITE-META
+  // CALL SITE; adding another one turns a passing tier-1 sim run red.
+  // Never throws, never blocks the form, and has no loading or error state:
+  // a missing name is a copy fallback, not a failure the user should see.
+  useEffect(() => {
+    const id = invitedLeagueId;
+    if (!id || invitedLeagueName) return;
+    let alive = true;
+    void fetchInviteMeta(id).then((meta) => {
+      if (!alive || !meta?.league_name) return;
+      void useSession.getState().setInvitedLeagueName(meta.league_name);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [invitedLeagueId, invitedLeagueName]);
+
+  const inviteHeadline = invitedBy
+    ? `@${invitedBy} invited you to ${invitedLeagueName || 'their league'} — ` +
+      "sign in and we'll take you straight there."
+    : invitedLeagueName
+    ? `You were invited to ${invitedLeagueName} — ` +
+      "sign in and we'll take you straight there."
+    : null;
 
   useEffect(() => {
     getLastUsername().then((u) => {
@@ -403,6 +438,17 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 left off.
               </Text>
             ) : null}
+            {/* P0-3 — the invited banner. INSIDE styles.form, beside the
+                reauth notice, so it renders in BOTH `landingOn` variants:
+                with onboarding.landing on, the Apple entry demotes to a text
+                link and everything above this changes, so a banner attached
+                to the Apple block would vanish for exactly the cohort P0-9
+                is testing. */}
+            {inviteHeadline ? (
+              <Text testID="signin.invited-banner" style={styles.invitedBanner}>
+                {inviteHeadline}
+              </Text>
+            ) : null}
             {!landingOn && appleShown ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
@@ -673,6 +719,13 @@ const styles = StyleSheet.create({
   // Teardown 06-03 — account-only session-expired re-auth notice.
   // Informational (not an error): dim chalk, sits above the Apple portal.
   reauthNotice: {
+    ...type.bodySm,
+    color: chalk.dim,
+    marginBottom: space.md,
+  },
+  // P0-3 — invited banner. Same slot, same rhythm as reauthNotice: no new
+  // visual pattern, no accent beyond the existing ones.
+  invitedBanner: {
     ...type.bodySm,
     color: chalk.dim,
     marginBottom: space.md,

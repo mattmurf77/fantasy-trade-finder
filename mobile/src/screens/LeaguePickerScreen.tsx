@@ -13,7 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
-import { useSession } from '../state/useSession';
+import { useSession, inviteIntentAgeMs } from '../state/useSession';
 import { useFlag, onboardingEnabled } from '../state/useFeatureFlags';
 import { requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
 import { S as GUIDE } from '../components/analystScript';
@@ -50,6 +50,13 @@ interface Props {
    *  Sleeper league (see hld.md §1.3). */
   invitedBy?: string | null;
   invitedLeagueName?: string | null;
+  /** P0-3 — case-B hint from LeagueJoinScreen. The auto-pin effect below
+   *  re-derives membership from `cached`, so this is an optimization, not a
+   *  command. */
+  autoPinLeagueId?: string;
+  /** P0-3 — case-C hint: render the invite notice row even once the store's
+   *  intent has been consumed. */
+  inviteNotice?: boolean;
 }
 
 // Show user's leagues → tap one → run sessionInit against it → done.
@@ -60,12 +67,20 @@ export default function LeaguePickerScreen({
   autoOpenEspnLink,
   invitedBy,
   invitedLeagueName,
+  autoPinLeagueId,
+  inviteNotice,
 }: Props) {
   // #266 — needed for the transition-settled auto-open below. Typed loose
   // like the rest of the screens; only addListener('transitionEnd') is used.
   const navigation = useNavigation<any>();
   const user = useSession((s) => s.user);
   const cached = useSession((s) => s.leagues);
+  // P0-3 — the persisted invite intent. SUBSCRIBED (not getState) because the
+  // notice row and the companion copy render from it; the auto-pin effect
+  // below still reads getState() at decision time.
+  const invitedLeagueId = useSession((s) => s.invitedLeagueId);
+  const storedInviteName = useSession((s) => s.invitedLeagueName);
+  const storedInvitedBy = useSession((s) => s.invitedBy);
   const setLeagues = useSession((s) => s.setLeagues);
   const setLeague = useSession((s) => s.setLeague);
   // P0-5 — the Sleeper-identity link (companion state) re-keys the session.
@@ -162,6 +177,77 @@ export default function LeaguePickerScreen({
     void pickLeague(cached[0], { auto: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cached, loading, error, selectingId, autoOpenEspnLink]);
+
+  // P0-3 — pin the invited league as soon as it appears in the list.
+  //
+  // Mirrors web one-for-one (web/js/app.js: read localStorage
+  // ftf_invited_league, findIndex over the loaded leagues, remove the key =
+  // consume, selectLeague). Keyed on `cached`, NOT on mount, and that is the
+  // whole trick: an account-only invitee (P0-5) arrives with zero leagues,
+  // links Sleeper/ESPN/MFL from the companion state, and the list
+  // repopulates — this effect re-fires and pins, with neither fix knowing
+  // about the other.
+  //
+  // pickLeague({auto:true}) is the ONLY pin path: it calls setLeague(), which
+  // OVERWRITES the `no_league` sentinel, so P0-5's relaunch predicate sends
+  // the user to Main on every subsequent cold start instead of bouncing them
+  // back here forever. CONSUME BEFORE PIN — pickLeague navigates away, and
+  // code after a navigation is a coin flip.
+  //
+  // An account_only session never reaches the pin: it has no Sleeper roster
+  // in the invited league, so its list stays empty and `find` returns
+  // undefined. That is the companion state's job, not this effect's.
+  const invitePinTried = useRef(false);
+  useEffect(() => {
+    if (invitePinTried.current) return;
+    if (loading || error || selectingId) return;
+    const wanted = useSession.getState().invitedLeagueId ?? autoPinLeagueId ?? null;
+    if (!wanted) return;
+    const lg = cached.find((x) => x.league_id === wanted);
+    if (!lg) return;                       // not (yet) a member — notice row below
+    invitePinTried.current = true;
+    void (async () => {
+      const ageMs = inviteIntentAgeMs();
+      track('invite_league_pinned', {
+        league_id: wanted,
+        source:    'picker_autopin',
+        ...(ageMs === null ? {} : { ms_since_open: ageMs }),
+      }, 'LeaguePicker');
+      await useSession.getState().consumeInvitedLeague();   // consume ON PIN
+      await pickLeague(lg, { auto: true });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cached, loading, error, selectingId, autoPinLeagueId]);
+
+  // P0-3 — the honest notice: an invite exists, the list has loaded, and the
+  // invited league is not in it. NOT a dead end and NOT a spinner — the real
+  // list stays usable underneath. The intent is deliberately NOT consumed
+  // here: the user may join on Sleeper and come back inside the 14-day TTL,
+  // and the effect above will fire on the refreshed list.
+  const wantedInviteId = invitedLeagueId ?? autoPinLeagueId ?? null;
+  const listReady = !loading && !error && cached.length > 0;
+  const showInviteNotice =
+    listReady &&
+    ((!!wantedInviteId && !cached.some((l) => l.league_id === wantedInviteId)) ||
+      inviteNotice === true);
+
+  // Once per MOUNT, not once per render.
+  const inviteFailReported = useRef(false);
+  useEffect(() => {
+    if (!showInviteNotice || inviteFailReported.current) return;
+    inviteFailReported.current = true;
+    track('invite_pin_failed', {
+      ...(wantedInviteId ? { league_id: wantedInviteId } : {}),
+      reason: 'not_member',
+    }, 'LeaguePicker');
+  }, [showInviteNotice, wantedInviteId]);
+
+  // P0-3 case D — invite context for P0-5's companion state, from TWO
+  // sources: route params win (a link tapped THIS launch), the persisted
+  // intent is the fallback (signed in with Apple three launches ago, only
+  // now linking a platform).
+  const inviteName = invitedLeagueName ?? storedInviteName ?? null;
+  const inviteBy = invitedBy ?? storedInvitedBy ?? null;
 
   // Render free-tier cold starts run 30–60s. Hold the friendly default for
   // the first 4s so warm requests never show the alarming "waking up" copy.
@@ -378,8 +464,8 @@ export default function LeaguePickerScreen({
         // before the platform merges resolve.
         <View style={styles.centered}>
           <Text testID="leagues.empty.body" style={styles.emptyBody}>
-            {invitedBy
-              ? `@${invitedBy} invited you to ${invitedLeagueName || 'their league'}. ` +
+            {inviteBy
+              ? `@${inviteBy} invited you to ${inviteName || 'their league'}. ` +
                 'Connect Sleeper, ESPN or MFL to join.'
               : 'Connect Sleeper, ESPN or MFL to see your leagues.'}
           </Text>
@@ -427,6 +513,17 @@ export default function LeaguePickerScreen({
           </Text>
         </View>
       ) : (
+        <>
+        {/* P0-3 — the invite notice. ABOVE the list, INSIDE this branch: it
+            must never leak into the `cached.length === 0` branch, whose
+            literal "No 2026 NFL leagues found for this account." sentence is
+            asserted verbatim by capture/leagues@fresh.yaml. */}
+        {showInviteNotice ? (
+          <Text testID="leaguepicker.invite-notice" style={styles.inviteNotice}>
+            You're not in that league yet — pick one below, or join the league
+            on Sleeper and open the invite again.
+          </Text>
+        ) : null}
         <FlatList
           data={cached}
           keyExtractor={(lg) => lg.league_id}
@@ -488,6 +585,7 @@ export default function LeaguePickerScreen({
             );
           }}
         />
+        </>
       )}
 
       {/* Flag-gated link affordances. Each platform gates on its own flag and
@@ -586,6 +684,14 @@ const styles = StyleSheet.create({
   // P0-5 companion-state copy. Not `error` — that one is semantic.neg (red)
   // and this is not a failure.
   emptyBody: { ...type.body, textAlign: 'center' },
+  // P0-3 — informational, NOT an error: dim chalk, same rhythm as the
+  // companion copy. Never semantic.neg — nothing has gone wrong.
+  inviteNotice: {
+    ...type.bodySm,
+    color: chalk.dim,
+    paddingHorizontal: space.xl,
+    paddingTop: space.sm,
+  },
   list: { paddingVertical: space.sm },
   row: {
     flexDirection: 'row',

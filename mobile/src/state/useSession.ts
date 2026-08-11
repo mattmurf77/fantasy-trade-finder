@@ -26,6 +26,28 @@ const SLG_KEY = 'sleeper_leagues';
 // Rank-home preference: which ranking flow the Rank tab opens at launch.
 // Device-local; also POSTed to /api/ranking-method for analytics.
 const RM_KEY = 'ftf_rank_method_pref';
+// P0-3 — invite intent: the league + inviter captured from an invite link,
+// awaiting a pin. Persisted (web's localStorage ftf_invited_by /
+// ftf_invited_league are the parity precedent, web/js/app.js) because the
+// invitee's real path is often tap → app opens → close → return later, and
+// because an account-only invitee (P0-5) can be league-less for several
+// launches before they link a platform.
+const INVITE_KEY = 'ftf_invite_intent';
+const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;   // 14 days (HLD S-15)
+
+/** Persisted shape behind INVITE_KEY. Unknown fields are ignored on read;
+ *  every field but `ts` may be null. */
+interface InviteIntent {
+  leagueId: string | null;
+  invitedBy: string | null;
+  /** Display name resolved once by SignInScreen's banner via
+   *  GET /api/league/invite-meta. Cached here so the LeaguePicker companion
+   *  state can name the league without a second call site (lld-p0-3 §2.0).
+   *  Null when unresolved — every consumer degrades to "their league". */
+  leagueName: string | null;
+  /** Capture time, ms epoch. TTL is evaluated on READ, never by a timer. */
+  ts: number;
+}
 
 export type RankMethodPref = 'quickset' | 'trio' | 'anchor' | 'tiers' | 'manual';
 const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'anchor', 'tiers', 'manual'];
@@ -36,6 +58,30 @@ const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'ancho
 let _revalidating = false;
 let _lastRevalidateMs = 0;
 const REVALIDATE_MIN_INTERVAL_MS = 60_000;
+
+// P0-3 — capture time of the live invite intent (ms epoch, 0 = none).
+// Module-level rather than store state: nothing renders from it, it is only
+// read to compute `ms_since_open` on the pin event and to evaluate the TTL.
+let _inviteTs = 0;
+
+/** Whole-blob write. Deliberately NOT a read-modify-write: every caller
+ *  already holds the full intent in store state, so a full write is
+ *  last-write-wins with no interleaving hazard. Never throws — a
+ *  persistence failure costs the invite across a relaunch, not this one. */
+async function _persistInviteIntent(blob: InviteIntent): Promise<void> {
+  try {
+    await AsyncStorage.setItem(INVITE_KEY, JSON.stringify(blob));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Age of the live invite intent in ms, or null when there is none.
+ *  Feeds `invite_league_pinned.ms_since_open`. Bounded by the 14-day TTL. */
+export function inviteIntentAgeMs(): number | null {
+  if (!_inviteTs) return null;
+  return Math.max(0, Date.now() - _inviteTs);
+}
 
 export interface SavedUser {
   user_id: string;
@@ -108,6 +154,13 @@ interface SessionState {
    *  attribute new accounts to the inviter via session_init.invited_by.
    *  In-memory only — once consumed by a real session init it's cleared. */
   invitedBy: string | null;
+  /** P0-3 — league id captured from an invite link (`?league=` or the
+   *  /app/league/join path). PERSISTED with a 14-day TTL — unlike
+   *  `invitedBy`, which is in-memory. Consumed when the league is pinned. */
+  invitedLeagueId: string | null;
+  /** P0-3 — resolved league name for the invite copy, or null. Resolved
+   *  once by SignInScreen's banner and cached into the persisted blob. */
+  invitedLeagueName: string | null;
   /** Preferred ranking flow — where the Rank tab opens at launch. Null =
    *  never chosen → the Rank tab shows the Build-your-board chooser
    *  (RankHomeScreen). Hydrated from AsyncStorage in bootstrap(); changed
@@ -160,6 +213,18 @@ interface SessionState {
    *  by initLeagueSession (or any other path that POSTs /api/session/init).
    *  Returns null when no referral was captured. */
   consumeInvitedBy: () => string | null;
+  /** P0-3 — record the invited league. Trims; no-ops on blank. Stamps a
+   *  fresh capture time and clears any cached league NAME when the id
+   *  changed (a stale name on a new league is worse than no name). */
+  setInvitedLeague: (leagueId: string) => Promise<void>;
+  /** P0-3 — cache the resolved league name. No-ops without a live intent
+   *  or on a blank name. Does NOT re-stamp the capture time: resolving a
+   *  name is not a fresh invite. */
+  setInvitedLeagueName: (name: string) => Promise<void>;
+  /** P0-3 — read the invited league id and clear the intent (state +
+   *  storage). Consume-on-PIN, never on read: only the caller that has
+   *  actually pinned the league calls this. */
+  consumeInvitedLeague: () => Promise<string | null>;
   /** Boot a demo session from /api/session/demo. Sets a synthetic user +
    *  league so RootNav routes into Main tabs, marks the session as demo,
    *  and persists nothing to disk beyond the secure-store session token
@@ -191,18 +256,21 @@ export const useSession = create<SessionState>((set, get) => ({
   switching: false,
   isDemo: false,
   invitedBy: null,
+  invitedLeagueId: null,
+  invitedLeagueName: null,
   rankingMethodPref: null,
   verification: null,
   verifyBannerDismissed: false,
 
   bootstrap: async () => {
-    const [userRaw, leagueRaw, leaguesRaw, tok, fmt, prefRaw] = await Promise.all([
+    const [userRaw, leagueRaw, leaguesRaw, tok, fmt, prefRaw, inviteRaw] = await Promise.all([
       AsyncStorage.getItem(SU_KEY),
       AsyncStorage.getItem(SL_KEY),
       AsyncStorage.getItem(SLG_KEY),
       getSessionToken(),
       getActiveScoringFormat(),
       AsyncStorage.getItem(RM_KEY),
+      AsyncStorage.getItem(INVITE_KEY),
     ]);
     let user: SavedUser | null = null;
     let league: SavedLeague | null = null;
@@ -216,7 +284,44 @@ export const useSession = create<SessionState>((set, get) => ({
     const rankingMethodPref = RANK_METHOD_PREFS.includes(prefRaw as RankMethodPref)
       ? (prefRaw as RankMethodPref)
       : null;
-    set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt, rankingMethodPref });
+
+    // P0-3 — hydrate the invite intent, evaluating the TTL ON READ (never by
+    // a timer). An expired blob is treated as absent AND removed, so it is
+    // not re-parsed on every launch for the rest of the install's life.
+    let invitedLeagueId: string | null = null;
+    let invitedLeagueName: string | null = null;
+    let invitedByStored: string | null = null;
+    _inviteTs = 0;
+    try {
+      if (inviteRaw) {
+        const blob = JSON.parse(inviteRaw) as Partial<InviteIntent> | null;
+        const ts = typeof blob?.ts === 'number' ? blob.ts : 0;
+        if (!ts || Date.now() - ts > INVITE_TTL_MS) {
+          void AsyncStorage.removeItem(INVITE_KEY).catch(() => {});
+        } else {
+          _inviteTs = ts;
+          invitedLeagueId   = typeof blob?.leagueId   === 'string' ? blob.leagueId   : null;
+          invitedLeagueName = typeof blob?.leagueName === 'string' ? blob.leagueName : null;
+          invitedByStored   = typeof blob?.invitedBy  === 'string' ? blob.invitedBy  : null;
+        }
+      }
+    } catch {
+      /* malformed blob — treat as absent, same as its neighbours above */
+    }
+
+    set({
+      user,
+      league,
+      leagues,
+      hasToken: !!tok,
+      activeFormat: fmt,
+      rankingMethodPref,
+      invitedLeagueId,
+      invitedLeagueName,
+      // Only hydrate the inviter when this launch has not already captured
+      // one from a live link — a link tapped THIS launch is fresher.
+      ...(get().invitedBy ? {} : invitedByStored ? { invitedBy: invitedByStored } : {}),
+    });
   },
 
   setRankingMethodPref: async (m) => {
@@ -364,11 +469,68 @@ export const useSession = create<SessionState>((set, get) => ({
     const u = (username || '').trim().toLowerCase();
     if (!u) return;
     set({ invitedBy: u });
+    // P0-3 — mirror into the persisted invite blob so a `?ref=`-only capture
+    // survives a relaunch the same way the league does. Fire-and-forget; the
+    // in-memory semantics above (and consumeInvitedBy) are unchanged, so
+    // api/auth keeps consuming it exactly as before.
+    const st = get();
+    if (!_inviteTs) _inviteTs = Date.now();
+    void _persistInviteIntent({
+      leagueId:   st.invitedLeagueId,
+      invitedBy:  u,
+      leagueName: st.invitedLeagueName,
+      ts:         _inviteTs,
+    });
   },
 
   consumeInvitedBy: () => {
     const cur = get().invitedBy;
     if (cur) set({ invitedBy: null });
+    return cur;
+  },
+
+  setInvitedLeague: async (leagueId) => {
+    const id = (leagueId || '').trim();
+    if (!id) return;
+    const st = get();
+    const changed = st.invitedLeagueId !== id;
+    // A NEW league invalidates any cached name — a stale name on a new
+    // league is worse than no name at all.
+    const leagueName = changed ? null : st.invitedLeagueName;
+    _inviteTs = Date.now();
+    set({ invitedLeagueId: id, invitedLeagueName: leagueName });
+    await _persistInviteIntent({
+      leagueId:   id,
+      invitedBy:  st.invitedBy,
+      leagueName,
+      ts:         _inviteTs,
+    });
+  },
+
+  setInvitedLeagueName: async (name) => {
+    const n = (name || '').trim();
+    const st = get();
+    if (!st.invitedLeagueId || !n) return;
+    set({ invitedLeagueName: n });
+    await _persistInviteIntent({
+      leagueId:   st.invitedLeagueId,
+      invitedBy:  st.invitedBy,
+      leagueName: n,
+      // NOT re-stamped: resolving a name is not a fresh invite, and letting
+      // it re-stamp would silently extend the 14-day TTL.
+      ts:         _inviteTs || Date.now(),
+    });
+  },
+
+  consumeInvitedLeague: async () => {
+    const cur = get().invitedLeagueId;
+    _inviteTs = 0;
+    set({ invitedLeagueId: null, invitedLeagueName: null });
+    try {
+      await AsyncStorage.removeItem(INVITE_KEY);
+    } catch {
+      /* non-fatal — the TTL sweeps it eventually */
+    }
     return cur;
   },
 
@@ -470,16 +632,21 @@ export const useSession = create<SessionState>((set, get) => ({
       AsyncStorage.removeItem(SU_KEY),
       AsyncStorage.removeItem(SL_KEY),
       AsyncStorage.removeItem(SLG_KEY),
+      // P0-3 — an invite intent belongs to the session that captured it.
+      AsyncStorage.removeItem(INVITE_KEY),
       clearSessionToken(),
     ]);
+    _inviteTs = 0;
     set({
-      user:           null,
-      league:         null,
-      leagues:        [],
-      hasToken:       false,
-      formatExplicit: false,
-      isDemo:         false,
-      invitedBy:      null,
+      user:              null,
+      league:            null,
+      leagues:           [],
+      hasToken:          false,
+      formatExplicit:    false,
+      isDemo:            false,
+      invitedBy:         null,
+      invitedLeagueId:   null,
+      invitedLeagueName: null,
       verification:   null,
       verifyBannerDismissed: false,
     });

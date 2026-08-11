@@ -13,6 +13,7 @@ import { Icon } from '../components/chalkline';
 import { useSession, NO_LEAGUE_ID } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
+import LeagueJoinScreen from '../screens/LeagueJoinScreen';
 import TabNav from './TabNav';
 import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -56,8 +57,22 @@ type AuthStack = {
   // state renders them as its lead copy. Nothing supplies them in wave 1 and
   // the companion state renders its generic copy when they are absent.
   LeaguePicker:
-    | { espnLink?: boolean; invitedBy?: string; invitedLeagueName?: string }
+    | {
+        espnLink?: boolean;
+        /** P0-3 case B — hint that this league should auto-pin if present.
+         *  A hint, not a command: the picker re-derives membership from its
+         *  own refreshed list. */
+        autoPinLeagueId?: string;
+        /** P0-3 case C — render the "not in that league yet" notice row. */
+        inviteNotice?: boolean;
+        invitedBy?: string;
+        invitedLeagueName?: string;
+      }
     | undefined;
+  // P0-3 — invite join interstitial. ROOT stack: reachable while signed out
+  // (the invitee usually is), and the capture harness enters it by name
+  // through testRouteEntry's SIGNED_OUT_ENTRY_ROUTES allowlist.
+  LeagueJoin: { leagueId: string; ref?: string };
   Main: undefined;
   Settings: undefined;
   Profile: { username: string };
@@ -450,11 +465,21 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // P0-3 (commit 12) — invite context, when the arrival came from
               // LeagueJoin. Unset by every wave-1 entry; the companion state
               // renders its generic copy when they are null.
+              autoPinLeagueId={route.params?.autoPinLeagueId}
+              inviteNotice={route.params?.inviteNotice === true}
               invitedBy={route.params?.invitedBy ?? null}
               invitedLeagueName={route.params?.invitedLeagueName ?? null}
             />
           )}
         </Stack.Screen>
+        {/* P0-3 — the invite JOIN interstitial. headerShown:false because it
+            is an interstitial, not a pushed detail screen: a spent invite
+            link must not present a back edge. */}
+        <Stack.Screen
+          name="LeagueJoin"
+          component={LeagueJoinScreen}
+          options={{ headerShown: false }}
+        />
         <Stack.Screen name="Main">
           {({ navigation }) => (
             <>

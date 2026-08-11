@@ -853,3 +853,39 @@ export async function getFreeAgents(
     (position && position !== 'ALL' ? `&position=${position}` : '');
   return api.get<FreeAgentsResponse>(`/api/league/free-agents?${qs}`);
 }
+
+// ── Invite meta (P0-3) ───────────────────────────────────────────────────
+/** P0-3 — public league name for an invite banner. Unauthenticated,
+ *  short-deadline, NEVER throws: a null return means "say 'their league'".
+ *
+ *  ONE call site by design (SignInScreen) — see lld-p0-3 §2.0. A second call
+ *  site on a screen that can run with an UNSEEDED league id books a
+ *  `vcr_misses` increment under the hermetic harness and fails the whole sim
+ *  run (`mobile/scripts/sim-run.sh`), so this is a rail, not a style note. */
+export interface InviteMeta {
+  league_id: string;
+  league_name: string | null;
+  platform: string | null;
+}
+
+export async function fetchInviteMeta(leagueId: string): Promise<InviteMeta | null> {
+  if (!leagueId) return null;
+  const ac = new AbortController();
+  // 4s deadline, not the client default: a sign-in screen must never wait on
+  // a cosmetic string. (AbortSignal.timeout is not relied on — RN varies.)
+  const t = setTimeout(() => ac.abort(), 4000);
+  try {
+    // skipAuth: the caller is a SIGNED-OUT screen; a stale token would be
+    // meaningless and would let the 401-expiry hook fire on a cosmetic call.
+    return await api.get<InviteMeta>(
+      `/api/league/invite-meta?league_id=${encodeURIComponent(leagueId)}`,
+      { skipAuth: true, signal: ac.signal },
+    );
+  } catch {
+    // Swallow everything. `api_request_failed` still fires from the client
+    // wrapper, so the failure stays observable without a UI state.
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}

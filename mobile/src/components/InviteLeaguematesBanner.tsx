@@ -4,15 +4,23 @@ import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 import { track } from '../api/events';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
 
 // Cold-start banner shown at the top of TradesScreen when NO league-mate
 // has submitted rankings yet. In that state every card is a consensus-basis
 // "fair-value idea" — the divergence engine (and mutual matching) needs at
 // least one ranked counterparty. The Invite button opens the OS share sheet
-// with the same referral URL format the web client builds
-// (`/?league=<id>&ref=<username>` — captured by captureReferralFromUrl and
-// utils/deepLinks on the receiving end).
+// with the invite URL from buildInviteUrl below.
+//
+// TWO accepted URL formats, and BOTH are parsed forever:
+//   • `/?league=<id>&ref=<username>` — every link ever shared. The web side
+//     captures it in captureReferralFromUrl; the mobile side captures it in
+//     utils/deepLinks' `?league=` reader, which P0-3 ADDED — before that fix
+//     mobile dropped the league on the floor on every invite ever sent.
+//   • `/app/league/join/<id>?ref=<username>` — the P0-3 path form, emitted
+//     only while `growth.invite_join_link` is on.
+// The legacy form is never retired: links already sitting in Sleeper chats
+// have to keep working.
 //
 // Chalkline banner construction: ink-2 surface, hairline border, ice tick,
 // body-sm copy.
@@ -24,17 +32,41 @@ interface Props {
   total: number;              // league-mates excluding the current user
 }
 
+/** The invite URL. Two accepted formats, and BOTH are parsed forever:
+ *
+ *   flag OFF (default) — <base>/?league=<id>&ref=<u>      (every link ever shared)
+ *   flag ON            — <base>/app/league/join/<id>?ref=<u>
+ *
+ * The flag is read IMPERATIVELY, inside this function, so both call sites
+ * (this banner's handleInvite, and LeagueScreen's inviteLeaguemates) stay
+ * byte-identical one-liners and cannot drift into emitting different formats.
+ * This is a callback-time read, never a render-time one — the same
+ * useFeatureFlags.getState() idiom as ratingPrompt.ts and TabNav.tsx. Do NOT
+ * convert it to a useFlag() hook: this is a module-level pure function called
+ * from handlers, not a component.
+ *
+ * `=== true` explicitly, because the fail-safe direction matters: an
+ * unhydrated flag map must emit the LEGACY URL. A wrong `false` costs
+ * nothing; a wrong `true` before the AASA claim has propagated through
+ * Apple's CDN sends every invite to Safari.
+ *
+ * `ref` stays optional — an unknown username omits it, which is why AASA
+ * must match `league` on its own (FB #239).
+ */
 export function buildInviteUrl(leagueId: string, username?: string | null): string {
+  const base = getBaseUrl();
+  const ref = username ? `?ref=${encodeURIComponent(username)}` : '';
+  if (useFeatureFlags.getState().flags['growth.invite_join_link'] === true) {
+    return `${base}/app/league/join/${encodeURIComponent(leagueId)}${ref}`;
+  }
   const params = [`league=${encodeURIComponent(leagueId)}`];
   if (username) params.push(`ref=${encodeURIComponent(username)}`);
-  return `${getBaseUrl()}/?${params.join('&')}`;
+  return `${base}/?${params.join('&')}`;
 }
 
 export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
-  // S7 PRD-01 (growth.share_landing): the invite URL already IS the landing
-  // page with ?ref= attribution preserved (verified against
-  // utils/deepLinks + web captureReferralFromUrl) — no URL change needed;
-  // the flag adds the share→open funnel event only.
+  // `growth.share_landing` gates the `invite_shared` EVENT and nothing else.
+  // The URL format is decided inside buildInviteUrl, by its own flag.
   const shareLandingOn = useFlag('growth.share_landing');
   async function handleInvite() {
     const url = buildInviteUrl(leagueId, username);
