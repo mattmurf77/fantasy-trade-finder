@@ -2,38 +2,40 @@ appId: com.fantasytradefinder.app
 # tc: TC-CAP-LEAGUE-QUICKSETDONE
 # profile: quickset-done
 # flags: release
-# captures: progress-ring--4-4-locked
+# captures: progress-ring--4-4-unlocked
 # source: mobile/src/screens/LeagueScreen.tsx, mobile/src/components/LeagueProgressModule.tsx
-# interactive-stop: progress-ring--4-4-locked
+# interactive-stop: progress-ring--4-4-unlocked
 #
 # CAPTURE REQUEST #8 (mobile UX audit 2026-08-09, §2) — "the finding is that a
 # Quick Set user reaches 4/4 and is still locked — I can describe it from code
 # but have never seen it." Every other league capture shows the ring at 0/4.
 #
-# WHY THIS PROFILE AND NO OTHER. The 4/4-but-locked contradiction is not a
-# render bug we can fake with an injection; it is two backend answers that
-# disagree, and only `quickset-done` produces both:
+# POST-FIX (audit P0-1, docs/plans/audit-p0-remediation/). The contradiction
+# this file was authored to photograph is GONE, and the frame is re-captured
+# rather than preserved — git history is the archive for the old one. What it
+# shows now is the FIXED shape:
 #
 #   • /api/tiers/status  → saved: [QB, RB, WR, TE]      (Quick Set committed
 #     tiers for all four positions in both formats)
-#   • /api/rankings/progress → unlocked: false           (ranking_method is
-#     NULL, so the endpoint falls to the trio branch and finds 0 of the 40
-#     required interactions — the default Rank route never visits the chooser
-#     that would have written a method)
+#   • /api/rankings/progress → unlocked: TRUE            (ranking_method is
+#     'quickset' — written at the point of use by /api/tiers/save, and
+#     backfilled at Flask boot for rows that predate the fix)
 #
-# LeagueScreen.tsx:328 counts a position ranked when its trio count clears the
-# threshold OR `tiersSaved.includes(p)`, so positionsRanked === 4; and
-# `progress.unlocked` is false, so nothing keyed to the unlock lights up. The
-# seeder REFUSES a profile that would un-reproduce this (app_user.unlocked
-# true without a rankings block, a ranking_method that isn't explicitly null),
-# so the fixture cannot silently drift out from under this capture.
+# HISTORY, two sentences: until P0-1, `ranking_method` stayed NULL because the
+# default Rank route never visits the chooser that wrote it, so the endpoint
+# fell to the trio branch, found 0 of the 40 required interactions, and
+# answered unlocked:false while LeagueScreen.tsx:328 counted the position
+# ranked on `tiersSaved.includes(p)` and painted 4/4. The seeder's guard is now
+# INVERTED (seed_ui_test_db.py `_validate_quickset`): it refuses an
+# all-four-position Quick Set profile that claims unlocked:false, because the
+# server can no longer produce that state — so the fixture cannot silently
+# drift back out from under this capture.
 #
 # WHY THE MODULE IS ON SCREEN AT ALL AT 4/4. `moduleVisible`
 # (LeagueScreen.tsx:358) is an OR: ring incomplete, OR no matches, OR
 # contrarian insufficient. The ring is COMPLETE here, so it is the second
 # clause carrying it — `quickset-done` seeds matches_seed {mutual: 0,
-# awaiting: 0}. That is exactly the user the finding describes: board done,
-# ring full, nothing unlocked.
+# awaiting: 0}.
 #
 # ENTRY is the ordinary pushed path (League tab → league-summary.league-home →
 # LeagueHome), matching capture/league.yaml and capture/league@near-unlock
@@ -102,7 +104,7 @@ tags: [capture, league, quickset-done]
       id: "league.hero"
     timeout: 30000
 
-# ── progress-ring--4-4-locked ────────────────────────────────────────────
+# ── progress-ring--4-4-unlocked ────────────────────────────────────────────
 # The module needs BOTH the summary and the coverage query resolved
 # (`moduleVisible` is `!!summary && !!coverage && …`), so it can never be on
 # the first frame; waiting on the module id rather than the hero is what keeps
@@ -128,7 +130,7 @@ tags: [capture, league, quickset-done]
     visibilityPercentage: 100
     timeout: 30000
 # THE ASSERTION THAT MAKES THIS CAPTURE MEAN SOMETHING: the ring reading FULL
-# while the account is locked — the exact frame the audit has never seen.
+# on an account that is now genuinely unlocked — the fixed frame.
 #
 # RUN-1 FIX: this asserted ".*4/4.*", the literal the ring paints
 # (LeagueProgressModule.tsx:84), and went red on a screen whose ring plainly
@@ -140,11 +142,11 @@ tags: [capture, league, quickset-done]
 # ASSERTION, never a tap.
 - assertVisible:
     text: ".*4 of 4 positions ranked.*"
-# …and the other half of the contradiction: `league.works-now` renders only
-# while mutual matches are zero, i.e. the ring is full and the payoff is still
-# dark. Asserting it here pins the frame to the locked reading rather than to
-# a coincidentally-full ring on an unlocked account.
+# `league.works-now` renders only while mutual matches are zero. Post-P0-1 it
+# no longer pins a "locked" reading — it pins the frame to a ZERO-MATCH league,
+# which is the second clause of `moduleVisible` and therefore the reason the
+# progress module is still on screen at a complete ring at all.
 - assertVisible:
     id: "league.works-now"
 - waitForAnimationToEnd
-- takeScreenshot: league__progress-ring--4-4-locked
+- takeScreenshot: league__progress-ring--4-4-unlocked

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "quickset-done",
-  "description": "THE 4/4-BUT-LOCKED STATE (mobile UX audit P0-1, capture request #8). qa_quickset has finished Quick Set across all four positions in both formats — tiers_saved is QB/RB/WR/TE and tier_overrides holds a real 96-player board — but has ZERO trio interactions and ranking_method NULL, because the default route (Rank -> Quick Set Tiers) never visits the chooser that writes it. LeagueScreen's ring counts a position ranked when it is tier-saved, so it reads 4/4; /api/rankings/progress sees ranking_method NULL, falls to the trio branch, finds 0 of the 40 required interactions, and answers unlocked:false. Everything keyed to the unlock stays dark - most consequentially the push-permission prompt, which is gated on progress.unlocked in RootNav. Also the only profile that seeds tier_overrides, which is what the public profile page renders from, so it doubles as the populated-profile fixture under flags/profiles-on.",
+  "description": "THE FIXED QUICK-SET STATE (mobile UX audit P0-1, capture request #8). qa_quickset has finished Quick Set across all four positions in both formats — tiers_saved is QB/RB/WR/TE and tier_overrides holds a real 96-player board — with ZERO trio interactions. ranking_method is 'quickset' and unlocked_formats is pre-seeded, which is exactly the shape the P0-1 startup backfill produces in production: the ring reads 4/4, /api/rankings/progress answers unlocked:true, the push primer is armed, and the first-unlock fan-out is already spent so it does not fire retroactively. HISTORY: until the P0-1 fix this profile existed to reproduce the 4/4-BUT-LOCKED contradiction (ranking_method NULL -> the trio branch -> 0 of 40 interactions -> unlocked:false); see docs/plans/audit-p0-remediation/. Also the only profile that seeds tier_overrides, so it doubles as the populated-profile fixture under flags/profiles-on.",
   "season": 2026,
   "flags_base": "release",
   "flag_overrides": {
@@ -22,8 +22,8 @@
   "app_user": {
     "username": "qa_quickset",
     "user_id": "900000000000000001",
-    "unlocked": false,
-    "ranking_method": null,
+    "unlocked": true,
+    "ranking_method": "quickset",
     "rankings": null,
     "quickset": {
       "positions": ["QB", "RB", "WR", "TE"],

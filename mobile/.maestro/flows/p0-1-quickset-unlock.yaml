@@ -1,0 +1,175 @@
+appId: com.fantasytradefinder.app
+# tc: TC-P0-1-QUICKSET-UNLOCK
+# profile: quickset-done
+# flags: release
+# source: backend/server.py get_rankings_progress, mobile/src/screens/RankScreen.tsx,
+#         mobile/src/screens/LeagueScreen.tsx, mobile/src/navigation/RootNav.tsx:267
+#
+# AUDIT P0-1 (mobile UX audit 2026-08-09) — a user who finished Quick Set read
+# 4/4 on the League ring and `unlocked:false` from /api/rankings/progress,
+# because `ranking_method` stayed NULL and NULL falls to the trio branch. The
+# fix writes the method at the point of USE (the four save handlers) plus a
+# startup backfill for the pre-fix cohort.
+#
+# ONE FLOW, NOT TWO. The acceptance criterion is 4/4 AND unlocked:true
+# TOGETHER. Two flows could each pass on different sessions and never prove
+# simultaneity, so the ring assertion and the unlocked-banner assertion live in
+# one run against one seeded backend.
+#
+# THE PROFILE IS THE POST-INVERSION `quickset-done`. It now seeds
+# ranking_method:'quickset' + unlocked_formats:["1qb_ppr","sf_tep"] — the exact
+# shape database.backfill_ranking_method_from_tiers leaves behind in prod, and
+# the pre-seeded floor is what suppresses a retroactive first-unlock fan-out.
+#
+# THIS FLOW FAILS ON THE UNFIXED TREE, at step 14 (`rank.unlocked-banner`
+# absent) and at step 12 (`rank.unlock-payoff` present). A PRE-FIX CONTROL RUN
+# IS REQUIRED: a test that never observed the bug proves nothing. Stash the
+# server.py/database.py hunks, seed the pre-inversion fixture, run this, and
+# confirm it goes red — then restore and run it green.
+#
+# THE PUSH-PERMISSION ALERT IS DELIBERATELY NOT ASSERTED (waiver W-1). The
+# SpringBoard permission alert is not in the app's view hierarchy, so Maestro
+# cannot see it. The proxy chain is exact and is the reason `rank.unlocked-
+# banner` is worth an id at all:
+#     rank.unlocked-banner  ⇔  isUnlockedEverywhere (RankScreen.tsx:356)
+#                           ⇔  progress?.unlocked
+#                           ⇔  pushEnabled           (RootNav.tsx:267)
+# The banner is the same boolean the push gate reads. Asserting the banner is
+# asserting the gate.
+#
+# NO INJECTIONS (fail_next / latency). Every state asserted here is the
+# fixture's own resting answer, so there is nothing armed that could leak into
+# a later leg. NO openLink and no launch argument — the flow walks the real
+# user path, which is the whole point of the finding.
+tags: [p0-1, unlock]
+---
+# LAW 6 — the react-query cache is persisted to disk. On a warm launch
+# RootNav's progress query answers from that cache and the run would prove
+# nothing about what the SERVER now returns.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble. LAW 10 — assert the typed username before
+# Continue: a raced inputText that lands half a name submits a partial username
+# and books a vcr miss. `eraseText` first is what makes the retry idempotent.
+# LAW 1 — full-match regex.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_quickset"
+      - assertVisible:
+          text: ".*qa_quickset.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# LAW 8 — SETTLE BEFORE SWITCHING TABS. The tab BAR paints long before #244's
+# launch routing finishes resetting the Rank stack, and a tab tap fired into
+# that window gets stolen back. `rank.more-ways` is the Rank surface's own
+# header control, so its presence proves the routing already ran.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+
+# ── ASSERTION A: the ring reads 4/4 ──────────────────────────────────────
+# The ordinary pushed path, matching capture/league@quickset-done.yaml.
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+# LAW 2 — iOS keeps off-screen ScrollView children in the hierarchy, so without
+# visibilityPercentage: 100 Maestro would call the module "visible" from the
+# hero and never scroll. NO centerElement: the module is a tall card and
+# centring overshot it in capture/league@quickset-done.yaml's RUN-2, cropping
+# the ring off the top of the frame.
+- scrollUntilVisible:
+    element:
+      id: "league.progress-module"
+    direction: DOWN
+    visibilityPercentage: 100
+    timeout: 30000
+# LAW 3 — PositionsRing's wrapper is `accessible`, which COLLAPSES its subtree
+# on iOS: the in-ring "4/4" numeral is not exposed to Maestro at all, only the
+# accessibilityLabel is (which is also the more restyle-stable string).
+# LAW 1 — wrapped in `.*`.
+- assertVisible:
+    text: ".*4 of 4 positions ranked.*"
+- takeScreenshot: p0-1__ring-4-4
+
+# ── ASSERTION B: and the account is actually unlocked ────────────────────
+# The only reachable path to RankScreen under release flags: with
+# `ux.rank_tab_destination` on, the Rank tab lands on the home surface and the
+# header control opens the RankMenu sheet. Verbatim from
+# capture/trios@near-unlock.yaml.
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 20000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trios"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trios"
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 40000
+# B-NEGATIVE. `rank.unlock-payoff` renders ONLY while
+# `unlockCopyOn && !isUnlockedEverywhere` (RankScreen.tsx:518), and
+# `ux.outlook_inline_default` is ON in the release fixture — so it is the
+# LOCKED state's fingerprint. Because LAW 2 means off-screen ScrollView
+# children still count as visible, assertNotVisible here is a STRONG claim:
+# absent from the hierarchy entirely, not merely below the fold.
+- assertNotVisible:
+    id: "rank.unlock-payoff"
+# LAW 2 again — the banner is the last child of the screen's ScrollView, below
+# the Skip actions row; without the forced scroll the shutter frames the trio
+# cards instead.
+- scrollUntilVisible:
+    element:
+      id: "rank.unlocked-banner"
+    direction: DOWN
+    visibilityPercentage: 100
+    timeout: 20000
+# THE assertion. By ID, never by copy: the banner's text forks on
+# `ux.outlook_inline_default` ("Your board now prices your trades — see the
+# Acquire tab" vs "Trade Finder unlocked — check the Acquire tab"), so a
+# full-match text regex (LAW 1) would bind this flow to a flag value.
+- assertVisible:
+    id: "rank.unlocked-banner"
+# LAW 5 forbids waitForAnimationToEnd on an ActivityIndicator; this is settled
+# static content, not a spinner, so it is safe and correct here.
+- waitForAnimationToEnd
+# LAW 23 — eyeball this frame. A green run is not a good capture.
+- takeScreenshot: p0-1__quickset-unlocked

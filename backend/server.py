@@ -145,7 +145,7 @@ from .database import (
     load_local_league_rosters,
     load_local_league_users,
     is_linked_platform_league,
-    set_ranking_method, get_ranking_method,
+    set_ranking_method, get_ranking_method, set_ranking_method_if_unset,
     get_profile_public, set_profile_public,
     save_tiers_position, get_tiers_saved,
     save_tier_overrides, load_tier_overrides,
@@ -5798,6 +5798,44 @@ def _invalidate_league_members_cache(league_id: str) -> None:
         _LEAGUE_MEMBERS_CACHE.pop(k, None)
 
 
+def _note_ranking_method(sess: dict, method: str, *,
+                         allow_over: tuple[str, ...] = ()) -> None:
+    """P0-1: record the ranking method at the point of USE.
+
+    NEVER RAISES. This is bookkeeping attached to a save that has already
+    succeeded; a failure here must never turn a successful board save into a
+    500. Every path out of this function is a return.
+
+    Writes only where the column is unset (or in `allow_over`) — see
+    database.set_ranking_method_if_unset for the first-use-wins contract and
+    the re-lock hazard it exists to avoid.
+
+    Drops the 60 s league-members cache ONLY on an actual write:
+    `has_ranking_method` is one of the fields load_league_member_unlock_states
+    projects, so leaguemates would otherwise see a stale badge for up to a
+    minute. Mirrors what set_ranking_method_route already does at :6318-6326.
+    A no-op write changes nothing leaguemates can see, so it must not pay the
+    cache-drop cost — a save-heavy Quick Set walk would otherwise flush the
+    league cache on every position.
+    """
+    try:
+        wrote = set_ranking_method_if_unset(
+            sess["user_id"], method, allow_over=allow_over)
+    except Exception as db_err:
+        log.warning("set_ranking_method_if_unset(%s) failed: %s", method, db_err)
+        return
+    if not wrote:
+        return
+    log.info("ranking-method noted at point of use for %s: %s",
+             sess.get("user_id"), method)
+    try:
+        _lid = getattr(sess.get("league"), "league_id", None)
+        if _lid:
+            _invalidate_league_members_cache(_lid)
+    except Exception:
+        pass
+
+
 @app.route("/api/leaderboard", methods=["GET"])
 def get_leaderboard():
     """GET /api/leaderboard?scope=league|universal&metric=streak|ranks&window=week|month|season|all&league_id=...
@@ -5982,6 +6020,11 @@ def post_rank3():
         except Exception as ev_err:
             log.warning("record_event(trio_swipe) failed: %s", ev_err)
 
+        # P0-1: the trio path is the one that always DID unlock, but only
+        # because null fell to the same branch. Recording it explicitly is
+        # what makes null mean "no ranking action yet" instead of "trio".
+        _note_ranking_method(sess, "trio")
+
         # Invalidate cached trade-generation jobs — the user's ELO map just
         # changed, so any cached deck is stale. Drop across all leagues
         # since rankings are user-level. Don't synchronously regenerate;
@@ -6152,7 +6195,12 @@ def get_rankings_progress():
     total_required  = threshold * len(POSITIONS)
     total_completed = sum(counts.values())
 
-    # Unlock logic depends on the user's chosen ranking method
+    # Unlock logic depends on the user's ranking method. P0-1 (2026-08-09
+    # audit): `ranking_method` is now written at the POINT OF USE by the four
+    # save handlers as well as by the chooser, so NULL here means "no ranking
+    # action taken since the P0-1 fix", not "never visited the chooser".
+    # The ladder itself is UNCHANGED — 'anchor' still falls to the trio
+    # branch (audit A-16) and 'manual' still unlocks unconditionally (A-17).
     g_user_id = sess["user_id"]
     ranking_method = None
     try:
@@ -7384,6 +7432,18 @@ def save_tiers_route():
                if body.get("via") in ("tiers", "quickset", "rookie_tiers",
                                       "rookie_quickset", "rookie_anchors")
                else "tiers")
+
+        # P0-1: a COMPLETENESS-marking save is the one that should own the
+        # unlock rule. A rookie-scope save deliberately does not complete a
+        # position (see the tiers_saved comment above), and the rookie_* via
+        # tags are subset boards — neither may pin the user to a rule they
+        # never opted into. `allow_over=("anchor",)` is the single approved
+        # upgrade (hld.md S-01): 'anchor' can never satisfy any unlock
+        # branch, so letting it shadow a finished Quick Set board would be a
+        # NEW failure created by this fix.
+        if scope != "rookie" and via in ("tiers", "quickset"):
+            _note_ranking_method(sess, via, allow_over=("anchor",))
+
         try:
             record_event(
                 g_user_id, "tier_save",
@@ -7511,6 +7571,14 @@ def save_anchor_route():
 
         # #164 — feed the Trends tab (see _record_trends_snapshot).
         _record_trends_snapshot(service, g_user_id, g_league, fmt, [player_id])
+
+        # P0-1: only the WIZARD marks a method. Answering an anchor inside
+        # the Draft Room (_ANCHOR_VIA = ("anchors","draft_room"), :1283) is
+        # not "I chose the Pick Anchor flow as my ranking method", and
+        # 'anchor' is the branch that can never unlock — pinning it from a
+        # draft-room tap would lock a user on a side quest.
+        if via == "anchors":
+            _note_ranking_method(sess, "anchor")
 
         tier = service.tier_for_elo(target_elo, player.position, fmt)
 
@@ -7885,6 +7953,14 @@ def reorder_rankings():
 
         # #164 — feed the Trends tab (see _record_trends_snapshot).
         _record_trends_snapshot(service, g_user_id, g_league, fmt, ordered_ids)
+
+        # P0-1: 'manual' unlocks UNCONDITIONALLY (:6163), so it is the most
+        # consequential method string in the ladder — and via:'rookie_ranks'
+        # is the editable consolidated ROOKIE board, a subset. Marking a
+        # subset reorder 'manual' would hand a user a permanent unlock off a
+        # rookies-only edit. Excluded.
+        if body.get("via") != "rookie_ranks":
+            _note_ranking_method(sess, "manual")
 
         return jsonify({"ok": True, "count": len(ordered_ids), "scoring_format": fmt})
     except Exception as e:

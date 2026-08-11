@@ -842,13 +842,16 @@ def test_audit_profiles_are_registered():
 
 # -- #8 / P0-1: the 4/4-but-locked ring --------------------------------------
 
-def test_quickset_done_is_tier_saved_but_has_no_ranking_method(audit):
-    """THE fixture for audit P0-1. LeagueScreen's ring counts a position
-    ranked when `progress[p] >= threshold OR tiersSaved.includes(p)`, so four
-    tier-saved positions read 4/4. `/api/rankings/progress` branches on
-    `ranking_method`: NULL falls to the trio branch, which needs 10
-    interactions per position — and a tier save writes Elo overrides without
-    ever touching the interaction counter. 4/4 and locked."""
+def test_quickset_done_is_tier_saved_and_unlocked(audit):
+    """THE fixture for audit P0-1, post-fix. LeagueScreen's ring counts a
+    position ranked when `progress[p] >= threshold OR tiersSaved.includes(p)`,
+    so four tier-saved positions read 4/4 — and now `/api/rankings/progress`
+    agrees, because `ranking_method` is 'quickset' (written at the point of
+    use, and backfilled at boot for pre-fix rows). The pre-seeded
+    `unlocked_formats` floor is not cosmetic: it is the fan-out suppression
+    (hld.md S-03) that stops a backfilled user's first poll from firing
+    `ranking_complete_first_time` and the leaguemate push retroactively.
+    Trio swipes stay at zero — unlocking without a single trio is the fix."""
     out_dir, _ = audit["quickset-done"]
     with _connect(out_dir, "quickset-done") as con:
         row = con.execute(
@@ -861,11 +864,9 @@ def test_quickset_done_is_tier_saved_but_has_no_ranking_method(audit):
 
     assert row["username"] == "qa_quickset"
     # The one field the whole finding rests on.
-    assert row["ranking_method"] is None
-    # …and the two that would each independently unlock the user anyway.
-    # NULL is the never-written state (mark_format_unlocked was never called);
-    # the monotonic floor in get_rankings_progress reads it as "no formats".
-    assert json.loads(row["unlocked_formats"] or "[]") == []
+    assert row["ranking_method"] == "quickset"
+    # …and the floor that makes the first /progress poll a no-op fan-out.
+    assert sorted(json.loads(row["unlocked_formats"] or "[]")) == ["1qb_ppr", "sf_tep"]
     assert swipes == 0
 
     saved = json.loads(row["tiers_saved"])
@@ -895,18 +896,27 @@ def test_quickset_done_overrides_are_the_public_profile_source(audit):
     assert all(isinstance(v, (int, float)) for v in overrides.values())
 
 
-@pytest.mark.parametrize("method", ["tiers", "quickset", "manual"])
-def test_quickset_with_an_unlocking_method_is_refused(tmp_path, method):
-    """The fixture is only honest while ranking_method stays NULL: any of
-    these makes `/api/rankings/progress` answer unlocked:true, and the profile
-    would quietly stop reproducing the bug it exists to demonstrate."""
+def test_quickset_all_four_with_unlocked_false_is_refused(tmp_path):
+    """Post-P0-1 the incoherent profile is the LOCKED one: the server answers
+    unlocked:true for a complete Quick Set board, and the startup backfill
+    writes ranking_method='quickset' at boot regardless of what the profile
+    says. Refused rather than allowed to rot."""
     with pytest.raises(SeederError) as e:
         seed_profile(
             _mutated_profile(tmp_path, "quickset-done",
-                             lambda d: d["app_user"].update(ranking_method=method)),
+                             lambda d: d["app_user"].update(unlocked=False)),
             out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
     assert e.value.code == EXIT_REFUSED
     assert "unlocked:true" in str(e.value)
+
+
+def test_quickset_done_may_leave_ranking_method_null(tmp_path):
+    """The seeder does not require the method — the startup backfill writes it.
+    Only the unlocked:false CLAIM is refused."""
+    seed_profile(
+        _mutated_profile(tmp_path, "quickset-done",
+                         lambda d: d["app_user"].update(ranking_method=None)),
+        out_dir=tmp_path, seed=SEED, now=FIXED_NOW)
 
 
 def test_unknown_ranking_method_is_refused(tmp_path):

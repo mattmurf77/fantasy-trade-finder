@@ -178,7 +178,10 @@ users_table = Table("users", metadata,
     Column("display_name",    String),
     Column("avatar",          String),
     Column("created_at",      String),
+    # P0-1: written at the point of USE by the four save handlers (first-use
+    # wins; 'anchor' upgradable) as well as by POST /api/ranking-method.
     Column("ranking_method",  String),   # null | 'trio' | 'manual' | 'tiers'
+                                          #      | 'anchor' | 'quickset'
     Column("tiers_saved",     Text),     # JSON — dual-format shape:
                                           #   {"1qb_ppr": ["RB","WR"], "sf_tep": []}
     Column("tier_overrides",  Text),     # JSON — dual-format shape:
@@ -1970,6 +1973,12 @@ def _migrate_db() -> None:
     # #258 — entity-decode MFL names stored before #210's import-time cleaning
     _backfill_mfl_name_entities()
 
+    # P0-1 (audit 2026-08-09) — users who completed a Quick Set board before
+    # the point-of-use ranking_method writes shipped are stuck on the trio
+    # branch with unlocked:false. Same slot, same idempotent-every-boot
+    # contract as the two backfills above. See docs/runbook.md.
+    backfill_ranking_method_from_tiers()
+
     # ── Agent 1 additions — user_player_skips ─────────────────────────────
     # The table is created by metadata.create_all(); this block is for any
     # future additive ALTERs to that table. Kept idempotent like the rest.
@@ -2435,6 +2444,86 @@ def _backfill_mfl_name_entities() -> None:
                     )
     except Exception as e:
         print(f"[backfill] mfl name entities failed: {e}")
+
+
+def backfill_ranking_method_from_tiers() -> int:
+    """P0-1 (audit 2026-08-09) — one-time repair for users who completed a
+    Quick Set / Tiers board BEFORE the point-of-use writes shipped, and are
+    therefore stuck on the trio branch of get_rankings_progress with
+    unlocked:false forever.
+
+    COHORT (deliberately narrow):
+        ranking_method IS NULL (or '')  AND  tiers_saved names all four of
+        QB/RB/WR/TE for AT LEAST ONE scoring format
+      → ranking_method = 'quickset'
+      → unlocked_formats gains every qualifying format (see below)
+
+    STRICTLY IMPROVING. For every row it touches the tiers branch returns
+    True, which is >= whatever the trio branch was returning. A user with a
+    PARTIAL tier board plus a full trio board is a real shape; tagging them
+    would move them from the trio rule to the tiers rule and could RE-LOCK
+    them, so they are excluded. They lose nothing: their next full-board save
+    writes the method at the point of use anyway.
+
+    THE unlocked_formats PRE-SEED IS NOT COSMETIC — it is the fan-out
+    suppression required by hld.md S-03. See lld-p0-1.md §2.2.3.
+
+    Idempotent by predicate (after the first run the cohort is empty), safe on
+    every boot, and never raises: a failure prints and returns what it wrote.
+    Returns the number of rows written.
+    """
+    _POS = ("QB", "RB", "WR", "TE")
+    col  = users_table.c.ranking_method
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(users_table.c.sleeper_user_id,
+                       users_table.c.tiers_saved,
+                       users_table.c.unlocked_formats)
+                .where(or_(col.is_(None), col == ""))
+            ).fetchall()
+    except Exception as e:
+        print(f"[backfill] ranking_method cohort read failed: {e}")
+        return 0
+
+    # (uid, merged unlocked_formats JSON) for every qualifying row.
+    plan: list[tuple[str, str]] = []
+    for row in rows:
+        saved    = _parse_per_format_json(row.tiers_saved, is_list=True)
+        complete = [f for f in SCORING_FORMATS
+                    if all(p in (saved.get(f) or []) for p in _POS)]
+        if not complete:
+            continue
+        try:
+            existing = json.loads(row.unlocked_formats) if row.unlocked_formats else []
+            if not isinstance(existing, list):
+                existing = []
+        except (json.JSONDecodeError, TypeError):
+            existing = []
+        merged = list(existing) + [f for f in complete if f not in existing]
+        plan.append((row.sleeper_user_id, json.dumps(merged)))
+
+    written = 0
+    for i in range(0, len(plan), 500):
+        chunk = plan[i:i + 500]
+        try:
+            with engine.begin() as conn:
+                for uid, uf in chunk:
+                    conn.execute(
+                        update(users_table)
+                        .where(users_table.c.sleeper_user_id == uid)
+                        .values(ranking_method="quickset", unlocked_formats=uf)
+                    )
+            written += len(chunk)
+        except Exception as e:
+            print(f"[backfill] ranking_method chunk at {i} failed: {e}")
+
+    if plan:
+        # scope-p0-1.md §2 makes the affected ids a BUILD REQUIREMENT: the
+        # scoped SQL undo is only expressible if the cohort was logged.
+        print(f"[backfill] ranking_method: tagged {written}/{len(plan)} user(s) "
+              f"'quickset' — cohort: {[uid for uid, _ in plan]}")
+    return written
 
 
 EXPERIMENT_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth")
@@ -3363,6 +3452,50 @@ def set_ranking_method(user_id: str, method: str) -> None:
             .where(users_table.c.sleeper_user_id == user_id)
             .values(ranking_method=method)
         )
+
+
+# The method strings POST /api/ranking-method validates (server.py:6303),
+# mirrored in backend/tests/fixtures/seed_ui_test_db.py:138.
+RANKING_METHODS = ("trio", "manual", "tiers", "anchor", "quickset")
+
+
+def set_ranking_method_if_unset(
+    user_id: str,
+    method: str,
+    allow_over: tuple[str, ...] = (),
+) -> bool:
+    """P0-1 — record the ranking method at the point of USE, first-use wins.
+
+    A SINGLE conditional UPDATE, so it is race-free under concurrent saves:
+    there is no read-then-write window in which two requests can both decide
+    the column is empty. Returns True iff this call wrote the value.
+
+    FIRST-USE WINS, not last-use wins. The unlock rule in
+    get_rankings_progress is method-dependent, so overwriting an established
+    method can RE-LOCK a user who already qualified under the old one — the
+    exact regression the monotonic unlocked_formats floor was added for
+    (server.py:6177-6187).  Writing only where there was nothing means this
+    helper can never subtract an unlock.
+
+    `allow_over` is the one deliberate widening: 'anchor' is the only method
+    string whose unlock rule can never succeed (it falls to the trio branch),
+    so a completeness-marking tiers/quickset save is allowed to overwrite it
+    and ONLY it. See docs/plans/audit-p0-remediation/lld-p0-1.md §4.2.
+    """
+    if method not in RANKING_METHODS:
+        return False
+    col  = users_table.c.ranking_method
+    cond = or_(col.is_(None), col == "")
+    if allow_over:
+        cond = or_(cond, col.in_(tuple(allow_over)))
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .where(cond)
+            .values(ranking_method=method)
+        )
+    return bool(res.rowcount)
 
 
 def get_ranking_method(user_id: str) -> str | None:

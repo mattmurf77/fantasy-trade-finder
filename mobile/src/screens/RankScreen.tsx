@@ -683,7 +683,7 @@ export default function RankScreen() {
         </View>
 
         {isUnlockedEverywhere && (
-          <View style={styles.unlockedBanner}>
+          <View testID="rank.unlocked-banner" style={styles.unlockedBanner}>
             <View style={styles.bannerTick} />
             <Text style={styles.unlockedText}>
               {/* S4 PRD-02: "unlocked" copy drifted — trades already

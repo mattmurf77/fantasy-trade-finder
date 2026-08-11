@@ -277,7 +277,14 @@ def _validate_profile(p: dict) -> None:
         _refuse("app_user needs username + user_id")
     rankings = app.get("rankings")
     if app.get("unlocked") and not rankings:
-        _refuse("unlocked:true requires a rankings block")
+        # P0-1: a COMPLETE Quick Set board is now a legitimate basis for
+        # unlocked:true — that is the whole fix. A trio block is no longer the
+        # only way in; an all-four-position quickset block is the other.
+        qs = app.get("quickset") or {}
+        qs_positions = set(qs.get("positions") or POSITIONS) if qs else set()
+        if qs_positions < set(POSITIONS):
+            _refuse("unlocked:true requires a rankings block, or a quickset "
+                    "block covering all four positions (audit P0-1)")
     if rankings is not None:
         for key in ("positions", "trios_per_position", "history_days", "formats"):
             if key not in rankings:
@@ -312,22 +319,22 @@ def _validate_profile(p: dict) -> None:
 
 
 def _validate_quickset(app: dict, _refuse) -> None:
-    """`app_user.ranking_method` + `app_user.quickset` (audit P0-1, capture
-    request #8).
+    """`app_user.ranking_method` + `app_user.quickset` (audit P0-1).
 
-    The pairing is the whole point, so it is validated as a pair. Quick Set
-    commits a board through `/api/tiers/save`, which writes `tiers_saved` +
-    `tier_overrides` and never touches the trio interaction counter; the
-    default route never visits the chooser that writes `ranking_method`. The
-    ring on LeagueScreen counts a position ranked when it is TIER-SAVED, so it
-    reads 4/4 — while `/api/rankings/progress`, seeing `ranking_method` NULL,
-    falls to the trio branch, finds 0 interactions, and answers
-    `unlocked: false`. 4/4 and locked.
+    Quick Set commits a board through `/api/tiers/save`, which writes
+    `tiers_saved` + `tier_overrides` and never touches the trio counter. Until
+    the P0-1 fix, `ranking_method` stayed NULL (the default route never visits
+    the chooser that wrote it), `/api/rankings/progress` fell to the trio
+    branch, and the user read 4/4 on the ring while `unlocked` was false.
 
-    That state only survives if `ranking_method` stays NULL: setting it to
-    tiers/quickset/manual makes the backend compute `unlocked: true` and the
-    fixture would quietly stop reproducing the bug it exists to show. Refused
-    rather than allowed to rot.
+    POST-FIX that state is unreachable, and the guard is inverted. The server
+    writes the method at the point of use, and the startup backfill
+    (database.backfill_ranking_method_from_tiers) tags any pre-fix NULL row
+    with 'quickset' at Flask boot — including this seeded one. So an
+    all-four-position Quick Set profile with `unlocked:false` no longer
+    describes anything the server can produce, REGARDLESS of ranking_method,
+    and is refused rather than allowed to rot. There is no `ranking_method:
+    null` escape hatch any more; the backfill closes it at boot.
     """
     method = app.get("ranking_method", _RANKING_METHOD_DEFAULT)
     if method is not _RANKING_METHOD_DEFAULT and method is not None \
@@ -355,17 +362,15 @@ def _validate_quickset(app: dict, _refuse) -> None:
     if per_pos < 1:
         _refuse("app_user.quickset players_per_position must be >= 1")
 
-    # THE guard. `server.get_rankings_progress` unlocks on tiers/quickset when
-    # every position is saved, and unconditionally on manual.
-    resolved = None if method is _RANKING_METHOD_DEFAULT else method
-    if not app.get("unlocked") and resolved in ("tiers", "quickset", "manual"):
-        if resolved == "manual" or set(positions) >= set(POSITIONS):
-            _refuse(
-                f"quickset with ranking_method {resolved!r} and unlocked:false is "
-                "incoherent — /api/rankings/progress would answer unlocked:true, "
-                "so the profile would not reproduce the 4/4-but-locked state "
-                "(audit P0-1). Use ranking_method:null, or set unlocked:true."
-            )
+    # THE guard, inverted (audit P0-1). No longer keyed on `ranking_method`.
+    if not app.get("unlocked") and set(positions) >= set(POSITIONS):
+        _refuse(
+            "an all-four-position quickset board with unlocked:false is "
+            "incoherent post-P0-1 — /api/rankings/progress answers "
+            "unlocked:true for it, and the startup backfill writes "
+            "ranking_method='quickset' at Flask boot even if the profile "
+            "leaves it null. Set unlocked:true."
+        )
 
 
 def _validate_draft(lg: dict, _refuse) -> None:
@@ -686,10 +691,21 @@ class World:
         return _resolve_trios(r["trios_per_position"], self.threshold) if r else 0
 
     def unlocked_formats(self) -> list[str]:
+        """Formats to pre-seed into users.unlocked_formats.
+
+        P0-1: a quickset-only profile has no rankings block, and its unlocked
+        formats are the formats its Quick Set board covers. Pre-seeding them is
+        also what reproduces the production backfill's fan-out suppression
+        (hld.md S-03) in the UI-test backend.
+        """
         app = self.profile["app_user"]
         if not app.get("unlocked"):
             return []
-        return list(self.app_rankings()["formats"])
+        r = self.app_rankings()
+        if r:
+            return list(r["formats"])
+        qs = self.quickset()
+        return list(qs["formats"]) if qs else list(db.SCORING_FORMATS)
 
     def elo_map(self, uid: str, fmt: str, top_n: int = 120) -> dict[str, float]:
         """A member's personal Elo snapshot: seed Elo + deterministic jitter
