@@ -29,6 +29,8 @@ import {
   getLeagueSummary,
 } from '../api/league';
 import LeagueProgressModule from '../components/LeagueProgressModule';
+import { shareInvite } from '../components/InviteLeaguematesBanner';
+import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
 import { useSession } from '../state/useSession';
 import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
@@ -60,6 +62,10 @@ export default function MatchesScreen() {
   const navigation = useNavigation<any>();
   const leagues = useSession((s) => s.leagues);
   const activeLeague = useSession((s) => s.league);
+  // P1-5 — needed for the invite link's `?ref=<username>` attribution.
+  // Without it this surface would silently drop referrer attribution while
+  // League Home kept it, and the two surfaces would not be comparable.
+  const user = useSession((s) => s.user);
   const [toast, setToast] = useState<{
     msg: string;
     tone?: 'success' | 'warn' | 'error';
@@ -407,6 +413,101 @@ export default function MatchesScreen() {
     else                      awaitingQuery.refetch();
   };
 
+  // ── P1-5 (audit A-14) — invite on the mutual-empty state ─────────────
+  // The screen that TELLS a user they need more leaguemates had no way to
+  // get more leaguemates. Counts come from the same ['league-summary',
+  // activeLeagueId] query key League Home uses, so the two surfaces share
+  // one cache entry and can never quote different numbers.
+  const inviteTotalMates =
+    typeof matchesSummary?.leaguemates_total === 'number' ? matchesSummary.leaguemates_total : 0;
+  const inviteJoinedMates =
+    typeof matchesSummary?.leaguemates_joined === 'number' ? matchesSummary.leaguemates_joined : 0;
+  // `emptyModule` already encodes "active league only" AND "both league
+  // reads confirmed", so gating on it stops a per-league count rendering
+  // under another league's filter chip.
+  const inviteProof = emptyModule ? inviteSocialProof(inviteTotalMates, inviteJoinedMates) : null;
+  const invitePlatform =
+    leagues.find((lg) => lg.league_id === activeLeagueId)?.platform ?? 'unknown';
+  // PR-6 (operator decision D-P1-13) — WHICH ACTION LEADS is conditional on
+  // league penetration, not fixed. Under 50% joined, an empty inbox is a
+  // population problem and the invite leads (primary, and placed above
+  // "Find a trade"). At 50%+ the boards mostly exist, so it is a discovery
+  // problem and "Find a trade" keeps the lead. Only ever one primary.
+  const invitePenetration = inviteTotalMates > 0 ? inviteJoinedMates / inviteTotalMates : 1;
+  const inviteLeads = inviteProof !== null && invitePenetration < 0.5;
+
+  const onInviteFromMatches = () =>
+    shareInvite({
+      leagueId:   activeLeagueId || '',
+      leagueName: matchesSummary?.league_name || activeLeague?.league_name,
+      username:   user?.username,
+      surface:    'matches_empty',
+      notJoined:  inviteTotalMates - inviteJoinedMates,
+      totalMates: inviteTotalMates,
+      platform:   invitePlatform,
+      screen:     'Matches',
+    });
+
+  // ⚠ THIS IS A MOUNT COUNTER, NOT AN IMPRESSION COUNTER. Do not read
+  // `invite_cta_shown{surface:'matches_empty'}` as an impression rate, and
+  // do not compute a tap-through rate from it, until the clipping below is
+  // fixed.
+  //
+  // The mutual-empty branch has NO scroll container anywhere in its
+  // ancestry — it is a plain <View style={styles.centered}> (flex: 1 +
+  // justifyContent: 'center'); the only ScrollView on this screen is the
+  // horizontal filter-chip row. On smaller devices that column is already
+  // taller than the viewport, so whatever sits below "Find a trade" is
+  // clipped off-screen and unreachable — today that is the progress module,
+  // Refresh and the help link. This event therefore counts MOUNTS, and its
+  // tap-through will read artificially low for whichever action does not
+  // lead (the leading action is placed above the clipping boundary).
+  //
+  // The operator accepted this knowingly (DECISIONS-p1.md D-P1-04) and will
+  // verify on TestFlight; fixing the scroll container is explicitly out of
+  // P1-5's scope and belongs with the A-34 layout family. Maestro cannot
+  // detect the failure either — off-screen children stay in the hierarchy,
+  // so assertVisible passes regardless. The screenshot is the evidence.
+  //
+  // `invite_cta_shown{surface:'league_home'}` is UNAFFECTED and is a real
+  // impression — that surface has a real ScrollView.
+  //
+  // Do NOT "fix" this by weakening the guard below: making the event fire
+  // less often would hide the defect rather than measure around it.
+  const inviteShownRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (segment !== 'mutual' || isLoading || isError) return;
+    if (visibleMatches.length !== 0) return;
+    if (!activeLeagueId || inviteProof === null) return;
+    if (inviteShownRef.current === activeLeagueId) return;
+    inviteShownRef.current = activeLeagueId;
+    track('invite_cta_shown', {
+      surface:     'matches_empty',
+      not_joined:  inviteTotalMates - inviteJoinedMates,
+      total_mates: inviteTotalMates,
+      platform:    invitePlatform,
+    }, 'Matches');
+  }, [segment, isLoading, isError, visibleMatches.length, activeLeagueId,
+      inviteProof, inviteTotalMates, inviteJoinedMates, invitePlatform]);
+
+  // Built once, placed either above or below "Find a trade" depending on
+  // which action leads. Two placements, one definition — so the copy and
+  // the handler cannot drift between the two orderings.
+  const inviteBlock = inviteProof === null ? null : (
+    <>
+      <Text testID="matches.invite-social-proof" style={styles.inviteProof}>
+        {inviteProof}
+      </Text>
+      <Text style={styles.emptyBody}>{INVITE_RATIONALE}</Text>
+      <Button
+        testID="matches.invite-cta"
+        label="Invite leaguemates"
+        variant={inviteLeads ? 'primary' : 'secondary'}
+        onPress={onInviteFromMatches}
+      />
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
@@ -533,19 +634,24 @@ export default function MatchesScreen() {
               find trade ideas right now; matches appear when a leaguemate
               likes the same trade.
             </Text>
-            {/* Primary action mirrors League home ("Find a trade" → the
-                Trades hub). Supersedes the S4 PRD-05 flag-gated "Go to
-                Trades" on THIS state only (same destination, now always
-                on); testID kept so existing flows keep passing. Refresh
-                stays as the quiet ghost — the empty state is a plain View,
-                so pull-to-refresh can't cover it (documented deviation
-                from the mock's "Refresh is dropped"). */}
+            {/* "Find a trade" → the Trades hub. Supersedes the S4 PRD-05
+                flag-gated "Go to Trades" on THIS state only (same
+                destination, now always on); testID kept so existing flows
+                keep passing. Refresh stays as the quiet ghost — the empty
+                state is a plain View, so pull-to-refresh can't cover it
+                (documented deviation from the mock's "Refresh is dropped").
+                P1-5 / PR-6: this is no longer unconditionally the primary —
+                under 50% of leaguemates joined the invite leads and sits
+                above it, and "Find a trade" drops to secondary. At 50%+ it
+                keeps the lead, as here. See `inviteLeads` above. */}
+            {inviteLeads ? inviteBlock : null}
             <Button
               testID="matches.go-to-trades"
               label="Find a trade"
-              variant="primary"
+              variant={inviteLeads ? 'secondary' : 'primary'}
               onPress={() => navigation.navigate('Trades', { screen: 'TradesHome' })}
             />
+            {inviteLeads ? null : inviteBlock}
             {/* Compact unlock module — ACTIVE league only (its counts are
                 league-scoped; hidden while a different league's filter is
                 selected or the league data hasn't arrived). */}
@@ -1038,6 +1144,15 @@ const styles = StyleSheet.create({
   progressModule: { alignSelf: 'stretch' },
   emptyBody: {
     ...type.bodySm,
+    textAlign: 'center',
+    maxWidth: 340,
+  },
+  // P1-5 — the social-proof count carries the weight of the ask, so it is
+  // semibold chalk against the dim body copy beside it.
+  inviteProof: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    color: chalk.base,
     textAlign: 'center',
     maxWidth: 340,
   },
