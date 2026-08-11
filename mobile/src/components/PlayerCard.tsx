@@ -58,6 +58,20 @@ export interface PlayerCardProps {
   // line 2). Don't reintroduce a numeric here.
   dense?: boolean;
   statsSlot?: React.ReactNode;     // dense line 2 — the TileStats strip
+  // #299 — OPT-IN single-line dense row (60pt → 32pt), League drill-in only.
+  // That caller passes no `statsSlot`, so its line 2 holds one TierChalkBadge
+  // and nothing else — ~23pt of a 60pt tile spent on a chip with a whole row
+  // to itself. Moving the badge into the right cluster (left of `posRank`)
+  // empties line 2 and the tile collapses to one line with NOTHING dropped.
+  //
+  // Deliberately opt-in rather than a change to the shared `dense` branch:
+  //   · Tiers rows are pressable AND drag-liftable, so the 44pt touch minimum
+  //     binds there; the League tiles pass no `onPress` and are inert, so it
+  //     does not bind here.
+  //   · Tiers + FreeAgents both pass `statsSlot`, which line 2 exists to hold.
+  // INVARIANT: incompatible with `statsSlot` — there is no line 2 to put it
+  // on. Pinned by mobile/tests/check-league-tile-density.js.
+  denseSingleLine?: boolean;
   // Teardown S8 PRD-01/-02 (inert a11y): the card is a composite tile —
   // VoiceOver reads it as ONE utterance (Pressable groups children by
   // default). When no override is passed, a label is composed from the
@@ -105,6 +119,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     showInjury = true,
     dense = false,
     statsSlot,
+    denseSingleLine = false,
     accessibilityLabel,
     accessibilityHint,
     accessibilityState,
@@ -204,6 +219,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         style={({ pressed }) => [
           styles.card,
           styles.cardDense,
+          denseSingleLine && styles.cardDenseSingle,
           selected && styles.cardSelected,
           pressed && !disabled && styles.cardPressed,
           disabled && styles.cardDisabled,
@@ -243,19 +259,36 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
               </Text>
             ) : null}
           </View>
-          <View style={styles.denseLine2}>
-            {tier && <TierChalkBadge t={tier} />}
-            {statsSlot}
-          </View>
+          {/* #299 — line 2 exists to hold the tier badge + `statsSlot`. In
+              single-line mode the badge moves to the right cluster below and
+              there is no `statsSlot`, so the row is not rendered at all. */}
+          {denseSingleLine ? null : (
+            <View style={styles.denseLine2}>
+              {tier && <TierChalkBadge t={tier} />}
+              {statsSlot}
+            </View>
+          )}
         </View>
         {/* #53 — positional rank prominent. #277: the 0–10k numeric value
             that sat under it (#54) is gone — the pick-tier label on line 2
-            (`tier` → TierChalkBadge) is the value display now. */}
-        {posRank ? (
-          <View style={styles.denseNums}>
-            <Text scale="dense" style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
-              {posRank}
-            </Text>
+            (`tier` → TierChalkBadge) is the value display now.
+            #299 — in single-line mode this cluster becomes a row and takes
+            the tier badge, presented LEFT of the positional rank (the
+            operator's spec). Left-to-right: tier, posRank, then `rightSlot`
+            below — which keeps the trailing edge free for a per-row action
+            (see docs/feedback/items/299-league-tile-density/status.md for the
+            measured room). */}
+        {posRank || (denseSingleLine && tier) ? (
+          <View style={[styles.denseNums, denseSingleLine && styles.denseNumsRow]}>
+            {denseSingleLine && tier ? <TierChalkBadge t={tier} /> : null}
+            {posRank ? (
+              <Text
+                scale="dense"
+                style={[styles.densePosRank, railColor ? { color: railColor } : null]}
+              >
+                {posRank}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         {rightSlot ? <View style={styles.denseRightSlot}>{rightSlot}</View> : null}
@@ -430,6 +463,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  // ── #299 single-line dense row — League drill-in only ────────────────
+  // 32pt, derived not guessed: the tallest thing on the row is the
+  // TierChalkBadge, which is `Badge` at type.label lineHeight 14 +
+  // paddingVertical 2×2 + borderWidth 1×2 = 20pt. 20 + 6 top + 6 bottom = 32.
+  // Under the `a11y.text_scaling` dense cap (×1.35) the badge tops out at
+  // ~27pt, so the fixed height still clears its own content.
+  cardDenseSingle: {
+    height: 32,
+  },
   denseMain: {
     flex: 1,
     justifyContent: 'center',
@@ -482,6 +524,15 @@ const styles = StyleSheet.create({
   denseNums: {
     alignItems: 'flex-end',
     marginRight: space.sm,
+  },
+  // #299 — the same cluster laid out horizontally so the tier badge can sit
+  // left of the positional rank. `flexShrink` stays at the RN default (0), so
+  // a long name ellipsizes (denseName sets flexShrink: 1) instead of
+  // squeezing the data.
+  denseNumsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
   densePosRank: {
     fontFamily: fonts.dataSemi,

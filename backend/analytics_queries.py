@@ -72,6 +72,25 @@ NON_INTENT_EVENTS = frozenset({
     # docs/business/analytics/2026-08-11-p0-7-addendum.md.
     "tab_selected", "league_view", "experiment_exposed",
     "quickset_abandoned",
+    # Feedback #297 / #299 / #302, 2026-08-11 — added in the SAME commit
+    # that added them to ALLOWED_CLIENT_EVENTS, for the reason stated
+    # directly above. Per-event reasoning (tracking plan:
+    # docs/feedback/items/297-lineup-impact-single-pin/analytics.md):
+    #
+    #   lineup_impact_unavailable — a passive impression. The user did
+    #     nothing; it is the opposite of intent. The evaluation that
+    #     produced it already counts the user via the server-fired
+    #     calc_trade_evaluated (INTENT, and a WAT_LIVE feeder), so
+    #     admitting this row adds no user DAU has not already seen.
+    #
+    #   league_team_closed — a TERMINATOR, and dismissal-class like
+    #     quickset_abandoned. Every close is preceded by a
+    #     league_team_opened, which IS intent and already counts the user.
+    #     The only user-days this could add are ones where the OPENER was
+    #     lost to SDK queue overflow — i.e. an artifact, never signal.
+    #     league_team_opened itself stays INTENT, untouched.
+    "lineup_impact_unavailable",
+    "league_team_closed",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

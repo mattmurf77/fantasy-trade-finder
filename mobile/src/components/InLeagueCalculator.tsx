@@ -30,6 +30,7 @@ import SendInSleeperButton from './SendInSleeperButton';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
+import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
@@ -738,7 +739,12 @@ export default function InLeagueCalculator({
       ) : null}
 
       {anySide && evalQ.data ? (
-        <LeagueVerdict ev={evalQ.data} oppName={opponent?.username ?? 'them'} stale={evalQ.isFetching} />
+        <LeagueVerdict
+          ev={evalQ.data}
+          oppName={opponent?.username ?? 'them'}
+          stale={evalQ.isFetching}
+          leagueId={leagueId}
+        />
       ) : anySide && evalQ.isLoading ? (
         <Card>
           <View style={styles.row}>
@@ -868,12 +874,34 @@ function LeagueVerdict({
   ev,
   oppName,
   stale,
+  leagueId,
 }: {
   ev: CalcEvaluationInLeague;
   oppName: string;
   stale: boolean;
+  leagueId: string;
 }) {
   const both = ev.give_value > 0 && ev.receive_value > 0;
+  // #297 analytics — the honest-empty lineup row is an IMPRESSION, and only
+  // the client knows it rendered. The server knows it omitted
+  // `starter_impact`; it does not know the user reached the both-sides-
+  // populated state below that actually draws the row (and it omits the
+  // field in Mode A too, where this component never runs). Keyed on `ev`,
+  // so it is one event per EVALUATION that showed the row — not one per
+  // mount, and not one per re-render.
+  const lineupUnavailable = both && !ev.starter_impact;
+  useEffect(() => {
+    if (!lineupUnavailable) return;
+    // LEAGUE platform, from the same cached list league_view reads. Never
+    // the device platform (that is a server-derived COLUMN), and never
+    // inferred from the league id's shape: ESPN and MFL league ids CAN be
+    // numeric (a live MFL id in this project's DB is 990062846), so an
+    // isdigit() read would label them 'sleeper'.
+    const platform =
+      useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+        ?.platform ?? 'unknown';
+    track('lineup_impact_unavailable', { platform }, 'TradeCalculator');
+  }, [lineupUnavailable, ev, leagueId]);
   const youGain = ev.your_value_delta > 0;
   const theyGain = ev.their_value_delta > 0;
   // Two-board headline — only meaningful on a two-sided divergence read.
@@ -960,6 +988,18 @@ function LeagueVerdict({
         <Text testID="calc.starter-impact" style={styles.starterImpact}>
           {ev.starter_impact.note}
         </Text>
+      ) : both ? (
+        // #297 (feedback 2026-08-10, "the lineup change feature … doesn't
+        // appear anymore") — this branch used to be a bare `null`. The
+        // server omits `starter_impact` whenever `_starter_impact` can't
+        // build (server.py:1152/1160: no Sleeper slot template — every
+        // ESPN/MFL/Fleaflicker/demo league id is non-numeric — or a roster
+        // missing from `league_members`), so a whole section vanished with
+        // no copy at all. That is indistinguishable from a regression, and
+        // it is what was actually reported: nothing was ever removed from
+        // this file. Only shown once both sides carry players, so it can't
+        // fire on the half-built "add a player to each side" state.
+        <LineupImpactUnavailable />
       ) : null}
       {/* Why the consensus totals differ from the naive sum of parts —
           collapsed by default, only when the server itemized adjustments
@@ -1004,6 +1044,30 @@ function slotShortLabel(slot: string): string {
 // price a rank (flag off, old server, or an unranked player).
 function posRankLabel(p: StarterSlotPlayer | null | undefined): string | undefined {
   return p && p.rank != null ? `${p.position}${p.rank}` : undefined;
+}
+
+// #297 — the honest replacement for the silent `null` above. Deliberately
+// says only what is true in EVERY absent case: it names the requirement,
+// not a diagnosis (the field is also absent when a roster is missing from a
+// perfectly good Sleeper league), and promises nothing about a future.
+// One accessibility element so VoiceOver reads it as a single sentence.
+const LINEUP_UNAVAILABLE_TITLE = 'Starting lineup';
+const LINEUP_UNAVAILABLE_BODY =
+  "Lineup impact isn't available here — reading it needs a Sleeper " +
+  "starting-slot template and both teams' rosters.";
+
+function LineupImpactUnavailable() {
+  return (
+    <View
+      testID="calc.lineup-impact-unavailable"
+      style={styles.lineupMod}
+      accessible
+      accessibilityLabel={`${LINEUP_UNAVAILABLE_TITLE}. ${LINEUP_UNAVAILABLE_BODY}`}
+    >
+      <TickLabel color={chalk.faint}>{LINEUP_UNAVAILABLE_TITLE}</TickLabel>
+      <Text style={styles.lineupUnavailable}>{LINEUP_UNAVAILABLE_BODY}</Text>
+    </View>
+  );
 }
 
 function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpactSlot[] }) {
@@ -1171,6 +1235,9 @@ const styles = StyleSheet.create({
     borderTopColor: ink.line,
     gap: space.xs,
   },
+  // #297 — honest "no lineup impact" copy in the same bordered-top block
+  // the table would have occupied.
+  lineupUnavailable: { ...type.bodySm, color: chalk.dim },
   lineupHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   lineupHeadText: {
     fontFamily: fonts.uiSemi,

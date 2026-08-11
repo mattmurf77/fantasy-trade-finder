@@ -157,6 +157,29 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # funnel-critical; zero volume until the flag lights (specced now
     # because the operator rejected the analytics waiver 2026-08-11).
     "outlook_strip_toggled",
+    # ── Feedback #297 / #299 / #302, 2026-08-11 ──────────────────────────
+    # Tracking plan (the addendum this module's docstring demands):
+    # docs/feedback/items/297-lineup-impact-single-pin/analytics.md.
+    # The operator REJECTED both build agents' analytics waivers.
+    #
+    # Only TWO names are added, and both are also listed in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit — INTENT is
+    # derived by SUBTRACTION, so a name added here and nowhere else
+    # step-changes DAU/WAU with no error and no log.
+    #
+    #   lineup_impact_unavailable — #297. The honest-empty "Starting
+    #     lineup" row rendered by the in-league calculator when the server
+    #     omits `starter_impact`. An IMPRESSION the server cannot see: the
+    #     server knows it omitted the field, it does not know the client
+    #     reached the both-sides-populated state that renders the row.
+    #
+    #   league_team_closed — #299/#302. The EXIT half of the League team
+    #     drill-in. The ENTER half is `league_team_opened` (P0-7, above) and
+    #     is NOT duplicated: this event deliberately does not re-register a
+    #     "focused" name. #302's entire claim is that the drill-in now HAS
+    #     exits; `via` is the only way to learn which one users find.
+    "lineup_impact_unavailable",
+    "league_team_closed",
 })
 
 # ---------------------------------------------------------------------------
@@ -292,10 +315,30 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Ranking
     "rank_method_selected": frozenset({"method", "is_first_time"}),
     # Trades
-    "find_trades_tapped":   frozenset(),
+    # #298 (2026-08-11) — TWO shipped entries widened, no new event name.
+    # Called out loudly because this file is claimed by four branches this
+    # week: both edits are pure ADDITIONS to an existing frozenset, no key
+    # removed, no neighbouring block reformatted.
+    #
+    # `source` is a BUG FIX, not a feature: TradesScreen.handleFindTrades
+    # (:768) has been sending it since #257 and the empty registry above
+    # popped it on every row — the live twin of `trade_card_shared`'s
+    # `landing`. Values in flight today: prefs_changed_strip,
+    # deck_error_retry, absent.
+    # `mode` ∈ single_pin | deck is #298's discriminator. Before the fix a
+    # pinned surface could not fire this event AT ALL (the CTA was gated
+    # out), so a non-zero find_trades_tapped{mode:single_pin} count IS the
+    # regression fix's telemetry.
+    "find_trades_tapped":   frozenset({"source", "mode"}),
+    # `mode` mirrors find_trades_tapped's — the OUTCOME half of the pair. A
+    # find_trades_tapped{mode:single_pin} with no following
+    # trade_card_viewed{mode:single_pin} is #298 reappearing: a deck
+    # generated with nowhere to render and no disposition path. Still fired
+    # from TradesScreen.tsx:2380 — #169 moved the Pass/Like CONTROLS into
+    # TradeCard.tsx, it did not move this emitter.
     "trade_card_viewed":    frozenset({"trade_id", "card_index", "lane",
                                        "dwell_ms", "ms_since_open",
-                                       "cold_start"}),
+                                       "cold_start", "mode"}),
     "trade_flagged":        frozenset({"reason", "trade_id"}),
     "match_opened":         frozenset({"match_id"}),
     # TikTok-discovery deck engine (F1 viewed/undo joins + F4 rerank moves)
@@ -427,6 +470,53 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "deck_regenerated":        frozenset({"position", "new_trades"}),
     # Outlook strip (#169 frame E) — `expanded` is the RESULTING state.
     "outlook_strip_toggled":  frozenset({"league_id", "expanded"}),
+    # ── Feedback #297, 2026-08-11 ───────────────────────────────────────
+    # `platform` is the LEAGUE platform (sleeper | espn | mfl |
+    # fleaflicker | unknown), read from the session's cached league list —
+    # the SAME sense league_selected.platform and league_view.platform
+    # carry above. It is NOT the device platform: that is a user_events
+    # COLUMN derived server-side in analytics_ingest.py (the NULL-
+    # `platform` incident), it is never a prop, and it must not become one.
+    #
+    # 'unknown' is a REAL value, not a placeholder: the calculator can be
+    # reached for a league that is not in the session's cached list (deep
+    # link, cold start before the switcher hydrates).
+    #
+    # There is deliberately NO `reason` prop. The client's only honest
+    # split of "why is starter_impact absent" would be
+    # `platform == 'sleeper'`, i.e. a pure function of the prop above —
+    # two encodings of one fact, which is the two-sources-of-truth bug this
+    # surface's history (#208/#248/#293) is a catalog of. The finer split
+    # (no_slot_template vs roster_missing) is knowable ONLY server-side and
+    # is recorded as deliberately-not-instrumented in the tracking plan.
+    "lineup_impact_unavailable": frozenset({"platform"}),
+    # ── Feedback #299 / #302, 2026-08-11 ────────────────────────────────
+    # The EXIT half of the League drill-in. `league_team_opened` (P0-7,
+    # above) is the enter half and is reused unchanged — there is no
+    # parallel "focused" name.
+    #
+    # `via` is a CLOSED enum of the five ways focus can end, one per
+    # control that calls the screen's single close helper:
+    #   header_back   — #302's fixed stack-header "‹ All teams" (tab root)
+    #   in_card_link  — the #243 in-card link (legacy root-stack push only;
+    #                   mutually exclusive with header_back on screen)
+    #   hardware_back — RESERVED, no emitter. #302's Android BackHandler was
+    #     built and withdrawn before ship (iOS-only release, unverifiable on
+    #     Android); the name is kept so re-enabling is one effect, not a
+    #     taxonomy migration. Pinned both ways by check-analytics-297-302.js.
+    #   tab_retap     — #302's re-tap of the already-active League tab
+    #   refocus       — opened a DIFFERENT team without leaving the panel
+    # A `league_team_opened` with no `league_team_closed` before the next
+    # screen_left is the sixth case — abandoned by navigating away. It is
+    # measured by ABSENCE on purpose: an unmount-cleanup emitter would
+    # double-fire on React strict-mode remounts and invent dwell.
+    #
+    # `dwell_ms` terminates the focus interval the way screen_left
+    # terminates screen_viewed. `rank` is the rank AT OPEN (carried in the
+    # focus ref), so it joins to league_team_opened.rank even when the user
+    # changes basis mid-focus. Bounded small integers; no league id, no
+    # member id, no team name.
+    "league_team_closed":     frozenset({"via", "dwell_ms", "rank"}),
 }
 
 

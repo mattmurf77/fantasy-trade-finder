@@ -18,7 +18,9 @@
       "bundleIdentifier": "com.fantasytradefinder.app",
       "buildNumber": "1",
       "usesAppleSignIn": true,
-      "associatedDomains": ["applinks:fantasy-trade-finder.onrender.com"],
+      "associatedDomains": [
+        "applinks:fantasy-trade-finder.onrender.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [

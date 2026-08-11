@@ -313,6 +313,48 @@
 
 ---
 
+## D-034 — #298 Single-Pin Recovery: the Deck Takes the Lead Slot, It Does Not Stack
+**Date:** 2026-08-11 (feedback #298, variant V1 — operator-decided)
+**Context:** Pinning one asset removed the Find-a-Trade CTA and the entire deck wrapper, and with it every accept/decline path — swipe, the Pass/Like row and the VoiceOver actions, all of which funnel into `advance()`. Two `singlePin ? null` gates caused it, and they fired identically in the `trades_home_inline` experiment's control group, so the experiment was never the cause.
+**Decision:** In single-pin mode the deck renders **only once it has cards** (`singlePinDeckActive`), and `FeaturedTradeWindow` hides while it does. One trade card in the lead slot at all times: the featured window before a generate, the deck card after. The alternates rail follows whichever is leading.
+**Alternatives considered:** Simply deleting both null-gates (variant V2) — rejected: it puts the featured window's calculator trade and the deck's top card on screen together, which is exactly the confusion #241 removed. #241's invariant is preserved, not reverted.
+**Consequences:** `deck.length`, not `topCard`, is the switch, so the surface does not snap back to the featured window when the deck is swiped out mid-session. After #169 moved the disposition controls into `TradeCard.tsx`, this fix and #169 compose: ungating the deck is what makes the card — and therefore Pass/Like — reachable when pinned.
+**Status:** Active.
+
+## D-035 — #298 Ships Without a New Feature Flag
+**Date:** 2026-08-11
+**Context:** The default for a behaviour change on a live surface is a kill-switch flag. This one is a documented exception, signed off by the operator.
+**Decision:** No new flag.
+**Alternatives considered:** Adding one — rejected on three grounds. (1) `useFeatureFlags.revalidateFlags` **replaces** the flag map rather than merging it, so a key living only in `LAUNCHED_FLAG_DEFAULTS` is `true` at first paint and `false` a second later — a flickering feature, worse than FB-115's hidden one. (2) Registering it properly requires `backend/feature_flags.py`; `config/features.json` alone is a no-op because `_load_from_json` drops unknown keys. (3) `trade.asset_ideas` is already a real, server-side, deploy-free kill switch for 100% of the diff — with it off, `singlePin` is `null` and every changed line falls back to the unconditional CTA + deck.
+**Consequences:** Rollback lever is `trade.asset_ideas → false`. **Generalisable:** "add a kill-switch flag" is not free in this codebase — it is a five-file change spanning `backend/`, and a half-registered flag is a live footgun because of the map-replace semantics. Check both before promising one.
+**Status:** Active.
+
+## D-036 — League Roster Tiles: 32pt via an Opt-In Prop, Not the Literal 30pt
+**Date:** 2026-08-11 (feedback #299)
+**Context:** The operator asked to cut the League roster tiles "to about half" their height.
+**Decision:** 32pt (−47%), delivered through a new `denseSingleLine` prop on `PlayerCard` that defaults to `false`.
+**Alternatives considered:** Literal 30pt — rejected: it needs `paddingVertical 2 → 1` on the shared `Badge` primitive, which renders position, tier, rookie and injury badges on every screen in the app. 32pt is the natural floor of the existing primitive (badge 20pt + 6pt above and below). Two points of gain is not worth an app-wide component fork.
+**Consequences:** The Tiers board — pressable, drag-liftable, and needing its `statsSlot` — is untouched, as is the FA list; both keep the 60pt two-line row. Draft-capital rows (`pickRow`) came down 40 → 32 in the same pass so the picks group doesn't read tall beside the roster. 728pt reclaimed on a 26-man roster; 4 → 8 players above the fold.
+**Status:** Active.
+
+## D-037 — League Drill-In Back Affordance Lives on the Stack Header, Tab-Root Only
+**Date:** 2026-08-11 (feedback #302, variant V2)
+**Context:** The drill-in is component state (`selectedId`), not a stack push, so **no** system back worked anywhere: no stack back (LeagueRankings is the stack root), no iOS edge-swipe, and no `BackHandler` was registered. A back control did exist, but it sat in the chart-card header above ~1,600pt of roster, top-right against an app convention of top-left, at 11px beside a 16px title.
+**Decision:** Move the exit into the already-fixed stack header (`headerLeft` + title swap) at zero vertical cost. **The Android `BackHandler` was built and then WITHDRAWN before ship** (operator, 2026-08-11): no Android device or emulator was available at any point in the batch, and this release is iOS/TestFlight-only, so shipping it would have put unverified code down a path no tester could reach. It returns with the first non-App-Store release. `'hardware_back'` stays a **reserved** `via` value with no emitter — kept registered so re-enabling is one `useEffect` rather than a taxonomy migration (the `sleeper_send_*` precedent, D-031) — and both halves are pinned: the value stays allowed, and nothing emits it.
+**Alternatives considered:** A 38pt sticky bar (variant V1) — rejected as costing vertical space on the screen #299 is simultaneously compressing. Making the drill-in a real route push — rejected: it breaks the 2026-07-26 Analyzer treatment (chart stays visible above the roster) and #237's shared filter state.
+**Consequences:** **Scoped to the tab-root registration.** The legacy root-stack `LeagueSummary` (deep-link entry, `RootNav.tsx:508-530`) already owns its `headerLeft` — the explicit JS back that exists because native back is dead over `headerShown: false` (RNS#3294) — and `setOptions` cannot restore what it overwrites. That variant keeps the in-card link; the two are mutually exclusive, so there are never two back controls and never a duplicate testID.
+**Status:** Active.
+
+## D-038 — Adopt `league_team_opened` for the League Drill-In; Add Only an Exit Event
+**Date:** 2026-08-11 (feedback #299/#302 analytics)
+**Context:** A prior instrumentation round, working against `origin/main` @ `ab9368f`, found no event covering the drill-in and specced a `league_team_focused` / `league_team_unfocused` pair. Between that check and its ship, `main` advanced 21 commits and the P0-7 round registered 17 client events — including `league_team_opened`, fired from the single `openTeam` helper both drill-in entry points route through, carrying the same bar-vs-row `via` the new pair proposed re-minting.
+**Decision:** Adopt `league_team_opened` unchanged as the enter half. Add exactly one new name, `league_team_closed {via, dwell_ms, rank}`, for the exit — which genuinely had no signal, because the drill-in is component state and emits no `screen_left`.
+**Alternatives considered:** Shipping the focused/unfocused pair — rejected: two events for one interaction on this screen is the two-sources-of-truth bug #208/#248/#293 are a catalog of.
+**Consequences:** All five exit controls route through one `closeTeam` choke point, and the file has exactly one bare `setSelectedId(null)`; both are statically pinned, so a new exit control that forgets to fire fails a check rather than silently vanishing from the data. `league_team_closed` is NON-INTENT, added in the same commit as its allowlist entry. Abandonment (opened, never closed) is measured by absence; there is deliberately no unmount-cleanup emitter, which would double-fire on React strict-mode remounts and invent dwell. **Meta-consequence worth generalising: an instrumentation gap analysis is only valid against the `origin/main` the work will land on.** Two of this batch's premises were true when checked and false when shipped.
+**Status:** Active.
+
+---
+
 ## Decision index
 
 | ID | Title | Date |
@@ -350,6 +392,11 @@
 | D-031 | The Reserved `sleeper_send_*` Names, and the Client/Server Split of the Send Funnel | 2026-08-11 |
 | D-032 | The Tour's Sign-Off Gate Is Beat Identity, Not Step Count | 2026-08-11 |
 | D-033 | Request the Celebration First, Consume It Only on Success | 2026-08-11 |
+| D-034 | #298 Single-Pin Recovery: the Deck Takes the Lead Slot, It Does Not Stack | 2026-08-11 |
+| D-035 | #298 Ships Without a New Feature Flag | 2026-08-11 |
+| D-036 | League Roster Tiles: 32pt via an Opt-In Prop, Not the Literal 30pt | 2026-08-11 |
+| D-037 | League Drill-In Back Affordance Lives on the Stack Header, Tab-Root Only | 2026-08-11 |
+| D-038 | Adopt `league_team_opened` for the League Drill-In; Add Only an Exit Event | 2026-08-11 |
 
 ---
 

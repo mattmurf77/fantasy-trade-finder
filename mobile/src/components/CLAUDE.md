@@ -4,7 +4,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 
 | Component | Use |
 |---|---|
-| `PlayerCard` | Player tile: name, position, value |
+| `PlayerCard` | Player tile: name, position, value. `denseSingleLine` (#299) — opt-in 32pt single-line variant of the `dense` row, used **only** by the League drill-in roster panel. Drops line 2 and renders the tier badge in the right cluster, left of `posRank`. **Incompatible with `statsSlot`** (there is no line 2 to hold it) and unsafe for any caller passing `onPress`: 32pt is below the 44pt touch minimum, and the League tiles being inert is what makes it legal there. Tiers board and FA list keep the 60pt two-line row. Pinned by `mobile/tests/check-league-drill-in.js` |
 | `TradeCard` | Give/receive summary card; swipe-deck variant adds keep-side, edit-in-calc, remove-asset, hide-strength/hide-lock props, and `disposition` (#169: Pass/Like render inside the card beneath the player tiles — top deck card only, never peek/match/featured; vocabulary + ordering are `docs/cross-client-invariants.md` § Deck disposition) |
 | `FeaturedTradeWindow` | Read-only featured-trade card for single-pin finder mode, back-chip history stack; exports `assetIdeaKey()` |
 | `AssetIdeasPanel` | Grouped Upgrade/Lateral/Downgrade ideas for the pinned asset (flag `trade.asset_ideas`); tap loads into `FeaturedTradeWindow` |
@@ -17,7 +17,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `TradeSide` | Calculator: one side of a built trade; marks owned picks with `MemberEnteredMarker` (flag `picks.assign_tradeable`) |
 | `VerdictPanel` | Calculator: dual-board fairness verdict + gives/gets bars (demo mode) |
 | `ConsensusVerdictCard` | Calculator: server-authoritative consensus verdict (live mode) |
-| `InLeagueCalculator` | Calculator "In league" mode: real opponent/rosters, two-board verdict, eveners, lineup before/after, prefill |
+| `InLeagueCalculator` | Calculator "In league" mode: real opponent/rosters, two-board verdict, eveners, lineup before/after, prefill. Fires `lineup_impact_unavailable` when the server omits `starter_impact` and both sides carry players; `platform` is read from the session league cache, **never** from the league id's shape |
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `EvenerRows` | Calculator: one-tap balance rows from evaluate's `eveners`; also serves one-sided "Trade options" |
 | `AdjustmentsDisclosure` | Calculator: collapsed "Value adjustments" itemization; "off" note under stud-tax `off` |
