@@ -11,6 +11,7 @@ import {
   type SendSurface,
 } from '../utils/tradeText';
 import SendInMflButton from './SendInMflButton';
+import SendInEspnButton from './SendInEspnButton';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
@@ -35,7 +36,10 @@ import { track } from '../api/events';
 //   • mfl with `trade.send_in_mfl` ON → SendInMflButton (MFL's documented
 //     import API — previously this button WRONGLY rendered on MFL leagues
 //     and a tap would have fired at Sleeper's API and failed)
-//   • mfl with `trade.send_in_mfl` OFF, espn, fleaflicker → the P0-6
+//   • espn with `espn.send` ON → SendInEspnButton (ESPN's lm-api-writes
+//     transactions endpoint; the flag ships OFF and absent from
+//     config/features.json until the auth probe clears, per D-026)
+//   • mfl/espn with their flags OFF, fleaflicker → the P0-6
 //     fallback: a stated reason (NO_SEND_REASON) plus a "Copy trade"
 //     action — never null; the send path itself is unreachable there.
 //
@@ -103,6 +107,12 @@ export default function SendInSleeperButton({
   // league with the flag OFF falls through to the P0-6 copy fallback below
   // instead of SendInMflButton's internal null (which would regress P0-6).
   const mflEnabled = useFlag('trade.send_in_mfl');
+  // ESPN's send path and rollback lever (`espn.send`, gating the backend
+  // route too — OFF and absent from config/features.json until the auth
+  // probe clears, per D-026). Read here, at the router, so an ESPN league
+  // with the flag OFF falls through to the P0-6 copy fallback below instead
+  // of SendInEspnButton's internal null (which would regress P0-6).
+  const espnEnabled = useFlag('espn.send');
   // #146 + audit P0-6 — reactive twin of api/espn.isEspnLeague, widened from
   // "is it ESPN" to "which platform is it". Reactive (a useSession SELECTOR,
   // not getState()) because this runs in render, unlike the imperative twins
@@ -401,6 +411,26 @@ export default function SendInSleeperButton({
   if (platform === 'mfl' && mflEnabled) {
     return (
       <SendInMflButton
+        leagueId={leagueId}
+        theirUserId={theirUserId}
+        givePlayerIds={givePlayerIds}
+        receivePlayerIds={receivePlayerIds}
+        impressionId={impressionId}
+        onSent={onSent}
+        compact={compact}
+        style={style}
+        surface={surface}
+      />
+    );
+  }
+
+  // ESPN twin, same routing law: the flag lives IN the condition so an ESPN
+  // league with `espn.send` OFF (today: everywhere — the flag is absent from
+  // config/features.json until the auth probe clears) falls through to the
+  // P0-6 fallback below, never to a null.
+  if (platform === 'espn' && espnEnabled) {
+    return (
+      <SendInEspnButton
         leagueId={leagueId}
         theirUserId={theirUserId}
         givePlayerIds={givePlayerIds}

@@ -189,16 +189,18 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # trade_sent (2026-08-11, operator-approved taxonomy addition — tracking
     # plan v2 addendum 2026-08-11, rescoped at the MFL merge the same day):
     # a CONFIRMED outbound send into a real NON-SLEEPER platform league.
-    # Fired server-side on the success path of POST /api/trades/propose-mfl
-    # ONLY — never on validation or hard-block failures (e.g.
-    # mfl_asset_unmapped). Deliberately NOT fired on the Sleeper path:
+    # Fired server-side on the success paths of POST /api/trades/propose-mfl
+    # and POST /api/trades/propose-espn ONLY — never on validation or
+    # hard-block failures (e.g. mfl_asset_unmapped, espn_pick_unsupported,
+    # espn_asset_unmapped). Deliberately NOT fired on the Sleeper path:
     # Sleeper's confirmed send is `sleeper_send_succeeded` (P0-7, above),
     # and firing both for one real send would double-count funnel stage 8.
     # Cross-platform send counts = sleeper_send_succeeded ∪ trade_sent.
     # Props (the NULL-`platform` incident is why `platform` is mandatory
     # and non-null):
-    #   platform      'mfl' — REQUIRED, never null ('sleeper' never appears;
-    #                 future non-Sleeper send platforms extend this enum)
+    #   platform      'mfl' | 'espn' (2026-08-11, Send-in-ESPN) — REQUIRED,
+    #                 never null ('sleeper' never appears; future non-Sleeper
+    #                 send platforms extend this enum)
     #   give_count    assets offered (players + side-attributed picks)
     #   receive_count assets requested (players + side-attributed picks)
     #   outcome       platform-confirmed status string ('proposed')

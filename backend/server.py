@@ -21794,6 +21794,288 @@ def mfl_pending_trades():
     })
 
 
+# ── "Send in ESPN" (flag `espn.send` — OFF and ABSENT from features.json) ────
+#
+# The ESPN analogue of Send-in-Sleeper/-MFL, riding ESPN's UNDOCUMENTED
+# lm-api-writes transactions endpoint. Payload live-verified for football
+# 2026-08-11 (docs/plans/espn-send-live-capture-2026-08-11.md); D-026 reversed
+# the standing write NO-GO to a GATED go. TODO(live-verify) — the flag-
+# graduation gate: it is NOT proven that espn_s2 + SWID alone authorize a
+# server-side POST (the captures came from a browser session; a CSRF/session
+# token may be required), so `espn.send` stays absent from
+# config/features.json until a controlled live attempt clears it.
+# Adapter: backend/espn_write.py (pure, opener-injectable).
+
+#: Reverse crosswalk cache: {sleeper_id: espn_id}, rebuilt only when the
+#: shared DP crosswalk object itself refreshes (espn_service's 24h TTL).
+_espn_reverse_xwalk_cache: tuple | None = None
+
+
+def _sleeper_to_espn_map() -> dict:
+    """Sleeper player id → ESPN playerId, inverted from the shared crosswalk's
+    `by_espn_id`. CONFIRMED 2026-08-11: the crosswalk's espn_id IS the
+    write-API playerId (4/4 live ids matched — capture doc §Resolved 1).
+    First-wins on collisions, matching the forward map's setdefault."""
+    global _espn_reverse_xwalk_cache
+    from . import espn_write as _espn_write
+    xw = _shared_crosswalk()
+    cached = _espn_reverse_xwalk_cache
+    if cached is not None and cached[0] is xw:
+        return cached[1]
+    inv = _espn_write.invert_espn_crosswalk(xw.by_espn_id)
+    _espn_reverse_xwalk_cache = (xw, inv)
+    return inv
+
+
+def _espn_team_id_from_member_id(league_id: str, member_id, teams) -> int | None:
+    """Resolve a counterparty's ESPN teamId from the synthetic member id FTF
+    stores for ESPN leagues (`_espn_member_id`'s two shapes), verified against
+    the LIVE team list from the pre-flight league read — never trusted bare.
+
+      espn:{league_id}.t{team_id}  → that team id, iff present in the league
+      espn:{SWID}                  → the team whose owner SWID matches
+
+    None when the id is neither shape or names no current team."""
+    from . import espn_service as _espn
+    s = str(member_id or "")
+    m = re.match(rf"^espn:{re.escape(str(league_id))}\.t(\d+)$", s)
+    if m:
+        tid = int(m.group(1))
+        return tid if any(t.team_id == tid for t in teams) else None
+    if s.startswith("espn:"):
+        target = _espn.canonical_swid(s[len("espn:"):]).upper()
+        for t in teams:
+            if t.owner_swid and _espn.canonical_swid(t.owner_swid).upper() == target:
+                return t.team_id
+    return None
+
+
+@app.route("/api/trades/propose-espn", methods=["POST"])
+def propose_trade_to_espn():
+    """Send a built trade into ESPN as a real pending proposal (players only).
+
+    Body: {league_id, their_user_id (the synthetic `espn:{SWID}` /
+           `espn:{L}.t{N}` member id ESPN counterparties carry) or
+           their_team_id, give_player_ids[], receive_player_ids[]
+           (FTF/Sleeper-space PLAYER ids — pick assets hard-block: ESPN's
+           pick encoding is unverified, so a pick is refused loudly rather
+           than guessed at or dropped), comments?, impression_id?}
+    Success → {status:"proposed", transaction_id, espn_status}. Structured
+    errors (client maps to reconnect / fallback UX):
+      404 feature_disabled | 403 verification_required | 404 espn_not_linked
+      409 espn_team_unknown | 409 espn_not_connected | 409 espn_auth_expired
+      (stored credential dropped) | 422 espn_pick_unsupported (+ picks[])
+      | 422 espn_asset_unmapped (+ unmapped[]) | 502 espn_write_failed
+      | 400 bad_request
+
+    Sibling of propose / propose-mfl rather than a platform switch on them
+    (the #149/#150/#200 numeric-league-id misroute class): the client routes
+    by platform and this route re-verifies platform='espn' via the leagues
+    row. Both team ids resolve SERVER-side — mine from the linked row's
+    binding, theirs from the member id against a live pre-flight league read
+    — the client never asserts either.
+    """
+    if _TEST_MODE:
+        # Fail closed: there is no legitimate automated send (mirrors the
+        # Sleeper/MFL propose routes' 599 under the UI-test harness).
+        return jsonify({"error": "test_mode_propose_disabled"}), 599
+    if not is_enabled("espn.send"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    # Same P1 hard gate as the Sleeper/MFL propose routes: this writes into
+    # the user's REAL ESPN league — only a session that proved control of
+    # this user_id may fire it. No grace period.
+    if not sess.get("verified"):
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=hard_route", user_id, request.method, request.path)
+        return jsonify({"error": "verification_required"}), 403
+
+    from . import espn_service as _espn
+    from . import espn_write as _espn_write
+    from .database import (get_espn_league, get_espn_credential,
+                           delete_espn_credential)
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    their_member_id = body.get("their_user_id")
+    their_team_in = body.get("their_team_id")
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    if not league_id.isdigit() or \
+            (their_member_id is None and their_team_in is None):
+        return jsonify({"error": "bad_request"}), 400
+    if not (give or receive):
+        return jsonify({"error": "bad_request"}), 400
+
+    # Server-authoritative platform + team resolution from the leagues row —
+    # the client never asserts its own team id.
+    row = get_espn_league(league_id)
+    if not row:
+        return jsonify({"error": "espn_not_linked",
+                        "message": "Link this ESPN league first."}), 404
+    if str(row.get("user_id") or "") != str(user_id):
+        # One linker per ESPN league row; only the linker has a team binding,
+        # so nobody else can send from it.
+        return jsonify({"error": "espn_not_linked",
+                        "message": "This ESPN league isn't linked to your "
+                                   "account."}), 404
+    my_team_id = row.get("espn_my_team_id")
+    if my_team_id is None:
+        return jsonify({"error": "espn_team_unknown",
+                        "message": "Couldn't determine your team — re-link "
+                                   "this league."}), 409
+
+    # A write ALWAYS needs the cookie pair, even for a public-league link.
+    cred = get_espn_credential(user_id)
+    swid = (cred or {}).get("swid")
+    if not cred or not swid:
+        return jsonify({"error": "espn_not_connected",
+                        "message": "Connect your ESPN account first."}), 409
+    try:
+        espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+    except Exception:
+        log.warning("espn propose: stored cookie undecryptable for %s", user_id)
+        return jsonify({"error": "espn_not_connected",
+                        "message": "Your saved ESPN sign-in couldn't be read "
+                                   "— connect ESPN again."}), 409
+
+    # PICKS HARD-BLOCK (players only). ESPN's pick-asset representation in
+    # items[] is UNVERIFIED (capture doc §Still unresolved 2) — a pick is
+    # refused loudly, never guessed at, never silently dropped.
+    picks = [p for p in give + receive if _is_ftf_pick_asset(league_id, p)]
+    if picks:
+        return jsonify({"error": "espn_pick_unsupported",
+                        "picks": picks,
+                        "message": "Draft picks can't be sent to ESPN yet, "
+                                   "so nothing was sent."}), 422
+
+    # Player mapping — HARD BLOCK on any miss. An offer must never silently
+    # drop an asset: a partially-mapped trade is a DIFFERENT trade, so the
+    # send refuses instead.
+    inverse = _sleeper_to_espn_map()
+    unmapped = [p for p in give + receive if p not in inverse]
+    if unmapped:
+        return jsonify({"error": "espn_asset_unmapped",
+                        "unmapped": unmapped,
+                        "message": "Some assets couldn't be matched to ESPN "
+                                   "player ids, so nothing was sent."}), 422
+
+    # Pre-flight league read (the same authenticated read the importer uses):
+    # resolves the counterparty's teamId against LIVE team data, yields the
+    # current scoringPeriodId (never a hardcoded week) and each player's real
+    # lineup slot id, and proves the cookies still read before we write.
+    season = int(row.get("espn_season") or _ESPN_DEFAULT_SEASON)
+    try:
+        raw = _espn.fetch_league(league_id, season, espn_s2=espn_s2, swid=swid)
+    except _espn.EspnAuthError:
+        # Dead/rejected cookies — drop the stored credential so the client
+        # re-prompts the ESPN connect flow (same treatment as MFL's expiry).
+        log.warning("espn propose: pre-flight auth-rejected for %s", user_id)
+        try:
+            delete_espn_credential(user_id)
+        except Exception:
+            log.exception("espn propose: credential delete failed")
+        return jsonify({
+            "error": "espn_auth_expired",
+            "message": "Your ESPN sign-in expired — connect ESPN again.",
+        }), 409
+    except _espn.EspnError as e:
+        return _espn_error_response(e)
+    league = _espn.parse_league(raw)
+    teams = league["teams"]
+    if not any(t.team_id == int(my_team_id) for t in teams):
+        return jsonify({"error": "espn_team_unknown",
+                        "message": "Your team is no longer in this ESPN "
+                                   "league — re-link it."}), 409
+
+    if their_team_in is not None:
+        try:
+            their_team_id = int(their_team_in)
+        except (TypeError, ValueError):
+            return jsonify({"error": "bad_request"}), 400
+        if not any(t.team_id == their_team_id for t in teams):
+            return jsonify({"error": "bad_request",
+                            "message": "That team isn't in this league."}), 400
+    else:
+        their_team_id = _espn_team_id_from_member_id(league_id,
+                                                     their_member_id, teams)
+        if their_team_id is None:
+            return jsonify({"error": "bad_request",
+                            "message": "Couldn't resolve the counterparty "
+                                       "team."}), 400
+    if int(their_team_id) == int(my_team_id):
+        return jsonify({"error": "bad_request",
+                        "message": "You can't send a trade to your own "
+                                   "team."}), 400
+
+    req = _espn_write.EspnTradeProposalRequest(
+        league_id=league_id,
+        season=season,
+        my_team_id=int(my_team_id),
+        their_team_id=int(their_team_id),
+        member_swid=swid,
+        give_espn_player_ids=[int(inverse[p]) for p in give],
+        receive_espn_player_ids=[int(inverse[p]) for p in receive],
+        scoring_period_id=_espn_write.current_scoring_period(raw),
+        lineup_slots=_espn_write.extract_lineup_slots(raw),
+        comment=(str(body.get("comments") or "").strip()),
+    )
+    try:
+        result = _espn_write.propose_trade(espn_s2, swid, req)
+    except _espn_write.EspnWriteAuthError as e:
+        # TODO(live-verify): until the auth probe clears, a 401/403 here may
+        # mean cookies alone never authorize a server-side write — either
+        # way: structured error, credential drop, client re-prompts connect.
+        log.warning("espn propose auth-rejected: %s", getattr(e, "detail", None))
+        try:
+            delete_espn_credential(user_id)
+        except Exception:
+            log.exception("espn propose: credential delete failed")
+        return jsonify({
+            "error": "espn_auth_expired",
+            "message": "ESPN rejected the sign-in — connect ESPN again.",
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 409
+    except _espn_write.EspnWriteError as e:
+        log.warning("espn propose write-failed [%s]: %s", e.kind,
+                    getattr(e, "detail", None))
+        return jsonify({
+            "error": "espn_write_failed",
+            "kind": e.kind,
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 502
+
+    # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
+    # routes; additive/optional, only reached on a successful ESPN write.
+    _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    # trade_sent (server-fired, taxonomy 2026-08-11, rescoped to non-Sleeper
+    # platforms only) — confirmed-success ONLY; every failure branch (incl.
+    # both 422 hard blocks) returned before this. `platform` is mandatory/
+    # non-null. Players only, so the counts are the raw side lengths.
+    try:
+        record_event(
+            user_id, "trade_sent",
+            league_id=league_id,
+            source="api",
+            props={"platform": "espn",
+                   "give_count": len(give),
+                   "receive_count": len(receive),
+                   "outcome": "proposed"},
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception:
+        pass
+    log.info("espn propose: user=%s league=%s to_team=%s assets=%d/%d",
+             user_id, league_id, their_team_id, len(give), len(receive))
+    return jsonify({"status": "proposed",
+                    "transaction_id": result.get("transaction_id"),
+                    "espn_status": result.get("status")})
+
+
 # ── Fleaflicker ──────────────────────────────────────────────────────────────
 
 def _flea_member_id(league_id: str, team_id: str) -> str:

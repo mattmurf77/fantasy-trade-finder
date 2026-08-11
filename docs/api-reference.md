@@ -215,6 +215,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 | POST | `/api/trades/propose` | **Flagged beta** (`trade.send_in_sleeper`, default off). Send a built trade to Sleeper as a real proposal — see [Send in Sleeper](#send-in-sleeper-flagged-beta) |
 | POST | `/api/trades/propose-mfl` | **Flagged** (`trade.send_in_mfl`, default off). Send a built trade into MyFantasyLeague via MFL's *documented* import API — see [Send in MFL](#send-in-mfl-flagged) |
 | POST | `/api/trades/respond-mfl` | **Flagged** (`trade.send_in_mfl`). Accept/reject/**revoke** a pending MFL trade — see [Send in MFL](#send-in-mfl-flagged) |
+| POST | `/api/trades/propose-espn` | **Flagged dark** (`espn.send` — OFF and deliberately **absent from `config/features.json`** until the auth probe clears, D-026). Send a built trade into ESPN via its undocumented write API — see [Send in ESPN](#send-in-espn-flagged-dark) |
 
 **Deck order is not strictly score-sorted.** With `trade.thompson_deck` on (prod default), the returned card order is Thompson-sampled (bounded 0.5–1.5× multiplier on `composite_score`) and `trade.deck_diversity` can demote league-saturated targets — so order is intentionally stochastic and varies run-to-run. Clients must not assume `cards[0]` is the strict `composite_score` max. With both flags off the deck is composite-sorted descending (TC-ENG-001 / TC-E2E-001).
 
@@ -348,6 +349,30 @@ The MFL analogue of Send in Sleeper — but riding MFL's **documented, sanctione
 | 400 | `bad_request` | Malformed body / unparseable counterparty / self-trade / malformed pick asset |
 
 **Scope:** players AND owned future picks are wired end-to-end — the mobile trade surfaces already carry picks in the mixed asset arrays, and the server encodes them (`FP_` only; `DP_` current-year slot picks have no FTF-side representation and remain pre-encoded-only). The `FP_` shape was verified against a live public `futureDraftPicks` export 2026-08-11 (`originalPickFor` 4-digit padded, round 1-based unpadded → `FP_0001_2027_1`); whether a live *import* accepts it is still on the operator checklist. The full lifecycle is routed: propose → pending-trades read → respond (accept/reject/revoke).
+
+## Send in ESPN (flagged dark)
+
+The ESPN analogue of Send in Sleeper/MFL, riding ESPN's **undocumented** `lm-api-writes.fantasy.espn.com` transactions endpoint (the one the ESPN web client itself uses). Payload **live-verified for football 2026-08-11** — two real proposals in a real dynasty league, read back via `mPendingTransactions` ([docs/plans/espn-send-live-capture-2026-08-11.md](plans/espn-send-live-capture-2026-08-11.md)); D-026 reversed the standing ESPN-write NO-GO to a *gated* go. Gated everywhere by `espn.send`, which ships **OFF and deliberately absent from `config/features.json`** — the flag-graduation gate is the one remaining unknown: the captures came from a browser session, so it is **not proven that `espn_s2` + `SWID` alone authorize a server-side POST** (a CSRF/session token may be required). Auth is the stored `espn_credentials` cookie pair (`espn_s2` Fernet-encrypted, `SWID` plain; same canonicalizers as the read path). Adapter: `backend/espn_write.py` (pure, opener-injectable; includes a cancel/revoke helper — `executionType: "CANCEL"` + `relatedTransactionId` — not yet routed).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/trades/propose-espn` | Send a trade into ESPN as a real pending proposal — **players only**. **Hard-verified: requires a verified session (403 `verification_required`), no grace.** Body `{league_id, their_user_id (the synthetic espn:{SWID} / espn:{L}.t{N} member id — or their_team_id, verified live), give_player_ids[], receive_player_ids[] (FTF/Sleeper PLAYER ids), comments?, impression_id?}`. Server-authoritative: the caller's teamId comes from the leagues row binding (`espn_my_team_id`, linker-only), the counterparty's resolves from the member id against a **live pre-flight league read** (which also supplies the current `scoringPeriodId` — 0 in the offseason, never a hardcoded week — and each player's real `fromLineupSlotId`, bench-20 fallback). **Two hard blocks, nothing ever silently dropped:** any pick asset → 422 `espn_pick_unsupported` (+ `picks[]` — ESPN pick encoding is unverified, so picks are refused, not guessed); any player the crosswalk can't reverse-map (Sleeper→ESPN `playerId`, confirmed 4/4 against live ids) → 422 `espn_asset_unmapped` (+ `unmapped[]`). → `{status: "proposed", transaction_id, espn_status: "PENDING"}`. **F1 (flag `deck.signal_v2`):** optional `impression_id` appends a `propose` `deck_outcomes` row. On confirmed success also fires the server-side `trade_sent` event (`platform: "espn"`); neither hard block ever fires it |
+
+`/api/trades/propose-espn` error contract:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 404 | `feature_disabled` | Flag off (today: everywhere — `espn.send` is absent from features.json) |
+| 403 | `verification_required` | Session not verified (P1 hard gate) |
+| 404 | `espn_not_linked` | League isn't a linked ESPN league, or is linked by a different FTF user (only the linker has a team binding) |
+| 409 | `espn_team_unknown` | League row has no `espn_my_team_id`, or that team vanished from the live league → re-link |
+| 409 | `espn_not_connected` | No stored/decryptable ESPN cookie pair → prompt the ESPN connect flow |
+| 409 | `espn_auth_expired` | ESPN rejected the cookies (401/403 on the pre-flight read OR the write) — stored credential dropped → reconnect. **TODO(live-verify):** until the auth probe clears, this can also mean cookies alone never authorize a server-side write |
+| 422 | `espn_pick_unsupported` | ≥1 pick asset in the arrays — hard block (ESPN pick encoding unverified), carries `picks[]` |
+| 422 | `espn_asset_unmapped` | ≥1 player failed the reverse crosswalk — hard block, carries `unmapped[]` |
+| 502 | `espn_write_failed` | ESPN refused or transport failed (non-auth) — carries `kind` + `detail` |
+| 502/404/… | `espn_unavailable` / `espn_league_not_found` / … | Pre-flight read failures via the shared ESPN error mapping |
+| 400 | `bad_request` | Malformed body / unresolvable counterparty / self-trade |
 
 **`POST /api/calc/score`** — body `{give_player_ids: [...], receive_player_ids: [...], scoring_format?: "1qb_ppr"|"sf_tep"}`. At least one side must be non-empty (both empty → 400). Unknown format falls back to `1qb_ppr`. Response:
 

@@ -34,6 +34,15 @@
 //      proposeTradeToMfl (never the Sleeper propose), carries the registered
 //      testID `trades.send-mfl-btn`, and REQUIRES `surface` (P0-7 parity —
 //      a mount without it must be a compile error).
+//   5. (Send-in-ESPN, 2026-08-11) platform === 'espn' AND `espn.send` ON →
+//      the router returns <SendInEspnButton/>, forwarding the same props +
+//      `surface`. The flag gate MUST live in the routing condition: with
+//      `espn.send` OFF (today: everywhere — the flag is deliberately absent
+//      from config/features.json until the auth probe clears, D-026) an ESPN
+//      league falls through to the P0-6 fallback (check 3), never null.
+//   6. SendInEspnButton self-gates on `espn.send`, proposes ONLY via
+//      proposeTradeToEspn (never the Sleeper propose), carries testID
+//      `trades.send-espn-btn`, and REQUIRES `surface`.
 //
 // Run: node tests/check-send-button-platform.js
 //   (or: npm run test:send-button-platform)
@@ -133,8 +142,55 @@ function walk(node, cb) {
          "no `if (platform === 'mfl' ...)` branch returning <SendInMflButton/> found");
   }
 
-  // 3a. The P0-6 fallback: platforms that can't send (espn, fleaflicker,
-  //     mfl with the flag off) render the stated reason + Copy trade —
+  // 2-espn. Same law for ESPN: an if on platform === 'espn' AND the
+  //    espn.send flag whose branch returns <SendInEspnButton/>. The flag
+  //    MUST be part of the routing condition: that is what makes flag-off
+  //    ESPN (today: everywhere) fall through to the P0-6 copy fallback
+  //    (check 3) instead of a live send or a null.
+  let espnDelegation = null;
+  let espnCondHasFlag = false;
+  walk(sf, (node) => {
+    if (!ts.isIfStatement(node)) return;
+    const cond = node.expression.getText(sf).replace(/\s+/g, ' ');
+    if (!/platform\s*===\s*'espn'/.test(cond)) return;
+    walk(node.thenStatement, (inner) => {
+      if (
+        (ts.isJsxSelfClosingElement(inner) || ts.isJsxOpeningElement(inner)) &&
+        inner.tagName.getText(sf) === 'SendInEspnButton'
+      ) {
+        espnDelegation = inner;
+        espnCondHasFlag = /espnEnabled/.test(cond);
+      }
+    });
+  });
+  if (espnDelegation) {
+    ok('router: espn branch delegates to <SendInEspnButton/>');
+    if (espnCondHasFlag &&
+        /const espnEnabled\s*=\s*useFlag\('espn\.send'\)/.test(text)) {
+      ok('router: espn delegation is gated on espn.send IN the condition');
+    } else {
+      fail('router: espn delegation is gated on espn.send IN the condition',
+           "expected `const espnEnabled = useFlag('espn.send')` and `platform === 'espn' && espnEnabled` — otherwise flag-off ESPN hits SendInEspnButton's internal null and regresses the P0-6 copy fallback");
+    }
+    const espnAttrs = espnDelegation.attributes.properties
+      .filter((p) => ts.isJsxAttribute(p))
+      .map((p) => p.name.getText(sf));
+    const espnNeeded = ['leagueId', 'theirUserId', 'givePlayerIds', 'receivePlayerIds', 'surface'];
+    const espnMissing = espnNeeded.filter((a) => !espnAttrs.includes(a));
+    if (espnMissing.length === 0) {
+      ok('router: espn delegation forwards league/opponent/asset props + surface');
+    } else {
+      fail('router: espn delegation forwards league/opponent/asset props + surface',
+           `missing props on <SendInEspnButton/>: ${espnMissing.join(', ')}`);
+    }
+  } else {
+    fail('router: espn branch delegates to <SendInEspnButton/>',
+         "no `if (platform === 'espn' ...)` branch returning <SendInEspnButton/> found");
+  }
+
+  // 3a. The P0-6 fallback: platforms that can't send (espn/mfl with their
+  //     flags off — espn.send is off everywhere today — and fleaflicker)
+  //     render the stated reason + Copy trade —
   //     pinned by both registered testIDs inside the !canSend branch.
   let fallbackUnavailable = false;
   let fallbackCopy = false;
@@ -234,6 +290,56 @@ function walk(node, cb) {
   } else {
     fail('mfl button: requires surface: SendSurface (P0-7 parity)',
          'expected a required `surface: SendSurface` prop in SendInMflButton Props');
+  }
+}
+
+// ── 6: SendInEspnButton fires only the ESPN API, flag-gated, testID'd ─────
+{
+  const { text, sf } = parse('SendInEspnButton.tsx');
+
+  if (/useFlag\('espn\.send'\)/.test(text) &&
+      /if \(!enabled\) return null;/.test(text)) {
+    ok('espn button: self-gates on espn.send');
+  } else {
+    fail('espn button: self-gates on espn.send',
+         "expected useFlag('espn.send') + `if (!enabled) return null;`");
+  }
+
+  if (/from '\.\.\/api\/sendInEspn'/.test(text) && /proposeTradeToEspn\(/.test(text)) {
+    ok('espn button: proposes via api/sendInEspn');
+  } else {
+    fail('espn button: proposes via api/sendInEspn',
+         'expected proposeTradeToEspn(...) imported from ../api/sendInEspn');
+  }
+
+  if (/proposeTradeToSleeper|proposeTradeToMfl/.test(text)) {
+    fail('espn button: never touches another platform\'s propose',
+         'proposeTradeToSleeper/proposeTradeToMfl referenced in SendInEspnButton.tsx');
+  } else {
+    ok('espn button: never touches another platform\'s propose');
+  }
+
+  let hasEspnTestId = false;
+  walk(sf, (node) => {
+    if (ts.isJsxAttribute(node) && node.name.getText(sf) === 'testID' &&
+        node.initializer && /trades\.send-espn-btn/.test(node.initializer.getText(sf))) {
+      hasEspnTestId = true;
+    }
+  });
+  if (hasEspnTestId) {
+    ok('espn button: carries testID trades.send-espn-btn');
+  } else {
+    fail('espn button: carries testID trades.send-espn-btn',
+         'the send-surface testID grammar registers this id');
+  }
+
+  // P0-7 parity: `surface` is a REQUIRED prop (no `?`), so a mount that
+  // forgets it is a compile error — matching the other twins' contract.
+  if (/surface\s*:\s*SendSurface;/.test(text) && !/surface\?\s*:/.test(text)) {
+    ok('espn button: requires surface: SendSurface (P0-7 parity)');
+  } else {
+    fail('espn button: requires surface: SendSurface (P0-7 parity)',
+         'expected a required `surface: SendSurface` prop in SendInEspnButton Props');
   }
 }
 

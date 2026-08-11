@@ -119,6 +119,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # pick-asset encodings) — see
     # docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md.
     "trade.send_in_mfl",      # backend/mfl_write.py
+    # "Send in ESPN" — ESPN's undocumented lm-api-writes transactions
+    # endpoint, live-verified for football 2026-08-11
+    # (docs/plans/espn-send-live-capture-2026-08-11.md). Gates POST
+    # /api/trades/propose-espn + the mobile send button on ESPN leagues.
+    # D-026: OFF and deliberately ABSENT from config/features.json until the
+    # auth probe clears (it is NOT proven that espn_s2 + SWID alone authorize
+    # a server-side POST — a CSRF/session token may be required).
+    "espn.send",              # backend/espn_write.py
     # FB-147 — import Sleeper trade-block flags (public GraphQL read) and tag
     # involved players on trade cards. Gates BOTH the session_init sync and
     # the `on_block` card serialization; off = payloads byte-identical to
