@@ -152,9 +152,23 @@ FLAG_KEYS: tuple[str, ...] = (
     # always require proof.
     "auth.enforce_verified_writes",
     # Email capture (docs/business/product/2026-07-17-email-capture-spec.md).
-    # False (default) = pre-spec behavior: Apple email is hashed, plaintext
-    # discarded. Flip ONLY in the same release as the capture UI + the
-    # privacy-policy update — the policy currently says "no email addresses".
+    # ON since 2026-08-11 (P1-3), flipped in config/features.json in ONE
+    # commit with the web/privacy.html §1/§2/§5/§6 rewrite. That pairing is
+    # enforced by backend/tests/test_email_capture.py::
+    #   test_release_flag_and_privacy_policy_ship_together.
+    # ON = the server-verified Apple/Google identity-token `email` claim is
+    # stored in PLAINTEXT on accounts.email with email_source + an ISO
+    # email_consent_at. False = pre-spec behavior: hash only, plaintext
+    # discarded.
+    # NEVER flip this key via FTF_FLAGS or POST /api/feature-flags/reload, in
+    # EITHER direction: an env-only flip changes what we store without
+    # changing what the published privacy policy says — the exact accident
+    # the pairing exists to prevent (living-memory/DECISIONS.md D-044).
+    # Rollback is therefore a revert commit, not a console click, and it
+    # stops NEW writes only: addresses already stored are not deleted.
+    # The Settings/onboarding capture UI is still UNBUILT — set_account_email
+    # (backend/accounts.py) has no callers, so email_source='user' is
+    # unreachable; the Apple identity-token path is the only writer today.
     "auth.email_capture",
     # ESPN league linking Phase 1 — read-only import of ESPN leagues via the
     # unofficial v3 API (docs/plans/espn-league-linking-plan-2026-07-11.md).
