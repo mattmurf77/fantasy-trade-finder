@@ -148,8 +148,13 @@ thing #297's fix creates, and only the client can witness it.
       both disposition buttons dispatch `advance()`. **All five of its sabotages were
       executed and each failed as intended** — output in `status.md` §4a. It needs no
       simulator, so unlike the Maestro flow it could be, and was, verified here.
-- **`testID`s added:** `trades.single-pin-deck-count` (TradesScreen.tsx:4648),
-  `calc.lineup-impact-unavailable` (InLeagueCalculator.tsx:1024). No renames, no
+- **Post-#169 note (integration round):** `f27c0f5` moved `trades.pass-btn` /
+  `trades.like-btn` into `TradeCard.tsx` (`:538`, `:555`). No testID changed, so the
+  Maestro flow and `testid-lint` are unaffected. The structural test WAS rewritten —
+  not repointed — to pin the wiring chain across the new seam instead of co-location,
+  with four added sabotages aimed at it: `status.md` §4a.
+- **`testID`s added:** `trades.single-pin-deck-count` (TradesScreen.tsx:4771),
+  `calc.lineup-impact-unavailable` (InLeagueCalculator.tsx:1062). No renames, no
   removals — every existing id on this surface is preserved deliberately, because #298's
   whole point is that the *existing* vocabulary should still be reachable.
   `mobile/scripts/testid-lint.sh` → `testid-lint OK`, exit 0.
