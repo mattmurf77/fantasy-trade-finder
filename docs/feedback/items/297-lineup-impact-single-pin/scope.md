@@ -30,7 +30,7 @@ buttons named **Pass / Like**) + `mockups/polish-lab-2026-08-11/trades-single-pi
   |---|---|---|
   | `find_trades_tapped` | `backend/analytics_taxonomy.py:51`, props `frozenset()` (`:191`) | Are pinned users generating decks again? Pre-fix this could not fire in single-pin mode at all — the button did not exist. A non-zero count from a pinned session is itself the fix's telemetry. |
   | `swipe` | `analytics_taxonomy.py:111` | Are pinned users dispositioning trades? Emitted from `advance()`, which every restored control (swipe, `trades.pass-btn`/`trades.like-btn`, VoiceOver actions) funnels into. |
-  | `trade_keep_side_tapped` | emitted at `TradesScreen.tsx:2003` | Unchanged; it is the main route *into* single-pin mode. |
+  | `trade_keep_side_tapped` | emitted at `TradesScreen.tsx:2004` | Unchanged; it is the main route *into* single-pin mode. |
 
   No taxonomy edit needed, so the DEFAULT-DENY drop path is not in play: every event
   this change can cause is already registered and will be accepted server-side.
@@ -99,7 +99,7 @@ buttons named **Pass / Like**) + `mockups/polish-lab-2026-08-11/trades-single-pi
       both disposition buttons dispatch `advance()`. **All five of its sabotages were
       executed and each failed as intended** — output in `status.md` §4a. It needs no
       simulator, so unlike the Maestro flow it could be, and was, verified here.
-- **`testID`s added:** `trades.single-pin-deck-count` (TradesScreen.tsx:4647),
+- **`testID`s added:** `trades.single-pin-deck-count` (TradesScreen.tsx:4648),
   `calc.lineup-impact-unavailable` (InLeagueCalculator.tsx:1024). No renames, no
   removals — every existing id on this surface is preserved deliberately, because #298's
   whole point is that the *existing* vocabulary should still be reachable.
