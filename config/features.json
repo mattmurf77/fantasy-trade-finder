@@ -43,6 +43,7 @@
   "trade.fit_premium": true,
   "trade.aggression_ab": true,
   "trade.send_in_sleeper": true,
+  "trade.send_in_mfl": false,
   "sleeper.trade_block": true,
   "trade.block_boost": true,
   "picks.owned_sync": true,

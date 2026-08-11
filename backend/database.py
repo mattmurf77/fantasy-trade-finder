@@ -215,8 +215,10 @@ users_table = Table("users", metadata,
     Column("last_rank_local_date",  String),
     Column("last_rank_tz",          String),
     # ── Verified session persistence (account-auth plan P1/P2) ───────────
-    # verified_via: 'sleeper' | 'apple' | 'google' — the source that proved
-    # control of this user record. NULL = never verified (username-only).
+    # verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' — the source
+    # that proved control of this user record. NULL = never verified
+    # (username-only). 'mfl_login' = a successful MFL username/password login
+    # (POST /api/mfl/auth-link — operator decision 2026-08-11).
     Column("verified_at",           String),
     Column("verified_via",          String),
     # ── Public-profile opt-in (teardown 06-04, flag profiles.user_toggle) ─
@@ -1406,7 +1408,7 @@ sessions_table = Table("sessions", metadata,
     Column("token_hash",   String, primary_key=True),   # SHA-256 hex of the bearer token
     Column("user_id",      String, nullable=False),     # sleeper id or acct_* working key
     Column("account_id",   String),                     # accounts.account_id when anchored
-    Column("verified_via", String),                     # 'sleeper' | 'apple' | 'google'
+    Column("verified_via", String),                     # 'sleeper' | 'apple' | 'google' | 'mfl_login'
     Column("account_only", Integer),                    # 1 = acct_* session (no Sleeper source)
     Column("username",     String),                     # for session rebuild after restart
     Column("display_name", String),

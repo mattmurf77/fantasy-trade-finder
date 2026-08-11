@@ -60,6 +60,14 @@ DEFAULT_YEAR = 2026
 # MFL asks unregistered clients to send a fixed User-Agent and space requests
 # ≥1s apart. The operator sets the registered UA in config/env after client
 # registration (plan §9 Q1); the default is polite and identifies the app.
+#
+# LOAD-BEARING, not just polite (observed 2026-08-11): MFL has answered
+# export requests carrying an EMPTY User-Agent with an EMPTY BODY while the
+# same request with this UA set returned data (league 62846, host www45,
+# TYPE=futureDraftPicks). Enforcement is intermittent — which is worse: a
+# stripped header can silently blank responses at any time instead of
+# erroring. Never strip this header from any MFL request (reads OR writes);
+# qa/verify-mfl-send.py §B re-probes the behavior.
 MFL_USER_AGENT = os.environ.get(
     "MFL_USER_AGENT", "FantasyTradeFinder/1.0 (+https://fantasytradefinder.app)"
 )
@@ -419,6 +427,102 @@ def fetch_future_draft_picks(league_id: str, year: int, host: str,
     except MflError:
         return {}
     return out if isinstance(out, dict) else {}
+
+
+def fetch_rosters(league_id: str, year: int, host: str,
+                  cookie: str | None = None, timeout: int = 15,
+                  _opener=None) -> dict:
+    """Fetch the `rosters` export on its own — the "Send in MFL" pre-flight
+    (#180 parity: /api/trades/validate re-checks that each traded asset is
+    still on the expected franchise before the handoff).
+
+    Best-effort like `fetch_draft_results`/`fetch_future_draft_picks`: any
+    MflError degrades to `{}` — validation then reports `checked: false`
+    rather than blocking a send on a flaky read. Same export
+    `fetch_league_bundle` pulls at link time (endpoint #5, integrations doc)."""
+    if not str(league_id).strip().isdigit():
+        return {}
+    try:
+        out = _fetch_one(host, year, "rosters", league_id, cookie,
+                         timeout, _opener)
+    except MflError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def fetch_pending_trades(league_id: str, year: int, host: str,
+                         cookie: str, timeout: int = 15,
+                         _opener=None) -> dict:
+    """Fetch the `pendingTrades` export — the trade-lifecycle read surface
+    ("Send in MFL" follow-up: a sent proposal's status + its TRADE_ID for a
+    later `tradeResponse` revoke).
+
+    OWNER-RESTRICTED per MFL's Request Reference — unlike the other exports
+    this one requires the `MFL_USER_ID` cookie (no cookie → MflAuthError
+    without touching the network). Deliberately NOT best-effort like
+    `fetch_rosters`/`fetch_draft_results`: the caller is a user-facing route
+    that must distinguish an expired sign-in (re-prompt) from "no pending
+    trades" — degrading auth failures to `{}` would conflate the two.
+    """
+    if not str(league_id).strip().isdigit():
+        raise MflError(f"league_id must be numeric, got {league_id!r}",
+                       kind="input")
+    if not cookie:
+        raise MflAuthError("no MFL cookie")
+    return _fetch_one(host, year, "pendingTrades", league_id, cookie,
+                      timeout, _opener)
+
+
+def parse_pending_trades(raw_export: dict) -> list[dict]:
+    """Normalise a raw `pendingTrades` export to
+    [{"trade_id", "offering_team", "offered_to", "will_give_up" (list),
+      "will_receive" (list), "comments", "expires"}].
+
+    Asset lists are MFL asset ids from the OFFERING team's perspective
+    (players bare, picks `DP_…`/`FP_…`), split from MFL's comma-separated
+    strings (which carry trailing commas). TODO(live-verify): field names
+    follow MFL's Request Reference (`tradeProposal`'s param vocabulary:
+    offeringteam / offeredto / will_give_up / will_receive / comments /
+    expires) — no live owner-restricted capture exists yet; the operator
+    checklist in the send-in-mfl scope block covers capturing one and
+    aligning this parser if it disagrees.
+    """
+    def _assets(value) -> list[str]:
+        return [a.strip() for a in str(_txt(value) or "").split(",")
+                if a.strip()]
+
+    out: list[dict] = []
+    for tr in _as_list((raw_export or {}).get("pendingTrades", {})
+                       .get("pendingTrade")):
+        if not isinstance(tr, dict):
+            continue
+        trade_id = str(_txt(tr.get("trade_id")) or "").strip()
+        if not trade_id:
+            continue
+        expires_raw = str(_txt(tr.get("expires")) or "").strip()
+        out.append({
+            "trade_id":      trade_id,
+            "offering_team": str(_txt(tr.get("offeringteam")) or "").strip(),
+            "offered_to":    str(_txt(tr.get("offeredto")) or "").strip(),
+            "will_give_up":  _assets(tr.get("will_give_up")),
+            "will_receive":  _assets(tr.get("will_receive")),
+            "comments":      _clean_text(_txt(tr.get("comments"))) or None,
+            "expires":       int(expires_raw) if expires_raw.isdigit() else None,
+        })
+    return out
+
+
+def parse_roster_ids(raw_export: dict) -> dict[str, set]:
+    """Normalise a raw `rosters` export to {franchise_id: {mfl_player_id,…}}."""
+    out: dict[str, set] = {}
+    for fr in _as_list((raw_export or {}).get("rosters", {}).get("franchise")):
+        if not isinstance(fr, dict):
+            continue
+        fid = fr.get("id")
+        ids = {str(e.get("id")) for e in _as_list(fr.get("player"))
+               if isinstance(e, dict) and e.get("id")}
+        out[fid] = ids
+    return out
 
 
 def fetch_scoring_inputs(league_id: str, year: int, host: str,

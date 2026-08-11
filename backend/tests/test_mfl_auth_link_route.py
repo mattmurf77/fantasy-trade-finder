@@ -189,6 +189,59 @@ def test_auth_link_without_key_falls_back_to_session_only(client, monkeypatch):
     assert len(r2.get_json()["imported"]) == 2
 
 
+# ── auth-link session verification (operator decision 2026-08-11) ────────────
+# A successful MFL login counts as a verified session — the MFL analogue of
+# the Sleeper-JWT oracle — so MFL-only users can pass the hard-verified
+# propose gates. Mirrors test_verified_sessions.py's link assertions.
+
+def test_auth_link_success_verifies_session_and_persists_marker(client):
+    from backend import accounts
+    c, token, engine, sess = client
+    assert not sess.get("verified")
+    r = _auth_link(c, token)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified"] is True
+    assert sess.get("verified") is True
+    assert sess.get("verified_via") == "mfl_login"
+    # persisted controller marker (first-verified-wins applies from here)
+    assert accounts.get_user_verified_via(USER) == "mfl_login"
+
+
+def test_auth_link_bad_credentials_do_not_verify(client):
+    from backend import accounts
+    c, token, _, sess = client
+
+    def _reject(u, p, y, **kw):
+        raise mfl.MflAuthError("MFL rejected the username/password")
+
+    with patch.object(mfl, "login", _reject):
+        r = _auth_link(c, token)
+    assert r.status_code == 403
+    assert not sess.get("verified")
+    assert accounts.get_user_verified_via(USER) is None
+
+
+def test_auth_link_verification_grants_long_expiry_durable_row(client):
+    """D-018: the 90d rolling expiry is verified-only and rides the durable
+    sessions row. MFL verification must not half-set it — with the
+    persistent-sessions flag on, a successful auth-link persists the row
+    (verified_via='mfl_login') and that row reads back unexpired."""
+    c, token, engine, sess = client
+    with patch.object(server, "is_enabled",
+                      lambda k: k in ("mfl.auth_link", "auth.persistent_sessions")):
+        r = _auth_link(c, token)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    # the session became persist-eligible the moment it verified…
+    assert server._session_persist_eligible(sess) is True
+    # …and the durable row actually exists, carries the marker, and is not
+    # expired under the 90d rolling read-time check.
+    row = db_module.load_persisted_session(token)
+    assert row is not None
+    assert row["user_id"] == USER
+    assert row["verified_via"] == "mfl_login"
+    assert server._persisted_row_expired(row) is False
+
+
 # ── auth-import ──────────────────────────────────────────────────────────────
 
 def test_auth_import_requires_signin(client):

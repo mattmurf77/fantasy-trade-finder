@@ -10,6 +10,7 @@ import {
   NO_SEND_REASON,
   type SendSurface,
 } from '../utils/tradeText';
+import SendInMflButton from './SendInMflButton';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
@@ -22,14 +23,21 @@ import {
 import { ApiError } from '../api/client';
 import { track } from '../api/events';
 
-// "Send in Sleeper". Renders on any real trade surface (found / matched /
-// suggested). Flag-gated: returns null when `trade.send_in_sleeper` is off.
-// Platform-gated too (#146, widened by audit P0-6): the button proposes a
-// REAL Sleeper trade, which is meaningless on an imported ESPN / MFL /
-// Fleaflicker league. Those leagues now render a stated reason plus a
-// "Copy trade" action instead of nothing — the send path itself is
-// untouched and unreachable there. Gated centrally here (every mount
-// passes leagueId) so future mounts can't forget it.
+// "Send in Sleeper" — and the single PLATFORM ROUTER for the send action.
+// Renders on any real trade surface (found / matched / suggested).
+// Flag-gated: returns null when `trade.send_in_sleeper` is off.
+//
+// Platform-gated centrally here (every mount passes leagueId) so no mount
+// can fire the wrong platform's API (#146, widened by audit P0-6, extended
+// for Send-in-MFL):
+//   • sleeper (or unknown/missing from the cache — fail-open, pre-#146
+//     behavior) → this button, Sleeper propose
+//   • mfl with `trade.send_in_mfl` ON → SendInMflButton (MFL's documented
+//     import API — previously this button WRONGLY rendered on MFL leagues
+//     and a tap would have fired at Sleeper's API and failed)
+//   • mfl with `trade.send_in_mfl` OFF, espn, fleaflicker → the P0-6
+//     fallback: a stated reason (NO_SEND_REASON) plus a "Copy trade"
+//     action — never null; the send path itself is unreachable there.
 //
 // One button, two paths — chosen by whether the Sleeper account is linked in
 // this session (checked up front via GET /api/sleeper/link):
@@ -90,6 +98,11 @@ export default function SendInSleeperButton({
   surface,
 }: Props) {
   const enabled = useFlag('trade.send_in_sleeper');
+  // MFL has its own send path and its own rollback lever (`trade.send_in_mfl`,
+  // gating the backend routes too). Read here, at the router, so an MFL
+  // league with the flag OFF falls through to the P0-6 copy fallback below
+  // instead of SendInMflButton's internal null (which would regress P0-6).
+  const mflEnabled = useFlag('trade.send_in_mfl');
   // #146 + audit P0-6 — reactive twin of api/espn.isEspnLeague, widened from
   // "is it ESPN" to "which platform is it". Reactive (a useSession SELECTOR,
   // not getState()) because this runs in render, unlike the imperative twins
@@ -379,15 +392,39 @@ export default function SendInSleeperButton({
     }
   }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
 
+  // Platform routing (see header). An MFL league with `trade.send_in_mfl` ON
+  // delegates to the MFL twin — one mount point, so the reconnect/confirm/
+  // pre-flight UX stays per platform while no surface can pick the wrong
+  // API. Deliberately BEFORE the `trade.send_in_sleeper` kill switch: the
+  // MFL send's rollback lever is its own flag (same one gating the backend
+  // routes), not Sleeper's.
+  if (platform === 'mfl' && mflEnabled) {
+    return (
+      <SendInMflButton
+        leagueId={leagueId}
+        theirUserId={theirUserId}
+        givePlayerIds={givePlayerIds}
+        receivePlayerIds={receivePlayerIds}
+        impressionId={impressionId}
+        onSent={onSent}
+        compact={compact}
+        style={style}
+        surface={surface}
+      />
+    );
+  }
+
   // The flag is still the kill switch for the WHOLE component on EVERY
-  // platform: off ⇒ null everywhere, i.e. exactly today's ESPN behaviour
-  // applied universally. That is why the copy fallback needs no flag of its
-  // own, and why `trade.send_in_sleeper` remains its rollback lever.
+  // platform (bar the MFL-send branch above): off ⇒ null everywhere, i.e.
+  // exactly today's ESPN behaviour applied universally. That is why the copy
+  // fallback needs no flag of its own, and why `trade.send_in_sleeper`
+  // remains its rollback lever.
   if (!enabled) return null;
 
-  // Non-Sleeper league: a send is impossible (ESPN/MFL/Fleaflicker are
-  // read-only imports and POST /api/sleeper/propose talks only to Sleeper's
-  // roster space). State the reason, offer the one action that works.
+  // Non-Sleeper league: a send is impossible (ESPN/Fleaflicker are read-only
+  // imports, MFL with its flag off has no live send path, and POST
+  // /api/sleeper/propose talks only to Sleeper's roster space). State the
+  // reason, offer the one action that works.
   if (!canSend) {
     return (
       <View testID="send-in-sleeper.unavailable" style={[styles.unavailable, style]}>
@@ -413,6 +450,7 @@ export default function SendInSleeperButton({
 
   return (
     <Button
+      testID="trades.send-sleeper-btn"
       label={label}
       variant="secondary"
       compact={compact}

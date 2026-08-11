@@ -18,7 +18,8 @@
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
     "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",
-    "test:trade-text": "node tests/check-trade-text.js"
+    "test:trade-text": "node tests/check-trade-text.js",
+    "test:send-button-platform": "node tests/check-send-button-platform.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
