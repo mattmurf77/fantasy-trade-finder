@@ -1043,6 +1043,20 @@ export default function TradesScreen({ navigation, route }: any) {
         ? { player: pinnedGive[0], direction: 'give' as const }
         : { player: pinnedReceive[0], direction: 'receive' as const }
       : null;
+  // #298 (feedback 2026-08-10) — single-pin featured mode used to null out
+  // BOTH the Find-a-Trade CTA and the whole deck wrapper, which took every
+  // accept/decline path with it (swipe handlers, the pass/like row, the
+  // VoiceOver actions — all of them funnel into `advance()`). Approved
+  // variant V1 (mockups/polish-lab-2026-08-11/trades-single-pin-recovery
+  // .html): the featured window BECOMES a deck card for the pinned asset.
+  // The CTA is always mounted so a pinned deck can be generated at all; once
+  // it lands, the deck leads and FeaturedTradeWindow steps aside so the two
+  // never stack (that stacking was #241's "mystery second trade card").
+  // `deck.length` — not `topCard` — so the deck keeps the slot through the
+  // swiped-out and deck-summary states instead of snapping back to the
+  // featured window mid-session.
+  const singlePinFeatured = !firstRun && !!singlePin;
+  const singlePinDeckActive = singlePinFeatured && deck.length > 0;
   const assetIdeasQuery = useQuery({
     queryKey: [
       'asset-ideas',
@@ -1914,12 +1928,30 @@ export default function TradesScreen({ navigation, route }: any) {
   // setParams) also kicks generation immediately, so the deck re-fills
   // for the new opponent without a manual "Find a Trade" tap. The FIRST
   // run (entry from the hub) keeps the historical manual start.
+  //
+  // #298, second defect (2026-08-10) — the regenerate condition used to read
+  // `finderMode === 'team'`, but since #269 the opponent's SOURCE moved to
+  // sheet-local state and the #270 strip's "Trading with" pill scopes one
+  // WITHOUT leaving guided mode. So picking a team in guided mode hit the
+  // reset above and nothing else: the deck silently emptied and regenerated
+  // nothing, dropping the user to "Hit Find a Trade to start". The condition
+  // is now "an opponent is scoped", which is what the branch always meant —
+  // legacy team mode is unchanged (there, scoping IS the mode), and with
+  // `trades.sheet_targeting` off `scopedOpponent` can only come from team
+  // mode's route params, so this reads exactly as it did before.
+  // CLEARING an opponent still only resets: broadening the search is not a
+  // request for a new sweep, and it matches how pin add/remove behaves.
   const finderScopeSeen = useRef(false);
   useEffect(() => {
     if (!finderHubOn || !finderMode) return;
     resetDeckForNewTargets();
-    if (finderScopeSeen.current && finderMode === 'team' && scopedOpponent) {
+    if (finderScopeSeen.current && scopedOpponent) {
       generateMutation.mutate({});
+      // The sweep about to land IS the current prefs — don't leave the #257
+      // "Preferences changed" nudge armed by the pick that triggered it
+      // (handleFindTrades clears these on the manual path).
+      prefsChangedSinceGenerateRef.current = false;
+      setShowPrefsChangedStrip(false);
     }
     finderScopeSeen.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3311,6 +3343,22 @@ export default function TradesScreen({ navigation, route }: any) {
     return actions;
   }
 
+  // #298 — the Upgrade / Lateral / Downgrade rail has ONE instance rendered
+  // at one of two positions: directly under the featured window (no pinned
+  // deck yet, today's layout) or under the deck card once one exists, so the
+  // actionable card always leads and the alternates read as "more trades"
+  // beneath it. Built here rather than duplicated at both mount points.
+  const assetIdeasPanel = singlePinFeatured ? (
+    <AssetIdeasPanel
+      data={assetIdeasQuery.data}
+      loading={assetIdeasQuery.isFetching}
+      pinnedName={singlePin!.player.name}
+      direction={singlePin!.direction}
+      featuredKey={featuredShown ? assetIdeaKey(featuredShown) : null}
+      onSelectIdea={handleSelectIdea}
+    />
+  ) : null;
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
@@ -4227,24 +4275,25 @@ export default function TradesScreen({ navigation, route }: any) {
 
         {/* Find-a-Trade — bare button (no Card): the mockup's "after"
             screen shows the landing as a trade, not a control panel.
-            Same gating as before: hidden in single-pin featured mode,
-            where the featured window + idea list replace the deck. */}
-        {!firstRun && singlePin ? null : (
-          <Button
-            variant="primary"
-            testID="trades.find-btn"
-            label={
-              deck.length > 0 && job?.status === 'complete'
-                ? 'Find more trades'
-                : 'Find a Trade'
-            }
-            disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
-            onPress={() => handleFindTrades()}
-            style={styles.findBtn}
-          />
-        )}
+            #298 — no longer hidden in single-pin featured mode: removing it
+            there left the pinned surface with no way to get a swipeable,
+            accept/declinable trade at all. In that mode it reads "Find more
+            trades" from the start, because the featured window is already
+            showing one (V1 mock: "CTA relabelled for the pinned context"). */}
+        <Button
+          variant="primary"
+          testID="trades.find-btn"
+          label={
+            singlePinFeatured || (deck.length > 0 && job?.status === 'complete')
+              ? 'Find more trades'
+              : 'Find a Trade'
+          }
+          disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
+          onPress={() => handleFindTrades()}
+          style={styles.findBtn}
+        />
 
-        {!(!firstRun && singlePin) && job?.status === 'running' && (
+        {job?.status === 'running' && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
             <View style={styles.progressInfo}>
               <ActivityIndicator color={chalk.dim} size="small" />
@@ -4311,9 +4360,14 @@ export default function TradesScreen({ navigation, route }: any) {
             visible by default; row taps swap ideas into the window (the
             replaced trade becomes the ‹ Previous trade back target). 0 or
             2+ pins ⇒ nothing here; the deck flow is untouched. */}
-        {!firstRun && singlePin ? (
+        {/* #298 — once a pinned deck exists the deck card takes this slot
+            (see the deck wrapper below) and the read-only featured window
+            steps aside: two trade summaries stacked on one screen is exactly
+            the "which one am I looking at?" confusion #241 removed. The
+            alternates rail follows whichever card is leading. */}
+        {singlePinFeatured ? (
           <>
-            {featuredShown ? (
+            {featuredShown && !singlePinDeckActive ? (
               <View
                 onLayout={(e) => {
                   featuredWindowY.current = e.nativeEvent.layout.y;
@@ -4328,14 +4382,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 />
               </View>
             ) : null}
-            <AssetIdeasPanel
-              data={assetIdeasQuery.data}
-              loading={assetIdeasQuery.isFetching}
-              pinnedName={singlePin.player.name}
-              direction={singlePin.direction}
-              featuredKey={featuredShown ? assetIdeaKey(featuredShown) : null}
-              onSelectIdea={handleSelectIdea}
-            />
+            {singlePinDeckActive ? null : assetIdeasPanel}
           </>
         ) : null}
 
@@ -4565,14 +4612,37 @@ export default function TradesScreen({ navigation, route }: any) {
             this block mounting alongside the new surface, so the old deck
             card showed up as a mystery second trade card under the idea
             rows. Multi-pin / no-pin / classic modes keep the deck exactly
-            as before. */}
-        {!firstRun && singlePin ? null : (
+            as before.
+
+            #298 (V1) narrows that gate rather than removing it: hiding the
+            deck also removed every accept/decline path from the pinned
+            surface, since the swipe handlers, the pass/like row and the
+            VoiceOver actions all live inside this block and all funnel into
+            `advance()`. Now the deck renders in single-pin mode ONLY once it
+            has cards — and the featured window yields the lead slot to it,
+            so #241's two-cards-at-once is still impossible. With no cards
+            (nothing generated yet) the block stays out entirely: the pinned
+            surface must not show "Hit Find a Trade to start" under a
+            featured trade it is already showing. */}
+        {singlePinFeatured && !singlePinDeckActive ? null : (
         <View
           style={styles.deckWrap}
           ref={deckWrapRef}
           collapsable={false}
           onLayout={(e) => { deckCardY.current = e.nativeEvent.layout.y; }}
         >
+          {/* #298 V1 — position counter, single-pin only. The pinned surface
+              leads with ONE card and the alternates rail sits below it, so
+              without a count it reads as a dead end rather than a deck you
+              can swipe through. The classic deck has always been an obvious
+              stack (the peek card behind the top one) and gets no counter. */}
+          {singlePinDeckActive && topCard ? (
+            <View testID="trades.single-pin-deck-count">
+              <TickLabel>
+                {`Featured trade · ${deckIdx + 1} of ${sortedDeck.length}`}
+              </TickLabel>
+            </View>
+          ) : null}
           {quicksetPromptShown ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
             // answered; the deck resumes underneath on either action.
@@ -4919,6 +4989,11 @@ export default function TradesScreen({ navigation, route }: any) {
           )}
         </View>
         )}
+
+        {/* #298 — second mount point for the single instance built above:
+            with a pinned deck leading, the Upgrade / Lateral / Downgrade
+            alternates read as "more trades" underneath it. */}
+        {singlePinDeckActive ? assetIdeasPanel : null}
         </>
         )}
 

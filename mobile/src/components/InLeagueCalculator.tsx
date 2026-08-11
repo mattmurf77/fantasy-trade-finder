@@ -950,6 +950,18 @@ function LeagueVerdict({
         <Text testID="calc.starter-impact" style={styles.starterImpact}>
           {ev.starter_impact.note}
         </Text>
+      ) : both ? (
+        // #297 (feedback 2026-08-10, "the lineup change feature … doesn't
+        // appear anymore") — this branch used to be a bare `null`. The
+        // server omits `starter_impact` whenever `_starter_impact` can't
+        // build (server.py:1152/1160: no Sleeper slot template — every
+        // ESPN/MFL/Fleaflicker/demo league id is non-numeric — or a roster
+        // missing from `league_members`), so a whole section vanished with
+        // no copy at all. That is indistinguishable from a regression, and
+        // it is what was actually reported: nothing was ever removed from
+        // this file. Only shown once both sides carry players, so it can't
+        // fire on the half-built "add a player to each side" state.
+        <LineupImpactUnavailable />
       ) : null}
       {/* Why the consensus totals differ from the naive sum of parts —
           collapsed by default, only when the server itemized adjustments
@@ -994,6 +1006,30 @@ function slotShortLabel(slot: string): string {
 // price a rank (flag off, old server, or an unranked player).
 function posRankLabel(p: StarterSlotPlayer | null | undefined): string | undefined {
   return p && p.rank != null ? `${p.position}${p.rank}` : undefined;
+}
+
+// #297 — the honest replacement for the silent `null` above. Deliberately
+// says only what is true in EVERY absent case: it names the requirement,
+// not a diagnosis (the field is also absent when a roster is missing from a
+// perfectly good Sleeper league), and promises nothing about a future.
+// One accessibility element so VoiceOver reads it as a single sentence.
+const LINEUP_UNAVAILABLE_TITLE = 'Starting lineup';
+const LINEUP_UNAVAILABLE_BODY =
+  "Lineup impact isn't available here — reading it needs a Sleeper " +
+  "starting-slot template and both teams' rosters.";
+
+function LineupImpactUnavailable() {
+  return (
+    <View
+      testID="calc.lineup-impact-unavailable"
+      style={styles.lineupMod}
+      accessible
+      accessibilityLabel={`${LINEUP_UNAVAILABLE_TITLE}. ${LINEUP_UNAVAILABLE_BODY}`}
+    >
+      <TickLabel color={chalk.faint}>{LINEUP_UNAVAILABLE_TITLE}</TickLabel>
+      <Text style={styles.lineupUnavailable}>{LINEUP_UNAVAILABLE_BODY}</Text>
+    </View>
+  );
 }
 
 function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpactSlot[] }) {
@@ -1161,6 +1197,9 @@ const styles = StyleSheet.create({
     borderTopColor: ink.line,
     gap: space.xs,
   },
+  // #297 — honest "no lineup impact" copy in the same bordered-top block
+  // the table would have occupied.
+  lineupUnavailable: { ...type.bodySm, color: chalk.dim },
   lineupHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   lineupHeadText: {
     fontFamily: fonts.uiSemi,
