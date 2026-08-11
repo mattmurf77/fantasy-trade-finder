@@ -4095,14 +4095,22 @@ export default function TradesScreen({ navigation, route }: any) {
               disabled — the progress strip below acts as the live signal.
               `generateMutation.isPending` is only true during the brief
               POST round-trip; after that, status flows through `job`.
-              #241: hidden in single-pin featured mode — the featured window
-              + idea list replace the deck there, so a generate would build
-              cards with nowhere to render. */}
-          {!firstRun && singlePin ? null : (
+              #298 undoes #241's hiding of this button in single-pin featured
+              mode: the generated cards DO have somewhere to render again
+              (the deck takes the featured window's slot once it has cards),
+              and without the button there was no way to reach an
+              accept/declinable trade from a pinned surface at all. This is
+              the `!consolidateOn` legacy layout's copy of the CTA — the
+              consolidated layout has its own below; they are the two arms of
+              one ternary and never render together. */}
           <Button
             variant="primary"
             testID="trades.find-btn"
-            label={deck.length > 0 && job?.status === 'complete' ? 'Find more trades' : 'Find a Trade'}
+            label={
+              singlePinFeatured || (deck.length > 0 && job?.status === 'complete')
+                ? 'Find more trades'
+                : 'Find a Trade'
+            }
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => {
               track('find_trades_tapped', undefined, 'Trades');
@@ -4110,13 +4118,13 @@ export default function TradesScreen({ navigation, route }: any) {
             }}
             style={styles.findBtn}
           />
-          )}
 
           {/* Progress strip — visible only during a running job. Cards are
               streaming into the deck above; this just narrates the work.
               Opponent coverage renders as a ice Meter with mono counts.
-              #241: hidden alongside the deck in single-pin featured mode. */}
-          {!(!firstRun && singlePin) && job?.status === 'running' && (
+              #298: shown in single-pin mode too, now that a generate there
+              lands somewhere. */}
+          {job?.status === 'running' && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
