@@ -102,6 +102,7 @@ import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { getBaseUrl } from '../api/client';
+import { resolveShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import FormatGate, { formatLabel } from '../components/FormatGate';
@@ -198,6 +199,12 @@ const EMPTY_QUEUE: never[] = [];
 // the payload are what get recorded (Elo signal, persistence, and mutual-
 // match detection all run on the modified package).
 const EDITED_SUFFIX = '::edited';
+
+// audit P1-1 / PR-14 — a package holding a draft pick cannot be rendered by
+// the share landing (og_image resolves ids against the players table and a
+// pick_id isn't in it), so those shares skip the mint. Derived from the row
+// the card already carries, never from the id's shape.
+const isPickAsset = (p: Player) => p.position === 'PICK' || p.pick_value != null;
 
 // Analytics: true once this screen has shown the "Waking up server" copy
 // (the >4s slow-switch overlay) at any point this app session. First-card
@@ -2863,21 +2870,48 @@ export default function TradesScreen({ navigation, route }: any) {
     const recv = c.receive_players.map((p) => p.name).join(' + ');
     // S7 PRD-01 (growth.share_landing): when the like completed a mutual
     // match, share the backend's /s/trade/<match_id> landing page (rich OG
-    // card in iMessage/Discord) with ?ref= attribution. Liked-but-unmatched
-    // trades have no server object yet (no /s/ route exists for them —
-    // documented W3/backend handoff), so those fall back to the site root
-    // with ?ref= preserved. Flag off: the legacy bare-root message, byte
-    // for byte.
+    // card in iMessage/Discord) with ?ref= attribution.
+    //
+    // audit P1-2 / PR-11: liked-but-unmatched trades DO have a server
+    // object available — POST /api/share/package (backend/server.py:16999)
+    // mints one for an arbitrary give/receive build and /s/p/<short_id>
+    // (backend/server.py:17048) renders it. The comment that used to sit
+    // here said no /s/ route existed for them; it predated the route and
+    // was never revisited, and this is the more common of the two share
+    // paths. resolveShareUrl degrades to the ?ref= root when the mint
+    // can't be made. Flag off: the legacy bare-root message, byte for byte.
     const rawId = c.trade_id.endsWith(EDITED_SUFFIX)
       ? c.trade_id.slice(0, -EDITED_SUFFIX.length)
       : c.trade_id;
     const matchId = matchIdByTradeRef.current.get(rawId);
     const ref = user?.username ? `ref=${encodeURIComponent(user.username)}` : '';
-    const url = shareLandingOn
-      ? matchId
-        ? `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`
-        : `${getBaseUrl()}/${ref ? `?${ref}` : ''}`
-      : 'https://fantasy-trade-finder.onrender.com';
+    let landing = false;
+    let url: string;
+    if (!shareLandingOn) {
+      url = 'https://fantasy-trade-finder.onrender.com';
+    } else if (matchId) {
+      url = `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`;
+      landing = true;
+    } else {
+      const resolved = await resolveShareUrl({
+        giveIds: c.give_player_ids,
+        receiveIds: c.receive_player_ids,
+        username: user?.username,
+        enabled: shareLandingOn,
+        isDemo,
+        surface: 'trades_liked',
+        hasPickAssets:
+          c.give_players.some(isPickAsset) || c.receive_players.some(isPickAsset),
+        onOutcome: (outcome, give_n, receive_n) =>
+          track(
+            'share_package_created',
+            { surface: 'trades_liked', give_n, receive_n, outcome },
+            'Trades',
+          ),
+      });
+      url = resolved.url;
+      landing = resolved.rung === 'package';
+    }
     try {
       const res = await Share.share({
         message:
@@ -2886,10 +2920,15 @@ export default function TradesScreen({ navigation, route }: any) {
           url,
       });
       if (res.action !== Share.dismissedAction) {
+        // `landing` widens from "a /s/trade/ landing was used" to "the
+        // artifact carried a rich landing (/s/trade/ OR /s/p/)". Safe to
+        // redefine silently: the prop has been stripped at ingest since it
+        // shipped (it is not in trade_card_shared's CLIENT_EVENT_PROPS
+        // row), so no row has ever carried it.
         track(
           'trade_card_shared',
           shareLandingOn
-            ? { trade_id: c.trade_id, landing: !!matchId }
+            ? { trade_id: c.trade_id, landing }
             : { trade_id: c.trade_id },
           'Trades',
         );
