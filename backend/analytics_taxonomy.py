@@ -113,6 +113,21 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
     "trade_accepted", "trade_declined", "trade_ratified", "counter_sent",
     "trade_match", "trades_generated", "calc_trade_evaluated",
+    # trade_sent (2026-08-11, operator-approved taxonomy addition — tracking
+    # plan v2 addendum 2026-08-11): a CONFIRMED outbound send into a real
+    # platform league. Fired server-side on the success path of BOTH
+    # POST /api/trades/propose (Sleeper) and POST /api/trades/propose-mfl —
+    # never on validation or hard-block failures (e.g. mfl_asset_unmapped).
+    # Props (spec'd once for both platforms; the NULL-`platform` incident is
+    # why `platform` is mandatory and non-null):
+    #   platform      'sleeper' | 'mfl'  — REQUIRED, never null
+    #   give_count    assets offered (players + side-attributed picks)
+    #   receive_count assets requested (players + side-attributed picks)
+    #   pick_count    Sleeper only — its draft_picks list is not
+    #                 side-attributed, so picks ride this separate count
+    #   outcome       platform-confirmed status string ('proposed')
+    # league_id rides the envelope column, not props. No player ids/PII.
+    "trade_sent",
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",

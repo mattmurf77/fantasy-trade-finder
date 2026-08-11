@@ -154,3 +154,17 @@ Four client-fired events (`POST /api/events`) for the in-app ESPN login → nati
 | `espn_connect_abandoned` | screen left without a capture (header back / swipe) | `saw_otp` |
 
 > **No credential ever becomes a property.** The only data that leaves the WebView is the two cookie strings, and they go to `POST /api/espn/link`, never to analytics. `saw_otp` measures how often the emailed-code step gates the flow; the code value is never read (see DECISIONS.md D-021).
+
+---
+
+## Addendum 2026-08-11 — `trade_sent` (send-leg completion, both platforms)
+
+One **server-fired** event (`SERVER_FIRED_EVENTS` in `backend/analytics_taxonomy.py`; `event_id=NULL`, never client-submittable) closing the gap the Send-in-MFL scope block flagged (§1 partial waiver) and `analytics_queries.py:498` documents: neither send route fired a completion event. Spec'd ONCE for both platforms — operator-approved taxonomy addition.
+
+| Event | Fires | Props |
+|---|---|---|
+| `trade_sent` | **Confirmed success only** on `POST /api/trades/propose` (Sleeper) and `POST /api/trades/propose-mfl` — after the platform write succeeded, never on validation or hard-block failures (`mfl_asset_unmapped`, auth/verification denials, write failures) | `platform` (`sleeper` \| `mfl` — **required, never null**; the NULL-`platform` incident is why), `give_count`, `receive_count` (per-side asset counts; MFL folds its side-attributed pick assets in), `pick_count` (Sleeper only — its `draft_picks` list is not side-attributed), `outcome` (platform-confirmed status string, `proposed`) |
+
+`league_id` rides the envelope column (`record_event(league_id=…)`), not props. **No player ids and no PII in props** — counts and enums only. Trade-asset identity already lives in `deck_outcomes` (`propose` rows) where an `impression_id` is present.
+
+> **WAT note:** `trade_sent` is now *in the taxonomy* but deliberately **not** added to `WAT_LIVE` (`trade_proposed`/`match_swiped`/`calc_trade_evaluated`) — widening the WAT definition is a separate metric decision for the funnel owner, not part of this instrumentation change. The `metric:wat.sleeper_send` dark-caveat in `analytics_queries.py` remains accurate until that decision.

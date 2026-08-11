@@ -207,6 +207,82 @@ def test_propose_refuses_own_franchise_and_garbage_counterparty(client):
 
 
 # ---------------------------------------------------------------------------
+# trade_sent analytics (taxonomy addendum 2026-08-11) — fires on confirmed
+# success only, platform always present and non-null (the NULL-platform
+# incident is the reason this is asserted, not assumed).
+# ---------------------------------------------------------------------------
+
+def _trade_sent_rows():
+    from sqlalchemy import select
+    with db_module.engine.connect() as conn:
+        rows = conn.execute(
+            select(db_module.user_events_table)
+            .where(db_module.user_events_table.c.event_type == "trade_sent")
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def test_propose_success_fires_trade_sent_platform_mfl(client):
+    c, token = client
+    fake = MagicMock(return_value={"status": "OK", "raw": ""})
+    with patch.object(mfl_write, "propose_trade", fake):
+        r = c.post("/api/trades/propose-mfl", headers=_h(token), data=_propose_body(
+            give_pick_assets=["FP_0001_2027_1"]))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    rows = _trade_sent_rows()
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == USER
+    assert rows[0]["league_id"] == LEAGUE
+    props = json.loads(rows[0]["props"])
+    assert props["platform"] == "mfl"                 # mandatory, non-null
+    assert props["give_count"] == 2                   # 1 player + 1 pick (side-attributed)
+    assert props["receive_count"] == 1
+    assert props["outcome"] == "proposed"
+
+
+def test_propose_unmapped_hard_block_fires_no_trade_sent(client):
+    """The mfl_asset_unmapped hard block is a refusal, not a send — it must
+    never land a trade_sent row."""
+    c, token = client
+    with patch.object(mfl_write, "propose_trade", MagicMock()):
+        r = c.post("/api/trades/propose-mfl", headers=_h(token), data=_propose_body(
+            give_player_ids=[SLEEPER_GIVE, "9999_no_such_player"]))
+    assert r.status_code == 422
+    assert _trade_sent_rows() == []
+
+
+def test_mfl_only_user_verifies_via_auth_link_then_proposes(client):
+    """Operator decision 2026-08-11: a successful MFL login (#177 auth-link)
+    IS session verification, so an MFL-only user — never verified via
+    Sleeper/Apple/Google — passes the propose-mfl hard gate."""
+    import backend.mfl_service as mfl
+    c, token = client
+    with server._sessions_lock:
+        server._sessions[token].pop("verified", None)
+    # Unverified session: the hard gate denies.
+    r = c.post("/api/trades/propose-mfl", headers=_h(token), data=_propose_body())
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "verification_required"
+    # MFL sign-in (patched login — no network), then the same propose passes.
+    with patch.object(server, "is_enabled",
+                      lambda k: k in ("trade.send_in_mfl", "mfl.auth_link")), \
+         patch.object(mfl, "login",
+                      lambda u, p, y, **kw: {"cookie": "MFL_USER_ID=abc123",
+                                             "mfl_user_id": "abc123"}), \
+         patch.object(mfl, "fetch_my_leagues", lambda cookie, year, **kw: []):
+        r = c.post("/api/mfl/auth-link", headers=_h(token), data=json.dumps(
+            {"username": "mattm", "password": "pw", "year": 2026}))
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["verified"] is True
+        fake = MagicMock(return_value={"status": "OK", "raw": ""})
+        with patch.object(mfl_write, "propose_trade", fake):
+            r = c.post("/api/trades/propose-mfl", headers=_h(token),
+                       data=_propose_body())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["status"] == "proposed"
+
+
+# ---------------------------------------------------------------------------
 # POST /api/trades/validate — MFL branch (#180 parity, advisory)
 # ---------------------------------------------------------------------------
 

@@ -12401,6 +12401,24 @@ def propose_trade_to_sleeper():
     # sourced this send carried an impression_id. Additive/optional; only
     # reached on a successful Sleeper propose.
     _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    # trade_sent (server-fired, taxonomy 2026-08-11) — confirmed-success
+    # only; the failure branches above return before this. `platform` is
+    # mandatory/non-null (the NULL-platform incident). Sleeper's draft_picks
+    # list is not side-attributed → separate pick_count.
+    try:
+        record_event(
+            user_id, "trade_sent",
+            league_id=league_id,
+            source="api",
+            props={"platform": "sleeper",
+                   "give_count": len(give),
+                   "receive_count": len(receive),
+                   "pick_count": len(picks),
+                   "outcome": result.get("status") or "proposed"},
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception:
+        pass
     return jsonify({
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
@@ -20643,9 +20661,48 @@ def mfl_auth_link():
     if storage == "session":
         sess["mfl_cookie"] = auth["cookie"]
 
+    # ── A successful MFL login counts as session verification ────────────
+    # Operator decision (2026-08-11, Send-in-MFL follow-ups): MFL accepting
+    # the username/password THIS request carried is proof-of-person — the
+    # MFL analogue of the Sleeper-JWT oracle — so an MFL-only user (no
+    # Sleeper/Apple/Google sign-in) can pass the hard verified gate on
+    # POST /api/trades/propose-mfl. Mirrors sleeper_link's proven-live
+    # block exactly: session marked verified, users.verified_via persisted,
+    # durable row upserted. D-018 (unverified sessions keep the short
+    # expiry) is honored by construction: the 90-day rolling expiry is
+    # granted by _session_persist_eligible reading sess["verified"], so
+    # verifying here IS what flips this session from the 4h posture to the
+    # long one — nothing else to set. Squatter safety is unchanged:
+    # @_gate_unverified_write already 403s an unverified session whenever a
+    # verified controller exists, so this path can only mint the FIRST
+    # controller (first-verified-wins, same as the Sleeper path).
+    sess["verified"] = True
+    sess["verified_via"] = "mfl_login"
+    try:
+        from . import accounts as _accounts
+        first_time = _accounts.get_user_verified_via(user_id) is None
+        if not user_exists(user_id):
+            # Login can beat session_init's background user upsert; make
+            # sure the row exists so the marker isn't dropped.
+            upsert_user(sleeper_user_id=user_id)
+        _accounts.mark_user_verified(user_id, "mfl_login")
+        if first_time:
+            log.info("AUTH-VERIFIED first verified controller user_id=%s "
+                     "via=mfl_login", user_id)
+    except Exception:
+        log.exception("persisting verified marker failed (session still "
+                      "verified in memory)")
+    # Durable session (flag auth.persistent_sessions): the session just
+    # became verified — persist it so it survives deploys/idle sweeps and
+    # picks up the verified 90d rolling expiry.
+    sess["_persisted_at"] = 0  # force the upsert past the throttle
+    _persist_session_if_eligible(
+        request.headers.get("X-Session-Token", ""), sess)
+
     log.info("mfl_auth_link: user=%s year=%s leagues=%d storage=%s",
              user_id, year, len(leagues), storage)
     return jsonify({"ok": True, "year": year, "storage": storage,
+                    "verified": bool(sess.get("verified")),
                     "leagues": leagues})
 
 
@@ -21145,6 +21202,23 @@ def propose_trade_to_mfl():
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
     _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    # trade_sent (server-fired, taxonomy 2026-08-11) — confirmed-success
+    # only; every failure branch (incl. the mfl_asset_unmapped hard block)
+    # returned before this. `platform` is mandatory/non-null. MFL picks ARE
+    # side-attributed, so they fold into the per-side counts.
+    try:
+        record_event(
+            user_id, "trade_sent",
+            league_id=league_id,
+            source="api",
+            props={"platform": "mfl",
+                   "give_count": len(give) + len(give_picks),
+                   "receive_count": len(receive) + len(receive_picks),
+                   "outcome": "proposed"},
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception:
+        pass
     log.info("mfl propose: user=%s league=%s offered_to=f%s assets=%d/%d",
              user_id, league_id, their_fid,
              len(give) + len(give_picks), len(receive) + len(receive_picks))

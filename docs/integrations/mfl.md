@@ -133,6 +133,17 @@ phone validation, tracked in
 of this doc) get higher limits. This is a politeness/identification contract,
 not a credentialed auth path — no token is issued for it.
 
+> **The User-Agent is load-bearing, not just polite (observed 2026-08-11).**
+> MFL has answered export requests carrying an empty `User-Agent` with an
+> **empty body**, while the same request with `MFL_USER_AGENT` set returned
+> data (observed against league 62846, host `www45`,
+> `export?TYPE=futureDraftPicks`). Enforcement appears **intermittent** — a
+> later same-day probe got data on all UA variants — which makes it worse,
+> not better: a stripped header can silently blank responses at any time
+> rather than erroring. Every read AND write path must send the UA.
+> `qa/verify-mfl-send.py` §B re-probes this in its no-auth section and
+> reports whichever behavior it sees.
+
 ## 3. Request/response shapes
 
 ### Fields consumed (per export)
@@ -442,6 +453,16 @@ practice, and whether `JSON=1` applies to import responses are all on the
 operator checklist. `_parse_import_response` accepts both `<status>OK</status>`
 XML and `{"status":"OK"}` JSON and **refuses to report success on any
 ambiguous body**.
+
+### v1 limitation — single-linker leagues (operator-accepted 2026-08-11)
+
+v1 stores **one `leagues` row per MFL league**, so only the FTF user who
+linked the league has a franchise binding (`platform_my_team`) and can send
+from it. Any other FTF user in the same MFL league gets 404 `mfl_not_linked`
+("This MFL league isn't linked to your account."); the mobile client offers
+re-linking, which transfers the binding to them. Accepted for v1 — per-user
+franchise bindings are a v2 concern if MFL adoption warrants it (see the
+scope block §"v1 limitations").
 
 ### Error modes
 

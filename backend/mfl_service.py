@@ -60,6 +60,14 @@ DEFAULT_YEAR = 2026
 # MFL asks unregistered clients to send a fixed User-Agent and space requests
 # ≥1s apart. The operator sets the registered UA in config/env after client
 # registration (plan §9 Q1); the default is polite and identifies the app.
+#
+# LOAD-BEARING, not just polite (observed 2026-08-11): MFL has answered
+# export requests carrying an EMPTY User-Agent with an EMPTY BODY while the
+# same request with this UA set returned data (league 62846, host www45,
+# TYPE=futureDraftPicks). Enforcement is intermittent — which is worse: a
+# stripped header can silently blank responses at any time instead of
+# erroring. Never strip this header from any MFL request (reads OR writes);
+# qa/verify-mfl-send.py §B re-probes the behavior.
 MFL_USER_AGENT = os.environ.get(
     "MFL_USER_AGENT", "FantasyTradeFinder/1.0 (+https://fantasytradefinder.app)"
 )

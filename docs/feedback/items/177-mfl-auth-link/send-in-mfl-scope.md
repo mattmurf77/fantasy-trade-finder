@@ -22,10 +22,17 @@
     deck-sourced sends land in the existing outcome spine.
   - Question answered: "are MFL sends happening, succeeding, failing, and why" — from
     `api_call` status/error-kind on `import.tradeProposal` plus route logs.
-- [ ] (a) New events: none. (c) n/a.
-  - **Partial waiver:** no dedicated `trade_sent` funnel event exists for Sleeper sends
-    either; parity is deliberate. If the operator wants a send-leg WAT event, spec it for
-    BOTH platforms in one taxonomy change (see `analytics_queries.py:498` note).
+- [x] (a) New events: ~~none~~ **`trade_sent` (added 2026-08-11 follow-up, operator-approved).**
+  - The original partial waiver ("no dedicated `trade_sent` funnel event exists for
+    Sleeper sends either; parity is deliberate") is **RESOLVED**: the operator approved
+    the send-leg event, spec'd ONCE for both platforms in one taxonomy change
+    (`backend/analytics_taxonomy.py` `SERVER_FIRED_EVENTS` + tracking plan v2 addendum
+    2026-08-11). Server-fired on the confirmed-success path of BOTH
+    `POST /api/trades/propose` and `POST /api/trades/propose-mfl`; never on validation
+    or hard-block failures. Props: `platform` (sleeper|mfl, **mandatory non-null** —
+    the NULL-`platform` incident), `give_count`/`receive_count`, `pick_count`
+    (Sleeper's side-unattributed picks), `outcome`. No player PII in props.
+    (c) n/a.
 
 ## 2. Schema & flag scope
 
@@ -102,6 +109,34 @@
   operator-declared express.
 
 ---
+
+## v1 limitations — operator-accepted (2026-08-11)
+
+- **Single-linker leagues.** v1 stores ONE `leagues` row per MFL league
+  (`upsert_platform_league` keyed by league id), so only the FTF user who *linked* the
+  league has a franchise binding and can send from it. Any other FTF user in the same
+  MFL league gets 404 `mfl_not_linked` ("This MFL league isn't linked to your
+  account.") and the mobile client routes them to re-link — which, if they complete it,
+  makes *them* the linker. **The operator accepts this for v1**; per-user franchise
+  bindings (a `user_id`-scoped link table) are a v2 concern if MFL adoption warrants
+  it. The error surfacing was reviewed 2026-08-11 and is clean: server message names
+  the actual problem, `SendInMflButton` maps `mfl_not_linked`/`mfl_franchise_unknown`
+  to a "re-link this league" alert with a "Go to leagues" action. No string change
+  needed.
+
+## Follow-ups shipped 2026-08-11 (branch `feat/send-in-mfl-followups`)
+
+1. **MFL login verifies the session** — `POST /api/mfl/auth-link` success now mirrors
+   `sleeper_link`'s proven-live block: `sess["verified"]=True`,
+   `verified_via="mfl_login"` persisted via `accounts.mark_user_verified`, durable
+   session row upserted (D-018 honored — the 90d rolling expiry follows from
+   `_session_persist_eligible` reading `sess["verified"]`). An MFL-only user can now
+   pass the propose-mfl hard gate.
+2. **`trade_sent` analytics event** — see §1 above.
+3. **Operator verification script** — `qa/verify-mfl-send.py` automates checklist
+   items 1–4 (+ the revoke half of 7). Operator-run only (uses `MFL_USERNAME` /
+   `MFL_PASSWORD` / `MFL_VERIFY_LEAGUE_ID` from `secrets.local.env`); a real send fires
+   only with `--send --offeredto --give --confirm`, and immediately revokes.
 
 ## Live-verification checklist (operator MUST run before ship — no live calls were made in this build)
 
