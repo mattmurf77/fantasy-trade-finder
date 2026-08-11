@@ -32,6 +32,10 @@ One file per top-level route. MAP, not a changelog — present behavior only, no
 
 ## Sharp edges
 
+- `LeagueSummaryScreen`'s drill-in has exactly **one** `setSelectedId(null)`, inside `closeTeam` — every exit control (header back, in-card link, active-tab re-tap) routes through it — **Android hardware back is withdrawn, not wired**; `'hardware_back'` is a reserved `via` value with no emitter, pinned both ways, and `openTeam` emits `via:'refocus'` when jumping team-to-team. A control that clears focus directly disappears from analytics while the UI keeps working. Pinned by `mobile/tests/check-analytics-297-302.js`.
+- `league-summary.header-title` (#302) — the stack-header title. Reads "League rankings" on the all-teams view and swaps to the focused team's name while drilled in. **Tab-root registration only**; the legacy root-stack `LeagueSummary` push keeps its static title.
+- `league-summary.roster-close` / `league-summary.back-all-teams` (#302) — the drill-in exit, **moved** from the chart-card header (where it scrolled away) to the stack header's `headerLeft`. Ids deliberately unchanged, as in #243. On the legacy root-stack push it remains the in-card link, because that screen's `headerLeft` is already its own back control. Exactly one of the two renders at a time.
+
 - `RookieRanksScreen` must never call `/api/tiers/save` or the merged-band `apply_tiers` path — reorder only, pinned by `backend/tests/test_rookie_ranks_editable.py`.
 - Pick-assignment surfaces never send a value field — prices are computed server-side from (round, years_out, format); the server 400s any value-shaped key.
 - `DraftRoomScreen`, `MockDraftScreen`, `PickAssignmentScreen` register UNCONDITIONALLY — their flags gate the entry point, not the route, so a stale deep link lands on an honest unavailable state instead of 404ing.

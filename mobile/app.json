@@ -2,7 +2,7 @@
   "expo": {
     "name": "DTF - Dynasty Trade Finder",
     "slug": "dtf-dynasty-trade-finder",
-    "version": "1.12.0",
+    "version": "1.12.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dtf",
@@ -18,7 +18,9 @@
       "bundleIdentifier": "com.fantasytradefinder.app",
       "buildNumber": "1",
       "usesAppleSignIn": true,
-      "associatedDomains": ["applinks:fantasy-trade-finder.onrender.com"],
+      "associatedDomains": [
+        "applinks:fantasy-trade-finder.onrender.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [

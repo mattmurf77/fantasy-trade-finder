@@ -135,6 +135,8 @@ Changes to any of these MUST update [`../docs/cross-client-invariants.md`](../do
 
 ## Code Conventions
 
+**Per-caller density on shared presentational primitives is an opt-in prop, never a branch change** (2026-08-11, #299). `PlayerCard`'s `dense` row is consumed by three screens with different interaction contracts — the Tiers board's rows are pressable *and* drag-liftable (the 44pt touch minimum binds), the FA list passes a `statsSlot`, the League drill-in is inert and passes neither. When one caller needs different geometry, add a boolean prop defaulting to the existing behaviour so every other caller stays byte-identical; do not reshape the shared branch and then audit the fallout. Enforce with a structural test that pins both the *old* dimension and the non-opt-in of every other caller.
+
 ### Karpathy Four Principles (per [`../docs/coding-guidelines.md`](../docs/coding-guidelines.md))
 1. **Think before coding** — surface assumptions and tradeoffs; ask when unclear.
 2. **Simplicity first** — minimum code that solves the problem; no speculative abstractions.
