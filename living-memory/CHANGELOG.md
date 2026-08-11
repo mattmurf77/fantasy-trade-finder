@@ -11,12 +11,17 @@
 
 ---
 
+## 2026-08-11 (#169 frame decisions built: outlook strip + in-card Pass/Like, shipped)
+
+- **PR #107 squash-merged as `f27c0f5`, CI green.** League Summary gains the frame-E collapsed "your outlook" strip (band chip + "projected Nth of M", per-league/user persisted via `state/outlookStrip.ts`, full section one tap away) — dark behind `outlook.odds`, render byte-identical while dark. Pass/Like moved **inside** the top deck card beneath the player tiles (testIDs unchanged; "Accept this trade" VoiceOver strings renamed to Pass/Like — now a cross-client invariant, own section + [D-025]). No odds block on the card at any week — absence is the operator's design; week 6+ deferred, not designed.
+- **`outlook_strip_toggled` specced + wired day one** (operator rejected the dark-flag analytics waiver): taxonomy allowlist + props entry + tracking-plan addendum; zero volume until lighting.
+- **Process:** full doc set (plan/HLD/LLD/PRD/scope) adversarially reviewed — 21 findings applied, four were blockers (incl. a Maestro delta that would have passed identically before/after; replaced with positional `childOf` asserts, proven on-sim). Sabotage-proven checks: `check-card-disposition.js` (×2) + taxonomy test.
+- **Sim gate: Tier-1 halted mid-run by operator** (usage cost) — deviation + partial evidence in scope.md §5 / TEST_LEDGER. Owed next sim session: green full suite, 4 re-captures, freshness sweep. En route: G-027 (npm ci strands Pods paths), G-028 (rookie-scope tests fail in data-carrying checkouts), disk-full incident (0 bytes → 25 Hermes launch crash-loops), stale-Maestro-driver-after-erase. Both #169 doc-drift finds fixed (#243 status → shipped; NEXT item on `outlook.odds`).
+
 ## 2026-08-10 (screen library shipped: 141 captures, 32 screens, capture harness)
 
 - **The screen library is live** (`screens/` at repo root): every reachable mobile screen in every reachable state — 141 pngquant-compressed captures across 9 fixture profiles x 2 flag sets (incl. the **complete Analyst onboarding set**, 16 scenes, all six poses), regenerable in one command (`mobile/scripts/screen-capture.sh`), freshness-linted (`screen-freshness.sh`), mockup ground truth per [`../mockups/CLAUDE.md`](../mockups/CLAUDE.md) + [`../screens/CLAUDE.md`](../screens/CLAUDE.md). New: launch-argument screen entry (test builds only, build-time gate), draft/espn fixture profiles + 3 `/__test__` pins, sim-gate tier rows + scope-block capture-delta + warn-only pre-push freshness check. Unreachable states documented, not faked; the UX audit's nine capture requests all resolved (response doc in the audit folder). Found en route: spotlight-solver product bug, trios controls inert under Maestro (open), `isdigit()` ESPN guard bug (fix running in separate session).
->>>>>>> 2e18e85 (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
 
->>>>>>> 36a033b (living-memory: screen-library ship entry + keep-10 rotation; sim-gate evidence)
 ## 2026-08-10 (feedback batch #289-#294 — MFL names, mock engine, pick value in every view)
 
 - **#289 MFL Draft Room identity.** Franchise names and player names both rendered raw ids. Fixed at `_render_mfl` with four ordered tiers (all-zeros sentinel → our `players` row → DP crosswalk `by_mfl_id` → `Player <id>`). **The keying is the guard, not the query list:** 255 MFL ids in the committed crosswalk are also a *different* player's Sleeper id, so reading `{player_id: row}` by a raw id renders one pick's player on another. [D-022]
