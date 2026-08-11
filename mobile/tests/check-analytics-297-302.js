@@ -173,7 +173,6 @@ assert(
 for (const [via, label] of [
   ['header_back', 'the #302 fixed stack-header control'],
   ['in_card_link', 'the #243 in-card link (root-stack push)'],
-  ['hardware_back', 'the Android BackHandler'],
   ['tab_retap', 'the active-tab re-tap'],
 ]) {
   assert(
@@ -182,6 +181,25 @@ for (const [via, label] of [
     `${label} must not clear focus directly`,
   );
 }
+// `hardware_back` is the fifth `via` value and has NO emitter: #302's Android
+// BackHandler was built and withdrawn before ship (operator, 2026-08-11 —
+// unverifiable on an iOS-only release). The name stays registered on purpose,
+// so re-enabling the handler is one effect rather than a taxonomy migration
+// (the `sleeper_send_*` precedent, D-031). Pin BOTH halves: the value is still
+// allowed by the taxonomy, and nothing in the client emits it yet — otherwise
+// the reservation silently rots into either a dropped prop value or an
+// unnoticed live emitter.
+assert(
+  countOf(leagueCode, "closeTeam('hardware_back')") === 0,
+  "#302 'hardware_back' has no emitter while the Android handler is withdrawn",
+  'an emitter here means the withdrawn BackHandler came back — restore it and this assertion together',
+);
+assert(
+  /hardware_back/.test(taxText),
+  "#302 'hardware_back' stays RESERVED in the server-side via enum",
+  'dropping it means a future Android release ships a value the ingest strips silently',
+);
+
 assert(
   countOf(leagueCode, "emitTeamClosed('refocus')") === 1 &&
     /const same = focusRef\.current\?\.id === id;\s*\n\s*if \(focusRef\.current && !same\) emitTeamClosed\('refocus'\);/

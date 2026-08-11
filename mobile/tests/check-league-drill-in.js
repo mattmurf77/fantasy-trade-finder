@@ -125,6 +125,14 @@ const cardSrc = parse(CARD_REL);
 const cardText = read(CARD_REL);
 const screenSrc = parse(SCREEN_REL);
 const screenText = read(SCREEN_REL);
+/** Source with comments removed. Required for any "this construct appears
+ *  nowhere" assertion — the comments in this screen deliberately NAME the
+ *  constructs they forbid (the withdrawn #302 BackHandler documents its own
+ *  restoration recipe verbatim), so scanning raw text makes such an
+ *  assertion permanently green for the wrong reason. */
+const screenCode = screenText
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\/\/[^\n]*/g, '');
 
 // ═══════════════════════════════════════════════════════════════════════
 // #299 — 1. The opt-in prop exists and is actually wired to the height
@@ -340,27 +348,22 @@ if (inCardBack) {
 // component state, not a stack push, so Android's back gesture left the tab
 // (or the app) instead of returning to all teams.
 
+// #302 — Android hardware back was BUILT AND WITHDRAWN before ship (operator,
+// 2026-08-11). It could not be exercised on any Android device or emulator and
+// this release is iOS/TestFlight-only, so it would have shipped unverified code
+// down a path no tester can reach. These two assertions pin the WITHDRAWAL, so
+// the handler cannot creep back unnoticed — and so that restoring it is a
+// deliberate act that turns this file red and must be flipped in the same
+// commit. Sabotage for both: re-add the effect; assertion 1 goes red.
 assert(
-  /BackHandler\.addEventListener\('hardwareBackPress'/.test(screenText),
-  '#302 an Android hardware-back handler is registered',
-);
-// #299/#302 analytics (2026-08-11): the four exit controls no longer call
-// setSelectedId(null) directly — they route through the single `closeTeam`
-// choke point, which emits league_team_closed AND clears the selection. The
-// second half of that chain (closeTeam ⇒ setSelectedId(null), exactly one
-// bare clear in the file) is pinned by check-analytics-297-302.js; this file
-// keeps pinning that each CONTROL reaches it.
-assert(
-  /BackHandler\.addEventListener\('hardwareBackPress',\s*\(\)\s*=>\s*\{\s*\n\s*closeTeam\('hardware_back'\);\s*\n\s*return true;/.test(
-    screenText,
-  ),
-  '#302 hardware back clears the focused team and CONSUMES the event',
-  'returning false falls through to the navigator and leaves the tab — the current behaviour',
+  !/BackHandler\.addEventListener/.test(screenCode),
+  '#302 the Android hardware-back handler stays withdrawn (iOS-only release)',
+  'a live registration means unverified Android code is shipping — restore the handler and flip this assertion together, never separately',
 );
 assert(
-  /if \(!selectedId\) return;\s*\n\s*const sub = BackHandler\.addEventListener/.test(screenText),
-  '#302 the handler is registered ONLY while a team is focused',
-  'always-on would swallow back on the all-teams view too',
+  /\|\s*'hardware_back'/.test(screenText),
+  "#302 'hardware_back' stays RESERVED in the CloseVia union",
+  'dropping the reserved member turns re-enabling the handler into a taxonomy migration instead of a one-effect change (the sleeper_send_* precedent, D-031)',
 );
 assert(
   /registerScrollToTop\('League', \(\) => \{[\s\S]{0,600}?closeTeam\('tab_retap'\);/.test(screenText),

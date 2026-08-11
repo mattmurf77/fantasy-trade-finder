@@ -469,7 +469,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   header_back   — #302's fixed stack-header "‹ All teams" (tab root)
     #   in_card_link  — the #243 in-card link (legacy root-stack push only;
     #                   mutually exclusive with header_back on screen)
-    #   hardware_back — #302's Android BackHandler
+    #   hardware_back — RESERVED, no emitter. #302's Android BackHandler was
+    #     built and withdrawn before ship (iOS-only release, unverifiable on
+    #     Android); the name is kept so re-enabling is one effect, not a
+    #     taxonomy migration. Pinned both ways by check-analytics-297-302.js.
     #   tab_retap     — #302's re-tap of the already-active League tab
     #   refocus       — opened a DIFFERENT team without leaving the panel
     # A `league_team_opened` with no `league_team_closed` before the next

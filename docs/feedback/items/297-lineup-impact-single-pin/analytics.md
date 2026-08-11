@@ -155,7 +155,7 @@ is the one inside `closeTeam`** (asserted; sabotage J1).
 |---|---|---|
 | `header_back` | #302's fixed stack-header "‹ All teams" (tab root only) | `setOptions` `headerLeft` |
 | `in_card_link` | The #243 in-card link (legacy root-stack push only; mutually exclusive with the above) | slim strip |
-| `hardware_back` | #302's Android `BackHandler` | back-press effect |
+| `hardware_back` | **RESERVED — no emitter.** #302's Android `BackHandler` was withdrawn before ship (iOS-only release; unverifiable on Android). Kept registered so re-enabling is one effect, not a taxonomy migration | *(none — pinned absent)* |
 | `tab_retap` | #302's re-tap of the already-active League tab | `registerScrollToTop('League', …)` |
 | `refocus` | Opened a *different* team without leaving the panel (chart bars stay tappable while focused) | `openTeam` |
 

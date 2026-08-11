@@ -7,7 +7,6 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
-  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -387,6 +386,9 @@ export default function LeagueSummaryScreen() {
   type CloseVia =
     | 'header_back'
     | 'in_card_link'
+    // RESERVED — no emitter until the Android release; see the withdrawn
+    // BackHandler effect below. Kept so re-enabling is one effect, not a
+    // taxonomy migration (the `sleeper_send_*` precedent, D-031).
     | 'hardware_back'
     | 'tab_retap'
     | 'refocus';
@@ -757,7 +759,7 @@ export default function LeagueSummaryScreen() {
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────
   // The drill-in is component state (`selectedId`), not a stack push, so
   // NOTHING in the OS gives the user a way back: no stack back (this is the
-  // stack root), no iOS edge-swipe, and — until the BackHandler below — no
+  // stack root), no iOS edge-swipe, and — on Android, still — no
   // Android back either. The only control was an 11px caption in the chart
   // card's top-RIGHT, above 1,600pt of roster, so it scrolled away the
   // moment the user did the thing they drilled in for.
@@ -814,19 +816,26 @@ export default function LeagueSummaryScreen() {
     }
   }, [isTabRoot, navigation, focusedTeamName, closeTeam]);
 
-  // #302 — Android hardware/gesture back. There were ZERO BackHandler
-  // registrations in this file, so on Android the drill-in swallowed the
-  // system back gesture's meaning entirely: back left the tab (or the app)
-  // rather than returning to all teams. Registered only while focused, so
-  // unfocused back keeps its normal navigator behaviour.
-  useEffect(() => {
-    if (!selectedId) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      closeTeam('hardware_back');
-      return true; // handled — do not fall through to the navigator
-    });
-    return () => sub.remove();
-  }, [selectedId, closeTeam]);
+  // #302 — Android hardware/gesture back is DELIBERATELY NOT REGISTERED YET.
+  //
+  // The gap is real: there are ZERO BackHandler registrations in this file,
+  // so on Android the drill-in swallows the system back gesture's meaning
+  // entirely — back leaves the tab (or the app) rather than returning to all
+  // teams. A working handler was built and then withdrawn before ship
+  // (operator, 2026-08-11): it could not be exercised on any Android device
+  // or emulator, and this release is iOS/TestFlight-only, so it would have
+  // shipped unverified code down a path no tester can reach. It returns with
+  // the first non-App-Store release.
+  //
+  // What to restore: a `useEffect` keyed on `[selectedId, closeTeam]` that
+  // early-returns when nothing is focused, registers
+  // BackHandler.addEventListener('hardwareBackPress'), calls
+  // closeTeam('hardware_back') and returns true (consuming the event —
+  // returning false falls through to the navigator and leaves the tab), and
+  // removes the subscription on cleanup. `'hardware_back'` is kept RESERVED
+  // in CloseVia and in the analytics enum precisely so this is a one-effect
+  // change and not a taxonomy migration. `mobile/tests/check-league-drill-in.js`
+  // pins the absence — flip those assertions in the same commit.
 
   // The single shared pill factory — both pill rows use it, so the drill-in
   // panel mirrors the chart card automatically.
