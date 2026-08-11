@@ -479,3 +479,117 @@ def test_p0_events_reject_device_platform_prop(harness):
     props = json.loads(_rows(engine)[0]._mapping["props"])
     assert props["platform"] == "espn"          # LEAGUE platform survives
     assert "device_platform" not in props       # device prop stripped
+
+
+# --- feedback #297 / #298 / #299 / #302 addendum (2026-08-11) --------------
+# Tracking plan: docs/feedback/items/297-lineup-impact-single-pin/analytics.md
+#
+# These exist because NAME survival and PROP survival are SEPARATE silent
+# failures on this endpoint (analytics_ingest.py:379-390):
+#   * an unregistered event_type is accepted-and-DROPPED, never 4xx'd, so a
+#     client track() call for it looks live and records nothing;
+#   * a registered type with an unregistered prop keeps the row but has that
+#     prop POPPED, so the row lands hollowed out.
+# `trade_card_shared` is the live in-tree example of the second: registered,
+# but props limited to {trade_id, channel}, so any `landing` is discarded.
+#
+# A test asserting "the client calls track with X" passes under BOTH failure
+# modes. These assert the ROUND TRIP: every prop is read back out of
+# user_events after ingestion, so a stripped prop fails.
+
+def test_feedback_297_302_new_events_land_with_every_prop(harness):
+    """Both new names register AND every specced prop survives ingest."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="lineup_impact_unavailable",
+                  screen="TradeCalculator",
+                  props={"platform": "mfl"}),
+        _envelope(1, event_type="league_team_closed",
+                  screen="LeagueRankings",
+                  props={"via": "header_back", "dwell_ms": 41200, "rank": 4}),
+    ]).get_json()
+    _assert_invariant(body, 2)
+    # dropped == 0 proves the NAMES registered: an unknown type still counts
+    # in `accepted`, so accepted alone proves nothing.
+    assert body["accepted"] == 2 and body["dropped"] == 0
+
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    assert set(by_type) == {"lineup_impact_unavailable", "league_team_closed"}
+
+    lu = json.loads(by_type["lineup_impact_unavailable"]["props"])
+    assert lu["platform"] == "mfl"   # LEAGUE platform, not device
+    assert by_type["lineup_impact_unavailable"]["screen"] == "TradeCalculator"
+
+    lc = json.loads(by_type["league_team_closed"]["props"])
+    assert lc["via"] == "header_back"        # the whole point of #302
+    assert lc["dwell_ms"] == 41200
+    assert lc["rank"] == 4
+
+
+def test_feedback_299_302_reuses_league_team_opened_for_the_enter_half(harness):
+    """#299/#302 adds an EXIT event only — the enter half is the shipped
+    P0-7 `league_team_opened`, and no parallel 'focused' name exists.
+
+    A duplicate enter name would be two sources of truth for one
+    interaction; this pins that neither was minted.
+    """
+    from backend import analytics_taxonomy as t
+    assert "league_team_opened" in t.ALLOWED_CLIENT_EVENTS
+    assert "league_team_focused" not in t.ALLOWED_CLIENT_EVENTS
+    assert "league_team_unfocused" not in t.ALLOWED_CLIENT_EVENTS
+
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="league_team_opened", screen="LeagueRankings",
+                  props={"via": "bar", "rank": 4, "basis": "consensus",
+                         "subset": "all", "filter_count": 0}),
+        _envelope(1, event_type="league_team_closed", screen="LeagueRankings",
+                  props={"via": "refocus", "dwell_ms": 900, "rank": 4}),
+    ]).get_json()
+    assert body["accepted"] == 2 and body["dropped"] == 0
+    assert {r._mapping["event_type"] for r in _rows(engine)} == {
+        "league_team_opened", "league_team_closed"}
+
+
+def test_feedback_298_mode_and_source_survive_on_existing_events(harness):
+    """#298 rides `mode` on two events that ALREADY fire on this path, and
+    un-strips the `source` the client has been sending since #257."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="find_trades_tapped",
+                  props={"source": "prefs_changed_strip",
+                         "mode": "single_pin"}),
+        _envelope(1, event_type="trade_card_viewed",
+                  props={"trade_id": "t-99", "card_index": 0,
+                         "mode": "single_pin"}),
+    ]).get_json()
+    _assert_invariant(body, 2)
+    assert body["accepted"] == 2 and body["dropped"] == 0
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    ft = json.loads(by_type["find_trades_tapped"]["props"])
+    assert ft["mode"] == "single_pin"
+    assert ft["source"] == "prefs_changed_strip"   # was being stripped
+    tc = json.loads(by_type["trade_card_viewed"]["props"])
+    assert tc["mode"] == "single_pin" and tc["trade_id"] == "t-99"
+
+
+def test_feedback_297_302_events_are_not_intent():
+    """Exposure/terminator telemetry must NOT enter the DAU/WAU series.
+
+    `analytics_queries.INTENT_EVENTS` is derived by SUBTRACTION
+    (`(SERVER_FIRED | ALLOWED_CLIENT) - NON_INTENT_EVENTS`), so taxonomy
+    growth is intent-BY-DEFAULT: registering a name and stopping there
+    step-changes DAU/WAU with no error and no log, and the jump is
+    indistinguishable from real growth after the fact. INTENT_EVENTS feeds
+    ~10 call sites in that module.
+    """
+    from backend import analytics_queries as q
+    new = {"lineup_impact_unavailable", "league_team_closed"}
+    assert new <= q.NON_INTENT_EVENTS
+    assert not (new & q.INTENT_EVENTS)
+    # The enter half deliberately STAYS intent — the interaction is counted
+    # once, by its opener.
+    assert "league_team_opened" in q.INTENT_EVENTS
+    # #298 added NO event name: a property on an event that already fires
+    # cannot perturb the series at all.
+    assert "find_trades_tapped" in q.INTENT_EVENTS
