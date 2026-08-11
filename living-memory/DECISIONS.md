@@ -353,6 +353,22 @@
 **Consequences:** All five exit controls route through one `closeTeam` choke point, and the file has exactly one bare `setSelectedId(null)`; both are statically pinned, so a new exit control that forgets to fire fails a check rather than silently vanishing from the data. `league_team_closed` is NON-INTENT, added in the same commit as its allowlist entry. Abandonment (opened, never closed) is measured by absence; there is deliberately no unmount-cleanup emitter, which would double-fire on React strict-mode remounts and invent dwell. **Meta-consequence worth generalising: an instrumentation gap analysis is only valid against the `origin/main` the work will land on.** Two of this batch's premises were true when checked and false when shipped.
 **Status:** Active.
 
+## D-039 — Tier-Board Share Routes Get a Flag Whose Resting State Is OFF
+**Date:** 2026-08-11 (P1 remediation, operator decision D-P1-12)
+**Context:** `GET /og/tiers/<pos>/<username>.png` and `GET /s/tiers/<pos>/<username>` shipped with **no guard of any kind** — no session, no in-app link, no flag. Any user's tier board, with their username in the page title, was fetchable by guessing the URL. The operator believed this had already been disabled; what had actually been disabled was the public *profile* surface (`profiles.public_pages` / `profiles.user_toggle`, #221) — a different surface entirely. The neighbouring package routes had always closed behind `growth.share_landing`, which never covered these two.
+**Decision:** Add `growth.tier_board_share`, default OFF in both `feature_flags.py` and `config/features.json`, guarding both routes to 404 exactly as the package routes do. Operator decision D-P1-12 rules that sharing of rankings / tier boards is **not a product surface**, so **OFF is the resting state, not a dark launch** — flipping it requires an explicit reversal, and the code, config and docs all say so.
+**Alternatives considered:** Deleting the routes outright — rejected: a flag is reversible in one line and the renderer (`og_image.render_tier_card`) has other potential callers. Reusing `growth.share_landing` — rejected: it is ON in production and gates the trade/package loop, which the operator wants to keep; one switch for two products with opposite intent is how this exposure survived in the first place.
+**Consequences:** Blast radius is nil — `web/js/app.js` `buildTierShareUrl()` is dead code (defined, never invoked), and no mobile, extension or Maestro reference exists. Three flag fixtures needed updating, not one: `release.json` is an enforced mirror of `config/features.json`, and `profiles-on.json` / `onboarding-v2.json` assert an **exact key set** against it. **Generalisable:** "is this surface gated?" must be answered by reading the route, not by recalling which flag was flipped — an adjacent, similarly-named surface being closed is not evidence.
+**Status:** Active.
+
+## D-040 — T1 Registers Four Analytics Names and Defers Four; the File Is Not Final
+**Date:** 2026-08-11 (P1 remediation, commit T1; operator decision AN-4)
+**Context:** `ALLOWED_CLIENT_EVENTS` is default-deny **and silent** (G-031): an unregistered name is dropped behind a 200, an unregistered prop is popped off a row that otherwise lands. Registration must therefore precede every emitter. Five workstreams claimed this one file.
+**Decision:** Register exactly four names — `calc_trade_shared` (INTENT), `share_package_created` (NON_INTENT), `invite_cta_shown` (NON_INTENT), `invite_cta_tapped` (INTENT) — plus two prop-row **extensions in place** (`invite_shared` +4 props; `trade_card_shared` +`landing` +`surface`). Classification is explicit in `NON_INTENT_EVENTS` because `INTENT_EVENTS` is a **deny-list**: silence ships an event as INTENT and step-changes DAU/WAU on the day its emitter goes live. Defer the four `sleeper_connect_*` names pending naming decision AN-1; cancel `tier_board_shared` (D-P1-12) and `email_captured` (AN-6).
+**Alternatives considered:** Registering `sleeper_connect_*` with a guessed name — rejected: a wrong name in a default-deny registry is worse than a missing one, because it looks live. Waiting for AN-1 before landing any of T1 — rejected: it blocks two other items for one item's open question.
+**Consequences:** **A T1 amendment commit is required** before P1-10's client wiring ships; the taxonomy file is not final and assertions pin all three absences so nobody "fixes" them by accident. Prop-row extensions are the dangerous half — a three-way merge resolving one back to its pre-existing value keeps the name working and hollows out every row — so both are asserted in two separate test files.
+**Status:** Active.
+
 ---
 
 ## D-039 — ESPN Trade-Write Is No Longer Categorically Prohibited; It Ships Through a Verification Gate
@@ -410,6 +426,8 @@
 | D-036 | League Roster Tiles: 32pt via an Opt-In Prop, Not the Literal 30pt | 2026-08-11 |
 | D-037 | League Drill-In Back Affordance Lives on the Stack Header, Tab-Root Only | 2026-08-11 |
 | D-038 | Adopt `league_team_opened` for the League Drill-In; Add Only an Exit Event | 2026-08-11 |
+| D-039 | Tier-Board Share Routes Get a Flag Whose Resting State Is OFF | 2026-08-11 |
+| D-040 | T1 Registers Four Analytics Names and Defers Four; the File Is Not Final | 2026-08-11 |
 
 ---
 

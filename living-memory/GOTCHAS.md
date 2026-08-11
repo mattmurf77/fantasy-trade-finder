@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-036 | `league_id` analytics props store `"[scrubbed]"` for Sleeper leagues only | Backend / analytics ingest / PII scrub |
 | G-035 | A JSX "is this gated on X?" test passes on a build where X is ignored | Mobile / structural tests / AST |
 | G-034 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
 | G-033 | A sim run goes red on an unrelated screen after adding one API call | Mobile / Maestro harness / VCR |
@@ -306,3 +307,10 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 ```
 
 Number sequentially. Don't delete entries even if "obviously fixed by now" — future-you will appreciate the history.
+
+### G-036 — a `league_id` analytics prop stores `"[scrubbed]"`, but only for Sleeper leagues
+- **Symptom:** an event is registered, its props survive ingest, the row lands — and `props.league_id` reads `"[scrubbed]"`. Per-league analysis returns one giant bucket. Spot-checking against an ESPN league shows a real id and makes the whole thing look fine.
+- **Cause:** `backend/analytics_ingest.py` `_PII_VALUE_RES` includes `\b\d(?:[ -]?\d){15,}\b` — a 16+ digit run, aimed at card numbers. **Sleeper league ids are 18 digits**, so they match. ESPN ids are ~6 digits and pass through untouched. The scrub happens *after* the prop allowlist, so every taxonomy-level check says the prop is fine.
+- **Scope:** `invite_shared`, `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`, `outlook_strip_toggled` — every event carrying `league_id` as a string prop.
+- **Fix:** not applied. Narrowing the regex weakens a real PII guard, and the honest alternatives (hash the id, or exempt a named prop key) are a decision the operator has not been asked. Pinned as behaviour by `test_p1_t1_league_id_is_redacted_by_the_pii_scrubber` so it cannot be rediscovered as a mystery, and recorded in the tracking plan so nobody plans a per-league metric on top of it.
+- **Prevention:** a value-shape PII regex silently redacts any identifier that happens to share the shape. When registering a prop that carries a platform id, post a realistic value through `POST /api/events` and read it back out of `user_events` — asserting the *key* survived is not enough. This is G-031's lesson one layer deeper: name survival, prop survival, and **value** survival are three separate silent failures.
