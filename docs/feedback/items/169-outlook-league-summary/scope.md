@@ -101,5 +101,21 @@
   are live UI): full smoke suite (11 flows) + extended `06-trades-deck` +
   re-captures per §3. The dark frame E adds no tier on its own; the card
   change sets the tier.
-- Evidence: TEST_LEDGER entry + `qa/sim-runs/last-sim-run.json` after the run
-- Operator deviation from the matrix: none requested
+- **OPERATOR DEVIATION (2026-08-11): full Tier-1 run halted mid-gate** —
+  "Let's proceed without sim testing. Eating up too much usage." Push via the
+  documented `FTF_SKIP_SIM_GATE=1` override; no `last-sim-run.json` written
+  (no full run completed — the file is not fabricated). **Partial sim
+  evidence obtained before the halt:** (a) the extended `06-trades-deck`
+  positional `childOf` asserts PASSED on-sim — both buttons proven inside
+  `trades.card-top` with no scroll; (b) screenshot proof of the operator's
+  requested layout (Pass/Like beneath the player tiles, above the value
+  section); (c) flow `01-signin` full pass end-to-end in the final harness
+  config; (d) app launch health verified manually after environment
+  recovery. **Not obtained:** a green full-suite run, the post-overlay
+  like/pass tap-through, the four §3 re-captures + freshness sweep — the
+  captures and the full run are owed at next sim session (noted in
+  TEST_LEDGER). The suite failures encountered were traced to four
+  environment/harness causes (flags fixture not loaded; backend process
+  reaped; disk exhaustion; stale Maestro driver post-erase), none to the
+  change under test.
+- Evidence: TEST_LEDGER entry 2026-08-11
