@@ -4,6 +4,9 @@
 > Branch `feedback-build-trades-297-298`, based on `origin/main` @ `ab9368f`.
 > Design contract: `mockups/polish-lab-2026-08-11/OPERATOR-DECISIONS.md` (#298 → **V1**;
 > buttons named **Pass / Like**) + `trades-single-pin-recovery.html`.
+> **Rebased 2026-08-11** onto `origin/main` @ `f65bab7` (integration round). All
+> `file:line` references below are against that base. #169 (`f27c0f5`) landed in between
+> and moved the Pass/Like row from `TradesScreen.tsx` into `TradeCard.tsx` — see §4a.
 > **Not shipped. Not merged. Not pushed. No simulator or Maestro run** — verification
 > here is static only, by instruction.
 
@@ -30,16 +33,16 @@ No `backend/` file, no shared doc, none of the parallel agent's three files.
 
 | # | `file:line` | Change |
 |---|---|---|
-| 1 | `TradesScreen.tsx:1058-1059` | New derived state. `singlePinFeatured = !firstRun && !!singlePin` is the old `!firstRun && singlePin` predicate, named once. `singlePinDeckActive = singlePinFeatured && deck.length > 0` is the new idea: **in single-pin mode, once a deck exists it takes the lead slot.** Keyed on `deck.length`, not `topCard`, so the deck keeps the slot through the swiped-out and deck-summary states instead of snapping back to the featured window mid-session. |
-| 2 | `TradesScreen.tsx:4106-4120` | **Legacy (`!consolidateOn`) layout's Find-a-Trade CTA — gate removed.** Was `{!firstRun && singlePin ? null : (…)}`. Label now reads "Find more trades" when `singlePinFeatured`, per the V1 mock's "CTA relabelled for the pinned context". |
-| 3 | `TradesScreen.tsx:4127` | Same layout's progress strip — gate removed (`{!(!firstRun && singlePin) && job?.status === 'running' && …}` → `{job?.status === 'running' && …}`). A generate in single-pin mode now has to narrate itself. |
-| 4 | `TradesScreen.tsx:4291-4302` | **The reported CTA** — consolidated (`consolidateOn`) layout's copy of the same button, same two changes. This is the one that renders under the release flag set. |
-| 5 | `TradesScreen.tsx:4304` | Same layout's progress strip — gate removed. |
-| 6 | `TradesScreen.tsx:3351-3363` | `assetIdeasPanel` extracted to a single JSX const so the Upgrade/Lateral/Downgrade rail can mount at one of **two** positions without being duplicated. |
-| 7 | `TradesScreen.tsx:4376-4394` | Featured block: `FeaturedTradeWindow` now also requires `!singlePinDeckActive`, and the rail renders here only when no deck is up. **This is how #241 stays fixed** — the featured window and a deck card can never be on screen together, so the "mystery second trade card" cannot come back. |
-| 8 | `TradesScreen.tsx:4635` | **The load-bearing one.** Deck-wrapper gate narrowed from `{!firstRun && singlePin ? null : (…)}` to `{singlePinFeatured && !singlePinDeckActive ? null : (…)}`. The deck — and with it `SwipableTopCard onLike/onPass`, the `trades.pass-btn`/`trades.like-btn` row and the VoiceOver like/pass actions, all of which funnel into `advance()` — renders in single-pin mode again, but only once it has cards. With no cards the block still stays out, so the pinned surface never shows "Hit Find a Trade to start" underneath a featured trade it is already displaying. |
-| 9 | `TradesScreen.tsx:4645-4656` | New position counter, single-pin only: `Featured trade · <n> of <m>` (`testID="trades.single-pin-deck-count"`), from the V1 mock. Uses `sortedDeck.length`, not `deck.length`, so a lane filter cannot make it lie; guarded on `topCard` so it cannot read "7 of 6" after the last swipe. `TickLabel` (`type.label`, 11px — at the floor, not under it), no new style. |
-| 10 | `TradesScreen.tsx:5000-5004` | Second mount point for the same `assetIdeasPanel`, below the deck, so the actionable card leads and the alternates read as "more trades" beneath it. |
+| 1 | `TradesScreen.tsx:1099-1100` | New derived state. `singlePinFeatured = !firstRun && !!singlePin` is the old `!firstRun && singlePin` predicate, named once. `singlePinDeckActive = singlePinFeatured && deck.length > 0` is the new idea: **in single-pin mode, once a deck exists it takes the lead slot.** Keyed on `deck.length`, not `topCard`, so the deck keeps the slot through the swiped-out and deck-summary states instead of snapping back to the featured window mid-session. |
+| 2 | `TradesScreen.tsx:4229-4243` | **Legacy (`!consolidateOn`) layout's Find-a-Trade CTA — gate removed.** Was `{!firstRun && singlePin ? null : (…)}`. Label now reads "Find more trades" when `singlePinFeatured`, per the V1 mock's "CTA relabelled for the pinned context". |
+| 3 | `TradesScreen.tsx:4250` | Same layout's progress strip — gate removed (`{!(!firstRun && singlePin) && job?.status === 'running' && …}` → `{job?.status === 'running' && …}`). A generate in single-pin mode now has to narrate itself. |
+| 4 | `TradesScreen.tsx:4414-4424` | **The reported CTA** — consolidated (`consolidateOn`) layout's copy of the same button, same two changes. This is the one that renders under the release flag set. |
+| 5 | `TradesScreen.tsx:4427` | Same layout's progress strip — gate removed. |
+| 6 | `TradesScreen.tsx:3456-3468` | `assetIdeasPanel` extracted to a single JSX const so the Upgrade/Lateral/Downgrade rail can mount at one of **two** positions without being duplicated. |
+| 7 | `TradesScreen.tsx:4499-4517` | Featured block: `FeaturedTradeWindow` now also requires `!singlePinDeckActive`, and the rail renders here only when no deck is up. **This is how #241 stays fixed** — the featured window and a deck card can never be on screen together, so the "mystery second trade card" cannot come back. |
+| 8 | `TradesScreen.tsx:4758` | **The load-bearing one.** Deck-wrapper gate narrowed from `{!firstRun && singlePin ? null : (…)}` to `{singlePinFeatured && !singlePinDeckActive ? null : (…)}`. The deck — and with it `SwipableTopCard onLike/onPass`, the VoiceOver like/pass actions, and (since #169 shipped) the in-card `trades.pass-btn`/`trades.like-btn` row that `SwipableTopCard` feeds via its `disposition` prop — renders in single-pin mode again. All three paths funnel into `advance()`. This gate is the single choke point for every one of them, but only once it has cards. With no cards the block still stays out, so the pinned surface never shows "Hit Find a Trade to start" underneath a featured trade it is already displaying. |
+| 9 | `TradesScreen.tsx:4768-4779` | New position counter, single-pin only: `Featured trade · <n> of <m>` (`testID="trades.single-pin-deck-count"`), from the V1 mock. Uses `sortedDeck.length`, not `deck.length`, so a lane filter cannot make it lie; guarded on `topCard` so it cannot read "7 of 6" after the last swipe. `TickLabel` (`type.label`, 11px — at the floor, not under it), no new style. |
+| 10 | `TradesScreen.tsx:5116-5120` | Second mount point for the same `assetIdeasPanel`, below the deck, so the actionable card leads and the alternates read as "more trades" beneath it. |
 
 **Why V1 and not "just delete both gates" (V2).** V2 is a smaller diff but puts two trade
 summaries on one screen — the featured calculator's trade is not the deck's top card, which
@@ -50,12 +53,12 @@ one card in the lead slot at all times.
 
 | # | `file:line` | Change |
 |---|---|---|
-| 11 | `TradesScreen.tsx:1932-1958` | The `scopedOpponent` effect's regenerate condition widened from `finderScopeSeen.current && finderMode === 'team' && scopedOpponent` to `finderScopeSeen.current && scopedOpponent`. Since #269 the opponent's *source* moved to sheet-local state and the #270 strip's "Trading with" pill scopes one **without leaving `'guided'`** — so the old condition never matched, `resetDeckForNewTargets()` ran alone, and the user was dropped to "Hit Find a Trade to start" with no explanation. The new condition is what the branch always meant. |
-| 12 | `TradesScreen.tsx:1951-1954` | After the auto-regenerate, clear `prefsChangedSinceGenerateRef` and `showPrefsChangedStrip` — mirroring `handleFindTrades` (`:736-737` in `handleFindTrades`). Without this, the pick that *caused* the sweep would leave the #257 "Preferences changed — tap to refresh" nudge armed against the very sweep it triggered. |
+| 11 | `TradesScreen.tsx:2012-2038` | The `scopedOpponent` effect's regenerate condition widened from `finderScopeSeen.current && finderMode === 'team' && scopedOpponent` to `finderScopeSeen.current && scopedOpponent`. Since #269 the opponent's *source* moved to sheet-local state and the #270 strip's "Trading with" pill scopes one **without leaving `'guided'`** — so the old condition never matched, `resetDeckForNewTargets()` ran alone, and the user was dropped to "Hit Find a Trade to start" with no explanation. The new condition is what the branch always meant. |
+| 12 | `TradesScreen.tsx:2031-2034` | After the auto-regenerate, clear `prefsChangedSinceGenerateRef` and `showPrefsChangedStrip` — mirroring `handleFindTrades` (`:773-774` in `handleFindTrades`). Without this, the pick that *caused* the sweep would leave the #257 "Preferences changed — tap to refresh" nudge armed against the very sweep it triggered. |
 
 **Blast radius of #11, checked:** legacy team mode is unchanged (there, scoping *is* the
 mode, so both the old and new conditions are true). With `trades.sheet_targeting` **off**,
-`scopedOpponent` can only come from team mode's route params (`:519-523`), so the new
+`scopedOpponent` can only come from team mode's route params (`:556-560`), so the new
 condition is provably identical to the old one — the change is inert with that flag off.
 **Clearing** an opponent still only resets and does not regenerate: broadening a search is
 not a request for a new sweep, and it matches how pin add/remove already behaves
@@ -65,9 +68,9 @@ not a request for a new sweep, and it matches how pin add/remove already behaves
 
 | # | `file:line` | Change |
 |---|---|---|
-| 13 | `InLeagueCalculator.tsx:953-964` | The third branch of the `starter_impact` guard was a bare `null`. Now `: both ? <LineupImpactUnavailable /> : null`. Gated on `both` (`InLeagueCalculator.tsx:866`, both sides carry players) so it cannot fire on the half-built "Add a player to each side for a verdict" state. |
-| 14 | `InLeagueCalculator.tsx:1011-1032` | New local `LineupImpactUnavailable`. Renders in `styles.lineupMod` — the same bordered-top block the table would have occupied — with `TickLabel` "Starting lineup" and one line of `type.bodySm` (13px). One `accessible` element with a combined `accessibilityLabel`, matching how `LineupImpactTable` voices its `note`. `testID="calc.lineup-impact-unavailable"`. |
-| 15 | `InLeagueCalculator.tsx:1202` | `styles.lineupUnavailable` — `type.bodySm` + `chalk.dim`. One new style. |
+| 13 | `InLeagueCalculator.tsx:991-1002` | The third branch of the `starter_impact` guard was a bare `null`. Now `: both ? <LineupImpactUnavailable /> : null`. Gated on `both` (`InLeagueCalculator.tsx:884`, both sides carry players) so it cannot fire on the half-built "Add a player to each side for a verdict" state. |
+| 14 | `InLeagueCalculator.tsx:1049-1070` | New local `LineupImpactUnavailable`. Renders in `styles.lineupMod` — the same bordered-top block the table would have occupied — with `TickLabel` "Starting lineup" and one line of `type.bodySm` (13px). One `accessible` element with a combined `accessibilityLabel`, matching how `LineupImpactTable` voices its `note`. `testID="calc.lineup-impact-unavailable"`. |
+| 15 | `InLeagueCalculator.tsx:1240` | `styles.lineupUnavailable` — `type.bodySm` + `chalk.dim`. One new style. |
 
 **The copy, and why it is worded that way:**
 
@@ -106,7 +109,7 @@ no blur, ≥11px, `chalk.faint` tick (neutral — not a new accent).
    touch.** `_load_from_json` (`:653-659`) drops unknown keys with
    `ignoring unknown key`, so `config/features.json` alone is a no-op.
 3. **A real kill switch already covers 100% of this diff.** `singlePin`
-   (`TradesScreen.tsx:1038-1045`) requires `trade.asset_ideas`. Set it `false` →
+   (`TradesScreen.tsx:1079-1086`) requires `trade.asset_ideas`. Set it `false` →
    `singlePin` is `null` → `singlePinFeatured` and `singlePinDeckActive` are both false →
    every changed line falls back to the unconditional CTA + deck. Server-side,
    deploy-free, already live.
@@ -162,8 +165,8 @@ EXIT=0
   (Structure verified by listing every 8-space-indent structural line between `:3650` and
   `:5010`; the outer `{gateState ? (` at `:3655` is what `</>` `)}` at `:5005-5006` closes.)
 - `grep -n singlePin TradesScreen.tsx` → the only remaining raw `singlePin` gates are
-  `:3682` (pin-summary card) and `:3733` (pin-edit header), both legitimately
-  single-pin-only UI, and `:4354` (`!singlePin` on `TradeBuildCanvas`, the `canvas`
+  `:3805` (pin-summary card) and `:3856` (pin-edit header), both legitimately
+  single-pin-only UI, and `:4477` (`!singlePin` on `TradeBuildCanvas`, the `canvas`
   experiment arm — see §7).
 
 ---
@@ -287,10 +290,10 @@ proof that "reasoned about" and "verified" are not the same thing.
 
 | Assertion (flow step) | Sabotage it detects | Why it fails, by construction |
 |---|---|---|
-| `assertVisible: trades.find-btn` after the pin | Restore the gate at `TradesScreen.tsx:4291` (or `:4106`) | With exactly one pin, `singlePin` is non-null and `firstRun` is false (`onboarding.trades_first: false` in the release fixture), so the gate evaluates `null` and no element carries that testID. **This is the literal v1.12.0 defect.** |
-| `extendedWaitUntil: trades.card-top` | Restore the deck-wrapper gate at `:4635` | `SwipableTopCard` (which owns `testID="trades.card-top"`) lives inside that wrapper. Gate restored ⇒ the wrapper is `null` ⇒ generated cards render nowhere. This is the other v1.12.0 defect, the one that took accept/decline with it. |
-| `assertVisible: trades.single-pin-deck-count` | Delete `:4645-4656`, **or** apply sabotage C | Direct assertion on the new element. Under C the counter and the whole deck slot vanish the moment the deck is exhausted — which this flow, tapping like once, would still miss. **4a covers C; this flow does not.** |
-| `assertVisible: trades.pass-btn` **and** `trades.like-btn` | Restore `:4635`, or delete the disposition row | Both ids exist only inside the deck wrapper. Asserting **both** (not just the one tapped) is deliberate: a fix restoring only the accept path would satisfy a like-only test while still failing the reporter's sentence, which names both. |
+| `assertVisible: trades.find-btn` after the pin | Restore the gate at `TradesScreen.tsx:4414` (or `:4229`) | With exactly one pin, `singlePin` is non-null and `firstRun` is false (`onboarding.trades_first: false` in the release fixture), so the gate evaluates `null` and no element carries that testID. **This is the literal v1.12.0 defect.** |
+| `extendedWaitUntil: trades.card-top` | Restore the deck-wrapper gate at `:4758` | `SwipableTopCard` (which owns `testID="trades.card-top"`) lives inside that wrapper. Gate restored ⇒ the wrapper is `null` ⇒ generated cards render nowhere. This is the other v1.12.0 defect, the one that took accept/decline with it. |
+| `assertVisible: trades.single-pin-deck-count` | Delete `:4768-4779`, **or** apply sabotage C | Direct assertion on the new element. Under C the counter and the whole deck slot vanish the moment the deck is exhausted — which this flow, tapping like once, would still miss. **4a covers C; this flow does not.** |
+| `assertVisible: trades.pass-btn` **and** `trades.like-btn` | Restore `:4758`, or apply sabotage E/H | **Since #169 both ids live in `TradeCard.tsx` (`:538`, `:555`), not this screen** — but they still render only inside the deck wrapper, via the top card, so the deck gate still removes them. Asserting **both** (not just the one tapped) is deliberate: a fix restoring only the accept path would satisfy a like-only test while still failing the reporter's sentence, which names both. |
 | `tapOn: trades.like-btn` → `extendedWaitUntil: trades.find-btn` | Sabotage E — buttons that render but do not dispatch | `advance()` dispositions the card, fires `swipe`, and fronts the next one. A cosmetic button leaves the deck frozen; the CTA assertion afterwards is the liveness check that the screen survived the tap. |
 | Reaching the board (`trades.board.add-away`) | — | Not an assertion about the fix; it is the flow's precondition. If it fails, the flow is wrong, not the code. Fallback in §6. |
 
@@ -299,7 +302,8 @@ proof that "reasoned about" and "verified" are not the same thing.
 - **The swipe gesture.** Both the button path and the gesture share `advance()`, and 4a
   pins the button wiring, but no test drives the actual pan gesture on `SwipableTopCard`.
 - **The VoiceOver custom actions** (`SwipableTopCard`'s `accessibilityActions`,
-  `:5509-5516`) — no VoiceOver in the harness. Manual, §6 step 8.
+  `:5629-5636`) — no VoiceOver in the harness for a real run, though **4a assertion 5 now
+  pins the handler's wiring statically** (sabotage I). Manual confirmation, §6 step 8.
 - **#298b entirely.** The team-pill regenerate needs the strip variant and a second
   opponent; it is a manual check, §6 step 5.
 - **#297's row entirely.** It needs a league whose id is non-numeric, which the `standard`
@@ -339,7 +343,7 @@ proof that "reasoned about" and "verified" are not the same thing.
 ### 5.2 `docs/glossary.md` — define single-pin mode
 
 > **Single-pin mode** — the state of TradesHome when exactly **one** asset is pinned in the
-> finder-target board, in either direction (`TradesScreen.tsx:1038-1045`; requires
+> finder-target board, in either direction (`TradesScreen.tsx:1079-1086`; requires
 > `trade.finder_targeting` **and** `trade.asset_ideas`). It replaces the ordinary "generate
 > and swipe" landing with an asset-centric surface: a featured trade for the pinned player
 > plus an Upgrade / Lateral / Downgrade alternates rail. Zero pins or two-or-more pins are
@@ -457,7 +461,7 @@ const singlePinFeatured = !firstRun && !!singlePin;
 const singlePinDeckActive = singlePinDeckOn && singlePinFeatured && deck.length > 0;
 ```
 
-…and the two CTA gates (`:4106`, `:4291`) and the deck gate (`:4635`) each regain a
+…and the two CTA gates (`:4229`, `:4414`) and the deck gate (`:4758`) each regain a
 `singlePinDeckOn ? … : <old expression>` wrapper. Note this is genuinely five files and a
 three-branch client change — which is the point made in D-0NN+1.
 
@@ -483,9 +487,9 @@ Run on the `standard` profile with the `release` flag fixture unless noted.
 4. **Manual, #298 main path (the reporter's own journey):** Trades → generate a deck → on a
    card tap **"Keep · more offers"** for a one-player side → confirm the pinned surface now
    shows the CTA and, after the auto-generate that `handleKeepSide` already fires
-   (`:2005-2006`), a deck card with Pass/Like. **Note this path already generated cards
+   (`:2085-2086`), a deck card with Pass/Like. **Note this path already generated cards
    before the fix — they simply had nowhere to render.** Then tap the pin row's clear/back
-   and confirm the original deck is restored unchanged (`handleClearPin`, `:2017`).
+   and confirm the original deck is restored unchanged (`handleClearPin`, `:2097`).
 5. **Manual, #298b:** with the `strip` variant of `trades_home_inline`, tap the "Trading
    with" pill → pick a league-mate. **Expect a sweep to start on its own** (progress strip
    appears, deck refills). Pre-fix this silently emptied the deck to "Hit Find a Trade to
@@ -501,9 +505,9 @@ Run on the `standard` profile with the `release` flag fixture unless noted.
    renders and the new row does **not**. Also confirm the row is absent while only one side
    has players.
 7. **Sabotage verification (§4) — do this before trusting the new flow.** Restore the gate
-   at `TradesScreen.tsx:4635` to `{!firstRun && singlePin ? null : (…)}`, re-run
+   at `TradesScreen.tsx:4758` to `{!firstRun && singlePin ? null : (…)}`, re-run
    `12-trades-single-pin.yaml`, and confirm it **fails** at `trades.card-top`. Revert. Repeat
-   for `:4291` and confirm failure at `trades.find-btn`.
+   for `:4414` and confirm failure at `trades.find-btn`.
 8. **Accessibility** — VoiceOver on the pinned deck card: the like/pass custom actions must
    be present (they ride inside the restored wrapper). And on the calculator: the new
    unavailable row must read as **one** sentence, not two nodes.
@@ -535,7 +539,7 @@ Real work, deliberately not built here.
    line this is not a quick fix and cannot go express without an explicit confirming yes.**
    #169's approved lab also argues for a one-line tier framing ("TE: 4th → 1 1st") on card
    real estate rather than the full table.
-3. **`TradeBuildCanvas` in single-pin deck mode.** `:4354` still excludes the canvas
+3. **`TradeBuildCanvas` in single-pin deck mode.** `:4477` still excludes the canvas
    variant when `singlePin` is set, on the reasoning that the pinned surface "already IS a
    build-canvas-like surface". With V1 that is no longer strictly true once a deck card
    leads. Not touched: it is a different experiment arm and changing it needs its own
@@ -570,7 +574,7 @@ Recorded because the orchestrator asked, and because two of these changed what I
    is a deliberate deviation from the mock's literal words, not an oversight.
 3. **The "one-line fix" estimate for #298b was low.** Widening the condition alone leaves
    the #257 "Preferences changed" nudge armed against the sweep its own trigger started —
-   `handleFindTrades` clears that state (`:736-737` in `handleFindTrades`) and the auto-regenerate path bypasses
+   `handleFindTrades` clears that state (`:773-774` in `handleFindTrades`) and the auto-regenerate path bypasses
    it. Two lines, not one.
 4. **The mock's V1 frame keeps the utility row (Draft / Free agents / Calculator) "below
    the fold" and shows the strip above the pin row.** I did not move either: reordering
