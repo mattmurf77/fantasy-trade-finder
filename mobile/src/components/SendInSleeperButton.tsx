@@ -63,13 +63,10 @@ interface Props {
   // Matches only — TradeMatch/AwaitingTrade carry league_name; the deck and
   // the calculator do not, and the copy text drops the line when absent.
   leagueName?: string;
-  // P0-7 (analytics): which mount this is. Declared HERE, in wave 1, so
-  // wave 2's instrumentation is a pure insertion into onPress/catch with no
-  // signature change. OPTIONAL in this commit because TradesScreen's mount is
-  // plumbed in a later commit; the close-out makes it required, at which point
-  // a missed mount is a compile error. P0-6 itself reads it nowhere and fires
-  // no events.
-  surface?: SendSurface;
+  // P0-7 (analytics): which mount this is. REQUIRED so a missed mount is a
+  // compile error, not a null dimension in the send funnel. Read by the
+  // track() calls in onPress/catch.
+  surface: SendSurface;
 }
 
 type State = 'idle' | 'checking' | 'sending' | 'sent';
@@ -90,9 +87,6 @@ export default function SendInSleeperButton({
   receivePlayerNames,
   opponentUsername,
   leagueName,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read by P0-7's
-  // track() insertions in onPress/catch; destructured here so that commit is a
-  // pure insertion with no signature or scope change.
   surface,
 }: Props) {
   const enabled = useFlag('trade.send_in_sleeper');
