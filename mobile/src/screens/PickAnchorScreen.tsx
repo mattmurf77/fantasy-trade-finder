@@ -17,6 +17,7 @@ import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeC
 import { useRookieScope } from '../state/rookieScope';
 import {
   getAnchorPool,
+  getProgress,
   saveAnchor,
   splitRankings,
   type AnchorKey,
@@ -24,7 +25,7 @@ import {
 } from '../api/rankings';
 import { useSession } from '../state/useSession';
 import { useRecoverOnResume } from '../hooks/useRecoverOnResume';
-import { ANCHOR_ROWS } from '../utils/anchorRows';
+import { ANCHOR_ROWS, BELOW_LADDER_LABEL } from '../utils/anchorRows';
 import { tierForElo, TIER_LABEL } from '../utils/tierBands';
 import { chalk, ice, ink, position, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
@@ -78,6 +79,7 @@ export default function PickAnchorScreen() {
   // Session format may be unset pre-init — the backend treats 1qb_ppr as
   // the default, so mirror that here for storage keys + band walks.
   const activeFormat = useSession((s) => s.activeFormat) ?? '1qb_ppr';
+  const leagueId = useSession((s) => s.league?.league_id ?? null);
 
   // rookie-draft M2 — the first surface in the scope rollout. The wizard's
   // ANSWERS are unchanged under scope: /api/anchor/save pins one pid at a
@@ -96,6 +98,25 @@ export default function PickAnchorScreen() {
     queryFn: () => getAnchorPool({ scope: rookieScope.param }),
     staleTime: Infinity,
   });
+
+  // P1-7 / RL-8 — the unlock hint. Until this shipped, the wizard showed
+  // progress through the QUEUE ("12 / 300 anchored") and said nothing about
+  // the thing the user is actually working toward. That silence is part of
+  // why an UNREACHABLE unlock bar (audit A-16) survived to an audit: with no
+  // counter on screen, "still locked" looked like "not done yet".
+  //
+  // Same cache key as RankScreen/LeagueScreen so this shares their entry
+  // rather than opening a second one — the ['progress'] invalidations
+  // scattered across the ranking screens all hit it.
+  const progressQuery = useQuery({
+    queryKey: ['progress', leagueId, activeFormat],
+    queryFn: getProgress,
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+  const anchorRequired = progressQuery.data?.anchor_required ?? null;
+  const anchorCount = progressQuery.data?.anchor_count ?? 0;
+  const anchorUnlocked = progressQuery.data?.unlocked === true;
 
   // #121/#125 — the pool fetch can race app-resume session revalidation:
   // it fires with the orphaned pre-deploy token, 401s, and (staleTime:
@@ -199,6 +220,16 @@ export default function PickAnchorScreen() {
       }
       if (done) persistDone(new Set(done).add(vars.playerId));
       haptics.selection();
+      // RL-8: keep the unlock hint honest as the user works. Bounded on
+      // purpose — once unlocked the counter stops mattering, so this costs
+      // at most one extra GET per anchor during the pre-unlock stretch and
+      // nothing afterwards. (The unmount effect below still invalidates the
+      // whole family for every OTHER screen.)
+      if (!anchorUnlocked) {
+        queryClient.invalidateQueries({
+          queryKey: ['progress', leagueId, activeFormat],
+        });
+      }
     },
   });
 
@@ -318,6 +349,17 @@ export default function PickAnchorScreen() {
         {' · '}{activeFormat === 'sf_tep' ? 'SF TEP' : '1QB PPR'}
       </Text>
 
+      {/* P1-7 / RL-8 — what the anchoring is FOR. Renders only when the
+          server sent a bar for this user's method, so a pre-P1-7 cached
+          response (or any other ranking method) degrades to nothing. */}
+      {anchorRequired != null ? (
+        <Text testID="anchors.unlock-hint" style={styles.unlockHint}>
+          {anchorUnlocked
+            ? 'Trade Finder unlocked'
+            : `${Math.min(anchorCount, anchorRequired)} / ${anchorRequired} toward unlocking Trade Finder`}
+        </Text>
+      ) : null}
+
       {current ? (
         <>
           <Card>
@@ -344,6 +386,7 @@ export default function PickAnchorScreen() {
               {row.map(({ key, label }) => (
                 <Button
                   key={key}
+                  testID={`anchors.rung.${key}`}
                   label={label}
                   compact
                   disabled={mutation.isPending}
@@ -392,7 +435,7 @@ export default function PickAnchorScreen() {
           {lastPlaced.name} →{' '}
           {lastPlaced.res.tier
             ? TIER_LABEL[lastPlaced.res.tier as Tier] ?? lastPlaced.res.tier
-            : 'No value'}
+            : BELOW_LADDER_LABEL}
         </Text>
       ) : (
         <Text style={styles.hint}>
@@ -448,6 +491,12 @@ const styles = StyleSheet.create({
   scopeText: { ...type.label },
   scopeTextActive: { color: chalk.base },
   progress: { ...type.label, textAlign: 'center', color: chalk.dim },
+  unlockHint: {
+    ...type.label,
+    textAlign: 'center',
+    color: ice.base,
+    marginTop: space.xs,
+  },
   tile: { gap: space.sm },
   name: { textAlign: 'center' },
   metaRow: {

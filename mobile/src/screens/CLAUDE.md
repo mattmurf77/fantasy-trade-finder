@@ -12,7 +12,7 @@ One file per top-level route. MAP, not a changelog — present behavior only, no
 | `TiersScreen` | Tiered roster view |
 | `QuickSetTiersScreen` | Guided per-position tier walk (top→FA); default Rank-tab launch route for no-pref users, resuming at the next unset position |
 | `QuickRankScreen` | Within-tier click-order ranking pass offered after Quick Set finishes |
-| `PickAnchorScreen` | Pick Anchor wizard: value one player at a time in draft-pick terms, position scope pills; shares its rung grid with `AnchorSheet` |
+| `PickAnchorScreen` | Pick Anchor wizard: value one player at a time in draft-pick terms, position scope pills; shares its rung grid with `AnchorSheet`. Rung buttons carry `anchors.rung.<key>`; their LABELS are derived from `TIER_LABEL` via `anchorRows.ts` and must never be authored locally (`npm run test:anchor-labels` enforces it) |
 | `ManualRanksScreen` | Editable drag/tap rank board, labeled "Overall Ranks" in the UI |
 | `RookieRanksScreen` | Consolidated cross-position rookie board (flag `ranks.rookie_subset`), filterable by position; drag-reorder only — must never reach the tiers-save path; two-way bridge to/from Draft Room |
 | `TradeFinderHubScreen` | UNROUTED since the guided-first landing shipped — kept in the tree, no navigator registers it. DNA editor moved to `TradeDnaSheet`; FA link superseded by the mode-bar chip |

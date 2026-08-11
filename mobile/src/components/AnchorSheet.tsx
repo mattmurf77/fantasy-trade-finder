@@ -8,7 +8,7 @@ import PositionChip from './PositionChip';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import { saveAnchor, type AnchorKey, type AnchorSaveResponse, type AnchorVia }
   from '../api/rankings';
-import { ANCHOR_ROWS } from '../utils/anchorRows';
+import { ANCHOR_ROWS, BELOW_LADDER_LABEL } from '../utils/anchorRows';
 import { TIER_LABEL } from '../utils/tierBands';
 import { chalk, ice, ink, radii, scrim, semantic, shadowSheet, space, type }
   from '../theme/chalkline';
@@ -152,7 +152,7 @@ export default function AnchorSheet({
               Set to{' '}
               {placed.tier
                 ? (TIER_LABEL[placed.tier as Tier] ?? placed.tier)
-                : 'No value'}
+                : BELOW_LADDER_LABEL}
               {'\n'}
               <Text style={styles.resultHint}>
                 Tap another rung to change it.

@@ -43,6 +43,8 @@ mock-entry.recap
 # --- 2026-08-09 sweep (screen-library build). Each verified in mobile/src ---
 # PickAnchorScreen.tsx:293      testID={`anchors.scope-${s.toLowerCase()}`}
 anchors.scope*
+# PickAnchorScreen.tsx:389      testID={`anchors.rung.${key}`}   (P1-7)
+anchors.rung.*
 # AnalystGuide.tsx:142          testID={`guide.avatar.${active.pose}`}
 guide.avatar.*
 # AnalystGuide.tsx:164          testID={`guide.cta.${c.action}`}
