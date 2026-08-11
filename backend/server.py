@@ -6180,8 +6180,16 @@ def get_rankings_progress():
             "threshold": 10,
             "unlocked": false,
             "total_required": 40,
-            "total_completed": 32
+            "total_completed": 32,
+            "anchor_count": 12,
+            "anchor_required": 40
         }
+
+    `unlocked` is per-method (see the ladder below). `anchor_count` /
+    `anchor_required` (P1-7, 2026-08-11) expose the BOARD-EVIDENCE bar used by
+    the 'anchor' and 'manual' methods, so those lanes can render a visible
+    progress hint the way the trio lane renders total_completed /
+    total_required. `anchor_required` is null for every other method.
     """
     sess = _require_session()
     sess["last_active"] = time.time()
@@ -6202,8 +6210,17 @@ def get_rankings_progress():
     # audit): `ranking_method` is now written at the POINT OF USE by the four
     # save handlers as well as by the chooser, so NULL here means "no ranking
     # action taken since the P0-1 fix", not "never visited the chooser".
-    # The ladder itself is UNCHANGED — 'anchor' still falls to the trio
-    # branch (audit A-16) and 'manual' still unlocks unconditionally (A-17).
+    #
+    # P1-7 (2026-08-11, audit A-16 + operator decision D-P1-10) —
+    # GOVERNING PRINCIPLE: *every ranking method must be able to unlock, and
+    # none may unlock without evidence of ranking work.* Two arms changed:
+    #   * 'anchor' had NO arm at all and fell to the trio rule below, which
+    #     the anchor lane can never satisfy — a structural dead end (A-16).
+    #   * 'manual' unlocked UNCONDITIONALLY, which post-P0-1 means one drag on
+    #     Manual Ranks (or one Quick Rank step — `via:'quickrank'` routes
+    #     through the same reorder handler) pins the method AND grants a
+    #     permanent unlock (A-17).
+    # Both now read the same durable evidence: the persisted board.
     g_user_id = sess["user_id"]
     ranking_method = None
     try:
@@ -6211,19 +6228,92 @@ def get_rankings_progress():
     except Exception:
         pass
 
+    def _tiers_rule() -> bool:
+        """Board-completeness unlock: all four positions committed through
+        /api/tiers/save for the ACTIVE format. Extracted so the tiers/quickset
+        branch and the two board-evidence branches' fallback clauses cannot
+        drift apart."""
+        try:
+            saved = get_tiers_saved(g_user_id, scoring_format=fmt)
+            return all(p in saved for p in POSITIONS)
+        except Exception:
+            return False
+
+    # Hoisted so the branches and the response payload read ONE value.
+    # Cheap: `service` is already in memory and this is a dict scan.
+    try:
+        _board_overrides = service.board_override_count()
+    except Exception:
+        _board_overrides = 0
+
     if ranking_method == "manual":
-        unlocked = True
+        # A-17 / P1-7. Was `unlocked = True`, unconditionally. A manual
+        # reorder writes an Elo override per reordered player
+        # (ranking_service.apply_reorder) and persists them via
+        # save_tier_overrides, so the same board evidence the anchor arm uses
+        # is available here. Strictly a TIGHTENING; the monotonic floor below
+        # means it can never re-lock anyone who has already been computed
+        # unlocked, and `or _tiers_rule()` can only ever add.
+        #
+        # THE THRESHOLD IS AN ASSUMPTION, NOT A DECISION — see
+        # RankingService.MANUAL_UNLOCK_MIN.
+        unlocked = (
+            _board_overrides >= RankingService.MANUAL_UNLOCK_MIN
+            or _tiers_rule()
+        )
     elif ranking_method in ("tiers", "quickset"):
         # 'quickset' (#119) commits through the same /api/tiers/save
         # contract as the Tiers board, so it unlocks the same way.
-        try:
-            saved = get_tiers_saved(g_user_id, scoring_format=fmt)
-            unlocked = all(p in saved for p in POSITIONS)
-        except Exception:
-            unlocked = False
+        unlocked = _tiers_rule()
+    elif ranking_method == "anchor":
+        # A-16 / P1-7. Anchors write Elo overrides (apply_anchor) and NOTHING
+        # ELSE: never a trio interaction, never a tiers_saved row. Without
+        # this arm 'anchor' fell to the trio rule and could NEVER unlock.
+        #
+        # The two alternatives the audit offered were both rejected, with
+        # proof, and must not be re-opened:
+        #
+        #   Option 1, "add 'anchor' to the tiers/quickset arm", is INERT.
+        #   That arm tests `tiers_saved`, which the anchor lane never writes
+        #   and is FORBIDDEN from writing — `_ANCHOR_VIA`'s contract above
+        #   (":no W1 surface may reach save_tiers_position / the merged-band
+        #   path", server.py ~:1284) — and structurally does not:
+        #   save_tiers_position does not occur anywhere in save_anchor_route.
+        #   An anchor-only user's tiers_saved is empty, so Option 1 leaves
+        #   them locked forever.
+        #
+        #   Option 2, "bump the interaction counter in apply_anchor", is
+        #   NON-DURABLE and cross-contaminating. `_interactions` is
+        #   OVERWRITTEN at session build from persisted rank swipes only, so
+        #   an in-memory bump dies on the next cold start. It would also hand
+        #   unlock credit to `via:'draft_room'` saves, which P0-1
+        #   deliberately excludes from writing ranking_method at all, and to
+        #   NULL-method users — a Draft Room long-press would silently be
+        #   worth 1/40th of a Trade Finder unlock. It also mixes units: a
+        #   trio interaction ORDERS three players, an anchor PRICES one.
+        #
+        # A DRAFT-ROOM-ONLY ANCHORER STAYS LOCKED, AND THAT IS INTENDED.
+        # Their ranking_method stays NULL (P0-1 skips via:'draft_room'), so
+        # this arm is never entered and the trio rule still applies. Their
+        # overrides accumulate and count later IF they ever answer one wizard
+        # question — because the predicate reads the BOARD, not the event
+        # stream. Deliberate: the board is the board, and retroactively
+        # discounting work the user genuinely did is the unfriendly reading.
+        # It cannot leak credit to anyone P0-1 excluded, because ENTERING
+        # this arm still requires a wizard answer.
+        unlocked = (
+            _board_overrides >= RankingService.ANCHOR_UNLOCK_MIN
+            or _tiers_rule()
+        )
     else:
         # 'trio' or null — original threshold logic
         unlocked = all(counts[p] >= threshold for p in POSITIONS)
+
+    # RL-8's hint: which board-evidence bar (if any) applies to this user.
+    _board_evidence_required = {
+        "anchor": RankingService.ANCHOR_UNLOCK_MIN,
+        "manual": RankingService.MANUAL_UNLOCK_MIN,
+    }.get(ranking_method)
 
     # Pull the user's prior unlocked formats now so we can apply a
     # monotonic floor to the per-method decision above. Users who already
@@ -6331,6 +6421,14 @@ def get_rankings_progress():
         "total_required":   total_required,
         "total_completed":  total_completed,
         "unlocked_formats": unlocked_formats_list,
+        # P1-7 / RL-8 — the visible progress hint for the board-evidence
+        # lanes. ADDITIVE and computed unconditionally so no client needs a
+        # branch; `anchor_required` is the bar that applies to THIS user's
+        # method (the anchor bar for anchorers, the manual bar for manual
+        # users), and is null for methods that do not use a board-evidence
+        # rule, so a client can render the hint iff it is non-null.
+        "anchor_count":     _board_overrides,
+        "anchor_required":  _board_evidence_required,
     })
 
 
@@ -6346,6 +6444,13 @@ def set_ranking_method_route():
     'quickset' (2026-07-12, #119) = the guided tier quick-set walk
     (QuickSetTiersScreen) promoted to a first-class method. Saves flow
     through /api/tiers/save, so unlock treats it like 'tiers'.
+
+    NOT THE ONLY WRITER since P0-1 (2026-08-11): the four board-save handlers
+    write the method at the point of use too, so most users never reach this
+    route. And since P1-7, every method has its OWN unlock rule in
+    get_rankings_progress — 'anchor' and 'manual' both unlock on
+    >= RankingService.{ANCHOR,MANUAL}_UNLOCK_MIN pool-resident board
+    overrides in the ACTIVE format, or on the tiers rule.
     """
     sess = _require_session()
     g_user_id = sess["user_id"]

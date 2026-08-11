@@ -199,6 +199,35 @@ class RankingService:
         None: 16,   # all positions combined
     }
 
+    # ── Board-evidence unlock bars (A-16 / A-17, P1-7, 2026-08-11) ──────────
+    # The trio bar above is counted in SWIPES. The two bars below are counted
+    # in BOARD OVERRIDES (users.tier_overrides), because the anchor and manual
+    # lanes produce no swipes at all — see board_override_count().
+    #
+    # ANCHOR_UNLOCK_MIN — the anchor method's bar. Equal to the trio bar
+    # (10 × 4 positions) so the product has ONE number to explain.
+    # Deliberately NOT per-position: the Pick Anchor wizard's default scope is
+    # a single cross-position, value-descending queue (#133,
+    # PickAnchorScreen.tsx), so a 4-position completeness rule would import a
+    # shape that surface does not have.
+    ANCHOR_UNLOCK_MIN = 40
+
+    # MANUAL_UNLOCK_MIN — the manual method's bar. Set equal to the other two
+    # for the same one-number-to-explain reason.
+    #
+    # *** ASSUMPTION AWAITING OPERATOR CONFIRMATION (P1-7, 2026-08-11). ***
+    # The VALUE is a product judgement nobody has made yet; the SHAPE (a
+    # durable board-evidence count rather than the unconditional `True` this
+    # replaces) follows D-P1-10's governing principle that every ranking
+    # method unlocks on evidence of real ranking work. 40 is a placeholder
+    # chosen for consistency, not a decided number. Note that with today's
+    # client payload — ManualRanksScreen posts the WHOLE visible list on every
+    # drag, so one drag writes an override per row — this bar is a floor
+    # against "pinned to 'manual' with no board at all", not a strong gate.
+    # Making it a strong gate (audit A-17) needs a product decision AND a
+    # client payload change, and is P1-8's job, not this item's.
+    MANUAL_UNLOCK_MIN = 40
+
     # ELO_INITIAL is a structural constant (not a tunable multiplier) — kept here.
     ELO_INITIAL = 1500.0
 
@@ -1485,6 +1514,29 @@ class RankingService:
         self._elo_overrides[player_id] = float(target_elo)
         self._version += 1
         return player
+
+    def board_override_count(self) -> int:
+        """How many of this service's Elo overrides are for players still in
+        the pool. The durable evidence behind the 'anchor' and 'manual' unlock
+        rules (server.get_rankings_progress).
+
+        WHY THE BOARD AND NOT THE INTERACTION COUNTER. `_interactions` is
+        rebuilt from persisted rank swipes on every session build
+        (see the `{pos: rank_swipe_count // 3}` rehydration below), so a
+        counter bumped in apply_anchor/apply_reorder would be discarded on the
+        next cold start — unlock on Tuesday, re-locked on Wednesday. Overrides
+        are persisted (server.save_tier_overrides) and restored per format, so
+        they survive. They are also format-scoped for free: this service
+        instance IS the active format's instance.
+
+        POOL-RESTRICTED ON PURPOSE. `_elo_overrides` deliberately retains
+        stale pids — session_init keeps the full stored dict rather than
+        filtering it, precisely so a pid missing from one day's pool is not
+        destroyed. A raw len() would therefore over-count a long-lived board
+        and could unlock a user on players who are no longer rankable.
+        """
+        pool_ids = {p.id for p in self._pool(None)}
+        return sum(1 for pid in self._elo_overrides if pid in pool_ids)
 
     def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
         """
