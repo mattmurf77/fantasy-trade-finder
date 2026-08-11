@@ -3,7 +3,9 @@ appId: com.fantasytradefinder.app
 # profile: standard
 # flags: release
 # Deck order is server-chosen: structural asserts only. 60s budget covers the
-# trade-job poll backoff (800→4000ms). Like via the Check button (gestures NA).
+# trade-job poll backoff (800→4000ms). Like/pass via the Check/X buttons
+# (gestures NA), which live INSIDE the top card since #169 — the containment
+# asserts below are the positional proof of that move.
 # First Trades visit auto-opens the team-outlook sheet (first-run prompt) —
 # dismissed conditionally via outlook.save-btn (Contender pre-selected).
 tags: [smoke, trades]
@@ -55,12 +57,43 @@ tags: [smoke, trades]
     visible:
       id: "trades.card-top"
     timeout: 60000
-- scrollUntilVisible:
-    element:
-      id: "trades.like-btn"
-    direction: DOWN
+# #169 — POSITIONAL asserts, no scroll step: both disposition buttons must be
+# descendants of the top card (childOf), on-screen with the card top. The old
+# below-deck layout fails these (the row needed a scrollUntilVisible … DOWN to
+# reach — law 2: a plain `visible:` would pass identically before and after
+# the move). LLD §3.2 specced `visibilityPercentage: 100` on the asserts, but
+# Maestro 2.5.1 only supports that key on scrollUntilVisible — containment is
+# the positional assert this harness can express; the no-scroll taps below
+# are the on-screen proof.
+- assertVisible:
+    id: "trades.pass-btn"
+    childOf:
+      id: "trades.card-top"
+- assertVisible:
+    id: "trades.like-btn"
+    childOf:
+      id: "trades.card-top"
 - tapOn:
     id: "trades.like-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 10000
+# #169 (PRD A5) — pass-tap smoke evidence: the deck advanced, the next card
+# fronts under the same trades.card-top id, and its in-card X button takes a
+# tap with no scroll. waitForAnimationToEnd is safe here (static deck, no
+# spinner) and keeps the tap off the outgoing card's fly-off animation.
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 10000
+- assertVisible:
+    id: "trades.pass-btn"
+    childOf:
+      id: "trades.card-top"
+- tapOn:
+    id: "trades.pass-btn"
 - extendedWaitUntil:
     visible:
       id: "trades.find-btn"

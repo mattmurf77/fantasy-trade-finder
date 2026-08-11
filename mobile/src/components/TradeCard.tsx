@@ -74,6 +74,15 @@ interface Props {
   // long-press context menu, the a11y custom action and the UNTOUCHABLE
   // badge all still work, so the mechanism stays reachable on-screen.
   hideLockButton?: boolean;
+  // #169 (card frame C, operator-modified) — deck disposition actions.
+  // When present, Pass/Like render inside the card directly beneath the
+  // player tile section. Only the deck's TOP card passes this — match
+  // variant, peek card, and read-only mounts never do.
+  disposition?: {
+    onPass: () => void;
+    onLike: () => void;
+    disabled?: boolean;
+  };
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -99,8 +108,9 @@ export function partnerFitLine(
 
 // Shared rendering for generated trades (TradesScreen swipe deck) and
 // mutual matches (MatchesScreen list). The only difference between the
-// two variants is the action buttons at the bottom — swipe decks don't
-// show buttons (gestures drive the decision), match cards do.
+// two variants is the actions — match cards show Dismiss/Send buttons at
+// the bottom; on the deck, gestures drive the decision and the top card
+// (alone) mirrors them with the in-card Pass/Like row (#169).
 function TradeCardComp({
   data,
   variant = 'swipe',
@@ -118,6 +128,7 @@ function TradeCardComp({
   onRemoveAsset,
   hideMatchStrength = false,
   hideLockButton = false,
+  disposition,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -511,6 +522,51 @@ function TradeCardComp({
         </View>
       </View>
 
+      {/* #169 (card frame C) — check / x disposition row, moved inside the
+          card directly beneath the players being traded. Same outcome as
+          swiping right/left: the host wires both to advance(), so the deck
+          advance, haptics, and the API call are identical to the swipe
+          path. Disabled while a swipe mutation is in flight to prevent
+          double-firing. */}
+      {disposition ? (
+        <View style={styles.dispositionRow}>
+          <Pressable
+            testID="trades.pass-btn"
+            onPress={disposition.onPass}
+            disabled={disposition.disabled}
+            style={({ pressed }) => [
+              styles.dispositionBtn,
+              styles.dispositionBtnPass,
+              pressed && styles.dispositionBtnPassPressed,
+              disposition.disabled && styles.dispositionDisabled,
+            ]}
+            accessibilityLabel="Pass on this trade"
+            accessibilityRole="button"
+          >
+            {({ pressed }) => (
+              <Icon name="x" color={pressed ? ink.ink0 : semantic.neg} />
+            )}
+          </Pressable>
+          <Pressable
+            testID="trades.like-btn"
+            onPress={disposition.onLike}
+            disabled={disposition.disabled}
+            style={({ pressed }) => [
+              styles.dispositionBtn,
+              styles.dispositionBtnLike,
+              pressed && styles.dispositionBtnLikePressed,
+              disposition.disabled && styles.dispositionDisabled,
+            ]}
+            accessibilityLabel="Like this trade"
+            accessibilityRole="button"
+          >
+            {({ pressed }) => (
+              <Icon name="check" color={pressed ? ink.ink0 : semantic.pos} />
+            )}
+          </Pressable>
+        </View>
+      ) : null}
+
       {/* #190 — full-editor path: the manual calculator, prefilled with
           this exact package. Sits at hint-tier prominence below the sides;
           the in-place swap affordances above remain the quick edit. */}
@@ -788,6 +844,42 @@ const styles = StyleSheet.create({
   keepBtnText: {
     ...type.bodySm,
     color: chalk.dim,
+  },
+  // #169 (FB-05 construction) — check / x disposition button row, inside
+  // the card beneath the player tiles. Icon-button construction
+  // (components.md → Buttons): square radius, 1px semantic border;
+  // pressed = semantic fill + ink icon (color-only state change, no
+  // transforms). 56px keeps the touch floor. Row margin trimmed to the
+  // card's rhythm (marginTop sm, no bottom margin).
+  dispositionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: space.xl,
+    marginTop: space.sm,
+  },
+  dispositionBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  dispositionBtnPass: {
+    borderColor: semantic.neg,
+  },
+  dispositionBtnPassPressed: {
+    backgroundColor: semantic.neg,
+  },
+  dispositionBtnLike: {
+    borderColor: semantic.pos,
+  },
+  dispositionBtnLikePressed: {
+    backgroundColor: semantic.pos,
+  },
+  dispositionDisabled: {
+    opacity: 0.45,
   },
   // #190 — edit-in-calculator row: hint-tier inline action.
   editCalcBtn: {
