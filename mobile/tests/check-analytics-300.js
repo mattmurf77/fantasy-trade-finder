@@ -299,9 +299,12 @@ assert(
   '#300 leaving the candidate view RESETS the dedup ref',
   'a sticky ref makes a genuine re-entry invisible',
 );
+// The GUARD, not merely the identifier — `query.isFetched` also appears in
+// the dep array, so a presence check on the name alone survives deleting the
+// early return. (Sabotage S21 caught exactly that, before this line existed.)
 assert(
-  !!exposureEffect && /query\.isFetched/.test(exposureEffect),
-  '#300 the exposure waits for the first fetch to resolve',
+  !!exposureEffect && /if\s*\(\s*!query\.isFetched\s*\)\s*return/.test(exposureEffect),
+  '#300 the exposure early-returns until the first fetch resolves',
   'emitting mid-flight reports `no_median` for a request that has not answered yet',
 );
 assert(
