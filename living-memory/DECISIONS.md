@@ -355,6 +355,19 @@
 
 ---
 
+## D-039 — ESPN Trade-Write Is No Longer Categorically Prohibited; It Ships Through a Verification Gate
+**Date:** 2026-08-12
+**Context:** `docs/plans/espn-league-linking-plan-2026-07-11.md` §2/§7 recorded a hard "Send in ESPN (write) — ❌ never on this plan": server writes to a Disney property were judged a categorically worse legal/ban posture than reads, and "copy trade to clipboard is the ceiling." A 2026-08-11 spike found the ban-risk judgement still sound but the *infeasibility* assumption too strong — the write host and `TRADE_PROPOSAL` envelope were community-captured, and FTF already stored the exact cookies and owned the player crosswalk. The operator reviewed the spike and elected to proceed.
+**Decision:** The categorical NO-GO is **reversed to a conditional GO**, operator-explicit, and both gating probes have since **passed**, so `espn.send` is now **ON** in `config/features.json`. Probe 1: the DynastyProcess crosswalk's `espn_id` **is** the write-API `playerId` (live-verified 4/4 across two real `ffl` proposals). Probe 2: a POST carrying **only** `espn_s2`+`SWID` and the static `x-fantasy-*` headers — **no CSRF or per-session token** — returned **409 `TRAN_INVALID_TRADE_TEAM_COUNT`**, a trade-domain validation error only reachable *after* auth and authorization succeed; probed with `items: []` so nothing could be created. Evidence: [`../docs/plans/espn-send-live-capture-2026-08-11.md`](../docs/plans/espn-send-live-capture-2026-08-11.md).
+**Alternatives considered:** Keep the NO-GO and ship only deep-link + clipboard — rejected as the ceiling the operator chose to raise, though it remains the automatic fallback and the flag-OFF path. Ship on the community-captured *baseball* payload without football verification — rejected; the `playerId`-space assumption was load-bearing and the live capture corrected three scaffold errors (ISO vs **epoch-ms** `expirationDate`, four missing `items[]` fields, a hardcoded `scoringPeriodId`).
+**Consequences:** Supersedes the §2/§7 NO-GO in the ESPN plan. Inherits D-019's posture and mirrors Sleeper's: per-user own-credentials/own-trade framing, terms/privacy disclosure, default-OFF flag retained as the kill switch. Residual Disney ToS/ban risk is an accepted operator call. Draft picks stay **hard-blocked** — and 2026-08-12 research clarified *why*: ESPN models only current-draft slots (`DRAFT_TRADE` + `overallPickNumber`), which has no counterpart for FTF's multi-season future rungs, so the block is correct on modelling grounds, not merely "encoding unverified."
+**Status:** Active (`espn.send` ON; shipped `main` @ `2fa1ff2`, TestFlight 1.13.0 build 103+).
+**Related ADR:** — (spike: `docs/plans/espn-send-spike-verification-2026-08-11.md`; reversal draft: `docs/plans/espn-send-decision-reversal-draft-2026-08-11.md`)
+
+**Numbering note:** this entry was first drafted as *D-026* against a stale checkout. `origin/main` had meanwhile issued D-026 through D-038 from concurrent sessions, so it was renumbered to D-039 on write-back. Same lesson as D-038's meta-consequence: **claim an ID against `origin/main`, not your working tree.**
+
+---
+
 ## Decision index
 
 | ID | Title | Date |

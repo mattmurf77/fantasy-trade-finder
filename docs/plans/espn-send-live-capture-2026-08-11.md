@@ -1,0 +1,149 @@
+# ESPN Send — Live Capture Results (2026-08-11)
+
+> Probe #1 from [`espn-send-spike-verification-2026-08-11.md`](espn-send-spike-verification-2026-08-11.md), executed against a **real** ESPN dynasty league. Resolves the spike's load-bearing unknown. Companion: [`send-in-espn-research-2026-08-11.md`](send-in-espn-research-2026-08-11.md), decision [`D-026`](../../living-memory/DECISIONS.md).
+>
+> **Credential hygiene:** the proposer's `memberId` is the account **SWID**, which is one of the two ESPN auth cookies. It is redacted as `{SWID}` throughout and must never be committed in raw form.
+
+---
+
+## How this was captured
+
+The operator proposed a trade by hand in the ESPN web UI. The `POST` itself scrolled out of the browser's network buffer before it could be read (the post-send navigation flushes it), so the **stored proposal was read back** through the read API from the operator's authenticated session:
+
+```
+GET lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/{L}?view=mPendingTransactions
+```
+
+That yields ESPN's own canonical representation of the proposal — which is what we need to construct one.
+
+**Caveat on provenance:** this is the *stored* record, not the literal request body. Fields ESPN derives server-side (rather than accepting from the client) cannot be distinguished from client-supplied ones here. A true request capture is still worth taking opportunistically.
+
+## League context
+
+Real 14-team dynasty league (`previousSeasons` back to 2014), season 2026, offseason (`scoringPeriodId: 0`, `latestScoringPeriod: 0`, undrafted).
+
+## The captured proposal
+
+```json
+{
+  "type": "TRADE_PROPOSAL",
+  "status": "PENDING",
+  "isPending": true,
+  "executionType": "EXECUTE",
+  "id": "50241ec8-ae7e-49ce-a9b4-f7a2e6b5ddbc",
+  "memberId": "{SWID}",
+  "teamId": 5,
+  "teamActions": { "5": "ACCEPTED" },
+  "proposedDate": 1786476250306,
+  "expirationDate": 1786649050203,
+  "scoringPeriodId": 0,
+  "bidAmount": 0,
+  "rating": 0,
+  "isActingAsTeamOwner": false,
+  "isLeagueManager": false,
+  "items": [
+    { "type": "TRADE", "playerId": 4697815, "fromTeamId": 12, "toTeamId": 5,
+      "fromLineupSlotId": 20, "toLineupSlotId": -1, "isKeeper": false, "overallPickNumber": 0 },
+    { "type": "TRADE", "playerId": 4608810, "fromTeamId": 5,  "toTeamId": 12,
+      "fromLineupSlotId": 20, "toLineupSlotId": -1, "isKeeper": false, "overallPickNumber": 0 }
+  ]
+}
+```
+
+## Second capture — structure reproduced
+
+A second proposal (`c7bc15ef-a899-4376-a67b-f801a799a01e`, players `4431268` / `4431545`) was made in the same league and read back identically: same envelope fields, same `teamId`-is-proposer semantics, same `fromLineupSlotId: 20` / `toLineupSlotId: -1`, `scoringPeriodId: 0`, and an `expirationDate` again ≈ 48 h after `proposedDate`. Two independent proposals agreeing rules out a one-off.
+
+**Two attempts to capture the raw request both failed**, and the reason is worth recording: ESPN performs a **full page reload** on send, which wipes *both* an injected `fetch`/XHR interceptor *and* the browser's network buffer. A future attempt must either persist captures to `sessionStorage` synchronously at capture time, or use DevTools' "Preserve log". Consequence: everything below is derived from ESPN's **stored** record, never from an observed request.
+
+## Resolved
+
+### 1. `espn_id` in the DynastyProcess crosswalk IS the write-API `playerId` — the load-bearer, CONFIRMED
+
+All four live ids across both proposals resolved directly against `espn_id` in the DP crosswalk snapshot — 4/4, no misses:
+
+| write-API `playerId` | crosswalk `name` | `sleeper_id` | `mfl_id` |
+|---|---|---|---|
+| `4697815` | Rachaad White | 8136 | 15721 |
+| `4608810` | Tez Johnson | 12485 | 17079 |
+| `4431268` | Chimere Dike | 12540 | 17171 |
+| `4431545` | Will Shipley | 11577 | 16601 |
+
+**Consequence:** `invert_espn_crosswalk` in `backend/espn_write.py` rests on a valid assumption. This was the single unknown that could have invalidated the whole player-mapping approach. It did not.
+
+### 2. The football (`ffl`) envelope matches the baseball-derived scaffold
+
+`type: "TRADE_PROPOSAL"`, `executionType: "EXECUTE"`, and the `items[]` shape all hold for football. The scaffold's core structure needs no revision.
+
+### 3. Direction semantics — CONFIRMED, matches the scaffold
+
+Ownership was verified via `?view=mTeam`: the proposer's `memberId` owns **team 5**; team 12 is the counterparty.
+
+- **Give** (proposer parts with the player): `fromTeamId: <me>` → `toTeamId: <them>`
+- **Receive**: `fromTeamId: <them>` → `toTeamId: <me>`
+
+So the proposer here gives Tez Johnson and receives Rachaad White. The spike's assumption was correct.
+
+### 4. `teamId` on the transaction is the PROPOSING team
+
+`teamId: 5` with `teamActions: {"5": "ACCEPTED"}` — the proposer's own action is recorded as `ACCEPTED` at creation; the recipient's is absent until they act.
+
+> **CORRECTION (2026-08-12).** An earlier revision of this line advised *"Poll `teamActions` for accept/decline state."* **That is wrong and would never work.** Across 2,342 real pending proposals, `teamActions` is *always* exactly `{"<proposerTeamId>": "ACCEPTED"}` and the only value that ever appears is `ACCEPTED` — a team that has not acted is simply **absent**, and there is no `DECLINED` or `PENDING` value. (ESPN's own `transactionTeamActionTypes` enum is `INVOLVED / ACCEPTED / APPROVED / VETOED / PROTESTED`.)
+>
+> **Worse, the proposal record itself lies about its own state.** A *declined* proposal keeps `status: "PENDING"` and `isPending: true` — verified 5/5 against real `TRADE_DECLINE` rows. The decline exists only as a **separate** `TRADE_DECLINE` transaction linked by `relatedTransactionId`. An *accepted* proposal, conversely, disappears from the pending feed entirely.
+>
+> **Correct approach:** never trust a proposal row's own status. Read `?view=mTransactions2` and reconcile `TRADE_DECLINE` / `TRADE_ACCEPT` / `TRADE_VETO` rows back to the proposal by `relatedTransactionId`. Gate on `status === "PENDING"` *and* the absence of a linked terminal row. Note also that acceptance is **not** finality: `processDate = acceptedDate + revisionHours`, and the trade can still be vetoed inside that window — the offer clock (`expirationDate`) and the review clock (`processDate`) are two different countdowns.
+>
+> This advice never reached shipped code (`backend/espn_write.py` references only the proposer's entry), so nothing was built on it. Full evidence: the 2026-08-12 ESPN lifecycle-parity research.
+
+### 5. A proposal lands as a normal PENDING trade
+
+`status: "PENDING"`, visible in `mPendingTransactions`. No league-vote or commissioner-review interstitial appeared at proposal time in this league's settings.
+
+## New fields the scaffold does not yet emit
+
+Not present in the baseball-derived envelope; each `items[]` entry also carried:
+
+| Field | Observed | Note |
+|---|---|---|
+| `fromLineupSlotId` | `20` | 20 = bench. Both players were benched (offseason). **Unknown whether a starter's real slot id is required** — untested. |
+| `toLineupSlotId` | `-1` | Sentinel, consistent across both items. |
+| `isKeeper` | `false` | |
+| `overallPickNumber` | `0` | |
+| `bidAmount` / `rating` | `0` | Transaction-level. |
+| `isActingAsTeamOwner` | `false` | Distinct from `isLeagueManager`. |
+
+`scoringPeriodId: 0` in the offseason — do **not** hardcode a real week; read it from league status.
+
+`expirationDate − proposedDate` = 172,799,897 ms ≈ **48 hours**, corroborating the scaffold's ~2-day default. Epoch **milliseconds**, not the `"%Y-%m-%dT%H:%M:%S.000Z"` string the scaffold formats — reconcile before building.
+
+## RESOLVED — cookies alone DO authorize a server-side write
+
+The last blocking unknown, settled by a controlled negative probe rather than another live trade.
+
+A `POST` was issued to the write endpoint carrying **only** `espn_s2` + `SWID` (via `credentials: 'include'`) plus `content-type` and the two `x-fantasy-*` headers — **deliberately no CSRF or session token**, i.e. exactly the header set a server-side call can produce. The payload used `items: []` so that nothing could be created even if auth succeeded.
+
+**Response: HTTP 409**
+
+```json
+{"messages":["The proposed trade contains 0 involved teams.  Only 2 team trades are supported."],
+ "details":[{"type":"TRAN_INVALID_TRADE_TEAM_COUNT", ...}]}
+```
+
+**Why this is dispositive:** `TRAN_INVALID_TRADE_TEAM_COUNT` is a *trade-domain validation* error. Reaching it means the request passed authentication, passed authorization for this league and team, and was evaluated by ESPN's transaction validator. An unauthenticated or CSRF-rejected request cannot produce that error — it fails at the edge with 401/403 and never sees the payload semantics.
+
+**Consequence:** the server-side architecture is viable. `backend/espn_write.py`'s auth model — decrypt the two stored cookies, attach the `x-fantasy-*` headers — is correct and needs no CSRF acquisition step. The `TODO(live-verify)` on the auth assumption can be cleared, and per **D-026** the blocking probes are now complete.
+
+*(Note: 409 rather than the expected 400/422. Treat 409 as a validation-class response, not a conflict, when mapping status → structured error.)*
+
+## Still unresolved — all non-blocking, each with a safe fallback in code
+
+1. **Draft picks in `items[]`.** Untested; both captures were players-only. **Hard-blocked in code** (`espn_pick_unsupported`) rather than guessed — no silent wrong encoding.
+2. **`espn_s2` lifetime / refresh UX.** Degrades to a clean `espn_auth_expired` + credential drop + reconnect prompt.
+3. **Whether `fromLineupSlotId` must be a player's true slot** for a rostered starter. Real slots are threaded from the roster read; bench-20 is only a fallback.
+
+## Follow-ups
+
+- Update `backend/espn_write.py`: resolve `# UNVERIFIED` tags 1/3/5, add the new item fields, switch `expirationDate` to epoch ms, stop hardcoding `scoringPeriodId`.
+- The next opportunistic capture should read the **request** (DevTools → Network → the `transactions/` POST → Payload) before navigating, to close unknown #1.
+- `espn.send` stays OFF and absent from `config/features.json` until unknown #1 clears, per D-026.
