@@ -68,8 +68,8 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // the same end state absence gives, stated where a graduating operator
   // will look. Graduating either feature is a one-word edit on these lines
   // plus `config/features.json`, never a new entry.
-  'league.pos_candidates': false,
-  'league.player_trade_handoff': false,
+  'league.pos_candidates': true,
+  'league.player_trade_handoff': true,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({
