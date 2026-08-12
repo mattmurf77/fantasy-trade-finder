@@ -18863,10 +18863,17 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
-@app.route("/api/espn/link", methods=["GET", "POST"])
+@app.route("/api/espn/link", methods=["GET", "POST", "DELETE"])
 @_gate_unverified_write
 def espn_link():
     """Link (import) an ESPN league — and manage the ESPN account credential.
+
+    DELETE → drop the stored espn_s2/SWID pair (disconnect), mirroring
+    DELETE /api/sleeper/link. Idempotent: deleting with nothing stored is a
+    clean 200 {connected: false}. Scoped to the CALLER's row only. Added
+    after the 2026-08-12 incident: a user who signed in with someone else's
+    ESPN account had no way to remove the captured cookies short of a manual
+    production-DB delete.
 
     GET → link status, mirroring GET /api/sleeper/link (send-auth lazy flow,
     2026-08-11): {connected, expires_at, expired, verified_at}. Never returns
@@ -18903,12 +18910,22 @@ def espn_link():
         return jsonify({"error": "feature_disabled"}), 404
     from . import espn_service as _espn
     from .database import (get_espn_credential, upsert_espn_credential,
+                           delete_espn_credential,
                            upsert_espn_league, replace_espn_league_members)
 
     sess = _require_session()
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    if request.method == "DELETE":
+        # Write gate already applied by @_gate_unverified_write (DELETE is a
+        # mutating method) — mirroring the Sleeper DELETE's denial check.
+        # delete_espn_credential is user_id-scoped and a no-op when nothing
+        # is stored, so this is idempotent by construction.
+        delete_espn_credential(user_id)
+        log.info("espn_link: credential deleted (disconnect) user=%s", user_id)
+        return jsonify({"connected": False})
 
     if request.method == "GET":
         cred = get_espn_credential(user_id)
@@ -20940,7 +20957,7 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
     }
 
 
-@app.route("/api/mfl/auth-link", methods=["GET", "POST"])
+@app.route("/api/mfl/auth-link", methods=["GET", "POST", "DELETE"])
 @_gate_unverified_write
 def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
@@ -20951,6 +20968,13 @@ def mfl_auth_link():
     the (key-less-deployment) session-only cookie is present; MFL stamps no
     expiry on its cookie, so there is no expires_at/expired here — a dead
     cookie surfaces as 409 mfl_auth_expired at propose time.
+
+    DELETE → drop the stored MFL cookie (disconnect), mirroring
+    DELETE /api/sleeper/link. Removes BOTH storage locations — the encrypted
+    mfl_credentials row AND the key-less-deployment session-only copy — so
+    the GET above reports {connected: false} afterward whichever path stored
+    it. Idempotent; scoped to the caller's own row. Added after the
+    2026-08-12 ESPN incident (no user-facing credential removal).
     """
     if not is_enabled("mfl.auth_link"):
         return jsonify({"error": "feature_disabled"}), 404
@@ -20960,6 +20984,15 @@ def mfl_auth_link():
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    if request.method == "DELETE":
+        # Write gate already applied by @_gate_unverified_write.
+        from .database import delete_mfl_credential
+        delete_mfl_credential(user_id)
+        sess.pop("mfl_cookie", None)   # session-only fallback copy
+        log.info("mfl_auth_link: credential deleted (disconnect) user=%s",
+                 user_id)
+        return jsonify({"connected": False})
 
     if request.method == "GET":
         from .database import get_mfl_credential

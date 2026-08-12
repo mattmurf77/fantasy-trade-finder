@@ -40,11 +40,14 @@ const js = ts.transpileModule(source, {
 // extractor needs no native access.
 const cookieGetCalls = [];
 const cookieClearCalls = [];
+// Mutable per-URL store so the enumerate-and-clear scenario below can seed
+// cookies (e.g. a Disney SSO session) and watch them get cleared by name.
+const storeByUrl = {};
 const cookieManagerStub = {
   default: {
     get: (url) => {
       cookieGetCalls.push(url);
-      return Promise.resolve(null);
+      return Promise.resolve(storeByUrl[url] || null);
     },
     clearByName: (url, name, useWebKit) => {
       cookieClearCalls.push({ url, name, useWebKit: !!useWebKit });
@@ -71,6 +74,7 @@ const {
   readEspnCookies,
   clearEspnCookies,
   ESPN_COOKIE_DOMAINS,
+  DISNEY_SSO_DOMAINS,
 } = moduleShim.exports;
 
 let failures = 0;
@@ -147,12 +151,14 @@ check('all empty → null', pickEspnCookies([]), null);
   );
 
   // ── clearEspnCookies: fresh-login guarantee ────────────────────────────
-  // Clears BOTH cookie names on BOTH domains in BOTH native stores
+  // With an EMPTY store, only the named espn_s2/SWID floor fires: BOTH
+  // cookie names on BOTH ESPN domains in BOTH native stores
   // (WKHTTPCookieStore + NSHTTPCookieStorage) — a stale espn_s2 surviving
   // any of the 2×2×2 combinations is the insta-capture loop the screen's
   // mount-time clear exists to prevent.
   await clearEspnCookies();
-  check('clear call count (2 names × 2 domains × 2 stores)', cookieClearCalls.length, 8);
+  check('empty store: named-clear floor (2 names × 2 domains × 2 stores)',
+        cookieClearCalls.length, 8);
   const combos = new Set(
     cookieClearCalls.map((c) => `${c.url}|${c.name}|${c.useWebKit ? 'wk' : 'ns'}`),
   );
@@ -166,6 +172,42 @@ check('all empty → null', pickEspnCookies([]), null);
     'clears every domain × name × store combo',
     [...combos].sort(),
     expected.sort(),
+  );
+
+  // ── enumerate-and-clear (2026-08-12 incident): a surviving Disney SSO
+  // session (or any non-espn_s2 espn.com session cookie) silently
+  // re-authenticates the previous account — the clear must enumerate each
+  // ESPN/Disney domain and clear whatever it finds there, by name, on that
+  // domain only.
+  check(
+    'Disney SSO domains are part of the clear surface',
+    [...DISNEY_SSO_DOMAINS].sort(),
+    ['https://cdn.registerdisney.go.com', 'https://registerdisney.go.com'],
+  );
+  storeByUrl['https://registerdisney.go.com'] = { OneID: { value: 'sso-session' } };
+  storeByUrl['https://www.espn.com'] = { espn_auth: { value: 'legacy-session' } };
+  cookieClearCalls.length = 0;
+  await clearEspnCookies();
+  const cleared = new Set(
+    cookieClearCalls.map((c) => `${c.url}|${c.name}|${c.useWebKit ? 'wk' : 'ns'}`),
+  );
+  check(
+    'seeded Disney SSO cookie is cleared on its own domain (both stores)',
+    ['https://registerdisney.go.com|OneID|wk', 'https://registerdisney.go.com|OneID|ns']
+      .every((k) => cleared.has(k)),
+    true,
+  );
+  check(
+    'seeded non-captured espn.com session cookie is cleared too',
+    ['https://www.espn.com|espn_auth|wk', 'https://www.espn.com|espn_auth|ns']
+      .every((k) => cleared.has(k)),
+    true,
+  );
+  check(
+    'enumerated clears never leave the domain the cookie was found on',
+    cookieClearCalls.every((c) =>
+      [...ESPN_COOKIE_DOMAINS, ...DISNEY_SSO_DOMAINS].includes(c.url)),
+    true,
   );
 
   if (failures > 0) {

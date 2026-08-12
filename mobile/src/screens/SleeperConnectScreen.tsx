@@ -140,8 +140,20 @@ export default function SleeperConnectScreen() {
         injectedJavaScript={INJECTED_POLLER}
         onMessage={onMessage}
         domStorageEnabled
-        sharedCookiesEnabled
-        thirdPartyCookiesEnabled
+        // Fresh-login guarantee (same defect class as the 2026-08-12 ESPN
+        // incident): without this, the WebView's PERSISTENT store keeps the
+        // last Sleeper login (the 365-day JWT in localStorage + session
+        // cookies), Sleeper's SPA restores that session on load, and the
+        // poller captures WHOEVER was last signed in within ~800ms — so the
+        // user can never sign in as a different account. `incognito` gives
+        // this WebView a non-persistent data store: nothing from a prior
+        // session leaks in, nothing survives unmount. Perfectly scoped — no
+        // shared/native cookie is read, written, or cleared (which is also
+        // why sharedCookiesEnabled is gone: it would copy the shared store
+        // back into the fresh session). Capture is unaffected: the JWT is
+        // read from the page's own localStorage via the injected poller,
+        // and persistence lives server-side + in the Keychain (#126).
+        incognito
         originWhitelist={['https://*']}
         style={styles.web}
       />

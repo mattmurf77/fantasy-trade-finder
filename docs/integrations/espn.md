@@ -89,6 +89,7 @@ otherwise miss it, and because it fails-soft into ESPN-adjacent behavior (see
 | Route | Method | `file:line` | Flag |
 |---|---|---|---|
 | `/api/espn/link` | POST | `backend/server.py:18358` | `espn.link` |
+| `/api/espn/link` | GET / DELETE | `backend/server.py` (`espn_link` — status read 2026-08-11; disconnect 2026-08-12, no ESPN egress on either) | `espn.link` |
 | `/api/espn/leagues` | GET | `backend/server.py:18510-18511` | `espn.link` |
 | `/api/espn/import` | POST | `backend/server.py:18536-18538` | `espn.link` |
 | `/api/espn/my-leagues` | GET | `backend/server.py` (`espn_my_leagues`, added 2026-08-09) | `espn.league_picker` |
@@ -266,10 +267,29 @@ Related league-binding columns on the `leagues` table (`backend/database.py:254-
    stored credential is treated as "no credential" (falls through to a public
    fetch attempt, which then 401/403s normally) rather than raising — see
    `backend/server.py:18406-18412` and `10544-10548`.
-6. **Deletion:** `delete_espn_credential` (`backend/database.py:9454-9463`) —
-   no route currently calls it (no "disconnect ESPN" UI action exists yet;
-   the comment at `database.py:9455` flags it as disconnect/dead-cookie
-   cleanup, written ahead of a UI that would trigger it).
+6. **Deletion:** `delete_espn_credential` (`backend/database.py`) — called
+   two ways:
+   - **Automatic dead-cookie cleanup:** the propose route drops a credential
+     ESPN rejects at send time.
+   - **User-initiated disconnect (`DELETE /api/espn/link`, 2026-08-12):**
+     session-authed, user-scoped, idempotent — mirrors
+     `DELETE /api/sleeper/link`; the subsequent `GET` reports
+     `{connected: false}`. Surfaced as "Disconnect ESPN account" in mobile
+     Settings → Account (`settings.espn-disconnect`, destructive confirm).
+     Added after the 2026-08-12 incident: cookies captured from someone
+     else's ESPN sign-in had no user-facing removal path and had to be
+     deleted straight from the production DB.
+7. **Account switching (the other half of that incident):** deleting the
+   stored row is not enough on its own — the connect WebView's persistent
+   web session would silently re-authenticate the SAME account (Disney SSO
+   session survives). `EspnConnectScreen` therefore clears the ESPN/Disney
+   web session (`clearEspnCookies`, `mobile/src/utils/espnCookies.ts`)
+   BEFORE the WebView is allowed to mount: enumerate-and-clear every cookie
+   on `www.espn.com` / `fantasy.espn.com` / `registerdisney.go.com` /
+   `cdn.registerdisney.go.com` (both native stores), plus named
+   `espn_s2`/`SWID` clears as belt-and-braces. Scoped to those domains
+   only — never `clearAll` (the native store is app-wide). Pinned by
+   `mobile/tests/check-espn-connect-clear.js`.
 
 ---
 

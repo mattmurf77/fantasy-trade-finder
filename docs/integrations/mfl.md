@@ -115,6 +115,20 @@ serializes named identity fields only), and never falls back to plaintext DB
 storage. `mfl_username` is stored alongside as a display-only identifier
 (never a secret).
 
+**Disconnect (`DELETE /api/mfl/auth-link`, 2026-08-12):** the user-facing
+removal path for the stored sign-in, added in the same pass as
+`DELETE /api/espn/link` (the ESPN incident — a captured credential with no
+removal path short of a production-DB delete). Session-authed, user-scoped,
+idempotent; clears BOTH storage locations — the encrypted `mfl_credentials`
+row (`delete_mfl_credential`) and the key-less-deployment session-only copy
+(`sess["mfl_cookie"]`) — so `GET /api/mfl/auth-link` reports
+`{connected: false}` afterward whichever path stored it. No MFL egress.
+Surfaced as "Disconnect MFL sign-in" in mobile Settings → Account
+(`settings.mfl-disconnect`, destructive confirm). Before this route, the
+only deletions were internal dead-cookie cleanup (auth-import/propose paths
+on `MflAuthError`). `POST /api/mfl/link` stores no credential and needs no
+DELETE.
+
 **Franchise identification:** MFL leagues are organized around numeric
 franchise ids (`f0001`, etc. — normalized to bare strings like `"1"` in
 parsed output). FTF maps:

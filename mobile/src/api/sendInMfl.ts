@@ -12,7 +12,7 @@
 // POST /api/trades/validate branches to a fresh MFL rosters export
 // server-side for MFL-linked leagues.
 
-import { api } from './client';
+import { api, apiRequest } from './client';
 
 export interface MflLinkStatus {
   connected: boolean;
@@ -28,6 +28,14 @@ export interface MflLinkStatus {
 // mfl_auth_expired at propose time.
 export async function getMflLinkStatus(): Promise<MflLinkStatus> {
   return api.get<MflLinkStatus>('/api/mfl/auth-link');
+}
+
+// DELETE — disconnect: remove the stored MFL session cookie server-side
+// (both the encrypted row and the key-less-deployment session-only copy).
+// Mirrors unlinkSleeper. Idempotent; scoped server-side to the caller's own
+// row. No device-side copy exists — the cookie only ever lives server-side.
+export async function unlinkMfl(): Promise<{ connected: boolean }> {
+  return apiRequest<{ connected: boolean }>('/api/mfl/auth-link', { method: 'DELETE' });
 }
 
 export interface ProposeMflTradePayload {
