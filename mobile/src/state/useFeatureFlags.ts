@@ -54,6 +54,22 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // must be visible from first paint; the flag stays a kill switch, and a
   // server `false` still turns it off on the next successful revalidate.
   'league.picks_always_counted': true,
+  // ── #300, DARK (both false) ────────────────────────────────────────────
+  // `league.pos_candidates` = the median divider + Buyer/Seller band labels
+  // on the ranked list; `league.player_trade_handoff` = the drill-in's
+  // direction swap and its Offer/Target row actions.
+  //
+  // These are listed here as `false` on purpose, and that is NOT a
+  // contradiction of the "dark features stay absent" rule above — the rule
+  // exists so a dark key cannot read TRUE at first paint. `revalidateFlags`
+  // does a whole-map `set({ flags })`, so a key that exists in only one of
+  // the two places disagrees with itself across the first two paints; an
+  // explicit `false` here agrees with the server default in both, which is
+  // the same end state absence gives, stated where a graduating operator
+  // will look. Graduating either feature is a one-word edit on these lines
+  // plus `config/features.json`, never a new entry.
+  'league.pos_candidates': false,
+  'league.player_trade_handoff': false,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

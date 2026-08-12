@@ -1,0 +1,209 @@
+appId: com.fantasytradefinder.app
+# tc: feedback #300 — median divider → drill-in direction → Offer/Target handoff
+# profile: standard
+# flags: release-300
+#
+# ══ NOT YET RUNNABLE, AND DELIBERATELY COMMITTED ANYWAY ═════════════════
+# The divider needs `medians` on GET /api/league/power-rankings, which a
+# PARALLEL backend change adds. Until that field is live in the hermetic
+# world this flow fails at the first `league-summary.median-divider`
+# assertion — correctly, because with no median on the wire the client draws
+# no line rather than one placed off a number it cannot name. Nothing here is
+# a workaround for the gap; run it once the field lands. It has NEVER been
+# executed on a simulator (parallel build agents were barred from holding
+# the sim), so treat every step below as authored-not-proven and eyeball the
+# screenshots on the first green run (law 23).
+#
+# ══ WHAT THIS PROVES ════════════════════════════════════════════════════
+# #300's complaint is that the League rankings stop one inch short: filtering
+# to WR already ranks the whole league by WR value and then offers no route
+# to a trade. The chain here is that missing inch, end to end:
+#
+#   no filter          → NO divider          (a median of "everything" is not
+#                                             a trade thesis)
+#   filter to WR       → the divider appears (the list is now a pure WR rank)
+#   tap rank 1         → the drill-in opens showing THEIR WRs, because rank 1
+#                        is above the line — the direction is the line, not a
+#                        Buyer/Seller label
+#   tap a player       → the pin is set and the finder is on screen
+#
+# ══ WHY EACH SELECTOR IS UNAMBIGUOUS ════════════════════════════════════
+#   league-summary.median-divider        renders only when `cutAfter` is set,
+#                                        i.e. one core position, no PICKS in
+#                                        the filter, All subset, medians on
+#                                        the wire. ABSENT on origin/main.
+#   league-summary.roster-section-caption  renders only in candidate mode —
+#                                        it is the "Tap a player to target
+#                                        them from …" line. ABSENT today.
+#   league-summary.roster-mirror-toggle  the stacked mirror roster's
+#                                        disclosure. ABSENT today.
+#   trades.asset-ideas                   AssetIdeasPanel mounts iff EXACTLY
+#                                        ONE finder pin exists and it is not
+#                                        first run (TradesScreen `singlePin`
+#                                        / `singlePinFeatured`). It renders
+#                                        its outer View in the loading, empty
+#                                        AND populated states, so it proves
+#                                        the pin without depending on the
+#                                        idea sweep returning anything. That
+#                                        is the "with the pin set" half of the
+#                                        gate, asserted structurally.
+#
+# ══ RANK 1 IS THE ONLY DETERMINISTIC ROW ════════════════════════════════
+# Team ids are seeded, not known here, and text selectors are banned (law 1 /
+# lld §4.4). `league-summary.team..*` is a REGEX and Maestro takes the first
+# match — rank 1, which is ALWAYS above the line (`cutAfter` is never 0). So
+# this flow exercises the TARGET direction end to end and asserts the OFFER
+# direction only structurally, via the mirror disclosure. Tapping an
+# addressable below-the-line team needs a fixed seeded user_id; filed in the
+# QA checklist rather than faked with a coordinate tap.
+#
+# ══ TWO SEEDING FACTS THIS FLOW DEPENDS ON ══════════════════════════════
+#  1. The hermetic world writes ZERO draft_picks (see 01-picks-in-subsets.yaml
+#     § Tier B), so `hasPicks` is false here. That NO LONGER MATTERS for this
+#     flow's premise: #294's rule A (first position tap auto-adds PICKS) was
+#     removed by operator decision on 2026-08-12, so one tap on the WR pill
+#     lands on exactly {WR} in a pick-carrying league too, and the divider
+#     appears on the natural path. The discoverability cost flagged here
+#     before — "in a real league that tap lands on {WR, PICKS} and the divider
+#     stays hidden until the user deselects the lit Picks pill" — is closed.
+#     The `candidatePos` PICKS gate is unchanged and still correct: a user who
+#     deliberately taps Picks on top of WR is asking for a WR+capital ranking,
+#     which the WR median does not describe, so the line hides until they tap
+#     it back off. That path is now opt-in rather than the default.
+#  2. `aggregate_tier_labels` is an operator-only experiment, so the divider's
+#     caption is very likely the bare "League median" here rather than
+#     "League median · ≈2 firsts". Assertions are on the testID, never the
+#     text — the label is allowed to be absent and the line is still true.
+#
+# `league-summary.roster-player..*` is spelled with a hyphen precisely so the
+# regex cannot also match roster-close / roster-subset / roster-posfilter /
+# roster-mirror-toggle / roster-picks. Tapping "a player" must never tap the
+# drill-in's exit.
+tags: [league, trades]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Law 10 — a raced inputText submits a partial name and books a real VCR miss;
+# eraseText first makes the retry idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+# Law 8 — the tab bar paints before #244 launch routing settles; settle on a
+# surface control before touching a tab.
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.subset.all"
+    timeout: 20000
+
+# ── 1. Unfiltered: there is no median to draw ────────────────────────────
+# The list here is ranked by whole-roster value. "The median of everything"
+# is not a position anyone trades for, so the line must be absent — and this
+# is the assertion that fails if the gate is ever loosened to "any filter".
+- assertNotVisible:
+    id: "league-summary.median-divider"
+- takeScreenshot: league-06-no-divider-unfiltered
+
+# ── 2. Filter to WR: the list becomes a pure WR ranking, and gains a line ──
+- tapOn:
+    id: "league-summary.posfilter.wr"
+# Law 2 — `visible:` counts off-screen ScrollView children, so an
+# assertVisible here would pass on a build that never drew the line. Scroll it
+# genuinely into view first.
+- scrollUntilVisible:
+    element:
+      id: "league-summary.median-divider"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible:
+    id: "league-summary.median-divider"
+- takeScreenshot: league-06-median-divider
+
+# ── 3. Tap rank 1 — above the line, so the drill-in shows THEIR roster ────
+- scrollUntilVisible:
+    element:
+      id: "league-summary.team..*"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "league-summary.team..*"
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.focus-caption"
+    timeout: 20000
+# Candidate mode is live: the verb is stated once for the section, and the
+# mirror roster is stacked below it rather than beside it (operator decision
+# 4 — side-by-side columns truncate at this width).
+- assertVisible:
+    id: "league-summary.roster-section-caption"
+- assertVisible:
+    id: "league-summary.roster-mirror-toggle"
+- takeScreenshot: league-06-drill-in-target
+
+# ── 4. The row action pins the player and lands in the finder ────────────
+- scrollUntilVisible:
+    element:
+      id: "league-summary.roster-player..*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "league-summary.roster-player..*"
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 30000
+# First Trades visit can auto-open the team-outlook sheet; dismiss it so the
+# pin proof below is not covered. Guarded, so it is a no-op when absent.
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+# THE ASSERTION #300 IS ABOUT. This panel mounts only when EXACTLY ONE finder
+# pin exists, so its presence is the handoff working: the player was pinned in
+# the `useFinderTargets` store — not passed as a route param, which
+# `trades.sheet_targeting` (ON in this fixture, as shipped) ignores.
+- scrollUntilVisible:
+    element:
+      id: "trades.asset-ideas"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible:
+    id: "trades.asset-ideas"
+- takeScreenshot: league-06-pinned-in-finder

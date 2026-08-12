@@ -7,6 +7,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -37,6 +38,8 @@ import {
   type OutlookMeta,
 } from '../api/league';
 import { useSession } from '../state/useSession';
+import { useFinderTargets } from '../state/useFinderTargets';
+import type { Player } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useOutlookStripExpanded } from '../state/outlookStrip';
 import { track } from '../api/events';
@@ -56,13 +59,15 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //   - Position filter (single OR multi, "All" default): on change the bars
 //     RE-VALUE to the selected keys and RE-SORT teams — a pure client-side
 //     transform over per-position values (no refetch). Restyled to colored
-//     outline pills, selected = solid fill. Under
-//     `league.picks_always_counted` (#293/#294, shipped ON v1.12.0; the flag is a kill switch) the selected
-//     keys ALWAYS include draft capital unless the user explicitly
-//     deselects the Picks pill: tapping the first position pill auto-adds
-//     PICKS, so a filter never silently drops a team's pick value. With the
-//     flag OFF the bars re-value to the selected position(s) ONLY, which is
-//     the shipped pre-#293 behavior.
+//     outline pills, selected = solid fill. A PLAIN toggle — the pill row
+//     adds and removes exactly the key tapped, and "All" clears. Draft
+//     capital is in the bars only when the user has tapped the Picks pill
+//     (operator, 2026-08-12: "All leagues have picks. They should not be
+//     selected along with a position filter. Only by explicit user action" —
+//     see `togglePos` for what that reversed and why). Under
+//     `league.picks_always_counted` (#293/#294, shipped ON v1.12.0; the flag
+//     is a kill switch) a selected Picks pill counts in EVERY subset; with
+//     the flag OFF it counts in All only, which is the pre-#293 behavior.
 //   - All · Starters · Bench segmented control (2026-07-26): "Starters" is
 //     the DERIVED value-optimal lineup the server computes per team
 //     (payload `teams[].starters` — the league's slot template filled with
@@ -220,6 +225,14 @@ const SUBSETS: ReadonlyArray<{ key: Subset; label: string }> = [
 ];
 const CHART_HEIGHT = 160;
 
+// #300 — 6pt of outward slop on each vertical edge of the 32pt roster tile.
+// 32 visual + 6 + 6 = 44pt of touch, exactly the iOS minimum, and
+// `styles.rosterRowActionable` sets the row margin to 12 so consecutive
+// tiles' slop regions tile (32 + 12 = 44 pitch) instead of overlapping by
+// 8pt and stealing each other's edge taps. Horizontal slop matches so a tap
+// just outside the card's rounded corner still lands.
+const ROW_HIT_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
+
 // Drill-in focus (2026-07-26): every non-selected bar renders its segments in
 // muted grays — existing ink/chalk tokens only (design-system rule: no new
 // hues), one distinct step per position so segments stay distinguishable.
@@ -242,6 +255,17 @@ const FORMAT_LABELS: Record<string, string> = {
 function fmtK(v: number): string {
   if (v >= 1000) return `${(Math.round(v / 100) / 10).toFixed(1)}k`;
   return String(Math.round(v));
+}
+
+// #300 — a team's display name, resolved the same way the focus caption and
+// the header title resolve it (display_name → username → id), so the
+// drill-in's roster headings can never disagree with the header above them.
+function teamName(t: PowerRankedTeam): string {
+  return t.display_name || t.username || t.user_id;
+}
+// "Punt Gods" → "Punt Gods'", "Zone Defense" → "Zone Defense's".
+function possessive(name: string): string {
+  return name.endsWith('s') || name.endsWith('S') ? `${name}'` : `${name}'s`;
 }
 
 function posColor(pos: string): string {
@@ -391,7 +415,16 @@ export default function LeagueSummaryScreen() {
     // taxonomy migration (the `sleeper_send_*` precedent, D-031).
     | 'hardware_back'
     | 'tab_retap'
-    | 'refocus';
+    | 'refocus'
+    // #300 (flag `league.pos_candidates`) — the AUTOMATIC exit. Changing the
+    // position filter while drilled in invalidates the drill-in's whole
+    // premise ("Punt Gods are short at WR" says nothing about TE), so the
+    // screen returns the user to the list where the new question is
+    // answered. It lands on the same place as `header_back` and must NOT be
+    // logged as the same thing: one is a choice, this is an ejection, and a
+    // funnel that cannot tell them apart reads every filter tap as a user
+    // giving up on the team.
+    | 'filter_change';
   // Pure emitter. No-ops when nothing is focused, so an exit control tapped
   // in the unfocused state can never invent a row.
   const emitTeamClosed = React.useCallback(
@@ -541,6 +574,23 @@ export default function LeagueSummaryScreen() {
   // `BarColumn`) take it as a REQUIRED, undefaulted parameter/prop so `tsc`
   // catches an unthreaded caller. Never call `useFlag` for this key again.
   const picksAlwaysCounted = useFlag('league.picks_always_counted');
+
+  // ── #300 — position trade candidates (BOTH DARK) ──────────────────────
+  // `league.pos_candidates` owns the TOP screen: the median divider across
+  // the ranked list, the Buyer/Seller band labels, the pick-tier labels that
+  // replace the raw numeric under a position filter, and the auto-return
+  // when the filter changes while drilled in.
+  // `league.player_trade_handoff` owns the DRILL-IN: which roster it shows
+  // (the direction the median line implies) and the Offer/Target row action
+  // that pins the player and routes to the finder.
+  //
+  // The handoff is meaningless on its own — it has no direction without the
+  // line — so every drill-in consumer below reads `candidateHandoffOn`,
+  // which is the AND of the two. `pos_candidates` alone is coherent by
+  // itself: a divider and two labels, no new behaviour.
+  const posCandidatesOn = useFlag('league.pos_candidates');
+  const playerHandoffOn = useFlag('league.player_trade_handoff');
+  const candidateHandoffOn = posCandidatesOn && playerHandoffOn;
 
   // Picks pill/segments only when the league actually carries draft capital
   // (ESPN + demo leagues report zero; old servers omit the field entirely).
@@ -756,6 +806,226 @@ export default function LeagueSummaryScreen() {
       ? otherByTeam.get(selected.tc.team.user_id) ?? null
       : null;
 
+  // ══ #300 — the median divider, the bands, and the direction rule ═══════
+  // Frozen design: docs/feedback/items/300-league-rankings-trade-candidates/
+  // operator-answers-2026-08-12.md (Direction 2). Mockups:
+  // mockups/candidates-300-v2/.
+  //
+  // WHEN THE DIVIDER MAY DRAW — and why the gate is stricter than "one
+  // position selected". A median line across a ranked list is only true if
+  // the list is sorted by the SAME quantity the median measures. Three
+  // conditions make that so, and dropping any one draws a line that is
+  // simply in the wrong place:
+  //
+  //   · exactly ONE core position — a median of "WR + TE" is a median of
+  //     nothing anyone trades for (operator decision 5);
+  //   · PICKS not in the filter — `activeTotal` ADDS `picks.value` when the
+  //     PICKS key is present, so the list would be ranked by WR+capital
+  //     while the median measures WR alone. Reaching this state now takes a
+  //     deliberate tap on the Picks pill: #294's rule A, which auto-added
+  //     PICKS on the first position tap and made the PICKS-present state
+  //     routine, was removed by operator decision on 2026-08-12 (see
+  //     `togglePos`). So the natural path — tap WR from All — lands on
+  //     exactly {WR} and draws the divider, in a pick-carrying league as
+  //     much as in a pickless one. The gate is unchanged and still load-
+  //     bearing: a user who explicitly adds Picks to a WR filter is asking
+  //     for a WR+capital ranking, and the WR median does not describe it;
+  //     no line is the honest answer, and one tap on the lit pill restores
+  //     it. This also restores the design lab's premise ("a single-position
+  //     filter returns exactly posValues[P]") as the ordinary case;
+  //   · subset 'all' — starters/bench RE-DERIVE `posValues[P]` from a
+  //     subset of the roster, while the server's median is over whole
+  //     rosters. Comparing the two is comparing different populations.
+  const candidatePos: CorePos | null = useMemo(() => {
+    if (!posCandidatesOn) return null;
+    if (subset !== 'all') return null;
+    if (posFilter.has('PICKS')) return null;
+    const core = CORE_POSITIONS.filter((p) => posFilter.has(p));
+    return core.length === 1 ? core[0] : null;
+  }, [posCandidatesOn, subset, posFilter]);
+
+  // The median's LABEL cannot be computed here (`_aggregate_pick_label` needs
+  // server-only pick seeds) and a raw numeric is not an allowed fallback on
+  // this screen. So the field is required, not optional-with-a-guess: absent
+  // ⇒ no divider at all. Its `value_label` may still be absent on its own
+  // (caller outside `aggregate_tier_labels`) — then the line draws with the
+  // bare caption, exactly as TeamRow degrades today.
+  const medianAtPos = candidatePos
+    ? query.data?.medians?.[candidatePos] ?? null
+    : null;
+
+  // How many rows sit ABOVE the line. `>=` rather than `>` puts an
+  // exactly-at-median team on the seller side, which is the arithmetic
+  // truth (nothing is above it that it is not) and matches mock D2-b.
+  // Refuses to draw at either end of the list: a line above rank 1 or below
+  // rank N marks no boundary, it just adds a caption (this is also the
+  // perfectly-flat league, where every team equals the median).
+  const cutAfter = useMemo(() => {
+    if (!candidatePos || !medianAtPos) return null;
+    let n = 0;
+    for (const r of ranked) {
+      if (r.tc.posValues[candidatePos] >= medianAtPos.value) n += 1;
+    }
+    return n > 0 && n < ranked.length ? n : null;
+  }, [candidatePos, medianAtPos, ranked]);
+
+  const medianCaption = medianAtPos?.value_label
+    ? `League median · ${medianAtPos.value_label}`
+    : 'League median';
+
+  // Operator decision 8 — the bottom `round(count * 0.33)` teams are Buyers,
+  // the top the same count Sellers, the middle unlabelled. Resolved sizes:
+  // 8 → 3/2/3 · 10 → 3/4/3 · 12 → 4/4/4 · 14 → 5/4/5.
+  //
+  // THE LABELS DRIVE NO BEHAVIOUR. They are emphasis on top of the line; the
+  // LINE is the direction rule for every team, including the unlabelled
+  // middle. Nothing below reads `bandFor` for anything but a caption — if it
+  // ever does, the middle third silently becomes inert, which is the option
+  // the operator explicitly did not take (still-open item 5).
+  const bandSize = cutAfter == null ? 0 : Math.round(ranked.length * 0.33);
+  const bandFor = (idx: number): 'Buyer' | 'Seller' | null => {
+    if (bandSize <= 0 || bandSize * 2 > ranked.length) return null;
+    if (idx < bandSize) return 'Seller';
+    if (idx >= ranked.length - bandSize) return 'Buyer';
+    return null;
+  };
+
+  // The caller's own row, which stays in the list as the anchor.
+  const myEntry = useMemo(
+    () => ranked.find((r) => r.tc.team.is_you) ?? null,
+    [ranked],
+  );
+
+  // Which roster the drill-in shows, decided by the tapped team's side of
+  // the line. Deliberately null for the caller's OWN row — "below the line ⇒
+  // offer yours" would mean offering the user their own players to
+  // themselves. Their row keeps today's drill-in (their roster, no actions),
+  // which is honest rather than clever. Also null when the caller has no
+  // team in this league (`is_you` nowhere): there is no "yours" to offer.
+  const candidateDir: 'offer' | 'target' | null =
+    candidateHandoffOn &&
+    candidatePos &&
+    cutAfter != null &&
+    selected &&
+    myEntry &&
+    !selected.tc.team.is_you
+      ? selectedIdx < cutAfter
+        ? 'target'
+        : 'offer'
+      : null;
+
+  // Stacked, never side-by-side (operator decision 4 — 171pt columns against
+  // a 113.1pt right cluster truncate even stripped of tier badge and
+  // posRank). Both rosters are present; the direction the line implied is
+  // expanded and the mirror is one tap away.
+  const drillRosters = useMemo(() => {
+    if (!selected) return null;
+    if (!candidateDir || !myEntry) {
+      return { primary: selected.tc, primaryVerb: null, mirror: null } as const;
+    }
+    return candidateDir === 'offer'
+      ? { primary: myEntry.tc, primaryVerb: 'offer', mirror: selected.tc } as const
+      : { primary: selected.tc, primaryVerb: 'target', mirror: myEntry.tc } as const;
+  }, [selected, candidateDir, myEntry]);
+
+  const [mirrorOpen, setMirrorOpen] = useState(false);
+  // A mirror left open across a re-focus would be showing the previous
+  // team's roster under the new team's heading.
+  useEffect(() => {
+    setMirrorOpen(false);
+  }, [selectedId, candidateDir]);
+
+  // ── #300 decision 6 — pick tiers everywhere, no raw numerics ───────────
+  // The label that matches `active` under the CURRENT filters. Today only
+  // the unfiltered All view passes one, so EVERY filtered view — including a
+  // single position — falls back to the raw numeric, which contradicts the
+  // no-numeric-values ruling (#277/#279).
+  //
+  // Under a single-position filter `activeTotal` returns exactly
+  // `posValues[P]`, which in the 'all' subset IS the server's authoritative
+  // `positions[P].value` — so `positions[P].value_label` describes it
+  // exactly. That case is fixed here.
+  //
+  // 2+ positions is NOT fixed and cannot be from the client: `value_label`
+  // is per position and is not additive as a label (a sum of two
+  // pick-equivalents is not the pick-equivalent of the sum), and no field on
+  // the wire names a combination. Those rows keep the numeric fallback that
+  // every non-`aggregate_tier_labels` caller already sees. Closing it needs
+  // a server-side combined label — see the build report.
+  const activeValueLabel = React.useCallback(
+    (tc: TeamComputed): string | undefined => {
+      if (subset === 'all' && posFilter.size === 0) return tc.team.total_value_label;
+      if (posCandidatesOn && candidatePos) {
+        return tc.team.positions?.[candidatePos]?.value_label;
+      }
+      return undefined;
+    },
+    [subset, posFilter, posCandidatesOn, candidatePos],
+  );
+
+  // ── #300 — a filter change while drilled in returns to the top screen ──
+  // Operator-decided. The drill-in's framing ("Punt Gods are short at WR")
+  // stops being true the instant the pill changes, and the screen that DOES
+  // answer the new question is the one the user just left.
+  //
+  // Routed through `closeTeam`, never a bare `setSelectedId(null)` — this
+  // file has exactly one of those and it lives inside the choke point, which
+  // is what makes "every exit emits an event" airtight
+  // (mobile/tests/check-analytics-297-302.js).
+  //
+  // The ref holds the LAST OBSERVED filter signature, so the effect fires on
+  // a real change and not on mount: without the first-observation guard,
+  // mounting straight into a focused team (impossible today, but one
+  // deep-link away) would eject the user immediately.
+  const filterSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sig = `${subset}|${[...posFilter].sort().join(',')}`;
+    const prev = filterSigRef.current;
+    filterSigRef.current = sig;
+    if (prev === null || prev === sig) return;
+    if (!posCandidatesOn) return;
+    if (!focusRef.current) return;
+    closeTeam('filter_change');
+    // Clearing focus silently moves VoiceOver with no explanation — the
+    // ejection has to say it happened. This is not the same as `‹ All teams`
+    // (a deliberate exit); it is automatic, hence the distinct `via`.
+    AccessibilityInfo.announceForAccessibility('Filter changed. Back to all teams.');
+  }, [subset, posFilter, posCandidatesOn, closeTeam]);
+
+  // ── #300 — the row action: pin, then hand off to the finder ────────────
+  // THE PIN STORE IS THE ONLY PRESELECTION CONTRACT THAT WORKS. Route params
+  // are ignored while `trades.sheet_targeting` is ON (shipped ON —
+  // TradesScreen.tsx reads `sheetOpponent`, not `route.params`), so a
+  // params-based handoff would compile, demo correctly with flags off, and
+  // silently no-op in production.
+  //
+  // REPLACE, never add: both sides are set every time, so a pin left over
+  // from an earlier session cannot ride along into the generated deck.
+  // `setSide` (not `clear()`) preserves the user's `packageMode` choice,
+  // which is unrelated to which asset is pinned.
+  //
+  // No analytics event fires here on purpose. An unregistered event name is
+  // accepted-and-DROPPED by ingest with no 4xx and no client log
+  // (analytics_ingest.py), and `backend/analytics_taxonomy.py` is not this
+  // change's to edit — a silently-discarded emitter is worse than an honest
+  // gap. The proposed registration is in the build report.
+  const handleRowAction = React.useCallback(
+    (p: PowerRankedPlayer, verb: 'offer' | 'target') => {
+      const player: Player = {
+        id: p.player_id,
+        name: p.name,
+        position: p.position,
+        team: p.team,
+        age: p.age,
+      };
+      const store = useFinderTargets.getState();
+      store.setSide('give', verb === 'offer' ? [player] : []);
+      store.setSide('receive', verb === 'target' ? [player] : []);
+      navigation.navigate('Trades', { screen: 'TradesHome' });
+    },
+    [navigation],
+  );
+
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────
   // The drill-in is component state (`selectedId`), not a stack push, so
   // NOTHING in the OS gives the user a way back: no stack back (this is the
@@ -840,40 +1110,67 @@ export default function LeagueSummaryScreen() {
   // The single shared pill factory — both pill rows use it, so the drill-in
   // panel mirrors the chart card automatically.
   //
-  // #294, flag `league.picks_always_counted`: selecting a position must not
-  // remove draft capital, so the plain toggle gains two rules (ON only):
-  //   A — auto-add: the FIRST position tap out of the unfiltered state also
-  //       selects PICKS, so the filter never silently drops pick value. The
-  //       pill lights up, so the inclusion is visible and one tap reverses it.
-  //   B — exit: removing a position that leaves NO core position selected
-  //       clears the filter to All, instead of stranding the user in a
-  //       picks-only ranking they never asked for. This is what keeps the
-  //       position pill reversible — tap RB on, tap RB off, back where you
-  //       started. Its one cost: starting at {PICKS}, adding RB, then
-  //       removing RB lands on All rather than back on {PICKS} (one extra
-  //       tap). Distinguishing those would need a hidden "the user chose
-  //       picks by hand" state axis, which is deliberately NOT built.
-  // Both rules are memoryless functions of `prev`, `pos` and `hasPicks`.
+  // The pill toggle is a PLAIN toggle: one tap adds a key, one tap removes
+  // it, `All` clears. It is flag-independent — `league.picks_always_counted`
+  // is deliberately NOT read here.
+  //
+  // ══ HISTORY, kept because the reasoning on both sides is on the record ══
+  // #294 (2026-08-10) added two flag-ON rules to this function, and the
+  // operator removed BOTH on 2026-08-12 ("All leagues have picks. They should
+  // not be selected along with a position filter. Only by explicit user
+  // action."). What they were, and why each is gone:
+  //
+  //   A — auto-add. The FIRST position tap out of the unfiltered state also
+  //       selected PICKS. Its stated reason: *selecting a position must not
+  //       remove draft capital* — a rebuilding team holding four 1sts ranked
+  //       like a team holding none the moment a position filter was applied.
+  //       REMOVED. The operator's ruling is the opposite reading of the same
+  //       fact: a position filter means that position, and because every
+  //       league carries picks, an auto-add fires for essentially every user
+  //       on every first tap — which is a default, not a choice. Pick value
+  //       is now an explicit opt-in: the Picks pill, tapped.
+  //
+  //   B — exit. Removing a position that left NO core position selected
+  //       cleared the filter to All, "instead of stranding the user in a
+  //       picks-only ranking they never asked for."
+  //       REMOVED, and the removal follows from A's. That justification held
+  //       ONLY because rule A could put PICKS in the filter without the user
+  //       asking. With A gone, `PICKS` in the filter can only ever mean the
+  //       user tapped the Picks pill deliberately — so {PICKS, RB} minus RB
+  //       clearing to All would DISCARD an explicit choice, which is exactly
+  //       what the operator's ruling objects to. Rule B's only observable
+  //       effect was on states containing PICKS (with no PICKS, removing the
+  //       last core position already yields the empty set = All), so those
+  //       two states are now the same set of states, and the rule is pure
+  //       loss. #294's note that separating them "would need a hidden 'the
+  //       user chose picks by hand' state axis, which is deliberately NOT
+  //       built" is obsolete for the same reason: removing A makes the axis
+  //       unnecessary, because every PICKS is hand-chosen. Reversibility,
+  //       rule B's other job, is now structural — a plain toggle is its own
+  //       inverse, and {PICKS} + RB − RB lands back on {PICKS} rather than
+  //       costing the extra tap #294 accepted.
+  //
+  // A picks-only ranking is still reachable (tap Picks from All) — it always
+  // was, since rule A never fired on the Picks pill itself. What changed is
+  // that nothing but a user tap can put you there.
   //
   // Invariant, in exactly this qualified form: *whenever the filter is
   // non-empty, the Picks pill's selected state is exactly equal to whether
   // pick value is in the chart. An empty filter means every key — including
-  // picks — with no pill selected.* The unqualified version is FALSE in the
-  // empty-filter case (picks ARE charted while the pill reads unselected,
-  // exactly as QB value is charted while the QB pill reads unselected) and
-  // must not be propagated.
+  // picks — with no pill selected.* It survives this change untouched, and is
+  // now enforced by `activeTotal` alone: for a non-empty filter that function
+  // adds `picks.value` iff `PICKS ∈ filter`, and the pill's `selected` state
+  // IS `filter.has('PICKS')` (PosFilterPills). The unqualified version is
+  // FALSE in the empty-filter case (picks ARE charted while the pill reads
+  // unselected, exactly as QB value is charted while the QB pill reads
+  // unselected) and must not be propagated.
   const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<FilterKey>>>) =>
     (pos: FilterKey | 'ALL') => {
       setter((prev) => {
         if (pos === 'ALL') return new Set();
         const next = new Set(prev);
-        const removing = next.has(pos);
-        if (removing) next.delete(pos);
+        if (next.has(pos)) next.delete(pos);
         else next.add(pos);
-        if (picksAlwaysCounted && pos !== 'PICKS') {
-          if (prev.size === 0 && hasPicks) next.add('PICKS'); // rule A
-          if (removing && !CORE_POSITIONS.some((p) => next.has(p))) return new Set(); // rule B
-        }
         return next;
       });
     };
@@ -1375,10 +1672,11 @@ export default function LeagueSummaryScreen() {
               } · ${
                 selected.active > 0
                   ? // #279 — pick-equivalent label, valid only when `active`
-                    // equals the server's authoritative total_value (subset
-                    // 'all', no position filter); numeric fallback otherwise.
-                    (subset === 'all' && posFilter.size === 0 &&
-                      selected.tc.team.total_value_label) ||
+                    // equals a value the server has actually priced a label
+                    // for. #300 decision 6 widens that from "the unfiltered
+                    // total" to "the single filtered position" as well; the
+                    // numeric fallback is unchanged everywhere else.
+                    activeValueLabel(selected.tc) ||
                     Math.round(selected.active).toLocaleString('en-US')
                   : '—'
               }${subset === 'all' ? '' : subset === 'starters' ? ' starter' : ' bench'}${
@@ -1404,10 +1702,81 @@ export default function LeagueSummaryScreen() {
               showPicks={showPicksKey}
             />
             <View style={styles.drillList}>
-              {groupRows(selected.tc.rows, posFilter).map((g) => {
+              {/* #300 — STACKED ROSTERS, never side-by-side columns
+                  (operator decision 4). With the handoff dark, or on the
+                  caller's own row, `drillRosters` is a single section
+                  holding exactly today's roster and today's inert tiles, so
+                  this map renders byte-identically to the pre-#300 block. */}
+              {(drillRosters
+                ? [
+                    { key: 'primary', tc: drillRosters.primary, verb: drillRosters.primaryVerb, mirror: false },
+                    ...(drillRosters.mirror
+                      ? [{
+                          key: 'mirror',
+                          tc: drillRosters.mirror,
+                          verb: (drillRosters.primaryVerb === 'offer' ? 'target' : 'offer') as 'offer' | 'target',
+                          mirror: true,
+                        }]
+                      : []),
+                  ]
+                : []
+              ).map((sec) => {
+              // The party on the OTHER side of the trade is always the
+              // tapped team — the caller's own row never enters candidate
+              // mode, so `selected` is never "you" when a verb is set.
+              const counterparty = teamName(selected.tc.team);
+              const ownerLabel = sec.tc.team.is_you
+                ? 'Your'
+                : possessive(teamName(sec.tc.team));
+              // The verb, stated once per section rather than inferred from
+              // six identical row labels.
+              const sectionCaption =
+                sec.verb === 'offer'
+                  ? `Tap a player to offer them to ${counterparty}.`
+                  : `Tap a player to target them from ${counterparty}.`;
+              return (
+                <View key={sec.key}>
+                  {/* The verb, stated ONCE per section. The per-row labels
+                      (Variant D) say which player; this says to whom. */}
+                  {sec.verb && !sec.mirror ? (
+                    <Text
+                      testID="league-summary.roster-section-caption"
+                      style={[type.bodySm, styles.rosterSectionCaption]}
+                    >
+                      {sectionCaption}
+                    </Text>
+                  ) : null}
+                  {sec.mirror ? (
+                    <Pressable
+                      testID="league-summary.roster-mirror-toggle"
+                      onPress={() => setMirrorOpen((v) => !v)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: mirrorOpen }}
+                      accessibilityLabel={`${ownerLabel} ${candidatePos}`}
+                      accessibilityHint={
+                        mirrorOpen ? 'Collapses this roster' : 'Expands this roster'
+                      }
+                      style={({ pressed }) => [
+                        styles.rosterMirrorHead,
+                        pressed && { backgroundColor: ink.ink3 },
+                      ]}
+                    >
+                      <Text style={[type.label, styles.rosterSectionTitle]}>
+                        {`${ownerLabel} ${candidatePos}`}
+                      </Text>
+                      <Icon
+                        name={mirrorOpen ? 'chevron-down' : 'chevron-right'}
+                        size={14}
+                        color={chalk.dim}
+                      />
+                    </Pressable>
+                  ) : null}
+                  {sec.mirror && !mirrorOpen
+                    ? null
+                    : groupRows(sec.tc.rows, posFilter).map((g) => {
                 const isCore = (CORE_POSITIONS as readonly string[]).includes(g.pos);
                 const rank = isCore
-                  ? teamPosRank[g.pos as CorePos].get(selected.tc.team.user_id) ?? 0
+                  ? teamPosRank[g.pos as CorePos].get(sec.tc.team.user_id) ?? 0
                   : 0;
                 // #279 — pick-equivalent label for this position's subtotal,
                 // valid only in the 'all' subset (there `g.value` is a
@@ -1416,14 +1785,37 @@ export default function LeagueSummaryScreen() {
                 // starters/bench recompute a different, unpriced subtotal).
                 const posLabel =
                   isCore && subset === 'all'
-                    ? selected.tc.team.positions?.[g.pos as CorePos]?.value_label
+                    ? sec.tc.team.positions?.[g.pos as CorePos]?.value_label
                     : undefined;
                 return (
                   <View key={g.pos}>
                     <View style={styles.groupHead}>
-                      <Text style={[styles.groupLabel, { color: posColor(g.pos) }]}>
-                        {g.pos}
-                      </Text>
+                      {/* #300 — the PRIMARY section names its owner beside
+                          the position ("Your WR", "Punt Gods' WR"), because
+                          in candidate mode the roster on screen is not
+                          necessarily the team in the header. The owner is
+                          chalk and the position keeps its hex: position
+                          hexes are data encodings (cross-client-invariants)
+                          and must not spread onto a team name. The mirror
+                          section's disclosure header already names its
+                          owner, so its groups stay bare.
+                          Both arms are spelled out rather than sharing a
+                          wrapper View so the flag-off tree is byte-identical
+                          to the shipped one. */}
+                      {sec.verb && !sec.mirror ? (
+                        <View style={styles.groupLabelRow}>
+                          <Text style={[styles.groupLabel, styles.groupOwner]}>
+                            {ownerLabel}
+                          </Text>
+                          <Text style={[styles.groupLabel, { color: posColor(g.pos) }]}>
+                            {g.pos}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={[styles.groupLabel, { color: posColor(g.pos) }]}>
+                          {g.pos}
+                        </Text>
+                      )}
                       <View style={styles.groupMetaRow}>
                         <Text style={[type.data, styles.groupMeta]}>
                           {`${g.rows.length} · ${posLabel ?? fmtK(g.value)}`}
@@ -1444,8 +1836,21 @@ export default function LeagueSummaryScreen() {
                       </View>
                     </View>
                     {g.rows.map((r) => (
-                      <View key={r.player_id} style={styles.rosterRow}>
+                      <View
+                        key={r.player_id}
+                        style={[styles.rosterRow, sec.verb ? styles.rosterRowActionable : null]}
+                      >
                         <PlayerCard
+                          // `roster-player`, not `roster`, on purpose: Maestro
+                          // id selectors are REGEX, so `league-summary.roster..*`
+                          // would also match roster-close / roster-subset /
+                          // roster-posfilter / roster-mirror-toggle /
+                          // roster-picks, and a flow meaning "tap a player"
+                          // would tap the drill-in's exit. It sits on the
+                          // tile's own Pressable, which is what survives the
+                          // `accessible: true` subtree collapse
+                          // (flow-authoring law 3).
+                          testID={`league-summary.roster-player.${r.player_id}`}
                           dense
                           // #299 — this caller passes no `statsSlot`, so the
                           // dense row's line 2 held one tier badge and
@@ -1468,11 +1873,71 @@ export default function LeagueSummaryScreen() {
                           // unpriceable rows (K/DEF) → no badge, no number.
                           tier={r.tier ?? null}
                           posRank={playerPosRank.get(r.player_id) ?? 'NR'}
+                          // ── #300: THE WHOLE ROW IS THE BUTTON ──────────
+                          // Not a nested control. `styles.card` has
+                          // `overflow: 'hidden'` (PlayerCard.tsx), so a
+                          // child's hit area is clipped by its own parent —
+                          // you cannot grow a 44pt target INSIDE a 32pt
+                          // clipped box. And the dense branch's Pressable
+                          // carries `accessible: true`, which on iOS
+                          // collapses the subtree: a nested button would get
+                          // no VoiceOver focus and no testID Maestro can
+                          // select (flow-authoring law 3).
+                          //
+                          // So: one focusable, one testID, one label + hint.
+                          // `hitSlop` 6/6 sits on the tile's OWN outermost
+                          // Pressable and extends OUTWARD into ancestors
+                          // that do not clip (`rosterRow` = margin only,
+                          // `drillList` = gap only) — the opposite of a
+                          // nested slop, which tries to escape the box it
+                          // lives in. `rosterRowActionable` lifts the row
+                          // margin 4 → 12 so adjacent slop regions tile
+                          // exactly instead of overlapping by 8pt and
+                          // stealing each other's taps. 44pt pitch, 32pt
+                          // visual.
+                          //
+                          // SIM-VERIFY BEFORE ASSERTING: RN hit-testing
+                          // through non-clipping ancestors SHOULD behave as
+                          // described but has not been exercised on a
+                          // simulator. If it does not hold, the fallback is
+                          // to grow the row to 44pt (mockups/
+                          // candidates-300-v2/tile-affordance.html R-2); the
+                          // horizontal design is unaffected either way.
+                          hitSlop={sec.verb ? ROW_HIT_SLOP : undefined}
+                          onPress={
+                            sec.verb ? () => handleRowAction(r, sec.verb!) : undefined
+                          }
+                          accessibilityHint={
+                            sec.verb === 'offer'
+                              ? `Offers ${r.name} to ${counterparty}`
+                              : sec.verb === 'target'
+                                ? `Targets ${r.name} from ${counterparty}`
+                                : undefined
+                          }
+                          // Variant D — operator override, recorded and not
+                          // to be relitigated: the RK + injury micro-tags go
+                          // so the verb fits. Measured net +2.6pt of name
+                          // budget vs the 143.8pt baseline. The a11y label
+                          // still speaks both facts.
+                          denseMicroTags={!sec.verb}
+                          rightSlot={
+                            sec.verb ? (
+                              <View style={styles.rowAction}>
+                                <Text style={styles.rowActionText}>
+                                  {sec.verb === 'offer' ? 'Offer' : 'Target'}
+                                </Text>
+                                <Icon name="chevron-right" size={12} color={ice.base} />
+                              </View>
+                            ) : undefined
+                          }
                         />
                       </View>
                     ))}
                   </View>
                 );
+                      })}
+                </View>
+              );
               })}
               {/* #14 FR1 — draft capital: the team's owned picks, priced on
                   the generic ladder. Hidden for leagues (or teams) without
@@ -1525,18 +1990,37 @@ export default function LeagueSummaryScreen() {
         ) : (
           <View style={styles.list}>
             {ranked.map((r, idx) => (
-              <TeamRow
-                key={r.tc.team.user_id}
-                team={r.tc.team}
-                rank={idx + 1}
-                active={r.active}
-                totalLabel={
-                  subset === 'all' && posFilter.size === 0
-                    ? r.tc.team.total_value_label
-                    : undefined
-                }
-                onPress={() => openTeam(r.tc.team.user_id, 'row', idx + 1)}
-              />
+              <React.Fragment key={r.tc.team.user_id}>
+                <TeamRow
+                  team={r.tc.team}
+                  rank={idx + 1}
+                  active={r.active}
+                  totalLabel={activeValueLabel(r.tc)}
+                  band={bandFor(idx)}
+                  onPress={() => openTeam(r.tc.team.user_id, 'row', idx + 1)}
+                />
+                {/* #300 — the median divider. Drawn on the SHIPPED playoff
+                    cutline construction (rule · label · rule, styles
+                    oddsCutRule / oddsCutText) because that is already this
+                    screen's way of marking a threshold across a ranked list
+                    — zero new patterns. It carries the median's PICK-TIER
+                    label, never a number, and degrades to the bare caption
+                    when the caller is outside `aggregate_tier_labels`.
+                    `cutAfter` is null unless the list is genuinely sorted by
+                    the position the median measures. */}
+                {cutAfter === idx + 1 ? (
+                  <View
+                    style={styles.medianCutline}
+                    testID="league-summary.median-divider"
+                    accessibilityRole="text"
+                    accessibilityLabel={`${medianCaption}. Teams above are richer at ${candidatePos}; below are shorter.`}
+                  >
+                    <View style={styles.oddsCutRule} />
+                    <Text style={styles.oddsCutText}>{medianCaption}</Text>
+                    <View style={styles.oddsCutRule} />
+                  </View>
+                ) : null}
+              </React.Fragment>
             ))}
           </View>
         )}
@@ -1656,8 +2140,9 @@ function SubsetControl({ idPrefix, subset, onSwitch, source }: {
 // (#14 FR1) appears whenever the league actually has draft capital — in
 // EVERY subset under `league.picks_always_counted` (#293/#294), and in the
 // All subset only when that flag is OFF. Its selected state is the user's
-// explicit opt-in/opt-out of pick value; see `togglePos` for the rules that
-// keep it in sync and for the (qualified) pill invariant. Multi-select.
+// explicit opt-in/opt-out of pick value, and nothing else may set it (operator,
+// 2026-08-12); see `togglePos` for the history and the qualified pill
+// invariant. Multi-select, plain toggle.
 function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
   idPrefix: string;
   filter: Set<FilterKey>;
@@ -1854,10 +2339,17 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, picksAlwaysCou
 // One team as a ranked list row under the chart: rank numeral, name + You
 // badge, active value, chevron. The caller's row is surface+border
 // highlighted (state via border and surface color, per Chalkline).
-function TeamRow({ team, rank, active, totalLabel, onPress }: {
+function TeamRow({ team, rank, active, totalLabel, band, onPress }: {
   team: PowerRankedTeam;
   rank: number;
   active: number;
+  /** #300 operator decision 8 — "Buyer" on the bottom `round(n * 0.33)`
+   *  teams, "Seller" on the top the same count, nothing in the middle.
+   *  EMPHASIS ONLY: it changes no behaviour anywhere. The direction rule is
+   *  the median LINE, which covers every team including the unlabelled
+   *  middle. Null (the default, and always with the flag off) renders
+   *  exactly today's row. */
+  band?: 'Buyer' | 'Seller' | null;
   /** #279 — pick-equivalent label for `active`, passed only when it's known
    *  to equal the server's authoritative `total_value` (subset 'all', no
    *  position filter) AND the caller is targeted by `aggregate_tier_labels`.
@@ -1870,7 +2362,9 @@ function TeamRow({ team, rank, active, totalLabel, onPress }: {
       testID={`league-summary.team.${team.user_id}`}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`View ${team.display_name || team.username} roster, rank ${rank}`}
+      accessibilityLabel={`View ${team.display_name || team.username} roster, rank ${rank}${
+        band ? `, ${band}` : ''
+      }`}
       style={({ pressed }) => [
         styles.listRow,
         team.is_you && styles.listRowYou,
@@ -1883,6 +2377,12 @@ function TeamRow({ team, rank, active, totalLabel, onPress }: {
           {team.display_name || team.username || team.user_id}
         </Text>
         {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
+        {/* Neutral outline, deliberately NOT semantic pos/neg: being a
+            seller is not "good" and being a buyer is not "bad", and the
+            Chalkline accents are reserved for actions (ice) and
+            informational highlights (flare). Default Badge = ink.lineStrong
+            border with chalk text — the same construction as the rank chip. */}
+        {band ? <Badge label={band} /> : null}
       </View>
       <View style={styles.listRight}>
         <Text style={type.data}>
@@ -2662,6 +3162,44 @@ const styles = StyleSheet.create({
   },
   rankChipText: { ...type.data, fontSize: 11, lineHeight: 15 },
   rosterRow: { marginBottom: space.xs },
+  // #300 — 4 → 12 ONLY when the row carries an action. Load-bearing, not
+  // cosmetic: with `ROW_HIT_SLOP` and the shipped 4pt margin, adjacent tiles'
+  // touch areas overlap by 8pt and a tap near a boundary hits the wrong
+  // player. 32 + 12 = the 44pt pitch the slop needs, with zero overlap. Inert
+  // rows (flag off, the caller's own row) keep the shipped 4.
+  rosterRowActionable: { marginBottom: 12 },
+  // #300 — the per-row verb. Decoration, NOT a control: the whole tile is the
+  // button (a nested Pressable would be clipped by `styles.card`'s
+  // `overflow: 'hidden'` and hidden from VoiceOver + Maestro by the tile's
+  // `accessible: true`). Ice is the Chalkline action accent.
+  rowAction: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  rowActionText: { ...type.label, color: ice.base },
+  // #300 — stacked roster sections (never side-by-side columns).
+  rosterSectionTitle: { color: chalk.base },
+  rosterSectionCaption: { color: chalk.dim, marginTop: space.sm },
+  groupLabelRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  groupOwner: { color: chalk.base },
+  rosterMirrorHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: space.sm,
+    paddingHorizontal: space.xs,
+    minHeight: 44,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    marginTop: space.sm,
+  },
+  // #300 — the median divider. Same three-part construction as the shipped
+  // playoff cutline (it reuses `oddsCutRule` + `oddsCutText` verbatim); only
+  // the outer spacing differs, because this band sits between two hairline
+  // list rows rather than inside the outlook card.
+  medianCutline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.sm,
+  },
   // The label column became a stack when the W3 M-C provenance marker
   // joined it; with no marker it renders exactly as the single Text did.
   pickRowBody: { flex: 1, gap: space.xs },
