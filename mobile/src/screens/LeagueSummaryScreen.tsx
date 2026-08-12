@@ -819,12 +819,18 @@ export default function LeagueSummaryScreen() {
   //     nothing anyone trades for (operator decision 5);
   //   · PICKS not in the filter — `activeTotal` ADDS `picks.value` when the
   //     PICKS key is present, so the list would be ranked by WR+capital
-  //     while the median measures WR alone. Note this is the ROUTINE state
-  //     under `league.picks_always_counted` (shipped ON): rule A auto-adds
-  //     PICKS on the first position tap, so reaching the divider in a
-  //     pick-carrying league costs one extra tap on the lit Picks pill. See
-  //     the build report — the design lab's premise ("a single-position
-  //     filter returns exactly posValues[P]") predates that rule;
+  //     while the median measures WR alone. Reaching this state now takes a
+  //     deliberate tap on the Picks pill: #294's rule A, which auto-added
+  //     PICKS on the first position tap and made the PICKS-present state
+  //     routine, was removed by operator decision on 2026-08-12 (see
+  //     `togglePos`). So the natural path — tap WR from All — lands on
+  //     exactly {WR} and draws the divider, in a pick-carrying league as
+  //     much as in a pickless one. The gate is unchanged and still load-
+  //     bearing: a user who explicitly adds Picks to a WR filter is asking
+  //     for a WR+capital ranking, and the WR median does not describe it;
+  //     no line is the honest answer, and one tap on the lit pill restores
+  //     it. This also restores the design lab's premise ("a single-position
+  //     filter returns exactly posValues[P]") as the ordinary case;
   //   · subset 'all' — starters/bench RE-DERIVE `posValues[P]` from a
   //     subset of the roster, while the server's median is over whole
   //     rosters. Comparing the two is comparing different populations.
@@ -1102,40 +1108,67 @@ export default function LeagueSummaryScreen() {
   // The single shared pill factory — both pill rows use it, so the drill-in
   // panel mirrors the chart card automatically.
   //
-  // #294, flag `league.picks_always_counted`: selecting a position must not
-  // remove draft capital, so the plain toggle gains two rules (ON only):
-  //   A — auto-add: the FIRST position tap out of the unfiltered state also
-  //       selects PICKS, so the filter never silently drops pick value. The
-  //       pill lights up, so the inclusion is visible and one tap reverses it.
-  //   B — exit: removing a position that leaves NO core position selected
-  //       clears the filter to All, instead of stranding the user in a
-  //       picks-only ranking they never asked for. This is what keeps the
-  //       position pill reversible — tap RB on, tap RB off, back where you
-  //       started. Its one cost: starting at {PICKS}, adding RB, then
-  //       removing RB lands on All rather than back on {PICKS} (one extra
-  //       tap). Distinguishing those would need a hidden "the user chose
-  //       picks by hand" state axis, which is deliberately NOT built.
-  // Both rules are memoryless functions of `prev`, `pos` and `hasPicks`.
+  // The pill toggle is a PLAIN toggle: one tap adds a key, one tap removes
+  // it, `All` clears. It is flag-independent — `league.picks_always_counted`
+  // is deliberately NOT read here.
+  //
+  // ══ HISTORY, kept because the reasoning on both sides is on the record ══
+  // #294 (2026-08-10) added two flag-ON rules to this function, and the
+  // operator removed BOTH on 2026-08-12 ("All leagues have picks. They should
+  // not be selected along with a position filter. Only by explicit user
+  // action."). What they were, and why each is gone:
+  //
+  //   A — auto-add. The FIRST position tap out of the unfiltered state also
+  //       selected PICKS. Its stated reason: *selecting a position must not
+  //       remove draft capital* — a rebuilding team holding four 1sts ranked
+  //       like a team holding none the moment a position filter was applied.
+  //       REMOVED. The operator's ruling is the opposite reading of the same
+  //       fact: a position filter means that position, and because every
+  //       league carries picks, an auto-add fires for essentially every user
+  //       on every first tap — which is a default, not a choice. Pick value
+  //       is now an explicit opt-in: the Picks pill, tapped.
+  //
+  //   B — exit. Removing a position that left NO core position selected
+  //       cleared the filter to All, "instead of stranding the user in a
+  //       picks-only ranking they never asked for."
+  //       REMOVED, and the removal follows from A's. That justification held
+  //       ONLY because rule A could put PICKS in the filter without the user
+  //       asking. With A gone, `PICKS` in the filter can only ever mean the
+  //       user tapped the Picks pill deliberately — so {PICKS, RB} minus RB
+  //       clearing to All would DISCARD an explicit choice, which is exactly
+  //       what the operator's ruling objects to. Rule B's only observable
+  //       effect was on states containing PICKS (with no PICKS, removing the
+  //       last core position already yields the empty set = All), so those
+  //       two states are now the same set of states, and the rule is pure
+  //       loss. #294's note that separating them "would need a hidden 'the
+  //       user chose picks by hand' state axis, which is deliberately NOT
+  //       built" is obsolete for the same reason: removing A makes the axis
+  //       unnecessary, because every PICKS is hand-chosen. Reversibility,
+  //       rule B's other job, is now structural — a plain toggle is its own
+  //       inverse, and {PICKS} + RB − RB lands back on {PICKS} rather than
+  //       costing the extra tap #294 accepted.
+  //
+  // A picks-only ranking is still reachable (tap Picks from All) — it always
+  // was, since rule A never fired on the Picks pill itself. What changed is
+  // that nothing but a user tap can put you there.
   //
   // Invariant, in exactly this qualified form: *whenever the filter is
   // non-empty, the Picks pill's selected state is exactly equal to whether
   // pick value is in the chart. An empty filter means every key — including
-  // picks — with no pill selected.* The unqualified version is FALSE in the
-  // empty-filter case (picks ARE charted while the pill reads unselected,
-  // exactly as QB value is charted while the QB pill reads unselected) and
-  // must not be propagated.
+  // picks — with no pill selected.* It survives this change untouched, and is
+  // now enforced by `activeTotal` alone: for a non-empty filter that function
+  // adds `picks.value` iff `PICKS ∈ filter`, and the pill's `selected` state
+  // IS `filter.has('PICKS')` (PosFilterPills). The unqualified version is
+  // FALSE in the empty-filter case (picks ARE charted while the pill reads
+  // unselected, exactly as QB value is charted while the QB pill reads
+  // unselected) and must not be propagated.
   const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<FilterKey>>>) =>
     (pos: FilterKey | 'ALL') => {
       setter((prev) => {
         if (pos === 'ALL') return new Set();
         const next = new Set(prev);
-        const removing = next.has(pos);
-        if (removing) next.delete(pos);
+        if (next.has(pos)) next.delete(pos);
         else next.add(pos);
-        if (picksAlwaysCounted && pos !== 'PICKS') {
-          if (prev.size === 0 && hasPicks) next.add('PICKS'); // rule A
-          if (removing && !CORE_POSITIONS.some((p) => next.has(p))) return new Set(); // rule B
-        }
         return next;
       });
     };

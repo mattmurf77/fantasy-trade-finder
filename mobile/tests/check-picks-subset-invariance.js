@@ -18,11 +18,22 @@
 // type error sees that. This file does.
 //
 // So the invariant pinned here is ATOMICITY: the flag is read ONCE, and every
-// gated expression resolves to that same value within a render. There are
-// fourteen gated expressions (prd.md R-0.2's G1–G14) reached by exactly three
-// gating symbols — the component-body identifier, `activeTotal`'s required
-// 4th parameter, and `BarColumn`'s required prop — because the latter two are
-// module-scope and cannot close over the first.
+// gated expression resolves to that same value within a render. prd.md R-0.2
+// listed fourteen gated expressions (G1–G14); TWELVE remain, reached by
+// exactly three gating symbols — the component-body identifier, `activeTotal`'s
+// required 4th parameter, and `BarColumn`'s required prop — because the latter
+// two are module-scope and cannot close over the first.
+//
+// G4 and G5 — `togglePos`'s rule A (auto-add PICKS on the first position tap)
+// and rule B (removing the last core position clears to All) — were REMOVED by
+// operator decision on 2026-08-12: "All leagues have picks. They should not be
+// selected along with a position filter. Only by explicit user action."
+// `togglePos` is therefore flag-INDEPENDENT, and section 3.5 asserts that
+// absence in three shapes rather than asserting a gate. Rule B fell with rule
+// A: its stated purpose was to keep the user out of a picks-only ranking "they
+// never asked for", which only existed because rule A could put PICKS there
+// unasked — with A gone, every PICKS is hand-chosen and clearing to All would
+// discard the very explicit choice the ruling protects.
 //
 // Assertions 13 and 14 are not optional garnish: adversarial review found two
 // verified escape hatches through which a build could pass every other
@@ -336,7 +347,8 @@ assert(
 // G3, G7 — component-body initializers.
 const showPicksKeyInit = varInit(componentFn, 'showPicksKey');
 const picksInViewInit = varInit(componentFn, 'picksInView');
-// G4/G5, G6 — component-body function bodies.
+// G6 — component-body function body. (G4/G5 — #294's togglePos rules A and B
+// — were REMOVED on 2026-08-12; section 3.5 below pins their absence.)
 const togglePosInit = varInit(componentFn, 'togglePos');
 const switchSubsetInit = varInit(componentFn, 'switchSubset');
 
@@ -374,7 +386,6 @@ const reconcileEffect = calls(componentFn, 'useEffect').filter((c) =>
 
 const bodyGated = [
   ['G3 showPicksKey', showPicksKeyInit],
-  ['G4/G5 togglePos', togglePosInit],
   ['G6 switchSubset', switchSubsetInit],
   ['G7 picksInView', picksInViewInit],
   ['G9 filtered hint branch', hintTernary],
@@ -400,6 +411,84 @@ for (const [label, node, sym] of [
     'a module-scope function must gate on its parameter/prop, not a free name',
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.5 — togglePos is a PLAIN toggle: #294's rules A and B are GONE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Operator decision, 2026-08-12: "All leagues have picks. They should not be
+// selected along with a position filter. Only by explicit user action."
+// So the two rules #294 added here (G4 auto-add, G5 exit-to-All) are removed,
+// and `togglePos` is flag-INDEPENDENT. That is the one gated expression in
+// R-0.2's G1–G14 that is deliberately no longer gated, which makes it the one
+// place where "the flag is not mentioned" is the assertion rather than the
+// bug. The three checks below are the exact inverse of the old
+// `3 — G4/G5 togglePos branches on the flag` row, and between them they close
+// every shape rule A or rule B could come back in:
+//
+//   3e  no reference to the flag identifier at all — a re-added rule needs it
+//       (both rules lived under `if (picksAlwaysCounted && …)`);
+//   3f  no 'PICKS' literal — rule A's payload was `next.add('PICKS')`, and
+//       any auto-add must name the key it adds;
+//   3g/h exactly one empty `new Set()`, and it is the `pos === 'ALL'` branch —
+//       rule B's payload was a SECOND `return new Set()` on a different
+//       condition. Counting alone would not say WHICH one survived, so 3h
+//       pins the survivor to the ALL clear.
+//
+// AST-level, not textual: identifiers and string literals are nodes, so the
+// history comment above `togglePos` — which necessarily names both
+// `picksAlwaysCounted` and 'PICKS' — cannot satisfy or defeat any of them.
+
+const toggleFlagIds = togglePosInit
+  ? findAll(togglePosInit, (n) => ts.isIdentifier(n) && n.getText(src) === FLAG_ID)
+  : [];
+assert(
+  !!togglePosInit && toggleFlagIds.length === 0,
+  `3e — togglePos does not reference \`${FLAG_ID}\``,
+  togglePosInit
+    ? `found ${toggleFlagIds.length}; the pill toggle is flag-independent since the 2026-08-12 reversal`
+    : 'togglePos not found',
+);
+
+const togglePicksLits = togglePosInit
+  ? findAll(togglePosInit, (n) => ts.isStringLiteral(n) && n.text === 'PICKS')
+  : [];
+assert(
+  !!togglePosInit && togglePicksLits.length === 0,
+  "3f — togglePos contains no 'PICKS' literal (rule A's auto-add is gone)",
+  `found ${togglePicksLits.length}; pick value is an explicit pill tap, never a side effect of tapping a position`,
+);
+
+const toggleEmptySets = togglePosInit
+  ? findAll(
+      togglePosInit,
+      (n) =>
+        ts.isNewExpression(n) &&
+        n.expression.getText(src) === 'Set' &&
+        (!n.arguments || n.arguments.length === 0),
+    )
+  : [];
+assert(
+  toggleEmptySets.length === 1,
+  '3g — togglePos constructs exactly ONE empty `new Set()`',
+  `found ${toggleEmptySets.length}; a second one is rule B (exit-to-All), which would discard a hand-chosen PICKS`,
+);
+let toggleAllGate = null;
+if (toggleEmptySets.length === 1) {
+  for (let p = toggleEmptySets[0].parent; p && p !== togglePosInit; p = p.parent) {
+    if (ts.isIfStatement(p)) {
+      toggleAllGate = p.expression;
+      break;
+    }
+  }
+}
+assert(
+  !!toggleAllGate && /pos === 'ALL'/.test(flat(toggleAllGate)),
+  "3h — that empty Set is the `pos === 'ALL'` branch",
+  toggleAllGate
+    ? `guarded by \`${flat(toggleAllGate)}\` instead`
+    : 'no enclosing if — the clear must be the All pill, not a derived rule',
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 4 / 5 — activeTotal's two arms, ON and OFF
@@ -634,23 +723,38 @@ assert(
 // 12 — the #279/#285 total_value_label gate is NOT widened
 // ═══════════════════════════════════════════════════════════════════════════
 
+// #300 (commit 1c3471a) folded the screen's TWO inline `total_value_label`
+// render sites into ONE shared helper (`activeValueLabel`), and moved its gate
+// from a JSX `&&`/ternary into an `if (…) return …` statement. The invariant
+// this section defends is unchanged — the label may only describe the
+// unfiltered All view, and may never ride the picks flag — but the two shape
+// assumptions baked into the old checks (a count of 2, and a gate that is
+// always an EXPRESSION) both broke, which is why 12a–12c were failing on this
+// branch before the 2026-08-12 rule-A removal touched anything. Re-pinned to
+// the current shape, deliberately no weaker: one render path (12a), still
+// gated on `subset === 'all' && posFilter.size === 0` whether that gate is an
+// expression or an `if` (12b), and now flag-free across the WHOLE helper
+// rather than just the gate expression (12c) — a helper with one label branch
+// has room for a flag-dependent second branch that a gate-only check misses.
 const labelSites = findAll(
   componentFn,
   (n) => ts.isPropertyAccessExpression(n) && n.name.getText(src) === 'total_value_label',
 );
 assert(
-  labelSites.length === 2,
-  '12a — total_value_label still has exactly two render sites',
-  `found ${labelSites.length}`,
+  labelSites.length === 1,
+  '12a — total_value_label has exactly ONE render path (`activeValueLabel`)',
+  `found ${labelSites.length}; every extra site is an unguarded copy of the gate`,
 );
 for (let i = 0; i < labelSites.length; i += 1) {
   let gate = null;
   for (let p = labelSites[i].parent; p; p = p.parent) {
-    if (
-      (isLogical(p) || ts.isConditionalExpression(p)) &&
-      flat(p).includes('posFilter.size === 0')
-    ) {
-      gate = p;
+    const cond = ts.isIfStatement(p)
+      ? p.expression
+      : isLogical(p) || ts.isConditionalExpression(p)
+        ? p
+        : null;
+    if (cond && flat(cond).includes('posFilter.size === 0')) {
+      gate = cond;
       break;
     }
   }
@@ -659,9 +763,17 @@ for (let i = 0; i < labelSites.length; i += 1) {
     `12b — total_value_label site ${i + 1} keeps the unfiltered-All gate`,
     'there is no server-side starters/bench pick-count decomposition — widening it fabricates',
   );
+  let host = labelSites[i].parent;
+  while (host && !ts.isArrowFunction(host) && !ts.isFunctionExpression(host)) host = host.parent;
+  // AST-level, never `flat().includes()`: a "the flag appears nowhere here"
+  // check run on raw source is satisfied — or defeated — by a comment naming
+  // the very thing it forbids.
   assert(
-    !!gate && !flat(gate).includes(FLAG_ID),
-    `12c — total_value_label site ${i + 1} does not reference the flag`,
+    !!gate &&
+      !!host &&
+      findAll(host, (n) => ts.isIdentifier(n) && n.getText(src) === FLAG_ID).length === 0,
+    `12c — total_value_label site ${i + 1} and its whole host function are flag-free`,
+    'the #279/#285 label gate is independent of `league.picks_always_counted` and must stay so',
   );
 }
 
