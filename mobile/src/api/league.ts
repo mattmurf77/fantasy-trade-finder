@@ -607,6 +607,25 @@ export interface PowerRankingsResponse {
    *  list and at least one is non-empty. Gates the All/Starters/Bench
    *  segmented control; absent on old servers (treat as false). */
   starters_available?: boolean;
+  /** #300 — the league's MEDIAN value at each core position, with the same
+   *  pick-equivalent label the per-team `positions[P].value_label` carries
+   *  (same `_aggregate_pick_label`, same `aggregate_tier_labels` gating).
+   *
+   *  It exists because the divider's label cannot be computed client-side:
+   *  the client can derive the median VALUE exactly (every team's
+   *  `positions[P].value` is already on the wire) but converting it to
+   *  "≈2 firsts" needs `elo_to_value` + `GENERIC_PICK_SEEDS`, which are
+   *  server-only — and a raw numeric is no longer an allowed fallback on
+   *  this screen (#277/#279).
+   *
+   *  Absent on old servers and on any server that has not shipped the field:
+   *  the client then draws NO divider rather than one placed off a number it
+   *  cannot name. `value_label` alone may be absent (caller outside the
+   *  experiment) — then the line still draws, captioned "League median" with
+   *  no value, exactly as `TeamRow` falls back today. */
+  medians?: Partial<
+    Record<'QB' | 'RB' | 'WR' | 'TE', { value: number; value_label?: string }>
+  >;
 }
 
 /** #14 — rank chip for league cards. Consensus basis; deliberately open
