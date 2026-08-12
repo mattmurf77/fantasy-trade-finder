@@ -2138,8 +2138,9 @@ function SubsetControl({ idPrefix, subset, onSwitch, source }: {
 // (#14 FR1) appears whenever the league actually has draft capital — in
 // EVERY subset under `league.picks_always_counted` (#293/#294), and in the
 // All subset only when that flag is OFF. Its selected state is the user's
-// explicit opt-in/opt-out of pick value; see `togglePos` for the rules that
-// keep it in sync and for the (qualified) pill invariant. Multi-select.
+// explicit opt-in/opt-out of pick value, and nothing else may set it (operator,
+// 2026-08-12); see `togglePos` for the history and the qualified pill
+// invariant. Multi-select, plain toggle.
 function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
   idPrefix: string;
   filter: Set<FilterKey>;

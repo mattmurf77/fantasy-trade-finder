@@ -196,7 +196,7 @@ assert(
 assert(
   !!candidatePosDecl && /if \(posFilter\.has\('PICKS'\)\) return null;/.test(candidatePosDecl),
   '#300 no divider while draft capital is in the filter',
-  "sabotage detected: `activeTotal` ADDS picks.value when PICKS is selected, so the list would be ranked by WR+capital while the median measures WR alone. This is the ROUTINE state under league.picks_always_counted's auto-add rule — the most reachable wrong line there is",
+  "sabotage detected: `activeTotal` ADDS picks.value when PICKS is selected, so the list would be ranked by WR+capital while the median measures WR alone. Since 2026-08-12 this state takes a deliberate tap on the Picks pill (#294's auto-add rule A was removed), which is exactly why the gate must stay: the user asked for WR+capital, and the WR median does not describe it",
 );
 assert(
   !!candidatePosDecl && /return core\.length === 1 \? core\[0\] : null;/.test(candidatePosDecl),

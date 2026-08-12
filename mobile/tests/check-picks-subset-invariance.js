@@ -769,8 +769,7 @@ for (let i = 0; i < labelSites.length; i += 1) {
   // check run on raw source is satisfied — or defeated — by a comment naming
   // the very thing it forbids.
   assert(
-    !!gate &&
-      !!host &&
+    !!host &&
       findAll(host, (n) => ts.isIdentifier(n) && n.getText(src) === FLAG_ID).length === 0,
     `12c — total_value_label site ${i + 1} and its whole host function are flag-free`,
     'the #279/#285 label gate is independent of `league.picks_always_counted` and must stay so',

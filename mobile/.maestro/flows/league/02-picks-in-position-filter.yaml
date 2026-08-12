@@ -4,17 +4,43 @@ appId: com.fantasytradefinder.app
 # flags: release+league.picks_always_counted
 #
 # TIER B — same seeding blocker as 01-picks-in-subsets.yaml: the hermetic
-# world has zero draft_picks rows, so `hasPicks` is false, rule A cannot fire
-# and the Picks pill never renders. Skip in the gate (`--exclude-tags picks`),
-# verify manually via T-S6, unskip when the seeding follow-up lands. Flag
-# forcing and the two sim-run.sh traps: see 01's header.
+# world has zero draft_picks rows, so `hasPicks` is false and the Picks pill
+# never renders. Skip in the gate (`--exclude-tags picks`), verify manually
+# via T-S6, unskip when the seeding follow-up lands. Flag forcing and the two
+# sim-run.sh traps: see 01's header — though `release.json` now carries
+# "league.picks_always_counted": true itself, so the fixture alone puts this
+# flow in the ON state and `league.pos_candidates` stays false (it is true
+# only in `release-300.json`), which is what keeps T4's drill-in filter taps
+# from tripping #300's auto-return.
 #
-# WHAT THIS PROVES. The R-6 state machine, which is the whole of #294:
+# ══ REWRITTEN 2026-08-12 — THIS FLOW'S ORIGINAL PREMISE IS NOW WRONG ══════
+# It asserted #294's R-6 state machine:
 #   {}            --tap RB--> {RB, PICKS}   rule A (auto-add)
 #   {RB, PICKS}   --tap Picks-> {RB}        explicit, visible opt-out
 #   {RB}          --tap RB---> {}  = All    rule B (exit)
-# Rule B is what keeps the position pill REVERSIBLE — without it, tapping RB
-# off lands the user in a picks-only ranking they never asked for.
+# The operator removed rules A and B on 2026-08-12 — "All leagues have picks.
+# They should not be selected along with a position filter. Only by explicit
+# user action." Since every league carries picks, rule A fired for effectively
+# every user on every first position tap, which made pick inclusion a default
+# rather than a choice; and rule B, whose whole job was to stop a user being
+# stranded on a picks-only ranking rule A had put them on, would now throw
+# away a hand-tapped Picks pill. Both are gone.
+#
+# WHAT THIS PROVES NOW. That the pill row is a PLAIN toggle, and that pick
+# value enters the chart only when the user says so:
+#   {}            --tap RB----> {RB}         no auto-add — Picks stays dark
+#   {RB}          --tap Picks-> {RB, PICKS}  explicit, visible opt-IN
+#   {RB, PICKS}   --tap RB----> {PICKS}      the explicit choice SURVIVES
+#                                            (this is the step rule B broke)
+#   {PICKS}       --tap Picks-> {}  = All    plain toggle back to unfiltered
+# Steps 1 and 3 are the two that would have failed before the change: step 1
+# is rule A's removal, step 3 is rule B's. Step 4 replaces rule B's job — a
+# plain toggle is its own inverse, so reversibility no longer needs a rule.
+#
+# Note step 1's assertion is `selected: false`, not `assertNotVisible` — with
+# the flag ON and real pick data the pill RENDERS in every subset (that is
+# #293, untouched). What must be dark is its SELECTED state. `assertNotVisible`
+# here would pass for the wrong reason on any seed without picks.
 #
 # SELECTOR NOTE — the open question prd.md §7.4 handed to this author, closed
 # as far as it can be closed here, so the next author does not re-litigate it:
@@ -64,34 +90,56 @@ tags: [league, picks]
       id: "league-summary.posfilter.all"
     timeout: 20000
 
-# ── T3: the R-6 state machine ────────────────────────────────────────────
-# Step 1 — first position tap out of All auto-adds PICKS (rule A). On
-# origin/main the Picks pill stays unselected and RB value alone is charted.
+# ── T3: the plain-toggle state machine ───────────────────────────────────
+# Step 1 — a position tap out of All selects THAT POSITION and nothing else.
+# The Picks pill is still on screen (flag ON renders it in every subset) and
+# must read unselected. Before 2026-08-12 rule A lit it here.
 - tapOn:
     id: "league-summary.posfilter.rb"
 - assertVisible:
-    id: "league-summary.posfilter.picks"
+    id: "league-summary.posfilter.rb"
     selected: true
-- takeScreenshot: league-02-rb-autoadds-picks
-
-# Step 2 — the opt-out is one visible tap, and it sticks.
-- tapOn:
-    id: "league-summary.posfilter.picks"
 - assertVisible:
     id: "league-summary.posfilter.picks"
     selected: false
-- takeScreenshot: league-02-picks-deselected
+- takeScreenshot: league-02-rb-no-picks-autoadd
 
-# Step 3 — removing the last core position exits to All (rule B), rather
-# than stranding the user on a picks-only ranking.
+# Step 2 — the opt-IN is one visible tap, and it sticks.
+- tapOn:
+    id: "league-summary.posfilter.picks"
+- assertVisible:
+    id: "league-summary.posfilter.picks"
+    selected: true
+- takeScreenshot: league-02-picks-opted-in
+
+# Step 3 — removing the last core position LEAVES the hand-chosen Picks
+# selection standing. Rule B used to clear the whole filter to All here,
+# discarding the tap from step 2; that is the behaviour the operator's ruling
+# forbids. `all` must therefore read unselected while `picks` stays lit.
 - tapOn:
     id: "league-summary.posfilter.rb"
 - assertVisible:
+    id: "league-summary.posfilter.picks"
+    selected: true
+- assertVisible:
+    id: "league-summary.posfilter.all"
+    selected: false
+- takeScreenshot: league-02-picks-survives-rb-removal
+
+# Step 4 — and the way back to unfiltered is the same plain toggle: tapping
+# the lit Picks pill empties the filter, which IS the All state. No rule.
+- tapOn:
+    id: "league-summary.posfilter.picks"
+- assertVisible:
     id: "league-summary.posfilter.all"
     selected: true
-- takeScreenshot: league-02-rule-b-exit-to-all
+- takeScreenshot: league-02-toggle-back-to-all
 
 # ── T4: #237 mirroring + a truthful #243 caption ─────────────────────────
+# Entered from the All state left by step 4. Reaching `RB + Picks` now takes
+# TWO drill-in taps rather than one, because rule A no longer supplies the
+# second — which is the point, and it is asserted from the DRILL-IN pill row
+# so the #237 mirroring claim covers the new toggle as well.
 # The flow never taps a Starters control, so `subsetLabel` is still "All" —
 # the caption must read `All · RB + Picks`, NOT `Starters · …`.
 - tapOn:
@@ -102,6 +150,8 @@ tags: [league, picks]
     timeout: 20000
 - tapOn:
     id: "league-summary.roster-posfilter.rb"
+- tapOn:
+    id: "league-summary.roster-posfilter.picks"
 - assertVisible:
     id: "league-summary.filter-caption"
 # Canonical QB→RB→WR→TE order with Picks last and title-cased (filterPosLabel),

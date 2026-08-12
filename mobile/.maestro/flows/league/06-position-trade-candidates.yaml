@@ -59,12 +59,17 @@ appId: com.fantasytradefinder.app
 #
 # ══ TWO SEEDING FACTS THIS FLOW DEPENDS ON ══════════════════════════════
 #  1. The hermetic world writes ZERO draft_picks (see 01-picks-in-subsets.yaml
-#     § Tier B), so `hasPicks` is false, #294's rule A cannot auto-add PICKS,
-#     and one tap on the WR pill lands on exactly {WR}. IN A REAL LEAGUE WITH
-#     PICKS THAT TAP LANDS ON {WR, PICKS} AND THE DIVIDER STAYS HIDDEN until
-#     the user deselects the lit Picks pill — by design (the list would
-#     otherwise be ranked by WR+capital while the median measures WR alone),
-#     but it is a real discoverability cost and is flagged to the operator.
+#     § Tier B), so `hasPicks` is false here. That NO LONGER MATTERS for this
+#     flow's premise: #294's rule A (first position tap auto-adds PICKS) was
+#     removed by operator decision on 2026-08-12, so one tap on the WR pill
+#     lands on exactly {WR} in a pick-carrying league too, and the divider
+#     appears on the natural path. The discoverability cost flagged here
+#     before — "in a real league that tap lands on {WR, PICKS} and the divider
+#     stays hidden until the user deselects the lit Picks pill" — is closed.
+#     The `candidatePos` PICKS gate is unchanged and still correct: a user who
+#     deliberately taps Picks on top of WR is asking for a WR+capital ranking,
+#     which the WR median does not describe, so the line hides until they tap
+#     it back off. That path is now opt-in rather than the default.
 #  2. `aggregate_tier_labels` is an operator-only experiment, so the divider's
 #     caption is very likely the bare "League median" here rather than
 #     "League median · ≈2 firsts". Assertions are on the testID, never the
