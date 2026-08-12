@@ -118,31 +118,43 @@ const flagsCode = stripComments(read(FLAGS_REL));
 const apiText = read(API_REL);
 
 // ═══════════════════════════════════════════════════════════════════════
-// 1. The two flags exist in BOTH places, and are DARK in both
+// 1. The two flags exist in BOTH places, and AGREE
 // ═══════════════════════════════════════════════════════════════════════
 //
 // `revalidateFlags` replaces the whole map (`set({ flags })`), so a key that
 // lives in only one of client-defaults / server-config disagrees with itself
-// across the first two paints. Registering both, false, is what makes the
-// dark launch actually dark at every moment of the boot.
+// across the first two paints — the feature paints for one frame and then
+// vanishes, or the reverse.
+//
+// This compares the two FILES rather than asserting a literal. The original
+// version of these three assertions hard-coded `false` ("shipping dark") and
+// went red the moment the operator flipped both keys ON at ship (d207b03) —
+// a test that fails on the intended change is a test that gets deleted. The
+// invariant that actually matters survives every future flip: the two
+// sources agree, and the key exists in both.
 
 const defaultsBlock = (flagsCode.match(
   /const LAUNCHED_FLAG_DEFAULTS: FlagMap = \{([\s\S]*?)\n\};/,
 ) || [])[1];
 assert(!!defaultsBlock, 'LAUNCHED_FLAG_DEFAULTS is findable');
+const servedFlags = JSON.parse(
+  fs.readFileSync(path.join(ROOT, '..', 'config', 'features.json'), 'utf8'),
+);
 for (const key of ['league.pos_candidates', 'league.player_trade_handoff']) {
+  const m = defaultsBlock
+    ? defaultsBlock.match(new RegExp(`'${key.replace('.', '\\.')}':\\s*(true|false)`))
+    : null;
   assert(
-    !!defaultsBlock && new RegExp(`'${key.replace('.', '\\.')}': false`).test(defaultsBlock),
-    `#300 '${key}' is registered FALSE in LAUNCHED_FLAG_DEFAULTS`,
-    'sabotage detected: flipping it to true, or deleting the line and letting the key exist server-side only',
+    !!m,
+    `#300 '${key}' is registered in LAUNCHED_FLAG_DEFAULTS`,
+    'sabotage detected: deleting the line and letting the key exist server-side only',
+  );
+  assert(
+    !!m && typeof servedFlags[key] === 'boolean' && (m[1] === 'true') === servedFlags[key],
+    `#300 '${key}' agrees between LAUNCHED_FLAG_DEFAULTS and config/features.json`,
+    `sabotage detected: flipping one side only (defaults=${m ? m[1] : 'absent'}, served=${servedFlags[key]})`,
   );
 }
-assert(
-  !!defaultsBlock &&
-    !/'league\.(pos_candidates|player_trade_handoff)': true/.test(defaultsBlock),
-  '#300 neither #300 flag is baked ON',
-  'sabotage detected: a dark feature that paints for one frame before the server says no',
-);
 
 // ═══════════════════════════════════════════════════════════════════════
 // 2. `medians` is OPTIONAL, and the divider refuses to draw without it

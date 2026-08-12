@@ -873,6 +873,56 @@ export default function LeagueSummaryScreen() {
     ? `League median · ${medianAtPos.value_label}`
     : 'League median';
 
+  // ── #300 — EXPOSURE. The only evidence this feature works in the wild ──
+  // The operator shipped #300 lit and waived both the simulator gate and
+  // the Maestro run, so nothing but this event will ever witness that a
+  // real user reached the candidate view. Without it a zero on
+  // `league_candidate_pinned` is unreadable: nobody FOUND the divider is
+  // indistinguishable from nobody WANTED it.
+  //
+  // No existing event covers this. `league_view` fires once per mount,
+  // before any pill is tapped. `league_subset_changed` fires on the
+  // All/Starters/Bench control only — a position-pill tap emits nothing
+  // today, anywhere in the app. `league_team_opened` fires only for users
+  // who already acted, which is the exact population whose absence is the
+  // thing being measured.
+  //
+  // THE GATE IS `candidatePos` ITSELF, read, never re-derived. The
+  // divider's render condition is a conjunction of four things (exactly one
+  // core position · no PICKS · subset 'all' · flag on) and a second copy of
+  // it would drift the moment one clause moves — #294's rule A came and
+  // went inside three days. A copy that drifted LOOSE would over-count
+  // massively: every multi-position and every Starters/Bench view would
+  // read as an exposure.
+  //
+  // `divider` carries the render OUTCOME rather than gating the emit on it,
+  // because the three states are three different stories and two of them
+  // are invisible if only `shown` is emitted: `no_median` means the payload
+  // arrived without the field (an incomplete rollout — an ops signal), and
+  // `no_split` means the median marks no boundary in this league. Both are
+  // read off `medianAtPos` / `cutAfter`, the same memos the render reads.
+  //
+  // Deduped on the POSITION alone, in a ref: one row per entry into a
+  // position's candidate view, not one per render, and not a second row
+  // when a background refetch nudges `cutAfter`. Leaving the view resets
+  // the ref, so a genuine re-entry is a genuine second exposure.
+  const candidateViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!candidatePos) {
+      candidateViewRef.current = null;
+      return;
+    }
+    // Before the first fetch resolves there is no payload to be missing, so
+    // emitting here would report `no_median` for a request still in flight.
+    if (!query.isFetched) return;
+    if (candidateViewRef.current === candidatePos) return;
+    candidateViewRef.current = candidatePos;
+    track('league_pos_candidates_viewed', {
+      position: candidatePos,
+      divider: !medianAtPos ? 'no_median' : cutAfter == null ? 'no_split' : 'shown',
+    }, route.name);
+  }, [candidatePos, medianAtPos, cutAfter, query.isFetched, route.name]);
+
   // Operator decision 8 — the bottom `round(count * 0.33)` teams are Buyers,
   // the top the same count Sellers, the middle unlabelled. Resolved sizes:
   // 8 → 3/2/3 · 10 → 3/4/3 · 12 → 4/4/4 · 14 → 5/4/5.
@@ -1004,11 +1054,26 @@ export default function LeagueSummaryScreen() {
   // `setSide` (not `clear()`) preserves the user's `packageMode` choice,
   // which is unrelated to which asset is pinned.
   //
-  // No analytics event fires here on purpose. An unregistered event name is
-  // accepted-and-DROPPED by ingest with no 4xx and no client log
-  // (analytics_ingest.py), and `backend/analytics_taxonomy.py` is not this
-  // change's to edit — a silently-discarded emitter is worse than an honest
-  // gap. The proposed registration is in the build report.
+  // #300 ANALYTICS — this is the feature's conversion moment and the one
+  // number worth reading. `league_candidate_pinned` is registered in
+  // backend/analytics_taxonomy.py (ALLOWED_CLIENT_EVENTS + CLIENT_EVENT_PROPS)
+  // in the same change; tracking plan in the item folder's analytics.md.
+  // Registration is not optional bookkeeping — an unregistered name, and
+  // equally an unregistered PROP on a registered name, is counted and
+  // DROPPED by ingest behind a 200, with no 4xx and no client log.
+  //
+  // `side` is the tapped team's side of the median line and is NOT
+  // redundant with `verb`: the drill-in stacks the MIRROR roster too, whose
+  // rows carry the opposite verb, so all four combinations occur and
+  // `mirror = (verb === 'target') === (side === 'below')` is the direct
+  // measure of users acting against the direction the line chose for them.
+  //
+  // Both `position` and `side` are read off the same memos the render is
+  // gated on (`candidatePos`, `candidateDir`), never re-derived — and
+  // `candidateDir` is non-null wherever this callback is reachable, because
+  // the row action only mounts when a section carries a verb. `rank` is the
+  // live `selectedIdx`, the same value the drill-in subline prints, so it
+  // stays coherent with `side` across a mid-focus basis change.
   const handleRowAction = React.useCallback(
     (p: PowerRankedPlayer, verb: 'offer' | 'target') => {
       const player: Player = {
@@ -1018,12 +1083,18 @@ export default function LeagueSummaryScreen() {
         team: p.team,
         age: p.age,
       };
+      track('league_candidate_pinned', {
+        verb,
+        position: candidatePos,
+        rank: selectedIdx + 1,
+        side: candidateDir === 'target' ? 'above' : 'below',
+      }, route.name);
       const store = useFinderTargets.getState();
       store.setSide('give', verb === 'offer' ? [player] : []);
       store.setSide('receive', verb === 'target' ? [player] : []);
       navigation.navigate('Trades', { screen: 'TradesHome' });
     },
-    [navigation],
+    [navigation, candidatePos, candidateDir, selectedIdx, route.name],
   );
 
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────
