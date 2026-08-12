@@ -59,13 +59,15 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //   - Position filter (single OR multi, "All" default): on change the bars
 //     RE-VALUE to the selected keys and RE-SORT teams — a pure client-side
 //     transform over per-position values (no refetch). Restyled to colored
-//     outline pills, selected = solid fill. Under
-//     `league.picks_always_counted` (#293/#294, shipped ON v1.12.0; the flag is a kill switch) the selected
-//     keys ALWAYS include draft capital unless the user explicitly
-//     deselects the Picks pill: tapping the first position pill auto-adds
-//     PICKS, so a filter never silently drops a team's pick value. With the
-//     flag OFF the bars re-value to the selected position(s) ONLY, which is
-//     the shipped pre-#293 behavior.
+//     outline pills, selected = solid fill. A PLAIN toggle — the pill row
+//     adds and removes exactly the key tapped, and "All" clears. Draft
+//     capital is in the bars only when the user has tapped the Picks pill
+//     (operator, 2026-08-12: "All leagues have picks. They should not be
+//     selected along with a position filter. Only by explicit user action" —
+//     see `togglePos` for what that reversed and why). Under
+//     `league.picks_always_counted` (#293/#294, shipped ON v1.12.0; the flag
+//     is a kill switch) a selected Picks pill counts in EVERY subset; with
+//     the flag OFF it counts in All only, which is the pre-#293 behavior.
 //   - All · Starters · Bench segmented control (2026-07-26): "Starters" is
 //     the DERIVED value-optimal lineup the server computes per team
 //     (payload `teams[].starters` — the league's slot template filled with

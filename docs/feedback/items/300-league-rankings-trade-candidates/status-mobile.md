@@ -19,6 +19,7 @@
 - [4. What the scope block needs from the mobile lane](#4-what-the-scope-block-needs-from-the-mobile-lane)
 - [5. Proposed shared-doc text (orchestrator-owned files)](#5-proposed-shared-doc-text-orchestrator-owned-files)
 - [6. QA checklist — including everything static analysis cannot reach](#6-qa-checklist--including-everything-static-analysis-cannot-reach)
+- [7. 2026-08-12 — removing #294's rule A and rule B from `togglePos`](#7-2026-08-12--removing-294s-rule-a-and-rule-b-from-togglepos)
 
 ---
 
@@ -69,6 +70,7 @@ check-league-drill-in.js              29/29
 check-analytics-297-302.js            35/35
 check-single-pin-actions.js           17/17
 check-league-candidates-300.js        66/66   (new)
+check-picks-subset-invariance.js      72/72   (see §7.5 — was 66/3-red)
 ```
 
 The new suite was proven against **40 deliberate sabotages**: every one turns
@@ -123,22 +125,22 @@ outside the `all` subset, for the same class of reason — starters/bench
 re-derive `posValues[P]` from part of the roster while the server's median is
 over the whole one). Correct, and pinned by the new suite.
 
-**Cost, and the operator decision it needs:** in a pick-carrying league the
-divider now costs **one extra tap** — the user must deselect the lit Picks
-pill. In the hermetic QA world this never bites (the seed writes zero
-`draft_picks`), which is exactly why it would have shipped unnoticed. Options
-if the operator wants it to appear on the first tap:
+**RESOLVED 2026-08-12 — the operator took a stronger version of option 1.**
+The cost described here (in a pick-carrying league the divider took **one
+extra tap** to deselect the lit Picks pill, and the hermetic QA world's
+zero-`draft_picks` seed meant it would have shipped unnoticed) is **closed**.
+Rather than suppress rule A for one flag combination, the operator removed it
+outright, in both flag states: *"All leagues have picks. They should not be
+selected along with a position filter. Only by explicit user action."*
+Tapping WR now means `{WR}` everywhere, so the divider appears on the natural
+path and the design lab's ground truth above is restored as the ordinary case.
+The gate itself is unchanged and still load-bearing for the now-deliberate
+`{WR, PICKS}` state. Full record, including why rule B fell with rule A: §7.
 
-- have rule A skip the auto-add while `league.pos_candidates` is on and the
-  tap is the first position — i.e. tapping WR means `{WR}`. Reverses #294's
-  ruling for one flag combination;
-- add a `medians` variant that includes pick value so the two agree — a
-  bigger API change, and "richest at WR once you count their picks" is not a
-  positional thesis;
-- leave it: one visible, reversible tap, with the lit pill explaining itself.
-
-Recommend the third; flagging it because the design lab's recommendation
-assumed the first was already true.
+The options not taken, for the record: a pick-inclusive `medians` variant was
+rejected as a bigger API change for a thesis that is not positional ("richest
+at WR once you count their picks"); leaving the extra tap in place was the
+prior recommendation and is superseded.
 
 ### 3.2 Operator decision 6 cannot be fully satisfied from the client
 
@@ -242,10 +244,11 @@ Proposed, not applied. Exact text follows.
 >   ranked list is genuinely sorted by the quantity the median measures:
 >   exactly one core position, `PICKS` **not** in the filter, subset `all`,
 >   and `medians` present on the payload. Loosening any of the four draws a
->   line in the wrong place and nothing on screen says so. Under
->   `league.picks_always_counted` (shipped ON) rule A auto-adds `PICKS` on the
->   first position tap, so in a pick-carrying league the divider costs one
->   extra tap on the lit Picks pill — by design. Pinned by
+>   line in the wrong place and nothing on screen says so. Reaching the
+>   `PICKS`-in-filter case now takes a deliberate tap on the Picks pill —
+>   `league.picks_always_counted`'s auto-add rule was removed on 2026-08-12
+>   (§7) — so tapping WR from All draws the divider in a pick-carrying league
+>   as much as a pickless one. Pinned by
 >   `mobile/tests/check-league-candidates-300.js`.
 > - The **median line is the direction rule** for every team, including the
 >   unlabelled middle third; the Buyer/Seller band labels are **emphasis and
@@ -316,20 +319,84 @@ Proposed, not applied. Exact text follows.
 > real value moment (the user has chosen an asset and entered the finder),
 > so it should count like `league_team_opened`.
 
-### `living-memory/DECISIONS.md` — one entry
+### `living-memory/DECISIONS.md` — two entries
 
 > **The #300 median divider draws only when the ranked list is sorted by the
-> quantity the median measures.** The design lab's ground truth ("a
-> single-position filter returns exactly `posValues[P]`") predates
-> `league.picks_always_counted`'s auto-add rule, which puts `PICKS` in the
-> filter on the first position tap and makes the list a WR+capital ranking.
-> Rather than draw a line that is confidently in the wrong place, the client
-> requires: one core position, no `PICKS`, subset `all`, and `medians` on the
-> payload. Cost: one extra tap on the lit Picks pill in pick-carrying
-> leagues. Alternatives (suppress rule A under the flag; add a
-> picks-inclusive median) are recorded in
-> `docs/feedback/items/300-league-rankings-trade-candidates/status-mobile.md`
-> §3.1 for the operator.
+> quantity the median measures.** A median across a ranked list is only true
+> if the list is ordered by the same quantity, so the client requires all
+> four of: exactly one core position, `PICKS` not in the filter, subset
+> `all`, and `medians` on the payload. Loosening any one draws a line that is
+> confidently in the wrong place, and nothing on screen would say so. The
+> `PICKS` clause was the contentious one: at authoring time
+> `league.picks_always_counted` auto-added `PICKS` on the first position tap,
+> which made a WR+capital ranking the routine state and cost the user an
+> extra tap on the lit Picks pill to see the line. That auto-add was removed
+> on 2026-08-12 (entry below), so the gate now fires only on a deliberate
+> Picks tap and the natural path reaches the divider. The gate itself is
+> unchanged and still correct: a user who adds Picks to a WR filter is asking
+> for a WR+capital ranking, which the WR median does not describe.
+
+> **`league.picks_always_counted` no longer touches the position-pill
+> toggle — pick value is an explicit opt-in (2026-08-12, operator).**
+> "All leagues have picks. They should not be selected along with a position
+> filter. Only by explicit user action." This reverses two rules #293/#294
+> shipped two days earlier, with their original reasoning on the record.
+> Rule A auto-added `PICKS` on the first position tap so that "selecting a
+> position must not remove draft capital" — a rebuilding team holding four
+> 1sts had ranked like a team holding none the moment a filter was applied.
+> The counter-reading that won: because *every* league carries picks, rule A
+> fired for effectively every user on every first tap, which makes pick
+> inclusion a default rather than a choice, and a position filter should mean
+> that position. Rule B (removing the last core position clears the filter to
+> All) fell with it, and had to: its stated job was to keep the user out of
+> "a picks-only ranking they never asked for" — a state only rule A could
+> produce unasked. With rule A gone every `PICKS` in the filter is a
+> hand-tapped pill, so clearing to All would discard the explicit choice the
+> ruling exists to protect. #294's objection that separating the two cases
+> "would need a hidden 'the user chose picks by hand' state axis, which is
+> deliberately NOT built" is obsolete for the same reason: removing rule A
+> makes the axis unnecessary. `togglePos` is now a plain, flag-independent
+> toggle — its own inverse, so reversibility no longer needs a rule, and
+> `{PICKS}` + RB − RB returns to `{PICKS}` instead of costing the extra tap
+> #294 accepted. Everything else the flag governs is untouched (picks counted
+> in all three subsets, the bar segment / legend swatch / pill in every
+> subset, the drill-in "Draft capital" group, three hint strings), and
+> flag-OFF behaviour is byte-identical — the removed guard was
+> `if (picksAlwaysCounted && …)`, inert when OFF. Twelve gated expressions
+> remain of R-0.2's fourteen. Pinned by
+> `mobile/tests/check-picks-subset-invariance.js` assertions 3e–3h, which
+> assert the rules' **absence** where the old suite asserted their gating.
+
+### `docs/config-reference.md:262` — `league.picks_always_counted` row, two corrections
+
+Both sentences below are now false and would mislead anyone reading the flag's
+contract. **Replace** *"the first position tap auto-adds `PICKS` (lit pill,
+one tap to opt out);"* with:
+
+> the Picks pill is a plain toggle and pick value enters the chart **only**
+> when the user selects it (the first-position-tap auto-add and the
+> clear-to-All-on-last-removal rules shipped with #294 were removed on
+> 2026-08-12 by operator decision — `togglePos` is now flag-independent);
+
+**Replace** *"Read ONCE and gating all fourteen expressions atomically"* with:
+
+> Read ONCE and gating all **twelve** remaining expressions atomically (was
+> fourteen; the two `togglePos` rules are gone)
+
+### `living-memory/DECISIONS.md:201` — the #293/#294 entry, amend in place
+
+The existing entry's decision sentence still asserts *"with the first position
+tap auto-adding `PICKS` as a visibly lit pill that one tap removes"*, which is
+no longer true. It should not be rewritten — the 2026-08-12 entry proposed
+above supersedes that clause — but the clause needs a pointer so the two are
+not read as contradicting each other. **Append** to that entry:
+
+> **Amended 2026-08-12:** the auto-add clause of this decision (and the
+> clear-to-All rule that supported it) was reversed by operator decision — see
+> the 2026-08-12 entry. The rest of this decision stands: pick value remains
+> subset- and filter-independent, counted in All, Starters and Bench and
+> whenever `PICKS` is in the filter. What changed is only *how* `PICKS` gets
+> into the filter — a user tap, never a side effect.
 
 ### `living-memory/TEST_LEDGER.md` — one entry
 
@@ -337,9 +404,14 @@ Proposed, not applied. Exact text follows.
 > one sim): `tsc --noEmit` clean · `testid-lint.sh` OK ·
 > `check-league-drill-in` 29/29 · `check-analytics-297-302` 35/35 ·
 > `check-single-pin-actions` 17/17 · **`check-league-candidates-300` 66/66
-> (new, proven against 40 sabotages, 0 false passes)**. Maestro flow
-> `league/06-position-trade-candidates.yaml` authored but **not executed** —
-> it needs the `medians` field live in the hermetic world. Simulator items
+> (new, proven against 40 sabotages, 0 false passes)** ·
+> **`check-picks-subset-invariance` 72/72** (was 66/3-red on the branch —
+> #300's `activeValueLabel` refactor had broken assertion 12; re-pinned, and
+> 3e–3h added for the 2026-08-12 rule A/B removal, each proven against a
+> targeted sabotage). Maestro flows `league/06-position-trade-candidates.yaml`
+> (new) and `league/02-picks-in-position-filter.yaml` (rewritten for the plain
+> toggle) authored but **not executed** — 06 needs the `medians` field live in
+> the hermetic world; 02 is Tier B (zero seeded draft picks). Simulator items
 > outstanding: §6 of `status-mobile.md`.
 
 ---
@@ -432,3 +504,168 @@ Ordered by risk. **Items 1–4 are the ones no static tool can settle.**
     drill-in are indistinguishable from `origin/main` — no divider, no chips,
     no captions, inert 32pt tiles at a 4pt margin, micro-tags present, and
     the numeric value column exactly as today.
+
+---
+
+## 7. 2026-08-12 — removing #294's rule A and rule B from `togglePos`
+
+Operator decision, delivered mid-#300: *"All leagues have picks. They should
+not be selected along with a position filter. Only by explicit user action."*
+
+This is a deliberate reversal of behaviour shipped two days earlier, taken
+with the original reasoning on the record. It is not relitigated here — the
+reasoning on both sides is **preserved in the code comment** above
+`togglePos` and in `config/features.json`'s flag block, rather than deleted.
+
+### 7.1 What was removed
+
+| Rule | What it did (flag ON) | Verdict |
+|---|---|---|
+| A — auto-add | first position tap out of `{}` also selected `PICKS` | **removed** — the operator's ruling |
+| B — exit | removing a position leaving no core position cleared the filter to All | **removed** — see §7.2 |
+
+Exactly one code hunk, `mobile/src/screens/LeagueSummaryScreen.tsx`
+`togglePos`: four lines deleted, two collapsed into one. `picksAlwaysCounted`
+references in that file go 24 → 23; the one lost is the `if (picksAlwaysCounted
+&& pos !== 'PICKS')` guard the two rules lived under. Everything else is
+comments.
+
+### 7.2 The rule B decision, and why it follows
+
+**Rule B goes.** Its stated justification — *"instead of stranding the user in
+a picks-only ranking they never asked for"* — was true **only because rule A
+could put `PICKS` in the filter without the user asking**. With rule A gone,
+`PICKS` in the filter can only ever mean the user tapped the Picks pill
+deliberately, so rule B's trigger and the operator's protected case are now
+*the same set of states*: `{PICKS, RB}` minus `RB` clearing to All discards an
+explicit choice, which is precisely what the ruling objects to.
+
+It could not be narrowed instead, because there is nothing left to narrow it
+*to*. Rule B's only observable effect was ever on states containing `PICKS` —
+with no `PICKS`, removing the last core position already yields the empty set,
+which *is* All. So the rule is now pure loss: every state it fires on is a
+state it must not fire on.
+
+Two of #294's other claims for rule B also dissolve:
+
+- **Reversibility.** Rule B was described as "what keeps the position pill
+  reversible — tap RB on, tap RB off, back where you started." A plain toggle
+  is its own inverse, so reversibility is now structural rather than a rule.
+  It is also strictly *better*: #294 accepted one broken case (`{PICKS}` → add
+  RB → remove RB lands on All, one extra tap); a plain toggle returns to
+  `{PICKS}`.
+- **The "hidden state axis".** #294 recorded that distinguishing a hand-chosen
+  `PICKS` from an auto-added one *"would need a hidden 'the user chose picks
+  by hand' state axis, which is deliberately NOT built."* Removing rule A
+  makes that axis **unnecessary**: every `PICKS` is hand-chosen, so the
+  distinction is free. This is the load-bearing reason rule B can go without
+  building anything.
+
+A picks-only ranking is still reachable — tap Picks from All, as it always
+was, since rule A never fired on the Picks pill itself. What changed is that
+nothing but a user tap can put you there.
+
+### 7.3 The three verifications requested
+
+**(1) The pill invariant holds, unchanged.** *"Whenever the filter is
+non-empty, the Picks pill's selected state is exactly equal to whether pick
+value is in the chart."* Checked against the two halves:
+
+- `activeTotal` (`:358–378`) is untouched. For a non-empty filter it sums per
+  key and adds `picks.value` **iff** `'PICKS' ∈ filter`.
+- The pill's `accessibilityState={{ selected }}` in `PosFilterPills`
+  (`:2149`) **is** `filter.has('PICKS')`.
+
+So the two sides are the same predicate, and always were — the invariant never
+depended on rule A. Under flag OFF the `PICKS` arm returns 0 in a non-`all`
+subset, but that state stays unreachable via `switchSubset`'s synchronous
+strip, the reconciliation effect, and `showPicksKey` hiding the pill; that
+machinery is untouched. The one **newly reachable** state is `{PICKS}` alone
+arrived at from `{PICKS, RB}` — `activeTotal` returns `picks.value`, pill lit,
+invariant satisfied — and it introduces no new rendering path, because
+`{PICKS}` was already reachable by tapping Picks from All.
+
+**(2) `league.picks_always_counted` is still meaningful.** All five surfaces
+the task names are byte-untouched, verified by diffing the flag's occurrences:
+`activeTotal`'s two arms (`:366–376`), `showPicksKey` (`:600`), `BarColumn`'s
+key list / `segValue` / `shownBase` (`:2207–2222`), the drill-in "Draft
+capital" group (`:1918`), and the three hint strings via `picksInView`
+(`:606`) and the filtered-hint ternary (`:1498`). Twelve of R-0.2's fourteen
+gated expressions remain; G4/G5 (`togglePos`) are the two that are gone.
+**Flag-OFF behaviour is byte-identical** — the deleted guard began
+`if (picksAlwaysCounted && …)`, so it was already inert with the flag off.
+
+**(3) #300's divider gate stays, comment corrected.** `candidatePos`
+(`:838–844`) still bails on `posFilter.has('PICKS')` — unchanged, and
+`check-league-candidates-300.js` still catches its removal (sabotaged both by
+deletion and by comment-out; both red). The comment block above it described
+rule A as a live obstacle and now describes the current reality: the natural
+path (tap WR from All) reaches the divider in a pick-carrying league, and the
+gate fires only when a user explicitly adds Picks — which is the state where
+the WR median genuinely does not describe the WR+capital ranking they asked
+for.
+
+### 7.4 What each pinning artifact needed
+
+| Artifact | What it needed, and why |
+|---|---|
+| `mobile/.maestro/flows/league/02-picks-in-position-filter.yaml` | **Rewritten.** Its core premise (`{} --tap RB--> {RB, PICKS}`) is now wrong. The new four-step machine asserts the plain toggle, and its steps 1 and 3 are exactly the two that would fail on pre-change code. Step 1 asserts `selected: false` on the Picks pill rather than `assertNotVisible` — with the flag ON and real picks the pill *renders*; what must be dark is its selected state. T4 now needs two drill-in taps to reach `RB + Picks`, since rule A no longer supplies the second. |
+| `mobile/.maestro/flows/league/04-picks-flag-off.yaml` | **Section (b) no longer distinguishes anything** — with rule A gone globally there is no rule to be dark, in either flag state. The claim is retired rather than reworded; the steps survive as screenshot baseline, which the header already declared the flow's honest job. Separately: this flow's header asserted `release.json` carries the flag `false`. It reads `true` (line 139) and has since 2026-08-10, so `# flags: release` runs it flag-**ON** despite the filename. Corrected in the header and filed below — fixing it properly needs a fixture, which is not this change's to add. |
+| `mobile/.maestro/flows/league/06-position-trade-candidates.yaml` | Its seeding note said the zero-picks seed was what let one WR tap land on `{WR}`, and flagged the real-league divider-hidden case as a discoverability cost. That cost is **closed**; note rewritten. |
+| `mobile/tests/check-picks-subset-invariance.js` | Pinned rule A/B via one row — `['G4/G5 togglePos', togglePosInit]` in `bodyGated`, asserting `togglePos` branches on the flag. That assertion encoded **rules A and B specifically**, not a broader invariant: the flag's other twelve gated expressions are asserted individually and none of them changed. Row removed, replaced by 3e–3h asserting the **absence** (§7.5). |
+| `mobile/tests/check-league-candidates-300.js` | Gate assertion unchanged; its failure message called the `PICKS`-present state "the ROUTINE state under `league.picks_always_counted`'s auto-add rule". Reworded. |
+| `config/features.json` | The `_comment_league_picks_always_counted` block documented both rules at length and would have become a lie. Rewritten to describe current behaviour, record the 2026-08-12 removal as an operator decision, and **preserve the original reasoning verbatim in substance**. |
+
+### 7.5 New and changed assertions, each with its sabotage
+
+`check-picks-subset-invariance.js`: **66 pass / 3 fail → 72 pass / 0 fail.**
+
+The three pre-existing failures (12a/12b/12c) were **not caused by this
+change** — they were red on `build-300-mobile` before it. Commit `1c3471a`
+(#300) folded the screen's two inline `total_value_label` render sites into
+one `activeValueLabel` helper and moved the gate from a JSX expression into an
+`if` statement, breaking both shape assumptions the checks were written on.
+Confirmed by running the suite against `62ff8d6`'s copy of the screen: green.
+The invariant they defend is intact, so they were re-pinned to the new shape,
+deliberately no weaker.
+
+| Assertion | Change | Sabotage that proves it |
+|---|---|---|
+| `3 — G4/G5 togglePos branches on the flag` | **removed** | superseded — it asserted the rules exist |
+| `3e — togglePos does not reference picksAlwaysCounted` | new | S1 re-add rule A · S2 re-add rule B · S3 re-add both — all red |
+| `3f — togglePos contains no 'PICKS' literal` | new | S1, S3 red; **S4** re-adds rule A *without* the flag guard — 3e cannot see it, 3f still red |
+| `3g — exactly ONE empty new Set()` | new | S2, S3 red; **S5** re-adds rule B with no flag reference and no `'PICKS'` literal — only 3g/3h see it |
+| `3h — that empty Set is the pos === 'ALL' branch` | new | S2, S3, S5 red; **S6** moves the surviving clear onto `pos === 'QB'` — 3g stays green, 3h alone goes red |
+| `12a — ONE render path` (was: two sites) | changed | **S8** adds a second `total_value_label` site — red |
+| `12b — keeps the unfiltered-All gate` | changed (accepts an `if` gate as well as an expression) | **S9b** widens the gate to `subset === 'all'` — red, alone |
+| `12c — site AND its whole host function are flag-free` (was: gate only) | changed, **strengthened** | **S10b** puts `picksAlwaysCounted` in the helper without adding a label site — red, alone. The old gate-only check would have missed it. |
+
+**Comment immunity, checked rather than assumed.** All four new assertions are
+AST-level (`ts.isIdentifier` / `ts.isStringLiteral` / `ts.isNewExpression`), and
+12c was converted from `flat().includes()` to an identifier-node scan for the
+same reason. **S7** is the control: a comment inside `togglePos` naming both
+`picksAlwaysCounted` and `next.add('PICKS')` produces **zero** failures. The
+shipped comment necessarily names both, so a raw-source scan would have been
+red on the correct build. `check-league-candidates-300.js` was independently
+checked: **S12** comments out the divider gate and the suite still goes red
+(it strips comments before matching), where a naive text scan would pass.
+
+**Twelve sabotages run, zero false passes.** The harness rewrites the screen
+in place and `git checkout --`s it afterwards, so it is not committed; every
+mutation was verified to have actually applied (`git diff --quiet` guard) —
+a mutation that silently no-ops is itself a false pass.
+
+### 7.6 Filed for the operator
+
+1. **There is no flag-OFF fixture for `league.picks_always_counted`.**
+   `release.json` has carried `true` since 2026-08-10, so
+   `04-picks-flag-off.yaml` runs flag-**ON** despite its name, and the only
+   route to the OFF arm is `sim-run.sh --flags` with inline JSON. The kill
+   switch is therefore un-exercised end-to-end. A `release-picks-off.json`
+   fixture would fix it; not added here because fixtures are shared and
+   out of this change's lane.
+2. **`02-picks-in-position-filter.yaml` remains Tier B.** The hermetic world
+   seeds zero `draft_picks`, so `hasPicks` is false and the Picks pill never
+   renders — the rewritten steps 1–4 cannot run until the seeding follow-up
+   lands. Until then the rules' removal is evidenced by 3e–3h (source-level,
+   seed-independent) and by manual control T-S6.
