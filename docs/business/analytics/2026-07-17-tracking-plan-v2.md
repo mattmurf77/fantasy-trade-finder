@@ -166,3 +166,31 @@ One client-fired event (`POST /api/events`) for the League Summary collapsed out
 | `outlook_strip_toggled` | user taps the strip and the expand/collapse toggle applies (`LeagueSummary`) | `league_id`, `expanded` (the **resulting** state) |
 
 > **Ships dark by design.** The strip lives behind `outlook.odds` (and `track()` is a no-op unless `analytics.client_events` is on), so zero rows arrive until the flag lights. The operator rejected the analytics waiver 2026-08-11 — the instrumentation exists from day one of the strip (NULL-`platform`-incident lesson).
+
+---
+
+## Addendum 2026-08-11c — `trade_sent` (send-leg completion, non-Sleeper platforms)
+
+One **server-fired** event (`SERVER_FIRED_EVENTS` in `backend/analytics_taxonomy.py`; `event_id=NULL`, never client-submittable) closing the gap the Send-in-MFL scope block flagged (§1 partial waiver): the MFL send route had no completion event. Operator-approved taxonomy addition.
+
+> **Rescoped at the MFL/P0-7 merge (2026-08-11).** This addendum originally spec'd `trade_sent` for BOTH platforms, but it landed concurrently with P0-7 (addendum `2026-08-11-p0-7-addendum.md`), which shipped `sleeper_send_succeeded` — server-fired on the same Sleeper success path, wired into `FUNNEL_STAGES` stage 8 and `FEATURE_VERTICALS["send_in_sleeper"]`. Firing both on one real Sleeper send would double-count the send leg, so at the merge `trade_sent` was **rescoped to non-Sleeper platforms only** (today: MFL). One event per real occurrence: Sleeper confirmed sends → `sleeper_send_succeeded`; non-Sleeper confirmed sends → `trade_sent`. A cross-platform send count is the union of the two.
+
+| Event | Fires | Props |
+|---|---|---|
+| `trade_sent` | **Confirmed success only** on `POST /api/trades/propose-mfl` — after the platform write succeeded, never on validation or hard-block failures (`mfl_asset_unmapped`, auth/verification denials, write failures). **Never on the Sleeper path** (see rescope note above) | `platform` (`mfl` — **required, never null**; the NULL-`platform` incident is why; `sleeper` never appears — future non-Sleeper send platforms extend the enum), `give_count`, `receive_count` (per-side asset counts; MFL folds its side-attributed pick assets in), `outcome` (platform-confirmed status string, `proposed`) |
+
+`league_id` rides the envelope column (`record_event(league_id=…)`), not props. **No player ids and no PII in props** — counts and enums only. Trade-asset identity already lives in `deck_outcomes` (`propose` rows) where an `impression_id` is present.
+
+> **WAT note:** `trade_sent` is now *in the taxonomy* but deliberately **not** added to `WAT_LIVE` (`trade_proposed`/`match_swiped`/`calc_trade_evaluated`) — widening the WAT definition is a separate metric decision for the funnel owner, not part of this instrumentation change. (P0-7 moved `sleeper_send_succeeded` and its client siblings to `WAT_LIVE` on its own — that covers the Sleeper leg only.)
+
+---
+
+## Addendum 2026-08-11d — `trade_responded` (trade-lifecycle response leg, MFL)
+
+The response-leg sibling of `trade_sent`, added with the MFL trade-lifecycle routes (`POST /api/trades/respond-mfl`). Same taxonomy discipline: **server-fired** (`SERVER_FIRED_EVENTS`; `event_id=NULL`, never client-submittable), `platform` mandatory and non-null, counts/enums only. No dedup concern: nothing else measures responses (Sleeper has no respond route; `trade_accepted`/`trade_declined` are FTF-internal match outcomes, not platform-confirmed responses).
+
+| Event | Fires | Props |
+|---|---|---|
+| `trade_responded` | **Confirmed success only** on `POST /api/trades/respond-mfl` — after MFL confirmed the `tradeResponse` import; never on validation, auth, or write failures. (No Sleeper respond route exists; if one ships, it reuses this event with `platform: "sleeper"` — no Sleeper-named sibling to collide with.) | `platform` (`mfl` — **required, never null**), `response` (`accept` \| `reject` \| `revoke` — the action requested), `outcome` (platform-confirmed result: `accepted` \| `rejected` \| `revoked`) |
+
+`league_id` rides the envelope column. **No trade contents, no MFL `trade_id`, no PII in props** — the funnel question is "are responses happening, and which kind", not which trade. Same WAT posture as `trade_sent`: in the taxonomy, not in `WAT_LIVE`.

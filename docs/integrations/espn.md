@@ -125,6 +125,7 @@ ESPN leagues and let them pick, instead of asking for a league ID?"
 | URL builder | `backend/espn_service.py` (`fan_leagues_url`) |
 | Call function | `backend/espn_service.py` (`fetch_fan_leagues`) |
 | Route | `GET /api/espn/my-leagues` (`backend/server.py`, `espn_my_leagues`) — flag `espn.league_picker` |
+| Second caller | `POST /api/espn/link`'s credential-only store (2026-08-12) uses the same read as its **pre-store verification probe** — see §2.4 item 1b |
 
 **Auth:** always cookie-mode — there is no "public" fan profile. Reads the
 session user's already-**stored** `espn_credentials` row (same
@@ -207,6 +208,7 @@ Table `espn_credentials` — `backend/database.py:1314-1321`:
 | `swid` | String | Braced GUID, stored **plaintext** (it's the ESPN member id, not a secret on its own) |
 | `espn_s2_encrypted` | Text, NOT NULL | **Fernet ciphertext** — the full-session credential, never stored plaintext |
 | `expires_hint_at` | String (ISO UTC) | Best-effort guess (~1 year community consensus); NULL = unknown. Actual expiry is discovered via a 401/403 (see §4), not this hint |
+| `verified_at` | String (ISO UTC) | **Credential-honesty fix (2026-08-12):** when this pair last PROVED itself via a live authenticated ESPN read — stamped by both store paths (§2.4). NULL = never proven (legacy rows): `GET /api/espn/link` reports such a row as **not** connected, so the client re-runs the verifying sign-in flow |
 | `created_at` / `updated_at` | String | Standard audit columns |
 
 Encryption key: `SLEEPER_TOKEN_KEY` (Fernet, base64) — **shared across every
@@ -223,10 +225,32 @@ Related league-binding columns on the `leagues` table (`backend/database.py:254-
 
 1. **Link (private):** client pastes or WebView-captures `espn_s2`+`swid` →
    `POST /api/espn/link` → cookies persisted first via `upsert_espn_credential`
-   (`backend/database.py:9395-9436`, encrypted at rest), *then* the league +
-   membership snapshot is written (`backend/server.py:18452-18488`) — order
+   (`backend/database.py`, encrypted at rest), *then* the league +
+   membership snapshot is written — order
    matters so a later re-import can reuse the cookies even if the league write
-   fails.
+   fails. The store stamps `verified_at`: the league fetch that just succeeded
+   ran WITH this pair attached, and the in-app flow only collects cookies after
+   an anonymous read 403s (private league), so that fetch was a genuine
+   authenticated proof — no second probe is made.
+1b. **Credential-only store (send-auth lazy flow, 2026-08-11; verification
+   added 2026-08-12):** `POST /api/espn/link` with `espn_s2`+`swid` and NO
+   `espn_league_id` — the ESPN Connect WebView entered from the trade-send
+   path (the league is already imported; only the account credential is
+   missing). The route **verifies before storing**: one live authenticated
+   fan-profile read (`espn_service.fetch_fan_leagues`, §1.7 — the fan API has
+   no anonymous success mode; a cookie-less request for an unknown SWID 404s,
+   and 401/403/404 all map to `EspnAuthError`). Success → pair stored
+   encrypted with `verified_at` stamped, `{connected:true, stored:
+   "credential", verified:true}`. `EspnAuthError` → **403
+   `espn_bad_credentials`, nothing stored** — the user learns at sign-in
+   time, not at their next trade send. Any other failure (transport,
+   ESPN 5xx, non-JSON edge page) → **502 `espn_unavailable`, nothing
+   stored** — deliberately distinct: an outage is not a verdict on the
+   cookies, so a user with a good sign-in is told to retry, never to
+   re-authenticate. This closed the one credential-honesty gap among the
+   platforms: MFL proves credentials via `login` + `fetch_my_leagues` and
+   Sleeper via `verify_token_live` before storing; ESPN previously stored
+   the pair blind and reported `connected: true`.
 2. **Re-link without pasting:** if the client sends no `espn_s2` on a repeat
    `POST /api/espn/link`, the backend falls back to the previously stored
    credential (`backend/server.py:18400-18412`) via `get_espn_credential`

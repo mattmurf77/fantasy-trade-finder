@@ -780,6 +780,7 @@ ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-
 | `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext |
 | `espn_s2_encrypted` | text | **Fernet ciphertext** of the `espn_s2` cookie — never plaintext, never logged |
 | `expires_hint_at` | str | ISO UTC guess (~1yr community consensus; undocumented). NULL = unknown — 401s drive reconnect |
+| `verified_at` | str | ISO UTC of the last live authenticated ESPN read that PROVED this pair (credential-honesty fix, 2026-08-12). Stamped by both `/api/espn/link` store paths; NULL = never proven (legacy rows) → `GET /api/espn/link` reports not connected |
 | `created_at`, `updated_at` | str | |
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.

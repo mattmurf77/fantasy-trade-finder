@@ -1,0 +1,215 @@
+# Feature Scope — "Send in MFL" (one-click trade proposal into MyFantasyLeague)
+
+**Date:** 2026-08-11
+**Entry point:** direct ask (operator-dispatched build agent), building on feedback #177's
+`send-trade-feasibility.md` and `docs/plans/send-in-mfl-research-2026-08-11.md`
+**Builder:** worktree agent `feat/send-in-mfl` (isolated; no merge/push — operator reviews)
+**Operator sign-off on waivers:** **PENDING — this scope block carries waivers (§1c-partial, §3 sim run, live-API confirmations). Surface to operator before ship.**
+
+---
+
+## 1. Analytics scope
+
+- [x] **(b) Existing events cover it** — no new event names are introduced, mirroring the
+  Sleeper propose route (which also fires no dedicated client/server event):
+  - `api_call` (flag `obs.api_events`, server-fired, `user_id="system:api"`) — the new
+    adapter `backend/mfl_write.py` instruments its live HTTP call through
+    `api_observability.observe_call("mfl", "import.tradeProposal", ...)` with the same
+    safe props the MFL export calls already carry (`league_id`, `host`, status, latency,
+    error kind). The `MFL_USER_ID` cookie is **never** an event property (mfl.md §6).
+  - `deck_outcomes` `propose` rows (flag `deck.signal_v2`) — the MFL route calls the same
+    `_save_deck_outcome_safe(impression_id, "propose")` hook as the Sleeper route, so
+    deck-sourced sends land in the existing outcome spine.
+  - Question answered: "are MFL sends happening, succeeding, failing, and why" — from
+    `api_call` status/error-kind on `import.tradeProposal` plus route logs.
+- [x] (a) New events: ~~none~~ **`trade_sent` (added 2026-08-11 follow-up, operator-approved;
+  rescoped to non-Sleeper platforms at the P0-7 merge the same day).**
+  - The original partial waiver ("no dedicated `trade_sent` funnel event exists for
+    Sleeper sends either; parity is deliberate") is **RESOLVED**: the operator approved
+    the send-leg event (`backend/analytics_taxonomy.py` `SERVER_FIRED_EVENTS` +
+    tracking plan v2 addendum 2026-08-11c). **Merge rescope:** audit P0-7 landed
+    `sleeper_send_succeeded` on the same Sleeper success path concurrently, so
+    `trade_sent` now fires ONLY on the confirmed-success path of
+    `POST /api/trades/propose-mfl` — never on `POST /api/trades/propose` (that would
+    double-count the send leg; one event per real occurrence), never on validation
+    or hard-block failures. Props: `platform` (`mfl`, **mandatory non-null** —
+    the NULL-`platform` incident), `give_count`/`receive_count` (MFL picks are
+    side-attributed and fold in), `outcome`. No player PII in props.
+    Cross-platform send counts = `sleeper_send_succeeded` ∪ `trade_sent`.
+    (c) n/a.
+
+## 2. Schema & flag scope
+
+- New/changed tables or columns: **none** (reuses `mfl_credentials`,
+  `leagues.platform_*`, `sleeper_credentials`' encryption key). → data-dictionary n/a.
+- New/changed feature flags: **`trade.send_in_mfl`** — added to
+  `backend/feature_flags.py` `FLAG_KEYS` + `config/features.json` (**default OFF**) +
+  `docs/config-reference.md`.
+  - Graduation criterion: operator completes the live-verification checklist below
+    against a real test league (import response shape, `wwwNN` host requirement,
+    pick-asset encodings), MFL client registration is done (multi-platform plan §9 Q1),
+    and the flag flips on in prod only after one observed end-to-end live send.
+  - Rollback lever (ship-the-knob): the flag itself — routes 404 and the mobile button
+    unmounts when off; no data migration to unwind.
+- New env vars / `model_config` keys: **none** (reuses `SLEEPER_TOKEN_KEY`,
+  `MFL_USER_AGENT`).
+
+## 3. Test scope (mobile test platform)
+
+- [x] **New flow:** `mobile/.maestro/flows/trade-send/mfl-send-gating.yaml` — authored
+  (id-selectors only, no sleeps/coordinates/text-taps). Covers: MFL league shows
+  "Send in MFL" (flag on) and does NOT show "Send in Sleeper"; Sleeper league still
+  shows "Send in Sleeper".
+  - **WAIVER (explicit, operator gate):** this flow **cannot run yet** — the hermetic
+    seed harness (`backend/tests/fixtures/seed_ui_test_db.py`) supports only
+    `sleeper`/`espn` platforms; an `mfl` seed profile does not exist, and this build
+    agent has no MFL test-league creds for a live run. The flow is authored against the
+    planned `qa_mfl` profile and is documented as blocked in its header. Operator gate:
+    author the `mfl` seed profile (or run against a live MFL-linked league) + run on-sim
+    before ship.
+- `testID`s added: `trades.send-sleeper-btn` (registered in lld.md Appendix A, now
+  actually wired), `trades.send-mfl-btn` (new). Both pass `mobile/scripts/testid-lint.sh`.
+- **Capture delta:** none pre-ship — the button is flag-OFF dark; capture
+  `trades`/`matches` on an MFL profile when the flag graduates.
+- Smoke-suite impact: none expected — 05-trades-render/06-trades-deck/08-matches run on
+  Sleeper-platform seeds where the rendered button is unchanged (`Send in Sleeper`, now
+  with a testID). **Sim verification of the smoke subset is part of the operator gate
+  below (not runnable in this environment).**
+- Backend: pytest added — `backend/tests/test_mfl_write.py` (adapter: URL/payload
+  construction incl. both pick encodings, response parsing XML+JSON, auth mapping,
+  asset-id validation) and `backend/tests/test_mfl_propose_route.py` (route: happy path,
+  reverse-crosswalk hard-block, expired-cookie 409 + credential drop, verification gate,
+  flag-off 404, MFL branch of `/api/trades/validate`). Zero live network — injected
+  openers/mocks only.
+- Mobile structural test: `mobile/tests/check-send-button-platform.js` (npm
+  `test:send-button-platform`) — pins the platform branch: ESPN/Fleaflicker render
+  neither send button, MFL renders only the MFL button, Sleeper only the Sleeper button.
+
+## 4. Docs scope (MANDATORY — HLD / LLD / API)
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | **updated** | New `POST /api/trades/propose-mfl` row + "Send in MFL" section + `/api/trades/validate` contract extended (MFL branch + gate now either send flag) |
+| `living-memory/LLD.md` | **WAIVED — worktree boundary** | Build agent is barred from `living-memory/` (parent session reconciles centrally). No convention shift beyond what `docs/integrations/mfl.md` now records; parent session to add the route/flag line if it deems it a convention change |
+| `docs/architecture.md` | n/a | No module re-wiring: `mfl_write.py` is a sibling of `sleeper_write.py` in the already-documented integrations layer; data flow mirrors the existing Sleeper send path |
+| `living-memory/HLD.md` | **WAIVED — worktree boundary** (and no genuine architecture shift — pattern-copy of an existing flow) | |
+| `docs/cross-client-invariants.md` | n/a | No shared constants/enums/colors changed; error codes are backend-owned strings consumed by one client |
+| `docs/glossary.md` | n/a | No new domain term (franchise id, futureDraftPicks already defined via mfl.md) |
+| ADR / `DECISIONS.md` | n/a / **WAIVED — worktree boundary** for DECISIONS.md | Design choice (sibling route over platform-switch on `/api/trades/propose`) is recorded in the api-reference section + this scope block, not ADR-worthy: it follows the platform-adapter pattern ADR-less siblings (ESPN/Fleaflicker) already use |
+| `docs/integrations/mfl.md` | **updated** | New §7 "Write surface (Send in MFL)" — import endpoint, auth, asset-id encodings, error modes, unverified-response TODOs |
+| `docs/config-reference.md` | **updated** | `trade.send_in_mfl` flag row |
+
+## 5. Ship gate declaration
+
+- **Simulator-gate tier** (matrix in `docs/runbook.md` § Pre-ship simulator gate):
+  Tier 2 (feature flow + affected smoke subset) is what this change class requires.
+  - **WAIVER (explicit, operator gate):** this build agent cannot run the simulator
+    (isolated worktree, no sim/harness execution, no MFL seed profile). **No sim run was
+    performed.** TEST_LEDGER + `qa/sim-runs/last-sim-run.json` must be written by the
+    operator/parent session when the gate runs. Backend pytest + mobile structural test
+    + testid-lint are the verification actually executed here.
+- Evidence: pytest output recorded in the final report; sim evidence pending operator.
+- Operator deviation: none declared; the waivers above are capability limits, not
+  operator-declared express.
+
+---
+
+## v1 limitations — operator-accepted (2026-08-11)
+
+- **Single-linker leagues.** v1 stores ONE `leagues` row per MFL league
+  (`upsert_platform_league` keyed by league id), so only the FTF user who *linked* the
+  league has a franchise binding and can send from it. Any other FTF user in the same
+  MFL league gets 404 `mfl_not_linked` ("This MFL league isn't linked to your
+  account.") and the mobile client routes them to re-link — which, if they complete it,
+  makes *them* the linker. **The operator accepts this for v1**; per-user franchise
+  bindings (a `user_id`-scoped link table) are a v2 concern if MFL adoption warrants
+  it. The error surfacing was reviewed 2026-08-11 and is clean: server message names
+  the actual problem, `SendInMflButton` maps `mfl_not_linked`/`mfl_franchise_unknown`
+  to a "re-link this league" alert with a "Go to leagues" action. No string change
+  needed.
+
+## Follow-ups shipped 2026-08-11 (branch `feat/send-in-mfl-followups`)
+
+1. **MFL login verifies the session** — `POST /api/mfl/auth-link` success now mirrors
+   `sleeper_link`'s proven-live block: `sess["verified"]=True`,
+   `verified_via="mfl_login"` persisted via `accounts.mark_user_verified`, durable
+   session row upserted (D-018 honored — the 90d rolling expiry follows from
+   `_session_persist_eligible` reading `sess["verified"]`). An MFL-only user can now
+   pass the propose-mfl hard gate.
+2. **`trade_sent` analytics event** — see §1 above.
+3. **Operator verification script** — `qa/verify-mfl-send.py` automates checklist
+   items 1–4 (+ the revoke half of 7). Operator-run only (uses `MFL_USERNAME` /
+   `MFL_PASSWORD` / `MFL_VERIFY_LEAGUE_ID` from `secrets.local.env`); a real send fires
+   only with `--send --offeredto --give --confirm`, and immediately revokes.
+
+## Trade-lifecycle follow-ups 2026-08-11 (branch `feat/mfl-trade-lifecycle`)
+
+All behind the SAME `trade.send_in_mfl` flag (deliberately no second knob); built dark,
+fixtures only, zero live MFL calls.
+
+1. **Draft picks in the send (asset coverage complete).** The mobile trade surfaces
+   already carry picks mixed into `give_player_ids`/`receive_player_ids`; the propose
+   route now splits them out (`server._is_ftf_pick_asset`) and encodes owned picks
+   (`{league}_{season}_{round}_{orig_franchise}`, `database.make_pick_id`) to MFL
+   `FP_FFFF_YYYY_R` strings via `server._mfl_encode_ftf_picks` — ground truth is the
+   stored `leagues.platform_future_picks` snapshot, never a client encoding. The
+   hard-block guarantee EXTENDS to picks: a pick absent from the snapshot, and every
+   generic `generic_pick_…` rung, 422s `mfl_asset_unmapped` (failing-first-proven in
+   `test_mfl_propose_route.py`). `/api/trades/validate`'s MFL branch mirrors it
+   (`asset_unmapped` now covers picks) and adds `pick_moved` (snapshot owner ≠
+   expected side — zero network). `DP_` current-year slot picks remain
+   pre-encoded-only (FTF picks carry no slot). Mobile change is contract-level only —
+   no client code filters or encodes picks.
+2. **`POST /api/trades/respond-mfl`** — routes the existing `mfl_write.respond_trade`
+   adapter (accept|reject|revoke; revoke = withdraw a sent offer). Same hard-verified
+   gate, cookie decrypt, credential-drop-on-auth-failure, and error codes as propose.
+   Fires the new server event `trade_responded` (taxonomy + tracking-plan addendum
+   2026-08-11b: `platform`/`response`/`outcome`, confirmed success only).
+3. **`GET /api/mfl/pending-trades`** — owner-restricted `export?TYPE=pendingTrades`
+   (`mfl_service.fetch_pending_trades` + `parse_pending_trades`; NOT best-effort so
+   auth failures surface as re-sign-in). Session-authed read. **Mobile surface
+   DEFERRED**: a pending-trades list is a new screen, not a small addition to the send
+   UX — follow-up once the lifecycle is live-verified.
+4. **Live-verify additions for the operator checklist:** (a) a live import accepting
+   the snapshot-derived `FP_` strings (the input shape WAS live-verified 2026-08-11:
+   `originalPickFor` 4-digit padded, round 1-based unpadded — league 62846/www45);
+   (b) a captured owner-restricted `pendingTrades` response body — the parser's field
+   vocabulary follows the Request Reference and carries TODO(live-verify);
+   (c) a live `tradeResponse` success/error body.
+
+## Live-verification checklist (operator MUST run before ship — no live calls were made in this build)
+
+Against a real MFL **test league** (create one, or use the operator's own), with a real
+`MFL_USER_ID` cookie from `POST /api/mfl/auth-link`:
+
+1. **Import host requirement** — fire `import?TYPE=tradeProposal` once against
+   `https://api.myfantasyleague.com/{year}/import?...` and once against the league's
+   assigned `https://wwwNN.myfantasyleague.com/{year}/import?...`. Confirm whether the
+   `api.` host rejects/empties (exports do — assumed same for imports; the adapter uses
+   the `wwwNN` host).
+2. **Response shape** — capture the raw success body: is it XML `<status>OK</status>`?
+   Does appending `JSON=1` yield `{"status":"OK"}`? Capture an error body too (e.g.
+   bogus `OFFEREDTO`) — `<error>...</error>`? HTTP status on error? Drop both captures
+   into `docs/references/mfl/import-tradeProposal/` and align
+   `mfl_write._parse_import_response` if it disagrees (it currently accepts both,
+   TODO-marked).
+3. **Pick-asset encodings** — in a league with tradable picks, pull
+   `export?TYPE=assets&L=...` (owner-restricted) and `futureDraftPicks`; confirm:
+   future picks are `FP_{origFranchiseId}_{year}_{round}` with the franchise **4-digit
+   zero-padded** (e.g. `FP_0005_2027_1`) and round **not** padded; current-year picks
+   are `DP_{round}_{slot}` **zero-based** and two-digit padded (`DP_02_05`). Then send a
+   pick-inclusive proposal and confirm MFL renders the intended picks.
+4. **Cookie on imports** — confirm the stored `MFL_USER_ID` cookie authenticates the
+   import (APIKEY documented as exports-only) and what a dead cookie returns
+   (401/403 vs `<error>` body) so `mfl_auth_expired` mapping is right.
+5. **Trade-disabled / commissioner-locked league** — disable owner trades in the test
+   league settings and send; capture the error so it can be surfaced cleanly (currently
+   falls into generic `mfl_write_failed`).
+6. **EXPIRES** — confirm the unix-seconds default lands as "expires in ~7 days" in MFL's
+   UI.
+7. **End-to-end from the app** — flag ON in a staging env, MFL league linked via #177,
+   propose from the Trades deck; confirm the pending offer appears for the counterparty
+   franchise in MFL, and revoke it.
+8. **Client registration** (pre-GA, not per-send): complete MFL client registration
+   (form + phone validation) and set the registered `MFL_USER_AGENT` — unregistered
+   write traffic is the most throttle-exposed (429).

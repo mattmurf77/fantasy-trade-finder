@@ -4,10 +4,18 @@
 # KEEP THIS CONSERVATIVE. A previous version globbed *.png and stripped the app
 # icon/splash assets, which failed the Bundle JavaScript phase. Exclude only
 # directories that cannot contribute to the app bundle.
-.claude/worktrees/
-archive/
-staged-work/
-feedback-workspace/
-mockups/
+#
+# ANCHOR EVERY ROOT-LEVEL ENTRY WITH A LEADING SLASH. This file uses gitignore
+# semantics, so a bare `screens/` matches a directory named `screens` at ANY
+# depth — including `mobile/src/screens/`, i.e. every screen in the app. That
+# is exactly what happened: builds 99 and 100 (v1.12.1) both died at Bundle
+# JavaScript with "Unable to resolve module ../screens/SignInScreen", while
+# `npx expo export` succeeded locally, because the failure only exists inside
+# the archive. Second instance of this bug class in this file.
+/.claude/worktrees/
+/archive/
+/staged-work/
+/feedback-workspace/
+/mockups/
+/screens/
 mobile/ios/build/
-screens/

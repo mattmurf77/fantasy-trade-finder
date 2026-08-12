@@ -19,6 +19,7 @@
     "test:league-unlocks": "node tests/check-league-unlocks.js",
     "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",
     "test:trade-text": "node tests/check-trade-text.js",
+    "test:send-button-platform": "node tests/check-send-button-platform.js",
     "test:single-pin-actions": "node tests/check-single-pin-actions.js",
     "test:league-drill-in": "node tests/check-league-drill-in.js",
     "test:analytics-297-302": "node tests/check-analytics-297-302.js"

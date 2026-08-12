@@ -220,6 +220,10 @@ def test_link_private_league_stores_encrypted_cookies(client):
     assert row["user_id"] == USER
     assert row["swid"] == swid
     assert row["espn_s2_encrypted"] != s2          # never plaintext
+    # Credential-honesty fix (2026-08-12): the import fetch just succeeded
+    # WITH this pair, so the store records that proof — GET /api/espn/link
+    # requires it before reporting connected.
+    assert row["verified_at"]
     from backend.sleeper_write import decrypt_token
     assert decrypt_token(row["espn_s2_encrypted"]) == s2
     with engine.connect() as conn:

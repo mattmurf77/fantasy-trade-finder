@@ -1,0 +1,107 @@
+appId: com.fantasytradefinder.app
+# tc: TC-SEND-MFL-GATING
+# profile: mfl        ← DOES NOT EXIST YET — see BLOCKED note below
+# flags: release + {trade.send_in_mfl: true, trade.send_in_sleeper: true}
+# source: mobile/src/components/SendInSleeperButton.tsx (platform router),
+#         mobile/src/components/SendInMflButton.tsx,
+#         mobile/src/screens/MatchesScreen.tsx, mobile/src/components/TradeCard.tsx
+#
+# ─────────────────────────────────────────────────────────────────────────
+# ⛔ BLOCKED — AUTHORED AHEAD OF ITS SEED PROFILE (operator gate).
+# The hermetic harness (backend/tests/fixtures/seed_ui_test_db.py) supports
+# only `sleeper`/`espn` platforms today (PLATFORMS tuple, line ~127); this
+# flow needs a `qa_mfl` profile: one 12-team `platform='mfl'` league
+# (upsert_platform_league + synthetic `mfl:{L}.f{FFFF}` members) seeded with
+# `matches_seed {mutual: 1}`, and `trade.send_in_mfl` true in its flag
+# fixture. Until that profile exists this flow cannot run — it is the
+# on-sim proof half of the send-button platform routing; the structural
+# half (mobile/tests/check-send-button-platform.js) runs today.
+# Recorded as an explicit waiver in
+# docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md §3/§5.
+# ─────────────────────────────────────────────────────────────────────────
+#
+# WHAT IT PROVES. Both Sleeper and MFL league ids are numeric, and the old
+# button gated only on ESPN — on an MFL league it rendered "Send in Sleeper"
+# and a tap fired a real write at Sleeper's API (research doc §1 "Notable
+# gap"). The router now delegates MFL leagues to SendInMflButton. So, on an
+# MFL-league mutual match: the MFL send is PRESENT and the Sleeper send is
+# ABSENT — stated as two assertions so a regression in either direction goes
+# red instead of mislabelling.
+#
+# NO taps on the send button itself: under FTF_TEST_MODE both propose routes
+# fail closed (599) by design; this flow verifies RENDER gating only.
+#
+# PRECONDITION (same class as capture/matches@espn.yaml, which see): the
+# router reads useSession().leagues and FAILS OPEN to Sleeper for a league id
+# missing from that cache — so entry MUST go through the league picker, whose
+# merge of GET /api/mfl/leagues is what stamps `platform: 'mfl'` into the
+# cache. A deep-link entry would photograph the wrong state.
+tags: [trade-send, mfl]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble (law #10): assert the typed username before
+# submitting; eraseText first so retries are idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_mfl"
+      - assertVisible:
+          text: ".*qa_mfl.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.*"
+          timeout: 30000
+# qa_mfl's single league arrives from GET /api/mfl/leagues — THAT MERGE is
+# what stamps platform:'mfl' into the cached league list (see PRECONDITION).
+- tapOn:
+    id: "leagues.row.*"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+# Settle before switching tabs — #244 launch routing steals early tab taps
+# (law #8): anchor on the Rank surface's own header control first.
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.matches"
+# The mutual tile's header line renders on no other branch (law #1: full-match
+# regex, wrapped in .*).
+- extendedWaitUntil:
+    visible:
+      text: ".*New match with @.*"
+    timeout: 60000
+# Frame the action row: match tiles overflow the viewport, and `visible:`
+# would pass on a half-mounted row (law #2) — force it fully on screen.
+# Text selector on a scroll TARGET, never a tap (lld.md §4.4 rule 1).
+- scrollUntilVisible:
+    element:
+      text: ".*Dismiss.*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd
+# THE finding, both directions:
+- assertVisible:
+    id: "trades.send-mfl-btn"
+- assertNotVisible:
+    id: "trades.send-sleeper-btn"
+- assertNotVisible:
+    text: ".*Send in Sleeper.*"
+- takeScreenshot: trade-send__mfl-gating--mutual-match

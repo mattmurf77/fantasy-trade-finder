@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Linking, Pressable } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
+import { espnCredentialsRejected, storeEspnCredentials } from '../api/espn';
 import { track } from '../api/events';
 
 // ESPN Connect WebView — Phase 1b of ESPN league linking
@@ -114,7 +115,29 @@ true;
 
 export default function EspnConnectScreen() {
   const navigation = useNavigation<any>();
+  // Send-auth lazy flow (2026-08-11): WHY was this screen entered?
+  //   • undefined (default) — the private-league link capture: cookies go
+  //     back to EspnLinkSheet through the bus, copy talks about reading a
+  //     private league. Unchanged behavior.
+  //   • 'send' — the trade-send path (SendInEspnButton): there is no sheet
+  //     and no league to link (it's already imported), so THIS screen stores
+  //     the captured pair server-side (credential-only POST /api/espn/link)
+  //     and the copy is about connecting the account to send trades. Never
+  //     tell this user their league is private — it usually isn't.
+  const route = useRoute<any>();
+  const sendMode: boolean = route.params?.reason === 'send';
   const [otpHint, setOtpHint] = useState(false);
+  // Send-mode store failure (credential-honesty fix, 2026-08-12): the
+  // backend now VERIFIES the captured pair against ESPN before storing, so
+  // a store can fail two distinguishable ways and neither may dead-end:
+  //   'rejected'    — ESPN refused the pair (403 espn_bad_credentials);
+  //                   nothing was saved. Retry = fresh sign-in in place.
+  //   'unreachable' — ESPN couldn't be reached to confirm (502 / network);
+  //                   nothing was saved, the pair may be fine. Retry =
+  //                   re-send the SAME captured pair.
+  const [storeFail, setStoreFail] = useState<null | 'rejected' | 'unreachable'>(null);
+  // The last captured pair, kept for the 'unreachable' retry.
+  const pairRef = useRef<{ espnS2: string; swid: string } | null>(null);
   // Wedge-detection hint (field report, build 95) — shown when a load
   // finishes (past the one-time automatic warm-up reload) and nothing has
   // progressed for WEDGE_HINT_TIMEOUT_MS. Purely a display flag; the actual
@@ -174,6 +197,49 @@ export default function EspnConnectScreen() {
     webviewRef.current?.reload();
   }, [clearWedgeTimer]);
 
+  // Send path: store the captured pair server-side (credential-only POST
+  // /api/espn/link — the server verifies it against ESPN before storing).
+  // Success pops back to the send surface. Failure stays HERE with an
+  // in-flow banner + retry — never a silent success, never a dead end; the
+  // send button's focus handler remains the honest backstop if the user
+  // backs out anyway.
+  const storePair = useCallback(
+    async (pair: { espnS2: string; swid: string }) => {
+      pairRef.current = pair;
+      try {
+        await storeEspnCredentials(pair.espnS2, pair.swid);
+      } catch (err) {
+        if (unmountedRef.current) return;
+        setStoreFail(espnCredentialsRejected(err) ? 'rejected' : 'unreachable');
+        return;
+      }
+      if (!unmountedRef.current) navigation.goBack();
+    },
+    [navigation],
+  );
+
+  // Retry for the banner. 'rejected' means the captured pair itself is bad:
+  // reset to a genuinely fresh sign-in (clear cookies, re-arm capture,
+  // reload — the same cold-start guarantees as mount). 'unreachable' means
+  // the pair was never judged: just re-send it.
+  const retryStore = useCallback(async () => {
+    const mode = storeFail;
+    setStoreFail(null);
+    if (mode === 'unreachable' && pairRef.current) {
+      await storePair(pairRef.current);
+      return;
+    }
+    storeClearedRef.current = false;
+    capturedRef.current = false;
+    try {
+      await clearEspnCookies();
+    } catch {
+      /* per-name failures already swallowed inside; belt & braces */
+    }
+    storeClearedRef.current = true;
+    webviewRef.current?.reload();
+  }, [storeFail, storePair]);
+
   // Deliver exactly once: read the native store, and if BOTH cookies are
   // present hand them to the sheet through the bus and pop back. The guards
   // are re-checked after the await — without that, backing out mid-read
@@ -185,28 +251,38 @@ export default function EspnConnectScreen() {
     if (!pair || capturedRef.current || unmountedRef.current) return;
     capturedRef.current = true;
     track('espn_connect_captured', { saw_otp: sawOtpRef.current }, 'EspnConnect');
+    if (sendMode) {
+      await storePair(pair);
+      return;
+    }
     deliverEspnCookies(pair);
     // No success overlay: the sheet's Modal re-mounts ABOVE the whole nav
     // stack the moment the bus delivers, so an overlay here could never be
     // seen. The sheet reappearing with the cookies filled (and
     // auto-advancing to the preview) IS the success feedback — just pop.
     navigation.goBack();
-  }, [navigation]);
+  }, [navigation, sendMode, storePair]);
 
   // espn_connect_opened on mount; espn_connect_abandoned if we leave without
   // a capture (cleanup runs on unmount — including header back / swipe).
   useEffect(() => {
-    track('espn_connect_opened', { source: 'link_sheet' }, 'EspnConnect');
+    track(
+      'espn_connect_opened',
+      { source: sendMode ? 'send_button' : 'link_sheet' },
+      'EspnConnect',
+    );
     return () => {
       unmountedRef.current = true;
       clearWedgeTimer();
       if (!capturedRef.current) {
         track('espn_connect_abandoned', { saw_otp: sawOtpRef.current }, 'EspnConnect');
         // Un-hide the sheet's Modal — it hid itself for the WebView push.
-        deliverEspnCookies(null);
+        // Send mode never touches the bus: no sheet hid itself, and a null
+        // delivered here could reach an unrelated dormant sheet.
+        if (!sendMode) deliverEspnCookies(null);
       }
     };
-  }, [clearWedgeTimer]);
+  }, [clearWedgeTimer, sendMode]);
 
   // Fresh-login guarantee FIRST, then poll: clear any stale ESPN cookies,
   // and only once that settles start the 1s poll (login is an SPA/redirect
@@ -251,9 +327,14 @@ export default function EspnConnectScreen() {
       <View style={styles.banner} testID="espn-connect.banner">
         <View style={styles.bannerTopRow}>
           <Text style={[type.bodySm, styles.bannerTopText]}>
-            Log in to ESPN below. We never see your password — once you’re in,
-            we read the two cookies ESPN issues for your private league
-            (espn_s2 and SWID) so we can import it.
+            {sendMode
+              ? 'Sign in to ESPN below to connect your account so FTF can ' +
+                'send trades for you. We never see your password — once ' +
+                'you’re in, we read the two sign-in cookies ESPN issues ' +
+                '(espn_s2 and SWID).'
+              : 'Log in to ESPN below. We never see your password — once ' +
+                'you’re in, we read the two cookies ESPN issues for your ' +
+                'private league (espn_s2 and SWID) so we can import it.'}
           </Text>
           {/* Always-visible resilience net (field report, build 95): one
               tap recovers a wedged/blank ESPN login load, regardless of
@@ -270,8 +351,11 @@ export default function EspnConnectScreen() {
           </Pressable>
         </View>
         <Text style={type.bodySm}>
-          Those two cookies are stored encrypted and used only to read this
-          league — read-only, we never post or change anything.{' '}
+          {sendMode
+            ? 'Those two cookies are stored encrypted and used only for ' +
+              'actions you take here — like sending a trade you built. '
+            : 'Those two cookies are stored encrypted and used only to read ' +
+              'this league — read-only, we never post or change anything. '}
           <Text
             style={styles.learnMore}
             accessibilityRole="link"
@@ -295,6 +379,32 @@ export default function EspnConnectScreen() {
               ESPN emailed you a code. iOS can autofill it from Mail or
               Messages — or grab it from your inbox and type it in.
             </Text>
+          </View>
+        ) : null}
+        {storeFail ? (
+          <View testID="espn-connect.store-error" style={styles.otpHint}>
+            <Text style={[type.bodySm, styles.otpHintText]}>
+              {storeFail === 'rejected'
+                ? 'ESPN didn’t accept that sign-in, so nothing was saved. ' +
+                  'Sign in again to retry.'
+                : 'Couldn’t reach ESPN to confirm your sign-in, so nothing ' +
+                  'was saved yet.'}
+            </Text>
+            <Pressable
+              testID="espn-connect.store-retry"
+              onPress={() => void retryStore()}
+              accessibilityRole="button"
+              accessibilityLabel={
+                storeFail === 'rejected'
+                  ? 'Sign in to ESPN again'
+                  : 'Retry saving the ESPN sign-in'
+              }
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={[type.bodySm, styles.retryLink]}>
+                {storeFail === 'rejected' ? 'Sign in again' : 'Try again'}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
       </View>
@@ -372,5 +482,7 @@ const styles = StyleSheet.create({
     backgroundColor: ink.ink2,
   },
   otpHintText: { color: chalk.base },
+  // Retry action inside the store-failure banner — ice = action color.
+  retryLink: { color: ice.base, marginTop: space.xs },
   web: { flex: 1, backgroundColor: ink.ink0 },
 });

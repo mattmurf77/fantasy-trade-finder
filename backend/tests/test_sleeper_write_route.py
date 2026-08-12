@@ -258,6 +258,55 @@ def test_propose_write_failure_returns_502(client):
     assert r.status_code == 502 and r.get_json()["error"] == "sleeper_write_failed"
 
 
+def _trade_sent_rows():
+    """user_events rows of type trade_sent in the patched test engine
+    (taxonomy addendum 2026-08-11 — send-leg completion event)."""
+    from sqlalchemy import select
+    with db_module.engine.connect() as conn:
+        rows = conn.execute(
+            select(db_module.user_events_table)
+            .where(db_module.user_events_table.c.event_type == "trade_sent")
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def test_propose_success_fires_no_trade_sent_on_sleeper(client):
+    """Analytics dedup (MFL merge, 2026-08-11): a confirmed Sleeper send is
+    measured by `sleeper_send_succeeded` (P0-7, funnel stage 8 — covered in
+    test_analytics_p0.py) and must NOT also land a `trade_sent` row —
+    one event per real occurrence. `trade_sent` is the non-Sleeper
+    confirmed-send event (POST /api/trades/propose-mfl only)."""
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+    fake = MagicMock(return_value={"transaction_id": "TX9", "status": "proposed", "raw": {}})
+    with patch.object(server, "_sleeper_get", return_value=rosters), \
+         patch.object(server._sleeper_write, "propose_trade", fake):
+        r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+            "league_id": LEAGUE, "their_roster_id": 2,
+            "give_player_ids": ["100", "101"], "receive_player_ids": ["200"],
+            "draft_picks": ["2027_1"]}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert _trade_sent_rows() == []
+
+
+def test_propose_failure_fires_no_trade_sent(client):
+    """trade_sent is confirmed-success only — a Sleeper write failure (502)
+    must not land a row."""
+    from backend.sleeper_write import SleeperWriteError
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+    with patch.object(server, "_sleeper_get", return_value=rosters), \
+         patch.object(server._sleeper_write, "propose_trade",
+                      MagicMock(side_effect=SleeperWriteError("boom", kind="network"))):
+        r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+            "league_id": LEAGUE, "their_roster_id": 2,
+            "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 502
+    assert _trade_sent_rows() == []
+
+
 def test_propose_roster_fetch_failure_degrades_gracefully(client):
     """A transient rosters-fetch failure must not 500 — it degrades to a
     structured 400 (client → deep-link fallback), never an unhandled crash."""
