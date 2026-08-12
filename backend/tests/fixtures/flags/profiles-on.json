@@ -136,6 +136,8 @@
   "league.rookie_board_entry": true,
   "league.power_rankings": false,
   "league.picks_always_counted": true,
+  "league.pos_candidates": false,
+  "league.player_trade_handoff": false,
   "rankings.cross_format_derive": true,
   "_comment_testing": "QA/testing surfaces. testing.stage_users gates the synthetic stage-user spawner (POST/DELETE /api/test-users, backend/test_users.py) used to QA the onboarding flow with qa_* users at preset adoption stages. Requests must ALSO come from a tester-allowlist device/user (config/tester_allowlist.json or FTF_TESTER_ALLOWLIST), so flipping this on never exposes the surface to real users. Default false; flip only during onboarding QA windows.",
   "testing.stage_users": false,
