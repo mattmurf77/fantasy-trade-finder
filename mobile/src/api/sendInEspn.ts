@@ -15,10 +15,17 @@
 import { api } from './client';
 
 export interface EspnLinkStatus {
+  /** True only for a credential that PASSED a live authenticated ESPN read
+   *  at store time (credential-honesty fix, 2026-08-12) — a stored-but-
+   *  never-proven pair reads false, routing the user through the sign-in
+   *  flow (which verifies before storing) instead of a doomed send. */
   connected: boolean;
   /** Stored expiry hint — usually null (ESPN stamps no cookie expiry). */
   expires_at?: string | null;
   expired?: boolean;
+  /** When the stored pair last proved itself against ESPN (ISO UTC);
+   *  present only when connected. */
+  verified_at?: string | null;
 }
 
 // GET — is an ESPN account credential (espn_s2 + SWID) stored for this user?

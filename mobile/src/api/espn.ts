@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, ApiError } from './client';
 import type { SessionInitBody } from './auth';
 import type { SavedUser } from '../state/useSession';
 
@@ -87,17 +87,36 @@ export function isEspnPreview(
  *  captured espn_s2 + SWID pair WITHOUT linking a league — the same POST
  *  /api/espn/link, minus espn_league_id. Used by EspnConnectScreen when
  *  entered from the trade-send path: the league is already imported, only
- *  the account credential is missing. No ESPN call happens server-side —
- *  the propose route's authenticated pre-flight read is the validity
- *  oracle. */
+ *  the account credential is missing.
+ *
+ *  Credential-honesty fix (2026-08-12): the server now VERIFIES the pair
+ *  with one live authenticated ESPN read before storing — a success here
+ *  means the sign-in actually works. Failures throw ApiError:
+ *    403 espn_bad_credentials — ESPN rejected the pair; nothing stored.
+ *      Narrow with espnCredentialsRejected(); the fix is a fresh sign-in.
+ *    502 espn_unavailable — ESPN unreachable; NOT a credential verdict,
+ *      nothing stored; retry the same pair. */
 export async function storeEspnCredentials(
   espnS2: string,
   swid: string,
-): Promise<{ connected: boolean }> {
-  return api.post<{ connected: boolean }>('/api/espn/link', {
+): Promise<{ connected: boolean; verified?: boolean }> {
+  return api.post<{ connected: boolean; verified?: boolean }>('/api/espn/link', {
     espn_s2: espnS2,
     swid,
   });
+}
+
+/** True when a storeEspnCredentials failure is ESPN's verdict on the pair
+ *  itself (403 espn_bad_credentials — sign in again), as opposed to a
+ *  transport/outage failure where the same pair may well be fine (retry). */
+export function espnCredentialsRejected(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 403 &&
+    typeof err.body === 'object' &&
+    err.body !== null &&
+    (err.body as { error?: string }).error === 'espn_bad_credentials'
+  );
 }
 
 export interface EspnLeagueMember {

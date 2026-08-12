@@ -7,7 +7,7 @@ import { Icon } from '../components/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
-import { storeEspnCredentials } from '../api/espn';
+import { espnCredentialsRejected, storeEspnCredentials } from '../api/espn';
 import { track } from '../api/events';
 
 // ESPN Connect WebView — Phase 1b of ESPN league linking
@@ -127,6 +127,17 @@ export default function EspnConnectScreen() {
   const route = useRoute<any>();
   const sendMode: boolean = route.params?.reason === 'send';
   const [otpHint, setOtpHint] = useState(false);
+  // Send-mode store failure (credential-honesty fix, 2026-08-12): the
+  // backend now VERIFIES the captured pair against ESPN before storing, so
+  // a store can fail two distinguishable ways and neither may dead-end:
+  //   'rejected'    — ESPN refused the pair (403 espn_bad_credentials);
+  //                   nothing was saved. Retry = fresh sign-in in place.
+  //   'unreachable' — ESPN couldn't be reached to confirm (502 / network);
+  //                   nothing was saved, the pair may be fine. Retry =
+  //                   re-send the SAME captured pair.
+  const [storeFail, setStoreFail] = useState<null | 'rejected' | 'unreachable'>(null);
+  // The last captured pair, kept for the 'unreachable' retry.
+  const pairRef = useRef<{ espnS2: string; swid: string } | null>(null);
   // Wedge-detection hint (field report, build 95) — shown when a load
   // finishes (past the one-time automatic warm-up reload) and nothing has
   // progressed for WEDGE_HINT_TIMEOUT_MS. Purely a display flag; the actual
@@ -186,6 +197,49 @@ export default function EspnConnectScreen() {
     webviewRef.current?.reload();
   }, [clearWedgeTimer]);
 
+  // Send path: store the captured pair server-side (credential-only POST
+  // /api/espn/link — the server verifies it against ESPN before storing).
+  // Success pops back to the send surface. Failure stays HERE with an
+  // in-flow banner + retry — never a silent success, never a dead end; the
+  // send button's focus handler remains the honest backstop if the user
+  // backs out anyway.
+  const storePair = useCallback(
+    async (pair: { espnS2: string; swid: string }) => {
+      pairRef.current = pair;
+      try {
+        await storeEspnCredentials(pair.espnS2, pair.swid);
+      } catch (err) {
+        if (unmountedRef.current) return;
+        setStoreFail(espnCredentialsRejected(err) ? 'rejected' : 'unreachable');
+        return;
+      }
+      if (!unmountedRef.current) navigation.goBack();
+    },
+    [navigation],
+  );
+
+  // Retry for the banner. 'rejected' means the captured pair itself is bad:
+  // reset to a genuinely fresh sign-in (clear cookies, re-arm capture,
+  // reload — the same cold-start guarantees as mount). 'unreachable' means
+  // the pair was never judged: just re-send it.
+  const retryStore = useCallback(async () => {
+    const mode = storeFail;
+    setStoreFail(null);
+    if (mode === 'unreachable' && pairRef.current) {
+      await storePair(pairRef.current);
+      return;
+    }
+    storeClearedRef.current = false;
+    capturedRef.current = false;
+    try {
+      await clearEspnCookies();
+    } catch {
+      /* per-name failures already swallowed inside; belt & braces */
+    }
+    storeClearedRef.current = true;
+    webviewRef.current?.reload();
+  }, [storeFail, storePair]);
+
   // Deliver exactly once: read the native store, and if BOTH cookies are
   // present hand them to the sheet through the bus and pop back. The guards
   // are re-checked after the await — without that, backing out mid-read
@@ -198,17 +252,7 @@ export default function EspnConnectScreen() {
     capturedRef.current = true;
     track('espn_connect_captured', { saw_otp: sawOtpRef.current }, 'EspnConnect');
     if (sendMode) {
-      // Send path: no sheet is listening — store the credential server-side
-      // ourselves (credential-only POST /api/espn/link) so the propose can
-      // read it, then pop back to the send surface. A failed store is not
-      // retried here: the send button's focus handler re-checks GET
-      // /api/espn/link on return and reports "Not connected" honestly.
-      try {
-        await storeEspnCredentials(pair.espnS2, pair.swid);
-      } catch {
-        /* focus-handler re-check owns the failure report */
-      }
-      navigation.goBack();
+      await storePair(pair);
       return;
     }
     deliverEspnCookies(pair);
@@ -217,7 +261,7 @@ export default function EspnConnectScreen() {
     // seen. The sheet reappearing with the cookies filled (and
     // auto-advancing to the preview) IS the success feedback — just pop.
     navigation.goBack();
-  }, [navigation, sendMode]);
+  }, [navigation, sendMode, storePair]);
 
   // espn_connect_opened on mount; espn_connect_abandoned if we leave without
   // a capture (cleanup runs on unmount — including header back / swipe).
@@ -337,6 +381,32 @@ export default function EspnConnectScreen() {
             </Text>
           </View>
         ) : null}
+        {storeFail ? (
+          <View testID="espn-connect.store-error" style={styles.otpHint}>
+            <Text style={[type.bodySm, styles.otpHintText]}>
+              {storeFail === 'rejected'
+                ? 'ESPN didn’t accept that sign-in, so nothing was saved. ' +
+                  'Sign in again to retry.'
+                : 'Couldn’t reach ESPN to confirm your sign-in, so nothing ' +
+                  'was saved yet.'}
+            </Text>
+            <Pressable
+              testID="espn-connect.store-retry"
+              onPress={() => void retryStore()}
+              accessibilityRole="button"
+              accessibilityLabel={
+                storeFail === 'rejected'
+                  ? 'Sign in to ESPN again'
+                  : 'Retry saving the ESPN sign-in'
+              }
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={[type.bodySm, styles.retryLink]}>
+                {storeFail === 'rejected' ? 'Sign in again' : 'Try again'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       <WebView
@@ -412,5 +482,7 @@ const styles = StyleSheet.create({
     backgroundColor: ink.ink2,
   },
   otpHintText: { color: chalk.base },
+  // Retry action inside the store-failure banner — ice = action color.
+  retryLink: { color: ice.base, marginTop: space.xs },
   web: { flex: 1, backgroundColor: ink.ink0 },
 });

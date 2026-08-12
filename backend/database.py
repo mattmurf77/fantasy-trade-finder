@@ -1313,6 +1313,11 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 # the user's ESPN member id in league payloads, so it is stored plaintext.
 # expires_hint_at: cookie lifetime is undocumented (~1 year community
 # consensus) — a NULL hint means "unknown"; 401s drive the reconnect UX.
+# verified_at (2026-08-12, credential-honesty fix): when this pair last
+# PROVED itself against ESPN — stamped by the store paths after a live
+# authenticated read succeeds. NULL means never proven (legacy rows, or a
+# hypothetical store path that skipped verification): GET /api/espn/link
+# reports such a row as NOT connected, so the client re-runs the sign-in.
 # Folds into the auth epic's `linked_sources` when that lands.
 # ---------------------------------------------------------------------------
 
@@ -1321,6 +1326,7 @@ espn_credentials_table = Table("espn_credentials", metadata,
     Column("swid",              String),                     # braced GUID — ESPN member id
     Column("espn_s2_encrypted", Text,   nullable=False),     # Fernet ciphertext — never plaintext
     Column("expires_hint_at",   String),                     # ISO UTC guess; NULL = unknown
+    Column("verified_at",       String),                     # ISO UTC of last successful live auth; NULL = never proven
     Column("created_at",        String, nullable=False),
     Column("updated_at",        String, nullable=False),
 )
@@ -1958,6 +1964,9 @@ def _migrate_db() -> None:
         ("user_events",        "country",               "VARCHAR"),
         # F3 (deck.fatigue) — per-item fatigue key on the impression spine.
         ("deck_impressions",   "centerpiece_id",        "VARCHAR"),
+        # ESPN credential-honesty fix (2026-08-12) — last successful live
+        # auth proof; NULL = never proven → GET /api/espn/link reads false.
+        ("espn_credentials",   "verified_at",           "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -9536,9 +9545,17 @@ def delete_sleeper_credential(user_id: str) -> None:
 
 def upsert_espn_credential(user_id: str, swid: str | None,
                            espn_s2_encrypted: str,
-                           expires_hint_at: str | None = None) -> None:
+                           expires_hint_at: str | None = None,
+                           verified_at: str | None = None) -> None:
     """Insert or replace a user's ESPN cookie pair (one row per user_id).
-    Mirrors upsert_sleeper_credential — created_at survives re-links."""
+    Mirrors upsert_sleeper_credential — created_at survives re-links.
+
+    verified_at (credential-honesty fix, 2026-08-12): ISO timestamp of the
+    live authenticated ESPN read that proved THIS pair works. Callers that
+    just verified pass it; a store without it leaves the row unproven and
+    GET /api/espn/link reports it as not connected. A re-store deliberately
+    REPLACES the previous value (each stored pair carries its own proof —
+    an old pair's verification never vouches for a new one)."""
     if not user_id or not espn_s2_encrypted:
         raise ValueError("user_id and espn_s2_encrypted are required")
     now = _now()
@@ -9547,6 +9564,7 @@ def upsert_espn_credential(user_id: str, swid: str | None,
         "swid":              swid,
         "espn_s2_encrypted": espn_s2_encrypted,
         "expires_hint_at":   expires_hint_at,
+        "verified_at":       verified_at,
         "created_at":        now,
         "updated_at":        now,
     }
@@ -9560,25 +9578,27 @@ def upsert_espn_credential(user_id: str, swid: str | None,
         if DATABASE_URL.startswith("sqlite"):
             conn.execute(text(
                 "INSERT OR REPLACE INTO espn_credentials "
-                "(user_id, swid, espn_s2_encrypted, expires_hint_at, created_at, updated_at) "
-                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :created_at, :updated_at)"
+                "(user_id, swid, espn_s2_encrypted, expires_hint_at, verified_at, created_at, updated_at) "
+                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :verified_at, :created_at, :updated_at)"
             ), payload)
         else:
             conn.execute(text(
                 "INSERT INTO espn_credentials "
-                "(user_id, swid, espn_s2_encrypted, expires_hint_at, created_at, updated_at) "
-                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :created_at, :updated_at) "
+                "(user_id, swid, espn_s2_encrypted, expires_hint_at, verified_at, created_at, updated_at) "
+                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :verified_at, :created_at, :updated_at) "
                 "ON CONFLICT (user_id) DO UPDATE SET "
                 "swid = EXCLUDED.swid, "
                 "espn_s2_encrypted = EXCLUDED.espn_s2_encrypted, "
                 "expires_hint_at = EXCLUDED.expires_hint_at, "
+                "verified_at = EXCLUDED.verified_at, "
                 "updated_at = EXCLUDED.updated_at"
             ), payload)
 
 
 def get_espn_credential(user_id: str) -> dict | None:
-    """Return {swid, espn_s2_encrypted, expires_hint_at, created_at,
-    updated_at} for a user, or None if they haven't linked ESPN cookies."""
+    """Return {swid, espn_s2_encrypted, expires_hint_at, verified_at,
+    created_at, updated_at} for a user, or None if they haven't linked
+    ESPN cookies."""
     if not user_id:
         return None
     with engine.connect() as conn:

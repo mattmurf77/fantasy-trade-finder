@@ -18869,18 +18869,27 @@ def espn_link():
     """Link (import) an ESPN league — and manage the ESPN account credential.
 
     GET → link status, mirroring GET /api/sleeper/link (send-auth lazy flow,
-    2026-08-11): {connected, expires_at, expired}. Never returns the cookies.
-    `connected` requires BOTH stored halves (espn_s2 + SWID) — a row missing
-    its SWID can't authenticate anything. `expires_at` is the stored
-    expires_hint_at (usually null; ESPN doesn't stamp cookie expiry).
+    2026-08-11): {connected, expires_at, expired, verified_at}. Never returns
+    the cookies. `connected` requires BOTH stored halves (espn_s2 + SWID — a
+    row missing its SWID can't authenticate anything) AND a verified_at stamp
+    (credential-honesty fix, 2026-08-12): a pair that never passed a live
+    authenticated ESPN read reads as NOT connected, so the client re-runs
+    sign-in instead of trusting an unproven pair. No live call happens here —
+    status reads stay cheap; verification happens at store time.
 
     POST body: {espn_league_id?, season?, team_id?, espn_s2?, swid?}
       • espn_s2+swid, NO espn_league_id → CREDENTIAL-ONLY store (send-auth
-        lazy flow): persist the pair encrypted and return {connected: true}.
-        Used by the ESPN Connect WebView when entered from the trade-send
-        path — the league is already imported; only the account credential
-        is missing. No ESPN call is made here: the propose route's
-        authenticated pre-flight read is the validity oracle.
+        lazy flow): VERIFY the pair with one live authenticated fan-profile
+        read (espn_service.fetch_fan_leagues — ESPN's fan API has no
+        anonymous success mode), then persist it encrypted with verified_at
+        stamped and return {connected: true}. Used by the ESPN Connect
+        WebView entered from the trade-send path — the league is already
+        imported; only the account credential is missing. A rejected pair is
+        NOT stored: 403 espn_bad_credentials (sign in again). ESPN
+        unreachable/5xx is NOT a credential verdict: 502 espn_unavailable
+        (retry), and nothing is stored either. MFL (login + myleagues) and
+        Sleeper (verify_token_live) already refuse to store unproven
+        credentials — this brings ESPN to parity.
       • no team_id  → PREVIEW: fetch + crosswalk, return the team list and
         match report; nothing is persisted.
       • team_id     → IMPORT: persist the league (platform='espn') + all
@@ -18903,7 +18912,11 @@ def espn_link():
 
     if request.method == "GET":
         cred = get_espn_credential(user_id)
-        if not cred or not cred.get("swid"):
+        # Honesty gate (2026-08-12): swid-less rows can't authenticate, and
+        # rows without verified_at were never proven against ESPN (legacy
+        # pre-verification stores) — both read as not connected so the
+        # client re-runs the sign-in flow, which verifies before storing.
+        if not cred or not cred.get("swid") or not cred.get("verified_at"):
             return jsonify({"connected": False})
         expires_at = cred.get("expires_hint_at")
         expired = False
@@ -18915,7 +18928,8 @@ def espn_link():
                 expired = False
         return jsonify({"connected": True,
                         "expires_at": expires_at,
-                        "expired": expired})
+                        "expired": expired,
+                        "verified_at": cred.get("verified_at")})
 
     body = request.get_json(force=True) or {}
     league_id = str(body.get("espn_league_id") or "").strip()
@@ -18934,14 +18948,49 @@ def espn_link():
         if not _sleeper_write.token_encryption_available():
             return jsonify({"error": "espn_unconfigured",
                             "message": "Credential encryption key missing."}), 503
+        # Verify BEFORE storing (credential-honesty fix, 2026-08-12): one
+        # live authenticated fan-profile read proves the pair works. The fan
+        # API has no anonymous success mode (a cookie-less request for an
+        # unknown SWID 404s — live-confirmed 2026-08-09, espn.md §1.7), and
+        # fetch_fan_leagues maps 401/403/404 to EspnAuthError. Without this,
+        # a bad capture was stored, reported {connected:true}, and only
+        # surfaced at the next trade send. MFL/Sleeper never had this gap.
         try:
-            upsert_espn_credential(user_id, swid,
-                                   _sleeper_write.encrypt_token(espn_s2))
+            _espn.fetch_fan_leagues(espn_s2, swid)
+        except _espn.EspnAuthError:
+            # ESPN rejected the pair — a credential verdict, not an outage.
+            # Nothing is stored; the client re-runs the sign-in.
+            log.info("espn_link: credential verification rejected user=%s",
+                     user_id)
+            return jsonify({
+                "error": "espn_bad_credentials",
+                "message": "ESPN didn't accept that sign-in — nothing was "
+                           "saved. Sign in to ESPN again.",
+            }), 403
+        except (_espn.EspnError, OSError) as e:
+            # Transport failure / ESPN 5xx / non-JSON edge page (OSError
+            # covers urllib's URLError + socket timeouts). NOT a verdict on
+            # the cookies — a user with a good sign-in must never be told
+            # it's bad because ESPN was down. Distinct, retryable code;
+            # nothing stored (an unproven pair must not reach the DB).
+            log.warning("espn_link: credential verification unavailable "
+                        "[%s]: %s", getattr(e, "kind", "transport"), e)
+            return jsonify({
+                "error": "espn_unavailable",
+                "message": "Couldn't reach ESPN to confirm the sign-in — "
+                           "nothing was saved. Try again shortly.",
+            }), 502
+        try:
+            upsert_espn_credential(
+                user_id, swid, _sleeper_write.encrypt_token(espn_s2),
+                verified_at=datetime.now(timezone.utc).isoformat())
         except Exception:
             log.exception("espn_link: credential-only store failed")
             return jsonify({"error": "store_failed"}), 500
-        log.info("espn_link: credential-only store user=%s", user_id)
-        return jsonify({"connected": True, "stored": "credential"})
+        log.info("espn_link: credential-only store user=%s (verified)",
+                 user_id)
+        return jsonify({"connected": True, "stored": "credential",
+                        "verified": True})
 
     if not league_id.isdigit():
         return jsonify({"error": "espn_bad_league_id",
@@ -19011,8 +19060,14 @@ def espn_link():
             return jsonify({"error": "espn_unconfigured",
                             "message": "Credential encryption key missing."}), 503
         try:
-            upsert_espn_credential(user_id, swid,
-                                   _sleeper_write.encrypt_token(espn_s2))
+            # verified_at: the league fetch above already succeeded WITH this
+            # pair attached — and the in-app flow only collects cookies after
+            # an anonymous read 403s (private league), so that fetch was a
+            # genuine authenticated proof. No second probe (don't double-hit
+            # ESPN or slow the import).
+            upsert_espn_credential(
+                user_id, swid, _sleeper_write.encrypt_token(espn_s2),
+                verified_at=datetime.now(timezone.utc).isoformat())
         except Exception:
             log.exception("espn_link: credential store failed")
             return jsonify({"error": "store_failed"}), 500
