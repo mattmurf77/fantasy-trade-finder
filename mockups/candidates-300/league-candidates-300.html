@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candidates lab — #300 League candidates → offer drill-in</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md).
+     Base tokens + phone-frame + tile CSS copied verbatim from the validated
+     #299 lab (mockups/polish-lab-2026-08-11/league-tile-density.html, commit
+     221c134) so the 32pt tile measurements here are the SAME box model, not a
+     redrawn approximation. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1360px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .verdict.no{border-left-color:var(--warn)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:28px 0 4px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-items:flex-start;width:100%}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .slotlbl.recon{color:var(--flare)} .slotlbl.recon::before{background:var(--flare)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.recon{color:var(--flare);border-color:var(--flare);background:rgba(240,80,140,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390×844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:center;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .scroll.tall{height:700px}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Focused slim strip (#243 shipped state) ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;justify-content:center}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--ice);color:var(--ice)} .pill.all.on{background:var(--ice);color:var(--on-ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:var(--ink-0)}
+  .pill.te{border-color:var(--te);color:var(--te)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.pk.on{background:var(--line-strong);color:var(--chalk)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px}
+  .grouplabel{font:700 12px var(--ui);letter-spacing:.06em}
+  .groupmetarow{display:flex;align-items:center;gap:8px}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense, POST-#299 V1 (32pt) ──
+     mobile/src/components/PlayerCard.tsx, drill-in caller LeagueSummaryScreen.tsx:1212-1229.
+     #299 has not merged; this shape is the operator-decided contract from
+     mockups/polish-lab-2026-08-11/league-tile-density.html, treated here as ground truth
+     since #300 is a hard dependent of it. */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden;height:32px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  .tile.dim{opacity:.4}
+
+  /* ── #300 additions: the contested trailing affordance ── */
+  .offer-chevron{display:inline-flex;align-items:center;justify-content:center;
+    color:var(--ice);flex:0 0 auto;position:relative}
+  .offer-chevron .hit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;border:1px dashed var(--ice);border-radius:8px;opacity:.35;pointer-events:none}
+  .offer-label{display:inline-flex;align-items:center;gap:3px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.5px;white-space:nowrap;flex:0 0 auto}
+  .offer-chevron.dim,.offer-label.dim{color:var(--chalk-faint)}
+  .offer-chevron.dim .hit{border-color:var(--chalk-faint)}
+  .zerocap{font-size:11px;color:var(--chalk-faint);padding:2px 0 6px 16px;font-style:italic}
+  .hint{font:500 12px var(--ui);color:var(--chalk-dim);display:flex;align-items:center;gap:6px;
+    margin:2px 0 10px}
+  .hint svg{color:var(--ice)}
+
+  /* ── Trade candidates section (reuses TeamRow, listRow: minHeight 44, LeagueSummaryScreen.tsx:2182) ── */
+  .candcard{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px 4px;margin:12px 0}
+  .candhead{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+  .candtitle{font:700 13px var(--ui)}
+  .candcaption{font:400 12px var(--ui);color:var(--chalk-dim)}
+  .teamrow{display:flex;align-items:center;gap:8px;min-height:44px;
+    border-bottom:1px solid var(--line);padding:8px 4px}
+  .teamrow:last-child{border-bottom:none}
+  .trank{font:500 13px var(--mono);width:16px;text-align:center;color:var(--chalk-dim)}
+  .tname{flex:1;font:600 14px var(--ui);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tdeficit{font:500 12px var(--mono);color:var(--chalk-dim);flex:0 0 auto}
+  .tval{font:600 13px var(--mono);flex:0 0 auto}
+  .empty{padding:14px 4px 16px;font:400 13px var(--ui);color:var(--chalk-dim);line-height:1.5}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;
+    border-radius:4px;font:700 12px var(--ui);letter-spacing:.6px;text-transform:uppercase}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-52px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+  .measurew{position:relative}
+  .measurew::before{content:attr(data-w);position:absolute;left:0;right:0;bottom:-16px;
+    font:500 11px var(--mono);color:var(--flare);text-align:center}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .tbl th:nth-child(n+2),.tbl td:nth-child(n+2){text-align:right}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .tbl td:first-child{color:var(--chalk);font-weight:600;text-align:left}
+  .tbl td:nth-child(n+2){font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.lose td:nth-child(n+2){color:var(--neg);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+
+  .vtbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .vtbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .vtbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .vtbl td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+  .vtbl tr.rec td{background:rgba(86,217,236,.06)}
+  .vtbl tr.rec td:first-child{color:var(--ice)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:300px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="note">
+    <h1>League candidates → offer drill-in — #300</h1>
+    <p class="q">"Be sure to plan it forward to actually getting to trades. […] clicking the team shows the
+      player at the position of weakness […] I'm aligned on C. But we should present all of our players at
+      that position somewhere on the page where the 'Offer this player' or something similar is presented
+      next to the player." — operator, <code>docs/feedback/items/300-league-rankings-trade-candidates/
+      operator-answers-2026-08-11.md</code> §2/§5.2. Decided design (§6): filter to one position P →
+      "Trade candidates" section (teams below league median/average at P, weakest first, reusing League
+      summary tiles) → tap a candidate → drill-in shows <b>the caller's own players at P</b>, each with a
+      trailing chevron "Offer" affordance → "Find a Trade with this team" screen-level button.</p>
+
+    <h2>The verdict this lab exists to produce</h2>
+    <div class="verdict"><strong>Yes — a trailing chevron fits the post-#299 32pt tile.</strong> A minimal
+      ice chevron glyph (no visible text) added to the existing right cluster costs
+      <b>~20pt</b> of horizontal budget (content width 358pt; right cluster grows from badge+posRank's
+      112pt to 132pt). The worst-case name row (long name + RK + injury tag + top tier badge) goes from
+      <b>148pt (~19 chars)</b> free for the name to <b>128pt (~16 chars)</b> — a real but modest cost,
+      the same class of "acceptable, ellipsis handles it" truncation #299's own width-stress test already
+      signed off on for V1. Tile height stays exactly 32pt; nothing about #299's box model changes.</div>
+    <div class="warnbox"><strong>But a literal, visible "Offer" TEXT label does NOT fit as comfortably.</strong>
+      Adding "Offer ›" as a small text+icon (mirroring the app's own "‹ All teams" idiom) costs
+      <b>~54pt</b>, not ~20pt, because it is a word plus an icon plus its own leading gap, not a bare glyph.
+      Worst-case name budget collapses to <b>94pt (~12 chars)</b> — "Marvin Harrison Jr." truncates to
+      "Marvin Harri" on the single worst-case row (long name + both micro-tags + the widest tier label
+      "4+ 1sts"). That crosses from "acceptable ellipsis" into "the name is the least legible thing on the
+      row," which #299's own verdict never had to accept. See §6 below for the full measured comparison and
+      the recommended synthesis (chevron-only per row + one instructional line at the section header, which
+      keeps the literal word "Offer" on screen without paying the per-row cost on every player).</div>
+
+    <h2>Ground truth this lab was built against</h2>
+    <ul>
+      <li><b>Worktree base:</b> <code>origin/main</code> @ <code>ab9368f</code> (branch
+        <code>feedback-mocks-300-candidates</code>) — matches the base named in the brief; verified with
+        <code>git log --oneline -3</code>.</li>
+      <li><b>Spec source:</b> <code>docs/feedback/items/300-league-rankings-trade-candidates/
+        operator-answers-2026-08-11.md</code> (commit <code>4f1c6e5</code>, branch
+        <code>feedback-300-plan</code>) — its §6 "third pass" table is the frozen design; supersedes
+        <code>plan.md</code> wherever they disagree (notably: the candidate definition is
+        <b>median/average-relative</b>, NOT "less than you" — <code>plan.md</code>'s §3.1 recommendation was
+        explicitly overridden by the operator).</li>
+      <li><b>#299 tile contract:</b> <code>mockups/polish-lab-2026-08-11/league-tile-density.html</code>
+        (commit <code>221c134</code>) — V1 (32pt, tier badge moved into the right cluster left of
+        <code>posRank</code>) is the operator-decided variant per
+        <code>mockups/polish-lab-2026-08-11/OPERATOR-DECISIONS.md</code>. Its CSS/box-model is reused
+        verbatim here, not re-derived, so this lab's pt numbers are directly comparable to that lab's.</li>
+      <li><b>Screen source:</b> <code>mobile/src/screens/LeagueSummaryScreen.tsx</code> — drill-in state is
+        component state <code>selectedId</code> (~:385), roster rows render non-pressable at :1210-1229,
+        <code>TeamRow</code> (the "same tiles as the League summary page" R-A1 asks the candidates section
+        to reuse) is :1609-1647, <code>listRow</code> style is :2182 (<code>minHeight: 44</code> — untouched
+        by #299, which only touches the roster-panel <code>PlayerCard dense</code> tiles).</li>
+      <li><b>Payload:</b> <code>mobile/src/api/league.ts:560-566</code> —
+        <code>positions: {QB|RB|WR|TE: {count, value, value_label?}}</code> is on the wire today; the
+        candidates list reads <code>posValues[P]</code> directly, never <code>activeTotal</code>
+        (<code>config/features.json</code>'s <code>league.picks_always_counted</code> comment: a
+        single-position filter silently includes PICKS in the filtered bar total, so the strip must not
+        reuse that number).</li>
+    </ul>
+  </div>
+
+  <!-- ══ CAPTURE ANCHOR + COVERAGE GAP ══════════════════════════════════ -->
+  <div class="sec">Capture anchor <span class="fb">screens/mobile/league-summary/populated.png</span></div>
+  <div class="note">
+    <div class="anchor">
+      <img class="anchorimg" src="../../screens/mobile/league-summary/populated.png"
+           alt="Real capture: League rankings, populated, unfocused">
+      <div class="anchortxt">
+        <h2 style="margin-top:0">Two stacked coverage gaps — flagged per <code>mockups/CLAUDE.md</code></h2>
+        <p>The real capture on the left is the League-rankings screen, unfiltered, unfocused — embedded as
+          the screen-identity anchor per the mockups hard rule. Everything else on this page is a
+          <b>reconstruction</b>, for two independent reasons:</p>
+        <p><b>Gap 1 (pre-existing, #299's finding):</b> <code>screens/manifest.json</code> lists five
+          <code>league-summary</code> states and none of them is the drill-in/focused-team state — the
+          capture flow never taps a bar. Every drill-in frame below is traced from source
+          (<code>LeagueSummaryScreen.tsx</code> line citations throughout), not a captured screenshot.</p>
+        <p><b>Gap 2 (new, this item):</b> the specific drill-in #300 introduces — a candidate team tapped,
+          <i>the caller's own roster</i> rendering instead of the tapped team's — <b>has never existed in the
+          shipped app in any form.</b> There is nothing to trace even once the drill-in capture gap above is
+          closed; every "Proposed" frame past this point is a first-principles construction from the
+          decided spec + the #299 tile contract, not a redrawn version of something real. Frames are labeled
+          accordingly (flare-colored slot labels = reconstruction, gray = faithful "today" recreation).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FRAME 1 — ENTRY POINT ═══════════════════════════════════════════ -->
+  <div class="sec">1. Entry point <span class="fb">candidates section in place under the chart card</span></div>
+  <div class="row3">
+
+    <!-- CURRENT -->
+    <div class="slot">
+      <div class="slotlbl cur">Current — shipped v1.12.0</div>
+      <div class="hchip"><b>No candidates surface exists</b> — filtering WR shows only the re-ranked list</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="card">
+            <div class="cardhead"><div><div class="t">QA Standard League</div><div class="c">Dynasty · SF TEP</div></div></div>
+            <div class="minichart">
+              <div class="c on" style="height:100%"></div><div class="c" style="height:88%"></div>
+              <div class="c" style="height:79%"></div><div class="c" style="height:71%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:58%"></div>
+              <div class="c" style="height:52%"></div><div class="c" style="height:46%"></div>
+              <div class="c" style="height:39%"></div><div class="c" style="height:31%"></div>
+              <div class="c" style="height:22%"></div><div class="c" style="height:14%"></div>
+            </div>
+          </div>
+          <div class="subsetrow" style="margin-bottom:12px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank" style="color:var(--ice)">1</span>
+              <span class="tname" style="color:var(--ice)">Kirbys Krew · You</span>
+              <span class="tval">21.4K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Dynasty Dominators</span>
+              <span class="tval">18.9K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Ironside Dynasty</span>
+              <span class="tval">14.1K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Redzone Renegades</span>
+              <span class="tval">11.7K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tval">6.1K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">The Rebuild</span>
+              <span class="tval">4.2K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+          </div>
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Filtering to WR today re-ranks the whole league by WR value
+        (<code>LeagueSummaryScreen.tsx:272-294,527-537</code>) but surfaces no notion of "who is weak" — the
+        user has to read the whole list and do the comparison themselves.</div>
+    </div>
+
+    <!-- PROPOSED -->
+    <div class="slot">
+      <div class="slotlbl recon">Proposed — <code>league.pos_candidates</code> ON · reconstruction</div>
+      <div class="hchip win"><b>Trade candidates</b> section, weakest-first, reuses TeamRow (44pt, untouched by #299)</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll">
+          <div class="card">
+            <div class="cardhead"><div><div class="t">QA Standard League</div><div class="c">Dynasty · SF TEP</div></div></div>
+            <div class="minichart">
+              <div class="c on" style="height:100%"></div><div class="c" style="height:88%"></div>
+              <div class="c" style="height:79%"></div><div class="c" style="height:71%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:58%"></div>
+              <div class="c" style="height:52%"></div><div class="c" style="height:46%"></div>
+              <div class="c" style="height:39%"></div><div class="c" style="height:31%"></div>
+              <div class="c" style="height:22%"></div><div class="c" style="height:14%"></div>
+            </div>
+          </div>
+          <div class="subsetrow" style="margin-bottom:12px">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+
+          <div class="candcard" testid="league-summary.candidates">
+            <div class="candhead">
+              <div class="candtitle">Trade candidates</div>
+              <div class="candcaption">Below the league median WR value (9.0K) — weakest first</div>
+            </div>
+            <div class="teamrow" testid="league-summary.candidates.row.1">
+              <span class="trank">1</span><span class="tname">The Rebuild</span>
+              <span class="tdeficit">−4.8K</span><span class="tval">4.2K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow" testid="league-summary.candidates.row.2">
+              <span class="trank">2</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tdeficit">−2.9K</span><span class="tval">6.1K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow" testid="league-summary.candidates.row.3">
+              <span class="trank">3</span><span class="tname">Redzone Renegades</span>
+              <span class="tdeficit">−0.4K</span><span class="tval">8.6K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+          </div>
+
+          <div class="list">
+            <div class="teamrow"><span class="trank" style="color:var(--ice)">1</span>
+              <span class="tname" style="color:var(--ice)">Kirbys Krew · You</span>
+              <span class="tval">21.4K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Dynasty Dominators</span>
+              <span class="tval">18.9K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Ironside Dynasty</span>
+              <span class="tval">14.1K</span>
+              <svg class="i" width="12" height="12" viewBox="0 0 24 24" style="color:var(--chalk-dim)"><path d="M9 5l7 7-7 7"/></svg></div>
+          </div>
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption"><b>Redzone Renegades appears despite sitting well ABOVE the caller</b> (8.6K vs
+        14.1K/Kirbys Krew is irrelevant here — median is 9.0K, Redzone is under it). This is the accepted
+        tradeoff from operator-answers §Q1: median-relative answers "who is weak league-wide," not "who can
+        I beat." The deficit column reads against the median, tone <code>chalk-dim</code> — never
+        <code>semantic.neg</code>, the deficit is good news for a seller, not a warning.</div>
+    </div>
+  </div>
+
+  <!-- ══ FRAME 2 — CANDIDATE DRILL-IN ═══════════════════════════════════ -->
+  <div class="sec">2. Candidate drill-in <span class="fb">tap a candidate → YOUR players at P, each with Offer</span></div>
+  <div class="row3">
+    <div class="slot" style="width:390px">
+      <div class="slotlbl recon">Proposed — reconstruction, recommended geometry (Variant A, §6)</div>
+      <div class="hchip win">Tile height <b>unchanged from #299</b> — 32pt, chevron-only trailing affordance</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll tall">
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div>
+                <div class="t">Trade candidate: The Rebuild</div>
+                <div class="c">Weak at WR — 4.2K (league median 9.0K)</div>
+              </div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                Candidates
+              </div>
+            </div>
+          </div>
+          <div class="hint">
+            <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+            Tap <b style="color:var(--chalk)">›</b> to offer a player to The Rebuild
+          </div>
+
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--wr)">YOUR WR</span>
+            <div class="groupmetarow"><span class="groupmeta">7 · 21.4K</span></div>
+          </div>
+
+          <div class="tilewrap measure" data-h="32pt">
+            <div class="tile" testid="league-summary.player-row.chase">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Ja'Marr Chase</span><span class="tm">CIN</span></div></div>
+              <div class="right">
+                <span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+                <span class="pr" style="color:var(--wr)">WR1</span>
+                <span class="offer-chevron" aria-label="Offer Ja'Marr Chase">
+                  <span class="hit"></span>
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile" testid="league-summary.player-row.mhj">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span></div></div>
+              <div class="right">
+                <span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+                <span class="pr" style="color:var(--wr)">WR8</span>
+                <span class="offer-chevron" aria-label="Offer Marvin Harrison Jr.">
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile" testid="league-summary.player-row.higgins">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Tee Higgins</span><span class="tm">CIN</span><span class="tag q">Q</span></div></div>
+              <div class="right">
+                <span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+                <span class="pr" style="color:var(--wr)">WR14</span>
+                <span class="offer-chevron" aria-label="Offer Tee Higgins">
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile" testid="league-summary.player-row.jw">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Jameson Williams</span><span class="tm">DET</span></div></div>
+              <div class="right">
+                <span class="bdg" style="border-color:var(--t-2nd)">2nd</span>
+                <span class="pr" style="color:var(--wr)">WR26</span>
+                <span class="offer-chevron" aria-label="Offer Jameson Williams">
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile" testid="league-summary.player-row.shakir">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Khalil Shakir</span><span class="tm">BUF</span></div></div>
+              <div class="right">
+                <span class="bdg" style="border-color:var(--t-3rd)">3rd</span>
+                <span class="pr" style="color:var(--wr)">WR33</span>
+                <span class="offer-chevron" aria-label="Offer Khalil Shakir">
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile dim" testid="league-summary.player-row.stash">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Xavier Restrepo</span><span class="tm">MIA</span></div></div>
+              <div class="right">
+                <span class="pr" style="color:var(--wr)">NR</span>
+                <span class="offer-chevron dim" aria-label="No market value, cannot offer Xavier Restrepo">
+                  <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="zerocap">No market value — can't build offers</div>
+
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">7 of Kirbys Krew's (You) own WRs, unfiltered, ranked by value — <b>not</b> The
+        Rebuild's roster (operator-answers §6 Q-N6: "ours only," the candidate row already asserted the
+        weakness with a number). Ja'Marr Chase's row shows the enlarged 44×44pt invisible hit-slop as a
+        dashed overlay — the visual glyph stays 12pt, the tap target does not shrink with it. Xavier
+        Restrepo is the 0-value row (§4 below). The screen-level button lives below the fold on this frame;
+        see Frame 3.</div>
+    </div>
+
+    <div class="slot" style="width:390px">
+      <div class="slotlbl recon">Proposed — continued, with the screen-level button</div>
+      <div class="hchip rec"><b>"Find a Trade with this team"</b> — R-A4/operator-answers §5 final copy</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll" style="height:auto;padding-bottom:16px">
+          <div class="card" style="padding:12px 16px">
+            <div class="cardhead">
+              <div><div class="t">Trade candidate: The Rebuild</div>
+                <div class="c">Weak at WR — 4.2K (league median 9.0K)</div></div>
+              <div class="backlink">
+                <svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                Candidates
+              </div>
+            </div>
+          </div>
+          <div class="grouphead" style="margin-top:2px">
+            <span class="grouplabel" style="color:var(--wr)">YOUR WR</span>
+            <div class="groupmetarow"><span class="groupmeta">7 · 21.4K</span></div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-3rd)">3rd</span>
+                <span class="pr" style="color:var(--wr)">WR38</span>
+                <span class="offer-chevron" aria-label="Offer Rome Odunze"><svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+            </div>
+          </div>
+          <div class="tilewrap">
+            <div class="tile">
+              <div class="rail" style="background:var(--wr)"></div>
+              <div class="main"><div class="l1"><span class="nm">Adonai Mitchell</span><span class="tm">IND</span></div></div>
+              <div class="right"><span class="bdg" style="border-color:var(--t-4th)">4th</span>
+                <span class="pr" style="color:var(--wr)">WR61</span>
+                <span class="offer-chevron" aria-label="Offer Adonai Mitchell"><svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+            </div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="btn ice" testid="league-summary.find-trades-with-team-btn">
+            Find a Trade with this team
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">One screen-level button, below the roster, ice-filled per the design system's
+        "ice = what you can do." Tapping a row's chevron pins that player as <code>give</code> + scopes the
+        opponent + routes (uses the existing <code>useFinderTargets</code> pin store, per plan.md §4 — no
+        new mechanism for the player path). Tapping this button scopes the opponent with NO player pin — the
+        new opponent-scoping mechanism operator-answers §3.1 flags as the one part that collides with
+        #297/#298 and needs its own <code>TradesScreen.tsx</code> edit.</div>
+    </div>
+  </div>
+
+  <!-- ══ FRAME 3 — EMPTY STATE ═══════════════════════════════════════════ -->
+  <div class="sec">3. Empty state <span class="fb">the caller can themselves be below the median (operator-answers §3.4)</span></div>
+  <div class="row3">
+    <div class="slot" style="width:390px">
+      <div class="slotlbl recon">Proposed — reconstruction</div>
+      <div class="hchip"><b>Honest, non-caller-relative copy</b> — no reference to "you," since the definition no longer is</div>
+      <div class="phone">
+        <div class="status"><span>8:28</span><span>WiFi</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons">
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10 21h4"/></svg>
+            <svg class="i" width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </div>
+        </div>
+        <div class="navhdr"><span class="t">League rankings</span></div>
+        <div class="scroll" style="height:auto;padding-bottom:16px">
+          <div class="card">
+            <div class="cardhead"><div><div class="t">QA Standard League</div><div class="c">Dynasty · SF TEP</div></div></div>
+            <div class="minichart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:82%"></div>
+              <div class="c" style="height:64%"></div><div class="c on" style="height:46%"></div>
+              <div class="c" style="height:39%"></div><div class="c" style="height:31%"></div>
+              <div class="c" style="height:22%"></div><div class="c" style="height:14%"></div>
+            </div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all">All</span><span class="pill qb on">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="candcard" testid="league-summary.candidates">
+            <div class="candhead">
+              <div class="candtitle">Trade candidates</div>
+              <div class="candcaption">Below the league median QB value (5.4K) — weakest first</div>
+            </div>
+            <div class="empty" testid="league-summary.candidates.empty">
+              No other team is below the league median QB value.
+            </div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>Acquire</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/></svg>Draft</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 24 24"><path d="M4 20V9l4 3 4-7 4 7 4-3v11z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Caller (You, rank 4/8, muted-gray bar in this frame) sits BELOW the QB median
+        here — under the shipped-#293 pick-inclusive filtered bar this team's own numeral would read low —
+        yet the section correctly renders empty, because every OTHER team is at/above the median too (a
+        small/bunched league). <code>plan.md</code>'s stale empty copy ("No team has less QB value than
+        you") does not parse in this world — it presumes the caller is the anchor, which the operator's
+        median/average pivot (§Q1) explicitly removed. This copy states the true condition instead:
+        no reference to "you" at all.</div>
+    </div>
+
+    <div class="slot" style="width:390px">
+      <div class="slotlbl warn">Open question the reconstruction surfaces</div>
+      <div class="hchip"><b>Median or average?</b> — the operator's own answer says both</div>
+      <div class="note" style="margin:0;height:auto">
+        <p>Operator-answers §1 Q1 records the decision as <b>"Median/average-relative"</b> — a single answer
+          naming two different statistics. <code>plan.md</code>'s rejected-alternatives table also collapses
+          them into one row ("Raw positional total, but relative to league median/average"). The two are NOT
+          interchangeable: with an even-sized league, the median sits between two teams and no team need
+          equal it exactly, while the average is pulled by outliers (one hoarding team massively above the
+          rest drags the bar for everyone else). This lab drew "median" throughout because it is the more
+          common fantasy-analytics convention and resists a single hoarder skewing the whole candidates list
+          — <b>but the operator's answer as written does not pick one</b>, and the two produce visibly
+          different candidate sets and a different empty-state boundary in a real league. This needs a
+          one-word confirmation before build (§8 open questions).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 4 — GEOMETRY CONTEST ═══════════════════════════════════ -->
+  <div class="sec">4. Geometry contest <span class="fb">the chevron-vs-32pt question, at true scale, three variants</span></div>
+  <div class="note">
+    <p>Content width inside the tile is <b>358pt</b> (390 − 16pt <code>scroll</code> padding each side,
+      identical box model to the #299 lab). That lab's own width-stress test (its final section) already
+      measured the worst-case row — long name + RK tag + injury tag + the widest tier label "4+ 1sts" +
+      posRank — at <b>148pt (~19 chars)</b> free for the name, calling it "acceptable" truncation. Everything
+      below extends that exact same worst-case row with #300's trailing affordance, so the three variants are
+      directly comparable to that baseline, not to a clean best-case row.</p>
+    <table class="tbl">
+      <tr><th>Element</th><th>Width</th></tr>
+      <tr><td>Rail + left inset + team code + RK tag + injury tag (fixed cost, from #299)</td><td>98pt</td></tr>
+      <tr><td>Tier badge — worst case "4+ 1sts"</td><td>60pt</td></tr>
+      <tr><td>posRank "WR61" + internal gaps + right margin</td><td>52pt</td></tr>
+      <tr class="win"><td>#299 baseline — remaining for the name</td><td>148pt (~19 chars)</td></tr>
+    </table>
+  </div>
+
+  <div class="row3" style="margin-top:8px">
+    <!-- VARIANT A -->
+    <div class="slot" style="width:390px">
+      <div class="slotlbl">Variant A — chevron only <b>· RECOMMENDED</b></div>
+      <div class="hchip win"><b>128pt (~16 chars)</b> for the name · 32pt tile unchanged</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span>
+              <span class="offer-chevron" aria-label="Offer Marvin Harrison Jr."><svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--rb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Christian McCaffrey</span><span class="tm">SF</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="pr" style="color:var(--rb)">RB12</span>
+              <span class="offer-chevron" aria-label="Offer Christian McCaffrey"><svg class="i" width="12" height="12" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Adds ~20pt (a bare 12pt glyph + 8pt leading gap) to the right cluster. Worst-case
+        name budget: 148 → <b>128pt</b>. Same class of truncation #299 already called acceptable — one or
+        two characters shorter, ellipsis still lands mid-surname, positional rank still disambiguates.
+        <b>Tile height stays 32pt — no exception to #299's box model anywhere.</b> Cost: the word "Offer"
+        is NOT visible on the row (accessibilityLabel only) — see the synthesis note below.</div>
+    </div>
+
+    <!-- VARIANT B -->
+    <div class="slot" style="width:390px">
+      <div class="slotlbl warn">Variant B — visible "Offer ›" label, same tile</div>
+      <div class="hchip"><b>94pt (~12 chars)</b> for the name — crosses into genuinely degraded</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm" style="max-width:88px">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span>
+              <span class="offer-label" aria-label="Offer Marvin Harrison Jr.">Offer<svg class="i" width="9" height="9" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--rb)"></div>
+            <div class="main"><div class="l1"><span class="nm" style="max-width:88px">Christian McCaffrey</span><span class="tm">SF</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="pr" style="color:var(--rb)">RB12</span>
+              <span class="offer-label" aria-label="Offer Christian McCaffrey">Offer<svg class="i" width="9" height="9" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">"Offer" text + icon mirrors the app's own "‹ All teams" idiom, but a WORD plus an
+        icon plus its own leading gap costs ~54pt, not ~20pt. Worst-case name budget collapses to
+        <b>94pt</b> — "Marvin Harrison Jr." renders as roughly "Marvin Harri…". That is a materially worse
+        truncation than anything #299 accepted; the name — the single most important fact on the row —
+        becomes the least legible thing on it. <code>max-width</code> forced above to render the true
+        clipped state rather than let the browser silently reflow past the phone frame.</div>
+    </div>
+
+    <!-- VARIANT C -->
+    <div class="slot" style="width:390px">
+      <div class="slotlbl">Variant C — visible label, drop posRank on THIS surface</div>
+      <div class="hchip win"><b>146pt (~19 chars)</b> for the name · still 32pt · loses league-wide posRank</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="offer-label" aria-label="Offer Marvin Harrison Jr.">Offer<svg class="i" width="9" height="9" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--rb)"></div>
+            <div class="main"><div class="l1"><span class="nm">Christian McCaffrey</span><span class="tm">SF</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="offer-label" aria-label="Offer Christian McCaffrey">Offer<svg class="i" width="9" height="9" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Dropping <code>posRank</code> (the player's league-wide rank at their position)
+        frees the ~52pt that variant B's label needed, restoring the name budget to essentially #299's
+        original baseline. Defensible because posRank answers "how good is this player league-wide," which
+        is not the question this specific view is trying to answer ("should I offer this player to THIS
+        weak team") — the candidates section already established the opponent's weakness with a number.
+        Cost, stated plainly: this ONE surface (the candidate-drill-in roster) would render its tiles
+        differently from the general roster drill-in one tap away, which shows the same <code>PlayerCard
+        dense</code> component WITH posRank. Two visually different tile configurations for the same
+        component on the same screen, depending on entry path.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Recommendation</h2>
+    <table class="vtbl">
+      <tr><th>Variant</th><th>Name budget (worst case)</th><th>Verdict</th></tr>
+      <tr class="rec"><td>A — chevron only</td><td>148 → <b>128pt</b></td>
+        <td><b>Recommended.</b> Zero exception to the #299 box model, truncation cost is in the same
+          "acceptable" class #299 already signed off on. Matches the LITERAL wording of operator-answers
+          §6 Q-N7 ("trailing chevron-style affordance — not a button"). Paired with a one-line
+          section-level hint ("Tap › to offer a player to &lt;Team&gt;", shown once per drill-in, not per
+          row) so the word "Offer" still appears on screen — satisfying Q-N5's label decision without
+          paying the per-row width cost B/C require.</td></tr>
+      <tr><td>B — visible "Offer ›" per row</td><td>148 → <b>94pt</b></td>
+        <td>Satisfies Q-N5 literally (the word is on every row) but the truncation crosses from
+          "acceptable" into "the name is now the least legible fact on the row" — a real regression versus
+          #299's own accepted worst case. Not recommended unless the operator explicitly wants the word
+          visible on every row and accepts that cost.</td></tr>
+      <tr><td>C — visible label, drop posRank here</td><td>148 → <b>146pt</b></td>
+        <td>The width math works, but it buys back the room by removing a data field
+          (<code>posRank</code>) that the general roster drill-in still shows one tap away — the same tile
+          renders two different shapes depending on how the user arrived. Worth it only if the operator
+          decides league-wide positional rank is genuinely not useful in a sell-side context.</td></tr>
+    </table>
+    <div class="flarebox"><b>A genuine spec contradiction found while drawing this, not papered over:</b>
+      operator-answers §6 records TWO separate resolutions that pull against each other at 32pt — Q-N5
+      ("the label" is "Offer") and Q-N7 ("trailing chevron-style affordance — not a button competing for the
+      right cluster"). Read literally, Q-N5 wants a visible word; Q-N7's own reasoning (avoiding a button
+      that competes for the right cluster) is exactly the reasoning that rules a visible word out at this
+      tile height. Variant A resolves the tension by making "Offer" the row's <i>accessibility</i> label and
+      a one-time section hint's <i>visible</i> word, never a per-row visible word — but that is this lab's
+      synthesis, not something operator-answers states outright. Flagged for sign-off in §8.</div>
+  </div>
+
+  <!-- ══ SECTION 8 — OPEN QUESTIONS ══════════════════════════════════════ -->
+  <div class="sec">Open questions for the operator</div>
+  <div class="note">
+    <ul>
+      <li><b>Median or average?</b> Operator-answers §1 Q1 says "Median/average-relative" without choosing.
+        This lab drew median throughout (§3 above explains why); the two statistics produce different
+        candidate lists and a different empty-state boundary in an uneven league. Needs one word.</li>
+      <li><b>Is Variant A's synthesis (chevron-only row + one-time section hint) an acceptable reading of
+        "label 'Offer'"?</b> Or does the operator want the word literally on every row (Variant B, accepting
+        the tighter name truncation) or willing to drop <code>posRank</code> on this one surface to afford
+        it (Variant C)? This is the single highest-leverage sign-off in this lab.</li>
+      <li><b>Group header copy.</b> This lab renders "YOUR WR" (not bare "WR") in the candidate drill-in so
+        it's unambiguous the roster shown is the caller's own, not the tapped team's — a real UX
+        disambiguation need since the SAME <code>setSelectedId</code> mechanism now renders two different
+        rosters depending on entry path (candidate tap → your roster; normal team-row tap → their roster,
+        unchanged). Not specified anywhere in the decided design; flagging the gap and the fix drawn here.</li>
+      <li><b>What happens if the position filter changes while a candidate drill-in is open?</b> The
+        candidates section only exists with exactly one core position selected; the general drill-in mirrors
+        <code>posFilter</code> live. If the user changes the filter while looking at "your WRs to offer The
+        Rebuild," does the view fall back to normal (their-roster) drill-in behavior, since it's no longer
+        position-scoped weakness browsing? Not mocked here — a genuine edge case worth a product answer
+        before build, not a mockup guess.</li>
+      <li><b>Candidates section cap/scroll interaction with the list below it.</b> This lab shows 3 candidate
+        rows above the full ranked list; a 12-team league with many teams below median could make the
+        combined section + list long. Plan.md §3.2 says "show all qualifying teams (a league is ≤ ~14 rows;
+        no pagination speculation)" — carried forward here unchanged, just flagging it stacks with the full
+        list still rendering below, unlike a mode where candidates REPLACE the list.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

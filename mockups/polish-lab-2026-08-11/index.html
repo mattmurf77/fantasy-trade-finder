@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Polish Lab — 2026-08-11 (#297 · #298 · #299 · #302)</title>
+<style>
+  html,body { margin:0; height:100%; font-family:"Courier New",monospace; background:#101418; }
+  .bar { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:8px;
+         background:#181e24; border-bottom:2px solid #2a333c; position:sticky; top:0; z-index:5; }
+  .tab { font-family:inherit; font-size:13px; padding:8px 12px; background:#101418; color:#c8d2dc;
+         border:1px solid #2a333c; border-radius:4px; cursor:pointer; }
+  .tab.active { background:#173042; color:#7fd4ff; border-color:#7fd4ff; }
+  .hint { margin-left:auto; font-size:11px; color:#6b7783; padding-right:6px; }
+  .pane { display:none; width:100%; height:calc(100vh - 54px); border:0; background:#101418; }
+  .pane.active { display:block; }
+</style></head>
+<body>
+<div class="bar">
+  <button class="tab active" data-i="0">Single-pin trades (#298 · #297)</button>
+  <button class="tab" data-i="1">Roster tile density (#299)</button>
+  <button class="tab" data-i="2">Back to all teams (#302)</button>
+  <span class="hint">panes load sibling files — keep them in this directory</span>
+</div>
+<iframe class="pane active" data-i="0" src="trades-single-pin-recovery.html"></iframe>
+<iframe class="pane" data-i="1" src="league-tile-density.html"></iframe>
+<iframe class="pane" data-i="2" src="drilldown-back-affordance.html"></iframe>
+<script>
+  var tabs  = document.querySelectorAll('.tab');
+  var panes = document.querySelectorAll('.pane');
+  for (var t = 0; t < tabs.length; t++) {
+    tabs[t].addEventListener('click', function (e) {
+      var i = e.target.getAttribute('data-i');
+      for (var a = 0; a < tabs.length;  a++) tabs[a].classList.remove('active');
+      for (var b = 0; b < panes.length; b++) panes[b].classList.remove('active');
+      e.target.classList.add('active');
+      document.querySelector('iframe.pane[data-i="' + i + '"]').classList.add('active');
+    });
+  }
+</script>
+</body></html>

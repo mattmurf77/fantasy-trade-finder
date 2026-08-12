@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#300 v2 — the 32pt tile, the 44pt problem, and the button word</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests,
+     so nothing on this page depends on the network. The *measurements* quoted
+     in the annotations were NOT taken from this fallback rendering: they come
+     from measure-tile.py, which reads the real Archivo / IBM Plex Mono TTFs the
+     app ships (@expo-google-fonts, mobile/node_modules) and computes advance
+     widths from hmtx. Round 1 estimated from a mockup box model; this round
+     measures against the shipped font.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md).
+     Base tokens + phone-frame + tile CSS descend from the validated #299 lab
+     (mockups/polish-lab-2026-08-11/league-tile-density.html, 221c134) and from
+     round 1 (fed9485), then re-derived against PlayerCard.tsx as SHIPPED on
+     origin/main @ 53bd19f. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1400px;width:100%}
+
+  .navbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 14px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 11px}
+  .navbar a.on{color:var(--on-ice);background:var(--ice);border-color:var(--ice)}
+  .navbar .lbl{font:500 11px var(--mono);color:var(--chalk-faint);margin-right:4px}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note h3{font:600 12px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+           color:var(--chalk);margin:14px 0 6px}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .verdict.no{border-left-color:var(--warn)}
+  .verdict.bad{border-left-color:var(--neg)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:30px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:flex-start;align-items:flex-start;width:100%}
+  .row3.mid{justify-content:center}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slot.wide{width:440px}
+  .slotlbl{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.08em;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:none}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .slotlbl.recon{color:var(--flare)} .slotlbl.recon::before{background:var(--flare)}
+  .slotlbl.bad{color:var(--neg)} .slotlbl.bad::before{background:var(--neg)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start;line-height:1.4}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.recon{color:var(--flare);border-color:var(--flare);background:rgba(240,80,140,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390x844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .sp{width:74px}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .scroll.tall{height:700px}
+  .scroll.short{height:470px}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Cards / chart strip / controls ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--wr)}
+  .bigchart{display:flex;align-items:flex-end;gap:4px;height:104px;margin-top:12px}
+  .bigchart .c{flex:1;border-radius:2px 2px 0 0;background:var(--wr);opacity:.85}
+  .bigchart .c.you{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;
+    justify-content:center;gap:6px}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .subsetseg .ct{font-family:var(--mono);font-size:11px;color:var(--chalk-faint)}
+  .subsetseg.on .ct{color:var(--chalk-dim)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.all.on{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:var(--ink-0)}
+  .pill.te{border-color:var(--te);color:var(--te)} .pill.te.on{background:var(--te);color:var(--ink-0)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px;gap:8px}
+  .grouplabel{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+  .groupsub{font:400 12px var(--ui);color:var(--chalk-dim);margin:-4px 0 6px}
+  .groupmetarow{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense + denseSingleLine, AS SHIPPED ──
+     mobile/src/components/PlayerCard.tsx @ origin/main 53bd19f:
+       cardDense    :472  height 60 -> cardDenseSingle :473-475 height 32
+       denseMain    paddingLeft 13, paddingRight space.sm 8
+       denseLine1   gap 6, alignItems baseline
+       denseNumsRow flexDirection row, gap space.sm 8; denseNums marginRight 8
+       denseName    Archivo600 15 / denseTeam Archivo400 11
+       denseTagFloor fontSize 11 (visual.chalkline_cleanup ON)
+       densePosRank IBMPlexMono600 14, position-colored
+       card         overflow hidden  <- the clip that kills an oversized hit area */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tilewrap.roomy{margin-bottom:12px}   /* proposed: 44pt pitch for hitSlop headroom */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden;height:32px}
+  .tile.t44{height:44px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .tag.o{color:var(--neg);border-color:var(--neg)}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  .bdg.ice{border-color:var(--ice);color:var(--ice)}
+  .tile.dim{opacity:.45}
+  .tile.press{background:var(--ink-3)}
+
+  /* trailing affordances */
+  .chev{display:inline-flex;align-items:center;justify-content:center;color:var(--ice);
+    flex:0 0 auto;position:relative}
+  .chev .hit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;border:1px dashed var(--ice);border-radius:8px;opacity:.4;pointer-events:none}
+  .actlbl{display:inline-flex;align-items:center;gap:3px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.5px;white-space:nowrap;flex:0 0 auto}
+  .actpill{display:inline-flex;align-items:center;border:1px solid var(--ice);color:var(--ice);
+    border-radius:4px;padding:2px 8px;font:600 11px var(--ui);letter-spacing:.5px;
+    white-space:nowrap;flex:0 0 auto}
+  .chev.dim,.actlbl.dim{color:var(--chalk-faint)}
+
+  /* row hitSlop illustration */
+  .hitrow{position:relative}
+  .hitrow::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px;
+    border:1px dashed var(--pos);border-radius:10px;opacity:.55;pointer-events:none}
+  .hitnote{font:500 11px var(--mono);color:var(--pos);padding-left:2px}
+
+  /* ── Team list rows (TeamRow / listRow: minHeight 44, LeagueSummaryScreen.tsx:2618) ── */
+  .list{display:flex;flex-direction:column;gap:2px}
+  .teamrow{display:flex;align-items:center;gap:8px;min-height:44px;
+    border-bottom:1px solid var(--line);padding:8px 4px}
+  .teamrow:last-child{border-bottom:none}
+  .teamrow.you{background:var(--ink-1);border:1px solid var(--line-strong);border-radius:4px;padding:8px}
+  .trank{font:500 13px var(--mono);width:20px;text-align:center;color:var(--chalk-dim);flex:0 0 auto}
+  .teamrow.you .trank{color:var(--ice)}
+  .tname{flex:1;font:600 16px var(--ui);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tright{display:flex;align-items:center;gap:8px;flex:0 0 auto;color:var(--chalk-dim)}
+  .tval{font:500 13px var(--mono);color:var(--chalk);flex:0 0 auto}
+  .youbdg{border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:1px 5px;
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .empty{padding:14px 4px 16px;font:400 13px var(--ui);color:var(--chalk-dim);line-height:1.5}
+
+  /* ── Collapsed strip (#169 OutlookStrip construction, LeagueSummaryScreen.tsx:2713-2731) ── */
+  .strip{display:flex;align-items:center;gap:8px;background:var(--ink-1);border:1px solid;
+    border-radius:4px;padding:8px 12px;margin-bottom:16px}
+  .strip .tick{width:3px;height:14px;flex:0 0 auto}
+  .strip .lbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .strip .phrase{flex:1;font:400 13px var(--ui);color:var(--chalk-dim);min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip.ice{border-color:var(--line)} .strip.ice .tick{background:var(--ice)} .strip.ice .lbl{color:var(--ice)}
+  .strip.warn{border-color:var(--warn)} .strip.warn .tick{background:var(--warn)} .strip.warn .lbl{color:var(--warn)}
+
+  /* ── Median cutline — the shipped oddsCutline construction verbatim
+       (LeagueSummaryScreen.tsx render + styles oddsCutline/oddsCutRule/oddsCutText) ── */
+  .cutline{display:flex;align-items:center;gap:8px;padding:10px 0}
+  .cutline .rule{flex:1;height:1px;background:var(--line-strong)}
+  .cutline .txt{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-dim);white-space:nowrap;flex:0 0 auto}
+  .cutline.flare .rule{background:var(--flare);opacity:.5} .cutline.flare .txt{color:var(--flare)}
+
+  .sidelbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-faint);padding:2px 0 6px 2px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;
+    border-radius:4px;font:700 12px var(--ui);letter-spacing:.6px;text-transform:uppercase;margin-top:8px}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+  .btn.ghost{border:1px solid var(--line-strong);color:var(--chalk)}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-58px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+  .measurew{position:relative;margin-bottom:22px}
+  .measurew::before{content:attr(data-w);position:absolute;left:0;right:0;bottom:-17px;
+    font:500 11px var(--mono);color:var(--flare);text-align:center}
+
+  .dupbracket{position:relative;border-left:2px solid var(--flare);padding-left:8px;margin-left:-10px}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong);vertical-align:bottom}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top;
+    line-height:1.5}
+  .tbl td:first-child{color:var(--chalk);font-weight:600}
+  .tbl.num th:nth-child(n+2),.tbl.num td:nth-child(n+2){text-align:right;font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.lose td:nth-child(n+2){color:var(--neg);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+  .tbl tr.dead td{background:rgba(239,68,68,.05)}
+  .tbl .ok{color:var(--pos)} .tbl .bad{color:var(--neg)} .tbl .mid{color:var(--warn)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:290px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+
+  /* R-1 illustration (page 2): the 44×44 box a NESTED control would need,
+     drawn on the tile's wrapper so it is visible at all. Inside the tile it is
+     clipped by `overflow: 'hidden'` — which is exactly the finding. Red bands
+     mark the 6pt top and bottom that the clip eats. */
+  .clipdemo{position:relative}
+  .clipdemo .want{position:absolute;right:12px;top:-6px;width:44px;height:44px;
+    border:1px dashed var(--neg);border-radius:8px;pointer-events:none}
+  .clipdemo .lost{position:absolute;right:12px;width:44px;height:6px;
+    background:rgba(239,68,68,.30);pointer-events:none}
+  .clipdemo .lost.t{top:-6px}
+  .clipdemo .lost.b{bottom:-6px}
+  .clipnote{font:500 11px var(--mono);color:var(--neg);padding:2px 0 0 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="navbar">
+    <span class="lbl">candidates-300-v2</span>
+    <a href="directions.html">1 · Two directions</a>
+    <a class="on" href="tile-affordance.html">2 · Tile, 44pt &amp; naming</a>
+    <a href="values-and-states.html">3 · Pick tiers &amp; states</a>
+    <a href="index.html">Index</a>
+  </div>
+
+  <div class="note">
+    <h1>The shipped 32pt tile — what actually fits, and what 44pt costs</h1>
+    <p>#299 shipped. <code>PlayerCard.tsx</code> on <code>origin/main</code> @ <code>53bd19f</code> has
+      <code>denseSingleLine</code> (<code>:74</code> doc, <code>:122</code> destructure, <code>:222</code>
+      branch) and <code>styles.cardDenseSingle = { height: 32 }</code> (<code>:472-475</code>). This page
+      measures against that code, not against last round’s mockup CSS.</p>
+
+    <h2>Method — and why the numbers moved</h2>
+    <p>Every width below comes from <code>measure-tile.py</code> (in this folder), which loads the same
+      TTFs the app loads — <code>@expo-google-fonts/archivo/{400Regular,600SemiBold}</code> and
+      <code>ibm-plex-mono/600SemiBold</code> from <code>mobile/node_modules</code> — and sums real
+      <code>hmtx</code> advance widths, adding React Native’s <code>letterSpacing</code> after every glyph
+      and the exact paddings/borders from <code>PlayerCard.tsx</code> and
+      <code>components/chalkline/Badge.tsx</code>. Run it with <code>python3 measure-tile.py</code>.</p>
+    <div class="warnbox"><b>Read the frames as geometry, not as typography.</b> The phone frames on this page
+      render in Arial/Helvetica fallbacks (no external font requests are allowed in this lab), so their
+      on-screen glyph widths are <i>not</i> the app’s. Where truncation matters, the frame shows the
+      <b>string the measurement says will render</b>, baked in literally. Trust the annotations; the pixels
+      are indicative.</div>
+    <p><b>Delta vs round 1:</b> round 1 put the baseline name budget at 148pt and the worst-case tier badge
+      at 60pt. Measured: <b>143.8pt</b> and <b>63.5pt</b>. Round 1 was ~3% optimistic — not enough to
+      change its chevron verdict, but enough to matter for the marginal “Offer” label call, which is
+      exactly the call this page has to make.</p>
+  </div>
+
+  <!-- ══ BASELINE ════════════════════════════════════════════════════════ -->
+  <div class="sec">1. The shipped tile, measured <span class="fb">worst case: long name + RK + injury + widest tier</span></div>
+  <div class="row3">
+    <div class="slot wide">
+      <div class="note" style="margin:0">
+        <table class="tbl num">
+          <tr><th>Element</th><th>Width</th><th style="text-align:left">Source</th></tr>
+          <tr><td>tile content width</td><td>358.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">390 − <code>scroll</code> padding <code>space.lg</code> 16 × 2</td></tr>
+          <tr><td>− tile border 1 × 2</td><td>356.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400"><code>styles.card.borderWidth</code></td></tr>
+          <tr><td><code>denseMain</code> paddingLeft</td><td>13.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">3px rail + 10 inset</td></tr>
+          <tr><td>“ARI” @ Archivo 400 / 11</td><td>18.4</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400"><code>denseTeam</code></td></tr>
+          <tr><td>RK micro-tag</td><td>24.5</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400"><code>denseTagFloor</code> 11px (S2 PRD-04) + 3×2 pad + 1×2 border</td></tr>
+          <tr><td>“Q” micro-tag</td><td>17.1</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">same construction</td></tr>
+          <tr><td>3 × <code>denseLine1</code> gap + paddingRight</td><td>26.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">6 + 6 + 6 + 8</td></tr>
+          <tr class="lose"><td>fixed LEFT cost</td><td>99.1</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">sum of the above</td></tr>
+          <tr><td>tier badge “4+ 1STS”</td><td>63.5</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400"><code>Badge</code>: 6×2 pad + 1×2 border + <code>type.label</code> uppercase, ls 0.88</td></tr>
+          <tr><td>posRank “WR61” @ Plex Mono 600 / 14</td><td>33.6</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400"><code>densePosRank</code></td></tr>
+          <tr><td><code>denseNumsRow</code> gap + <code>denseNums</code> marginRight</td><td>16.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">8 + 8</td></tr>
+          <tr class="lose"><td>fixed RIGHT cluster</td><td>113.1</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">sum</td></tr>
+          <tr class="win"><td>REMAINING FOR THE NAME</td><td>143.8</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">356 − 99.1 − 113.1</td></tr>
+          <tr class="win"><td>“Marvin Harrison Jr.” needs</td><td>131.4</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">Archivo 600 / 15 — <b class="ok">fits, unclipped</b></td></tr>
+        </table>
+        <h3>Full tier-badge ladder (the right cluster’s variable cost)</h3>
+        <table class="tbl num">
+          <tr><th>Tier</th><th>Renders</th><th>Width</th><th>Tier</th><th>Renders</th><th>Width</th></tr>
+          <tr><td>firsts_4plus</td><td>4+ 1STS</td><td>63.5</td><td>second</td><td>2ND</td><td>39.0</td></tr>
+          <tr><td>firsts_3</td><td>3 1STS</td><td>55.6</td><td>third</td><td>3RD</td><td>38.9</td></tr>
+          <tr><td>firsts_2</td><td>2 1STS</td><td>55.6</td><td>fourth</td><td>4TH</td><td>37.8</td></tr>
+          <tr><td>first_1</td><td>1 1ST</td><td>47.4</td><td>waivers</td><td>FA</td><td>30.3</td></tr>
+        </table>
+        <p style="margin-top:8px">The badge swings <b>33.2pt</b> across the ladder. A row showing “FA”
+          has 33pt more name budget than one showing “4+ 1sts” — which is why the worst case has to be
+          drawn with the top tier, and why “it fits on my roster” is not evidence.</p>
+      </div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl cur">Baseline — the tile exactly as shipped</div>
+      <div class="hchip win">143.8pt name budget · nothing truncates</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case — 32pt, inert, no onPress">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span></div>
+          </div>
+        </div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR8</span></div>
+          </div>
+        </div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ricky Pearsall</span><span class="tm">SF</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-fa)">FA</span>
+              <span class="pr" style="color:var(--wr)">WR74</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">36pt pitch (32 + <code>rosterRow</code> marginBottom 4). No <code>onPress</code>,
+        so the row is inert and the 44pt minimum does not bind — <b>that is #299’s entire justification,
+        and #300 is the thing that invalidates it.</b></div>
+    </div>
+  </div>
+
+  <!-- ══ 44pt ════════════════════════════════════════════════════════════ -->
+  <div class="sec">2. The 44pt problem <span class="fb">the constraint every proposal must answer</span></div>
+  <div class="note">
+    <p class="q">“The moment the tile gets an <code>onPress</code>, 32pt stops being safe. […] the dense
+      branch is one <code>Pressable</code> with <code>accessible: true</code>, so a chevron in
+      <code>rightSlot</code> is invisible to VoiceOver and to Maestro id-selectors unless surfaced as an
+      <code>accessibilityAction</code>.” — #299 implementation agent</p>
+    <p><b>Confirmed against source.</b> <code>styles.card</code> sets <code>overflow: 'hidden'</code>
+      (<code>PlayerCard.tsx:388</code>). A nested affordance that tries to buy height with
+      <code>hitSlop</code> or padding is clipped by its own parent — you cannot grow a 44pt target
+      <i>inside</i> a 32pt clipped box. Three ways out; all three are drawn.</p>
+  </div>
+
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl bad">R-1 — nested control inside the row <b>· REJECTED</b></div>
+      <div class="hchip bad">clipped hit area + invisible to VoiceOver and Maestro</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap clipdemo" style="margin-bottom:30px">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR8</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <span class="want"></span><span class="lost t"></span><span class="lost b"></span>
+        </div>
+        <div class="clipnote">dashed = the 44×44 target a nested control needs · shaded = the 12pt the clip eats</div>
+        <div class="caption" style="color:var(--neg);margin-top:6px">Drawn <i>outside</i> the tile so it is
+          visible at all — inside it, the box simply disappears. That is the finding, not a drafting
+          choice: a child of a view with <code>overflow: 'hidden'</code> cannot present a hit area larger
+          than its parent.</div>
+      </div>
+      <div class="caption"><b>Two independent failures.</b> <b>(1) Geometry:</b> the hit area is clipped, so
+        the control is a 32pt (or smaller) target however it is styled. <b>(2) Accessibility + testing:</b>
+        the dense branch’s outer <code>Pressable</code> carries <code>accessible: true</code>, which on iOS
+        collapses the whole subtree into one element — a nested button gets no VoiceOver focus and no
+        <code>testID</code> that Maestro can select (this is Maestro flow-authoring law 3 in
+        <code>mobile/.maestro/README.md</code>, learned on-sim). Rescuing it needs an
+        <code>accessibilityActions</code> entry plus an <code>onAccessibilityAction</code> handler — real
+        work, and it still leaves the target clipped.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl warn">R-2 — grow the row to 44pt</div>
+      <div class="hchip">honest, simple, +72pt over a 6-player group · partially reverses #299</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap"><div class="tile t44">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR8</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap"><div class="tile t44">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Jaxon Smith-Njigba</span><span class="tm">SEA</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR12</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap"><div class="tile t44">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span><span class="tag rk">RK</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span>
+            <span class="pr" style="color:var(--wr)">WR31</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+      </div>
+      <div class="caption">48pt pitch. Six players = <b>288pt</b> vs the shipped 216pt. Defensible — #299’s
+        32pt was explicitly conditional on inertness, and this surface is no longer inert — but it visibly
+        undoes the density the operator asked for, on the one screen they asked for it.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">R-3 — 32pt visual, 44pt target <b>· RECOMMENDED</b></div>
+      <div class="hchip win">outer Pressable <code>hitSlop</code> 6/6 + 12pt row gap = 44pt pitch</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR8</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Jaxon Smith-Njigba</span><span class="tm">SEA</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR12</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span><span class="tag rk">RK</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span>
+            <span class="pr" style="color:var(--wr)">WR31</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="hitnote">green dashes = the 44pt touch area · the visible tile stays 32pt</div>
+      </div>
+      <div class="caption">44pt pitch, <b>264pt</b> for six — 24pt cheaper than R-2 and, more importantly,
+        the <b>visual</b> density #299 bought is fully preserved. The whole row is the button, so there is
+        no nested control at all: one focusable, one <code>testID</code>, one
+        <code>accessibilityLabel</code>, one hint. The chevron reverts to pure decoration.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Why R-3’s hit area is not clipped (and the one thing build must verify)</h2>
+    <p><code>overflow: 'hidden'</code> clips a view’s <b>children</b>. The <code>hitSlop</code> here is on
+      the tile’s <b>own outermost</b> <code>Pressable</code> and extends outward into its <i>ancestors</i>:
+      <code>rosterRow</code> (a plain <code>View</code>, <code>styles.rosterRow</code> = margin only),
+      <code>drillList</code> (gap only), then the <code>ScrollView</code> content. None of them clips. So
+      the slop lands in unclipped space — the opposite of R-1, where the slop tries to escape the tile it
+      lives inside.</p>
+    <div class="warnbox"><b>State this as a build gate, not as a fact.</b> Round 1 was called out for
+      reporting mockup geometry as source truth; this lab will not repeat it in the other direction. RN
+      hit-testing through non-clipping ancestors <i>should</i> behave as described, but it must be
+      <b>confirmed on the simulator</b> — tap 5pt above a row and assert the right row fires — before the
+      44pt claim is written into the PRD. If it does not hold, fall back to R-2 (grow to 44pt); the
+      horizontal design on the rest of this page is unaffected either way.</div>
+    <h3>Row spacing is load-bearing, not cosmetic</h3>
+    <p>With <code>hitSlop</code> 6/6 and the shipped 4pt <code>rosterRow</code> margin, adjacent rows’ touch
+      areas would overlap by 8pt and taps near a boundary would hit the wrong player. The margin must rise
+      to <b>12</b> so the slop regions tile exactly (32 + 12 = 44 pitch, zero overlap). That is the whole
+      cost of R-3, and it is why R-3 is 264pt rather than 216pt — <b>44pt compliance is never free
+      vertically; R-3 just buys it without giving back the look.</b></p>
+    <h3>Accessibility, concretely</h3>
+    <ul>
+      <li><b>Role.</b> The composed label already exists (<code>PlayerCard.tsx:175-196</code>) and
+        <code>accessibilityRole</code> becomes <code>'button'</code> automatically once <code>onPress</code>
+        is passed (<code>:199-200</code>) — no change needed.</li>
+      <li><b>Hint.</b> Add one per direction: <i>“Offers Puka Nacua to Punt Gods”</i> /
+        <i>“Targets Ja’Marr Chase from Gridiron Goons”</i>. The label says what the row <b>is</b>; the hint
+        says what activating it <b>does</b>.</li>
+      <li><b>No <code>accessibilityActions</code> needed</b> — that machinery exists for rows with a
+        <i>second</i> command. One row, one verb, so it stays unused.</li>
+      <li><b>Maestro.</b> Selector is the tile’s own <code>testID</code>
+        (<code>league-summary.roster.&lt;player_id&gt;</code>), which already survives the accessible-container
+        collapse because it is on the container. Flow-authoring law 3 is satisfied by construction rather
+        than worked around.</li>
+      <li><b>WCAG 2.5.8 (Target Size, Minimum, 24×24)</b> is met by the pointer target, which
+        <code>hitSlop</code> defines. VoiceOver’s focus rectangle still draws at 32pt — acceptable, since
+        activation is a double-tap anywhere once focused, not a re-aim.</li>
+    </ul>
+  </div>
+
+  <!-- ══ VARIANT D ═══════════════════════════════════════════════════════ -->
+  <div class="sec">3. Variant D — drop the injury and rookie tags to fit a visible “Offer”</div>
+  <div class="note">
+    <div class="verdict"><strong>Measured verdict: yes, it fits — with room to spare.</strong> Dropping the
+      RK and injury micro-tags frees <b>53.6pt</b> of the worst-case row. A visible “Offer ›” costs
+      <b>51.0pt</b>. Net <b>+2.6pt</b>: the worst-case name budget goes from today’s <b>143.8pt</b> to
+      <b>146.4pt</b>, and “Marvin Harrison Jr.” — which truncates under every other labelled variant —
+      renders <b>in full</b>. The two costs cancel almost exactly, which is a coincidence, but a measured
+      one.</div>
+    <table class="tbl num">
+      <tr><th>Variant</th><th>Affordance</th><th>Name budget</th><th style="text-align:left">“Marvin Harrison Jr.” renders as</th></tr>
+      <tr><td>shipped baseline (no affordance)</td><td>—</td><td>143.8</td><td style="text-align:left;font-family:var(--mono);color:var(--chalk)">Marvin Harrison Jr.</td></tr>
+      <tr><td>A — bare chevron, tags kept</td><td>20.0</td><td>123.8</td><td style="text-align:left;font-family:var(--mono);color:var(--warn)">Marvin Harriso…</td></tr>
+      <tr><td>B — “Offer ›”, tags kept</td><td>51.0</td><td>92.8</td><td style="text-align:left;font-family:var(--mono);color:var(--neg)">Marvin Har…</td></tr>
+      <tr><td>B′ — “Target ›”, tags kept</td><td>59.0</td><td>84.8</td><td style="text-align:left;font-family:var(--mono);color:var(--neg)">Marvin Ha…</td></tr>
+      <tr class="rec"><td>D1 — “Offer ›”, tags dropped</td><td>51.0</td><td>146.4</td><td style="text-align:left;font-family:var(--mono);color:var(--pos)">Marvin Harrison Jr.</td></tr>
+      <tr><td>D2 — “Target ›”, tags dropped</td><td>59.0</td><td>138.4</td><td style="text-align:left;font-family:var(--mono);color:var(--pos)">Marvin Harrison Jr.</td></tr>
+      <tr><td>D3 — bare chevron, tags dropped</td><td>20.0</td><td>177.4</td><td style="text-align:left;font-family:var(--mono);color:var(--pos)">Marvin Harrison Jr.</td></tr>
+      <tr><td>D4 — outlined ice “Offer” pill, tags dropped</td><td>54.0</td><td>143.4</td><td style="text-align:left;font-family:var(--mono);color:var(--pos)">Marvin Harrison Jr.</td></tr>
+    </table>
+  </div>
+
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl bad">B — label WITH the tags kept</div>
+      <div class="hchip bad">92.8pt · the name is the least legible thing on the row</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case, measured truncation shown literally">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Har…</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span>
+              <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Round 1 measured 94pt here and called it degraded. Re-measured: <b>92.8pt</b>.
+        Verdict unchanged and confirmed — a row where “RK” and “Q” survive intact while the player’s name
+        does not has its priorities inverted.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">D1 — label WITHOUT the tags</div>
+      <div class="hchip win">146.4pt · full name · <b>better than today’s baseline</b></div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case — nothing truncates">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span>
+              <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+        <div class="tilewrap">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jalen McMillan</span><span class="tm">TB</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4th)">4th</span>
+              <span class="pr" style="color:var(--wr)">WR68</span>
+              <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Geometrically the strongest labelled option. Note the second row: <b>Jalen
+        McMillan is questionable</b> and this tile no longer says so — that is the price, and it is an
+        information price, not a layout one.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl">D3 — bare chevron, tags dropped</div>
+      <div class="hchip win">177.4pt · the most spacious option of all</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="tilewrap measurew" data-w="worst case + 33.6pt of slack">
+          <div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR61</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Shows what the tag removal is really buying if the word is not needed per row:
+        33.6pt of pure slack — enough to absorb the widest tier badge on <i>any</i> name in the pool. But it
+        pays the information price without buying the clarity, which is the worst of both.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Recommendation on Variant D</h2>
+    <div class="verdict no"><strong>D is viable and D is not recommended.</strong> The measurement says
+      yes; the content says no. Both dropped tags are <b>decision inputs on this exact surface</b>:</div>
+    <ul>
+      <li><b>Injury.</b> On the offer side, “which of my WRs do I send?” is materially changed by one of them
+        being <code>Q</code> or <code>IR</code>. On the target side, an injured asset is the classic buy-low.
+        The <code>InjuryBadge</code> was explicitly raised from 9px to the 11px floor by teardown S2 PRD-04
+        <i>because it is a decision input</i> (<code>PlayerCard.tsx:505-509</code>). Removing it on a trade
+        surface undoes that reasoning rather than the pixel.</li>
+      <li><b>Rookie.</b> In dynasty, RK is a value signal, not decoration.</li>
+      <li>The tags are <b>conditional</b>. Most rows carry neither, so most rows already have ~197pt of name
+        budget. Paying for a per-row word by deleting data from the minority of rows that <i>have</i> data
+        is a bad exchange.</li>
+    </ul>
+    <div class="verdict"><strong>Recommended instead: keep the tags, use a bare chevron, and put the verb in
+      the group header — once.</strong> That is variant A (123.8pt worst case: “Marvin Harriso…”, one
+      character worse than #299’s own accepted truncation) plus the <code>groupsub</code> line drawn on
+      <a href="directions.html" style="color:var(--ice)">page 1</a>: <i>“Tap a player to offer them to Punt
+      Gods.”</i> The literal word “Offer” stays on screen, named once instead of six times, and no row
+      loses data. If the operator wants the word on every row anyway, <b>D1 is the variant to build</b> —
+      it measures clean, and this note is the argument they are overriding, not a blocker.</div>
+  </div>
+
+  <!-- ══ NAMING ══════════════════════════════════════════════════════════ -->
+  <div class="sec">4. Button naming <span class="fb">“Offer” vs “Target”</span></div>
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl">N-a — one word both sides: “Offer”</div>
+      <div class="hchip bad">wrong on the sellers side</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="sidelbl">Buyers side — your players</div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR8</span>
+            <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="sidelbl" style="padding-top:10px">Sellers side — their players</div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Ja’Marr Chase</span><span class="tm">CIN</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+            <span class="pr" style="color:var(--wr)">WR1</span>
+            <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+      </div>
+      <div class="caption">“Offer Ja’Marr Chase” reads as <i>offering him to someone</i> — but he is not
+        yours. You are <b>asking</b>, not offering. One word cannot carry two directions here.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">N-b — “Offer” / “Target” <b>· RECOMMENDED</b></div>
+      <div class="hchip win">both words already exist in this app</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="sidelbl">Your WR — offer to Punt Gods</div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR8</span>
+            <span class="actlbl">Offer<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="sidelbl" style="padding-top:10px">Gridiron Goons’ WR — target from them</div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Ja’Marr Chase</span><span class="tm">CIN</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+            <span class="pr" style="color:var(--wr)">WR1</span>
+            <span class="actlbl">Target<svg class="i" width="11" height="11" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+      </div>
+      <div class="caption">“Target” is this codebase’s established acquire verb —
+        <code>TradesScreen.tsx:5373</code> ships the string <b>“Target players to acquire”</b> and
+        <code>:1964</code> defines <code>targetPickerPool</code>. Nothing new is being coined.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">N-c — the recommended combination</div>
+      <div class="hchip rec">verb in the header, chevron in the row</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="grouphead" style="padding-bottom:2px">
+          <span class="grouplabel" style="color:var(--wr)">Your WR</span>
+          <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span>
+            <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">9/12</span></span>
+        </div>
+        <div class="groupsub">Tap a player to <b style="color:var(--chalk)">offer</b> them to Punt Gods.</div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Marvin Harrison Jr.</span><span class="tm">ARI</span><span class="tag rk">RK</span><span class="tag q">Q</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+            <span class="pr" style="color:var(--wr)">WR61</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap roomy"><div class="tile hitrow">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Jalen McMillan</span><span class="tm">TB</span><span class="tag q">Q</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-4th)">4th</span>
+            <span class="pr" style="color:var(--wr)">WR68</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+      </div>
+      <div class="caption">Both micro-tags survive on both rows, the verb is stated in words, and the
+        worst-case name loses one character. This is what pages 1 and 3 draw throughout.</div>
+    </div>
+  </div>
+
+  <!-- ══ SIDE BY SIDE ════════════════════════════════════════════════════ -->
+  <div class="sec">5. Operator question — “show BOTH teams’ players side by side, since there is space?”</div>
+  <div class="note">
+    <div class="verdict bad"><strong>There is space vertically. There is none horizontally — measured.</strong>
+      Two columns on a 390pt screen give each tile <b>171pt</b> of inner width. The fixed right cluster
+      (tier badge + posRank + gaps) alone is <b>113.1pt</b>.</div>
+    <table class="tbl num">
+      <tr><th>Two-column tile carrying…</th><th>Name budget</th><th style="text-align:left">Result</th></tr>
+      <tr class="dead"><td>everything the shipped tile carries</td><td>−41.2</td><td style="text-align:left;font-family:var(--ui);color:var(--neg);font-weight:600">negative — the data does not fit, let alone a name</td></tr>
+      <tr class="dead"><td>no micro-tags (tier + posRank kept)</td><td>12.4</td><td style="text-align:left;font-family:var(--ui);color:var(--neg);font-weight:600">renders as “…”</td></tr>
+      <tr><td>no tags, posRank dropped</td><td>54.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">“Marvi…”</td></tr>
+      <tr><td>no tags, tier badge dropped</td><td>84.0</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">“Marvin Ha…”</td></tr>
+      <tr><td>no tags, no tier, no posRank</td><td>125.6</td><td style="text-align:left;font-family:var(--ui);color:var(--warn);font-weight:600">“Marvin Harrison…” — and the row now says nothing about value</td></tr>
+    </table>
+    <p>To make two columns fit you must delete the tier badge, which is the <b>entire</b> value display
+      after #277/#279 replaced numeric values app-wide — and the row still truncates. A side-by-side
+      comparison that cannot show what anyone is worth is not a comparison.</p>
+    <div class="verdict"><strong>Answer: yes to “both rosters”, no to “side by side”. Stack them.</strong>
+      Full-width groups, the direction implied by the median expanded first, the mirror collapsed to a
+      one-line disclosure row (drawn on page 1). Every column keeps 358pt and all its data; the cost is
+      vertical, which is the axis that actually has room.</div>
+    <h3>And this is the argument that decides Direction 1 vs 2</h3>
+    <p>Once the drill-in shows both rosters, a Buyers/Sellers pill <i>above</i> it is choosing a direction
+      the drill-in then un-chooses. The pill’s only remaining job is deciding which group is expanded
+      first — and which side of the median line the tapped row was on already answers that, for free. The
+      operator’s own “show both” instinct is correct and it is what makes the pills redundant.</p>
+  </div>
+
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl bad">S-a — side by side, drawn anyway</div>
+      <div class="hchip bad">tier + posRank deleted and it STILL truncates</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Gridiron Goons</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div style="display:flex;gap:12px">
+            <div style="flex:1;min-width:0">
+              <div class="grouplabel" style="color:var(--wr);padding:6px 0">Yours</div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Marvin Harrison…</span><span class="tm">ARI</span></div></div>
+              </div></div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Jaxon Smith-Nj…</span><span class="tm">SEA</span></div></div>
+              </div></div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span></div></div>
+              </div></div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div class="grouplabel" style="color:var(--chalk-dim);padding:6px 0">Theirs</div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Ja’Marr Chase</span><span class="tm">CIN</span></div></div>
+              </div></div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Malik Nabers</span><span class="tm">NYG</span></div></div>
+              </div></div>
+              <div class="tilewrap"><div class="tile" style="width:173px">
+                <div class="rail" style="background:var(--wr)"></div>
+                <div class="main"><div class="l1"><span class="nm">Brian Thomas Jr.</span><span class="tm">JAX</span></div></div>
+              </div></div>
+            </div>
+          </div>
+          <div class="empty" style="border-left:3px solid var(--neg);padding-left:10px;margin-top:10px">
+            No tier badge. No positional rank. No injury or rookie tag. Names still clipped. And there is
+            nowhere left to put a trailing affordance.</div>
+        </div>
+      </div>
+      <div class="caption">Drawn to be judged, not to be argued about. This is the best a two-column layout
+        can do at 390pt with the shipped tile’s data.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">S-b — stacked, mirror collapsed <b>· RECOMMENDED</b></div>
+      <div class="hchip win">358pt per row · all data intact · both rosters reachable</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Gridiron Goons</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="grouphead" style="padding-bottom:2px">
+            <span class="grouplabel" style="color:var(--wr)">Gridiron Goons’ WR</span>
+            <span class="groupmetarow"><span class="groupmeta">5 · ≈4.5 firsts</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">1/12</span></span></div>
+          <div class="groupsub">Tap a player to target them from Gridiron Goons.</div>
+          <div class="tilewrap roomy"><div class="tile hitrow">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja’Marr Chase</span><span class="tm">CIN</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR1</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile hitrow">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Malik Nabers</span><span class="tm">NYG</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-3)">3 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR4</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile hitrow">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Brian Thomas Jr.</span><span class="tm">JAX</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR6</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="grouphead" style="padding-top:12px">
+            <span class="grouplabel" style="color:var(--chalk-dim)">Your WR</span>
+            <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></svg></span></div>
+        </div>
+      </div>
+      <div class="caption">The mirror group is a 38pt disclosure row using the same chevron-swap idiom as
+        the outlook strip. Expanded, it shows your six WRs with the <b>Offer</b> verb — the full two-way
+        board, one tap in, nothing deleted.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">6. Group-header copy — the recommendation</div>
+      <div class="hchip rec">depends on the “both rosters” answer above</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="grouphead" style="padding-bottom:2px">
+          <span class="grouplabel" style="color:var(--wr)">Your WR</span>
+          <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span>
+            <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">9/12</span></span></div>
+        <div class="groupsub">Tap a player to offer them to Punt Gods.</div>
+        <div style="height:18px"></div>
+        <div class="grouphead" style="padding-bottom:2px">
+          <span class="grouplabel" style="color:var(--wr)">Gridiron Goons’ WR</span>
+          <span class="groupmetarow"><span class="groupmeta">5 · ≈4.5 firsts</span>
+            <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">1/12</span></span></div>
+        <div class="groupsub">Tap a player to target them from Gridiron Goons.</div>
+      </div>
+      <div class="caption">Three changes from today’s <code>groupHead</code>
+        (<code>LeagueSummaryScreen.tsx:1408-1443</code>), all small:
+        <b>(1)</b> the label gains an owner — “Your WR” / “&lt;Team&gt;’ WR” — because with two rosters on
+        one screen a bare “WR” is ambiguous;
+        <b>(2)</b> the existing meta (<code>count · value_label</code>) and the existing tercile-colored
+        <code>rankChip</code> are unchanged, so nothing new is invented;
+        <b>(3)</b> one <code>type.bodySm</code> caption carries the verb. Ownership goes in the label rather
+        than the caption so VoiceOver reads it as part of the section header.
+        <b>Type floor check:</b> label 11px, meta 13px mono, rankChip 11px, caption 13px — nothing under 11.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Summary of this page</h2>
+    <table class="tbl">
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>Does a bare chevron fit the shipped 32pt tile?</td><td>Yes — 20.0pt, worst-case name budget 143.8 → 123.8pt (“Marvin Harriso…”).</td></tr>
+      <tr><td>Does a visible “Offer ›” fit with the tags kept?</td><td>No — 92.8pt, “Marvin Har…”. Round 1’s call, re-measured and confirmed.</td></tr>
+      <tr class="rec"><td><b>Variant D — does it fit with the tags dropped?</b></td><td><b>Yes, and then some: 146.4pt, 2.6pt better than today’s baseline, name unclipped.</b> Not recommended on content grounds (injury and rookie are decision inputs on a trade surface), but geometrically clean if the operator wants the word per row.</td></tr>
+      <tr><td>How is the 44pt minimum met on a 32pt row?</td><td>Whole row is the button; <code>hitSlop</code> 6/6 on the tile’s own outermost <code>Pressable</code> (unclipped — the clip is on children); <code>rosterRow</code> margin 4 → 12 so slop regions do not overlap. 44pt pitch, 32pt visual. Must be sim-verified before it is asserted in the PRD.</td></tr>
+      <tr><td>Does that break VoiceOver or Maestro?</td><td>No — it removes the problem. One <code>Pressable</code>, one action, one <code>testID</code>, one label + hint. No <code>accessibilityActions</code> needed.</td></tr>
+      <tr><td>Offer or Target?</td><td>Both. “Offer” when the player is yours, “Target” when they are theirs — <code>TradesScreen.tsx:5373</code> already ships “Target players to acquire”.</td></tr>
+      <tr><td>Both rosters side by side?</td><td>Both rosters yes; side by side no — 171pt columns force deleting the tier badge and still truncate. Stack them, mirror collapsed.</td></tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>
