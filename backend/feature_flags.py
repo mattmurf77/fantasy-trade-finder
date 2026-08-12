@@ -312,6 +312,22 @@ FLAG_KEYS: tuple[str, ...] = (
     # pre-#293 rule where picks count only in All with no filter. Client-only:
     # no backend behavior rides this key.
     "league.picks_always_counted",
+    # #300 — League rankings positional trade candidates
+    # (docs/feedback/items/300-league-rankings-trade-candidates/).
+    # league.pos_candidates: the median divider on the League rankings list
+    # when EXACTLY ONE core position is selected — the labelled cutline plus
+    # the Buyer/Seller band emphasis and the stacked-roster drill-in. OFF
+    # (default) = the list renders exactly as it does today. Client-only
+    # today: the route's `medians` field is additive and ships UNFLAGGED
+    # (see the note in league_power_rankings_route) so the client never has
+    # to reason about a flag-on/field-absent state.
+    "league.pos_candidates",
+    # league.player_trade_handoff: the drill-in's row actions ("Offer" on
+    # your own players, "Target" on theirs) that pin the asset and route to
+    # the trade finder, replacing existing pins. OFF (default) = rows carry
+    # no action. Separate key from pos_candidates so the divider can ship
+    # without the write-side handoff.
+    "league.player_trade_handoff",
     # ── QA / testing surfaces ──
     # Kin of FTF_TEST_MODE, but runtime-flagged (not env-gated) so the
     # operator's phone can exercise a prod-shaped build. Every consumer must

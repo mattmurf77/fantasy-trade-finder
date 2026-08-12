@@ -91,6 +91,27 @@ NON_INTENT_EVENTS = frozenset({
     #     league_team_opened itself stays INTENT, untouched.
     "lineup_impact_unavailable",
     "league_team_closed",
+    # Feedback #300, 2026-08-12 — added in the SAME commit that added it to
+    # ALLOWED_CLIENT_EVENTS, for the reason stated at the top of this block.
+    # Tracking plan:
+    # docs/feedback/items/300-league-rankings-trade-candidates/analytics.md.
+    #
+    #   league_pos_candidates_viewed — an EXPOSURE. The user tapped a
+    #     position pill on a screen they had already reached; the event
+    #     witnesses that a surface rendered, not that anything was wanted.
+    #     Same class as league_view and tab_selected directly above. It is
+    #     also the ONLY event on this screen that a user can emit without
+    #     ever drilling in, so admitting it to INTENT would promote every
+    #     idle filter tap to a user-day and step-change DAU from ship day —
+    #     precisely the artifact this deny-list exists to prevent.
+    #
+    # league_candidate_pinned is deliberately ABSENT from this set: it IS
+    # intent (an asset chosen, the finder entered), the peer of
+    # find_trades_tapped and league_team_opened. It adds no DAU seam either
+    # way — the row action lives inside the drill-in, which is reachable
+    # only through openTeam, so every pin is preceded in the same session
+    # by a league_team_opened that already counts the user.
+    "league_pos_candidates_viewed",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

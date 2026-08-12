@@ -19444,6 +19444,63 @@ def _sleeper_lineup_slots(league_id: str) -> list[str] | None:
     return slots or None
 
 
+def _position_medians(teams: list[dict]) -> dict[str, dict]:
+    """#300 — the league's MEDIAN positional value per core position, with its
+    pick-equivalent label (docs/feedback/items/300-league-rankings-trade-
+    candidates/operator-answers-2026-08-12.md, the frozen design).
+
+    Shape: ``{QB|RB|WR|TE: {value, value_label}}``. The mobile client draws one
+    labelled divider on the League rankings list when exactly one core position
+    is selected; it can compute the median VALUE itself but cannot LABEL it —
+    labelling is server-side — which is the entire reason this field exists.
+
+    Three decisions, recorded because the field is a frozen cross-client
+    contract:
+
+    1. **Population = every team in the payload, the caller included.** The
+       divider is drawn on the very list `teams` serializes, and the frozen
+       design keeps the caller's own team in that list as the anchor ("there is
+       no separate section for it to be wrongly included in"). Excluding the
+       caller would put the line in a different place than the list it is drawn
+       across.
+    2. **Even team counts take the MEAN of the two middle values** — the
+       textbook median, and what a naive client-side implementation computes,
+       so the server's `value` and the client's agree. It also preserves the
+       property the design leans on for odd counts: an odd league leaves
+       exactly one team sitting ON the median, an even one leaves none.
+       Rounded to 1dp like every other value on this wire.
+    3. **`value_label` is UNGATED.** The per-team `value_label` under `#279`
+       rides the operator-only `aggregate_tier_labels` experiment, but
+       `_aggregate_pick_label` is a pure function of the value with no
+       experiment dependency — it is read directly here. A divider that
+       rendered a label for the operator and a blank for everyone else would
+       be worse than no divider.
+
+    SUBSET SCOPE — the All subset ONLY. `teams[].positions[P].value` is the
+    whole-roster positional subtotal; the client's Starters/Bench subsets are
+    derived client-side from `roster` + `starters`, and the frozen field shape
+    has no room for a per-subset median. The client must therefore render the
+    divider only while the subset is All, never label a Starters/Bench line
+    with this value. Empty `teams` → `{}` (no list, so no divider; never a
+    fabricated 0.0).
+    """
+    from .power_rankings import CORE_POSITIONS
+    if not teams:
+        return {}
+    out: dict[str, dict] = {}
+    for pos in CORE_POSITIONS:
+        values = sorted(
+            float((t.get("positions") or {}).get(pos, {}).get("value") or 0.0)
+            for t in teams
+        )
+        mid = len(values) // 2
+        median = (values[mid] if len(values) % 2
+                  else (values[mid - 1] + values[mid]) / 2.0)
+        median = round(median, 1)
+        out[pos] = {"value": median, "value_label": _aggregate_pick_label(median)}
+    return out
+
+
 @app.route("/api/league/power-rankings")
 def league_power_rankings_route():
     """GET /api/league/power-rankings?league_id=...&basis=consensus|personal|redraft
@@ -19573,6 +19630,17 @@ def league_power_rankings_route():
             "scoring_format":     fmt,
             "updated_at":         datetime.now(timezone.utc).isoformat(),
             "starters_available": starters_available,
+            # #300 — league median per core position + its pick-equivalent
+            # label, for the single-position median divider. Served
+            # UNFLAGGED alongside `league.pos_candidates` (which gates the
+            # client's divider): the field is additive — it changes no
+            # existing key — and costs one sort per core position, so a
+            # flag-on/field-absent state would only give the client a worse
+            # contract to reason about. Basis-aware for free: the medians
+            # are computed over the same `teams` this request priced, so a
+            # personal-basis read gets personal-basis medians. All subset
+            # only — see _position_medians.
+            "medians":            _position_medians(teams),
             "teams":              teams,
         })
     except Exception as e:

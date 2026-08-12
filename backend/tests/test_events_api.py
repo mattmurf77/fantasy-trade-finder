@@ -593,3 +593,124 @@ def test_feedback_297_302_events_are_not_intent():
     # #298 added NO event name: a property on an event that already fires
     # cannot perturb the series at all.
     assert "find_trades_tapped" in q.INTENT_EVENTS
+
+
+# --- feedback #300 addendum (2026-08-12) -----------------------------------
+# Tracking plan:
+# docs/feedback/items/300-league-rankings-trade-candidates/analytics.md
+#
+# #300 shipped LIT with the simulator gate and the Maestro run waived, so
+# these two names are the only evidence that will ever exist that the
+# League-rankings median divider works in the wild. Same two silent failure
+# modes as the block above: an unregistered NAME is counted-and-dropped, and
+# a registered name with an unregistered PROP lands hollowed out.
+
+def test_feedback_300_new_events_land_with_every_prop(harness):
+    """Both #300 names register AND every specced prop survives ingest."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="league_pos_candidates_viewed",
+                  screen="LeagueRankings",
+                  props={"position": "WR", "divider": "shown"}),
+        _envelope(1, event_type="league_candidate_pinned",
+                  screen="LeagueRankings",
+                  props={"verb": "target", "position": "WR", "rank": 3,
+                         "side": "above"}),
+    ]).get_json()
+    _assert_invariant(body, 2)
+    # dropped == 0 proves NAME survival; an unknown type still counts in
+    # `accepted`, so `accepted` alone proves nothing.
+    assert body["accepted"] == 2 and body["dropped"] == 0
+
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    assert set(by_type) == {"league_pos_candidates_viewed",
+                            "league_candidate_pinned"}
+
+    # PROP survival — read back out of user_events.props, not asserted on the
+    # request. An unregistered prop is popped while the envelope still
+    # reports dropped == 0.
+    # `seq` and `ts_suspect` are stamped by the server AFTER the strip and
+    # never pass through CLIENT_EVENT_PROPS, so they are excluded rather than
+    # registered (analytics_taxonomy.py's own note).
+    def _client_props(row):
+        return {k: v for k, v in json.loads(row["props"]).items()
+                if k not in {"seq", "ts_suspect"}}
+
+    assert _client_props(by_type["league_pos_candidates_viewed"]) == {
+        "position": "WR", "divider": "shown"}
+
+    pin = _client_props(by_type["league_candidate_pinned"])
+    assert pin == {"verb": "target", "position": "WR", "rank": 3,
+                   "side": "above"}
+    # `side` is what makes the pair readable: with the mirror roster stacked
+    # in the drill-in, (verb, side) has four live combinations and
+    # verb-against-side is the direct measure of users overriding the line.
+    assert pin["side"] == "above" and pin["verb"] == "target"
+
+
+def test_feedback_300_divider_outcome_values_all_survive(harness):
+    """`divider` is three-valued on purpose — a shown-only impression event
+    cannot distinguish "nobody found it" from "the payload arrived without
+    `medians`", which is an incomplete-rollout signal, not a product one."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(i, event_type="league_pos_candidates_viewed",
+                  screen="LeagueRankings",
+                  props={"position": p, "divider": d})
+        for i, (p, d) in enumerate(
+            [("QB", "shown"), ("RB", "no_median"), ("TE", "no_split")])
+    ]).get_json()
+    assert body["accepted"] == 3 and body["dropped"] == 0
+    seen = {json.loads(r._mapping["props"])["divider"] for r in _rows(engine)}
+    assert seen == {"shown", "no_median", "no_split"}
+
+
+def test_feedback_300_position_prop_is_not_a_device_platform(harness):
+    """#300's `position` is a CORE POSITION (QB|RB|WR|TE). Neither event may
+    carry a device-platform prop — that is a server-derived COLUMN (the
+    NULL-`platform` incident), and it is stripped here."""
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="league_candidate_pinned",
+                  screen="LeagueRankings",
+                  props={"verb": "offer", "position": "TE", "rank": 9,
+                         "side": "below", "platform": "ios"}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["position"] == "TE"
+    assert "platform" not in props
+
+
+def test_feedback_300_exposure_is_not_intent_but_the_action_is():
+    """The split that keeps DAU/WAU honest.
+
+    `INTENT_EVENTS` is derived by SUBTRACTION, so taxonomy growth is
+    intent-BY-DEFAULT. `league_pos_candidates_viewed` is a passive exposure
+    and is the ONLY event on that screen a user can emit without ever
+    drilling in — admitting it would promote every idle position-pill tap to
+    a user-day and step-change DAU from ship day.
+
+    `league_candidate_pinned` deliberately STAYS intent: an asset chosen and
+    the finder entered is a real value moment, the peer of
+    `find_trades_tapped`. It seams nothing either way, because the row
+    action is reachable only inside a drill-in and every drill-in emits an
+    (intent) `league_team_opened` first.
+    """
+    from backend import analytics_queries as q
+    assert "league_pos_candidates_viewed" in q.NON_INTENT_EVENTS
+    assert "league_pos_candidates_viewed" not in q.INTENT_EVENTS
+    assert "league_candidate_pinned" not in q.NON_INTENT_EVENTS
+    assert "league_candidate_pinned" in q.INTENT_EVENTS
+
+
+def test_feedback_300_mints_no_duplicate_of_a_shipped_league_event():
+    """#300 adds an EXPOSURE and an ACTION. It must not re-mint an enter/exit
+    name for the drill-in — `league_team_opened` / `league_team_closed`
+    already own that interaction, and a second source of truth for one tap is
+    the #208/#248/#293 bug class."""
+    from backend import analytics_taxonomy as t
+    assert "league_team_opened" in t.ALLOWED_CLIENT_EVENTS
+    assert "league_team_closed" in t.ALLOWED_CLIENT_EVENTS
+    for minted in ("league_candidate_opened", "league_divider_shown",
+                   "league_candidate_viewed", "league_band_shown"):
+        assert minted not in t.ALLOWED_CLIENT_EVENTS

@@ -72,6 +72,28 @@ export interface PlayerCardProps {
   // INVARIANT: incompatible with `statsSlot` — there is no line 2 to put it
   // on. Pinned by mobile/tests/check-league-tile-density.js.
   denseSingleLine?: boolean;
+  // #300 Variant D — hide the RK + injury micro-tags on the DENSE line 1 so a
+  // per-row action label fits. OPERATOR OVERRIDE, taken against the design
+  // lab's recommendation and recorded in
+  // docs/feedback/items/300-league-rankings-trade-candidates/
+  // operator-answers-2026-08-12.md decision 2: "that call stands and is not
+  // to be relitigated at build time". Measured: dropping both tags frees
+  // 53.6pt of the worst-case row, "Offer ›" costs 51.0pt, net +2.6pt against
+  // the 143.8pt shipped baseline.
+  //
+  // VISUAL ONLY, and deliberately so. The composed a11y label below still
+  // speaks "rookie" and "injury Q" — the override is a layout trade on a
+  // 32pt row, and there is no reason to pay it twice by also stripping the
+  // utterance, which has no width. `showInjury` keeps its own meaning (drop
+  // the fact entirely, Trios); this drops only the printed tag.
+  denseMicroTags?: boolean;
+  /** #300 — outward touch padding on the tile's OWN outermost Pressable, so a
+   *  32pt visual row can present a 44pt target. It works precisely because
+   *  the slop extends into ANCESTORS (`rosterRow` margin-only, `drillList`
+   *  gap-only), none of which clips — unlike a nested control, which
+   *  `styles.card`'s `overflow: 'hidden'` would clip. Callers using this MUST
+   *  also space rows so adjacent slop regions do not overlap. */
+  hitSlop?: number | { top?: number; bottom?: number; left?: number; right?: number };
   // Teardown S8 PRD-01/-02 (inert a11y): the card is a composite tile —
   // VoiceOver reads it as ONE utterance (Pressable groups children by
   // default). When no override is passed, a label is composed from the
@@ -120,6 +142,8 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     dense = false,
     statsSlot,
     denseSingleLine = false,
+    denseMicroTags = true,
+    hitSlop,
     accessibilityLabel,
     accessibilityHint,
     accessibilityState,
@@ -215,6 +239,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         onLongPress={onLongPress}
         disabled={disabled}
         delayLongPress={commandLongPressMs}
+        hitSlop={hitSlop}
         {...a11yProps}
         style={({ pressed }) => [
           styles.card,
@@ -232,7 +257,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
               {player.name}
             </Text>
             <Text scale="dense" style={styles.denseTeam}>{teamStr}</Text>
-            {isRookie && (
+            {isRookie && denseMicroTags && (
               <Text
                 scale="dense"
                 style={[
@@ -244,7 +269,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
                 RK
               </Text>
             )}
-            {injury ? (
+            {injury && denseMicroTags ? (
               <Text
                 scale="dense"
                 style={[

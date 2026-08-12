@@ -964,3 +964,181 @@ def test_route_total_label_sums_owned_picks_1sts_and_2nds_ignores_3rd(
     # DOLLAR-priced picks.value (unrelated to the label's literal count).
     assert a["total_value"] == round(a["positions_value"] + a["picks"]["value"], 1)
     assert b["total_value"] == round(b["positions_value"] + b["picks"]["value"], 1)
+
+
+# ---------------------------------------------------------------------------
+# #300 — `medians`: the league median positional value + its pick-equivalent
+# label, for the single-position median divider on the League rankings list
+# (docs/feedback/items/300-league-rankings-trade-candidates/
+# operator-answers-2026-08-12.md — the frozen design).
+#
+# The field exists because the client can compute the median VALUE but cannot
+# LABEL it. Every test below therefore asserts LABEL CONTENT, not key presence:
+# a test that only checked `"medians" in body` would pass on a build that
+# labelled the mean, the max, or nothing at all.
+# ---------------------------------------------------------------------------
+
+def _label_of(value: float) -> str:
+    """The expected label, recomputed from `_pick_gap_equivalent` rather than
+    by calling `_aggregate_pick_label` — so these tests pin the LABEL STRING,
+    not merely 'whatever that helper returns'."""
+    half = round(_pick_gap_equivalent(max(value, 0.0))["firsts"] * 2) / 2
+    return f"≈{half:g} firsts"
+
+
+def _teams_with_qb(*values: float) -> list[dict]:
+    """`teams`-shaped rows carrying only what `_position_medians` reads."""
+    return [{"user_id": f"u_{i}",
+             "positions": {"QB": {"count": 1, "value": v},
+                           "RB": {"count": 0, "value": 0.0},
+                           "WR": {"count": 0, "value": 0.0},
+                           "TE": {"count": 0, "value": 0.0}}}
+            for i, v in enumerate(values)]
+
+
+def test_medians_odd_count_is_the_middle_team_not_the_mean():
+    # mean = 4000.0, median = 2000.0 — deliberately far enough apart that the
+    # half-first rounding cannot collapse the two labels together.
+    teams = _teams_with_qb(1000.0, 2000.0, 9000.0)
+    med = server._position_medians(teams)
+    assert med["QB"]["value"] == 2000.0
+    assert med["QB"]["value_label"] == _label_of(2000.0) == "≈1 firsts"
+    assert med["QB"]["value_label"] != _label_of(4000.0)      # not the mean
+    assert med["QB"]["value_label"] != _label_of(9000.0)      # not the max
+
+
+def test_medians_even_count_averages_the_two_middle_values():
+    """Recorded convention: the textbook median (mean of the two middle
+    values), NOT the lower-middle team — so an even league leaves no team
+    sitting on the line and an odd one leaves exactly one, which is what the
+    frozen design's 'At median' case depends on."""
+    teams = _teams_with_qb(1000.0, 2000.0, 9000.0, 10000.0)
+    med = server._position_medians(teams)
+    assert med["QB"]["value"] == 5500.0                       # (2000+9000)/2
+    assert med["QB"]["value_label"] == _label_of(5500.0) == "≈2.5 firsts"
+    assert med["QB"]["value"] != 2000.0                       # not lower-middle
+    assert med["QB"]["value_label"] != _label_of(2000.0)
+
+
+def test_medians_cover_exactly_the_four_core_positions():
+    med = server._position_medians(_teams_with_qb(1000.0, 2000.0, 9000.0))
+    assert set(med) == {"QB", "RB", "WR", "TE"}
+    for pos in ("RB", "WR", "TE"):
+        # No holdings anywhere → a real 0.0 median with a real label, never
+        # a missing key the client has to branch on.
+        assert med[pos] == {"value": 0.0, "value_label": _label_of(0.0)}
+
+
+def test_medians_empty_teams_is_empty_dict():
+    """No list ⇒ no divider. Never a fabricated 0.0 across four positions."""
+    assert server._position_medians([]) == {}
+
+
+def test_route_serves_medians_unflagged_with_correct_labels(client):
+    """De-gating proof, part 1: the `client` fixture pins every feature flag
+    OFF and runs with no experiment at all — `medians` and its LABELS are
+    still served, and the labels match the payload's own team values."""
+    _install_sess(_mk_sess())
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    assert set(body["medians"]) == {"QB", "RB", "WR", "TE"}
+    for pos in ("QB", "RB", "WR", "TE"):
+        vals = sorted(t["positions"][pos]["value"] for t in body["teams"])
+        mid = len(vals) // 2
+        expected = round(vals[mid] if len(vals) % 2
+                         else (vals[mid - 1] + vals[mid]) / 2.0, 1)
+        assert body["medians"][pos]["value"] == expected
+        assert body["medians"][pos]["value_label"] == _label_of(expected)
+    # ...while the #279 per-team labels stay experiment-gated and absent.
+    assert all("value_label" not in pv
+               for t in body["teams"] for pv in t["positions"].values())
+
+
+def test_route_medians_label_ungated_for_non_allowlisted_caller(
+        client, exp_engine, monkeypatch):
+    """De-gating proof, part 2: with the `aggregate_tier_labels` experiment
+    RUNNING and the caller NOT targeted — the exact state in which #279's
+    per-team `value_label` is withheld — `medians[P].value_label` is still a
+    real label. A divider that renders a label for the operator and a blank
+    for everyone else is worse than no divider."""
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")   # u_b is NOT listed
+    _mk_aggregate_experiment(exp_engine)
+    ex.invalidate_cache()
+    _install_sess(_mk_sess(user_id="u_b"))
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    assert all("value_label" not in pv
+               for t in body["teams"] for pv in t["positions"].values())
+    for pos in ("QB", "RB", "WR", "TE"):
+        vals = sorted(t["positions"][pos]["value"] for t in body["teams"])
+        mid = len(vals) // 2
+        expected = round(vals[mid] if len(vals) % 2
+                         else (vals[mid - 1] + vals[mid]) / 2.0, 1)
+        assert body["medians"][pos]["value_label"] == _label_of(expected)
+
+
+# The caller-inclusion league: three teams, the CALLER holding the only
+# high-value QB and a third team holding none. QB values sort to
+# [0.0, 1000.0, 4481.7], so the median WITH the caller is 1000.0 ("≈0.5
+# firsts") and the median WITHOUT them would be 500.0 ("≈0 firsts") — the two
+# populations disagree in both the value AND the label.
+_MEMBERS_3 = [
+    {"user_id": "u_a", "username": "alice", "display_name": "Alice",
+     "player_ids": ["qb1"]},                     # 1800 elo → 4481.7
+    {"user_id": "u_b", "username": "bob", "display_name": "Bob",
+     "player_ids": ["qb2"]},                     # 1500 elo → 1000.0
+    {"user_id": "u_c", "username": "cy", "display_name": "Cy",
+     "player_ids": ["rb2"]},                     # no QB → 0.0
+]
+
+
+def test_route_medians_population_includes_the_calling_team(client):
+    """Recorded decision: the median is taken over EVERY team in the payload,
+    the caller included — the frozen design keeps the caller's own team in the
+    list as the anchor, so the line must be drawn across that same list."""
+    with patch.object(server, "load_league_members",
+                      lambda lid: [dict(m) for m in _MEMBERS_3]
+                      if lid == LEAGUE else []):
+        _install_sess(_mk_sess(user_id="u_a"))
+        code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    caller = next(t for t in body["teams"] if t["is_you"])
+    others = sorted(t["positions"]["QB"]["value"]
+                    for t in body["teams"] if not t["is_you"])
+    assert caller["positions"]["QB"]["value"] == round(elo_to_value(1800), 1)
+
+    with_caller = 1000.0                                   # middle of three
+    without_caller = round((others[0] + others[1]) / 2.0, 1)   # 500.0
+    assert with_caller != without_caller
+    assert body["medians"]["QB"]["value"] == with_caller
+    assert body["medians"]["QB"]["value_label"] == _label_of(with_caller)
+    assert body["medians"]["QB"]["value_label"] != _label_of(without_caller)
+
+
+def test_route_medians_are_basis_aware(client):
+    """The medians are computed over the SAME `teams` the request priced, so a
+    personal-basis read gets personal-basis medians for free."""
+    class _Board:
+        def get_rankings(self, position=None):
+            return SimpleNamespace(rankings=[
+                SimpleNamespace(player=SimpleNamespace(id="qb2"), elo=1900.0)])
+
+    with patch.object(server, "load_league_members",
+                      lambda lid: [dict(m) for m in _MEMBERS_3]
+                      if lid == LEAGUE else []), \
+         patch.object(server, "_verified_read_denial", lambda sess: None):
+        _install_sess(_mk_sess(user_id="u_a"))
+        _, consensus = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+        _install_sess(_mk_sess(user_id="u_a", svc=_Board()))
+        code, personal = _get(
+            client, f"/api/league/power-rankings?league_id={LEAGUE}&basis=personal")
+    assert code == 200
+    # The board pumps qb2 1500 → 1900, which lifts it PAST qb1 — so the QB
+    # values re-sort to [0.0, 4481.7, 7389.1] and the median team changes
+    # from Bob to Alice. The label moves with the median.
+    assert consensus["medians"]["QB"]["value"] == 1000.0
+    assert personal["medians"]["QB"]["value"] == round(elo_to_value(1800.0), 1)
+    assert personal["medians"]["QB"]["value_label"] == _label_of(
+        round(elo_to_value(1800.0), 1))
+    assert (personal["medians"]["QB"]["value_label"]
+            != consensus["medians"]["QB"]["value_label"])
