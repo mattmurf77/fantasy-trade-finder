@@ -2,21 +2,6 @@
 <!-- Drafted 2026-07-11 from code audit (backend/database.py, backend/server.py,
      backend/sleeper_write.py, mobile/src/observability/sentry.ts); §6 + retention
      re-synced to backend/accounts.py delete_user_data matrix on 2026-07-19.
-
-     2026-08-11 (P1-3): §1, §2, §5 and §6 re-synced to `auth.email_capture = true`,
-     flipped in config/features.json in this same commit. This is the FIRST change
-     to this document that EXPANDS a collection claim rather than narrowing one:
-     the provider-supplied email address is now stored in plaintext on
-     accounts.email. The retired claims were "We never store your email address
-     itself" (§1) and "No email addresses ... the Service has no email field" (§2);
-     backend/tests/test_email_capture.py::test_release_flag_and_privacy_policy_ship_together
-     fails the build if either sentence returns while the flag is on.
-     PROFESSIONAL LEGAL REVIEW DID NOT HAPPEN for this change. It was drafted from
-     the code (backend/accounts.py find_or_create_account / delete_user_data /
-     export_user_data) by an agent, reviewed by the operator, and shipped knowingly
-     without counsel — a recorded operator decision (DECISIONS-p1.md D-P1-06), not
-     an oversight. The standing TODO below is unchanged and still outstanding.
-
      OPERATOR TODO before public launch:
        1. Replace "the support contact on our App Store page" with a concrete
           support contact (email or form URL) in §6 and §10.
@@ -78,7 +63,7 @@
 <body>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective date: August 11, 2026</p>
+    <p class="updated">Effective date: July 19, 2026</p>
 
     <p>
       Fantasy Trade Finder ("we", "us", or "the Service") operates
@@ -106,27 +91,11 @@
         <strong>Sign-in identity (Apple or Google).</strong> If you sign in with
         Apple (or, in the future, Google), we store the stable anonymous
         identifier the provider issues for our app (Apple/Google
-        <code>sub</code>) and the provider name. This identifier exists only to
-        recognize your account across devices and sign-ins. We do not store your
-        name from the provider beyond an optional display name you can change,
-        and we never receive or store any provider password.
-      </li>
-      <li>
-        <strong>Your email address, when your sign-in provider gives us one.</strong>
-        As of August 11, 2026, if Apple (or, in the future, Google) shares an
-        email address with us when you sign in, <strong>we store that address in
-        readable form on your account</strong>, together with the one-way SHA-256
-        hash of it we have always kept, and the date it arrived. If you chose
-        <strong>"Hide My Email"</strong> at Apple's prompt, what Apple sends us is
-        a private relay address ending in
-        <code>@privaterelay.appleid.com</code>; we store it the same way and we
-        cannot see the real address behind it. We keep an address so we can
-        contact you about the product and occasionally invite you to give
-        feedback. <strong>We are not sending any email at all today</strong> —
-        there is no mailing list, no sending tool, and no sending address; this
-        is collection ahead of any use, and if that changes we will update this
-        policy first. If you sign in with a Sleeper username only, no email
-        address for you exists anywhere in the Service.
+        <code>sub</code>), the provider name, and — if the provider shares an
+        email address — a one-way SHA-256 hash of it. We never store your email
+        address itself, your name from the provider beyond an optional display
+        name you can change, or any provider password. This identifier exists
+        only to recognize your account across devices and sign-ins.
       </li>
       <li>
         <strong>Your rankings and in-app activity.</strong> Every ranking
@@ -200,7 +169,7 @@
     <h2>2. Information we do NOT collect</h2>
     <ul>
       <li>No passwords. Sign-in is by Sleeper username via Sleeper's public API. The optional Sleeper connection captures a session token, never your password.</li>
-      <li>No phone numbers and no payment information — there is no billing and there are no in-app purchases. (Email addresses are covered in section 1: we store one only when your sign-in provider shares it with us.)</li>
+      <li>No email addresses, phone numbers, or payment information — the Service has no email field, no billing, and no in-app purchases.</li>
       <li>No location, contacts, camera, microphone, or health data.</li>
       <li>No advertising or third-party marketing analytics SDKs — there are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics, Mixpanel, or similar in the app or website. The usage analytics described above are collected and stored by us alone; the only third party receiving diagnostic data is Sentry, for crashes.</li>
       <li>We do not sell your data, and we do not share it with advertisers or data brokers.</li>
@@ -229,7 +198,6 @@
     <h2>5. Data retention</h2>
     <ul>
       <li><strong>Account and league data</strong> (profile, leagues, rosters) is kept while your account is active so the Service works across sessions.</li>
-      <li><strong>Your email address and its hash</strong>, when we have them, are kept for as long as your account exists. There is no expiry date and no automatic purge, and there is no way to remove the address by itself — it is deleted when you delete your account, along with the sign-in identity record it lives on. See section 6.</li>
       <li><strong>Rankings, rating history, and daily consensus value snapshots</strong> are retained indefinitely. This is deliberate: historical values power the trends, history charts, and season-recap features, and once a day passes those numbers cannot be reconstructed.</li>
       <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion, the records keyed to your account are deleted outright; a small set of shared records is anonymized instead so the other manager's history stays intact — see section 6.</li>
       <li><strong>Feedback</strong> is kept through its triage lifecycle (new → planned/in&nbsp;progress → fixed/shipped or declined) and retained as a product record afterward.</li>
@@ -246,9 +214,7 @@
         period and no support request needed. It removes your user record,
         rankings and rating history, ranking comparisons, trade decisions,
         preferences, notifications and push tokens, activity and usage events,
-        any stored Sleeper connection token, and your sign-in identity record
-        — <strong>including your stored email address and its hash</strong>,
-        which are deleted outright rather than blanked. A small set of
+        and any stored Sleeper connection token. A small set of
         <em>shared</em> records is anonymized instead of erased so the other
         manager's history stays intact: trade matches keep the other side's
         record with your identifier replaced by a deleted-user placeholder,
@@ -259,17 +225,8 @@
         still request deletion through the in-app feedback button or the
         support contact on our App Store listing.</li>
       <li><strong>Export your data:</strong> you can download a copy of the
-        data we hold about you (profile, rankings, decisions, events, and your
-        account record — including any stored email address) from the app's
-        Settings; it's returned as a machine-readable file.</li>
-      <li><strong>Removing only your email address:</strong> we want to be
-        straight about this — <strong>there is no way to do that today.</strong>
-        There is no unsubscribe link, no setting, and no support process that
-        removes your address while keeping your account, because there is
-        nothing being sent to unsubscribe from. Deleting your account, above, is
-        the only way to remove it. If we ever build a way to send email, we will
-        add an unsubscribe mechanism and update this policy before the first
-        message goes out.</li>
+        data we hold about you (profile, rankings, decisions, events) from
+        the app's Settings; it's returned as a machine-readable file.</li>
       <li><strong>Device identifier after deletion:</strong> the random install identifier lives in your device's secure storage, which apps cannot fully erase; it persists on the device even after account deletion (and survives reinstalls). It links to nothing on our servers after anonymization — if you sign up again from the same device, our systems see a new user on a previously seen device, nothing more. Erasing your device removes it entirely.</li>
       <li><strong>Disconnect Sleeper sending:</strong> in the app's Settings at any time — the stored token is deleted immediately.</li>
       <li><strong>Push notifications:</strong> can be turned off per-category in Settings or entirely in your device settings.</li>

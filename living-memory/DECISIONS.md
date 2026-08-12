@@ -411,36 +411,6 @@
 
 ---
 
-## D-044 — `auth.email_capture` Moves Only Through `config/features.json`, in the Paired Commit
-**Date:** 2026-08-11 (P1 remediation, P1-3; operator decision PV-2 / D-P1-13)
-**Context:** Flipping this flag starts storing plaintext email addresses on identifiable accounts. `web/privacy.html` — the App Store Connect privacy URL — said "We never store your email address itself" and "No email addresses". Collection going live against that text is a public misrepresentation, and the window in which it could happen is however long it takes someone to notice.
-**Decision:** The flag and the policy ship in **one commit**, and this key is flipped through `config/features.json` **and nothing else, in either direction**. `FTF_FLAGS` and `POST /api/feature-flags/reload` are **prohibited** for it. `backend/tests/test_email_capture.py::test_release_flag_and_privacy_policy_ship_together` makes the split a red build; the prohibition is recorded in four places (this entry, the `config/features.json` comment key, the `feature_flags.py` comment, `docs/config-reference.md`) because nothing in the code enforces it.
-**Alternatives considered:** Flipping via Render's `FTF_FLAGS` env var — rejected, and it is the *reason* for the rule: one console click, no deploy, no diff, no reviewer, no CI, i.e. the only mechanism that can decouple capture from the policy. Splitting the flag and policy into two commits for reviewability — rejected: it recreates exactly the window the pairing closes.
-**Consequences:** **The deploy-free kill switch is deliberately surrendered in both directions.** Rollback is a revert commit and a Render deploy — minutes, not seconds. That cost was accepted knowingly. The pairing test is a *negative* assertion, so a future rewrite deleting both sentences without describing capture would still pass; a positive marker was considered and not adopted. Note the asymmetry that makes "we can always turn it off" incomplete: the switch is reversible, **the storage is not** — the flag gates writes, nothing nulls `accounts.email`, and addresses already written stay written, backups included.
-**Status:** Active.
-
----
-
-## D-045 — Apple Relay-ness Is Derived From the Address Suffix, Not Modelled
-**Date:** 2026-08-11 (P1 remediation, P1-3)
-**Context:** A user who picks "Hide My Email" yields an `@privaterelay.appleid.com` proxy in the same identity-token claim as a real address. `_normalize_email` accepts both identically, so the column cannot tell them apart. Apple's own `is_private_email` claim is never read (zero hits repo-wide).
-**Decision:** Do not model it. Relay-ness is derived from the address suffix at query time — no new `email_source` value, no `is_private_email` column, no migration.
-**Alternatives considered:** A fourth `email_source` value — rejected: it conflates *how the address arrived* (the column's actual meaning: the provider name) with *what kind of address it is*. A boolean column — rejected: a migration and a second source of truth for something a `LIKE` already answers exactly.
-**Consequences:** Whoever ships the first send inherits the real constraint: mail to a relay is **dropped** unless the sending domain is registered in Apple Developer → *Sign in with Apple for Email Communication* with SPF/DKIM. No domain, sender, or send path exists today (zero hits for `smtp|sendgrid|mailgun|postmark|ses|resend` across `backend/`, `requirements*.txt`, `mobile/package.json`). Also permanent and outside our control: a relay address breaks for good if the user revokes the app in iOS Settings, and re-consent is not obtainable.
-**Status:** Active.
-
----
-
-## D-046 — No `email_captured` Event; Capture Volume Is Read From State
-**Date:** 2026-08-11 (P1 remediation, P1-3; operator decision AN-6 / D-P1-13)
-**Context:** The 2026-07-17 spec calls for the server to fire `email_captured`. In the lane that actually shipped, the address arrives as a **side effect of signing in** — there is no moment at which a user chose anything.
-**Decision:** Cancelled, not deferred to a date. `backend/analytics_taxonomy.py` is untouched by P1-3. The quantity is queried from state: `SELECT count(*), email_source FROM accounts WHERE email_consent_at IS NOT NULL`.
-**Alternatives considered:** Registering it anyway for funnel symmetry — rejected on three grounds: state answers the question *more* accurately than an append-only log; a new `SERVER_FIRED_EVENTS` name is **intent-by-default** (the exclusion roster is a deny-list), so it would silently enter DAU/WAU/retention unless someone remembered to exclude it; and the taxonomy file was the round's most contended, frozen after the T1 registration commit.
-**Consequences:** No client-side signal exists for capture, which is correct while capture is not a user action. **The event earns its place when the Settings/onboarding "Add your email" field ships** — at that point a user does choose, and the taxonomy edit belongs to that build.
-**Status:** Active.
-
----
-
 ## Decision index
 
 | ID | Title | Date |
@@ -488,9 +458,6 @@
 | D-041 | Unlock Is Per-Method and Reads the Board, Not the Event Stream | 2026-08-11 |
 | D-042 | First-Unlock Fan-Out Is Suppressed by a Backfill, Not a Special Case | 2026-08-11 |
 | D-043 | Shared Display Vocabularies Are Derived From One Constant | 2026-08-11 |
-| D-044 | `auth.email_capture` Moves Only Through `config/features.json`, in the Paired Commit | 2026-08-11 |
-| D-045 | Apple Relay-ness Is Derived From the Address Suffix, Not Modelled | 2026-08-11 |
-| D-046 | No `email_captured` Event; Capture Volume Is Read From State | 2026-08-11 |
 
 ---
 
