@@ -180,6 +180,37 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #     exits; `via` is the only way to learn which one users find.
     "lineup_impact_unavailable",
     "league_team_closed",
+    # ── Feedback #300, 2026-08-12 ───────────────────────────────────────
+    # Tracking plan (the addendum this module's docstring demands):
+    # docs/feedback/items/300-league-rankings-trade-candidates/analytics.md.
+    # The operator flipped `league.pos_candidates` +
+    # `league.player_trade_handoff` ON at ship (d207b03) AND waived the
+    # simulator gate and the Maestro run, so these two events are the only
+    # evidence that will ever exist that the feature works in the wild.
+    #
+    # Exactly ONE of the two is also listed in
+    # analytics_queries.NON_INTENT_EVENTS, in this same commit — INTENT is
+    # derived by SUBTRACTION, so a passive name added here and nowhere else
+    # step-changes DAU/WAU with no error and no log.
+    #
+    #   league_pos_candidates_viewed — the EXPOSURE half, and NON_INTENT.
+    #     Fires when the user reaches the single-position candidate view
+    #     (the exact `candidatePos` memo the divider's own render gate
+    #     reads). Without it, a zero on the action below is unreadable:
+    #     nobody found the feature vs nobody wanted it. There is no
+    #     existing event to hang this on — `league_view` fires ONCE per
+    #     mount, before any pill is tapped; `league_subset_changed` fires
+    #     on the All/Starters/Bench control only (a position-pill tap
+    #     emits nothing today, anywhere); and `league_team_opened` fires
+    #     only for users who already acted, which is the population whose
+    #     absence is the thing being measured.
+    #
+    #   league_candidate_pinned — the ACTION half, and INTENT. The Offer /
+    #     Target row action: pins give/receive through useFinderTargets and
+    #     routes to the trade finder. This is the feature's conversion
+    #     moment and the one number worth reading.
+    "league_pos_candidates_viewed",
+    "league_candidate_pinned",
 })
 
 # ---------------------------------------------------------------------------
@@ -517,6 +548,48 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # changes basis mid-focus. Bounded small integers; no league id, no
     # member id, no team name.
     "league_team_closed":     frozenset({"via", "dwell_ms", "rank"}),
+    # ── Feedback #300, 2026-08-12 ───────────────────────────────────────
+    # `position` is a CORE POSITION (QB | RB | WR | TE) — the single
+    # position the ranked list is filtered to. It is NOT a device platform
+    # and NOT a roster slot; the divider exists only for the four core
+    # positions the server publishes a median for.
+    #
+    # `divider` is the render OUTCOME, three closed values, each read
+    # straight off the memo the render itself reads — never re-derived:
+    #   shown     — the line drew (`cutAfter` non-null)
+    #   no_median — `medians[position]` absent from the payload: an old
+    #               server, or the position missing from the object. The
+    #               ops signal that the rollout is incomplete, and the
+    #               reason this is a three-valued prop rather than a
+    #               shown-only impression event.
+    #   no_split  — a median arrived but marks no boundary (every team on
+    #               one side, or a list too short to split), so the client
+    #               deliberately draws nothing.
+    "league_pos_candidates_viewed": frozenset({"position", "divider"}),
+    # The conversion moment. `verb` ∈ offer | target is the user's action;
+    # `side` ∈ above | below is the TAPPED TEAM's side of the median line.
+    #
+    # THE TWO ARE NOT REDUNDANT, and the reason is the mirror. The primary
+    # roster's verb is fixed by the side (above ⇒ target theirs, below ⇒
+    # offer yours), but the drill-in also stacks the MIRROR roster, whose
+    # rows carry the OPPOSITE verb. So all four combinations occur, and
+    # `mirror = (verb == 'target') == (side == 'below')` — i.e. the user
+    # acted against the direction the line chose for them. That rate is
+    # the direct test of the feature's central bet and it is unreadable
+    # from either prop alone.
+    #
+    # `rank` is the tapped team's 1-based ON-SCREEN rank at the moment of
+    # the pin (the same `selectedIdx` the drill-in header prints), so it
+    # is coherent with `side` even if the user changed basis mid-focus —
+    # which is also why it can differ from the `league_team_opened.rank`
+    # that preceded it. Bounded small integer; no league id, no member id,
+    # no team name, no player id.
+    #
+    # There is deliberately NO `band` prop (Buyer / Seller). Those labels
+    # drive no behaviour by operator ruling, and the band is a pure
+    # function of `rank` and `league_view.team_count` on the same mount.
+    # See the tracking plan's deliberately-not-instrumented section.
+    "league_candidate_pinned": frozenset({"verb", "position", "rank", "side"}),
 }
 
 
