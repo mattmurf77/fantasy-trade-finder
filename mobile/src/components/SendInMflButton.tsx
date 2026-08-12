@@ -2,10 +2,11 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
+import MflSignInSheet from './MflSignInSheet';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
-import { proposeTradeToMfl } from '../api/sendInMfl';
+import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import type { SendSurface } from '../utils/tradeText';
@@ -19,12 +20,15 @@ import type { SendSurface } from '../utils/tradeText';
 // defense-in-depth for a direct mount, never the user-visible flag-off path.
 //
 // Differences from the Sleeper twin, deliberate:
-//   • No up-front link-status check — there is no GET status route for the
-//     MFL cookie; the propose itself answers (409 mfl_not_connected /
-//     mfl_auth_expired) and we route that to reconnect guidance.
-//   • Reconnect = MFL sign-in (username/password via PlatformLinkSheet on
-//     the league picker), not a token-capture webview — so the reconnect
-//     CTA navigates to LeaguePicker rather than a dedicated connect screen.
+//   • Sleeper-style LAZY auth (send-auth gap fix, 2026-08-11): an up-front
+//     GET /api/mfl/auth-link decides the FIRST message. Unlinked → the
+//     in-flow MflSignInSheet opens right here (username/password →
+//     POST /api/mfl/auth-link stores the cookie AND verifies the session);
+//     on success the send resumes immediately — the sheet's callback runs
+//     confirmSend, whose "Send this trade?" alert still gates the actual
+//     write. No LeaguePicker punt for a missing/expired sign-in.
+//     League-level problems (mfl_not_linked / mfl_franchise_unknown) still
+//     route to LeaguePicker — those genuinely need a re-link, not a login.
 //   • The server HARD-BLOCKS on any asset it can't map (422
 //     mfl_asset_unmapped) — surfaced honestly, nothing partial is sent.
 //   • Picks ride along: the asset arrays every trade surface passes are
@@ -74,14 +78,19 @@ export default function SendInMflButton({
   const enabled = useFlag('trade.send_in_mfl');
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
+  // In-flow MFL sign-in (send-auth lazy flow) — a focused sheet, right on
+  // the send surface, instead of a cross-surface punt to the league picker.
+  const [signInVisible, setSignInVisible] = useState(false);
 
   const openMfl = useCallback(() => {
     Linking.openURL('https://www.myfantasyleague.com').catch(() => {});
   }, []);
 
-  // MFL sign-in lives in PlatformLinkSheet on the league picker ("Add
-  // league" → MFL → Sign in). No dedicated connect screen exists to deep
-  // link into, so reconnect guidance lands the user there.
+  const openSignIn = useCallback(() => setSignInVisible(true), []);
+
+  // LEAGUE re-link (mfl_not_linked / mfl_franchise_unknown only): the league
+  // row itself is missing or unbound, which a sign-in can't fix — that flow
+  // lives in PlatformLinkSheet on the league picker.
   const goReconnect = useCallback(() => {
     navigation.navigate('LeaguePicker');
   }, [navigation]);
@@ -113,12 +122,15 @@ export default function SendInMflButton({
       const detail: string | undefined = body?.detail || body?.message;
 
       if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
+        // Credential vanished/expired between the status check and the send
+        // — open the in-flow sign-in sheet; a successful sign-in resumes
+        // the send. Never a cross-surface punt to the league list.
         Alert.alert(
           'Sign in with MFL',
-          'Your MFL sign-in is missing or expired. Sign in again from the league list (Add league → MFL).',
+          'Your MFL sign-in is missing or expired. Sign in again to send this trade — your league stays linked.',
           [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Go to leagues', onPress: goReconnect },
+            { text: 'Sign in', onPress: openSignIn },
           ],
         );
       } else if (code === 'verification_required') {
@@ -161,7 +173,7 @@ export default function SendInMflButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goReconnect, openMfl]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, openSignIn, goReconnect, openMfl]);
 
   // #180-parity pre-flight — the shared /api/trades/validate branches to a
   // fresh MFL rosters export server-side. Never throws; findings are
@@ -200,15 +212,52 @@ export default function SendInMflButton({
     );
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-  const onPress = useCallback(() => {
+  // A successful sign-in resumes the send immediately — the confirm alert
+  // inside confirmSend ("Send this trade?") still gates the actual write,
+  // so nothing sends without an explicit yes.
+  const onSignedIn = useCallback(() => {
+    setSignInVisible(false);
+    void confirmSend();
+  }, [confirmSend]);
+
+  const onPress = useCallback(async () => {
     if (state !== 'idle') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openMfl();
       return;
     }
-    void confirmSend();
-  }, [state, leagueId, theirUserId, openMfl, confirmSend]);
+
+    // Decide the FIRST message by whether an MFL sign-in is stored for this
+    // user (send-auth lazy flow — MFL credentials are captured only on
+    // demand, so a zero-auth-linked league reaches here with none stored).
+    setState('checking');
+    let connected: boolean;
+    try {
+      const status = await getMflLinkStatus();
+      connected = !!status.connected;
+    } catch {
+      // Status unknown (network / older server) — try the send; doPropose
+      // routes to sign-in if it turns out we're not connected.
+      setState('idle');
+      void confirmSend();
+      return;
+    }
+    setState('idle');
+
+    if (connected) {
+      void confirmSend();
+    } else {
+      Alert.alert(
+        'Sign in with MFL to send trades',
+        'To send this trade, sign in to your MyFantasyLeague account. Your password goes to MFL’s login only — we never store it.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign in', onPress: openSignIn },
+        ],
+      );
+    }
+  }, [state, leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
 
   if (!enabled) return null;
 
@@ -218,14 +267,21 @@ export default function SendInMflButton({
     : 'Send in MFL';
 
   return (
-    <Button
-      testID="trades.send-mfl-btn"
-      label={label}
-      variant="secondary"
-      compact={compact}
-      disabled={state === 'sending' || state === 'checking' || state === 'sent'}
-      onPress={onPress}
-      style={style}
-    />
+    <>
+      <Button
+        testID="trades.send-mfl-btn"
+        label={label}
+        variant="secondary"
+        compact={compact}
+        disabled={state === 'sending' || state === 'checking' || state === 'sent'}
+        onPress={onPress}
+        style={style}
+      />
+      <MflSignInSheet
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+        onSignedIn={onSignedIn}
+      />
+    </>
   );
 }

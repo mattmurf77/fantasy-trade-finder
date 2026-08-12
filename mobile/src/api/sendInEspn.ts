@@ -14,6 +14,21 @@
 
 import { api } from './client';
 
+export interface EspnLinkStatus {
+  connected: boolean;
+  /** Stored expiry hint — usually null (ESPN stamps no cookie expiry). */
+  expires_at?: string | null;
+  expired?: boolean;
+}
+
+// GET — is an ESPN account credential (espn_s2 + SWID) stored for this user?
+// Mirrors getSleeperLinkStatus: the send button checks this UP FRONT and
+// routes to EspnConnectScreen (reason: 'send') when unlinked, instead of
+// letting the propose 409 into a dead end. Never returns the cookies.
+export async function getEspnLinkStatus(): Promise<EspnLinkStatus> {
+  return api.get<EspnLinkStatus>('/api/espn/link');
+}
+
 export interface ProposeEspnTradePayload {
   league_id: string;
   /** The counterparty's member id as FTF stores it for ESPN leagues — the

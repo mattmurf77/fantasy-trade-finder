@@ -84,7 +84,13 @@ type AuthStack = {
   // path; delivers the cookies back to the sheet via espnConnectBus. No
   // params — the sheet owns the returned data (it hides its own Modal for
   // the push, since a native-stack screen lands behind an open RN Modal).
-  EspnConnect: undefined;
+  // Send-auth lazy flow (2026-08-11): `reason` tells the screen WHY it was
+  // entered so its banner says the right thing — absent/undefined = the
+  // private-league link capture (EspnLinkSheet, copy unchanged);
+  // 'send' = the trade-send path (SendInEspnButton), which stores the
+  // captured pair server-side itself (credential-only POST /api/espn/link)
+  // instead of delivering to the sheet's bus.
+  EspnConnect: { reason?: 'send' } | undefined;
   // #142/#144 — League rankings (power rankings) + FA finder, entered from
   // the League tab's Explore rows.
   LeagueSummary: undefined;

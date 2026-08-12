@@ -14,6 +14,22 @@
 
 import { api } from './client';
 
+export interface MflLinkStatus {
+  connected: boolean;
+  mfl_username?: string | null;
+  year?: number | null;
+}
+
+// GET — is an MFL sign-in (session cookie) stored for this user? Mirrors
+// getSleeperLinkStatus: the send button checks this UP FRONT and opens the
+// in-flow MFL sign-in sheet when unlinked, instead of letting the propose
+// 409 into a LeaguePicker punt. Never returns the cookie. MFL stamps no
+// expiry, so there is no expired flag — a dead cookie surfaces as 409
+// mfl_auth_expired at propose time.
+export async function getMflLinkStatus(): Promise<MflLinkStatus> {
+  return api.get<MflLinkStatus>('/api/mfl/auth-link');
+}
+
 export interface ProposeMflTradePayload {
   league_id: string;
   /** The counterparty's member id as FTF stores it for MFL leagues — the

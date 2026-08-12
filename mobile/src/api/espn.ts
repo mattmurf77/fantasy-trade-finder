@@ -83,6 +83,23 @@ export function isEspnPreview(
   return (res as EspnLinkPreview).status === 'choose_team';
 }
 
+/** Credential-only store (send-auth lazy flow, 2026-08-11): persist a
+ *  captured espn_s2 + SWID pair WITHOUT linking a league — the same POST
+ *  /api/espn/link, minus espn_league_id. Used by EspnConnectScreen when
+ *  entered from the trade-send path: the league is already imported, only
+ *  the account credential is missing. No ESPN call happens server-side —
+ *  the propose route's authenticated pre-flight read is the validity
+ *  oracle. */
+export async function storeEspnCredentials(
+  espnS2: string,
+  swid: string,
+): Promise<{ connected: boolean }> {
+  return api.post<{ connected: boolean }>('/api/espn/link', {
+    espn_s2: espnS2,
+    swid,
+  });
+}
+
 export interface EspnLeagueMember {
   user_id: string;                 // FTF user id for you; synthetic `espn:` otherwise
   username: string;

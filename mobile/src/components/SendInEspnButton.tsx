@@ -1,11 +1,11 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
-import { proposeTradeToEspn } from '../api/sendInEspn';
+import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import type { SendSurface } from '../utils/tradeText';
@@ -24,10 +24,16 @@ import type { SendSurface } from '../utils/tradeText';
 // graduation is a config flip, not a client release.
 //
 // Differences from the twins, deliberate:
-//   • No up-front link-status check — the propose itself answers
-//     (409 espn_not_connected / espn_auth_expired) and we route that to
-//     reconnect guidance (the ESPN connect flow lives in EspnLinkSheet on
-//     the league picker, so reconnect navigates to LeaguePicker).
+//   • Sleeper-style LAZY auth (send-auth gap fix, 2026-08-11): an up-front
+//     GET /api/espn/link decides the FIRST message. Unlinked → we navigate
+//     in-flow to EspnConnectScreen with reason:'send' (it stores the
+//     captured pair server-side itself); on return the focus handler
+//     re-checks and tells the user to tap Send again — the same one-button
+//     loop as SendInSleeperButton. ESPN cookies are needed for EVERY send,
+//     public league or not, so this is the primary path for the many users
+//     whose public league never triggered the private-league capture.
+//     League-level problems (espn_not_linked / espn_team_unknown) still
+//     route to LeaguePicker — those genuinely need a re-link, not a login.
 //   • PLAYERS ONLY. ESPN pick assets are unverified server-side, so any pick
 //     id in the arrays HARD-BLOCKS the whole send (422
 //     espn_pick_unsupported) — surfaced honestly, nothing partial is sent.
@@ -74,17 +80,60 @@ export default function SendInEspnButton({
   const enabled = useFlag('espn.send');
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
+  // True while we're waiting for the user to come back from the ESPN connect
+  // webview — the screen-focus handler consumes it to report the result
+  // (same mechanism as the Sleeper twin's awaitingLinkRef).
+  const awaitingLinkRef = useRef(false);
 
   const openEspn = useCallback(() => {
     Linking.openURL('https://fantasy.espn.com').catch(() => {});
   }, []);
 
-  // The ESPN connect flow (WebView cookie capture / paste) lives in
-  // EspnLinkSheet on the league picker ("Add league" → ESPN). No dedicated
-  // connect screen exists to deep link into, so reconnect guidance lands the
-  // user there — same pattern as the MFL twin.
+  // ACCOUNT sign-in (send-auth lazy flow): in-flow push to the existing
+  // EspnConnectScreen. reason:'send' makes the screen (a) show send-oriented
+  // copy — never "this league is private" — and (b) store the captured pair
+  // server-side itself via the credential-only POST /api/espn/link.
+  const goConnect = useCallback(() => {
+    awaitingLinkRef.current = true;
+    navigation.navigate('EspnConnect', { reason: 'send' });
+  }, [navigation]);
+
+  // LEAGUE re-link (espn_not_linked / espn_team_unknown only): the league
+  // row itself is missing or unbound, which the connect webview can't fix —
+  // that flow lives in EspnLinkSheet on the league picker.
   const goReconnect = useCallback(() => {
     navigation.navigate('LeaguePicker');
+  }, [navigation]);
+
+  // When the user returns from the connect webview (success, failure, OR a
+  // manual back-out), re-check the link from the server and tell them where
+  // they stand. Gated on awaitingLinkRef so only the button that sent them
+  // there speaks up, and only once.
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', async () => {
+      if (!awaitingLinkRef.current) return;
+      awaitingLinkRef.current = false;
+      let connected = false;
+      try {
+        const status = await getEspnLinkStatus();
+        connected = !!status.connected && !status.expired;
+      } catch {
+        /* fall through to the "couldn't confirm" copy */
+      }
+      if (connected) {
+        haptics.success();
+        Alert.alert(
+          'ESPN connected',
+          'Tap “Send in ESPN” again to send your trade.',
+        );
+      } else {
+        Alert.alert(
+          'Not connected',
+          'Your ESPN sign-in didn’t complete. Tap “Send in ESPN” to try again.',
+        );
+      }
+    });
+    return unsub;
   }, [navigation]);
 
   const doPropose = useCallback(async () => {
@@ -114,12 +163,16 @@ export default function SendInEspnButton({
       const detail: string | undefined = body?.detail || body?.message;
 
       if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
+        // Credential vanished/expired between the status check and the send
+        // (the server drops a dead pair on a rejected pre-flight) — send
+        // them to the in-flow sign-in; the focus handler reports the result
+        // on return. Never a cross-surface punt to the league list.
         Alert.alert(
-          'Connect ESPN',
-          'Your ESPN sign-in is missing or expired. Connect again from the league list (Add league → ESPN).',
+          'Sign in to ESPN',
+          'Your ESPN sign-in is missing or expired. We’ll open ESPN so you can sign in again — your league stays linked.',
           [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Go to leagues', onPress: goReconnect },
+            { text: 'Sign in', onPress: goConnect },
           ],
         );
       } else if (code === 'verification_required') {
@@ -167,7 +220,7 @@ export default function SendInEspnButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goReconnect, openEspn]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
 
   // #180-parity pre-flight — the shared /api/trades/validate has no ESPN
   // branch yet, so this degrades to checked:false (plain confirm). Never
@@ -206,15 +259,44 @@ export default function SendInEspnButton({
     );
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-  const onPress = useCallback(() => {
+  const onPress = useCallback(async () => {
     if (state !== 'idle') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openEspn();
       return;
     }
-    void confirmSend();
-  }, [state, leagueId, theirUserId, openEspn, confirmSend]);
+
+    // Decide the FIRST message by whether an ESPN credential is stored for
+    // this user (send-auth lazy flow — ESPN cookies are captured only on
+    // demand, so a public-league owner reaches here with none stored).
+    setState('checking');
+    let connected: boolean;
+    try {
+      const status = await getEspnLinkStatus();
+      connected = !!status.connected && !status.expired;
+    } catch {
+      // Status unknown (network / older server) — try the send; doPropose
+      // routes to connect if it turns out we're not linked.
+      setState('idle');
+      void confirmSend();
+      return;
+    }
+    setState('idle');
+
+    if (connected) {
+      void confirmSend();
+    } else {
+      Alert.alert(
+        'Sign in to ESPN to send trades',
+        'To send this trade we’ll open ESPN so you can sign in and connect your account. We never see your password.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign in', onPress: goConnect },
+        ],
+      );
+    }
+  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
 
   if (!enabled) return null;
 

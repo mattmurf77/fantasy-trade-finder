@@ -291,6 +291,50 @@ function walk(node, cb) {
     fail('mfl button: requires surface: SendSurface (P0-7 parity)',
          'expected a required `surface: SendSurface` prop in SendInMflButton Props');
   }
+
+  // ── Send-auth lazy flow (2026-08-11): unlinked MFL routes to an IN-FLOW
+  //    sign-in, never a LeaguePicker punt ──────────────────────────────────
+  if (/getMflLinkStatus/.test(text) &&
+      /from '\.\.\/api\/sendInMfl'/.test(text) &&
+      /getMflLinkStatus\(\)/.test(text)) {
+    ok('mfl button: up-front link-status check (getMflLinkStatus)');
+  } else {
+    fail('mfl button: up-front link-status check (getMflLinkStatus)',
+         'expected getMflLinkStatus imported from ../api/sendInMfl and called before the send — unlinked users must be offered sign-in, not a propose 409 dead end');
+  }
+
+  let mflSheetMounted = false;
+  walk(sf, (node) => {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) &&
+        node.tagName.getText(sf) === 'MflSignInSheet') {
+      mflSheetMounted = true;
+    }
+  });
+  if (mflSheetMounted) {
+    ok('mfl button: mounts the in-flow MflSignInSheet');
+  } else {
+    fail('mfl button: mounts the in-flow MflSignInSheet',
+         'expected <MflSignInSheet/> rendered by SendInMflButton — the send path needs an in-flow sign-in surface');
+  }
+
+  // The not-connected/expired error branch must open the in-flow sign-in,
+  // not navigate to LeaguePicker (the pre-fix dead end).
+  let mflReconnectInFlow = false;
+  let mflReconnectPunts = false;
+  walk(sf, (node) => {
+    if (!ts.isIfStatement(node)) return;
+    const cond = node.expression.getText(sf).replace(/\s+/g, ' ');
+    if (!/mfl_not_connected/.test(cond) || !/mfl_auth_expired/.test(cond)) return;
+    const branch = node.thenStatement.getText(sf);
+    if (/openSignIn/.test(branch)) mflReconnectInFlow = true;
+    if (/LeaguePicker/.test(branch)) mflReconnectPunts = true;
+  });
+  if (mflReconnectInFlow && !mflReconnectPunts) {
+    ok('mfl button: not-connected/expired reconnect is in-flow (no LeaguePicker punt)');
+  } else {
+    fail('mfl button: not-connected/expired reconnect is in-flow (no LeaguePicker punt)',
+         'the mfl_not_connected/mfl_auth_expired branch must open the sign-in sheet (openSignIn) and must NOT navigate to LeaguePicker');
+  }
 }
 
 // ── 6: SendInEspnButton fires only the ESPN API, flag-gated, testID'd ─────
@@ -340,6 +384,45 @@ function walk(node, cb) {
   } else {
     fail('espn button: requires surface: SendSurface (P0-7 parity)',
          'expected a required `surface: SendSurface` prop in SendInEspnButton Props');
+  }
+
+  // ── Send-auth lazy flow (2026-08-11): unlinked ESPN routes to the IN-FLOW
+  //    connect screen, never a "go to the league list" dead end ────────────
+  if (/getEspnLinkStatus/.test(text) &&
+      /from '\.\.\/api\/sendInEspn'/.test(text) &&
+      /getEspnLinkStatus\(\)/.test(text)) {
+    ok('espn button: up-front link-status check (getEspnLinkStatus)');
+  } else {
+    fail('espn button: up-front link-status check (getEspnLinkStatus)',
+         'expected getEspnLinkStatus imported from ../api/sendInEspn and called before the send — unlinked users must be offered sign-in, not a propose 409 dead end');
+  }
+
+  if (/navigate\(\s*'EspnConnect',\s*\{\s*reason:\s*'send'\s*\}\s*\)/.test(text)) {
+    ok("espn button: connects in-flow via EspnConnect with reason:'send'");
+  } else {
+    fail("espn button: connects in-flow via EspnConnect with reason:'send'",
+         "expected navigation.navigate('EspnConnect', { reason: 'send' }) — the reason param is what keeps the connect screen from showing private-league copy to a public-league user");
+  }
+
+  // The not-connected/expired error branch must route to the connect screen
+  // (goConnect), not navigate to LeaguePicker (the pre-fix dead end).
+  // League-LEVEL problems (espn_not_linked / espn_team_unknown) may still
+  // route to LeaguePicker — those need a re-link, not a login.
+  let espnReconnectInFlow = false;
+  let espnReconnectPunts = false;
+  walk(sf, (node) => {
+    if (!ts.isIfStatement(node)) return;
+    const cond = node.expression.getText(sf).replace(/\s+/g, ' ');
+    if (!/espn_not_connected/.test(cond) || !/espn_auth_expired/.test(cond)) return;
+    const branch = node.thenStatement.getText(sf);
+    if (/goConnect/.test(branch)) espnReconnectInFlow = true;
+    if (/LeaguePicker/.test(branch)) espnReconnectPunts = true;
+  });
+  if (espnReconnectInFlow && !espnReconnectPunts) {
+    ok('espn button: not-connected/expired reconnect is in-flow (no LeaguePicker punt)');
+  } else {
+    fail('espn button: not-connected/expired reconnect is in-flow (no LeaguePicker punt)',
+         'the espn_not_connected/espn_auth_expired branch must route to the connect screen (goConnect) and must NOT navigate to LeaguePicker');
   }
 }
 

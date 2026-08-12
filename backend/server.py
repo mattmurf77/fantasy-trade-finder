@@ -18863,12 +18863,24 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
-@app.route("/api/espn/link", methods=["POST"])
+@app.route("/api/espn/link", methods=["GET", "POST"])
 @_gate_unverified_write
 def espn_link():
-    """Link (import) an ESPN league for the session user.
+    """Link (import) an ESPN league — and manage the ESPN account credential.
 
-    Body: {espn_league_id, season?, team_id?, espn_s2?, swid?}
+    GET → link status, mirroring GET /api/sleeper/link (send-auth lazy flow,
+    2026-08-11): {connected, expires_at, expired}. Never returns the cookies.
+    `connected` requires BOTH stored halves (espn_s2 + SWID) — a row missing
+    its SWID can't authenticate anything. `expires_at` is the stored
+    expires_hint_at (usually null; ESPN doesn't stamp cookie expiry).
+
+    POST body: {espn_league_id?, season?, team_id?, espn_s2?, swid?}
+      • espn_s2+swid, NO espn_league_id → CREDENTIAL-ONLY store (send-auth
+        lazy flow): persist the pair encrypted and return {connected: true}.
+        Used by the ESPN Connect WebView when entered from the trade-send
+        path — the league is already imported; only the account credential
+        is missing. No ESPN call is made here: the propose route's
+        authenticated pre-flight read is the validity oracle.
       • no team_id  → PREVIEW: fetch + crosswalk, return the team list and
         match report; nothing is persisted.
       • team_id     → IMPORT: persist the league (platform='espn') + all
@@ -18889,8 +18901,48 @@ def espn_link():
     if not user_id:
         return jsonify({"error": "no_user"}), 401
 
+    if request.method == "GET":
+        cred = get_espn_credential(user_id)
+        if not cred or not cred.get("swid"):
+            return jsonify({"connected": False})
+        expires_at = cred.get("expires_hint_at")
+        expired = False
+        if expires_at:
+            try:
+                expired = (datetime.fromisoformat(expires_at)
+                           <= datetime.now(timezone.utc))
+            except Exception:
+                expired = False
+        return jsonify({"connected": True,
+                        "expires_at": expires_at,
+                        "expired": expired})
+
     body = request.get_json(force=True) or {}
     league_id = str(body.get("espn_league_id") or "").strip()
+
+    espn_s2 = (body.get("espn_s2") or "").strip() or None
+    swid    = (body.get("swid") or "").strip() or None
+    if bool(espn_s2) != bool(swid):
+        return jsonify({"error": "espn_cookies_incomplete",
+                        "message": "Private leagues need BOTH espn_s2 and SWID."}), 400
+
+    # Credential-only store (send-auth lazy flow, 2026-08-11): both cookies,
+    # no league id. The ESPN Connect WebView entered from the SEND path has
+    # no league to link — it just needs the captured pair persisted so
+    # POST /api/trades/propose-espn can read it.
+    if not league_id and espn_s2:
+        if not _sleeper_write.token_encryption_available():
+            return jsonify({"error": "espn_unconfigured",
+                            "message": "Credential encryption key missing."}), 503
+        try:
+            upsert_espn_credential(user_id, swid,
+                                   _sleeper_write.encrypt_token(espn_s2))
+        except Exception:
+            log.exception("espn_link: credential-only store failed")
+            return jsonify({"error": "store_failed"}), 500
+        log.info("espn_link: credential-only store user=%s", user_id)
+        return jsonify({"connected": True, "stored": "credential"})
+
     if not league_id.isdigit():
         return jsonify({"error": "espn_bad_league_id",
                         "message": "ESPN league IDs are numeric."}), 400
@@ -18898,12 +18950,6 @@ def espn_link():
         season = int(body.get("season") or _ESPN_DEFAULT_SEASON)
     except (TypeError, ValueError):
         return jsonify({"error": "espn_bad_season"}), 400
-
-    espn_s2 = (body.get("espn_s2") or "").strip() or None
-    swid    = (body.get("swid") or "").strip() or None
-    if bool(espn_s2) != bool(swid):
-        return jsonify({"error": "espn_cookies_incomplete",
-                        "message": "Private leagues need BOTH espn_s2 and SWID."}), 400
 
     # Fall back to previously-stored cookies so re-links of a private league
     # don't require a fresh paste.
@@ -20839,10 +20885,18 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
     }
 
 
-@app.route("/api/mfl/auth-link", methods=["POST"])
+@app.route("/api/mfl/auth-link", methods=["GET", "POST"])
 @_gate_unverified_write
 def mfl_auth_link():
-    """Sign in with MFL and list the user's leagues (no import yet)."""
+    """Sign in with MFL and list the user's leagues (no import yet).
+
+    GET → sign-in status, mirroring GET /api/sleeper/link (send-auth lazy
+    flow, 2026-08-11): {connected, mfl_username, year}. Never returns the
+    cookie. `connected` is true when an encrypted credential row exists OR
+    the (key-less-deployment) session-only cookie is present; MFL stamps no
+    expiry on its cookie, so there is no expires_at/expired here — a dead
+    cookie surfaces as 409 mfl_auth_expired at propose time.
+    """
     if not is_enabled("mfl.auth_link"):
         return jsonify({"error": "feature_disabled"}), 404
     from . import mfl_service as _mfl
@@ -20851,6 +20905,21 @@ def mfl_auth_link():
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    if request.method == "GET":
+        from .database import get_mfl_credential
+        try:
+            cred = get_mfl_credential(user_id)
+        except Exception:
+            cred = None
+        if cred:
+            return jsonify({"connected": True,
+                            "mfl_username": cred.get("mfl_username"),
+                            "year": cred.get("year")})
+        if sess.get("mfl_cookie"):
+            return jsonify({"connected": True,
+                            "mfl_username": None, "year": None})
+        return jsonify({"connected": False})
 
     body = request.get_json(force=True) or {}
     username = str(body.get("username") or "").strip()

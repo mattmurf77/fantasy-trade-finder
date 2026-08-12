@@ -28,7 +28,7 @@ One file per top-level route. MAP, not a changelog — present behavior only, no
 | `PickAssignmentScreen` | ESPN pick-ownership grid (flag `picks.assign`): season tabs, one-time drag-order setup, collapsible rounds, optimistic-concurrency conflict sheet on a stale write. No value entry anywhere — prices are server-computed |
 | `PlaceholderScreen` | Stub for unfinished routes |
 | `TestStagesScreen` | Operator QA: spawn a synthetic adoption-stage user and swap this device into it; device-only factory reset (Settings → Testing, flag `testing.stage_users`) |
-| `EspnConnectScreen` | WebView ESPN login (flag `espn.webview_capture`): captures `espn_s2`/`SWID` from native cookies and hands them back to `EspnLinkSheet`, which auto-advances |
+| `EspnConnectScreen` | WebView ESPN login (flag `espn.webview_capture`): captures `espn_s2`/`SWID` from native cookies. Two entry reasons (route param `reason`): default = private-league link — pair goes back to `EspnLinkSheet` via the bus, which auto-advances; `'send'` = trade-send auth (`SendInEspnButton`) — the screen stores the pair server-side itself (credential-only `POST /api/espn/link`), shows send-oriented banner copy (never "this league is private"), and skips the bus entirely |
 
 ## Sharp edges
 

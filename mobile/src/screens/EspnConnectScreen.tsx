@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Linking, Pressable } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
+import { storeEspnCredentials } from '../api/espn';
 import { track } from '../api/events';
 
 // ESPN Connect WebView — Phase 1b of ESPN league linking
@@ -114,6 +115,17 @@ true;
 
 export default function EspnConnectScreen() {
   const navigation = useNavigation<any>();
+  // Send-auth lazy flow (2026-08-11): WHY was this screen entered?
+  //   • undefined (default) — the private-league link capture: cookies go
+  //     back to EspnLinkSheet through the bus, copy talks about reading a
+  //     private league. Unchanged behavior.
+  //   • 'send' — the trade-send path (SendInEspnButton): there is no sheet
+  //     and no league to link (it's already imported), so THIS screen stores
+  //     the captured pair server-side (credential-only POST /api/espn/link)
+  //     and the copy is about connecting the account to send trades. Never
+  //     tell this user their league is private — it usually isn't.
+  const route = useRoute<any>();
+  const sendMode: boolean = route.params?.reason === 'send';
   const [otpHint, setOtpHint] = useState(false);
   // Wedge-detection hint (field report, build 95) — shown when a load
   // finishes (past the one-time automatic warm-up reload) and nothing has
@@ -185,28 +197,48 @@ export default function EspnConnectScreen() {
     if (!pair || capturedRef.current || unmountedRef.current) return;
     capturedRef.current = true;
     track('espn_connect_captured', { saw_otp: sawOtpRef.current }, 'EspnConnect');
+    if (sendMode) {
+      // Send path: no sheet is listening — store the credential server-side
+      // ourselves (credential-only POST /api/espn/link) so the propose can
+      // read it, then pop back to the send surface. A failed store is not
+      // retried here: the send button's focus handler re-checks GET
+      // /api/espn/link on return and reports "Not connected" honestly.
+      try {
+        await storeEspnCredentials(pair.espnS2, pair.swid);
+      } catch {
+        /* focus-handler re-check owns the failure report */
+      }
+      navigation.goBack();
+      return;
+    }
     deliverEspnCookies(pair);
     // No success overlay: the sheet's Modal re-mounts ABOVE the whole nav
     // stack the moment the bus delivers, so an overlay here could never be
     // seen. The sheet reappearing with the cookies filled (and
     // auto-advancing to the preview) IS the success feedback — just pop.
     navigation.goBack();
-  }, [navigation]);
+  }, [navigation, sendMode]);
 
   // espn_connect_opened on mount; espn_connect_abandoned if we leave without
   // a capture (cleanup runs on unmount — including header back / swipe).
   useEffect(() => {
-    track('espn_connect_opened', { source: 'link_sheet' }, 'EspnConnect');
+    track(
+      'espn_connect_opened',
+      { source: sendMode ? 'send_button' : 'link_sheet' },
+      'EspnConnect',
+    );
     return () => {
       unmountedRef.current = true;
       clearWedgeTimer();
       if (!capturedRef.current) {
         track('espn_connect_abandoned', { saw_otp: sawOtpRef.current }, 'EspnConnect');
         // Un-hide the sheet's Modal — it hid itself for the WebView push.
-        deliverEspnCookies(null);
+        // Send mode never touches the bus: no sheet hid itself, and a null
+        // delivered here could reach an unrelated dormant sheet.
+        if (!sendMode) deliverEspnCookies(null);
       }
     };
-  }, [clearWedgeTimer]);
+  }, [clearWedgeTimer, sendMode]);
 
   // Fresh-login guarantee FIRST, then poll: clear any stale ESPN cookies,
   // and only once that settles start the 1s poll (login is an SPA/redirect
@@ -251,9 +283,14 @@ export default function EspnConnectScreen() {
       <View style={styles.banner} testID="espn-connect.banner">
         <View style={styles.bannerTopRow}>
           <Text style={[type.bodySm, styles.bannerTopText]}>
-            Log in to ESPN below. We never see your password — once you’re in,
-            we read the two cookies ESPN issues for your private league
-            (espn_s2 and SWID) so we can import it.
+            {sendMode
+              ? 'Sign in to ESPN below to connect your account so FTF can ' +
+                'send trades for you. We never see your password — once ' +
+                'you’re in, we read the two sign-in cookies ESPN issues ' +
+                '(espn_s2 and SWID).'
+              : 'Log in to ESPN below. We never see your password — once ' +
+                'you’re in, we read the two cookies ESPN issues for your ' +
+                'private league (espn_s2 and SWID) so we can import it.'}
           </Text>
           {/* Always-visible resilience net (field report, build 95): one
               tap recovers a wedged/blank ESPN login load, regardless of
@@ -270,8 +307,11 @@ export default function EspnConnectScreen() {
           </Pressable>
         </View>
         <Text style={type.bodySm}>
-          Those two cookies are stored encrypted and used only to read this
-          league — read-only, we never post or change anything.{' '}
+          {sendMode
+            ? 'Those two cookies are stored encrypted and used only for ' +
+              'actions you take here — like sending a trade you built. '
+            : 'Those two cookies are stored encrypted and used only to read ' +
+              'this league — read-only, we never post or change anything. '}
           <Text
             style={styles.learnMore}
             accessibilityRole="link"
