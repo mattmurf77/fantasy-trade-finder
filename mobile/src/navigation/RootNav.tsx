@@ -20,7 +20,6 @@ import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import EspnConnectScreen from '../screens/EspnConnectScreen';
-import SleeperProbeScreen from '../screens/SleeperProbeScreen';
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
@@ -92,7 +91,6 @@ type AuthStack = {
   // captured pair server-side itself (credential-only POST /api/espn/link)
   // instead of delivering to the sheet's bus.
   EspnConnect: { reason?: 'send' } | undefined;
-  SleeperProbe: undefined;
   // #142/#144 — League rankings (power rankings) + FA finder, entered from
   // the League tab's Explore rows.
   LeagueSummary: undefined;
@@ -799,29 +797,6 @@ export default function RootNav({ booted }: { booted: boolean }) {
                   navigation.canGoBack()
                     ? navigation.goBack()
                     : navigation.navigate('Main')
-                }
-              />
-            ),
-          })}
-        />
-        {/* TEMPORARY (ADR-011 reachability probe). Registered unconditionally,
-            same rule as EspnConnect — the flag gates the Settings entry row,
-            not the route. Delete with the screen once the question is settled. */}
-        <Stack.Screen
-          name="SleeperProbe"
-          component={SleeperProbeScreen}
-          options={({ navigation }) => ({
-            headerShown: true,
-            title: 'Sleeper probe',
-            headerTitle: () => <HeaderTitle>Sleeper probe</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            headerBackVisible: false,
-            headerLeft: () => (
-              <HeaderBack
-                testID="sleeper-probe.back-btn"
-                onPress={() =>
-                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')
                 }
               />
             ),

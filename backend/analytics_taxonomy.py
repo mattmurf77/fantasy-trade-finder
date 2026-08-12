@@ -96,11 +96,6 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # WebView, and they go to POST /api/espn/link, not analytics.
     "espn_connect_opened", "espn_connect_otp_step",
     "espn_connect_captured", "espn_connect_abandoned",
-    # TEMPORARY (ADR-011 reachability probe, 2026-08-12). Operator-only,
-    # gated on debug.sleeper_probe. Reported as an event rather than read
-    # off a screen so the result is durable and transcription-free.
-    # Delete with the probe screen.
-    "sleeper_probe_result",
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
     # Plans: docs/plans/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
     # Tracking-plan addendum (the precondition this module's docstring
@@ -431,12 +426,6 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # ('link_sheet'); `saw_otp` records whether the Disney SSO one-time-code
     # step appeared before the outcome. No cookie/credential prop exists or
     # may be added.
-    # variant: which header set was sent (the actual question — spoofing
-    # desktop Chrome from an iOS TLS stack may fare WORSE than honest
-    # iOS headers, since a UA/fingerprint mismatch is itself a bot signal).
-    # verdict/http_status: outcome. net_type: wifi vs cellular carry
-    # different IP reputations. No URLs, no bodies, no credentials.
-    "sleeper_probe_result":   frozenset({"variant", "verdict", "http_status", "net_type"}),
     "espn_connect_opened":    frozenset({"source"}),
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),

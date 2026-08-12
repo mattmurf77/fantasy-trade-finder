@@ -251,8 +251,6 @@ export default function SettingsScreen({ navigation }: any) {
   // #130 — ESPN-link CTA row (flag `espn.link`): routes to the LeaguePicker
   // with the EspnLinkSheet auto-opened (the one place the import flow lives).
   const espnLinkEnabled = useFlag('espn.link');
-  // TEMPORARY (ADR-011 reachability probe) — see config/features.json comment.
-  const sleeperProbeEnabled = useFlag('debug.sleeper_probe');
   // Operator QA tool (server also allowlist-gates the spawn route). The
   // flag is delivered per-device via the experiment overlay, so it doubles
   // as the tester-allowlist signal for gating the Testing section in v2.
@@ -1385,24 +1383,6 @@ export default function SettingsScreen({ navigation }: any) {
           {sleeperDisconnectRow}
           {espnDisconnectRow}
           {mflDisconnectRow}
-          {/* TEMPORARY (ADR-011). Operator-only; the flag is OFF for everyone
-              else, so this row does not exist for them. Delete with the screen. */}
-          {sleeperProbeEnabled ? (
-            <Pressable
-              testID="settings.sleeper-probe"
-              accessibilityRole="button"
-              onPress={() => navigateFromSettings('SleeperProbe')}
-              style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowKey}>Run Sleeper reachability probe</Text>
-                <Text style={styles.rowSub}>
-                  Diagnostic. Sends Sleeper's own no-op query — reads nothing, changes nothing.
-                </Text>
-              </View>
-              <Icon name="chevron-right" color={chalk.dim} size={16} />
-            </Pressable>
-          ) : null}
           {publicProfileRow}
           {exportRow}
           <Pressable

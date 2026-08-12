@@ -66,8 +66,20 @@
    or draft status, and d1/d2/d3 target a league in no profile. Either fund the
    seeder work or drop the flows so the gap is visible instead of implied.
 
-1. **Review + graduate `feat/send-in-mfl`.** *(built this session, unmerged)* — complete build (adapter, `/api/trades/propose-mfl`, `trade.send_in_mfl` OFF, platform-aware button fix, 2412 tests green). Blocked on the 8-item live-verification checklist + MFL client registration + 3 operator questions (MFL-login-as-verified?, single-linker leagues?, `trade_sent` event?). Detail: [`HANDOFF.md`](HANDOFF.md), scope: `../docs/feedback/items/177-mfl-auth-link/send-in-mfl-scope.md`.
-2. **Decide the ESPN send NO-GO reversal + run probe #1.** *(operator)* — `spike/send-in-espn-write` scaffolds the write path (all football values UNVERIFIED, `espn.send` OFF + absent from `config/features.json`). First live probe = capture one real browser Propose-Trade in a throwaway ESPN dynasty league (resolves the `espn_id`==`playerId` load-bearer). Reversal is a hand-added `DECISIONS.md` D-entry, post-scorecard. Artifacts: `../docs/plans/espn-send-spike-verification-2026-08-11.md`, `...decision-reversal-draft-2026-08-11.md`.
+1. **Complete MFL client registration (form + cell-phone validation).** *(operator, external)*
+   *Why now:* MFL send is **live and live-verified** — a real 2-for-2 proposal succeeded in
+   prod 2026-08-12. Registration is the last pre-scale item: unregistered clients get MFL's
+   tightest rate limits; registered ones get ~2.5x with a fixed `MFL_USER_AGENT`. Not urgent
+   at one user, blocking before real volume. Still unexercised by any live call:
+   `tradeResponse` and `pendingTrades` — `qa/verify-mfl-send.py` covers the revoke half.
+2. **Make one real ESPN send from the app.** *(5 minutes, live now)*
+   *Why now:* `espn.send` is ON and the write envelope is validated by negative probe
+   (409 `TRAN_NOT_FOUND` for accept/decline; 409 `TRAN_INVALID_TRADE_TEAM_COUNT` for
+   propose), but **no real ESPN send has been made from the app**. Three narrow unknowns
+   need a real transaction: whether ESPN checks `teamId` is the true counterparty or derives
+   it from SWID, whether `items` should be `[]` or omitted (persisted records disagree), and
+   the success-response body the adapter parses. Treat the first real send as the confirming
+   test, exactly as MFL's was. Requires build 103+.
 3. **Resolve the two conflicting ESPN pick-assignment designs.** *(author/operator decision, not a merge)* — `teardown-remediation` reimplements a problem `origin/main` already shipped differently. Detail: [`HANDOFF.md`](HANDOFF.md).
 4. **Execute the branch-triage verdicts.** *([`../docs/reviews/2026-08-08-branch-triage.md`](../docs/reviews/2026-08-08-branch-triage.md))* — 3 RECOVER are real gaps, 3 ASK need operator calls, 29 DELETEs pinned by worktrees.
 

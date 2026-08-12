@@ -127,11 +127,6 @@ FLAG_KEYS: tuple[str, ...] = (
     # auth probe clears (it is NOT proven that espn_s2 + SWID alone authorize
     # a server-side POST — a CSRF/session token may be required).
     "espn.send",              # backend/espn_write.py
-    # TEMPORARY (ADR-011). Gates an operator-only Settings row that runs a
-    # read-nothing Sleeper reachability probe from the device. Ships in a
-    # production TestFlight binary, so a __DEV__ guard would make it inert
-    # exactly where it must run -- this flag is the gate. Delete with the screen.
-    "debug.sleeper_probe",    # mobile/src/screens/SleeperProbeScreen.tsx
     # FB-147 — import Sleeper trade-block flags (public GraphQL read) and tag
     # involved players on trade cards. Gates BOTH the session_init sync and
     # the `on_block` card serialization; off = payloads byte-identical to
