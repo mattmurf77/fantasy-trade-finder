@@ -55,21 +55,60 @@ Sleeper's forthcoming "enhancement" is almost certainly a partner OAuth flow (th
 
 | Platform | Source | State |
 |---|---|---|
-| **MFL** | `export?TYPE=pendingTrades` (owner-restricted, cookie) | **Shipped** — `GET /api/mfl/pending-trades` |
+| **MFL** | `export?TYPE=pendingTrades` (owner-restricted, cookie) | **Shipped and now LIVE-VERIFIED** — `GET /api/mfl/pending-trades` |
 | **ESPN** | `?view=mPendingTransactions`, **reconciled against** `?view=mTransactions2` | Not built |
 | **Sleeper** | `league_transactions_filtered(league_id, type_filters:["trade"], status_filters:["proposed"])` | Not built (GraphQL; cleared by the Sleeper agreement) |
 
-### The ESPN trap — do not skip this
+### The ESPN trap — REVISED 2026-08-12 after live validation, and the fix is simpler than first written
 
-ESPN's pending feed **lies about its own state**, verified against real data:
+An earlier revision of this plan said to read `mPendingTransactions` and reconcile it against `mTransactions2`. **That was backwards.** Validated end-to-end against league 11896 with six real proposals of known outcome:
 
-- A **declined** proposal keeps `status: "PENDING"` and `isPending: true` (5/5 observed). The decline exists only as a separate `TRADE_DECLINE` row linked by `relatedTransactionId`.
-- An **accepted** proposal **disappears** from the pending feed entirely.
-- `teamActions` can never show a decline — it only ever contains `{proposer: "ACCEPTED"}`, and a team that hasn't acted is simply absent.
+| Proposal | `status` in `mTransactions2` | `isPending` | Linked terminal row | Truth |
+|---|---|---|---|---|
+| c7bc15ef | **PENDING** | true | `TRADE_DECLINE` | declined |
+| 50241ec8 | **PENDING** | true | `TRADE_DECLINE` | declined |
+| 75aa61d4 | **PENDING** | true | `TRADE_DECLINE` | declined |
+| 85d0215a / 7f4fff26 / ec752a14 | CANCELED | **true** | none | canceled |
 
-So a naive ESPN read shows **dead offers as live and live ones as gone**. Correct approach: read `mPendingTransactions`, then reconcile `TRADE_DECLINE` / `TRADE_ACCEPT` / `TRADE_VETO` rows from `mTransactions2` by `relatedTransactionId`, and drop any proposal with a linked terminal row.
+**`mPendingTransactions` returned `[]` — correctly.** It listed exactly 2 while those offers were live yesterday, and 0 now that all six are resolved. **It is self-pruning and authoritative; trust it.**
+
+The unreliable surface is `mTransactions2`, the *history* view, where a proposal row's `status` is frozen at creation — a declined proposal still reads `PENDING` there forever, because the decline lives in a separate `TRADE_DECLINE` row. Reconstructing "what's open" from history is what requires reconciliation by `relatedTransactionId`; reading the live pending feed does not.
+
+Two field-level warnings that survive the revision:
+
+- **`isPending` is always `true` on proposal rows — even ones whose own `status` is `CANCELED`.** It is junk. Never branch on it.
+- **`teamActions` can never show a decline.** It only ever contains `{proposer: "ACCEPTED"}`; a team that hasn't acted is simply absent.
+- There is a third terminal state beyond declined/accepted: **`CANCELED`** (revoked or expired). Filter on `status === "PENDING"` when reading history, *in addition to* the terminal-row check — either filter alone is insufficient.
+
+**Net effect on the build: the ESPN read is simpler than planned.** `mPendingTransactions` alone is sufficient for the inbox. `mTransactions2` is only needed if we later want outcome history ("your offer was declined") rather than just open offers.
 
 Also: acceptance is **not** finality on ESPN. `processDate = acceptedDate + revisionHours`, and the trade can still be vetoed inside that window. `expirationDate` (offer clock) and `processDate` (review clock) are two different countdowns and the UI must not conflate them.
+
+### MFL — live-verified 2026-08-12, response shape confirmed
+
+Logged in with the stored credentials and read `export?TYPE=pendingTrades&L=62846&JSON=1`. **Returned a real pending trade**, retiring the `TODO(live-verify)` on the parser's field vocabulary:
+
+```jsonc
+{"pendingTrades": {"pendingTrade": {
+  "trade_id": "1057",
+  "offeringteam": "0002", "offeredto": "0013",
+  "will_give_up": "17105,FP_0002_2028_2,",     // trailing comma; player ids + pick assets, mixed
+  "will_receive": "15749,16187,",
+  "expires": "1787116590", "timestamp": "1786511790",   // unix SECONDS, not ms
+  "comments": "",
+  "description": "Boston Brawlers proposed a trade to Dakota Hicks: …"
+}}}
+```
+
+Four things worth building against:
+
+- **Every documented field is present and correctly named** — the parser's vocabulary was guessed from MFL's docs and is now observed.
+- **`FP_0002_2028_2` appears in the wild**, confirming the `FP_{franchise}_{year}_{round}` encoder against a real trade rather than only against a `futureDraftPicks` snapshot.
+- **Asset lists are comma-joined strings with a trailing comma**, mixing player ids and pick assets in one field — split and drop empties.
+- **`expires`/`timestamp` are unix SECONDS.** ESPN's equivalents are epoch **milliseconds**. The normalized model must convert; getting this wrong yields expiry dates in 1970 or 56,000 AD.
+- **Single pending trade returns an object, not an array** — MFL's usual XML-to-JSON quirk. Coerce to a list, as `mfl_service` already does elsewhere.
+
+**Host correction:** `api.myfantasyleague.com` served this identically to `www45`. The recorded gotcha that the `api.` host "returns empty for league data" now looks **misattributed** — the real cause was the missing `User-Agent` (an empty UA returns an empty body from either host). Keep using the league's `wwwNN` host since it is known-good, but the wwwNN-only claim in `docs/integrations/mfl.md` should be re-tested rather than trusted.
 
 ### Normalized model
 
