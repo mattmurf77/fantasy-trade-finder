@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-036 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
 | G-035 | A JSX "is this gated on X?" test passes on a build where X is ignored | Mobile / structural tests / AST |
 | G-034 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
 | G-033 | A sim run goes red on an unrelated screen after adding one API call | Mobile / Maestro harness / VCR |
@@ -291,6 +292,13 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** the assertion collected the conditions of *several* JSX ancestors and regex-matched the token anywhere in the concatenation. In `check-league-drill-in.js`, the relocated tier badge sits inside the cluster's own `posRank || (denseSingleLine && tier) ? …` ternary, so the token `denseSingleLine` was present in an ancestor regardless of the badge's own gate.
 - **Fix:** read the **innermost** conditional only, and stop walking at the enclosing JSX element boundary (`nearestConditionText()`, fixed in `ba30464`).
 - **Prevention:** run every new assertion against a deliberately sabotaged tree before trusting it. This one was found *only* because the falsification pass was executed — it would not have surfaced in review, and unfixed it would have shipped the Tiers and FreeAgents rows rendering the tier badge twice. Four false-passing tests were caught this way in the #297–#302 batch alone; treat "my test passes" as unproven until the sabotage fails it. See [D-036](DECISIONS.md).
+
+### G-036 — a bare directory name in `.easignore` matches that name at ANY depth
+- **Symptom:** an EAS iOS build errors after ~50s at the **Bundle JavaScript** phase with `Unable to resolve module ../screens/SignInScreen` (or any module), while `npx expo export --platform ios` succeeds locally from the same tree. Two builds failed this way (99, 100) on v1.12.1.
+- **Cause:** `.easignore` uses **gitignore semantics**. The entry `screens/`, added to exclude the top-level 135-capture screen library, also matched **`mobile/src/screens/`** — every screen in the app — and stripped it from the uploaded archive. The tree was never wrong; only the archive was. Proven with git's own matcher: `screens/` matches both `screens/a.png` and `mobile/src/screens/SignInScreen.tsx`; `/screens/` matches only the first.
+- **Fix:** anchor every root-level entry with a leading slash (`/screens/`). Landed as `53bd19f`; build 101 from that commit finished and submitted.
+- **Prevention:** **a green local bundle cannot clear an archive-scoped failure** — do not let it talk you out of reading the real log. Two further traps found on the way in: `eas build` **exits 0 even when the remote build ERRORS** (verify with `eas-cli build:list --json` and read `status`), and the build logs are **brotli**-encoded, so the CLI will not render them post-hoc and `curl --compressed` fails — fetch `logFiles[0]` from `eas-cli build:view <id> --json` (signed URL, ~15 min TTL) and decompress with node's `zlib.brotliDecompressSync`.
+- **History:** **second instance of this bug class in this same file.** An earlier version globbed `*.png` and stripped the app icon and splash assets, failing the identical phase. The rule is now stated at the top of `.easignore` rather than left implied by a war story. A worktree-vs-clone hypothesis cost a whole build cycle before the log was read — building from a linked git worktree was **ruled out** as a cause.
 
 ---
 

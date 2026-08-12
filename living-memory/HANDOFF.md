@@ -9,9 +9,69 @@
 ---
 
 ## Table of Contents
+- [2026-08-12 — Feedback #297–#302 shipped to TestFlight; #300 specced and unbuilt](#2026-08-12--feedback-297302-shipped-to-testflight-300-specced-and-unbuilt)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-12 — Feedback #297–#302 shipped to TestFlight; #300 specced and unbuilt
+
+### Where I am right now
+
+**Everything from this batch is merged and swept.** `main` carries `f8acd71`
+(PR #108 — the four fixes + batch analytics, v1.12.1), `53bd19f` (PR #110 — the
+`.easignore` fix), and `62ff8d6` (PR #109 — the design record + the complete
+#300 spec). **TestFlight build 101 submitted and processing.** Items #297,
+#298, #299, #302 set `fixed`; #301 `declined`; #205 parked.
+
+Twelve branches and eight worktrees swept, ledgered first in
+[`../docs/recovery/2026-08-12-feedback-297-302-sweep.md`](../docs/recovery/2026-08-12-feedback-297-302-sweep.md).
+
+### What a next session should pick up
+
+1. **#300 is build-ready and unbuilt.** Frozen design in
+   `docs/feedback/items/300-league-rankings-trade-candidates/operator-answers-2026-08-12.md`;
+   two mockup labs under `mockups/candidates-300*/`. **It needs a new API
+   field** (`medians` with pick-tier labels — the client can compute the median
+   value but cannot label it), which puts it on the bright line: full gates, not
+   a quick fix. Three items inside it are explicitly *not* to be relitigated —
+   Variant D was an operator override taken against the lab's advice, and the
+   reasoning is recorded with it.
+2. **The Android `BackHandler` is owed** with the first non-App-Store release.
+   It was built and withdrawn (`#302`) because no Android device or emulator
+   was available and the release is iOS-only. Its **absence is pinned** by two
+   test suites — restoring it turns them red, and the assertions must be
+   flipped in the same commit.
+3. **No `check-*.js` suite runs in CI.** Ten of them now, three added by this
+   batch, all `npm run`-only — so **81 structural assertions gate nothing**.
+   Proposed job is written in
+   `docs/feedback/items/297-lineup-impact-single-pin/status.md` §5.5.
+4. **Sim gate still deferred** by operator for this batch; two Maestro flows are
+   authored but never executed. No `last-sim-run.json` was written — not
+   fabricated.
+
+### What bit us, so it doesn't again
+
+- **`.easignore` cost two failed builds** — a bare `screens/` matched
+  `mobile/src/screens/`. Fixed and now anchored; full write-up in
+  [`GOTCHAS.md`](GOTCHAS.md) **G-036**, along with two adjacent traps: `eas
+  build` exits 0 on a failed remote build, and its logs are brotli-encoded.
+- **`origin/main` moved 21 commits mid-batch and falsified two premises**,
+  forcing a rebase and a complete analytics redo. An instrumentation gap
+  analysis is only valid against the `main` it will land on ([D-038](DECISIONS.md)).
+- **Four false-passing tests were caught**, in four independently authored
+  suites, every one by running assertions against a deliberately sabotaged
+  tree. Treat "my test passes" as unproven here until a sabotage fails it.
+
+### Active environment state
+
+`pytest backend/tests -q` → **2452 passed, 1 skipped** on the shipped tree.
+`tsc --noEmit` clean, `testid-lint OK`, structural suites 17 + 29 + 35.
+Analytics verified **in production** by a post-deploy probe: four events
+posted, every property echoed back out of `user_events.props` — including
+`source` on `find_trades_tapped`, dead since #257.
 
 ---
 
