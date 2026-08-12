@@ -97,7 +97,32 @@ That a competitor (Dynasty Daddy) operates the same pattern unchallenged is **no
 
 The two zero-risk items below (persist `transaction_id`, reconcile against the public completed sweep) remain correct and should still be built — they touch only the sanctioned public API.
 
-Everything on the GraphQL surface is now a **business decision, not an engineering one**, and the scope of that decision is wider than "should we add an inbox": it is **"what do we do about the Sleeper write path we already ship?"** Options run from leaving it (accepting the risk knowingly), to flag-off pending review, to pursuing Approved Integration Partner status. **Route to `/pm-partnerships`; do not let an agent decide this.**
+Everything on the GraphQL surface is a **business decision, not an engineering one** — and **the operator has resolved it.**
+
+### RESOLVED 2026-08-12 — the operator states FTF has explicit agreement from Sleeper to use this surface
+
+This is exactly the carve-out §11.3 names ("except pursuant to a separate written agreement executed by Sleeper") and §2.9's Approved Integration Partner concept. **The ToS objection above is therefore answered, and both the existing live `trade.send_in_sleeper` feature and any further GraphQL work are cleared to proceed.**
+
+Two notes so this record stays useful rather than becoming a game of telephone:
+
+- **A future session reading §2 above will otherwise re-raise this alarm.** Anyone who does should stop at this section: the terms question was raised, escalated, and answered by the operator on 2026-08-12.
+- **Worth attaching the artifact.** A pointer to the agreement — its form, date, and counterparty at Sleeper — filed alongside this memo (or in `docs/business/`) would let the record stand on its own. Not a precondition for building; a durability improvement, and the kind of thing that matters if the question is ever asked from outside.
+
+### Consequently, the recommendation flips
+
+Sleeper full lifecycle parity is **viable and now the best-understood of the three platforms** — better than ESPN, where accept/reject payloads remain genuinely uncaptured. The public schema dump gives server-supplied signatures for everything:
+
+| Capability | Path | Status |
+|---|---|---|
+| Read pending | `league_transactions_filtered(status_filters:["proposed"], type_filters:["trade"])` | **confirmed reachable** |
+| Accept | `accept_trade(leg, league_id, transaction_id)` | **confirmed signature** |
+| Reject | `reject_trade(...)` — same triple | **already built**, unrouted |
+| Revoke own offer | no `cancel_trade` exists; `force_cancel_transaction` is **commissioners-only** per the server's own description | likely `reject_trade` on one's own offer — **inferred, unproven** |
+| Counter-offer | `propose_trade(reject_transaction_id, reject_transaction_leg, …)` — atomic | **confirmed signature** |
+
+Fix these in `backend/sleeper_write.py` when the work is picked up: there is **no `roster_ids` argument** (participants derive server-side from `v_adds`/`v_drops`); `draft_picks` and `waiver_budget` are `[String]`, not object arrays; and `expires_at` exists but was never captured.
+
+The two zero-risk public-API items (persist `transaction_id`, reconcile against the completed sweep) are still worth doing first — they are cheap, independent, and useful regardless.
 
 ## The one experiment that could still overturn this
 

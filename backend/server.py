@@ -22168,9 +22168,20 @@ def propose_trade_to_espn():
                         "message": "Your saved ESPN sign-in couldn't be read "
                                    "— connect ESPN again."}), 409
 
-    # PICKS HARD-BLOCK (players only). ESPN's pick-asset representation in
-    # items[] is UNVERIFIED (capture doc §Still unresolved 2) — a pick is
-    # refused loudly, never guessed at, never silently dropped.
+    # PICKS HARD-BLOCK (players only). This is PERMANENT, not a TODO.
+    #
+    # The original reason ("encoding unverified") is now obsolete: 2026-08-12
+    # research confirmed ESPN does carry pick legs, as
+    # {"type":"DRAFT_TRADE","overallPickNumber":N,"playerId":0,...}. But
+    # overallPickNumber is a slot in the CURRENT draft, and FTF's pick assets
+    # are multi-season future rungs ("2027 1st") for which ESPN has no
+    # representation at all. There is nothing to encode, not something we
+    # haven't decoded yet.
+    #
+    # In practice this costs users nothing — ESPN leagues don't trade future
+    # picks (operator-confirmed), which is a large part of why dynasty players
+    # are on Sleeper/MFL in the first place. Refused loudly, never guessed at,
+    # never silently dropped.
     picks = [p for p in give + receive if _is_ftf_pick_asset(league_id, p)]
     if picks:
         return jsonify({"error": "espn_pick_unsupported",

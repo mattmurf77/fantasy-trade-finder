@@ -138,7 +138,7 @@ A `POST` was issued to the write endpoint carrying **only** `espn_s2` + `SWID` (
 
 ## Still unresolved — all non-blocking, each with a safe fallback in code
 
-1. **Draft picks in `items[]`.** Untested; both captures were players-only. **Hard-blocked in code** (`espn_pick_unsupported`) rather than guessed — no silent wrong encoding.
+1. ~~**Draft picks in `items[]`.**~~ **RESOLVED 2026-08-12 — and the hard block is permanent, not a TODO.** ESPN *does* carry pick legs, as `{"type":"DRAFT_TRADE","overallPickNumber":N,"playerId":0,…}`. But `overallPickNumber` is a slot in the **current** draft, joinable to `mDraftDetail.picks[]`, whereas FTF's pick assets are multi-season **future rungs** ("2027 1st") — for which ESPN has no representation at all. So there is nothing to encode, not something undecoded. **Operator-confirmed that ESPN leagues don't trade future picks in practice**, which is much of why dynasty players are on Sleeper/MFL — so the block costs users nothing. Keep `espn_pick_unsupported`; only the stated *reason* needed correcting.
 2. **`espn_s2` lifetime / refresh UX.** Degrades to a clean `espn_auth_expired` + credential drop + reconnect prompt.
 3. **Whether `fromLineupSlotId` must be a player's true slot** for a rostered starter. Real slots are threaded from the roster read; bench-20 is only a fallback.
 
