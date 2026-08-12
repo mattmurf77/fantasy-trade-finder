@@ -61,6 +61,11 @@ WAT_EVENTS = WAT_LIVE | WAT_DARK
 # backend/api_observability.py; rows carry user_id='system:api') — they must
 # never read as user intent.
 NON_INTENT_EVENTS = frozenset({
+    # TEMPORARY (ADR-011 probe, 2026-08-12) — a diagnostic the operator
+    # runs by hand, never a user action. INTENT is a deny-list, so this
+    # MUST be listed here in the same commit that registers it or a
+    # hand-run diagnostic starts counting as engagement.
+    "sleeper_probe_result",
     "app_opened", "app_backgrounded", "app_open", "screen_viewed",
     "push_sent", "client_error", "api_call", "api_request",
     # P0 remediation 2026-08-11 — impression / navigation / outcome class.

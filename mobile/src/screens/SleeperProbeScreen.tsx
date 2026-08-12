@@ -30,7 +30,9 @@
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, View, Text, StyleSheet, Pressable } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import NetInfo from '@react-native-community/netinfo';
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
+import { track } from '../api/events';
 
 const SLEEPER_GRAPHQL_URL = 'https://sleeper.com/graphql';
 const SECURE_SLEEPER_JWT_KEY = 'sleeper.link.jwt';
@@ -125,12 +127,35 @@ export default function SleeperProbeScreen() {
         setNote('Stored Sleeper entry has no token field.');
         return;
       }
+      // Captured automatically so the result is self-describing — wifi and
+      // cellular carry different IP reputations, and relying on the operator
+      // to remember which network they were on is a transcription error
+      // waiting to happen.
+      let netType = 'unknown';
+      try {
+        const state = await NetInfo.fetch();
+        netType = state.type ?? 'unknown';
+      } catch {
+        /* leave 'unknown' — never let telemetry failure break the probe */
+      }
+
       // Sequential, not parallel — two simultaneous requests from one IP is
       // itself a mildly abusive signature, and this probe should not be the
       // thing that trips the system it is measuring.
       const spoofed = await runOne('Chrome-spoofed headers', token, SPOOFED_HEADERS);
       const honest = await runOne('Honest iOS headers', token, HONEST_HEADERS);
       setResults([spoofed, honest]);
+
+      // Report both outcomes so the answer survives without transcription.
+      // Verdict + status + network only — never the body, the URL, or the token.
+      for (const [variant, r] of [['spoofed', spoofed], ['honest', honest]] as const) {
+        track('sleeper_probe_result', {
+          variant,
+          verdict: r.verdict,
+          http_status: r.status,
+          net_type: netType,
+        });
+      }
     } finally {
       setRunning(false);
     }
