@@ -136,6 +136,33 @@ A `POST` was issued to the write endpoint carrying **only** `espn_s2` + `SWID` (
 
 *(Note: 409 rather than the expected 400/422. Treat 409 as a validation-class response, not a conflict, when mapping status → structured error.)*
 
+---
+
+## 2026-08-12 — `TRADE_DECLINE` observed first-hand; the PENDING trap reproduced 3/3 in our own league
+
+The operator declined a real incoming offer while an injected `fetch`/XHR interceptor was armed. **The POST was again not captured** — third consecutive failure, same root cause each time: ESPN performs a full page load around the action, and a page reload destroys the injected hook. `sessionStorage` preserves captured *data* across a reload but cannot preserve the *hook*, and there is no way to re-inject automatically. **Stop attempting injected capture. Use DevTools with "Preserve log" enabled, which is browser-native and survives reloads.**
+
+What the *stored* records gave instead — read back from `?view=mTransactions2` on league 11896, and worth more than the single POST would have been:
+
+**`TRADE_DECLINE` shape, confirmed on real 2026 `ffl` data (3 records):**
+
+```jsonc
+{ "type": "TRADE_DECLINE", "status": "EXECUTED", "executionType": "EXECUTE",
+  "teamId": <the DECLINING team>,        // 5 when we declined; 12 when they declined ours
+  "relatedTransactionId": "<proposal id>",
+  "isPending": false, "scoringPeriodId": 0,
+  "bidAmount": 0, "rating": 0, "isLeagueManager": false, "isActingAsTeamOwner": false,
+  "memberId": "{SWID}", "proposedDate": <epoch ms>, "id": "<uuid>" }
+```
+
+Exact key set: `bidAmount, executionType, id, isActingAsTeamOwner, isLeagueManager, isPending, memberId, proposedDate, rating, relatedTransactionId, scoringPeriodId, status, teamId, type`. **There is no `items` key at all** — confirming the earlier third-party finding. `teamId` is the **responder**, not the proposer, which is the inverse of a `TRADE_PROPOSAL` row.
+
+This raises confidence in the inferred accept/decline **write** body (`type` + `relatedTransactionId` + responder `teamId` + `executionType:"EXECUTE"`, no items) by the same logic that validated the original proposal capture — but it is still the persisted record, not an observed request. **Do not ship an inferred write payload.**
+
+**The PENDING trap, reproduced independently:** all **3/3** declined proposals here still read `status: "PENDING"` and `isPending: true` on their own records. Combined with the 5/5 from a third-party capture, that is **8/8 across two unrelated leagues**. This is now settled, not suspected: a proposal record never reflects its own decline, and status must be reconciled from `TRADE_DECLINE` / `TRADE_ACCEPT` / `TRADE_VETO` rows via `relatedTransactionId`.
+
+**Correction to the read plan:** the `x-fantasy-filter` grammar recorded in the 2026-08-12 parity research **returned an empty result** when applied to `mTransactions2` here. Unfiltered, the same request returned 82 transactions (`ROSTER` 70, `TRADE_PROPOSAL` 6, `TRADE_DECLINE` 3, `TRADE_ACCEPT` 2, `TRADE_UPHOLD` 1). Treat that filter grammar as **unverified**; filter client-side until it is proven.
+
 ## Still unresolved — all non-blocking, each with a safe fallback in code
 
 1. ~~**Draft picks in `items[]`.**~~ **RESOLVED 2026-08-12 — and the hard block is permanent, not a TODO.** ESPN *does* carry pick legs, as `{"type":"DRAFT_TRADE","overallPickNumber":N,"playerId":0,…}`. But `overallPickNumber` is a slot in the **current** draft, joinable to `mDraftDetail.picks[]`, whereas FTF's pick assets are multi-season **future rungs** ("2027 1st") — for which ESPN has no representation at all. So there is nothing to encode, not something undecoded. **Operator-confirmed that ESPN leagues don't trade future picks in practice**, which is much of why dynasty players are on Sleeper/MFL — so the block costs users nothing. Keep `espn_pick_unsupported`; only the stated *reason* needed correcting.
