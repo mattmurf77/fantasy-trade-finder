@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#300 v2 — candidates lab index</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests,
+     so nothing on this page depends on the network. The *measurements* quoted
+     in the annotations were NOT taken from this fallback rendering: they come
+     from measure-tile.py, which reads the real Archivo / IBM Plex Mono TTFs the
+     app ships (@expo-google-fonts, mobile/node_modules) and computes advance
+     widths from hmtx. Round 1 estimated from a mockup box model; this round
+     measures against the shipped font.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md).
+     Base tokens + phone-frame + tile CSS descend from the validated #299 lab
+     (mockups/polish-lab-2026-08-11/league-tile-density.html, 221c134) and from
+     round 1 (fed9485), then re-derived against PlayerCard.tsx as SHIPPED on
+     origin/main @ 53bd19f. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1400px;width:100%}
+
+  .navbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 14px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 11px}
+  .navbar a.on{color:var(--on-ice);background:var(--ice);border-color:var(--ice)}
+  .navbar .lbl{font:500 11px var(--mono);color:var(--chalk-faint);margin-right:4px}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note h3{font:600 12px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+           color:var(--chalk);margin:14px 0 6px}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .verdict.no{border-left-color:var(--warn)}
+  .verdict.bad{border-left-color:var(--neg)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:30px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:flex-start;align-items:flex-start;width:100%}
+  .row3.mid{justify-content:center}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slot.wide{width:440px}
+  .slotlbl{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.08em;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:none}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .slotlbl.recon{color:var(--flare)} .slotlbl.recon::before{background:var(--flare)}
+  .slotlbl.bad{color:var(--neg)} .slotlbl.bad::before{background:var(--neg)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start;line-height:1.4}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.recon{color:var(--flare);border-color:var(--flare);background:rgba(240,80,140,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390x844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .sp{width:74px}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .scroll.tall{height:700px}
+  .scroll.short{height:470px}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Cards / chart strip / controls ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--wr)}
+  .bigchart{display:flex;align-items:flex-end;gap:4px;height:104px;margin-top:12px}
+  .bigchart .c{flex:1;border-radius:2px 2px 0 0;background:var(--wr);opacity:.85}
+  .bigchart .c.you{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;
+    justify-content:center;gap:6px}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .subsetseg .ct{font-family:var(--mono);font-size:11px;color:var(--chalk-faint)}
+  .subsetseg.on .ct{color:var(--chalk-dim)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.all.on{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:var(--ink-0)}
+  .pill.te{border-color:var(--te);color:var(--te)} .pill.te.on{background:var(--te);color:var(--ink-0)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px;gap:8px}
+  .grouplabel{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+  .groupsub{font:400 12px var(--ui);color:var(--chalk-dim);margin:-4px 0 6px}
+  .groupmetarow{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense + denseSingleLine, AS SHIPPED ──
+     mobile/src/components/PlayerCard.tsx @ origin/main 53bd19f:
+       cardDense    :472  height 60 -> cardDenseSingle :473-475 height 32
+       denseMain    paddingLeft 13, paddingRight space.sm 8
+       denseLine1   gap 6, alignItems baseline
+       denseNumsRow flexDirection row, gap space.sm 8; denseNums marginRight 8
+       denseName    Archivo600 15 / denseTeam Archivo400 11
+       denseTagFloor fontSize 11 (visual.chalkline_cleanup ON)
+       densePosRank IBMPlexMono600 14, position-colored
+       card         overflow hidden  <- the clip that kills an oversized hit area */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tilewrap.roomy{margin-bottom:12px}   /* proposed: 44pt pitch for hitSlop headroom */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden;height:32px}
+  .tile.t44{height:44px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .tag.o{color:var(--neg);border-color:var(--neg)}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  .bdg.ice{border-color:var(--ice);color:var(--ice)}
+  .tile.dim{opacity:.45}
+  .tile.press{background:var(--ink-3)}
+
+  /* trailing affordances */
+  .chev{display:inline-flex;align-items:center;justify-content:center;color:var(--ice);
+    flex:0 0 auto;position:relative}
+  .chev .hit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;border:1px dashed var(--ice);border-radius:8px;opacity:.4;pointer-events:none}
+  .actlbl{display:inline-flex;align-items:center;gap:3px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.5px;white-space:nowrap;flex:0 0 auto}
+  .actpill{display:inline-flex;align-items:center;border:1px solid var(--ice);color:var(--ice);
+    border-radius:4px;padding:2px 8px;font:600 11px var(--ui);letter-spacing:.5px;
+    white-space:nowrap;flex:0 0 auto}
+  .chev.dim,.actlbl.dim{color:var(--chalk-faint)}
+
+  /* row hitSlop illustration */
+  .hitrow{position:relative}
+  .hitrow::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px;
+    border:1px dashed var(--pos);border-radius:10px;opacity:.55;pointer-events:none}
+  .hitnote{font:500 11px var(--mono);color:var(--pos);padding-left:2px}
+
+  /* ── Team list rows (TeamRow / listRow: minHeight 44, LeagueSummaryScreen.tsx:2618) ── */
+  .list{display:flex;flex-direction:column;gap:2px}
+  .teamrow{display:flex;align-items:center;gap:8px;min-height:44px;
+    border-bottom:1px solid var(--line);padding:8px 4px}
+  .teamrow:last-child{border-bottom:none}
+  .teamrow.you{background:var(--ink-1);border:1px solid var(--line-strong);border-radius:4px;padding:8px}
+  .trank{font:500 13px var(--mono);width:20px;text-align:center;color:var(--chalk-dim);flex:0 0 auto}
+  .teamrow.you .trank{color:var(--ice)}
+  .tname{flex:1;font:600 16px var(--ui);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tright{display:flex;align-items:center;gap:8px;flex:0 0 auto;color:var(--chalk-dim)}
+  .tval{font:500 13px var(--mono);color:var(--chalk);flex:0 0 auto}
+  .youbdg{border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:1px 5px;
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .empty{padding:14px 4px 16px;font:400 13px var(--ui);color:var(--chalk-dim);line-height:1.5}
+
+  /* ── Collapsed strip (#169 OutlookStrip construction, LeagueSummaryScreen.tsx:2713-2731) ── */
+  .strip{display:flex;align-items:center;gap:8px;background:var(--ink-1);border:1px solid;
+    border-radius:4px;padding:8px 12px;margin-bottom:16px}
+  .strip .tick{width:3px;height:14px;flex:0 0 auto}
+  .strip .lbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .strip .phrase{flex:1;font:400 13px var(--ui);color:var(--chalk-dim);min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip.ice{border-color:var(--line)} .strip.ice .tick{background:var(--ice)} .strip.ice .lbl{color:var(--ice)}
+  .strip.warn{border-color:var(--warn)} .strip.warn .tick{background:var(--warn)} .strip.warn .lbl{color:var(--warn)}
+
+  /* ── Median cutline — the shipped oddsCutline construction verbatim
+       (LeagueSummaryScreen.tsx render + styles oddsCutline/oddsCutRule/oddsCutText) ── */
+  .cutline{display:flex;align-items:center;gap:8px;padding:10px 0}
+  .cutline .rule{flex:1;height:1px;background:var(--line-strong)}
+  .cutline .txt{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-dim);white-space:nowrap;flex:0 0 auto}
+  .cutline.flare .rule{background:var(--flare);opacity:.5} .cutline.flare .txt{color:var(--flare)}
+
+  .sidelbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-faint);padding:2px 0 6px 2px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;
+    border-radius:4px;font:700 12px var(--ui);letter-spacing:.6px;text-transform:uppercase;margin-top:8px}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+  .btn.ghost{border:1px solid var(--line-strong);color:var(--chalk)}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-58px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+  .measurew{position:relative;margin-bottom:22px}
+  .measurew::before{content:attr(data-w);position:absolute;left:0;right:0;bottom:-17px;
+    font:500 11px var(--mono);color:var(--flare);text-align:center}
+
+  .dupbracket{position:relative;border-left:2px solid var(--flare);padding-left:8px;margin-left:-10px}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong);vertical-align:bottom}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top;
+    line-height:1.5}
+  .tbl td:first-child{color:var(--chalk);font-weight:600}
+  .tbl.num th:nth-child(n+2),.tbl.num td:nth-child(n+2){text-align:right;font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.lose td:nth-child(n+2){color:var(--neg);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+  .tbl tr.dead td{background:rgba(239,68,68,.05)}
+  .tbl .ok{color:var(--pos)} .tbl .bad{color:var(--neg)} .tbl .mid{color:var(--warn)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:290px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+
+  /* R-1 illustration (page 2): the 44×44 box a NESTED control would need,
+     drawn on the tile's wrapper so it is visible at all. Inside the tile it is
+     clipped by `overflow: 'hidden'` — which is exactly the finding. Red bands
+     mark the 6pt top and bottom that the clip eats. */
+  .clipdemo{position:relative}
+  .clipdemo .want{position:absolute;right:12px;top:-6px;width:44px;height:44px;
+    border:1px dashed var(--neg);border-radius:8px;pointer-events:none}
+  .clipdemo .lost{position:absolute;right:12px;width:44px;height:6px;
+    background:rgba(239,68,68,.30);pointer-events:none}
+  .clipdemo .lost.t{top:-6px}
+  .clipdemo .lost.b{bottom:-6px}
+  .clipnote{font:500 11px var(--mono);color:var(--neg);padding:2px 0 0 2px}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>#300 round 2 — League rankings → trade candidates</h1>
+    <p>Second-round redesign lab for feedback <b>#300</b>, drawn against <code>origin/main</code> @
+      <code>53bd19f</code> — i.e. against <b>#299 as shipped</b>, not against round 1’s mockup box model.
+      Three standalone pages; open any of them directly.</p>
+    <div class="icebox"><b>No iframes on this page, by design.</b> Round 1’s index did not render at all in
+      Chrome over <code>file://</code>. This one is plain links and static HTML — nothing to fail. Each
+      page below is fully self-contained (inline CSS, inline SVG, no scripts, no external fonts); the only
+      external reference in the whole lab is one <code>&lt;img src&gt;</code> to the real screen capture at
+      <code>../../screens/mobile/league-summary/populated.png</code>, which resolves correctly from
+      <code>file://</code> because it is a relative path from a real file, not from <code>srcdoc</code>.</div>
+  </div>
+
+  <div class="sec">Pages</div>
+  <div class="note">
+    <h2><a href="directions.html" style="color:var(--ice);text-decoration:none">1 · directions.html — the two competing shapes →</a></h2>
+    <p>Today’s screen filtered to WR; <b>Direction 1</b> (operator’s: collapsed Trade-candidates strip on the
+      shipped <code>OutlookStrip</code> pattern + Buyers/Sellers pills, with the drill-ins); <b>Direction 2</b>
+      (one ranked list, one median divider built from the shipped playoff-cutline construction, with the
+      odd-team-count case and the honest cost of losing the intent toggle); the operator’s literal
+      <b>Buyers / Median / Sellers</b> three-section phrasing drawn three ways (empty middle → invented
+      tolerance band → the form that actually works); the shared drill-in; and the recommendation.</p>
+
+    <h2><a href="tile-affordance.html" style="color:var(--ice);text-decoration:none">2 · tile-affordance.html — the 32pt tile, the 44pt problem, the button word →</a></h2>
+    <p>The shipped tile measured against real font metrics (name budget <b>143.8pt</b>, worst-case tier badge
+      <b>63.5pt</b>); three ways to satisfy the 44pt touch minimum on a 32pt row, including why a nested
+      control is clipped by <code>overflow: 'hidden'</code> and invisible to VoiceOver/Maestro;
+      <b>Variant D</b> (drop the injury + rookie tags to buy a visible “Offer”) re-measured —
+      <b>it fits, with 2.6pt to spare</b>; “Offer” vs “Target”; and the side-by-side question answered with
+      numbers.</p>
+
+    <h2><a href="values-and-states.html" style="color:var(--ice);text-decoration:none">3 · values-and-states.html — pick tiers and the missing states →</a></h2>
+    <p>The three value vocabularies already in the codebase and which one a median delta may use; the
+      ladder audit that kills delta-as-pick-tier (4 of 12 deltas collapse onto “an Early 1st”; the biggest
+      gap in the league has no name at all); the exact floor, read out of
+      <code>_pick_gap_equivalent</code>; the new API field the divider needs; filter-changed-while-drilled-in;
+      and the edge states nobody has drawn — multi-select, flat league, unpriceable rows.</p>
+
+    <h2 style="margin-top:20px"><span style="color:var(--chalk-dim)">measure-tile.py — the measurements, runnable</span></h2>
+    <p><code>python3 measure-tile.py</code>. Loads the same TTFs the app loads
+      (<code>@expo-google-fonts/{archivo,ibm-plex-mono}</code> from <code>mobile/node_modules</code>), sums
+      real <code>hmtx</code> advance widths with React Native’s <code>letterSpacing</code>, and adds the
+      exact paddings and borders from <code>PlayerCard.tsx</code> and
+      <code>components/chalkline/Badge.tsx</code>. Every pt figure in this lab comes from it.</p>
+  </div>
+
+  <div class="sec">The three calls this lab makes</div>
+  <div class="note">
+    <table class="tbl">
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr class="rec"><td>Direction 1 or Direction 2?</td><td><b>Direction 2</b> — one list, one median divider — keeping Direction 1’s vocabulary and its “6 sellers · 5 buyers” count line. Direction 1 adds a persisted collapse state, a segmented control and a second list whose every row already appears below it, and buys one saved scroll flick.</td></tr>
+      <tr class="rec"><td>How is 44pt met on a 32pt row?</td><td>The <b>whole row</b> is the button — no nested control, so VoiceOver and Maestro problems disappear — with <code>hitSlop</code> 6/6 on the tile’s own outermost <code>Pressable</code> and <code>rosterRow</code> margin 4 → 12. 44pt pitch, 32pt visual. <b>Must be sim-verified before it is asserted.</b></td></tr>
+      <tr class="rec"><td>Variant D?</td><td><b>Fits</b> — 146.4pt name budget vs today’s 143.8pt, “Marvin Harrison Jr.” unclipped. <b>Not recommended</b>: injury and rookie are decision inputs on a trade surface. Bare chevron + the verb once in the group header instead.</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">Provenance</div>
+  <div class="note">
+    <ul>
+      <li><b>Traced:</b> one image — <code>screens/mobile/league-summary/populated.png</code>, embedded on
+        page 1 as the screen-identity anchor.</li>
+      <li><b>Reconstructed:</b> everything else. <code>screens/manifest.json</code> still has no drill-in
+        capture for <code>league-summary</code> (flagged by #299, still open), and both directions propose
+        surfaces that have never shipped in any form. Frames are labelled
+        <span style="color:var(--chalk-dim)">gray = faithful recreation of today</span> /
+        <span style="color:var(--flare)">pink = reconstruction</span>.</li>
+      <li><b>Source of truth for the tile:</b> <code>mobile/src/components/PlayerCard.tsx</code> @
+        <code>53bd19f</code> — <code>denseSingleLine</code> <code>:74/:122/:222</code>,
+        <code>cardDenseSingle</code> <code>:472-475</code>, <code>card.overflow: 'hidden'</code>
+        <code>:388</code>.</li>
+      <li><b>Prior rounds:</b> round 1 lab <code>mockups/candidates-300/league-candidates-300.html</code>
+        (<code>fed9485</code>); #299/#302 decisions
+        <code>mockups/polish-lab-2026-08-11/OPERATOR-DECISIONS.md</code> (<code>221c134</code>); frozen
+        round-1 spec <code>docs/feedback/items/300-league-rankings-trade-candidates/operator-answers-2026-08-11.md</code>
+        (branch <code>docs-297-302-artifacts</code> / PR #109).</li>
+      <li><b>Design rules:</b> <code>docs/design/design-system.md</code> +
+        <code>docs/design/components.md</code>. No emoji, no gradients, no blur, radius ≤ 8, ice for actions
+        and flare for informational highlights only, position and tier hexes taken verbatim from
+        <code>docs/cross-client-invariants.md</code>. <b>11px type floor checked on every element</b> —
+        round 1 shipped a 10px annotation; nothing in this lab is under 11.</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

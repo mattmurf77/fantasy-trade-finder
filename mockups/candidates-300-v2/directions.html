@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#300 v2 — two directions: collapsed section vs median divider</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests,
+     so nothing on this page depends on the network. The *measurements* quoted
+     in the annotations were NOT taken from this fallback rendering: they come
+     from measure-tile.py, which reads the real Archivo / IBM Plex Mono TTFs the
+     app ships (@expo-google-fonts, mobile/node_modules) and computes advance
+     widths from hmtx. Round 1 estimated from a mockup box model; this round
+     measures against the shipped font.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md).
+     Base tokens + phone-frame + tile CSS descend from the validated #299 lab
+     (mockups/polish-lab-2026-08-11/league-tile-density.html, 221c134) and from
+     round 1 (fed9485), then re-derived against PlayerCard.tsx as SHIPPED on
+     origin/main @ 53bd19f. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1400px;width:100%}
+
+  .navbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 14px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 11px}
+  .navbar a.on{color:var(--on-ice);background:var(--ice);border-color:var(--ice)}
+  .navbar .lbl{font:500 11px var(--mono);color:var(--chalk-faint);margin-right:4px}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note h3{font:600 12px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+           color:var(--chalk);margin:14px 0 6px}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .verdict.no{border-left-color:var(--warn)}
+  .verdict.bad{border-left-color:var(--neg)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:30px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:flex-start;align-items:flex-start;width:100%}
+  .row3.mid{justify-content:center}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slot.wide{width:440px}
+  .slotlbl{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.08em;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:none}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .slotlbl.recon{color:var(--flare)} .slotlbl.recon::before{background:var(--flare)}
+  .slotlbl.bad{color:var(--neg)} .slotlbl.bad::before{background:var(--neg)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start;line-height:1.4}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.recon{color:var(--flare);border-color:var(--flare);background:rgba(240,80,140,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390x844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .sp{width:74px}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .scroll.tall{height:700px}
+  .scroll.short{height:470px}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Cards / chart strip / controls ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--wr)}
+  .bigchart{display:flex;align-items:flex-end;gap:4px;height:104px;margin-top:12px}
+  .bigchart .c{flex:1;border-radius:2px 2px 0 0;background:var(--wr);opacity:.85}
+  .bigchart .c.you{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;
+    justify-content:center;gap:6px}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .subsetseg .ct{font-family:var(--mono);font-size:11px;color:var(--chalk-faint)}
+  .subsetseg.on .ct{color:var(--chalk-dim)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.all.on{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:var(--ink-0)}
+  .pill.te{border-color:var(--te);color:var(--te)} .pill.te.on{background:var(--te);color:var(--ink-0)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px;gap:8px}
+  .grouplabel{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+  .groupsub{font:400 12px var(--ui);color:var(--chalk-dim);margin:-4px 0 6px}
+  .groupmetarow{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense + denseSingleLine, AS SHIPPED ──
+     mobile/src/components/PlayerCard.tsx @ origin/main 53bd19f:
+       cardDense    :472  height 60 -> cardDenseSingle :473-475 height 32
+       denseMain    paddingLeft 13, paddingRight space.sm 8
+       denseLine1   gap 6, alignItems baseline
+       denseNumsRow flexDirection row, gap space.sm 8; denseNums marginRight 8
+       denseName    Archivo600 15 / denseTeam Archivo400 11
+       denseTagFloor fontSize 11 (visual.chalkline_cleanup ON)
+       densePosRank IBMPlexMono600 14, position-colored
+       card         overflow hidden  <- the clip that kills an oversized hit area */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tilewrap.roomy{margin-bottom:12px}   /* proposed: 44pt pitch for hitSlop headroom */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden;height:32px}
+  .tile.t44{height:44px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .tag.o{color:var(--neg);border-color:var(--neg)}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  .bdg.ice{border-color:var(--ice);color:var(--ice)}
+  .tile.dim{opacity:.45}
+  .tile.press{background:var(--ink-3)}
+
+  /* trailing affordances */
+  .chev{display:inline-flex;align-items:center;justify-content:center;color:var(--ice);
+    flex:0 0 auto;position:relative}
+  .chev .hit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;border:1px dashed var(--ice);border-radius:8px;opacity:.4;pointer-events:none}
+  .actlbl{display:inline-flex;align-items:center;gap:3px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.5px;white-space:nowrap;flex:0 0 auto}
+  .actpill{display:inline-flex;align-items:center;border:1px solid var(--ice);color:var(--ice);
+    border-radius:4px;padding:2px 8px;font:600 11px var(--ui);letter-spacing:.5px;
+    white-space:nowrap;flex:0 0 auto}
+  .chev.dim,.actlbl.dim{color:var(--chalk-faint)}
+
+  /* row hitSlop illustration */
+  .hitrow{position:relative}
+  .hitrow::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px;
+    border:1px dashed var(--pos);border-radius:10px;opacity:.55;pointer-events:none}
+  .hitnote{font:500 11px var(--mono);color:var(--pos);padding-left:2px}
+
+  /* ── Team list rows (TeamRow / listRow: minHeight 44, LeagueSummaryScreen.tsx:2618) ── */
+  .list{display:flex;flex-direction:column;gap:2px}
+  .teamrow{display:flex;align-items:center;gap:8px;min-height:44px;
+    border-bottom:1px solid var(--line);padding:8px 4px}
+  .teamrow:last-child{border-bottom:none}
+  .teamrow.you{background:var(--ink-1);border:1px solid var(--line-strong);border-radius:4px;padding:8px}
+  .trank{font:500 13px var(--mono);width:20px;text-align:center;color:var(--chalk-dim);flex:0 0 auto}
+  .teamrow.you .trank{color:var(--ice)}
+  .tname{flex:1;font:600 16px var(--ui);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tright{display:flex;align-items:center;gap:8px;flex:0 0 auto;color:var(--chalk-dim)}
+  .tval{font:500 13px var(--mono);color:var(--chalk);flex:0 0 auto}
+  .youbdg{border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:1px 5px;
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .empty{padding:14px 4px 16px;font:400 13px var(--ui);color:var(--chalk-dim);line-height:1.5}
+
+  /* ── Collapsed strip (#169 OutlookStrip construction, LeagueSummaryScreen.tsx:2713-2731) ── */
+  .strip{display:flex;align-items:center;gap:8px;background:var(--ink-1);border:1px solid;
+    border-radius:4px;padding:8px 12px;margin-bottom:16px}
+  .strip .tick{width:3px;height:14px;flex:0 0 auto}
+  .strip .lbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .strip .phrase{flex:1;font:400 13px var(--ui);color:var(--chalk-dim);min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip.ice{border-color:var(--line)} .strip.ice .tick{background:var(--ice)} .strip.ice .lbl{color:var(--ice)}
+  .strip.warn{border-color:var(--warn)} .strip.warn .tick{background:var(--warn)} .strip.warn .lbl{color:var(--warn)}
+
+  /* ── Median cutline — the shipped oddsCutline construction verbatim
+       (LeagueSummaryScreen.tsx render + styles oddsCutline/oddsCutRule/oddsCutText) ── */
+  .cutline{display:flex;align-items:center;gap:8px;padding:10px 0}
+  .cutline .rule{flex:1;height:1px;background:var(--line-strong)}
+  .cutline .txt{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-dim);white-space:nowrap;flex:0 0 auto}
+  .cutline.flare .rule{background:var(--flare);opacity:.5} .cutline.flare .txt{color:var(--flare)}
+
+  .sidelbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-faint);padding:2px 0 6px 2px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;
+    border-radius:4px;font:700 12px var(--ui);letter-spacing:.6px;text-transform:uppercase;margin-top:8px}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+  .btn.ghost{border:1px solid var(--line-strong);color:var(--chalk)}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-58px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+  .measurew{position:relative;margin-bottom:22px}
+  .measurew::before{content:attr(data-w);position:absolute;left:0;right:0;bottom:-17px;
+    font:500 11px var(--mono);color:var(--flare);text-align:center}
+
+  .dupbracket{position:relative;border-left:2px solid var(--flare);padding-left:8px;margin-left:-10px}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong);vertical-align:bottom}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top;
+    line-height:1.5}
+  .tbl td:first-child{color:var(--chalk);font-weight:600}
+  .tbl.num th:nth-child(n+2),.tbl.num td:nth-child(n+2){text-align:right;font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.lose td:nth-child(n+2){color:var(--neg);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+  .tbl tr.dead td{background:rgba(239,68,68,.05)}
+  .tbl .ok{color:var(--pos)} .tbl .bad{color:var(--neg)} .tbl .mid{color:var(--warn)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:290px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+
+  /* R-1 illustration (page 2): the 44×44 box a NESTED control would need,
+     drawn on the tile's wrapper so it is visible at all. Inside the tile it is
+     clipped by `overflow: 'hidden'` — which is exactly the finding. Red bands
+     mark the 6pt top and bottom that the clip eats. */
+  .clipdemo{position:relative}
+  .clipdemo .want{position:absolute;right:12px;top:-6px;width:44px;height:44px;
+    border:1px dashed var(--neg);border-radius:8px;pointer-events:none}
+  .clipdemo .lost{position:absolute;right:12px;width:44px;height:6px;
+    background:rgba(239,68,68,.30);pointer-events:none}
+  .clipdemo .lost.t{top:-6px}
+  .clipdemo .lost.b{bottom:-6px}
+  .clipnote{font:500 11px var(--mono);color:var(--neg);padding:2px 0 0 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="navbar">
+    <span class="lbl">candidates-300-v2</span>
+    <a class="on" href="directions.html">1 · Two directions</a>
+    <a href="tile-affordance.html">2 · Tile, 44pt &amp; naming</a>
+    <a href="values-and-states.html">3 · Pick tiers &amp; states</a>
+    <a href="index.html">Index</a>
+  </div>
+
+  <div class="note">
+    <h1>#300 round 2 — two competing shapes for “rankings → trade”</h1>
+    <p class="q">Operator, round 2: make the Trade Candidates section <b>collapsed by default</b> with
+      <b>Buyers | Sellers</b> pills — Buyers are teams below the median at the focused position (tap → my
+      players, offer them), Sellers are teams above it (tap → their players, target them), and my own team
+      never appears on either side. Orchestrator’s counter-proposal: <b>no section at all</b> — the ranked
+      list is already sorted by that position, so draw <b>one labelled median divider</b> across it and let
+      the side of the line decide the direction.</p>
+    <p>Both are drawn here at equal fidelity, on the same league, with the same data. A recommendation is
+      at the bottom of this page. The tile geometry, the 44pt problem, the button naming and the
+      side-by-side question live on <a href="tile-affordance.html" style="color:var(--ice)">page 2</a>;
+      pick-tier value presentation and the secondary states live on
+      <a href="values-and-states.html" style="color:var(--ice)">page 3</a>.</p>
+
+    <h2>Ground truth — measured, not assumed</h2>
+    <ul>
+      <li><b>Base:</b> <code>origin/main</code> @ <code>53bd19f</code>, worktree branch
+        <code>mocks-300-v2</code>. Verified with <code>git log --oneline -3</code>.</li>
+      <li><b>#299 has SHIPPED.</b> The 32pt tile is real code, not a proposal:
+        <code>PlayerCard.tsx</code> prop <code>denseSingleLine</code> (<code>:74</code>,
+        <code>:122</code>, <code>:222</code>), <code>styles.cardDenseSingle</code> =
+        <code>height: 32</code> (<code>:472-475</code>), consumed by
+        <code>LeagueSummaryScreen.tsx:1457</code>. Every measurement in this lab was re-derived from that
+        source and from the real Archivo / IBM Plex Mono TTFs the app loads — see
+        <code>measure-tile.py</code> in this folder. Round 1 measured its own mockup CSS; this round does not.</li>
+      <li><b>The list is already the answer.</b> <code>activeTotal()</code>
+        (<code>LeagueSummaryScreen.tsx:336-357</code>) with a single-position filter returns exactly
+        <code>tc.posValues[P]</code> — nothing else, not even picks (PICKS only enters when the PICKS key is
+        in the filter set). So filtering to WR re-sorts the whole league <i>purely</i> by WR value. The
+        ranked list under the chart <b>is</b> the buyers/sellers ranking already; it simply never says
+        where the middle is. This is the load-bearing fact behind Direction 2.</li>
+      <li><b>The divider already exists in this file.</b> The playoff cutline
+        (<code>league-summary.odds.cutline</code>, styles <code>oddsCutline</code> /
+        <code>oddsCutRule</code> / <code>oddsCutText</code>) is a rule-label-rule band drawn <i>across a
+        ranked list</i> to mark a threshold. Direction 2’s median divider is that construction verbatim —
+        zero new patterns.</li>
+      <li><b>The collapsed strip already exists too.</b> <code>OutlookStrip</code>
+        (<code>:2059-2098</code>) + <code>useOutlookStripExpanded</code>
+        (<code>state/outlookStrip.ts</code>): a 3×14 tick, a <code>type.label</code> caption, a one-line
+        phrase, a chevron that <i>swaps</i> and never rotates, and per-user/per-league AsyncStorage memory
+        keyed <code>ftf_outlook_strip_&lt;user_id&gt;</code> holding a sparse
+        <code>Record&lt;league_id, true&gt;</code> of the EXPANDED leagues. Direction 1’s strip is that
+        component’s construction, re-voiced.</li>
+    </ul>
+  </div>
+
+  <!-- ══ CAPTURE ANCHOR ══════════════════════════════════════════════════ -->
+  <div class="sec">Capture anchor <span class="fb">screens/mobile/league-summary/populated.png</span></div>
+  <div class="note">
+    <div class="anchor">
+      <img class="anchorimg" src="../../screens/mobile/league-summary/populated.png"
+           alt="Real capture: League rankings, populated, unfocused">
+      <div class="anchortxt">
+        <h2 style="margin-top:0">What is traced and what is reconstructed</h2>
+        <p><b>Traced (one image, left):</b> the League-rankings screen, populated, unfocused. This is the
+          only real pixel evidence available for this surface. Its chrome — top bar, card, filter pills,
+          ranked list — is what every frame below imitates.</p>
+        <p><b>Reconstructed (everything else on all three pages):</b>
+          <code>screens/manifest.json</code> lists five <code>league-summary</code> states —
+          <code>populated</code>, <code>populated--single-format</code>, <code>basis--personal</code>,
+          <code>loading</code>, <code>error</code> — and <b>none of them is the drill-in state</b>. The
+          capture flow never taps a bar. #299 flagged this gap; it is still open. So every focused/drill-in
+          frame is traced <i>from source</i> (line citations throughout), not from a screenshot.</p>
+        <p><b>Doubly reconstructed:</b> both directions below propose a surface that has never existed in
+          the shipped app in any form — a team row that opens <i>your own</i> roster, and a median line
+          across the ranked list. There is nothing to trace even after the capture gap closes. Frames are
+          labelled: <span style="color:var(--chalk-dim)">gray = faithful recreation of today</span>,
+          <span style="color:var(--flare)">pink = reconstruction / never existed</span>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TODAY ═══════════════════════════════════════════════════════════ -->
+  <div class="sec">0. Today <span class="fb">filter to WR — the ranking already reorders, and then stops</span></div>
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl cur">Current — shipped v1.12.1, WR selected</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="topbar">
+          <div class="tbmain">
+            <div class="tbkick">League</div>
+            <div class="tbname"><span class="n">Lakeview League</span><span class="fmt">SF TEP</span></div>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg>
+          </div>
+        </div>
+        <div class="scroll">
+          <div class="card" style="margin-bottom:12px">
+            <div class="cardhead"><div><div class="t">League rankings</div>
+              <div class="c">Ranked by WR value only — chart reordered.</div></div></div>
+            <div class="bigchart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:92%"></div>
+              <div class="c" style="height:84%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:70%"></div><div class="c" style="height:66%"></div>
+              <div class="c" style="height:58%"></div><div class="c" style="height:55%"></div>
+              <div class="c you" style="height:48%"></div><div class="c" style="height:44%"></div>
+              <div class="c" style="height:34%"></div><div class="c" style="height:22%"></div>
+            </div>
+          </div>
+          <div class="subsetrow">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈3.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="foldmark"><span>fold — 6 more teams below</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb on">League</div><div class="tb">Rank</div><div class="tb">Trades</div><div class="tb">More</div>
+        </div>
+      </div>
+      <div class="caption">The reorder is already correct and already complete. The screen ranks all 12
+        teams by WR value and stops there — no line, no verb, no route to a trade. <b>#300 is the missing
+        last inch, not a missing ranking.</b></div>
+    </div>
+
+    <div class="slot wide">
+      <div class="note" style="margin:0">
+        <h2 style="margin-top:0">The mock league used on all three pages</h2>
+        <p>12 teams, superflex TEP, filtered to <b>WR</b>. You are <b>Zone Defense</b> at rank 9 — deliberately
+          <i>below</i> the median, so both verbs are exercised. Values are the shipped
+          <code>positions.WR.value_label</code> shape (<code>_aggregate_pick_label</code>,
+          <code>server.py:833-858</code> → <code>"≈{half:g} firsts"</code>, rounded to the nearest half-first).</p>
+        <table class="tbl num">
+          <tr><th>#</th><th>Team</th><th>WR value</th><th>Side</th></tr>
+          <tr><td>1</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Gridiron Goons</td><td>≈4.5 firsts</td><td class="ok">seller</td></tr>
+          <tr><td>2</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Pylon Pirates</td><td>≈4 firsts</td><td class="ok">seller</td></tr>
+          <tr><td>3</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Blitz Brigade</td><td>≈3.5 firsts</td><td class="ok">seller</td></tr>
+          <tr><td>4</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Turf Monsters</td><td>≈3 firsts</td><td class="ok">seller</td></tr>
+          <tr><td>5</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Hail Marys</td><td>≈2.5 firsts</td><td class="ok">seller</td></tr>
+          <tr><td>6</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Sunday Scaries</td><td>≈2.5 firsts</td><td class="ok">seller</td></tr>
+          <tr class="rec"><td colspan="4" style="text-align:center;font-family:var(--ui);font-weight:600">— league median at WR ≈ 2.25 firsts —</td></tr>
+          <tr><td>7</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Play Action</td><td>≈2 firsts</td><td class="mid">buyer</td></tr>
+          <tr><td>8</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Red Zone Reapers</td><td>≈2 firsts</td><td class="mid">buyer</td></tr>
+          <tr><td>9</td><td style="text-align:left;color:var(--ice);font-weight:600">Zone Defense (you)</td><td>≈1.5 firsts</td><td>—</td></tr>
+          <tr><td>10</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Checkdown Charlies</td><td>≈1.5 firsts</td><td class="mid">buyer</td></tr>
+          <tr><td>11</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Punt Gods</td><td>≈1 firsts</td><td class="mid">buyer</td></tr>
+          <tr><td>12</td><td style="text-align:left;color:var(--chalk-dim);font-weight:400">Waiver Wire Warriors</td><td>≈0.5 firsts</td><td class="mid">buyer</td></tr>
+        </table>
+        <p style="margin-top:10px"><b>6 sellers · 5 buyers · you.</b> Under the operator’s universal rule
+          your own team is excluded from both sides, which is why the two counts sum to 11, not 12.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ DIRECTION 1 ═════════════════════════════════════════════════════ -->
+  <div class="sec">1. Direction 1 — the operator’s: collapsed section + Buyers/Sellers pills</div>
+  <div class="note">
+    <p>Built on the shipped <code>OutlookStrip</code> pattern: collapsed by default, expanded state
+      remembered per user <i>and</i> per league in AsyncStorage, chevron swaps rather than rotates, the
+      strip stays mounted while expanded because it <i>is</i> the collapse affordance. Voice differs —
+      outlook is the <code>warn</code> section, so candidates take a neutral <code>line</code> border with
+      an <code>ice</code> tick + label, keeping the screen’s ice count at three
+      (WR pill is position-blue when active, so the ice budget here is: strip label, row affordance,
+      primary button).</p>
+  </div>
+
+  <div class="row3">
+
+    <!-- 1a collapsed -->
+    <div class="slot">
+      <div class="slotlbl recon">D1-a — collapsed (the default)</div>
+      <div class="hchip recon">reconstruction · 38pt strip</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">Lakeview League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg></div>
+        </div>
+        <div class="scroll">
+          <div class="card" style="margin-bottom:12px">
+            <div class="cardhead"><div><div class="t">League rankings</div>
+              <div class="c">Ranked by WR value only — chart reordered.</div></div></div>
+            <div class="bigchart">
+              <div class="c" style="height:100%"></div><div class="c" style="height:92%"></div>
+              <div class="c" style="height:84%"></div><div class="c" style="height:76%"></div>
+              <div class="c" style="height:70%"></div><div class="c" style="height:66%"></div>
+              <div class="c" style="height:58%"></div><div class="c" style="height:55%"></div>
+              <div class="c you" style="height:48%"></div><div class="c" style="height:44%"></div>
+              <div class="c" style="height:34%"></div><div class="c" style="height:22%"></div>
+            </div>
+          </div>
+          <div class="subsetrow">
+            <div class="subsetseg on">All</div><div class="subsetseg">Starters</div><div class="subsetseg">Bench</div>
+          </div>
+          <div class="posfilter">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="strip ice">
+            <span class="tick"></span><span class="lbl">Trade candidates</span>
+            <span class="phrase">6 sellers · 5 buyers at WR</span>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈3.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="foldmark"><span>fold — 8 more teams below</span></div>
+        </div>
+        <div class="tabbar"><div class="tb on">League</div><div class="tb">Rank</div><div class="tb">Trades</div><div class="tb">More</div></div>
+      </div>
+      <div class="caption">Cheap (38pt) and quiet. <b>But #300’s complaint was that there is no route from
+        the rankings to a trade</b> — and this hides the route behind a tap, one screen-height below the
+        chart. #169 collapsed the outlook because it was <i>ancillary</i>; the candidates section is the
+        point of having filtered.</div>
+    </div>
+
+    <!-- 1b expanded, buyers -->
+    <div class="slot">
+      <div class="slotlbl recon">D1-b — expanded, <b>Buyers</b> pill</div>
+      <div class="hchip">duplication: every row here is also in the list below</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">Lakeview League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg></div>
+        </div>
+        <div class="scroll">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="strip ice" style="margin-bottom:10px">
+            <span class="tick"></span><span class="lbl">Trade candidates</span>
+            <span class="phrase">6 sellers · 5 buyers at WR</span>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 12l6-6 6 6"/></svg>
+          </div>
+          <div class="subsetrow" style="margin-bottom:8px">
+            <div class="subsetseg on">Buyers <span class="ct">5</span></div>
+            <div class="subsetseg">Sellers <span class="ct">6</span></div>
+          </div>
+          <div class="caption" style="padding:0 2px 8px">Below the league median at WR — they need one.
+            Tap a team to offer yours.</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">10</span><span class="tname">Checkdown Charlies</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">11</span><span class="tname">Punt Gods</span>
+              <span class="tval">≈1 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">12</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tval">≈0.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="sidelbl" style="padding-top:14px">League rankings — all 12</div>
+          <div class="list dupbracket">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="foldmark"><span>fold — 10 more, including all 5 rows above again</span></div>
+        </div>
+        <div class="tabbar"><div class="tb on">League</div><div class="tb">Rank</div><div class="tb">Trades</div><div class="tb">More</div></div>
+      </div>
+      <div class="caption">The rank numerals give the duplication away: <b>7, 8, 10, 11, 12</b> — the gap at
+        9 is you, removed by the universal rule. The same five rows, in the same order, with the same
+        values, reappear ~180pt below inside “League rankings — all 12”. <b>Two populations, one screen.</b></div>
+    </div>
+
+    <!-- 1c sellers -->
+    <div class="slot">
+      <div class="slotlbl recon">D1-c — <b>Sellers</b> pill</div>
+      <div class="hchip recon">reconstruction · mirror of D1-b</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">Lakeview League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg></div>
+        </div>
+        <div class="scroll">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="strip ice" style="margin-bottom:10px">
+            <span class="tick"></span><span class="lbl">Trade candidates</span>
+            <span class="phrase">6 sellers · 5 buyers at WR</span>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 12l6-6 6 6"/></svg>
+          </div>
+          <div class="subsetrow" style="margin-bottom:8px">
+            <div class="subsetseg">Buyers <span class="ct">5</span></div>
+            <div class="subsetseg on">Sellers <span class="ct">6</span></div>
+          </div>
+          <div class="caption" style="padding:0 2px 8px">Above the league median at WR — they can spare one.
+            Tap a team to target theirs.</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈3.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="sidelbl" style="padding-top:14px">League rankings — all 12</div>
+          <div class="foldmark"><span>fold — the same 6 rows start again, in the same order</span></div>
+        </div>
+        <div class="tabbar"><div class="tb on">League</div><div class="tb">Rank</div><div class="tb">Trades</div><div class="tb">More</div></div>
+      </div>
+      <div class="caption">The Sellers pill is <b>the top of the ranked list, re-printed</b> — ranks 1-6, in
+        order, unchanged. There is no filtering, no re-sorting and no added information: the pill’s entire
+        contribution is the word “Sellers” and the caption under it.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>What Direction 1 costs, drawn</h2>
+    <ul>
+      <li><b>Structural duplication is unavoidable, not a drafting mistake.</b> Both pills are contiguous
+        slices of a list that is already on the screen, already in that order. Buyers = the bottom half,
+        Sellers = the top half. Nothing is computed that the list does not already show.</li>
+      <li><b>Two populations disagree on one screen.</b> The section obeys “never show my own team”; the
+        list below cannot (it is the League <i>rankings</i> — omitting the reader would be a bug). So the
+        same screen shows a league of 11 and a league of 12, ~180pt apart.</li>
+      <li><b>Collapsed-by-default fights the feedback.</b> #300 says the path to a trade is missing. Making
+        the path a disclosure that defaults shut, below the fold, is a smaller version of the same problem.
+        (It is also new persisted state: another <code>AsyncStorage</code> key, another hydrate, another
+        per-user/per-league record to reset on sign-out.)</li>
+      <li><b>Caps and scrolling come back.</b> A section listing 6 teams inside a screen that already lists
+        12 has to decide how many to show, whether to scroll internally (nested scroll inside a
+        <code>ScrollView</code> — the pattern this codebase avoids), or to cap and add a “show all”.</li>
+      <li><b>It does add one thing the list does not have: an explicit intent toggle.</b> That is a real
+        benefit and is what Direction 2 must answer for. See D2-e.</li>
+    </ul>
+  </div>
+
+  <!-- ══ DIRECTION 2 ═════════════════════════════════════════════════════ -->
+  <div class="sec">2. Direction 2 — one list, one median divider</div>
+  <div class="note">
+    <p>No section, no pills, no collapse state, no second population. The ranked list gains
+      <b>one line</b> — the shipped <code>oddsCutline</code> construction (rule · label · rule) already used
+      on this same screen to mark the playoff cut. Above the line: teams richer than the league at WR
+      (sellers). Below: teams poorer (buyers). Your own row stays where it belongs, marked, as the anchor.</p>
+  </div>
+
+  <div class="row3">
+
+    <!-- 2a -->
+    <div class="slot">
+      <div class="slotlbl recon"><b>D2-a</b> — the whole proposal, in one frame</div>
+      <div class="hchip rec">+34pt total · one new element · zero new state</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">Lakeview League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg></div>
+        </div>
+        <div class="scroll">
+          <div class="card" style="margin-bottom:12px;padding:12px 14px">
+            <div class="cardhead"><div><div class="t">League rankings</div>
+              <div class="c">Ranked by WR value only — chart reordered.</div></div></div>
+            <div class="minichart">
+              <div class="c on" style="height:100%"></div><div class="c on" style="height:92%"></div>
+              <div class="c on" style="height:84%"></div><div class="c on" style="height:76%"></div>
+              <div class="c on" style="height:70%"></div><div class="c on" style="height:66%"></div>
+              <div class="c on" style="height:58%"></div><div class="c on" style="height:55%"></div>
+              <div class="c" style="height:48%;background:var(--ice)"></div><div class="c on" style="height:44%"></div>
+              <div class="c on" style="height:34%"></div><div class="c on" style="height:22%"></div>
+            </div>
+          </div>
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="sidelbl">Richer at WR — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈3.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="cutline">
+            <span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span>
+          </div>
+          <div class="sidelbl">Shorter at WR — offer yours</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="foldmark"><span>fold — 3 more buyers below</span></div>
+        </div>
+        <div class="tabbar"><div class="tb on">League</div><div class="tb">Rank</div><div class="tb">Trades</div><div class="tb">More</div></div>
+      </div>
+      <div class="caption">One 34pt cutline plus two 20pt side labels. <b>Every team appears exactly once.</b>
+        Your own row is the second free reference point — “above me / below me” and “above the median /
+        below the median” are both readable off the same list without a control.</div>
+    </div>
+
+    <!-- 2b odd -->
+    <div class="slot">
+      <div class="slotlbl recon">D2-b — the odd-count edge case (11 teams)</div>
+      <div class="hchip">the median IS a team — the line has to choose a side</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="sidelbl">Richer at WR — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="teamrow" style="border-top:1px solid var(--line)">
+            <span class="trank">6</span><span class="tname">Sunday Scaries</span>
+            <span class="bdg" style="border-color:var(--line-strong);color:var(--chalk-dim)">At median</span>
+            <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          <div class="cutline">
+            <span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span>
+          </div>
+          <div class="sidelbl">Shorter at WR — offer yours</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">8</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval">≈1.5 firsts</span>
+              <span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">With an odd team count the median <i>is</i> one team’s value. The line is drawn
+        <b>below</b> that team and the row wears a neutral “At median” badge — it is a seller by
+        arithmetic (nothing is above it that it is not), and the badge stops it from looking mis-sorted.
+        <b>Direction 1 has no equivalent answer:</b> a Buyers/Sellers split has to silently put that team on
+        one side with no way to say why.</div>
+    </div>
+
+    <!-- 2c cost of no toggle -->
+    <div class="slot">
+      <div class="slotlbl warn">D2-e — the honest weakness: “only show me buyers”</div>
+      <div class="hchip">the cost, drawn: one scroll, no control</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll">
+          <div class="sidelbl" style="opacity:.35">Richer at WR — target theirs</div>
+          <div class="list" style="opacity:.35">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span><span class="tval">≈4.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span><span class="tval">≈4 firsts</span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span><span class="tval">≈3.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span><span class="tval">≈3 firsts</span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span><span class="tval">≈2.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span><span class="tval">≈2.5 firsts</span></div>
+          </div>
+          <div class="cutline flare">
+            <span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span>
+          </div>
+          <div class="sidelbl">Shorter at WR — offer yours</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval">≈1.5 firsts</span>
+              <span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">10</span><span class="tname">Checkdown Charlies</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">11</span><span class="tname">Punt Gods</span>
+              <span class="tval">≈1 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">12</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tval">≈0.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption"><b>This is what the missing toggle costs.</b> “Buyers only” is: scroll ~290pt so
+        the line reaches the top of the viewport. The six seller rows are dimmed here only to make the point
+        — in the real screen they are simply above you. In a 12-team league the whole list is ~570pt, so
+        both halves are one flick apart; in a 14-team league it is ~660pt. The toggle would save one flick
+        and cost a control, a state, and a second population. <b>That is the trade Direction 2 is making,
+        stated plainly.</b></div>
+    </div>
+  </div>
+
+  <!-- ══ DRILL-INS ═══════════════════════════════════════════════════════ -->
+  <div class="sec">3. The drill-in — identical in both directions</div>
+  <div class="note">
+    <p>Whichever direction wins, the drill-in is the same surface: a team, a position, and the roster that
+      matters for that direction, each row carrying the action. Direction 1 reaches it from a pill; Direction 2
+      from the row’s side of the line. The frames below use the recommended tile treatment from
+      <a href="tile-affordance.html" style="color:var(--ice)">page 2</a>: 32pt visual row, whole row is the
+      button, <code>hitSlop</code> 6/6 for a 44pt target, 12pt row gap, trailing chevron, and the verb
+      stated once in the group header rather than 6 times in the rows.</p>
+  </div>
+
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl recon">Below the line → <b>offer yours</b></div>
+      <div class="hchip recon">reconstruction · never existed in any build</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr">
+          <span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Punt Gods</span><span class="sp"></span>
+        </div>
+        <div class="scroll">
+          <div class="card" style="margin-bottom:10px;padding:12px 14px">
+            <div class="cardhead"><div><div class="t">Punt Gods</div>
+              <div class="c">#11 of 12 at WR · ≈1 firsts · 1.25 firsts below the median</div></div></div>
+            <div class="minichart" style="height:34px">
+              <div class="c" style="height:100%"></div><div class="c" style="height:88%"></div>
+              <div class="c" style="height:78%"></div><div class="c" style="height:70%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:52%"></div><div class="c" style="height:50%"></div>
+              <div class="c" style="height:44%;background:var(--ice)"></div><div class="c" style="height:40%"></div>
+              <div class="c on" style="height:30%"></div><div class="c" style="height:20%"></div>
+            </div>
+          </div>
+          <div class="posfilter" style="margin-top:0;margin-bottom:8px">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="grouphead" style="padding-bottom:2px">
+            <span class="grouplabel" style="color:var(--wr)">Your WR</span>
+            <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span>
+              <span class="rankchip" style="border-color:var(--warn);color:var(--warn)">9/12</span></span>
+          </div>
+          <div class="groupsub">Tap a player to offer them to Punt Gods.</div>
+          <div class="tilewrap roomy"><div class="tile hitrow">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR8</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jaxon Smith-Njigba</span><span class="tm">SEA</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR12</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Rome Odunze</span><span class="tm">CHI</span><span class="tag rk">RK</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span>
+              <span class="pr" style="color:var(--wr)">WR31</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Xavier Worthy</span><span class="tm">KC</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2nd)">2nd</span>
+              <span class="pr" style="color:var(--wr)">WR27</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jalen McMillan</span><span class="tm">TB</span><span class="tag q">Q</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4th)">4th</span>
+              <span class="pr" style="color:var(--wr)">WR68</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="grouphead" style="padding-bottom:2px;padding-top:14px">
+            <span class="grouplabel" style="color:var(--chalk-dim)">Punt Gods’ WR</span>
+            <span class="groupmetarow"><span class="groupmeta">4 · ≈1 firsts</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></svg></span>
+          </div>
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+      </div>
+      <div class="caption">Their roster is present but <b>collapsed to a disclosure row</b> — the direction
+        the line implied is expanded, the mirror is one tap away. That is the answer to “show both, since
+        there is space”: there is space <i>vertically</i>, not horizontally (page 2 measures why).</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl recon">Above the line → <b>target theirs</b></div>
+      <div class="hchip recon">reconstruction · exact mirror</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr">
+          <span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Gridiron Goons</span><span class="sp"></span>
+        </div>
+        <div class="scroll">
+          <div class="card" style="margin-bottom:10px;padding:12px 14px">
+            <div class="cardhead"><div><div class="t">Gridiron Goons</div>
+              <div class="c">#1 of 12 at WR · ≈4.5 firsts · 2.25 firsts above the median</div></div></div>
+            <div class="minichart" style="height:34px">
+              <div class="c on" style="height:100%"></div><div class="c" style="height:88%"></div>
+              <div class="c" style="height:78%"></div><div class="c" style="height:70%"></div>
+              <div class="c" style="height:64%"></div><div class="c" style="height:60%"></div>
+              <div class="c" style="height:52%"></div><div class="c" style="height:50%"></div>
+              <div class="c" style="height:44%;background:var(--ice)"></div><div class="c" style="height:40%"></div>
+              <div class="c" style="height:30%"></div><div class="c" style="height:20%"></div>
+            </div>
+          </div>
+          <div class="posfilter" style="margin-top:0;margin-bottom:8px">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="grouphead" style="padding-bottom:2px">
+            <span class="grouplabel" style="color:var(--wr)">Gridiron Goons’ WR</span>
+            <span class="groupmetarow"><span class="groupmeta">5 · ≈4.5 firsts</span>
+              <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">1/12</span></span>
+          </div>
+          <div class="groupsub">Tap a player to target them from Gridiron Goons.</div>
+          <div class="tilewrap roomy"><div class="tile hitrow">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ja’Marr Chase</span><span class="tm">CIN</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-4plus)">4+ 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR1</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Malik Nabers</span><span class="tm">NYG</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-3)">3 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR4</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Brian Thomas Jr.</span><span class="tm">JAX</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="pr" style="color:var(--wr)">WR6</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Drake London</span><span class="tm">ATL</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR9</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Ladd McConkey</span><span class="tm">LAC</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR15</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="grouphead" style="padding-bottom:2px;padding-top:14px">
+            <span class="grouplabel" style="color:var(--chalk-dim)">Your WR</span>
+            <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></svg></span>
+          </div>
+          <div class="foldmark"><span>fold</span></div>
+        </div>
+      </div>
+      <div class="caption">Same layout, swapped groups, swapped verb. The <code>‹ All teams</code> header
+        affordance is #302 V2 as decided, and the title swaps to the team name — no new chrome.</div>
+    </div>
+
+    <div class="slot wide">
+      <div class="note" style="margin:0">
+        <h2 style="margin-top:0">Why both drill-ins are identical — and what that implies</h2>
+        <p>Once the drill-in shows <b>both</b> rosters (operator question 4), the Buyers/Sellers pill above
+          it is deciding something the drill-in immediately un-decides. The pill answers “which direction?”;
+          the drill-in then shows both directions anyway. <b>The pill’s only surviving job is ordering</b> —
+          which group is expanded first — and the side of the median line does that for free.</p>
+        <p>This is the strongest single argument against Direction 1 that came out of drawing it, and it
+          only appears once you honour the operator’s own “show both teams’ players” request. If the
+          drill-in were one-sided, the pill would be load-bearing. It is not, because the operator asked for
+          both — correctly, since a real trade needs both sides.</p>
+        <h3>What each direction contributes, once the drill-in is fixed</h3>
+        <table class="tbl">
+          <tr><th>Job</th><th>Direction 1</th><th>Direction 2</th></tr>
+          <tr><td>Rank teams by the position</td><td>the list below already does it</td><td class="ok">the list, unchanged</td></tr>
+          <tr><td>Say where the middle is</td><td>via a section boundary</td><td class="ok">via one line</td></tr>
+          <tr><td>Say which direction to trade</td><td>via a pill</td><td class="ok">via which side of the line the row is on</td></tr>
+          <tr><td>Exclude your own team</td><td>required rule, needs enforcing</td><td class="ok">unnecessary — your row is the anchor</td></tr>
+          <tr><td>Show both rosters in the drill-in</td><td>same</td><td>same</td></tr>
+          <tr><td>New persisted state</td><td class="bad">AsyncStorage per user × league</td><td class="ok">none</td></tr>
+          <tr><td>New components</td><td class="bad">strip + segmented control + section list</td><td class="ok">one cutline (already in this file)</td></tr>
+          <tr><td>Teams shown twice</td><td class="bad">5 or 6 of 12</td><td class="ok">none</td></tr>
+          <tr><td>Explicit intent toggle</td><td class="ok">yes</td><td class="mid">no — costs one scroll flick</td></tr>
+          <tr><td>Odd team count</td><td class="bad">silent forced choice</td><td class="ok">“At median” row, line below it</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ THIRD OPTION ════════════════════════════════════════════════════ -->
+  <div class="sec">4. The operator’s literal third phrasing — Buyers / Median / Sellers as three sections</div>
+  <div class="note">
+    <p>Drawn rather than argued away, per the brief. Three frames: the literal reading, the only way to make
+      it non-empty, and the version that is actually honest.</p>
+  </div>
+
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl bad">E-a — literal: three sections, 12 teams</div>
+      <div class="hchip bad">the middle section is empty by construction</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="grouphead"><span class="grouplabel" style="color:var(--chalk-dim)">Sellers</span>
+            <span class="groupmeta">6</span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span><span class="tval">≈4.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span><span class="tval">≈4 firsts</span></div>
+            <div class="teamrow" style="opacity:.5"><span class="trank">…</span><span class="tname">4 more</span><span class="tval"></span></div>
+          </div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--chalk-dim)">Median</span>
+            <span class="groupmeta">0</span></div>
+          <div class="empty" style="border:1px dashed var(--neg);border-radius:4px;color:var(--neg)">
+            No teams. With 12 teams sorted by WR value the median is the midpoint <i>between</i> ranks 6 and 7 —
+            a number, not a roster. Nothing can ever be in this section.</div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--chalk-dim)">Buyers</span>
+            <span class="groupmeta">5</span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span><span class="tval">≈2 firsts</span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span><span class="tval">≈2 firsts</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">The objection, made visible. A median is a <b>statistic</b>; a section is a
+        <b>set</b>. Sorting n teams by one value produces ⌊n/2⌋ above and ⌈n/2⌉ below and nothing in between.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl bad">E-b — the only fix: invent a tolerance band</div>
+      <div class="hchip bad">arbitrary width · unstable membership · no verb</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="grouphead"><span class="grouplabel" style="color:var(--chalk-dim)">Sellers</span>
+            <span class="groupmeta">4 · above +12%</span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span><span class="tval">≈4.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span><span class="tval">≈4 firsts</span></div>
+            <div class="teamrow" style="opacity:.5"><span class="trank">…</span><span class="tname">2 more</span><span class="tval"></span></div>
+          </div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--warn)">Around the median</span>
+            <span class="groupmeta">4 · ±12%</span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span><span class="tval">≈2.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span><span class="tval">≈2.5 firsts</span></div>
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span><span class="tval">≈2 firsts</span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span><span class="tval">≈2 firsts</span></div>
+          </div>
+          <div class="empty" style="border-left:3px solid var(--warn);padding-left:10px">
+            What do you do with these four? Neither buy nor sell — the section has no verb.</div>
+          <div class="grouphead"><span class="grouplabel" style="color:var(--chalk-dim)">Buyers</span>
+            <span class="groupmeta">3 · below −12%</span></div>
+        </div>
+      </div>
+      <div class="caption">Three failures at once. <b>(1)</b> ±12% is invented — nothing in the codebase
+        justifies any width. <b>(2)</b> Membership flickers: values move nightly, so a team crosses the band
+        edge and changes section with no meaningful roster change. <b>(3)</b> The middle section has no
+        action attached to it, so it is a bucket you cannot do anything with — which makes it noise in a
+        surface whose entire purpose is “what do I do next”.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl rec" style="color:var(--pos)">E-c — the honest three-part form</div>
+      <div class="hchip win">a middle that always has exactly one member: <b>you</b></div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="sidelbl">Richer at WR — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="cutline">
+            <span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval">≈1.5 firsts</span>
+              <span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">10</span><span class="tname">Checkdown Charlies</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="sidelbl">Shorter at WR — offer yours</div>
+        </div>
+      </div>
+      <div class="caption">If “median” is really shorthand for <i>the middle of the league, the thing I
+        compare against</i>, then the middle that always has exactly one member is <b>your own row</b>. This
+        frame is Direction 2 unchanged: the median line marks the league’s centre, your highlighted row
+        marks yours, and the reader gets both reference points from one sorted list. <b>The three-part
+        intuition is satisfied without inventing a group.</b>
+        (Note the guard rail: the round-1 operator ruling explicitly overrode “less than you” as the
+        <i>candidate definition</i> in favour of median-relative. This does not reopen that — the median
+        still defines the sides; “you” is only a marker.)</div>
+    </div>
+  </div>
+
+  <!-- ══ RECOMMENDATION ══════════════════════════════════════════════════ -->
+  <div class="sec">5. Recommendation</div>
+  <div class="note">
+    <div class="verdict"><strong>Ship Direction 2 — one list, one median divider — with two things borrowed
+      from Direction 1.</strong> The divider is the shipped playoff-cutline construction reused verbatim; it
+      adds ~34pt and one element to a screen that already computes everything it needs. Direction 1 adds a
+      persisted collapse state, a segmented control, and a second list whose every row is a duplicate of a
+      row already on screen, in exchange for one saved scroll flick.</div>
+    <p><b>Borrow from Direction 1:</b></p>
+    <ol>
+      <li><b>The vocabulary.</b> “Buyers” and “sellers” are the operator’s words and they are good ones —
+        keep them as the two side labels above and below the line (drawn here as plain-words variants
+        “Richer at WR — target theirs” / “Shorter at WR — offer yours”; both wordings are shown so the
+        operator can pick. Straight “Sellers” / “Buyers” is shorter but assumes the reader knows which side
+        of the deal they are on).</li>
+      <li><b>The counts.</b> The strip’s “6 sellers · 5 buyers at WR” summary is genuinely useful and
+        survives Direction 2 as a caption on the chart card — one line, no control.</li>
+    </ol>
+    <h3>Where Direction 1 would still be the right call</h3>
+    <p>If the operator’s real requirement is that the candidate set be <b>narrower than “half the league”</b>
+      — e.g. only teams a full pick tier below the median, or only teams whose weakest starter you can
+      actually beat — then a section is justified, because the section would then contain something the
+      sorted list does not: a <i>filtered</i> set. As specified today (“below the median”) it contains
+      exactly the bottom half, and that is the whole reason to prefer the line. <b>This is the single
+      question worth putting back to the operator.</b></p>
+    <h3>What stopped working once drawn</h3>
+    <ul>
+      <li><b>The universal “never show my own team” rule creates the duplication it was meant to avoid</b> —
+        it forces the section’s population (11) to differ from the list’s (12) on one screen. In Direction 2
+        the rule is unnecessary and is dropped, not violated: your row is the anchor.</li>
+      <li><b>Collapsed-by-default and “I can’t get to a trade” are in tension.</b> The #169 precedent is
+        sound for an ancillary projection; the candidate route is the payload of the filter.</li>
+      <li><b>The Buyers/Sellers pill is un-decided by the drill-in</b> the moment both rosters are shown
+        there, which the operator separately asked for.</li>
+      <li><b>Neither direction’s median can be labelled without new server surface</b> — see
+        <a href="values-and-states.html" style="color:var(--ice)">page 3</a>. The median <i>value</i> is
+        computable client-side from the payload already on the wire; the pick-equivalent <i>label</i> for it
+        is not. That is an API change and therefore not a “quick fix” under the bright-line rule.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

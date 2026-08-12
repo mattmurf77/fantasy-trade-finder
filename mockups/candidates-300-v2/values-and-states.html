@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#300 v2 — value as pick tiers, and the secondary states</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests,
+     so nothing on this page depends on the network. The *measurements* quoted
+     in the annotations were NOT taken from this fallback rendering: they come
+     from measure-tile.py, which reads the real Archivo / IBM Plex Mono TTFs the
+     app ships (@expo-google-fonts, mobile/node_modules) and computes advance
+     widths from hmtx. Round 1 estimated from a mockup box model; this round
+     measures against the shipped font.
+     Position + tier hexes are cross-client invariants (docs/cross-client-invariants.md).
+     Base tokens + phone-frame + tile CSS descend from the validated #299 lab
+     (mockups/polish-lab-2026-08-11/league-tile-density.html, 221c134) and from
+     round 1 (fed9485), then re-derived against PlayerCard.tsx as SHIPPED on
+     origin/main @ 53bd19f. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --t-4plus:#F87171; --t-3:#E879F9; --t-2:#FBBF24; --t-1st:#2DD4BF;
+    --t-2nd:#38BDF8; --t-3rd:#F472B6; --t-4th:#A3E635; --t-fa:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1400px;width:100%}
+
+  .navbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 14px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 11px}
+  .navbar a.on{color:var(--on-ice);background:var(--ice);border-color:var(--ice)}
+  .navbar .lbl{font:500 11px var(--mono);color:var(--chalk-faint);margin-right:4px}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note h3{font:600 12px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+           color:var(--chalk);margin:14px 0 6px}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .verdict{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk)}
+  .verdict.no{border-left-color:var(--warn)}
+  .verdict.bad{border-left-color:var(--neg)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:30px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row3{display:flex;flex-wrap:wrap;gap:22px;justify-content:flex-start;align-items:flex-start;width:100%}
+  .row3.mid{justify-content:center}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:390px}
+  .slot.wide{width:440px}
+  .slotlbl{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.08em;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:none}
+  .slotlbl.cur{color:var(--chalk-dim)} .slotlbl.cur::before{background:var(--line-strong)}
+  .slotlbl.warn{color:var(--warn)} .slotlbl.warn::before{background:var(--warn)}
+  .slotlbl.recon{color:var(--flare)} .slotlbl.recon::before{background:var(--flare)}
+  .slotlbl.bad{color:var(--neg)} .slotlbl.bad::before{background:var(--neg)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+    background:rgba(245,158,11,.06);align-self:flex-start;line-height:1.4}
+  .hchip.win{color:var(--pos);border-color:var(--pos);background:rgba(34,197,94,.06)}
+  .hchip.rec{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip.recon{color:var(--flare);border-color:var(--flare);background:rgba(240,80,140,.06)}
+  .hchip.bad{color:var(--neg);border-color:var(--neg);background:rgba(239,68,68,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame — 390pt (iPhone 14/15 non-Pro, 390x844) ── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .tbkick{font:600 11px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 11px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+          border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .sp{width:74px}
+
+  .scroll{position:relative;height:618px;overflow:hidden;padding:16px 16px 0}
+  .scroll.tall{height:700px}
+  .scroll.short{height:470px}
+  .foldmark{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;padding-bottom:4px;pointer-events:none}
+  .foldmark span{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--flare);
+    background:var(--ink-0);border:1px dashed var(--flare);border-radius:3px;padding:2px 7px}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Cards / chart strip / controls ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 11px var(--ui);color:var(--ice);
+    letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto;white-space:nowrap;min-height:32px}
+  .minichart{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+  .minichart .c{flex:1;border-radius:2px 2px 0 0;background:var(--ink-3)}
+  .minichart .c.on{background:var(--wr)}
+  .bigchart{display:flex;align-items:flex-end;gap:4px;height:104px;margin-top:12px}
+  .bigchart .c{flex:1;border-radius:2px 2px 0 0;background:var(--wr);opacity:.85}
+  .bigchart .c.you{background:var(--ice)}
+
+  .drillsub{font:500 13px var(--mono);color:var(--chalk-dim);margin-bottom:8px}
+  .subsetrow{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 11px var(--ui);color:var(--chalk-dim);
+    letter-spacing:.88px;text-transform:uppercase;min-height:34px;display:flex;align-items:center;
+    justify-content:center;gap:6px}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+  .subsetseg .ct{font-family:var(--mono);font-size:11px;color:var(--chalk-faint)}
+  .subsetseg.on .ct{color:var(--chalk-dim)}
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 11px var(--ui);letter-spacing:.5px}
+  .pill.all{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.all.on{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:var(--ink-0)}
+  .pill.te{border-color:var(--te);color:var(--te)} .pill.te.on{background:var(--te);color:var(--ink-0)}
+  .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;min-height:38px;gap:8px}
+  .grouplabel{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase}
+  .groupsub{font:400 12px var(--ui);color:var(--chalk-dim);margin:-4px 0 6px}
+  .groupmetarow{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .groupmeta{font:500 13px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:2px;padding:1px 5px;font:600 11px var(--mono)}
+
+  /* ── THE TILE — PlayerCard dense + denseSingleLine, AS SHIPPED ──
+     mobile/src/components/PlayerCard.tsx @ origin/main 53bd19f:
+       cardDense    :472  height 60 -> cardDenseSingle :473-475 height 32
+       denseMain    paddingLeft 13, paddingRight space.sm 8
+       denseLine1   gap 6, alignItems baseline
+       denseNumsRow flexDirection row, gap space.sm 8; denseNums marginRight 8
+       denseName    Archivo600 15 / denseTeam Archivo400 11
+       denseTagFloor fontSize 11 (visual.chalkline_cleanup ON)
+       densePosRank IBMPlexMono600 14, position-colored
+       card         overflow hidden  <- the clip that kills an oversized hit area */
+  .tilewrap{margin-bottom:4px}          /* rosterRow: marginBottom space.xs = 4 */
+  .tilewrap.roomy{margin-bottom:12px}   /* proposed: 44pt pitch for hitSlop headroom */
+  .tile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        display:flex;align-items:center;position:relative;overflow:hidden;height:32px}
+  .tile.t44{height:44px}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .tile .main{flex:1;min-width:0;padding-left:13px;padding-right:8px;
+              display:flex;flex-direction:column;justify-content:center}
+  .tile .l1{display:flex;align-items:baseline;gap:6px;min-width:0}
+  .tile .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis;flex-shrink:1;min-width:0}
+  .tile .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:0 0 auto}
+  .tile .tag{font:600 11px var(--ui);letter-spacing:.5px;padding:1px 3px;border:1px solid;
+             border-radius:2px;flex:0 0 auto;line-height:1.2}
+  .tile .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tile .tag.q{color:var(--warn);border-color:var(--warn)}
+  .tile .tag.o{color:var(--neg);border-color:var(--neg)}
+  .tile .right{display:flex;align-items:center;gap:8px;margin-right:8px;flex:0 0 auto}
+  .tile .pr{font:600 14px var(--mono)}
+  .bdg{border:1px solid;border-radius:2px;padding:2px 6px;font:600 11px var(--ui);
+       letter-spacing:.88px;text-transform:uppercase;color:var(--chalk);flex:0 0 auto;
+       line-height:14px;white-space:nowrap}
+  .bdg.ice{border-color:var(--ice);color:var(--ice)}
+  .tile.dim{opacity:.45}
+  .tile.press{background:var(--ink-3)}
+
+  /* trailing affordances */
+  .chev{display:inline-flex;align-items:center;justify-content:center;color:var(--ice);
+    flex:0 0 auto;position:relative}
+  .chev .hit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;border:1px dashed var(--ice);border-radius:8px;opacity:.4;pointer-events:none}
+  .actlbl{display:inline-flex;align-items:center;gap:3px;color:var(--ice);
+    font:600 11px var(--ui);letter-spacing:.5px;white-space:nowrap;flex:0 0 auto}
+  .actpill{display:inline-flex;align-items:center;border:1px solid var(--ice);color:var(--ice);
+    border-radius:4px;padding:2px 8px;font:600 11px var(--ui);letter-spacing:.5px;
+    white-space:nowrap;flex:0 0 auto}
+  .chev.dim,.actlbl.dim{color:var(--chalk-faint)}
+
+  /* row hitSlop illustration */
+  .hitrow{position:relative}
+  .hitrow::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px;
+    border:1px dashed var(--pos);border-radius:10px;opacity:.55;pointer-events:none}
+  .hitnote{font:500 11px var(--mono);color:var(--pos);padding-left:2px}
+
+  /* ── Team list rows (TeamRow / listRow: minHeight 44, LeagueSummaryScreen.tsx:2618) ── */
+  .list{display:flex;flex-direction:column;gap:2px}
+  .teamrow{display:flex;align-items:center;gap:8px;min-height:44px;
+    border-bottom:1px solid var(--line);padding:8px 4px}
+  .teamrow:last-child{border-bottom:none}
+  .teamrow.you{background:var(--ink-1);border:1px solid var(--line-strong);border-radius:4px;padding:8px}
+  .trank{font:500 13px var(--mono);width:20px;text-align:center;color:var(--chalk-dim);flex:0 0 auto}
+  .teamrow.you .trank{color:var(--ice)}
+  .tname{flex:1;font:600 16px var(--ui);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tright{display:flex;align-items:center;gap:8px;flex:0 0 auto;color:var(--chalk-dim)}
+  .tval{font:500 13px var(--mono);color:var(--chalk);flex:0 0 auto}
+  .youbdg{border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:1px 5px;
+    font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .empty{padding:14px 4px 16px;font:400 13px var(--ui);color:var(--chalk-dim);line-height:1.5}
+
+  /* ── Collapsed strip (#169 OutlookStrip construction, LeagueSummaryScreen.tsx:2713-2731) ── */
+  .strip{display:flex;align-items:center;gap:8px;background:var(--ink-1);border:1px solid;
+    border-radius:4px;padding:8px 12px;margin-bottom:16px}
+  .strip .tick{width:3px;height:14px;flex:0 0 auto}
+  .strip .lbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;flex:0 0 auto}
+  .strip .phrase{flex:1;font:400 13px var(--ui);color:var(--chalk-dim);min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip.ice{border-color:var(--line)} .strip.ice .tick{background:var(--ice)} .strip.ice .lbl{color:var(--ice)}
+  .strip.warn{border-color:var(--warn)} .strip.warn .tick{background:var(--warn)} .strip.warn .lbl{color:var(--warn)}
+
+  /* ── Median cutline — the shipped oddsCutline construction verbatim
+       (LeagueSummaryScreen.tsx render + styles oddsCutline/oddsCutRule/oddsCutText) ── */
+  .cutline{display:flex;align-items:center;gap:8px;padding:10px 0}
+  .cutline .rule{flex:1;height:1px;background:var(--line-strong)}
+  .cutline .txt{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-dim);white-space:nowrap;flex:0 0 auto}
+  .cutline.flare .rule{background:var(--flare);opacity:.5} .cutline.flare .txt{color:var(--flare)}
+
+  .sidelbl{font:600 11px var(--ui);letter-spacing:.88px;text-transform:uppercase;
+    color:var(--chalk-faint);padding:2px 0 6px 2px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;
+    border-radius:4px;font:700 12px var(--ui);letter-spacing:.6px;text-transform:uppercase;margin-top:8px}
+  .btn.ice{background:var(--ice);color:var(--on-ice)}
+  .btn.ghost{border:1px solid var(--line-strong);color:var(--chalk)}
+
+  .measure{position:relative}
+  .measure::after{content:attr(data-h);position:absolute;right:-58px;top:50%;transform:translateY(-50%);
+    font:500 11px var(--mono);color:var(--flare);white-space:nowrap}
+  .measurew{position:relative;margin-bottom:22px}
+  .measurew::before{content:attr(data-w);position:absolute;left:0;right:0;bottom:-17px;
+    font:500 11px var(--mono);color:var(--flare);text-align:center}
+
+  .dupbracket{position:relative;border-left:2px solid var(--flare);padding-left:8px;margin-left:-10px}
+
+  /* ── tables ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .tbl th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong);vertical-align:bottom}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top;
+    line-height:1.5}
+  .tbl td:first-child{color:var(--chalk);font-weight:600}
+  .tbl.num th:nth-child(n+2),.tbl.num td:nth-child(n+2){text-align:right;font-family:var(--mono);color:var(--chalk)}
+  .tbl tr.win td:nth-child(n+2){color:var(--pos);font-weight:600}
+  .tbl tr.lose td:nth-child(n+2){color:var(--neg);font-weight:600}
+  .tbl tr.rec td{background:rgba(86,217,236,.06)}
+  .tbl tr.rec td:first-child{color:var(--ice)}
+  .tbl tr.dead td{background:rgba(239,68,68,.05)}
+  .tbl .ok{color:var(--pos)} .tbl .bad{color:var(--neg)} .tbl .mid{color:var(--warn)}
+
+  .anchor{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;width:100%}
+  .anchorimg{width:290px;border:1px solid var(--line-strong);border-radius:14px;display:block}
+  .anchortxt{flex:1 1 420px}
+
+  /* R-1 illustration (page 2): the 44×44 box a NESTED control would need,
+     drawn on the tile's wrapper so it is visible at all. Inside the tile it is
+     clipped by `overflow: 'hidden'` — which is exactly the finding. Red bands
+     mark the 6pt top and bottom that the clip eats. */
+  .clipdemo{position:relative}
+  .clipdemo .want{position:absolute;right:12px;top:-6px;width:44px;height:44px;
+    border:1px dashed var(--neg);border-radius:8px;pointer-events:none}
+  .clipdemo .lost{position:absolute;right:12px;width:44px;height:6px;
+    background:rgba(239,68,68,.30);pointer-events:none}
+  .clipdemo .lost.t{top:-6px}
+  .clipdemo .lost.b{bottom:-6px}
+  .clipnote{font:500 11px var(--mono);color:var(--neg);padding:2px 0 0 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="navbar">
+    <span class="lbl">candidates-300-v2</span>
+    <a href="directions.html">1 · Two directions</a>
+    <a href="tile-affordance.html">2 · Tile, 44pt &amp; naming</a>
+    <a class="on" href="values-and-states.html">3 · Pick tiers &amp; states</a>
+    <a href="index.html">Index</a>
+  </div>
+
+  <div class="note">
+    <h1>Value as pick tiers — and the states nobody drew</h1>
+    <p class="q">“Value must be presented in PICK TIERS, not raw numbers. […] Open problem: that labels a
+      team’s <i>value</i>, not a <i>difference from median</i>. Show what ‘1.2k below median’ looks like as a
+      pick tier, and say plainly what happens when a delta falls below the ladder’s floor.”</p>
+    <div class="verdict"><strong>Short answer: the app already has a delta→pick converter, its floor is
+      already defined in code, and you should still not use it here.</strong> Label each team’s
+      <i>level</i> (which is already on the wire and already shipped on this screen) and let the divider
+      carry the median’s level. Deltas get their magnitude from the sorted order and the existing bar
+      chart — encodings that do not need a name and therefore cannot invent one.</div>
+  </div>
+
+  <!-- ══ 1 ═══════════════════════════════════════════════════════════════ -->
+  <div class="sec">1. What the codebase already has <span class="fb">read before designing, not after</span></div>
+  <div class="note">
+    <h3>Three different value vocabularies exist, and only one of them is for deltas</h3>
+    <table class="tbl">
+      <tr><th>Vocabulary</th><th>Where</th><th>What it is for</th><th>Usable for a median delta?</th></tr>
+      <tr><td><code>TIER_LABEL</code> — the 8-tier ladder<br><span style="font-weight:400">4+ 1sts · 3 1sts · 2 1sts · 1 1st · 2nd · 3rd · 4th · FA</span></td>
+        <td><code>utils/tierBands.ts:38-47</code>, walked off <b>Elo</b> by the server’s
+          <code>tier_for_elo</code></td>
+        <td>Classifying <b>one asset</b></td>
+        <td class="bad">No. It is an Elo classification, and a difference of two value <i>sums</i> is not an
+          Elo. <code>server.py:840-845</code> already spells out the second reason: the top bucket
+          (<code>4+ 1sts</code>) is an open-ended catch-all, not a countable multiple.</td></tr>
+      <tr><td><code>_aggregate_pick_label(value)</code><br><span style="font-weight:400">→ “≈2.5 firsts”</span></td>
+        <td><code>server.py:833-858</code>; surfaced as <code>positions[P].value_label</code> and
+          <code>total_value_label</code> (<code>api/league.ts:560-566</code>), gated by the operator-only
+          <code>aggregate_tier_labels</code> experiment</td>
+        <td>A team’s <b>level</b> at a position</td>
+        <td class="ok">Yes for levels — this is what the screen already renders. Rounded to the nearest half
+          first, monotone, never has a “no name” hole.</td></tr>
+      <tr><td><code>_pick_gap_equivalent(gap)</code><br><span style="font-weight:400">→ {firsts, pick_equivalent} → “a Late 2nd”</span></td>
+        <td><code>server.py:805-830</code>; already on screen in <code>TradeValueBar.tsx:88-105</code> and
+          <code>TradeBuildCanvas.tsx:120-122</code></td>
+        <td>A <b>gap</b> between two packages</td>
+        <td class="mid">Technically yes — it is literally the gap converter — but see the ladder audit
+          below.</td></tr>
+    </table>
+    <h3>The floor is not a design question; it is already answered in code</h3>
+    <p><code>_pick_gap_equivalent</code> returns <code>pick_equivalent: None</code> when
+      <code>gap &lt; min_val * 0.5</code> or <code>gap &gt; max_val * 1.25</code>. Evaluated against
+      <code>GENERIC_PICK_SEEDS</code> (<code>pick_values.py:24-38</code>) and
+      <code>elo_to_value</code> (<code>trade_service.py:712-727</code>, base 1000 / k 0.0050 / ref 1500):</p>
+    <table class="tbl num">
+      <tr><th>Boundary</th><th>Value</th><th>In firsts</th><th style="text-align:left">Behaviour</th></tr>
+      <tr><td>base first (Mid 1st, Elo 1650)</td><td>2117.0</td><td>1.0000</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk-dim);font-weight:400">the unit</td></tr>
+      <tr><td>floor — <code>min × 0.5</code></td><td>123.3</td><td>0.0582</td><td style="text-align:left;font-family:var(--ui);color:var(--neg);font-weight:600">below this, no pick name exists</td></tr>
+      <tr><td>ceiling — <code>max × 1.25</code></td><td>3755.2</td><td>1.7738</td><td style="text-align:left;font-family:var(--ui);color:var(--neg);font-weight:600">above this, no single pick is big enough</td></tr>
+    </table>
+    <div class="verdict"><strong>So: “what happens when a delta falls below the ladder’s floor” has a
+      concrete answer — the server returns <code>null</code> and the honest render is
+      “about even at WR”, never a fabricated tier.</strong> And that non-answer is itself useful
+      information: “about even” is exactly “this team is not a candidate at this position.”</div>
+  </div>
+
+  <div class="sec">2. Why delta-as-pick-tier still fails <span class="fb">the ladder audit, run on the mock league</span></div>
+  <div class="note">
+    <p>The rungs are sparse and top-heavy. Between <b>Late 1st (0.705 firsts)</b> and
+      <b>Early 1st (1.419)</b> there is nothing at all — a 0.71-firsts hole, two-thirds of a first round
+      wide. Every delta that lands in it gets named after whichever edge is closer.</p>
+    <table class="tbl num">
+      <tr><th>#</th><th style="text-align:left">Team</th><th>WR level</th><th>Δ vs median</th><th style="text-align:left">Nearest single pick</th><th>Naming error</th></tr>
+      <tr class="dead"><td>1</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Gridiron Goons</td><td>≈4.5</td><td>+2.25</td><td style="text-align:left;font-family:var(--ui);color:var(--neg);font-weight:600">none — past the ceiling</td><td>—</td></tr>
+      <tr><td>2</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Pylon Pirates</td><td>≈4</td><td>+1.75</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 1st</td><td class="bad">19%</td></tr>
+      <tr><td>3</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Blitz Brigade</td><td>≈3.5</td><td>+1.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 1st</td><td class="mid">14%</td></tr>
+      <tr><td>4</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Turf Monsters</td><td>≈3</td><td>+0.75</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">a Late 1st</td><td>6%</td></tr>
+      <tr><td>5</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Hail Marys</td><td>≈2.5</td><td>+0.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 3rd</td><td>6%</td></tr>
+      <tr><td>6</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Sunday Scaries</td><td>≈2.5</td><td>+0.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 3rd</td><td>6%</td></tr>
+      <tr class="rec"><td colspan="6" style="text-align:center;font-family:var(--ui);font-weight:600">league median · ≈2.25 firsts at WR</td></tr>
+      <tr><td>7</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Play Action</td><td>≈2</td><td>−0.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 3rd</td><td>6%</td></tr>
+      <tr><td>8</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Red Zone Reapers</td><td>≈2</td><td>−0.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 3rd</td><td>6%</td></tr>
+      <tr><td>9</td><td style="text-align:left;font-weight:600;color:var(--ice)">Zone Defense (you)</td><td>≈1.5</td><td>−0.75</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">a Late 1st</td><td>6%</td></tr>
+      <tr><td>10</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Checkdown Charlies</td><td>≈1.5</td><td>−0.75</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">a Late 1st</td><td>6%</td></tr>
+      <tr><td>11</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Punt Gods</td><td>≈1</td><td>−1.25</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 1st</td><td class="mid">14%</td></tr>
+      <tr><td>12</td><td style="text-align:left;font-weight:400;color:var(--chalk-dim)">Waiver Wire Warriors</td><td>≈0.5</td><td>−1.75</td><td style="text-align:left;font-family:var(--ui);color:var(--chalk);font-weight:400">an Early 1st</td><td class="bad">19%</td></tr>
+    </table>
+    <p><b>What that column reads like down the screen:</b> —, Early 1st, Early 1st, Late 1st, Early 3rd,
+      Early 3rd, │ Early 3rd, Early 3rd, Late 1st, Late 1st, Early 1st, Early 1st. <b>Four different deltas
+      collapse onto “an Early 1st”, the largest gap in the league has no name at all, and the labels
+      mirror around the line so the top of the list and the bottom read identically.</b> A column that says
+      the same thing about the richest team and the poorest team is worse than no column.</p>
+    <div class="warnbox"><b>And the floor is worse than “below 0.058 firsts there is no name”.</b> Just
+      above it the nearest-rung approximation is wild: a delta of <b>0.07 firsts</b> is named
+      <b>“a Late 4th”</b> — off by <b>66%</b>. So the honest floor for <i>display</i> is not the code’s
+      <code>null</code> boundary; it is wherever the naming error stops being defensible, and nothing in
+      the codebase defines that. That is a second invented number, right after the one the three-section
+      variant needed on page 1.</div>
+  </div>
+
+  <div class="sec">3. Three ways to render it, drawn</div>
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl bad">P-a — delta labelled on every row</div>
+      <div class="hchip bad">repetitive, mirrored, one row with no label</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval" style="color:var(--chalk-faint)">≈2.3 firsts up</span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval" style="color:var(--pos)">an Early 1st up</span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval" style="color:var(--pos)">an Early 1st up</span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval" style="color:var(--pos)">a Late 1st up</span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval" style="color:var(--pos)">an Early 3rd up</span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval" style="color:var(--pos)">an Early 3rd up</span></div>
+          </div>
+          <div class="cutline"><span class="rule"></span><span class="txt">League median</span><span class="rule"></span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval" style="color:var(--warn)">an Early 3rd down</span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval" style="color:var(--warn)">an Early 3rd down</span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval" style="color:var(--warn)">a Late 1st down</span></div>
+            <div class="teamrow"><span class="trank">10</span><span class="tname">Checkdown Charlies</span>
+              <span class="tval" style="color:var(--warn)">a Late 1st down</span></div>
+            <div class="teamrow"><span class="trank">11</span><span class="tname">Punt Gods</span>
+              <span class="tval" style="color:var(--warn)">an Early 1st down</span></div>
+            <div class="teamrow"><span class="trank">12</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tval" style="color:var(--warn)">an Early 1st down</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Read it top to bottom: the column is a palindrome. The name says how far from the
+        middle, not which direction, so the direction has to be carried by a colour and the words
+        “up/down” — three encodings for one fact. And rank 1, the most extreme team, is the one row that
+        cannot be named.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">P-b — levels on rows, median on the line <b>· RECOMMENDED</b></div>
+      <div class="hchip win">one label kind · monotone · no floor · already on the wire</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="sidelbl">Richer at WR — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">≈4.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Pylon Pirates</span>
+              <span class="tval">≈4 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈3.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">4</span><span class="tname">Turf Monsters</span>
+              <span class="tval">≈3 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="cutline"><span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span></div>
+          <div class="sidelbl">Shorter at WR — offer yours</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval">≈1.5 firsts</span>
+              <span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">10</span><span class="tname">Checkdown Charlies</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">11</span><span class="tname">Punt Gods</span>
+              <span class="tval">≈1 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">12</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="tval">≈0.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Every row and the line speak the <b>same unit</b>, so the reader subtracts
+        visually and never has to trust a rung name. The column is monotone top to bottom — which is what a
+        ranked list should look like. <b>Rows are unchanged from what already ships</b>
+        (<code>TeamRow.totalLabel</code>); only the line is new.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl warn">P-c — hybrid: delta only where it is honest</div>
+      <div class="hchip">defensible, and still two labels doing one job</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="sidelbl">Richer at WR — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+          <div class="cutline"><span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span></div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="bdg" style="border-color:var(--line-strong);color:var(--chalk-dim)">About even</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow you"><span class="trank">9</span><span class="tname">Zone Defense</span>
+              <span class="youbdg">You</span><span class="tval">≈1.5 firsts</span>
+              <span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">12</span><span class="tname">Waiver Wire Warriors</span>
+              <span class="bdg" style="border-color:var(--warn);color:var(--warn)">Big gap</span>
+              <span class="tval">≈0.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Delta expressed as a <b>plain-words band</b> instead of a rung name — no
+        invented precision, and the two ends of the distribution get called out. If the operator wants
+        per-row delta emphasis, <b>this is the honest form of it</b>. It still costs a second label per row
+        and a second threshold to define, which is why P-b is the recommendation.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>The build finding buried in this</h2>
+    <div class="warnbox"><b>The median’s label cannot be computed on the client.</b> Every team’s raw
+      <code>positions[P].value</code> is already on the wire (<code>api/league.ts:560-566</code>), so the
+      client can compute the <i>median value</i> exactly — but converting it to “≈2 firsts” needs
+      <code>elo_to_value</code> and <code>GENERIC_PICK_SEEDS</code>, which live on the server, and numeric
+      values are no longer an allowed fallback. <b>So Direction 2’s divider label requires a new response
+      field</b> — minimally
+      <code>medians: { QB|RB|WR|TE: { value, value_label } }</code> on
+      <code>/api/league/power-rankings</code>, computed with the same
+      <code>_aggregate_pick_label</code> and gated by the same <code>aggregate_tier_labels</code>
+      experiment as the labels beside it.</div>
+    <p><b>That makes this an API-contract change, which the project’s bright line says is not a “quick
+      fix”</b> (root <code>CLAUDE.md</code> → Feature gates). Whichever direction wins:
+      <code>docs/api-reference.md</code> must be updated, and the feature-scope block’s Docs table filled
+      row by row. Direction 1 needs the same field for its “6 sellers · 5 buyers” counts, so this is not a
+      cost that picking Direction 1 avoids.</p>
+    <p><b>Degradation is already specified by precedent:</b> <code>value_label</code> is absent for anyone
+      outside the experiment and on old servers, and <code>TeamRow</code> falls back to the numeric
+      (<code>LeagueSummaryScreen.tsx:1889-1891</code>). The divider must degrade the same way — label absent
+      → draw the line with the bare text <b>“League median”</b> and no value. The line is still true; only
+      the number is missing.</p>
+  </div>
+
+  <!-- ══ FILTER CHANGE ═══════════════════════════════════════════════════ -->
+  <div class="sec">4. Filter changed while drilled in → return to the top screen <span class="fb">operator-decided</span></div>
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl recon">F-1 — drilled in on WR</div>
+      <div class="hchip recon">reconstruction</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Punt Gods</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0;margin-bottom:8px">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="grouphead" style="padding-bottom:2px">
+            <span class="grouplabel" style="color:var(--wr)">Your WR</span>
+            <span class="groupmetarow"><span class="groupmeta">6 · ≈1.5 firsts</span></span></div>
+          <div class="groupsub">Tap a player to offer them to Punt Gods.</div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR8</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+          <div class="tilewrap roomy"><div class="tile">
+            <div class="rail" style="background:var(--wr)"></div>
+            <div class="main"><div class="l1"><span class="nm">Jaxon Smith-Njigba</span><span class="tm">SEA</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+              <span class="pr" style="color:var(--wr)">WR12</span>
+              <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div></div>
+        </div>
+      </div>
+      <div class="caption">Note the filter pills are <i>inside</i> the drill-in — that is #237’s shared
+        <code>posFilter</code> state, deliberately mounted in both places
+        (<code>LeagueSummaryScreen.tsx:1399-1405</code>).</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl recon">F-2 — user taps <b>TE</b></div>
+      <div class="hchip">the moment the drill-in stops being true</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="backlink"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</span>
+          <span class="t">Punt Gods</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0;margin-bottom:8px">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te on">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="empty" style="border-left:3px solid var(--warn);padding-left:10px">
+            Punt Gods was a <b style="color:var(--chalk)">WR</b> candidate. At TE they rank 3rd of 12 —
+            they are not short at all, and “offer yours” is now the wrong verb on this screen.
+            The drill-in is stale the instant the pill changes.</div>
+          <div class="tilewrap roomy"><div class="tile dim">
+            <div class="rail" style="background:var(--te)"></div>
+            <div class="main"><div class="l1"><span class="nm">Brock Bowers</span><span class="tm">LV</span></div></div>
+            <div class="right"><span class="bdg" style="border-color:var(--t-2)">2 1sts</span>
+              <span class="pr" style="color:var(--te)">TE1</span></div>
+          </div></div>
+        </div>
+      </div>
+      <div class="caption">Staying put would leave the user on a per-team page whose framing
+        (“candidate at WR”) no longer holds, while the screen that <i>does</i> answer “who is short at TE”
+        is the one they just left.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl" style="color:var(--pos)">F-3 — return to the top, TE applied</div>
+      <div class="hchip win">recommended treatment of the operator’s decision</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te on">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="strip ice" style="border-color:var(--line);margin-bottom:12px">
+            <span class="tick"></span><span class="lbl">Now showing TE</span>
+            <span class="phrase">back to all 12 teams</span>
+          </div>
+          <div class="sidelbl">Richer at TE — target theirs</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Punt Gods</span>
+              <span class="tval">≈1.5 firsts</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Two things make the ejection legible rather than jarring: a <b>one-line
+        transient strip</b> naming what changed and where you now are, and the fact that
+        <b>Punt Gods is visibly still on screen</b> — at rank 3, on the other side of the line. The user is
+        not thrown away from their task; they are shown the same team from the new question’s angle.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h3>What the auto-return needs, that is easy to forget</h3>
+    <ul>
+      <li><b>Announce it.</b> Setting <code>selectedId = null</code> silently moves VoiceOver focus with no
+        explanation. The transient strip should carry an
+        <code>AccessibilityInfo.announceForAccessibility</code> equivalent: “Showing TE. Back to all
+        12 teams.”</li>
+      <li><b>It is not the same as “back”.</b> #302 V2’s <code>‹ All teams</code> is a deliberate exit; this
+        is an automatic one. They should land on the same screen but should not be logged as the same
+        event — <code>via: 'filter_change'</code> vs <code>via: 'back'</code>, so the analytics can tell
+        an ejection from a choice.</li>
+      <li><b>Android back.</b> The #299/#302 lab already flagged that there are <b>zero</b>
+        <code>BackHandler</code> registrations in <code>LeagueSummaryScreen.tsx</code> and the drill-in is
+        component state, not a stack push. Auto-return does not fix that; it adds a second way to leave the
+        drill-in while the hardware button still has none.</li>
+      <li><b>Restore scroll to the line.</b> Returning to the top of a 570pt list hides the answer. The
+        return should scroll so the median divider is near the top of the viewport — the position from
+        which both sides are readable.</li>
+      <li><b>Multi-select.</b> Adding a <i>second</i> position (WR + TE) is also a filter change, but see
+        the next section: it has no median at all, so it must return to the top <i>and</i> drop the line.</li>
+    </ul>
+  </div>
+
+  <!-- ══ EDGE CASES ══════════════════════════════════════════════════════ -->
+  <div class="sec">5. States nobody has drawn yet</div>
+  <div class="row3">
+    <div class="slot">
+      <div class="slotlbl warn">S-1 — two or more positions selected</div>
+      <div class="hchip">no line — a median of what?</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr on">WR</span><span class="pill te on">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="caption" style="padding:0 2px 8px">Ranked by WR + TE value — chart reordered.</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">1</span><span class="tname">Gridiron Goons</span>
+              <span class="tval">6,140</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">2</span><span class="tname">Hail Marys</span>
+              <span class="tval">5,880</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+            <div class="teamrow"><span class="trank">3</span><span class="tname">Blitz Brigade</span>
+              <span class="tval">5,410</span><span class="tright"><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption"><b>Two reasons the line must not draw here.</b> (1) “Teams short at WR+TE” is not
+        a trade thesis — you trade for a position, not for a basket. (2) <code>value_label</code> is
+        <b>per position</b> and is not additive as a label, so the rows fall back to the raw numeric today
+        (<code>TeamRow</code> passes <code>totalLabel</code> only when <code>posFilter.size === 0</code>,
+        <code>LeagueSummaryScreen.tsx:1533-1536</code>) — which is itself now a rule violation worth its own
+        item. <b>Recommendation: the divider renders only when exactly one core position is selected.</b></div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl warn">S-2 — a flat league</div>
+      <div class="hchip">the line is true and useless — say so</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navhdr"><span class="sp"></span><span class="t">League rankings</span><span class="sp"></span></div>
+        <div class="scroll short">
+          <div class="posfilter" style="margin-top:0">
+            <span class="pill all">All</span><span class="pill qb on">QB</span><span class="pill rb">RB</span>
+            <span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">Picks</span>
+          </div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">5</span><span class="tname">Hail Marys</span>
+              <span class="tval">≈2 firsts</span></div>
+            <div class="teamrow"><span class="trank">6</span><span class="tname">Sunday Scaries</span>
+              <span class="tval">≈2 firsts</span></div>
+          </div>
+          <div class="cutline"><span class="rule"></span><span class="txt">League median · ≈2 firsts</span><span class="rule"></span></div>
+          <div class="empty" style="border-left:3px solid var(--warn);padding-left:10px;margin:2px 0 6px">
+            Every team is within about a 4th of the median at QB. Nobody here is short, and nobody is
+            spare — try another position.</div>
+          <div class="list">
+            <div class="teamrow"><span class="trank">7</span><span class="tname">Play Action</span>
+              <span class="tval">≈2 firsts</span></div>
+            <div class="teamrow"><span class="trank">8</span><span class="tname">Red Zone Reapers</span>
+              <span class="tval">≈2 firsts</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">This is the <code>pick_equivalent: null</code> case surfacing as copy instead of
+        as a blank. If <i>every</i> delta is under the floor the line still draws (it is still where the
+        middle is) but the screen says out loud that the position is not a trade lane. <b>Direction 1’s
+        equivalent is worse:</b> it would show 6 “buyers” who are not short of anything.</div>
+    </div>
+
+    <div class="slot">
+      <div class="slotlbl warn">S-3 — unpriceable and empty rows</div>
+      <div class="hchip">tier null is already a live case, not a hypothetical</div>
+      <div style="padding:14px 16px;background:var(--ink-0);border:1px solid var(--line);border-radius:8px">
+        <div class="grouphead" style="padding-bottom:2px">
+          <span class="grouplabel" style="color:var(--wr)">Your WR</span>
+          <span class="groupmetarow"><span class="groupmeta">3 · ≈1.5 firsts</span></span></div>
+        <div class="groupsub">Tap a player to offer them to Punt Gods.</div>
+        <div class="tilewrap roomy"><div class="tile">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Puka Nacua</span><span class="tm">LAR</span></div></div>
+          <div class="right"><span class="bdg" style="border-color:var(--t-1st)">1 1st</span>
+            <span class="pr" style="color:var(--wr)">WR8</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div class="tilewrap roomy"><div class="tile">
+          <div class="rail" style="background:var(--wr)"></div>
+          <div class="main"><div class="l1"><span class="nm">Tyler Scott</span><span class="tm">CHI</span></div></div>
+          <div class="right"><span class="pr" style="color:var(--wr)">NR</span>
+            <span class="chev"><svg class="i" width="12" height="12" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></span></div>
+        </div></div>
+        <div style="height:14px"></div>
+        <div class="grouphead" style="padding-bottom:2px">
+          <span class="grouplabel" style="color:var(--te)">Your TE</span>
+          <span class="groupmetarow"><span class="groupmeta">0 · —</span></span></div>
+        <div class="empty" style="padding:8px 2px">No TEs on this roster. Nothing to offer here.</div>
+      </div>
+      <div class="caption">Row 2 is the shipped <code>tier ?? null</code> path — no badge, no number, and
+        <code>posRank</code> falls back to <code>'NR'</code>
+        (<code>LeagueSummaryScreen.tsx:1471</code>). It <b>gains 63.5pt of name budget</b>, so it is never
+        the layout worst case; it is a <i>meaning</i> problem — an unpriced player still gets an “Offer”
+        chevron, and tapping it starts a trade the calculator cannot value. <b>Recommendation: keep the row
+        tappable</b> (the user may know something the pool does not) <b>and let the trade builder carry the
+        warning</b> — do not silently disable a row for a reason the row cannot explain.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>Checklist this page leaves for the PRD</h2>
+    <table class="tbl">
+      <tr><th>Item</th><th>Disposition</th></tr>
+      <tr class="rec"><td>Value display</td><td>Per-team <b>level</b> labels (shipped <code>value_label</code>) on rows; median level on the divider. <b>No per-row deltas.</b></td></tr>
+      <tr><td>Delta-as-pick-tier</td><td>Possible via <code>_pick_gap_equivalent</code>, floor already defined (<code>null</code> under 0.058 firsts, none above 1.774), but the rungs are too sparse — 4 of 12 mock deltas collapse onto “an Early 1st” and the column mirrors around the line. Rejected; plain-words bands (P-c) are the fallback if the operator insists.</td></tr>
+      <tr><td>New API surface</td><td><code>medians: {QB|RB|WR|TE: {value, value_label}}</code> on <code>/api/league/power-rankings</code>, same <code>aggregate_tier_labels</code> gating, degrade to a bare “League median” line. <b>Bright-line: not a quick fix.</b></td></tr>
+      <tr><td>Divider gating</td><td>Exactly one core position selected. Never for All, never for multi-select, never for PICKS.</td></tr>
+      <tr><td>Flat league</td><td>Line still draws; add the “nobody is short here” copy when every delta is under the floor.</td></tr>
+      <tr><td>Filter change while drilled in</td><td>Return to top (operator-decided) + transient strip + a11y announcement + scroll to the line + distinct analytics <code>via</code>.</td></tr>
+      <tr><td>Android back</td><td>Still zero <code>BackHandler</code>s on this screen. Pre-existing; carried forward from the #302 lab, not introduced here.</td></tr>
+      <tr><td>Unpriceable rows</td><td>Stay tappable, no badge, <code>NR</code> posRank; the builder warns, not the row.</td></tr>
+      <tr><td>Multi-position numeric leak</td><td>With 2+ positions selected <code>TeamRow</code> falls back to a raw number today — that now contradicts “no numeric values”. Separate item; flag it rather than fix it here.</td></tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>
