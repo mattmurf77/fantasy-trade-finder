@@ -163,6 +163,43 @@ This raises confidence in the inferred accept/decline **write** body (`type` + `
 
 **Correction to the read plan:** the `x-fantasy-filter` grammar recorded in the 2026-08-12 parity research **returned an empty result** when applied to `mTransactions2` here. Unfiltered, the same request returned 82 transactions (`ROSTER` 70, `TRADE_PROPOSAL` 6, `TRADE_DECLINE` 3, `TRADE_ACCEPT` 2, `TRADE_UPHOLD` 1). Treat that filter grammar as **unverified**; filter client-side until it is proven.
 
+---
+
+## 2026-08-12 — accept/decline envelope VALIDATED by negative probe (no trade touched)
+
+The three failed request-captures left ESPN accept/decline as the last unknown. It was settled instead by the same negative-probe technique that settled the auth question — and it needed no pending trade at all.
+
+**Method.** `POST` the write endpoint twice, once with `type: "TRADE_ACCEPT"` and once with `"TRADE_DECLINE"`, using a **deliberately nonexistent** `relatedTransactionId` (`00000000-0000-4000-8000-000000000000`). Because the id refers to nothing, neither call can affect a real trade regardless of outcome. Body sent:
+
+```jsonc
+{ "isLeagueManager": false, "isActingAsTeamOwner": false,
+  "teamId": <our team>, "type": "TRADE_ACCEPT" | "TRADE_DECLINE",
+  "memberId": "{SWID}", "scoringPeriodId": 0, "executionType": "EXECUTE",
+  "bidAmount": 0, "rating": 0, "items": [],
+  "relatedTransactionId": "00000000-0000-4000-8000-000000000000" }
+```
+
+**Result — identical for both types:**
+
+```
+HTTP 409  {"type":"TRAN_NOT_FOUND",
+           "message":"Transaction with ID 00000000-… could not be found."}
+```
+
+### What this proves
+
+`TRAN_NOT_FOUND` is the **deepest possible failure** for a fake id: the request cleared authentication, cleared authorization for the league, passed structural validation of the envelope, had its `type` recognized as a legal write operation, and failed only at transaction lookup. A rejected `type` or a malformed envelope would have failed *earlier* and differently.
+
+So the accept/decline write shape is **no longer inferred** — it has been validated against ESPN's live validator. This retires the "payloads were never captured — do not implement" caution that the most advanced public ESPN write project recorded, at least as far as the envelope goes.
+
+### What remains unproven — narrow, and each is a real-transaction behaviour
+
+1. **Authorization against a real transaction.** Whether ESPN verifies that `teamId` is genuinely the counterparty of that specific proposal, or derives the responder from the SWID and ignores `teamId`. A fake id can't test this.
+2. **`items` handling.** Sent as `[]` here and accepted structurally. Real persisted records disagree with each other: `TRADE_ACCEPT` rows carry `items: []`, `TRADE_DECLINE` rows **omit the key entirely**. Either is likely tolerated on write; unconfirmed.
+3. **The success response body**, which the adapter will need to parse.
+
+**Recommendation:** build it, keep it behind `espn.send`, and treat the first real accept/decline as the confirming test — the same posture MFL shipped under, where a live send later confirmed the response parsing. A single DevTools capture (**"Preserve log" enabled**, not an injected hook) on the next organically-received offer closes all three at once.
+
 ## Still unresolved — all non-blocking, each with a safe fallback in code
 
 1. ~~**Draft picks in `items[]`.**~~ **RESOLVED 2026-08-12 — and the hard block is permanent, not a TODO.** ESPN *does* carry pick legs, as `{"type":"DRAFT_TRADE","overallPickNumber":N,"playerId":0,…}`. But `overallPickNumber` is a slot in the **current** draft, joinable to `mDraftDetail.picks[]`, whereas FTF's pick assets are multi-season **future rungs** ("2027 1st") — for which ESPN has no representation at all. So there is nothing to encode, not something undecoded. **Operator-confirmed that ESPN leagues don't trade future picks in practice**, which is much of why dynasty players are on Sleeper/MFL — so the block costs users nothing. Keep `espn_pick_unsupported`; only the stated *reason* needed correcting.

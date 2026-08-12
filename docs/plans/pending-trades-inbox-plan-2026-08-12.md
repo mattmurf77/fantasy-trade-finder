@@ -108,11 +108,13 @@ Normalize all three to one shape — `mfl_service.parse_pending_trades` already 
 
 | | MFL | Sleeper | ESPN |
 |---|---|---|---|
-| **Accept** | **Shipped** `RESPONSE=accept` | `accept_trade(leg, league_id, transaction_id)` — **confirmed signature** | **UNCAPTURED** |
-| **Decline** | **Shipped** `RESPONSE=reject` | `reject_trade(...)` — **built, unrouted** | **UNCAPTURED** |
+| **Accept** | **Shipped** `RESPONSE=accept` | `accept_trade(leg, league_id, transaction_id)` — **confirmed signature** | **Envelope validated** (2026-08-12 negative probe) |
+| **Decline** | **Shipped** `RESPONSE=reject` | `reject_trade(...)` — **built, unrouted** | **Envelope validated** (same probe) |
 | **Revoke** | **Shipped** `RESPONSE=revoke` | no `cancel_trade`; likely `reject_trade` on own offer — *inferred* | `executionType:"CANCEL"` + `relatedTransactionId` — **confirmed, built, unrouted** |
 
-**ESPN accept/decline is the only genuine unknown left**, and it's being closed by a live capture as this plan is written. `force_cancel_transaction` on Sleeper is **commissioner-only** per the server's own description — do not use it for user revoke.
+**ESPN accept/decline is no longer blocked.** A negative probe — `TRADE_ACCEPT` and `TRADE_DECLINE` posted with a deliberately nonexistent `relatedTransactionId`, so nothing real could be touched — returned **409 `TRAN_NOT_FOUND`** for both. That is the *deepest* failure a fake id can reach: auth, league authorization, envelope validation, and `type` recognition all passed; only the lookup failed. The write shape is validated against ESPN's live validator rather than inferred.
+
+Three narrow unknowns remain, all requiring a *real* transaction: whether ESPN checks that `teamId` is genuinely the counterparty (or derives it from SWID); whether `items` should be `[]` or omitted (persisted records disagree — accept carries `[]`, decline omits it); and the success-response body the adapter must parse. **Build it behind `espn.send` and treat the first real accept as the confirming test** — the posture MFL shipped under. `force_cancel_transaction` on Sleeper is **commissioner-only** per the server's own description — do not use it for user revoke.
 
 Route: `POST /api/trades/respond` taking `{platform, league_id, trade_id, action}`, dispatching to the per-platform adapter. Mirrors `respond-mfl`'s error vocabulary. Fires `trade_responded` with non-null `platform` on confirmed success only.
 
@@ -167,7 +169,7 @@ Design notes, all Chalkline-governed (tokens only; no emoji icons, no gradients)
 1. **`GET /api/trades/pending`** with MFL (already built) + Sleeper (confirmed signatures). Ship backend-first, as MFL's lifecycle was.
 2. **ESPN read**, including the `mTransactions2` reconciliation — more work than the other two combined, and wrong without it.
 3. **`POST /api/trades/respond`** — MFL and Sleeper fully; ESPN revoke only.
-4. **ESPN accept/decline** — gated on the live capture.
+4. **ESPN accept/decline** — envelope validated by negative probe; build behind `espn.send`, first real accept is the confirming test.
 5. **The Offers tab** — the client work, platform-agnostic. Serves all three at once, and MFL's shipped-but-invisible lifecycle finally becomes visible.
 6. **Push notification on incoming offer** — natural follow-on, out of scope here.
 
