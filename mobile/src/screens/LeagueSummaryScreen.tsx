@@ -1806,7 +1806,16 @@ export default function LeagueSummaryScreen() {
                         style={[styles.rosterRow, sec.verb ? styles.rosterRowActionable : null]}
                       >
                         <PlayerCard
-                          testID={`league-summary.roster.${r.player_id}`}
+                          // `roster-player`, not `roster`, on purpose: Maestro
+                          // id selectors are REGEX, so `league-summary.roster..*`
+                          // would also match roster-close / roster-subset /
+                          // roster-posfilter / roster-mirror-toggle /
+                          // roster-picks, and a flow meaning "tap a player"
+                          // would tap the drill-in's exit. It sits on the
+                          // tile's own Pressable, which is what survives the
+                          // `accessible: true` subtree collapse
+                          // (flow-authoring law 3).
+                          testID={`league-summary.roster-player.${r.player_id}`}
                           dense
                           // #299 — this caller passes no `statsSlot`, so the
                           // dense row's line 2 held one tier badge and

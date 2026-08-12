@@ -385,6 +385,19 @@ if (screenCards.length === 1) {
   // styles.card has overflow:'hidden' so a child's hit area is clipped, and
   // the dense Pressable's accessible:true hides a child from VoiceOver AND
   // from Maestro id-selectors (flow-authoring law 3).
+  // The selector a Maestro flow reaches a player row with. `roster-player`
+  // rather than `roster` because Maestro id selectors are REGEX: the pattern
+  // `league-summary.roster..*` also matches roster-close, roster-subset,
+  // roster-posfilter, roster-mirror-toggle and roster-picks, so a flow
+  // meaning "tap a player" would tap the drill-in's own exit control.
+  assert(
+    /testID=\{`league-summary\.roster-player\.\$\{r\.player_id\}`\}/.test(
+      propText(card, 'testID') || '',
+    ),
+    '#300 the roster tile carries a collision-free per-player testID',
+    'sabotage detected: renaming it to `league-summary.roster.<id>` — the flow then taps `‹ All teams` and every later assertion fails for the wrong reason',
+  );
+
   const slot = propNode(card, 'rightSlot');
   assert(
     !!slot && findTag(slot, 'Pressable').length === 0 &&
