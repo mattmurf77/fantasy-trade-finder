@@ -15,8 +15,19 @@ mockups in [`mockups/candidates-300-v2/`](../../../../mockups/candidates-300-v2/
 **Builder:** backend build agent (`build-300-backend`, based on `origin/main`
 @ `62ff8d6`) + mobile build agent (`build-300-mobile`), running in parallel
 against a frozen field contract
-**Operator sign-off on waivers:** **NEEDED** — four waivers below (§1 analytics,
-§3 Maestro/capture, §4 three doc rows), each flagged inline
+**Operator sign-off on waivers:** **NEEDED** — three waivers remain below
+(§3 Maestro/capture, §4 three doc rows), each flagged inline. **§1's analytics
+waiver is CLOSED** (2026-08-12): the operator rejected it and the instrumentation
+is built on branch `analytics-300` — tracking plan in [`analytics.md`](analytics.md).
+
+> **2026-08-12 — this scope block was written for a DARK launch and the ship
+> was not one.** `d207b03` flipped `league.pos_candidates` and
+> `league.player_trade_handoff` **ON** and waived both the pre-ship simulator
+> gate (§5) and the Maestro flow execution (§3). §5's Tier 2 declaration and
+> §2's "both default OFF" therefore describe an intent that was overridden by
+> operator direction, not the state that shipped. The consequence is recorded
+> where it lands: with no runtime exercise before TestFlight, the two analytics
+> events in §1 are the only evidence the feature works at all.
 
 ---
 
@@ -40,28 +51,63 @@ against a frozen field contract
   moment on the server side. `GET /api/league/power-rankings` already emits
   nothing server-side today and #300 does not change that.
 
-- [ ] **(a)/(b) for the MOBILE half — DEFERRED TO THE MOBILE AGENT, and this
-  is a live waiver the operator should see.** #300 adds at least three genuinely
-  new user moments the backend cannot instrument: the divider being *seen*, a
-  team being opened *from a side of the line*, and the Offer/Target handoff into
-  the trade finder. Recommendation, not a decision:
+- [x] **(a) for the MOBILE half — WAIVER CLOSED 2026-08-12. Built and specced.**
+  Full tracking plan: [`analytics.md`](analytics.md). Two client event names,
+  no new properties on any shipped event, no server event, no route, no schema,
+  no flag.
 
-  | Event | Properties | Fires when | Client |
-  |---|---|---|---|
-  | (existing) `league_subset_changed` | `subset`, `from`, `source`, … | position pill changes | mobile |
-  | (existing) `league_team_opened` | `via`, `rank`, `basis`, `subset`, … | team drill-in opens — **extend with `side: above\|below\|at`** rather than adding an event | mobile |
-  | (new, if wanted) `league_candidate_action` | `action: offer\|target`, `side`, `pos` | Offer/Target tapped | mobile |
+  | Event | Properties | Fires when | Client | Intent? |
+  |---|---|---|---|---|
+  | (new) `league_candidate_pinned` | `verb` (offer\|target), `position`, `rank`, `side` (above\|below) | an Offer/Target row action is tapped — the pin is written and the finder entered | mobile | **INTENT** |
+  | (new) `league_pos_candidates_viewed` | `position`, `divider` (shown\|no_median\|no_split) | the single-position candidate view is reached (`candidatePos` non-null, payload resolved) | mobile | **NON-INTENT** |
+  | (existing) `league_team_closed` | unchanged `{via, dwell_ms, rank}` | unchanged | mobile | unchanged |
+  | (existing) `league_team_opened` | unchanged | unchanged | mobile | unchanged |
 
-  **Binding constraint if any new event is added:** it must go into
-  `ALLOWED_CLIENT_EVENTS` **and** `EVENT_PROPS` in `backend/analytics_taxonomy.py`
-  (DEFAULT-DENY — unregistered events are counted and dropped server-side, never
-  4xx'd, so an unregistered event is silently invisible), **and** the same commit
-  must make an explicit `NON_INTENT_EVENTS` decision in
-  `backend/analytics_queries.py`. `INTENT_EVENTS` is derived by subtraction, so a
-  new name that is not an intent event step-changes DAU/WAU permanently and
-  silently. Verdicts if the events above are built: a divider *impression* is
-  non-intent; `league_candidate_action` **is** intent (leave it out of
-  `NON_INTENT_EVENTS`).
+  **Why the exposure event exists, given the operator waived the sim gate and
+  the Maestro run:** `league_candidate_pinned` alone cannot be read. A zero on
+  it means "nobody found the divider" and "nobody wanted it" equally, and
+  nothing else on this branch will ever witness the feature rendering. No
+  shipped event covers the gap — `league_view` fires once per mount before any
+  pill is tapped, `league_subset_changed` fires on the All/Starters/Bench
+  control only (**a position-pill tap emits nothing today, anywhere in the
+  app**), and `league_team_opened` fires only for users who already acted,
+  which is the population whose absence is the thing being measured. This is
+  why the "extend `league_team_opened` with `side`" recommendation recorded
+  here on 2026-08-12 was **not** adopted for the exposure; `side` is carried on
+  the action event instead, where it is coherent with `verb`.
+
+  **The binding constraint, discharged.** Both names are in
+  `ALLOWED_CLIENT_EVENTS` **and** `CLIENT_EVENT_PROPS` in
+  `backend/analytics_taxonomy.py` (DEFAULT-DENY: unregistered names — and
+  unregistered *props* on registered names — are counted and dropped
+  server-side behind a 200, never 4xx'd), and the **same commit** makes the
+  explicit `NON_INTENT_EVENTS` decision in `backend/analytics_queries.py`:
+  `league_pos_candidates_viewed` is added (a passive exposure, and the only
+  event on that screen a user can emit without drilling in — INTENT would
+  promote every idle filter tap to a user-day), `league_candidate_pinned` is
+  deliberately left out (a real value moment, and it seams nothing because
+  every pin is preceded by an intent `league_team_opened`).
+
+  **The trap this feature specifically posed.** The divider renders only when
+  four clauses hold together (flag on · subset `all` · no `PICKS` · exactly one
+  core position), and rule A was removed from `togglePos` on this same branch —
+  so the condition moved *during the build*. The emitter therefore reads the
+  render's own `candidatePos` memo and re-derives none of the four clauses; a
+  copy that drifted loose would count every multi-position and every
+  Starters/Bench view as an exposure. Pinned four ways in
+  `mobile/tests/check-analytics-300.js` (sabotages S17–S20).
+
+  **Deliberately not instrumented,** with reasons in `analytics.md` §4: the
+  Buyer/Seller `band` (drives no behaviour by operator ruling; recoverable from
+  `rank` + `league_view.team_count`), the mirror disclosure toggle, a general
+  position-pill-changed event, and any server-side signal for the `medians`
+  field (the `no_median` value on the exposure is the client-side witness).
+
+  **Owed before any report reads these names:** the deploy-then-probe gate,
+  `analytics.md` §8. It must assert `accepted > 0` as well as `dropped == 0` —
+  without identity the response is
+  `{"accepted":0,"dropped":0,"rejected":[{"reason":"no_identity"}]}`, which
+  reads as a pass and is not one.
 
 ## 2. Schema & flag scope
 
@@ -109,6 +155,15 @@ against a frozen field contract
 - **Smoke-suite impact:** the backend change is additive to a response body no
   smoke flow asserts key-count on; flags are OFF so no mobile smoke flow's
   rendering changes. Expected green with no edit.
+- **Analytics lane (added 2026-08-12, branch `analytics-300`):** 5 new pytest
+  cases in `backend/tests/test_events_api.py` (`-k 300`) asserting the round
+  trip out of `user_events.props`, not the request — NAME survival and PROP
+  survival are separate silent failures. New client suite
+  `mobile/tests/check-analytics-300.js`, 51 assertions. **41 sabotages + 1
+  inert control, 42/42 accounted for, one genuine false pass found and fixed**
+  (matrix in [`analytics.md`](analytics.md) §8). Two suites were **already RED
+  on the base** because of `d207b03` and are fixed on the same branch — see
+  §8's first table.
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
@@ -118,7 +173,8 @@ against a frozen field contract
 | `living-memory/LLD.md` | n/a | No convention shifted. `medians` follows the existing additive-key precedent (`starters`, `tier`, `picks`) and reuses the existing `_aggregate_pick_label` helper rather than introducing a second value scale. |
 | `docs/architecture.md` | n/a | No module added, removed, or re-wired. `_position_medians` is a private helper in `server.py` beside the route it serves; `backend/power_rankings.py` is untouched. |
 | `living-memory/HLD.md` | n/a | No architecture shift: no new module, client, or major flow. |
-| `docs/cross-client-invariants.md` | **WAIVED, with a reason the operator should weigh** | The 33% band size (`round(team_count * 0.33)`) and the "line, not the label, is the direction rule" ruling are decided *client-side only* — no backend constant encodes them, and only one client (mobile) implements them. By the doc's own trigger ("a value that exists in multiple clients") it does not qualify today. **It will the moment web or the extension renders this divider**, and the value would then have to move server-side or be duplicated. Flagged rather than silently skipped. |
+| `docs/cross-client-invariants.md` (analytics enums) | **OWED — text written, not applied** | Added 2026-08-12 with the analytics work: `league_pos_candidates_viewed.divider` and `league_candidate_pinned.verb`/`side` are closed enums, and event names + props are a cross-client contract by that doc's own rule. Exact text in [`analytics.md`](analytics.md) §9. Orchestrator-owned. |
+| `docs/cross-client-invariants.md` (33% band) | **WAIVED, with a reason the operator should weigh** | The 33% band size (`round(team_count * 0.33)`) and the "line, not the label, is the direction rule" ruling are decided *client-side only* — no backend constant encodes them, and only one client (mobile) implements them. By the doc's own trigger ("a value that exists in multiple clients") it does not qualify today. **It will the moment web or the extension renders this divider**, and the value would then have to move server-side or be duplicated. Flagged rather than silently skipped. |
 | `docs/glossary.md` | **WAIVED** | "Buyer"/"Seller"/"median divider" are UI copy on one screen, not domain terms that appear in code identifiers or across clients. Revisit if the drill-in vocabulary spreads. |
 | `docs/config-reference.md` | **OWED (flags)** | Two new flag keys. Same orchestrator-collision reasoning as `api-reference.md`; the `_comment_league_pos_candidates` block in `config/features.json` carries the full description in the meantime. |
 | ADR / `DECISIONS.md` | **WAIVED** | Three decisions were made (median population, subset scope, label de-gating) but none overturns a prior design choice or sets a new convention — they are documented verbatim in the `_position_medians` docstring, which is where a future reader hits them. The one candidate for a `DECISIONS.md` entry is the **subset scope** — see §6, which the operator should read before merge. |
