@@ -49,7 +49,6 @@ import type { StudTaxMode } from '../api/calc';
 import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
-import { navigationRef } from '../navigation/RootNav';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
@@ -1392,7 +1391,7 @@ export default function SettingsScreen({ navigation }: any) {
             <Pressable
               testID="settings.sleeper-probe"
               accessibilityRole="button"
-              onPress={() => navigationRef.navigate('SleeperProbe')}
+              onPress={() => navigateFromSettings('SleeperProbe')}
               style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
             >
               <View style={{ flex: 1 }}>
