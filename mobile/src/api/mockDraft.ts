@@ -30,12 +30,19 @@ export type MockDraftType = 'linear' | 'snake';
 export type MockOrderSource = 'assigned' | 'randomized';
 export type MockPickBy = 'user' | 'cpu';
 
+/** #305 — who makes the picks. A CLOSED two-member enum on the wire
+ *  (`docs/cross-client-invariants.md`): `cpu` = computer drafters pick the
+ *  other teams; `manual` = the user picks for every team. Snapshotted into
+ *  `settings` at create and immutable for the life of the mock. */
+export type MockDraftMode = 'cpu' | 'manual';
+
 /** The refusals the engine ships today. Open by construction (D10) — read
  *  any other value as "not available right now" rather than failing. */
 export type MockEmptyReason =
   | 'no_active_mock'
   | 'class_not_loaded'
   | 'cpu_model_unvalidated'
+  | 'user_not_in_draft'
   | (string & {});
 
 export interface MockOnTheClock {
@@ -85,6 +92,30 @@ export interface MockSettingsEcho {
   order_source: MockOrderSource | null;
   personas: Record<string, MockPersona> | null;
   noise: Record<string, number> | null;
+  /** #305 — the ONLY source of mode truth. Never infer mode from `by`
+   *  values, pick cadence, or `on_the_clock`. Nullable in the TYPE only
+   *  (an old server omits it); the new server always sends it. */
+  mode: MockDraftMode | null;
+  /** #295/#305 — the caller's team id in this draft: THE join key for
+   *  "my team" (`my_picks`, ticker highlight, `for_own_team`). Never key
+   *  "my team" off `by` — in manual mode every pick is `by: "user"` while
+   *  `picked_by_user_id` walks the order. Nullable in the TYPE only. */
+  user_owner_id: string | null;
+}
+
+/** The GET typed-empty's ride-along probe (#295 R9) — shipped-but-untyped
+ *  until now. `reason` carries the refusal ladder's answer
+ *  (`user_not_in_draft` included), which is what lets the entry card render
+ *  disabled BEFORE any POST. */
+export interface MockCapability {
+  can_start: boolean;
+  reason: MockEmptyReason | null;
+  teams: number;
+  min_teams: number;
+  rounds_default: number;
+  rounds_max: number;
+  type: MockDraftType | null;
+  order_source: MockOrderSource | null;
 }
 
 export interface MockDraftState {
@@ -109,6 +140,8 @@ export interface MockDraftEmpty {
   schema: number;
   empty: true;
   reason: MockEmptyReason;
+  /** GET only — the POST typed-empty is exactly three keys. */
+  capability?: MockCapability;
 }
 
 export type MockDraftResponse = MockDraftState | MockDraftEmpty;
@@ -146,6 +179,7 @@ export async function createMockDraft(params: {
   leagueId: string;
   rounds?: number;
   type?: MockDraftType;
+  mode?: MockDraftMode;
 }): Promise<MockDraftResponse> {
   return checked(
     await api.post<MockDraftResponse>('/api/mock-draft', {
@@ -154,6 +188,9 @@ export async function createMockDraft(params: {
       // responsibility: the route defaults to a flat 4 (gap G9).
       ...(params.rounds != null ? { rounds: params.rounds } : {}),
       ...(params.type ? { type: params.type } : {}),
+      // #305 — spread only when set, so a 1.12.x-shaped call is
+      // byte-identical on the wire.
+      ...(params.mode ? { mode: params.mode } : {}),
     }),
   );
 }

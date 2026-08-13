@@ -40,7 +40,7 @@ import {
   space,
   type,
 } from '../../theme/chalkline';
-import type { MockDraftType } from '../../api/mockDraft';
+import type { MockDraftMode, MockDraftType } from '../../api/mockDraft';
 
 /** Mirrors `mock_draft_service._ROOKIE_MAX_ROUNDS` / `DEFAULT_ROUNDS`. */
 export const MOCK_MIN_ROUNDS = 1;
@@ -50,6 +50,7 @@ export const MOCK_DEFAULT_ROUNDS = 4;
 export interface MockSetupResult {
   rounds: number;
   type: MockDraftType;
+  mode: MockDraftMode;
 }
 
 export default function MockSetupSheet({
@@ -78,6 +79,10 @@ export default function MockSetupSheet({
 }) {
   const [rounds, setRounds] = useState(defaultRounds ?? MOCK_DEFAULT_ROUNDS);
   const [draftType, setDraftType] = useState<MockDraftType>('linear');
+  // #305 — default CPU (plan §10 Q2): the sim loop is the feature's core,
+  // and defaulting to manual would hide the repaired CPU loop the same
+  // reports asked for.
+  const [mode, setMode] = useState<MockDraftMode>('cpu');
 
   // Re-seed each time the sheet opens: the board may have refreshed since
   // the last open, and a stale pre-fill is worse than no pre-fill.
@@ -85,6 +90,7 @@ export default function MockSetupSheet({
     if (!visible) return;
     setRounds(clampRounds(defaultRounds ?? MOCK_DEFAULT_ROUNDS));
     setDraftType('linear');
+    setMode('cpu');
   }, [visible, defaultRounds]);
 
   return (
@@ -162,6 +168,34 @@ export default function MockSetupSheet({
             </Text>
           </View>
 
+          {/* #305 — who makes the picks. The field label + segment reads as
+              one sentence ("You pick for → Your team / Every team"), so the
+              choice is self-evident without knowing how the app works. */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>You pick for</Text>
+            <View style={styles.seg}>
+              <TypeSeg
+                testID="mock-setup.mode.cpu"
+                label="Your team"
+                active={mode === 'cpu'}
+                disabled={busy}
+                onPress={() => setMode('cpu')}
+              />
+              <TypeSeg
+                testID="mock-setup.mode.manual"
+                label="Every team"
+                active={mode === 'manual'}
+                disabled={busy}
+                onPress={() => setMode('manual')}
+              />
+            </View>
+            <Text style={styles.fieldHint}>
+              {mode === 'manual'
+                ? 'You make each team’s pick, in draft order, from first to last.'
+                : 'Computer drafters handle the other teams and stop when you’re up.'}
+            </Text>
+          </View>
+
           {!orderAssigned ? (
             <Text testID="mock-setup.order-notice" style={styles.orderNotice}>
               Your league hasn’t set a draft order, so we’ll shuffle one and
@@ -180,12 +214,19 @@ export default function MockSetupSheet({
             label="Start"
             variant="primary"
             loading={busy}
-            onPress={() => onStart({ rounds, type: draftType })}
+            onPress={() => onStart({ rounds, type: draftType, mode })}
           />
-          <Text style={styles.footNote}>
-            Nothing here is written to your league. Computer drafters pick for
-            the other {teams != null && teams > 1 ? teams - 1 : ''} teams.
-          </Text>
+          {mode === 'manual' ? (
+            <Text style={styles.footNote}>
+              Nothing here is written to your league. You’re making every pick
+              in this mock.
+            </Text>
+          ) : (
+            <Text style={styles.footNote}>
+              Nothing here is written to your league. Computer drafters pick for
+              the other {teams != null && teams > 1 ? teams - 1 : ''} teams.
+            </Text>
+          )}
           <Button
             testID="mock-setup.cancel"
             label="Cancel"

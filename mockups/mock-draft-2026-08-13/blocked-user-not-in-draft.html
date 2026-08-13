@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Draft Lab — user_not_in_draft blocked states (#295)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:17px;color:var(--chalk);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk)}
+.lab{display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)}
+.cap{font-size:12px;color:var(--faint);max-width:390px;text-align:center;line-height:1.5}
+.shot{width:390px;border:1px solid var(--line);border-radius:22px;display:block}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);background:rgba(12,14,17,.94);border-radius:2px;padding:2px 6px;line-height:1.45}
+.ann.c{color:var(--ice);border:1px solid var(--ice)}
+.ann.w{color:var(--warn);border:1px solid var(--warn)}
+
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:52px;display:flex;align-items:center;gap:8px;padding:0 14px}
+.topbar .tick{width:3px;height:22px;background:var(--ice)}
+.topbar .lstack{display:flex;flex-direction:column;line-height:1.15}
+.topbar .micro{font-size:11px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;font-weight:600}
+.topbar .lname{font-size:15px;font-weight:600}
+.fmt{background:var(--ink3);border-radius:2px;padding:2px 6px;font-size:11px;font-weight:600;letter-spacing:.06em}
+.h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:24px;text-align:center;padding:10px 0}
+.modeseg{display:flex;margin:0 16px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.modeseg .seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid transparent}
+.modeseg .seg.on{background:var(--ink3);color:var(--chalk);border-bottom-color:var(--flare)}
+.mrail{margin-top:12px;display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(240,80,140,.08);border-bottom:2px solid var(--flare)}
+.mrail .l{color:var(--flare);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.mrail .r{color:var(--dim);font-size:13px}
+
+.ecard{margin:16px;border:1px solid var(--line);border-radius:4px;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--ink1);position:relative}
+.ecard .t{font-size:17px;font-weight:600;color:var(--dim)}
+.ecard .b{font-size:13px;color:var(--dim);line-height:1.45}
+.deadbtn{min-height:44px;border:1px solid var(--lineStrong);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--chalk);opacity:.45}
+
+.tabbar{position:absolute;bottom:0;left:0;right:0;height:64px;border-top:1px solid var(--line);background:var(--ink0);display:flex;align-items:center;justify-content:space-around;padding-bottom:8px}
+.tab{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--dim)}
+.tab.on{color:var(--ice)}
+.tab svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.75}
+
+/* session-screen empty */
+.nav{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.nav .back{color:var(--chalk);font-size:18px}
+.nav .ttl{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:20px}
+.nav .sp{width:18px}
+.centerfill{padding:80px 24px 0;display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;position:relative}
+.centerfill .body{font-size:13px;color:var(--chalk);line-height:1.55}
+.ghostbtn{font-size:14px;font-weight:600;color:var(--dim);padding:8px 12px}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Blocked entry — <code>user_not_in_draft</code> (#295 fail-loud half)</h1>
+  <p><b>What this page shows.</b> The new refusal has two client surfaces, both drawn against their real
+  captures: the Draft Room's entry card (seventh <code>mockBlock</code> arm,
+  <code>mock-entry.blocked.user_not_in_draft</code>) and the session screen's typed-empty
+  (<code>mock-draft.empty.user_not_in_draft</code>). The entry card disables <b>before any POST</b> — the GET
+  ride-along <code>capability</code> now carries <code>can_start: false, reason: "user_not_in_draft"</code>
+  (LLD §3.3), so the user meets the refusal on arrival, not one tap late.</p>
+  <p><b>Copy contract:</b> honest about why (no seat for your team in this draft), <b>no promise of timelines</b>
+  and no “try again later”. Body and CTA strings are the LLD §1.6 placeholders —
+  <span style="color:var(--warn)">PRD owns final wording</span>.</p>
+  <p><b>Capture note:</b> no capture of any blocked-arm card exists in the screen library (the six shipped arms
+  were never captured — coverage gap, not policy). The nearest real captures are embedded: the healthy entry card
+  and the session screen's <code>no_active_mock</code> empty.</p>
+</div>
+
+<div class="lab">
+
+  <!-- CURRENT: healthy entry card -->
+  <div class="side">
+    <div class="tag cur">Current — capture (healthy entry)</div>
+    <img class="shot" src="../../screens/mobile/mock-draft/entry--card.png" alt="Shipped Draft Room mock entry card capture">
+    <div class="cap">Real capture (<code>entry--card.png</code>). The Mock side's entry card in its healthy state
+    — flare border, live CTAs. The blocked arms replace this card with a muted variant (line border, dim title,
+    dead CTA); none of the six shipped blocked arms has a capture.</div>
+  </div>
+
+  <!-- PROPOSAL: blocked card -->
+  <div class="side">
+    <div class="tag pro">Proposal — blocked card</div>
+    <div class="phone" style="min-height:844px">
+      <div class="status"><span>6:02</span><span>◦◦◦ ▮</span></div>
+      <div class="topbar">
+        <div class="tick"></div>
+        <div class="lstack"><span class="micro">League</span><span class="lname">Newton Dynasty League</span></div>
+        <span class="fmt">SF&nbsp;&nbsp;TEP</span>
+      </div>
+      <div class="h1">Rookie draft</div>
+      <div class="modeseg"><div class="seg">Real draft</div><div class="seg on">Mock</div></div>
+      <div class="mrail"><span class="l">Mock draft</span><span class="r">not your league’s real draft</span></div>
+      <div class="ecard">
+        <div class="t">Mock draft</div>
+        <div class="b">We couldn’t find your team in this league’s draft, so there’s no seat for you to draft from.</div>
+        <div class="deadbtn">Your team isn’t in this draft</div>
+        <div class="ann c" style="right:8px;top:-10px">mock-entry.blocked.user_not_in_draft</div>
+        <div class="ann w" style="left:8px;bottom:-10px">body + CTA: PRD copy</div>
+      </div>
+      <div class="ann c" style="left:16px;top:395px;max-width:340px">muted on ARRIVAL — GET capability.reason,<br>no POST needed (LLD §3.3 probeReason)</div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 16V9M10 16V4M16 16v-5"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 7h10l-2.5-2.5M16 13H6l2.5 2.5"/></svg>Acquire</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M6 17V3h8l-2 3 2 3H6"/></svg>Draft</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="7" cy="13" r="3.2"/><circle cx="13" cy="7" r="3.2"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16l3-8 4 5 4-9 3 12z"/></svg>League</div>
+      </div>
+    </div>
+    <div class="cap">Seventh blocked arm, same muted construction as the six shipped ones: <code>--line</code>
+    border (flare highlight withdrawn), dim title, plain-words body, disabled secondary button whose label states
+    the condition — never “Start”. Newton (ESPN, the #305 reporter's league) shown because a stale roster
+    takeover / commissioner rebuild there is the realistic trigger.</div>
+  </div>
+
+  <!-- CURRENT: session empty -->
+  <div class="side">
+    <div class="tag cur">Current — capture (session empty)</div>
+    <img class="shot" src="../../screens/mobile/mock-draft/empty--no-active-mock.png" alt="Shipped MockDraftScreen typed-empty capture">
+    <div class="cap">Real capture (<code>empty--no-active-mock.png</code>). The session screen's typed-empty
+    branch: mode rail stays up, centered copy, ghost return button. Today an unknown reason degrades to the
+    <code>default:</code> arm (“This mock draft isn’t available right now.”).</div>
+  </div>
+
+  <!-- PROPOSAL: session empty, new arm -->
+  <div class="side">
+    <div class="tag pro">Proposal — session typed-empty arm</div>
+    <div class="phone" style="min-height:844px">
+      <div class="status"><span>6:03</span><span>◦◦◦ ▮</span></div>
+      <div class="nav"><span class="back">‹</span><span class="ttl">Mock draft</span><span class="sp"></span></div>
+      <div class="mrail" style="margin-top:0"><span class="l">Mock draft</span><span class="r">not your league’s real draft</span></div>
+      <div class="centerfill">
+        <div class="body">Your team isn’t in this league’s draft, so there’s no seat to mock from.</div>
+        <div class="ghostbtn">Back to the draft room</div>
+        <div class="ann c" style="right:0;top:-14px">mock-draft.empty.user_not_in_draft</div>
+        <div class="ann w" style="left:0;bottom:-34px">must differ from the default: arm (T-295-10) · PRD copy</div>
+      </div>
+    </div>
+    <div class="cap">The deep-link / stale-navigation landing: one new <code>emptyCopy</code> arm, same layout as
+    every typed-empty. The testID is template-generated (<code>mock-draft.empty.${emptyReason}</code>) —
+    no structural change, copy only. No timeline promised, no retry implied: the ghost button returns to the room,
+    where the muted card states the same fact.</div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Rationale</h2>
+  <ul>
+    <li><b>Placement in the ladder:</b> the arm sits after <code>class_not_loaded</code> — with the
+    server-answered refusals, ahead of the board-derived ones — keyed on
+    <code>postRefusal === 'user_not_in_draft' || probeReason === 'user_not_in_draft'</code> (LLD §3.3). Drawing it
+    as a muted card (not an error card) matches its nature: a league condition, not a failure.</li>
+    <li><b>The dead CTA states the condition.</b> House rule from the six shipped arms: the button label never
+    says “Start” and never lies about a tap doing something. “Your team isn't in this draft” follows
+    “Needs 6+ teams” / “Not during a live draft” grammar.</li>
+    <li><b>Why both surfaces:</b> the entry card covers the normal path (probe answers before any tap); the
+    session-screen arm covers arrivals that bypass the room (deep link, back-stack resume, a mock that refused at
+    create via the engine raise). Both speak the one reason vocabulary — the user never learns which enforcement
+    point fired (HLD §3.3).</li>
+    <li><b>Honesty floor:</b> neither surface suggests when or whether this resolves — that depends on the
+    league's platform data, which the app can't promise. The copy names the fact and stops.</li>
+  </ul>
+</div>
+
+</body>
+</html>

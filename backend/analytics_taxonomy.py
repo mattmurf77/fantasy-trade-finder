@@ -251,6 +251,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # CLIENT_EVENT_PROPS). Re-adding a name is harmless in a set but the
     # prop-row edit is not, and the two are easy to confuse.
     "invite_cta_shown", "invite_cta_tapped",
+    # ── #295/#296/#305 mock-draft family, 2026-08-13 ─────────────────────
+    # Registration-ONLY commit, ordered FIRST on branch mock-draft-fix
+    # (INV-11): this registry is default-deny behind a 200, so a name that
+    # arrives after its track() call is silent data loss. All five are
+    # CLIENT-fired (one family, one namespace — no SERVER_FIRED_EVENTS
+    # sibling exists or may be added without a rename; the #292 server-side
+    # bulk-clear emits nothing). `mock_completed` and `mock_create_refused`
+    # are NON_INTENT — their analytics_queries.NON_INTENT_EVENTS rows land
+    # in this SAME commit (the DAU-seam rule; see that file's block comment).
+    # `platform` on every row is the LEAGUE platform from the session league
+    # cache (the InLeagueCalculator convention), never the device platform.
+    "mock_started", "mock_pick_made", "mock_completed", "mock_abandoned",
+    "mock_create_refused",
     # Notification-inbox growth surface, 2026-08-13 — the bell's first
     # instrumentation of any kind. Tracking plan:
     # docs/plans/notif-inbox-growth/analytics.md.
@@ -726,6 +739,28 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                         "total_mates", "platform"}),
     "invite_cta_tapped":     frozenset({"surface", "not_joined",
                                         "total_mates", "platform"}),
+    # ── #295/#296/#305 mock-draft family, 2026-08-13 ─────────────────────
+    # `platform` (REQUIRED on all five, never null) is the LEAGUE platform
+    # (sleeper | espn | mfl | fleaflicker | unknown) from the session league
+    # cache — the InLeagueCalculator convention verbatim, NOT the device
+    # platform (that is a user_events COLUMN; the NULL-`platform` incident).
+    # `mode` ∈ cpu | manual = settings_echo.mode, the only mode truth.
+    # `mock_started` props read off the server's resolved settings_echo,
+    # never the setup sheet's request values. `mock_pick_made.for_own_team`
+    # = the just-picked slot's roster_id vs settings_echo.user_owner_id
+    # (always true in cpu mode). `mock_completed.user_picks` counts
+    # my_picks.length — the user's TEAM's picks, never a `by == "user"`
+    # count (in manual mode every pick is by:"user").
+    # `mock_create_refused.reason` is the typed-empty reason verbatim
+    # (open string).
+    "mock_started":        frozenset({"platform", "teams", "rounds", "type",
+                                      "order_source", "mode"}),
+    "mock_pick_made":      frozenset({"platform", "mode", "round", "pick_no",
+                                      "for_own_team"}),
+    "mock_completed":      frozenset({"platform", "mode", "rounds", "teams",
+                                      "user_picks"}),
+    "mock_abandoned":      frozenset({"platform", "mode", "picks_made"}),
+    "mock_create_refused": frozenset({"platform", "reason"}),
     # ── Bell inbox, 2026-08-13 ────────────────────────────────────────────
     # Tracking plan: docs/plans/notif-inbox-growth/analytics.md. MOBILE
     # ONLY — web/js/app.js has no analytics SDK (no track(), no /api/events

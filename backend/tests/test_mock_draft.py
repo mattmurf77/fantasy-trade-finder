@@ -101,11 +101,32 @@ def linear_players(n: int, positions=("WR", "RB", "TE", "QB")) -> list[tuple]:
 def make_state(ctx, *, owners, user, rounds=2, draft_type=mds.TYPE_LINEAR,
                ownership=None, personas=None, seed=7, bpa_prob=None,
                decay=None, reach=None):
+    """Engine-test harness state.
+
+    #295/#296/#305 made ``build_settings`` refuse the degenerate shapes many
+    of these engine tests exercise ON PURPOSE: a phantom ``user`` outside the
+    order (so the whole draft is CPU) now raises ``UserNotInDraft`` (INV-6),
+    and an explicit order under ``MOCK_MIN_TEAMS`` now floors to a labelled
+    shuffle (§14-2). Those guards protect the CONSTRUCTION path; the CPU-
+    behaviour tests here need the old tiny/user-less snapshots, so this
+    helper builds through ``build_settings`` with a compliant user and then
+    re-imposes the test's intended ``order``/``order_source``/
+    ``user_owner_id`` on the snapshot — a hand-built state, which is exactly
+    what ``advance_cpu``'s fail-soft defences exist for. The guards
+    themselves are pinned by T-295-06/T-295-16, which drive ``build_settings``
+    directly.
+    """
+    owners = [str(o) for o in owners]
     settings = mds.build_settings(
-        ctx, owners=owners, user_owner_id=user, rounds=rounds,
+        ctx, owners=owners,
+        user_owner_id=user if str(user) in owners else owners[0],
+        rounds=rounds,
         draft_type=draft_type, order=list(owners),
         order_source=mds.ORDER_SOURCE_ASSIGNED, ownership=ownership,
         personas=personas, rng=random.Random(seed))
+    settings["order"] = list(owners)
+    settings["order_source"] = mds.ORDER_SOURCE_ASSIGNED
+    settings["user_owner_id"] = str(user)
     if bpa_prob is not None:
         settings["noise"]["bpa_prob"] = bpa_prob
     if decay is not None:
@@ -900,6 +921,16 @@ from backend.trade_service import League, LeagueMember         # noqa: E402
 ROUTE = "/api/mock-draft"
 ROUTE_TOKEN = "test-token-w2-01"
 OPERATOR = "313560442465169408"
+#: The shared route session's caller — a QA id, NOT the operator's, so route
+#: creates never write mock rows under a real user in the local dev DB. The
+#: two corpus e2e tests (T-295-01/T-295-03) use OPERATOR because the recorded
+#: leagues' orders name that id, and clean up the rows they create.
+QA_CALLER = "990000000000000042"
+#: The shared session's rookie pool: p1..p30, strictly descending consensus.
+#: p21..p28 are rostered by the four opponents, p29/p30 by the caller, so the
+#: consensus pool is exactly p1..p20 — one player per slot of a default
+#: 5-team x 4-round mock.
+_SESSION_POOL_IDS = [f"p{i}" for i in range(1, 31)]
 
 
 def _pin_flags(**overrides) -> dict:
@@ -933,27 +964,72 @@ def client():
     return server.app.test_client()
 
 
+def _abandon_all_mocks(user_id: str, league_id: str) -> None:
+    """Retire every surfaceable mock row for `(user, league)` — test hygiene
+    so one test's create can never leak into another's GET."""
+    from backend.database import load_current_mock_draft, update_mock_draft
+    row = load_current_mock_draft(user_id, league_id)
+    while row:
+        update_mock_draft(row["id"], user_id, status="abandoned")
+        row = load_current_mock_draft(user_id, league_id)
+
+
+def _session_player_rows(requested):
+    rows = {pid: {"full_name": f"Rookie {pid}",
+                  "position": ("WR", "RB", "TE", "QB")[i % 4], "team": "ARI",
+                  "rookie_year": "2026", "search_rank": i + 1}
+            for i, pid in enumerate(_SESSION_POOL_IDS)}
+    return {pid: rows[pid] for pid in requested if pid in rows}
+
+
 @pytest.fixture()
-def session(monkeypatch):
-    pool = [Player(id="p1", name="Rookie One", position="WR", team="ARI", age=22)]
+def session(monkeypatch, tmp_path):
+    """The shared route session, in the PRODUCTION shape (#295 §7.0 rewrite).
+
+    The shipped fixture put the caller INSIDE ``league.members`` — the exact
+    inverse of ``/api/session/init``'s convention, and the coincidence that
+    blinded #291. The contract, pinned by ``test_295_02``:
+
+    * ``league.members`` holds the FOUR caller-excluded opponents (4 + the
+      caller = 5 teams, over ``MOCK_MIN_TEAMS``), small disjoint rosters;
+    * the caller's roster rides ``sess["user_roster"]``, never ``members``;
+    * ``sess["display_name"]`` is set.
+
+    Hermetic: ``_SLEEPER_FIXTURES_DIR`` points at an EMPTY dir, so a board
+    read on the create path is a fixture MISS that raises inside
+    ``build_board`` (which catches and degrades to the honest no-order
+    board) — never a live call.
+    """
+    positions = ("WR", "RB", "TE", "QB")
+    pool = [Player(id=pid, name=f"Rookie {pid}", position=positions[i % 4],
+                   team="ARI", age=22)
+            for i, pid in enumerate(_SESSION_POOL_IDS)]
+    elo = {pid: 2000.0 - i for i, pid in enumerate(_SESSION_POOL_IDS)}
     service = RankingService(players=pool)
+    opponents = [
+        LeagueMember(user_id=f"99000000000000010{k}", username=f"opp{k}",
+                     roster=[f"p{21 + 2 * k}", f"p{22 + 2 * k}"],
+                     elo_ratings={})
+        for k in range(4)
+    ]
     league = League(league_id=LAKEVIEW_LEAGUE, name="Lakeview", platform="sleeper",
-                    members=[LeagueMember(user_id=OPERATOR, username="op",
-                                          roster=[], elo_ratings={})])
-    sess = {"user_id": OPERATOR, "league": league, "players": pool,
+                    members=opponents)
+    sess = {"user_id": QA_CALLER, "league": league, "players": pool,
+            "user_roster": ["p29", "p30"], "display_name": "QA Caller",
             "services": {"1qb_ppr": service}, "service": service,
             "trade_svc": object(), "active_format": "1qb_ppr", "last_active": 0.0}
-    monkeypatch.setattr(server, "_get_universal_pool",
-                        lambda fmt: (pool, {"p1": 1500.0}))
-    monkeypatch.setattr(server, "_rookie_player_ids", lambda season: {"p1"})
+    monkeypatch.setattr(server, "_get_universal_pool", lambda fmt: (pool, elo))
+    monkeypatch.setattr(server, "_rookie_player_ids",
+                        lambda season: set(_SESSION_POOL_IDS))
     monkeypatch.setattr(server, "get_league_draft_context",
                         lambda lid: {"platform": "sleeper", "season": 2026})
     monkeypatch.setattr(server, "_sleeper_lineup_slots", lambda lid: STANDARD_LINEUP)
-    monkeypatch.setattr(dbs, "database_players",
-                        lambda ids: {"p1": {"full_name": "Rookie One",
-                                            "position": "WR", "team": "ARI",
-                                            "rookie_year": "2026",
-                                            "search_rank": 1}})
+    monkeypatch.setattr(dbs, "database_players", _session_player_rows)
+    empty_fixtures = tmp_path / "no-sleeper-fixtures"
+    empty_fixtures.mkdir(exist_ok=True)
+    monkeypatch.setattr(server, "_SLEEPER_FIXTURES_DIR", str(empty_fixtures))
+    monkeypatch.setattr(server, "_SLEEPER_RECORD", False)
+    _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
     with server._sessions_lock:
         server._sessions[ROUTE_TOKEN] = sess
     try:
@@ -961,10 +1037,29 @@ def session(monkeypatch):
     finally:
         with server._sessions_lock:
             server._sessions.pop(ROUTE_TOKEN, None)
+        _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
 
 
 def _post(client, path=ROUTE, **body):
     return client.post(path, json=body, headers={"X-Session-Token": ROUTE_TOKEN})
+
+
+def test_295_02_the_route_fixture_is_production_shaped(session):
+    """T-295-02 — the fixture-contract tripwire (sabotage: re-add the caller
+    to the fixture's members; this test must fail on the PRE-rewrite fixture
+    too).
+
+    The app-wide convention is that ``league.members`` NEVER contains the
+    caller (``/api/session/init`` refuses to re-add them) and the caller's
+    roster rides ``sess["user_roster"]``. The shipped fixture inverted that —
+    the exact coincidence that let #291's suite pass while every live mock
+    was born user-less. The suite must fail if anyone "fixes" it back.
+    """
+    member_ids = {str(m.user_id) for m in session["league"].members}
+    assert str(session["user_id"]) not in member_ids
+    assert session["user_id"], "the shared fixture's caller must be a real id"
+    assert session.get("user_roster"), "the caller's roster rides the session"
+    assert session.get("display_name")
 
 
 def test_w2_01_flag_off_404s_every_mock_route(client, flag_off, session):
@@ -1041,14 +1136,16 @@ def test_the_abort_criterion_is_enforced_at_the_route(client, flag_on, session):
     contract itself is unchanged and still covered when the gate is closed.
     """
     assert mds.CPU_MODEL_VALIDATED is True
-    resp = _post(client, league_id=LAKEVIEW_LEAGUE)
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, rng_seed=7)
     assert resp.status_code == 200
     body = resp.get_json()
-    # The gate no longer refuses. Any remaining typed-empty must come from a
-    # DIFFERENT rung of the ladder (this fixture league is under MOCK_MIN_TEAMS),
-    # never from the calibration gate.
+    # The gate no longer refuses — and post-#295 the shared session is a
+    # 5-team league that clears the WHOLE ladder, so an open gate now means
+    # a real created mock, not a typed-empty from a later rung.
     assert body.get("reason") != "cpu_model_unvalidated", body
     assert body["schema"] == 1
+    assert not body.get("empty"), body
+    assert body.get("mock_id")
 
 
 def test_get_with_no_mock_is_a_typed_empty_not_a_404(client, flag_on, session):
@@ -1146,26 +1243,29 @@ def test_w2_20_g1_traded_slots_become_pick_ownership_and_move_the_clock():
     shape is `{pick_no: owner}`, and the overall pick number depends on THIS
     mock's rounds/teams/type. `build_settings` owns that translation.
     """
+    # 4 teams since #295: an explicit order under MOCK_MIN_TEAMS is floored
+    # to a shuffle (T-295-16), so the translation is asserted on a compliant
+    # shape.
     ctx = make_ctx(players=linear_players(8))
     settings = mds.build_settings(
-        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
-        draft_type=mds.TYPE_SNAKE, order=["a", "b", "c"],
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=2,
+        draft_type=mds.TYPE_SNAKE, order=["a", "b", "c", "d"],
         order_source=mds.ORDER_SOURCE_ASSIGNED,
         traded_slots={(2, 3): "a"}, rng=random.Random(1))
-    # Snake: round 2 runs 3,2,1, so slot 3 in round 2 is overall pick 4.
-    assert settings["ownership"] == {"4": "a"}
+    # Snake: round 2 runs 4,3,2,1, so slot 3 in round 2 is overall pick 6.
+    assert settings["ownership"] == {"6": "a"}
     state = mds.new_state(ctx, settings, 7)
     state["picks"] = [{"pick_no": i, "round": 1, "slot": i, "roster_id": "x",
-                       "player_id": f"p{i}", "by": "cpu"} for i in (1, 2, 3)]
+                       "player_id": f"p{i}", "by": "cpu"} for i in (1, 2, 3, 4, 5)]
     assert mds.next_pick(state)["roster_id"] == "a"      # not "c"
 
     # An explicit `ownership` entry still wins — the persisted shape is the
     # one a resumed row replays from.
     override = mds.build_settings(
-        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=2,
         draft_type=mds.TYPE_SNAKE, traded_slots={(2, 3): "a"},
-        ownership={4: "b"}, rng=random.Random(1))
-    assert override["ownership"] == {"4": "b"}
+        ownership={6: "b"}, rng=random.Random(1))
+    assert override["ownership"] == {"6": "b"}
 
 
 def test_w2_20_g1_a_randomized_order_is_still_labelled_randomized():
@@ -1239,12 +1339,12 @@ def test_w2_20_g2_the_capability_probe_answers_without_starting_a_mock(
     cap = payload["capability"]
     assert set(cap) == {"can_start", "reason", "teams", "min_teams",
                         "rounds_default", "rounds_max", "type", "order_source"}
-    assert cap["can_start"] is False
-    # Operator override 2026-08-06: the calibration gate is OPEN, so the first
-    # refusal a 1-member session league hears is the size rung. The property
-    # under test is unchanged — the probe reports the SAME first refusal the
-    # create route would, whatever that rung happens to be.
-    assert cap["reason"] == mds.REASON_LEAGUE_TOO_SMALL
+    # Post-#295 the probe counts the CALLER too (R4/INV-3): 4 caller-excluded
+    # members + the caller = 5 teams, over the floor, so the honest answer is
+    # can_start. The refusal answers are pinned by T-295-08/T-295-09.
+    assert cap["can_start"] is True
+    assert cap["reason"] is None
+    assert cap["teams"] == 5
     assert cap["min_teams"] == mds.MOCK_MIN_TEAMS
     assert (cap["rounds_default"], cap["rounds_max"]) == (mds.DEFAULT_ROUNDS, 8)
 
@@ -2565,7 +2665,7 @@ def test_290_13_no_player_lookup_uses_an_uncrosswalked_id(
     safe by construction because `ctx.player_rows` is keyed on
     `_rookie_player_ids(season)`; this test is what keeps it that way.
     """
-    allowed = {"p1"}
+    allowed = set(_SESSION_POOL_IDS)      # the fixture's whole rookie class
     seen = []
 
     def _strict_players(ids):
@@ -2573,11 +2673,10 @@ def test_290_13_no_player_lookup_uses_an_uncrosswalked_id(
         seen.append(got)
         extra = got - allowed
         assert not extra, f"player lookup used non-rookie ids: {sorted(extra)}"
-        return {"p1": {"full_name": "Rookie One", "position": "WR",
-                       "team": "ARI", "rookie_year": "2026", "search_rank": 1}}
+        return _session_player_rows(got)
 
     monkeypatch.setattr(dbs, "database_players", _strict_players)
-    created = _post(client, league_id=LAKEVIEW_LEAGUE)
+    created = _post(client, league_id=LAKEVIEW_LEAGUE, rng_seed=13)
     assert created.status_code in (200, 201), created.get_data()
     got = client.get(f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}",
                      headers={"X-Session-Token": ROUTE_TOKEN})
@@ -2664,3 +2763,560 @@ def test_292_04_a_second_mock_creates_after_a_completed_one():
     assert load_mock_draft(first)["status"] == "complete"
     current = load_current_mock_draft(user, league)
     assert current["id"] == second and current["status"] == "active"
+
+
+# ===========================================================================
+# #295/#296/#305 — the membership repair (T-295-xx) and manual mode
+# (T-305-xx). PRD: docs/feedback/items/295-mock-user-not-in-draft/
+# prd-2026-08-13.md §7. Every behavioural test names its sabotage in its
+# docstring; the red runs are recorded in the build's status doc.
+# ===========================================================================
+
+FFV3_LEAGUE = "1312140920132497408"
+
+
+def _ffv3_opponents():
+    """The recorded ffv3 league's 11 NON-caller members — the production
+    session shape over a real 12-team league."""
+    users = json.loads((FIXTURES / "draft" / "ffv3-predraft" / "league"
+                        / FFV3_LEAGUE / "users.json").read_text())
+    return [LeagueMember(user_id=str(u["user_id"]),
+                         username=str(u.get("display_name") or "manager"),
+                         roster=[], elo_ratings={})
+            for u in users if str(u["user_id"]) != OPERATOR]
+
+
+def test_295_01_the_user_is_in_their_own_mock_end_to_end(
+        client, flag_on, session, tmp_path, monkeypatch):
+    """T-295-01 — route e2e on the `ffv3-predraft` corpus, production-shape
+    session (owners/user derived exactly the way the route derives them).
+    Sabotage: revert R1 — `_mock_owner_ids` returns member ids only.
+
+    The whole defect, stated as one test: 11 caller-excluded members + the
+    caller = a 12-team mock, the caller in the order rail, ON THE CLOCK at
+    their own slot, their roster out of the pool, named in their own draft,
+    and a pick that lands `by: "user"`.
+    """
+    from backend.tests.support.draft_replay import DraftReplay
+    opponents = _ffv3_opponents()
+    assert len(opponents) == 11
+    session["user_id"] = OPERATOR
+    session["league"].members = opponents
+    _abandon_all_mocks(OPERATOR, FFV3_LEAGUE)
+    dbs.reset_cache()
+    DraftReplay("ffv3-predraft", tmp_path).install(monkeypatch, server)
+    try:
+        resp = _post(client, league_id=FFV3_LEAGUE, rounds=1, rng_seed=11)
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["teams"] == 12
+        order_ids = {str(r["owner_user_id"]) for r in body["order"]}
+        assert OPERATOR in order_ids
+        assert body["status"] == "active"
+        clock = body["on_the_clock"]
+        assert clock["is_user"] is True
+        assert str(clock["roster_id"]) == OPERATOR
+        # R3 — the caller is NAMED in their own draft, never "Unassigned".
+        my_rows = [r for r in body["order"]
+                   if str(r["owner_user_id"]) == OPERATOR]
+        assert my_rows and all(r["owner_username"] for r in my_rows)
+        # R2 — the caller's session roster is out of the pool.
+        undrafted = {str(r["player_id"]) for r in body["undrafted"]}
+        assert not ({"p29", "p30"} & undrafted)
+        # …and the pick lands.
+        target = str(body["undrafted"][0]["player_id"])
+        picked = _post(client, ROUTE + "/pick",
+                       mock_id=body["mock_id"], player_id=target)
+        assert picked.status_code == 200
+        mine = [p for p in picked.get_json()["picks"] if p["by"] == "user"]
+        assert mine and str(mine[0]["picked_by_user_id"]) == OPERATOR
+        assert str(mine[0]["player_id"]) == target
+    finally:
+        dbs.reset_cache()
+        _abandon_all_mocks(OPERATOR, FFV3_LEAGUE)
+
+
+def test_295_03_an_assigned_order_sizes_the_draft_not_owners(
+        client, flag_on, session, tmp_path, monkeypatch):
+    """T-295-03 — `lakeview-complete` (assigned order, 55 traded picks).
+    Sabotage: revert R4's derivation — `teams = len(owners)`.
+
+    The session knows 5 owners (4 QA opponents + the operator); the platform
+    order names 12. The ORDER sizes the draft: teams 12, 48 slot rows, slots
+    1..12 every round — the pre-fix `teams = len(owners)` silently dropped
+    every slot past the member count.
+    """
+    from backend.tests.support.draft_replay import DraftReplay
+    session["user_id"] = OPERATOR       # slot 6 of the recorded order
+    _abandon_all_mocks(OPERATOR, LAKEVIEW_LEAGUE)
+    dbs.reset_cache()
+    DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
+    try:
+        real = server._mock_real_draft(session, LAKEVIEW_LEAGUE, 2026)
+        assert real["order_source"] == mds.ORDER_SOURCE_ASSIGNED
+        assert len(real["order"]) == 12
+        assert OPERATOR in real["order"]
+        assert real["order"][11] == "974112322165735424"    # slot 12's manager
+        resp = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=4, rng_seed=5)
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["teams"] == 12
+        assert body["settings_echo"]["order_source"] == "assigned"
+        assert len(body["order"]) == 48
+        assert {r["slot"] for r in body["order"]} == set(range(1, 13))
+        assert OPERATOR in {str(r["owner_user_id"]) for r in body["order"]}
+    finally:
+        dbs.reset_cache()
+        _abandon_all_mocks(OPERATOR, LAKEVIEW_LEAGUE)
+
+
+def test_295_04_randomized_platform_branches_include_the_user(
+        client, flag_on, session, monkeypatch):
+    """T-295-04 — non-Sleeper randomized branches: MFL, and an ESPN 14-team
+    Newton-shape variant (13 caller-excluded members — #305's 13-pick-round
+    arithmetic inverted). Sabotage: revert R1.
+    """
+    try:
+        # MFL: randomized-and-labelled, user in the shuffle.
+        monkeypatch.setattr(server, "get_league_draft_context",
+                            lambda lid: {"platform": "mfl", "season": 2026})
+        resp = _post(client, league_id="mfl-newton", rounds=1, rng_seed=3)
+        body = resp.get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["order_source"] == "randomized"
+        assert QA_CALLER in {str(r["owner_user_id"]) for r in body["order"]}
+
+        # ESPN Newton shape: 13 members + the caller = 14 picks per round.
+        session["league"].members = [
+            LeagueMember(user_id=f"espn-opp-{k:02d}", username=f"npc{k}",
+                         roster=[], elo_ratings={})
+            for k in range(13)]
+        monkeypatch.setattr(server, "get_league_draft_context",
+                            lambda lid: {"platform": "espn", "season": 2026})
+        resp = _post(client, league_id="espn:11896", rounds=1, rng_seed=4)
+        body = resp.get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["teams"] == 14
+        assert len([r for r in body["order"] if r["round"] == 1]) == 14
+        assert body["settings_echo"]["order_source"] == "randomized"
+        assert QA_CALLER in {str(r["owner_user_id"]) for r in body["order"]}
+    finally:
+        _abandon_all_mocks(QA_CALLER, "mfl-newton")
+        _abandon_all_mocks(QA_CALLER, "espn:11896")
+
+
+def test_295_05_the_fourth_rung_is_last_and_keyword_only(monkeypatch):
+    """T-295-05 — the ladder. Sabotage: remove the fourth rung."""
+    ctx = make_ctx(players=linear_players(8))
+    owners = ["a", "b", "c", "d"]
+    # The rung fires when the id is absent…
+    assert mds.start_refusal(ctx, owners, user_owner_id="zz") == \
+        mds.REASON_USER_NOT_IN_DRAFT
+    # …the probe answers the same string…
+    assert mds.capability(ctx, owners, user_owner_id="zz")["reason"] == \
+        mds.REASON_USER_NOT_IN_DRAFT
+    # …a member passes…
+    assert mds.start_refusal(ctx, owners, user_owner_id="a") is None
+    # …and the empty string is NOT None (the phantom-owner rule).
+    assert mds.start_refusal(ctx, owners, user_owner_id="") == \
+        mds.REASON_USER_NOT_IN_DRAFT
+
+    # The three shipped rungs outrank it, in the shipped order.
+    empty = mds.MockContext(league_id="L", season=2026, consensus_elo={},
+                            rookie_ids=frozenset(), player_rows={})
+    assert mds.start_refusal(empty, owners, user_owner_id="zz") == \
+        mds.REASON_CLASS_NOT_LOADED
+    monkeypatch.setattr(mds, "CPU_MODEL_VALIDATED", False)
+    assert mds.start_refusal(ctx, owners, user_owner_id="zz") == \
+        mds.REASON_CPU_MODEL_UNVALIDATED
+    monkeypatch.setattr(mds, "CPU_MODEL_VALIDATED", True)
+    assert mds.start_refusal(ctx, ["a", "b"], user_owner_id="zz") == \
+        mds.REASON_LEAGUE_TOO_SMALL
+
+    # A legacy positional 2-arg call still answers the OLD ladder.
+    assert mds.start_refusal(ctx, owners) is None
+    assert mds.start_refusal(ctx, ["a", "b"]) == mds.REASON_LEAGUE_TOO_SMALL
+
+
+def test_295_06_build_settings_refuses_a_user_less_draft():
+    """T-295-06 — the engine backstop raise (INV-6). Sabotage: remove the
+    raise. The raise fires before any slot table or row exists; the
+    no-row-persisted half is pinned at the route by T-295-13/T-305-04."""
+    ctx = make_ctx(players=linear_players(8))
+    with pytest.raises(mds.UserNotInDraft):
+        mds.build_settings(ctx, owners=["a", "b", "c", "d"],
+                           user_owner_id="zz", order=["a", "b", "c", "d"],
+                           order_source=mds.ORDER_SOURCE_ASSIGNED,
+                           rng=random.Random(1))
+    # The randomized branch refuses identically.
+    with pytest.raises(mds.UserNotInDraft):
+        mds.build_settings(ctx, owners=["a", "b", "c", "d"],
+                           user_owner_id="zz", rng=random.Random(1))
+    assert mds.UserNotInDraft.code == mds.REASON_USER_NOT_IN_DRAFT
+
+
+def test_295_07_create_and_resume_build_identical_rostered_ids(session):
+    """T-295-07 — INV-2 parity. Sabotage: revert the resume half of R2 only
+    (`_mock_context_from_row` keeps the member-only comprehension)."""
+    ctx_create, _owners = server._mock_league_context(
+        session, LAKEVIEW_LEAGUE, 2026)
+    state = {"league_id": LAKEVIEW_LEAGUE, "season": 2026,
+             "settings": {"scoring_format": "1qb_ppr",
+                          "lineup_slots": STANDARD_LINEUP}}
+    ctx_resume = server._mock_context_from_row(session, state)
+    assert ctx_create.rostered_ids == ctx_resume.rostered_ids
+    # Both contain the CALLER's roster — the half #291 never checked.
+    assert {"p29", "p30"} <= set(ctx_create.rostered_ids)
+    assert {"p29", "p30"} <= set(ctx_resume.rostered_ids)
+    assert ctx_create.rosters[QA_CALLER] == ["p29", "p30"]
+    assert ctx_resume.rosters[QA_CALLER] == ["p29", "p30"]
+
+
+def test_295_08_the_probe_counts_the_caller(session):
+    """T-295-08 — INV-3/G2. Sabotage: revert the probe half of R1 —
+    `_mock_capability` counts members only."""
+    # 3 opponents + the caller = 4 teams: exactly the floor, can_start.
+    session["league"].members = session["league"].members[:3]
+    cap = server._mock_capability(session, LAKEVIEW_LEAGUE, 2026)
+    assert cap["can_start"] is True and cap["teams"] == 4
+    # 2 opponents + the caller = 3: refused as too small.
+    session["league"].members = session["league"].members[:2]
+    cap = server._mock_capability(session, LAKEVIEW_LEAGUE, 2026)
+    assert cap["can_start"] is False and cap["teams"] == 3
+    assert cap["reason"] == mds.REASON_LEAGUE_TOO_SMALL
+
+
+def test_295_09_a_sessionless_user_id_is_refused_not_phantomed(
+        client, flag_on, session):
+    """T-295-09 — the phantom-owner tripwire. Sabotage: make
+    `_mock_owner_ids` append the caller unconditionally (the `""` phantom).
+
+    A session minted the shipped way whose `user_id` is `""` must get the
+    loud refusal — never a draft containing an empty-string team."""
+    session["user_id"] = ""
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE)
+    assert resp.status_code == 200
+    assert resp.get_json() == {"schema": 1, "empty": True,
+                               "reason": "user_not_in_draft"}
+
+
+def test_295_13_the_engine_raise_maps_to_the_typed_empty_not_a_500(
+        client, flag_on, session, monkeypatch):
+    """T-295-13 — route exception mapping. Sabotage: remove the route
+    `try/except` (red = the generic-errorhandler 500)."""
+    from backend.database import load_current_mock_draft
+
+    def _boom(*a, **k):
+        raise mds.UserNotInDraft("x")
+
+    monkeypatch.setattr(mds, "build_settings", _boom)
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE)
+    assert resp.status_code == 200
+    assert resp.get_json() == {"schema": 1, "empty": True,
+                               "reason": "user_not_in_draft"}
+    # A refused mock is NEVER persisted (INV-6).
+    assert load_current_mock_draft(QA_CALLER, LAKEVIEW_LEAGUE) is None
+
+
+def test_295_15_order_only_entries_are_first_class_slots():
+    """T-295-15 — the personas union (R5). Sabotage: revert the union —
+    personas keyed on `owners` only."""
+    ctx = make_ctx(players=linear_players(12),
+                   rosters={"a": [], "b": [], "c": [], "d": []})
+    settings = mds.build_settings(
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=1,
+        order=["e", "b", "c", "a"], order_source=mds.ORDER_SOURCE_ASSIGNED,
+        rng=random.Random(1))
+    # The order-only entry has a persona row (settings stays complete)…
+    assert settings["personas"]["e"] == {"outlook": "not_sure",
+                                         "source": "default"}
+    # …and an owner absent from the order keeps its row too (the union).
+    assert "d" in settings["personas"]
+    assert settings["teams"] == 4                       # len(order), INV-4
+    # A full run completes with no KeyError: 3 CPU picks (incl. the
+    # roster-less order-only team, fail-soft), then the user's slot.
+    state = mds.new_state(ctx, settings, 9)
+    mds.advance_cpu(state, ctx, allow_unvalidated_model=True)
+    assert mds.next_pick(state)["is_user"] is True
+    free = next(r["player_id"] for r in mds._available(ctx, state))
+    mds.apply_user_pick(state, ctx, free)
+    assert state["status"] == mds.STATUS_COMPLETE
+    assert len(state["picks"]) == 4
+
+
+def test_295_16_a_short_order_is_not_an_order():
+    """T-295-16 — the short-order floor (R4/§14-2). Sabotage: revert the
+    floor (red: `teams == 2`)."""
+    ctx = make_ctx(players=linear_players(20))
+    owners = [f"o{i}" for i in range(8)]
+    # user o1 is inside the degenerate 2-entry order, so the sabotaged build
+    # reaches the teams assertion (the named red is `teams == 2`, not the
+    # INV-6 raise).
+    settings = mds.build_settings(
+        ctx, owners=owners, user_owner_id="o1", rounds=1,
+        order=["o1", "o2"], order_source=mds.ORDER_SOURCE_ASSIGNED,
+        traded_slots={(1, 2): "o5"}, rng=random.Random(5))
+    assert settings["order_source"] == mds.ORDER_SOURCE_RANDOMIZED
+    assert settings["teams"] == 8
+    assert "o1" in settings["order"]
+    assert "o3" in settings["order"]      # non-order owners join the shuffle
+    assert sorted(settings["order"]) == sorted(owners)
+    # The overlay drops WITH the order it was keyed against.
+    assert settings["ownership"] == {}
+
+
+def test_295_17_the_event_family_is_registered_with_its_intent_class():
+    """T-295-17 — registration pin. Sabotage: drop `mock_completed` from
+    `NON_INTENT_EVENTS` (the DAU-seam regression)."""
+    from backend.analytics_taxonomy import (ALLOWED_CLIENT_EVENTS,
+                                            CLIENT_EVENT_PROPS)
+    from backend.analytics_queries import NON_INTENT_EVENTS
+
+    five = {"mock_started", "mock_pick_made", "mock_completed",
+            "mock_abandoned", "mock_create_refused"}
+    assert five <= ALLOWED_CLIENT_EVENTS
+    assert {"mock_completed", "mock_create_refused"} <= NON_INTENT_EVENTS
+    assert not ({"mock_started", "mock_pick_made", "mock_abandoned"}
+                & NON_INTENT_EVENTS)
+    assert CLIENT_EVENT_PROPS["mock_started"] == frozenset(
+        {"platform", "teams", "rounds", "type", "order_source", "mode"})
+    assert CLIENT_EVENT_PROPS["mock_pick_made"] == frozenset(
+        {"platform", "mode", "round", "pick_no", "for_own_team"})
+    assert CLIENT_EVENT_PROPS["mock_completed"] == frozenset(
+        {"platform", "mode", "rounds", "teams", "user_picks"})
+    assert CLIENT_EVENT_PROPS["mock_abandoned"] == frozenset(
+        {"platform", "mode", "picks_made"})
+    assert CLIENT_EVENT_PROPS["mock_create_refused"] == frozenset(
+        {"platform", "reason"})
+
+
+# --- #305 — manual mode ---------------------------------------------------
+
+def test_305_01_manual_create_stops_at_pick_one(client, flag_on, session):
+    """T-305-01 — manual create. Sabotage: revert the `next_pick` lever."""
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=1,
+                 mode="manual", rng_seed=6)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert not body.get("empty"), body
+    assert body["status"] == "active"
+    assert body["picks"] == []                        # zero CPU picks
+    clock = body["on_the_clock"]
+    assert (clock["pick_no"], clock["round"], clock["slot"]) == (1, 1, 1)
+    assert clock["is_user"] is True
+    first_owner = next(str(r["owner_user_id"]) for r in body["order"]
+                       if r["pick_no"] == 1)
+    assert str(clock["roster_id"]) == first_owner
+    # Seed 6 puts an OPPONENT at slot 1 — the user is on the clock for a
+    # team that is not their own, which is the mode's whole point.
+    assert first_owner != QA_CALLER
+    assert body["settings_echo"]["mode"] == "manual"
+
+
+def test_305_02_a_full_manual_lap(client, flag_on, session):
+    """T-305-02 — every slot picked in sequence. Sabotage: change
+    `state_payload`'s `my_picks` filter to `by == "user"` (pins M7/HLD §4.3).
+    """
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=1,
+                 mode="manual", rng_seed=6)
+    body = resp.get_json()
+    assert not body.get("empty"), body
+    mock_id = body["mock_id"]
+    teams = body["settings_echo"]["teams"]
+    assert teams == 5
+    state, made = body, 0
+    while state["status"] == "active":
+        clock = state["on_the_clock"]
+        assert clock["is_user"] is True
+        assert clock["pick_no"] == made + 1           # exactly one-slot steps
+        target = str(state["undrafted"][0]["player_id"])
+        r = _post(client, ROUTE + "/pick", mock_id=mock_id, player_id=target)
+        assert r.status_code == 200
+        state = r.get_json()
+        made += 1
+        assert len(state["picks"]) == made
+    assert made == teams and state["status"] == "complete"
+    assert all(p["by"] == "user" for p in state["picks"])
+    # `my_picks` is the user's TEAM's picks — a strict subset even though
+    # every pick is by:"user". Seed 6 puts the caller at slot 5.
+    mine = [p for p in state["picks"]
+            if str(p["picked_by_user_id"]) == QA_CALLER]
+    assert len(state["my_picks"]) == len(mine) == 1
+    assert state["my_picks"][0]["pick_no"] == mine[0]["pick_no"]
+
+
+def test_305_03_bad_mode_400_and_absent_null_empty_default_to_cpu(
+        client, flag_on, session):
+    """T-305-03 — validation + default. Sabotage: remove the route
+    validation (bogus then coerces in-engine to a 200 — red).
+
+    PRD deviation, recorded: the spec's "byte-equal to a pre-change capture"
+    is unsatisfiable — the same seed produces a DIFFERENT draft pre- vs
+    post-repair because membership itself changed (HLD §8's honest
+    restatement). The backward-compat property that IS pinnable: absent,
+    null, "" and explicit "cpu" are ONE create — byte-equal picks for a
+    fixed seed.
+    """
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, mode="bogus")
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "bad_mode"}
+
+    bodies = []
+    for extra in ({}, {"mode": None}, {"mode": ""}, {"mode": "cpu"}):
+        resp = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=1,
+                     rng_seed=17, **extra)
+        body = resp.get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["mode"] == "cpu"
+        bodies.append(json.dumps(body["picks"], sort_keys=True))
+        _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
+    assert len(set(bodies)) == 1
+
+
+def test_305_04_the_guard_is_mode_blind(
+        client, flag_on, session, tmp_path, monkeypatch):
+    """T-305-04 — guard x mode. Sabotage: make the `build_settings` raise
+    conditional on `mode != MODE_MANUAL`.
+
+    The ladder-blind case: the caller IS in owners (the rung passes) but the
+    platform's assigned order does not name them — QA_CALLER is not in
+    lakeview's recorded 12. A manual create must still refuse loudly."""
+    from backend.tests.support.draft_replay import DraftReplay
+    from backend.database import load_current_mock_draft
+    dbs.reset_cache()
+    DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
+    try:
+        resp = _post(client, league_id=LAKEVIEW_LEAGUE, mode="manual",
+                     rng_seed=2)
+        assert resp.status_code == 200
+        assert resp.get_json() == {"schema": 1, "empty": True,
+                                   "reason": "user_not_in_draft"}
+        assert load_current_mock_draft(QA_CALLER, LAKEVIEW_LEAGUE) is None
+    finally:
+        dbs.reset_cache()
+
+
+def _set_mock_row(mock_id: int, **cols) -> None:
+    from backend import database as db
+    with db.engine.begin() as conn:
+        conn.execute(db.mock_drafts_table.update()
+                     .where(db.mock_drafts_table.c.id == int(mock_id))
+                     .values(**cols))
+
+
+def test_305_05_a_pre_mode_row_resumes_byte_identically(
+        client, flag_on, session):
+    """T-305-05 — compat. Sabotage: flip `next_pick`'s default to
+    `MODE_MANUAL`.
+
+    The same persisted row is resumed + picked twice: once with `"mode"`
+    stripped from its settings_json (a pre-#305 row), once with it present.
+    All four responses must be byte-equal pairwise."""
+    from backend.database import load_mock_draft
+
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=1, rng_seed=21)
+    body = resp.get_json()
+    assert not body.get("empty"), body
+    mock_id = body["mock_id"]
+    row = load_mock_draft(mock_id)
+    settings0, picks0, status0 = row["settings"], row["picks"], row["status"]
+    assert '"mode": "cpu"' in settings0
+    stripped = json.dumps(
+        {k: v for k, v in json.loads(settings0).items() if k != "mode"},
+        sort_keys=True)
+
+    headers = {"X-Session-Token": ROUTE_TOKEN}
+    url = f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}"
+
+    # Timeline B — the pre-mode row.
+    _set_mock_row(mock_id, settings=stripped)
+    b1 = client.get(url, headers=headers).get_data()
+    target = str(json.loads(b1)["undrafted"][0]["player_id"])
+    b2 = _post(client, ROUTE + "/pick", mock_id=mock_id,
+               player_id=target).get_data()
+
+    # Timeline A — the same row with mode present, rewound.
+    _set_mock_row(mock_id, settings=settings0, picks=picks0, status=status0)
+    a1 = client.get(url, headers=headers).get_data()
+    a2 = _post(client, ROUTE + "/pick", mock_id=mock_id,
+               player_id=target).get_data()
+
+    assert a1 == b1
+    assert a2 == b2
+
+
+def test_305_06_every_state_payload_carries_mode_and_user_owner_id(
+        client, flag_on, session):
+    """T-305-06 — the echo contract. Sabotage: remove either echo key."""
+    def _echo_ok(payload, mode):
+        echo = payload["settings_echo"]
+        assert "mode" in echo and echo["mode"] == mode
+        assert "user_owner_id" in echo and echo["user_owner_id"] == QA_CALLER
+
+    for mode, extra in (("cpu", {}), ("manual", {"mode": "manual"})):
+        body = _post(client, league_id=LAKEVIEW_LEAGUE, rounds=1,
+                     rng_seed=8, **extra).get_json()
+        assert not body.get("empty"), body
+        _echo_ok(body, mode)                                    # POST create
+        got = client.get(f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}",
+                         headers={"X-Session-Token": ROUTE_TOKEN}).get_json()
+        _echo_ok(got, mode)                                     # GET resume
+        target = str(body["undrafted"][0]["player_id"])
+        picked = _post(client, ROUTE + "/pick", mock_id=body["mock_id"],
+                       player_id=target).get_json()
+        _echo_ok(picked, mode)                                  # pick response
+        _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
+
+    # A stripped pre-mode state echoes the EFFECTIVE value.
+    ctx = make_ctx(players=linear_players(8))
+    settings = mds.build_settings(
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=1,
+        order=["a", "b", "c", "d"], order_source=mds.ORDER_SOURCE_ASSIGNED,
+        rng=random.Random(1))
+    del settings["mode"]
+    state = mds.new_state(ctx, settings, 1)
+    echo = mds.state_payload(state, ctx)["settings_echo"]
+    assert echo["mode"] == "cpu" and echo["user_owner_id"] == "a"
+
+
+def test_305_07_manual_mode_never_consults_the_rng(client, flag_on, session):
+    """T-305-07 — determinism. Sabotage: append one CPU pick inside the
+    manual path (any second turn-decision site)."""
+    ctx = make_ctx(players=linear_players(12))
+    settings = mds.build_settings(
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="c", rounds=1,
+        order=["a", "b", "c", "d"], order_source=mds.ORDER_SOURCE_ASSIGNED,
+        mode=mds.MODE_MANUAL, rng=random.Random(3))
+
+    def _lap(seed):
+        state = mds.new_state(ctx, dict(settings), seed)
+        mds.advance_cpu(state, ctx)         # manual: returns at pick 1
+        for pid in ("p1", "p2", "p3"):
+            mds.apply_user_pick(state, ctx, pid)
+        return state
+
+    state = _lap(3)
+    assert [p["by"] for p in state["picks"]] == ["user"] * 3
+    continuous = json.dumps(mds.state_payload(state, ctx), sort_keys=True)
+
+    # dumps -> loads -> payload is byte-equal to the continuous one.
+    settings_json, picks_json = mds.dumps(state)
+    resumed = mds.loads({"id": None, "user_id": "c", "league_id": "L1",
+                         "season": 2026, "status": state["status"],
+                         "settings": settings_json, "picks": picks_json,
+                         "rng_seed": 3})
+    assert json.dumps(mds.state_payload(resumed, ctx),
+                      sort_keys=True) == continuous
+
+    # A second replay is byte-equal — no RNG state was consulted…
+    assert json.dumps(mds.state_payload(_lap(3), ctx),
+                      sort_keys=True) == continuous
+    # …and so is a replay under a DIFFERENT seed: with an assigned order the
+    # per-pick RNG is the only place the seed could leak, and manual mode
+    # never draws from it. (In the randomized branch the seed still drives
+    # the order shuffle at build time, in both modes.)
+    other_seed = _lap(99)
+    assert [p["player_id"] for p in other_seed["picks"]] == \
+        [p["player_id"] for p in state["picks"]]

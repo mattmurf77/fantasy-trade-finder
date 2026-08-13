@@ -11738,8 +11738,55 @@ def _mock_owner_name(user_id: str, stored: dict | None,
     return ""
 
 
-def _mock_usernames(league_id: str, members) -> dict[str, str]:
+def _mock_owner_ids(sess: dict) -> list[str]:
+    """INV-1/INV-3 — THE construction of the engine's ``owners``: the session
+    members (caller-excluded by app convention — ``/api/session/init`` builds
+    ``league.members`` from the client's ``opponent_rosters`` and refuses to
+    re-add the caller) plus the caller, str-coerced, de-duplicated,
+    order-preserving. Both the create path (R1) and the capability probe (R4)
+    call this and nothing else, so probe and create cannot count teams
+    differently (G2). An empty session ``user_id`` is never appended — the
+    refusal ladder then answers ``user_not_in_draft`` (T-295-09's
+    phantom-owner tripwire)."""
+    members = list(getattr(sess.get("league"), "members", []) or [])
+    out: list[str] = []
+    seen: set[str] = set()
+    for uid in (*(str(m.user_id) for m in members),
+                str(sess.get("user_id") or "")):
+        if uid and uid not in seen:
+            seen.add(uid)
+            out.append(uid)
+    return out
+
+
+def _mock_rosters(sess: dict) -> dict[str, list[str]]:
+    """INV-1/INV-2 — THE construction of the engine's ``rosters``: member
+    rosters plus the caller's session roster. The caller's entry is assigned
+    AFTER the member comprehension, so if a client ever sends the caller
+    inside ``opponent_rosters`` the dict key de-duplicates and the session's
+    own ``user_roster`` wins — the session is the caller's authoritative
+    roster. Create (R2) and resume (R3) both call this, so ``rostered_ids``
+    and the severity inputs are identical on both paths and
+    ``consensus_rank`` cannot shift between create and resume."""
+    members = list(getattr(sess.get("league"), "members", []) or [])
+    rosters = {str(m.user_id): [str(p) for p in (m.roster or [])]
+               for m in members}
+    uid = str(sess.get("user_id") or "")
+    if uid:
+        rosters[uid] = [str(p) for p in (sess.get("user_roster") or [])]
+    return rosters
+
+
+def _mock_usernames(league_id: str, members,
+                    session_user: tuple[str, str | None] | None = None,
+                    ) -> dict[str, str]:
     """``user_id -> display name`` for a mock's ``order[]`` rows (D-16).
+
+    ``session_user`` (#295/#296/#305, the fifth membership site) is
+    ``(user_id, display_name)`` for the CALLER, who is absent from ``members``
+    by app convention: without it a repaired mock on a league with no
+    ``league_members`` rows renders the user's own recap rows as
+    "Unassigned" — in the draft and unnamed in it.
 
     Built off `league_members` — which holds franchise names for MFL leagues,
     written at link and at every re-sync — rather than off whatever the session
@@ -11780,6 +11827,13 @@ def _mock_usernames(league_id: str, members) -> dict[str, str]:
         name = _mock_owner_name(uid, row, None)
         if name:
             out[uid] = name
+    if session_user:
+        uid, display = session_user
+        uid = str(uid or "")
+        if uid and uid not in out:
+            name = _mock_owner_name(uid, stored.get(uid), display)
+            if name:
+                out[uid] = name
     return out
 
 
@@ -11795,8 +11849,10 @@ def _mock_league_context(sess: dict, league_id: str, season: int):
 
     g_league = sess.get("league")
     members = list(getattr(g_league, "members", []) or [])
-    rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
-    usernames = _mock_usernames(str(league_id), members)      # D-16 (create)
+    rosters = _mock_rosters(sess)                             # R2 — incl. caller
+    usernames = _mock_usernames(                              # D-16 (create)
+        str(league_id), members,
+        session_user=(str(sess.get("user_id") or ""), sess.get("display_name")))
     rostered = {pid for ids in rosters.values() for pid in ids}
 
     fmt = _active_format(sess)
@@ -11816,7 +11872,7 @@ def _mock_league_context(sess: dict, league_id: str, season: int):
         lineup_slots   = lineup,
         usernames      = usernames,
         scoring_format = fmt,
-    ), [str(m.user_id) for m in members]
+    ), _mock_owner_ids(sess)
 
 
 def _mock_context_from_row(sess: dict, state: dict):
@@ -11832,11 +11888,13 @@ def _mock_context_from_row(sess: dict, state: dict):
     settings = state.get("settings") or {}
     g_league = sess.get("league")
     members = list(getattr(g_league, "members", []) or [])
-    rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
+    rosters = _mock_rosters(sess)   # R3 — create/resume parity (INV-2)
     # D-16 (RESUME) — every GET and every /pick lands here, so this is the
     # common path, not the create one. Fixing only `_mock_league_context`
     # would leave every resumed mock still rendering machine ids.
-    usernames = _mock_usernames(str(state["league_id"]), members)
+    usernames = _mock_usernames(
+        str(state["league_id"]), members,
+        session_user=(str(sess.get("user_id") or ""), sess.get("display_name")))
     fmt = settings.get("scoring_format") or _active_format(sess)
     _pool_players, consensus_seed = _get_universal_pool(fmt)
     rookie_ids = _rookie_player_ids(int(state["season"]))
@@ -11866,12 +11924,13 @@ def _mock_capability(sess: dict, league_id: str, season: int) -> dict:
     """
     from . import mock_draft_service as mds
 
-    g_league = sess.get("league")
-    members = list(getattr(g_league, "members", []) or [])
     ctx = mds.MockContext(
         league_id=str(league_id), season=int(season), consensus_elo={},
         rookie_ids=frozenset(_rookie_player_ids(int(season))), player_rows={})
-    return mds.capability(ctx, [str(m.user_id) for m in members])
+    # R4 — the probe counts the SAME owners the create will (G2), caller
+    # included, and runs the identical four-rung ladder.
+    return mds.capability(ctx, _mock_owner_ids(sess),
+                          user_owner_id=str(sess.get("user_id") or ""))
 
 
 def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
@@ -12003,17 +12062,22 @@ def _mock_resolve_league(sess: dict, league_id: str):
 def mock_draft_route():
     """GET/POST /api/mock-draft — create, or read the current mock.
 
-    POST `{league_id, rounds?, type?, rng_seed?}` creates (abandoning any
-    prior active row for that user+league in the SAME transaction), resolves
-    order / ownership / personas, and would advance the CPU to the user's
-    first turn. GET `?league_id=&basis=consensus|my_board` returns the active
-    mock, or the most recent complete one as a recap.
+    POST `{league_id, rounds?, type?, mode?, rng_seed?}` creates (abandoning
+    any prior active row for that user+league in the SAME transaction),
+    resolves order / ownership / personas, and advances the CPU to the user's
+    first turn (`mode: "cpu"`, the default) or stops at pick 1 with zero CPU
+    picks (`mode: "manual"` — the user picks for every team, #305). GET
+    `?league_id=&basis=consensus|my_board` returns the active mock, or the
+    most recent complete one as a recap.
 
     Errors: 404 feature_disabled (flag off, before ANY session work) ·
     400 league_id is required · 404 league_not_found · 400 bad_basis ·
-    400 not_rookie_draft (rounds beyond ROOKIE_MAX_ROUNDS) · 401/409 via the
-    session helpers. Typed-empty `200 {"empty": true, "reason": …}` for
-    `class_not_loaded` and `cpu_model_unvalidated`.
+    400 bad_mode (mode ∉ {cpu, manual}) · 400 not_rookie_draft (rounds beyond
+    ROOKIE_MAX_ROUNDS) · 401/409 via the session helpers. Typed-empty
+    `200 {"empty": true, "reason": …}` for `class_not_loaded`,
+    `cpu_model_unvalidated`, `league_too_small` and `user_not_in_draft`
+    (the last served identically by the ladder rung and the engine's
+    `UserNotInDraft` raise — clients never learn which fired).
     """
     if not is_enabled("draft.mock"):
         return jsonify({"error": "feature_disabled"}), 404
@@ -12068,6 +12132,13 @@ def mock_draft_route():
         # rather than a live board build so creation stays egress-free.
         return jsonify({"error": "not_rookie_draft"}), 400
 
+    # #305 — cheap request validation before expensive resolution, `bad_basis`
+    # parity. Absent / null / "" all default to cpu (a shipped 1.12.x client
+    # is byte-untouched).
+    mode = str(body.get("mode") or mds.MODE_CPU)
+    if mode not in (mds.MODE_CPU, mds.MODE_MANUAL):
+        return jsonify({"error": "bad_mode"}), 400
+
     ctx, owners = _mock_league_context(sess, league_id, season)
     # ONE refusal ladder, shared with the G2 capability probe, so a client that
     # rendered an enabled button can never be told something the probe did not
@@ -12076,7 +12147,7 @@ def mock_draft_route():
     # The typed-empty body stays byte-identical to M2's — the `reason` IS the
     # information here, and a client that got this far already read the G2
     # probe. `capability` rides the GET only.
-    refusal = mds.start_refusal(ctx, owners)
+    refusal = mds.start_refusal(ctx, owners, user_owner_id=user_id)
     if refusal is not None:
         return jsonify(mds.empty_payload(refusal))
 
@@ -12091,13 +12162,23 @@ def mock_draft_route():
     # when the platform has no assigned one; `order_source` rides the payload
     # so the client can DISCLOSE that rather than imply a real order.
     real = _mock_real_draft(sess, league_id, season)
-    settings = mds.build_settings(
-        ctx, owners=owners, user_owner_id=user_id, rounds=rounds,
-        draft_type=body.get("type") or real["type"],
-        order=real["order"], order_source=real["order_source"],
-        traded_slots=real["traded_slots"],
-        personas=_mock_personas(league_id, sess),
-        rng=random.Random(rng_seed))
+    try:
+        settings = mds.build_settings(
+            ctx, owners=owners, user_owner_id=user_id, rounds=rounds,
+            draft_type=body.get("type") or real["type"],
+            order=real["order"], order_source=real["order_source"],
+            traded_slots=real["traded_slots"],
+            personas=_mock_personas(league_id, sess),
+            mode=mode,
+            rng=random.Random(rng_seed))
+    except mds.UserNotInDraft:
+        # INV-6 — the engine's backstop for the case the ladder is
+        # structurally blind to (the user is an owner but the platform's
+        # assigned order does not name them). Byte-identical to the rung's
+        # refusal, so clients see one vocabulary and never learn which
+        # enforcement point fired. A raise NOT caught here would 500 through
+        # the generic errorhandler (T-295-13).
+        return jsonify(mds.empty_payload(mds.REASON_USER_NOT_IN_DRAFT))
     state = mds.new_state(ctx, settings, rng_seed, user_id=user_id)
     mds.advance_cpu(state, ctx)
     settings_json, picks_json = mds.dumps(state)
