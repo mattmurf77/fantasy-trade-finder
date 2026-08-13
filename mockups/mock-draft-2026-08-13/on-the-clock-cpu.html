@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Draft Lab — On the clock, CPU mode (#295/#296)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:17px;color:var(--chalk);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk)}
+.lab{display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)} .tag.rec{color:var(--warn);border-color:var(--warn)}
+.cap{font-size:12px;color:var(--faint);max-width:390px;text-align:center;line-height:1.5}
+.shot{width:390px;border:1px solid var(--line);border-radius:22px;display:block}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);background:rgba(12,14,17,.94);border-radius:2px;padding:2px 6px;line-height:1.45}
+.ann.c{color:var(--ice);border:1px solid var(--ice)}
+.ann.f{color:var(--flare);border:1px solid var(--flare)}
+.ann.w{color:var(--warn);border:1px solid var(--warn)}
+
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.nav{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.nav .back{color:var(--chalk);font-size:18px}
+.nav .ttl{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:20px}
+.nav .end{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ice)}
+.mrail{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(240,80,140,.08);border-bottom:2px solid var(--flare)}
+.mrail .l{color:var(--flare);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.mrail .r{color:var(--dim);font-size:13px}
+.pad{padding:12px 16px 24px;display:flex;flex-direction:column;gap:12px}
+
+.clock{background:var(--ink1);border:1px solid var(--flare);border-radius:4px;padding:8px 12px;display:flex;flex-direction:column;gap:3px;position:relative}
+.clock .line{display:flex;align-items:baseline;gap:8px}
+.clock .pick{font-family:var(--f-mono);font-weight:600;font-size:19px}
+.clock .who{font-size:13px;color:var(--flare);flex:1}
+.clock .meta{font-size:11px;color:var(--faint)}
+.clock .how{font-size:13px;color:var(--dim)}
+
+.ticklabel{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--chalk)}
+.ticklabel::before{content:'';width:3px;height:12px;background:var(--ice)}
+.sec{display:flex;flex-direction:column;gap:8px}
+.trow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.trow .no{font-family:var(--f-mono);font-size:12px;color:var(--faint);width:40px}
+.trow .nm{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .who{font-size:11px;color:var(--faint)}
+.pos-qb{color:var(--qb)} .pos-rb{color:var(--rb)} .pos-wr{color:var(--wr)} .pos-te{color:var(--te)}
+.dim{color:var(--dim)}
+
+.chiprow{display:flex;flex-wrap:wrap;gap:8px}
+.mychip{border:1px solid var(--flare);border-radius:2px;padding:4px 10px;display:flex;flex-direction:column;gap:1px}
+.mychip .lab{font-family:var(--f-mono);font-size:13px}
+.mychip .sub{font-size:11px;color:var(--faint)}
+
+.basisrow{display:flex;gap:8px}
+.bchip{border:1px solid var(--line);border-radius:4px;padding:12px 18px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.bchip.on{border-color:var(--ice);background:var(--ink3);color:var(--chalk)}
+
+.urow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.urow .rk{font-family:var(--f-mono);font-size:14px;color:var(--faint);width:20px}
+.urow .main{flex:1;display:flex;flex-direction:column;gap:2px}
+.urow .nm{font-size:16px;font-weight:600}
+.urow .sub{font-size:13px;color:var(--dim)}
+.pickbtn{border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:6px 12px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>On the clock — CPU mode, post-repair (#295/#296)</h1>
+  <p><b>The known reality first:</b> the shipped mock has <b>never</b> put a live-league user on the clock.
+  The session convention keeps the caller out of <code>league.members</code>, so <code>owners</code> never
+  contains the user, <code>is_user</code> never fires, and every live mock is born complete (plan §1).
+  Any frame on this page showing the user's turn depicts a state that has never existed in production.</p>
+  <p><b>About the left pane:</b> a real capture <i>does</i> exist — the hermetic capture harness
+  (<code>screens/manifest.json</code>: profile <code>draft-pre</code>, no injections, 2026-08-11) reaches the
+  on-the-clock state because its seeded world reproduces the fixture shape that live sessions never have.
+  It is embedded per the house rule as the exact visual vocabulary of the screen, labeled for what it is:
+  a harness state, not shipped-live behavior.</p>
+</div>
+
+<div class="lab">
+
+  <!-- HARNESS CAPTURE -->
+  <div class="side">
+    <div class="tag cur">Reference — harness capture</div>
+    <img class="shot" src="../../screens/mobile/mock-draft/active--on-the-clock.png" alt="Harness capture: user on the clock at 2.08">
+    <div class="cap">Real capture (<code>active--on-the-clock.png</code>), hermetic <code>draft-pre</code> world,
+    12 teams, user at slot 8, pick 19 of 44. <b>Live users have never seen this state</b> — the harness seed is
+    the only place <code>is_user</code> has ever been true. Every element the proposal reuses (rail, clock card,
+    ticker, Your-picks chips, basis chips, Pick rows) is already shipped and visually final here.</div>
+  </div>
+
+  <!-- RECONSTRUCTION: live ffv3 post-repair -->
+  <div class="side">
+    <div class="tag rec">Reconstruction — live ffv3, post-repair</div>
+    <div class="phone">
+      <div class="status"><span>8:15</span><span>◦◦◦ ▮</span></div>
+      <div class="nav"><span class="back">‹</span><span class="ttl">Mock draft</span><span class="end">End</span></div>
+      <div class="mrail"><span class="l">Mock draft</span><span class="r">pick 8 of 48</span></div>
+      <div class="pad">
+        <div class="clock">
+          <div class="line"><span class="pick">1.08</span><span class="who">You’re on the clock</span></div>
+          <div class="meta">round 1 · pick 8 of 48 · 7 picks made</div>
+          <div class="how">Tap a rookie below, then confirm.</div>
+          <div class="ann f" style="right:8px;top:-10px">#295 acceptance: the clock claims YOUR turn</div>
+        </div>
+
+        <div class="sec">
+          <div class="ticklabel">Just picked</div>
+          <div class="trow"><span class="no">1.07</span><span class="nm"><span class="pos-wr">WR</span> De'Zhaun Stribling <span class="dim">· SF</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.06</span><span class="nm"><span class="pos-wr">WR</span> Germie Bernard <span class="dim">· PIT</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.05</span><span class="nm"><span class="pos-wr">WR</span> Antonio Williams <span class="dim">· WAS</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.04</span><span class="nm"><span class="pos-rb">RB</span> Jonah Coleman <span class="dim">· DEN</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.03</span><span class="nm"><span class="pos-wr">WR</span> Chris Bell <span class="dim">· MIA</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.02</span><span class="nm"><span class="pos-wr">WR</span> Denzel Boston <span class="dim">· CLE</span></span><span class="who">CPU</span></div>
+          <div class="trow"><span class="no">1.01</span><span class="nm"><span class="pos-qb">QB</span> Ty Simpson <span class="dim">· LAR</span></span><span class="who">CPU</span></div>
+        </div>
+
+        <div class="sec" style="position:relative">
+          <div class="ticklabel">Your picks</div>
+          <div class="chiprow">
+            <div class="mychip"><span class="lab">1.08</span><span class="sub">on the clock</span></div>
+            <div class="mychip"><span class="lab">2.08</span><span class="sub"></span></div>
+            <div class="mychip"><span class="lab">3.08</span><span class="sub"></span></div>
+            <div class="mychip"><span class="lab">4.08</span><span class="sub"></span></div>
+          </div>
+          <div class="ann c" style="right:0;top:-10px">12-team rail · operator slot 8 (live ffv3 order)</div>
+        </div>
+
+        <div class="sec">
+          <div class="ticklabel">Tap to draft</div>
+          <div class="basisrow">
+            <span class="bchip on">Consensus</span>
+            <span class="bchip">My board</span>
+          </div>
+          <div class="urow"><span class="rk">1</span>
+            <div class="main"><span class="nm">Elijah Sarratt</span><span class="sub"><span class="pos-wr">WR</span> · BAL · 3rd</span></div>
+            <span class="pickbtn">Pick</span></div>
+          <div class="urow"><span class="rk">2</span>
+            <div class="main"><span class="nm">Eli Raridon</span><span class="sub"><span class="pos-te">TE</span> · NE · 3rd</span></div>
+            <span class="pickbtn">Pick</span></div>
+          <div class="urow" style="border-bottom:none"><span class="rk">3</span>
+            <div class="main"><span class="nm">Carson Beck</span><span class="sub"><span class="pos-qb">QB</span> · ARI · 3rd</span></div>
+            <span class="pickbtn">Pick</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cap"><b>Reconstruction — this state has never existed in the shipped app.</b> Live ffv3 after the
+    repair, drawn to the LLD §4.1 wire example: 12-team assigned linear order, the operator at slot 8, CPU picks
+    1.01–1.07 already made, mock stopped at the user's first slot. All chrome is the shipped screen verbatim
+    (traced from the harness capture); only the numbers state the repaired arithmetic. Player names/order are
+    illustrative (the harness rookie class).</div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Rationale</h2>
+  <ul>
+    <li><b>Nothing new is drawn — that is the point.</b> The repair is backend membership arithmetic (R1–R4 +
+    teams-from-order); the session screen already renders the user's turn correctly whenever the payload says so.
+    The proposal frame exists to state, visually, what the fixed payload produces on the <i>reported league</i>:
+    <code>teams == 12</code> (not 11), all 12 slots on the rail, the user's own slots in “Your picks”, the clock
+    stopped at 1.08, and Pick affordances live.</li>
+    <li><b>The rail count is part of the acceptance.</b> “pick 8 of 48” (12 × 4) is the visible statement of the
+    teams-from-order rule — the pre-repair assigned branch would have shown 44 (11 × 4) and silently dropped
+    slot 12's manager.</li>
+    <li><b>The user's rostered players are absent from the list</b> (R2) — not annotatable in a static frame
+    beyond this note, but the undrafted list drawn here assumes the caller's roster is excluded from the pool.</li>
+    <li><b>Maestro tie-in:</b> the flare annotation marks the exact assertion M-1 adds to d3 — the clock card
+    claiming the user's turn (<code>You’re on the clock</code>) before any tap, which #291's flow never asserted.</li>
+  </ul>
+</div>
+
+</body>
+</html>

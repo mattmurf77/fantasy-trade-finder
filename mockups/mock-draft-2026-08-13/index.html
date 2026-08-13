@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Draft Lab — 2026-08-13 (#295/#296/#305)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink3:#232833;
+  --line:#262C35; --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --flare:#F0508C; --warn:#F59E0B;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);display:flex;flex-direction:column;align-items:center;padding:32px 16px 64px;gap:18px}
+h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:26px}
+.sub{color:var(--dim);font-size:13px;max-width:760px;text-align:center;line-height:1.55}
+.sub code{font-family:var(--f-mono);font-size:12px;color:var(--chalk)}
+.list{display:flex;flex-direction:column;gap:12px;width:100%;max-width:760px}
+a.card{display:block;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px 16px;text-decoration:none;color:var(--chalk)}
+a.card:hover{border-color:var(--ice)}
+a.card .t{font-size:15px;font-weight:600;color:var(--ice);margin-bottom:3px}
+a.card .d{font-size:13px;color:var(--dim);line-height:1.5}
+.foot{color:var(--faint);font-size:12px;max-width:760px;text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>Mock Draft Lab — 2026-08-13</h1>
+<div class="sub">Feedback <b>#295 / #296 / #305</b> — mock-draft repair + manual-draft-for-all-teams.
+Link-only index (no iframes — works over <code>file://</code>). Each page: today's screen (real capture where one
+exists) beside the proposal, 390px frames, rationale below. Frames of states the shipped app has never produced
+are tagged <span style="color:var(--warn)">RECONSTRUCTION</span>; strings the PRD owns are flagged
+<span style="color:var(--warn)">PRD COPY</span> in place.</div>
+
+<div class="list">
+  <a class="card" href="setup-mode-toggle.html">
+    <div class="t">1 · Setup sheet — drafting-mode toggle</div>
+    <div class="d">CPU vs manual as a fourth field on the shipped sheet (TypeSeg reused, CPU default), plus the
+    mode-dependent footnote branch. Capture + two proposal frames.</div>
+  </a>
+  <a class="card" href="on-the-clock-cpu.html">
+    <div class="t">2 · On the clock — CPU mode, post-repair</div>
+    <div class="d">The state that has never existed live: the user's turn on ffv3 (12 teams, slot 8, pick 8 of 48).
+    Harness capture as visual reference + a labeled reconstruction of the repaired arithmetic.</div>
+  </a>
+  <a class="card" href="manual-picking-for.html">
+    <div class="t">3 · Manual mode — “Picking for {team}” clock variant</div>
+    <div class="d">Your team (flare, unchanged) vs on-behalf (chalk headline naming the team + picking-for sub-line
+    + “{team}'s pick” confirm meta). Includes the ticker “—” finding.</div>
+  </a>
+  <a class="card" href="blocked-user-not-in-draft.html">
+    <div class="t">4 · Blocked entry — user_not_in_draft</div>
+    <div class="d">Both surfaces of the new refusal: the Draft Room's seventh muted-card arm (disabled pre-POST via
+    the GET capability ride-along) and the session screen's typed-empty arm. Honest copy, no timelines.</div>
+  </a>
+  <a class="card" href="recap-manual-mode.html">
+    <div class="t">5 · Recap — manual mode</div>
+    <div class="d">“Your draft” stays the user's team alone (4 picks) even though they made all 48 —
+    my_picks keys on picked_by_user_id, never by. The visual pin for LLD don't-get-wrong (c).</div>
+  </a>
+</div>
+
+<div class="foot">House convention: real captures embedded from <code>../../screens/mobile/mock-draft/</code>
+(hermetic harness, 2026-08-11). Chalkline tokens throughout; binding docs:
+<code>docs/feedback/items/295-mock-user-not-in-draft/{plan,hld,lld}-2026-08-13.md</code>.</div>
+</body>
+</html>

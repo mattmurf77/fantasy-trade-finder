@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Draft Lab — Setup sheet: drafting-mode toggle (#305)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:17px;color:var(--chalk);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk)}
+.lab{display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)}
+.cap{font-size:12px;color:var(--faint);max-width:390px;text-align:center;line-height:1.5}
+.shot{width:390px;border:1px solid var(--line);border-radius:22px;display:block}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);background:rgba(12,14,17,.94);border-radius:2px;padding:2px 6px;line-height:1.45}
+.ann.c{color:var(--ice);border:1px solid var(--ice)}
+.ann.w{color:var(--warn);border:1px solid var(--warn)}
+
+/* dimmed room behind the sheet */
+.behind{opacity:.28;pointer-events:none}
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:52px;display:flex;align-items:center;gap:8px;padding:0 14px}
+.topbar .tick{width:3px;height:22px;background:var(--ice)}
+.topbar .lstack{display:flex;flex-direction:column;line-height:1.15}
+.topbar .micro{font-size:11px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;font-weight:600}
+.topbar .lname{font-size:15px;font-weight:600}
+.fmt{background:var(--ink3);border-radius:2px;padding:2px 6px;font-size:11px;font-weight:600;letter-spacing:.06em}
+.h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:24px;text-align:center;padding:10px 0}
+.modeseg{display:flex;margin:0 16px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.modeseg .seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid transparent}
+.modeseg .seg.on{background:var(--ink3);color:var(--chalk);border-bottom-color:var(--flare)}
+.mrail{margin-top:12px;display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(240,80,140,.08);border-bottom:2px solid var(--flare)}
+.mrail .l{color:var(--flare);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.mrail .r{color:var(--dim);font-size:13px}
+.ecard{margin:16px;border:1px solid var(--flare);border-radius:4px;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--ink1)}
+.ecard .t{font-size:17px;font-weight:600}
+.ecard .b{font-size:13px;color:var(--dim);line-height:1.45}
+
+/* sheet */
+.scrim{background:rgba(7,9,12,.78);padding-top:26px}
+.sheet{background:var(--ink2);border:1px solid var(--line);border-radius:8px 8px 0 0;box-shadow:0 12px 32px rgba(0,0,0,.55);padding:8px 16px 20px;display:flex;flex-direction:column;gap:14px}
+.grab{width:32px;height:4px;background:var(--lineStrong);margin:2px auto 2px;border-radius:2px}
+.stitle{font-size:16px;font-weight:600}
+.flabel{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.field{display:flex;flex-direction:column;gap:8px;position:relative}
+.readonly{display:flex;align-items:center;gap:12px;background:var(--ink1);border:1px solid var(--line);border-radius:4px;padding:10px 12px;min-height:44px}
+.readonly .v{font-size:13px;flex:1}
+.readonly .tag2{font-size:11px;color:var(--faint)}
+.stepper{display:flex;align-items:center;align-self:flex-start;border:1px solid var(--lineStrong);border-radius:4px;overflow:hidden}
+.stepbtn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--ink1);color:var(--ice);font-family:var(--f-mono);font-size:15px}
+.stepval{min-width:64px;text-align:center;font-family:var(--f-mono);font-size:14px}
+.seg2{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg2 .s{flex:1;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-bottom:2px solid transparent;padding:8px 6px;text-align:center}
+.seg2.tall .s{min-height:56px}
+.seg2 .s .sl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);line-height:1.3}
+.seg2 .s.on{background:var(--ink3);border-bottom-color:var(--ice)}
+.seg2 .s.on .sl{color:var(--chalk)}
+.hint{font-size:11px;color:var(--faint);line-height:1.5}
+.btn{min-height:44px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+.btn.primary{background:var(--ice);color:var(--onIce)}
+.btn.ghost{color:var(--dim)}
+.footnote{font-size:11px;color:var(--faint);text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Setup sheet — drafting-mode toggle (#305)</h1>
+  <p><b>What this page shows.</b> The mock-setup sheet gains a two-option segmented control — CPU vs manual —
+  below the Pick-order row, per LLD §1.6 / §3.2 (<code>mock-setup.mode.cpu</code> / <code>mock-setup.mode.manual</code>).
+  It reuses the shipped <code>TypeSeg</code> construction verbatim (ink-3 well + 2px ice underline on the active
+  segment — ice = action, no new colors). <b>CPU is drawn as the default</b>, per plan §10 Q2 (pending operator
+  confirmation; the build blocks on that answer only if it flips).</p>
+  <p><b>Copy is PRD-owned.</b> Every string on the new control and the mode-dependent footnote is the LLD's
+  placeholder, flagged <span style="color:var(--warn)">PRD COPY</span> on the frames. Everything else on the sheet
+  is the shipped screen verbatim (capture left).</p>
+</div>
+
+<div class="lab">
+
+  <!-- CURRENT -->
+  <div class="side">
+    <div class="tag cur">Current — capture</div>
+    <img class="shot" src="../../screens/mobile/mock-draft/setup-sheet.png" alt="Shipped mock setup sheet capture">
+    <div class="cap">Real capture (<code>screens/mobile/mock-draft/setup-sheet.png</code>, hermetic harness,
+    2026-08-11). Three controls: read-only team, rounds stepper, Linear|Snake. No mode control exists.</div>
+  </div>
+
+  <!-- PROPOSAL: CPU default -->
+  <div class="side">
+    <div class="tag pro">Proposal — CPU default</div>
+    <div class="phone">
+      <div class="behind">
+        <div class="status"><span>8:14</span><span>◦◦◦ ▮</span></div>
+        <div class="topbar">
+          <div class="tick"></div>
+          <div class="lstack"><span class="micro">League</span><span class="lname">QA Pre-Draft League</span></div>
+          <span class="fmt">SF&nbsp;&nbsp;TEP</span>
+        </div>
+        <div class="h1">Rookie draft</div>
+        <div class="modeseg"><div class="seg">Real draft</div><div class="seg on">Mock</div></div>
+        <div class="mrail"><span class="l">Mock draft</span><span class="r">not your league’s real draft</span></div>
+        <div class="ecard"><div class="t">No mock running</div>
+          <div class="b">Start one and computer versions of your leaguemates draft against you…</div></div>
+      </div>
+      <div class="scrim">
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="stitle">Start a mock</div>
+          <div class="field">
+            <div class="flabel">You’re drafting for</div>
+            <div class="readonly"><span class="v">qa_draft — QA Pre-Draft League</span><span class="tag2">fixed</span></div>
+          </div>
+          <div class="field">
+            <div class="flabel">Rounds</div>
+            <div class="stepper"><div class="stepbtn">−</div><div class="stepval">4</div><div class="stepbtn">+</div></div>
+          </div>
+          <div class="field">
+            <div class="flabel">Pick order</div>
+            <div class="seg2">
+              <div class="s on"><span class="sl">Linear</span></div>
+              <div class="s"><span class="sl">Snake</span></div>
+            </div>
+            <div class="hint">We can’t read your league’s draft type yet, so this starts on linear — change it if your rookie draft snakes.</div>
+          </div>
+          <div class="field">
+            <div class="flabel">Drafting mode</div>
+            <div class="seg2 tall">
+              <div class="s on"><span class="sl">Computer picks<br>other teams</span></div>
+              <div class="s"><span class="sl">You pick for<br>every team</span></div>
+            </div>
+            <div class="ann w" style="right:-6px;top:-6px">PRD COPY</div>
+            <div class="ann c" style="left:-6px;bottom:-26px">mock-setup.mode.cpu / .manual</div>
+          </div>
+          <div class="btn primary">Start</div>
+          <div class="footnote">Nothing here is written to your league. Computer drafters pick for the other 11 teams.</div>
+          <div class="btn ghost">Cancel</div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">New “Drafting mode” field below Pick order — <code>TypeSeg</code> reused verbatim, CPU active
+    by default. The shipped CPU footnote is unchanged in this state. Segment labels are the LLD's placeholders
+    (“Computer picks other teams” / “You pick for every team”), wrapped to two lines at the 11px label size —
+    if the PRD's final copy runs longer, shorten the segment labels and move the explanation into the field hint.</div>
+  </div>
+
+  <!-- PROPOSAL: manual selected -->
+  <div class="side">
+    <div class="tag pro">Proposal — manual selected</div>
+    <div class="phone">
+      <div class="behind">
+        <div class="status"><span>8:14</span><span>◦◦◦ ▮</span></div>
+        <div class="topbar">
+          <div class="tick"></div>
+          <div class="lstack"><span class="micro">League</span><span class="lname">QA Pre-Draft League</span></div>
+          <span class="fmt">SF&nbsp;&nbsp;TEP</span>
+        </div>
+        <div class="h1">Rookie draft</div>
+        <div class="modeseg"><div class="seg">Real draft</div><div class="seg on">Mock</div></div>
+        <div class="mrail"><span class="l">Mock draft</span><span class="r">not your league’s real draft</span></div>
+        <div class="ecard"><div class="t">No mock running</div>
+          <div class="b">Start one and computer versions of your leaguemates draft against you…</div></div>
+      </div>
+      <div class="scrim">
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="stitle">Start a mock</div>
+          <div class="field">
+            <div class="flabel">You’re drafting for</div>
+            <div class="readonly"><span class="v">qa_draft — QA Pre-Draft League</span><span class="tag2">fixed</span></div>
+          </div>
+          <div class="field">
+            <div class="flabel">Rounds</div>
+            <div class="stepper"><div class="stepbtn">−</div><div class="stepval">4</div><div class="stepbtn">+</div></div>
+          </div>
+          <div class="field">
+            <div class="flabel">Pick order</div>
+            <div class="seg2">
+              <div class="s on"><span class="sl">Linear</span></div>
+              <div class="s"><span class="sl">Snake</span></div>
+            </div>
+            <div class="hint">We can’t read your league’s draft type yet, so this starts on linear — change it if your rookie draft snakes.</div>
+          </div>
+          <div class="field">
+            <div class="flabel">Drafting mode</div>
+            <div class="seg2 tall">
+              <div class="s"><span class="sl">Computer picks<br>other teams</span></div>
+              <div class="s on"><span class="sl">You pick for<br>every team</span></div>
+            </div>
+          </div>
+          <div class="btn primary">Start</div>
+          <div class="footnote" style="position:relative">Nothing here is written to your league. You make every pick for all 12 teams.
+            <span class="ann w" style="right:-6px;top:-14px">PRD COPY</span>
+          </div>
+          <div class="btn ghost">Cancel</div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">Manual selected: only two things change — the active segment and the footnote, which now states
+    that the user makes every pick and (unchanged promise) nothing touches the league. The footnote branch is
+    LLD §3.2's spec; its manual-mode sentence here is a placeholder — PRD owns the final wording.</div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Rationale</h2>
+  <ul>
+    <li><b>Same control, same field grammar.</b> The mode control is the fourth field in an existing three-field
+    sheet — label in 11px caps, <code>TypeSeg</code> segments, 44px touch floor. Nothing new to learn; the sheet
+    stays a confirmation, not an interrogation.</li>
+    <li><b>Placement below Pick order</b> per LLD §3.2 — the two “how the draft runs” controls (order, mode) sit
+    together, after the two prefilled facts (team, rounds).</li>
+    <li><b>Mode is create-time-immutable</b> (HLD §4.2). The sheet is the only place mode is ever chosen, which is
+    why the segment labels must explain consequences in plain words rather than say “CPU”/“Manual” bare.</li>
+    <li><b>Footnote is the disclosure surface.</b> The shipped sheet already uses the footnote for the
+    nothing-touches-your-league promise; the manual branch keeps that promise verbatim and swaps only the
+    who-picks clause. Two-sentence max — this is a footnote, not a tutorial.</li>
+    <li><b>Drawing check that worked:</b> the LLD's placeholder labels fit the segments only when wrapped to two
+    lines. That is legal (min-height grows, 11px floor respected) but tight — flagged for the PRD as a length
+    budget: segment labels ≤ ~14 characters per line at 11px caps in a 179px segment.</li>
+  </ul>
+</div>
+
+</body>
+</html>
