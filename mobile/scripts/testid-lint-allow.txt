@@ -72,3 +72,9 @@ draft-room.mode.*
 mock-draft.empty.*
 # mock-entry blocked-panel ids are object properties rendered as testID={block.testID} (MockChrome.tsx)
 mock-entry.*
+# MatchesScreen.tsx (#307, Matches-group build against the frozen §4.3
+# contract): chip row templates its ids —
+#   testID={c.id === 'all' ? 'matches.league-chip.all' : `matches.league-chip.${c.id}`}
+# Referenced by flows/league/07-matches-tile-scoped.yaml, which is
+# merge-gated on that edit landing.
+matches.league-chip.*
