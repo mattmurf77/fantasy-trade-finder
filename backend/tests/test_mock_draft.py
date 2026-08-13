@@ -101,11 +101,32 @@ def linear_players(n: int, positions=("WR", "RB", "TE", "QB")) -> list[tuple]:
 def make_state(ctx, *, owners, user, rounds=2, draft_type=mds.TYPE_LINEAR,
                ownership=None, personas=None, seed=7, bpa_prob=None,
                decay=None, reach=None):
+    """Engine-test harness state.
+
+    #295/#296/#305 made ``build_settings`` refuse the degenerate shapes many
+    of these engine tests exercise ON PURPOSE: a phantom ``user`` outside the
+    order (so the whole draft is CPU) now raises ``UserNotInDraft`` (INV-6),
+    and an explicit order under ``MOCK_MIN_TEAMS`` now floors to a labelled
+    shuffle (§14-2). Those guards protect the CONSTRUCTION path; the CPU-
+    behaviour tests here need the old tiny/user-less snapshots, so this
+    helper builds through ``build_settings`` with a compliant user and then
+    re-imposes the test's intended ``order``/``order_source``/
+    ``user_owner_id`` on the snapshot — a hand-built state, which is exactly
+    what ``advance_cpu``'s fail-soft defences exist for. The guards
+    themselves are pinned by T-295-06/T-295-16, which drive ``build_settings``
+    directly.
+    """
+    owners = [str(o) for o in owners]
     settings = mds.build_settings(
-        ctx, owners=owners, user_owner_id=user, rounds=rounds,
+        ctx, owners=owners,
+        user_owner_id=user if str(user) in owners else owners[0],
+        rounds=rounds,
         draft_type=draft_type, order=list(owners),
         order_source=mds.ORDER_SOURCE_ASSIGNED, ownership=ownership,
         personas=personas, rng=random.Random(seed))
+    settings["order"] = list(owners)
+    settings["order_source"] = mds.ORDER_SOURCE_ASSIGNED
+    settings["user_owner_id"] = str(user)
     if bpa_prob is not None:
         settings["noise"]["bpa_prob"] = bpa_prob
     if decay is not None:
@@ -1146,26 +1167,29 @@ def test_w2_20_g1_traded_slots_become_pick_ownership_and_move_the_clock():
     shape is `{pick_no: owner}`, and the overall pick number depends on THIS
     mock's rounds/teams/type. `build_settings` owns that translation.
     """
+    # 4 teams since #295: an explicit order under MOCK_MIN_TEAMS is floored
+    # to a shuffle (T-295-16), so the translation is asserted on a compliant
+    # shape.
     ctx = make_ctx(players=linear_players(8))
     settings = mds.build_settings(
-        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
-        draft_type=mds.TYPE_SNAKE, order=["a", "b", "c"],
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=2,
+        draft_type=mds.TYPE_SNAKE, order=["a", "b", "c", "d"],
         order_source=mds.ORDER_SOURCE_ASSIGNED,
         traded_slots={(2, 3): "a"}, rng=random.Random(1))
-    # Snake: round 2 runs 3,2,1, so slot 3 in round 2 is overall pick 4.
-    assert settings["ownership"] == {"4": "a"}
+    # Snake: round 2 runs 4,3,2,1, so slot 3 in round 2 is overall pick 6.
+    assert settings["ownership"] == {"6": "a"}
     state = mds.new_state(ctx, settings, 7)
     state["picks"] = [{"pick_no": i, "round": 1, "slot": i, "roster_id": "x",
-                       "player_id": f"p{i}", "by": "cpu"} for i in (1, 2, 3)]
+                       "player_id": f"p{i}", "by": "cpu"} for i in (1, 2, 3, 4, 5)]
     assert mds.next_pick(state)["roster_id"] == "a"      # not "c"
 
     # An explicit `ownership` entry still wins — the persisted shape is the
     # one a resumed row replays from.
     override = mds.build_settings(
-        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
+        ctx, owners=["a", "b", "c", "d"], user_owner_id="a", rounds=2,
         draft_type=mds.TYPE_SNAKE, traded_slots={(2, 3): "a"},
-        ownership={4: "b"}, rng=random.Random(1))
-    assert override["ownership"] == {"4": "b"}
+        ownership={6: "b"}, rng=random.Random(1))
+    assert override["ownership"] == {"6": "b"}
 
 
 def test_w2_20_g1_a_randomized_order_is_still_labelled_randomized():

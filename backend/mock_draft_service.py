@@ -70,6 +70,12 @@ ORDER_SOURCE_RANDOMIZED = "randomized"
 BY_USER = "user"
 BY_CPU = "cpu"
 
+#: #305 — the two draft modes. A create-time-immutable ``settings`` key (no
+#: schema change; the blob absorbs it). The ONE engine lever is ``next_pick``
+#: (INV-7): in manual mode every owned slot is ``is_user``.
+MODE_CPU = "cpu"
+MODE_MANUAL = "manual"
+
 PERSONA_DECLARED = "declared"
 PERSONA_INFERRED = "inferred"
 PERSONA_DEFAULT = "default"
@@ -84,6 +90,12 @@ REASON_NO_ACTIVE_MOCK = "no_active_mock"
 #: W2d/G-extra. ``teams`` was ``len(owners)`` with no floor, so a 2-team league
 #: got a 2-team "mock" whose every round is a coin flip between two rosters.
 REASON_LEAGUE_TOO_SMALL = "league_too_small"
+#: #295/#296/#305 — the session user could not be placed in the resolved
+#: draft. Fourth and LAST ladder rung (least actionable); also the code of the
+#: :class:`UserNotInDraft` raise from :func:`build_settings`, which the create
+#: route maps to the byte-identical typed-empty, so a born-broken mock can be
+#: refused but never persisted (INV-6) and clients see one vocabulary.
+REASON_USER_NOT_IN_DRAFT = "user_not_in_draft"
 
 #: The smallest league a mock says anything about. Below this the CPU field is
 #: too thin for a reach to mean anything — with 3 opponents the pool barely
@@ -315,6 +327,20 @@ class PlayerUnavailable(MockDraftError):
     code = "player_unavailable"
 
 
+class UserNotInDraft(MockDraftError):
+    """#295/#296/#305 — the resolved order does not contain the user.
+
+    Raised by :func:`build_settings` before any slot table or persisted row
+    exists: at this depth a missing user signals a contract violation between
+    the resolution layer and the engine (an assigned platform order can omit a
+    user who IS in ``owners`` — e.g. a co-owner id), not a league condition.
+    The create route maps it to ``empty_payload(REASON_USER_NOT_IN_DRAFT)``,
+    byte-identical to the refusal ladder's rung.
+    """
+
+    code = REASON_USER_NOT_IN_DRAFT
+
+
 class CalibrationGateClosed(MockDraftError):
     """CPU generation attempted while :data:`CPU_MODEL_VALIDATED` is False."""
 
@@ -423,7 +449,8 @@ def class_loaded(ctx: MockContext) -> bool:
     return bool(ctx.rookie_ids)
 
 
-def start_refusal(ctx: MockContext, owners: Sequence[str]) -> str | None:
+def start_refusal(ctx: MockContext, owners: Sequence[str],
+                  *, user_owner_id: str | None = None) -> str | None:
     """The reason a mock cannot start right now, or ``None`` — **interface G2**.
 
     ONE ordering of the refusals, so the capability probe a client renders a
@@ -431,8 +458,14 @@ def start_refusal(ctx: MockContext, owners: Sequence[str]) -> str | None:
     disagree. The order is the SHIPPED route's, preserved deliberately:
     ``class_not_loaded`` outranks ``cpu_model_unvalidated`` because it is the
     transient, seasonal, self-resolving state and is the more useful thing to
-    say when both hold. ``league_too_small`` is last because it is the only one
-    the user can do nothing about.
+    say when both hold. The last two rungs are the least actionable, in that
+    order: ``league_too_small``, then ``user_not_in_draft`` (#295/#296/#305).
+
+    ``user_owner_id`` is keyword-only and ``None``-defaulted: ``None`` means a
+    legacy positional caller and SKIPS the fourth rung, so every existing call
+    site answers the old ladder byte-identically. The empty string is NOT
+    ``None`` — a session with ``user_id == ""`` refuses (the phantom-owner
+    tripwire, T-295-09). The rung is mode-blind.
     """
     if not class_loaded(ctx):
         return REASON_CLASS_NOT_LOADED
@@ -440,12 +473,16 @@ def start_refusal(ctx: MockContext, owners: Sequence[str]) -> str | None:
         return REASON_CPU_MODEL_UNVALIDATED
     if len({str(o) for o in owners or ()}) < MOCK_MIN_TEAMS:
         return REASON_LEAGUE_TOO_SMALL
+    if (user_owner_id is not None
+            and str(user_owner_id) not in {str(o) for o in owners or ()}):
+        return REASON_USER_NOT_IN_DRAFT
     return None
 
 
 def capability(ctx: MockContext, owners: Sequence[str],
                *, draft_type: str | None = None,
-               order_source: str | None = None) -> dict:
+               order_source: str | None = None,
+               user_owner_id: str | None = None) -> dict:
     """**Interface G2** — what a client needs to render the mock entry point
     WITHOUT POSTing a create first.
 
@@ -460,7 +497,7 @@ def capability(ctx: MockContext, owners: Sequence[str],
     linear/snake toggle and disclose a randomized order before the user
     commits — the same disclosure the created mock echoes back.
     """
-    reason = start_refusal(ctx, owners)
+    reason = start_refusal(ctx, owners, user_owner_id=user_owner_id)
     return {
         "can_start": reason is None,
         "reason": reason,
@@ -963,6 +1000,7 @@ def build_settings(ctx: MockContext,
                    draft_type: str | None = None,
                    order: Sequence[str] | None = None,
                    order_source: str = ORDER_SOURCE_RANDOMIZED,
+                   mode: str = MODE_CPU,
                    ownership: Mapping[Any, str] | None = None,
                    traded_slots: Mapping[Any, str] | None = None,
                    personas: Mapping[str, Mapping[str, str]] | None = None,
@@ -984,12 +1022,37 @@ def build_settings(ctx: MockContext,
     pick number depends on this mock's own ``rounds``/``teams``/``type``, which
     only this function knows. ``traded_slots`` is translated through the slot
     table built just above, and an explicit ``ownership`` entry wins over it.
+
+    **Three #295/#296/#305 rules (INV-4/INV-6):**
+
+    * ``teams == len(resolved_order)`` — ``owners`` never sizes the draft; its
+      residual roles are the shuffle pool, the persona keying and the refusal
+      ladder's count.
+    * An explicit ``order`` shorter than ``MOCK_MIN_TEAMS`` is *not an order*:
+      fall back to the seeded shuffle of ``owners``, label it ``randomized``,
+      and drop ``traded_slots`` with it.
+    * :class:`UserNotInDraft` is raised when the resolved order lacks
+      ``user_owner_id`` — before any slot table or persisted row exists.
+
+    **Fail-soft roster contract:** an order entry absent from ``ctx.rosters``
+    simply has no pre-draft roster to exclude and no severity input — its CPU
+    picks come from the shared pool with flat needs. That is the contract, not
+    a bug: the session cannot supply a roster for a member it does not know.
+    Every such entry still gets a persona row (the ``owners ∪ resolved_order``
+    union below), so ``settings`` stays the complete record of the mock.
     """
     owners = [str(o) for o in owners]
-    teams = len(owners)
     rounds = int(rounds or DEFAULT_ROUNDS)
     rounds = max(1, min(_ROOKIE_MAX_ROUNDS, rounds))
     draft_type = draft_type if draft_type in (TYPE_LINEAR, TYPE_SNAKE) else TYPE_LINEAR
+
+    if order is not None and len(order) < MOCK_MIN_TEAMS:
+        # §14-2: a degenerate platform order below the mock's own floor is not
+        # an order (server precedent: "a partial slot map is not an order").
+        # Fall back to the labelled shuffle, and drop the overlay with it: a
+        # traded pick is meaningless without the slots it trades between.
+        order = None
+        traded_slots = None
 
     if order:
         resolved_order = [str(o) for o in order]
@@ -999,10 +1062,14 @@ def build_settings(ctx: MockContext,
         (rng or random.Random(0)).shuffle(resolved_order)
         resolved_source = ORDER_SOURCE_RANDOMIZED
 
+    teams = len(resolved_order)                                  # INV-4
+    if str(user_owner_id) not in resolved_order:                 # INV-6
+        raise UserNotInDraft(str(user_owner_id))
+
     resolved_personas = {
         str(o): dict(((personas or {}).get(str(o))
                       or {"outlook": DEFAULT_OUTLOOK, "source": PERSONA_DEFAULT}))
-        for o in owners
+        for o in dict.fromkeys([*owners, *resolved_order])
     }
     slots = pick_slots(rounds, teams, draft_type)
     resolved_ownership: dict[str, str] = {}
@@ -1020,6 +1087,10 @@ def build_settings(ctx: MockContext,
         "teams": teams,
         "order": resolved_order,
         "order_source": resolved_source,
+        # #305 — create-time-immutable. Engine-side coercion keeps this
+        # function total (the `draft_type` idiom above); the route already
+        # 400'd real garbage as `bad_mode`.
+        "mode": mode if mode in (MODE_CPU, MODE_MANUAL) else MODE_CPU,
         "slots": slots,
         "ownership": resolved_ownership,
         "personas": resolved_personas,
@@ -1050,7 +1121,14 @@ def total_picks(settings: Mapping[str, Any]) -> int:
 
 
 def next_pick(state: Mapping[str, Any]) -> dict | None:
-    """The slot on the clock, or ``None`` when the draft is done."""
+    """The slot on the clock, or ``None`` when the draft is done.
+
+    THE one mode lever (INV-7): in ``manual`` mode every owned slot is
+    ``is_user``, so ``advance_cpu`` stops at pick 1 on create and returns
+    immediately after every ``/pick``. No other site may read ``mode`` for a
+    turn decision. The read-time default keeps pre-mode persisted rows
+    byte-identical (T-305-05).
+    """
     made = len(state.get("picks") or [])
     slots = state["settings"].get("slots") or []
     if made >= len(slots):
@@ -1058,7 +1136,9 @@ def next_pick(state: Mapping[str, Any]) -> dict | None:
     slot = dict(slots[made])
     owner = owner_of(slot["pick_no"], state["settings"])
     slot["roster_id"] = owner
-    slot["is_user"] = owner is not None and owner == state["settings"].get("user_owner_id")
+    mode = state["settings"].get("mode", MODE_CPU)
+    slot["is_user"] = owner is not None and (
+        mode == MODE_MANUAL or owner == state["settings"].get("user_owner_id"))
     return slot
 
 
@@ -1340,6 +1420,15 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "noise": settings.get("noise"),
             # G3 — the denominator for "12th of 79 on the consensus board".
             "consensus_pool_size": len(pool),
+            # #305 — ALWAYS present, the only source of mode truth. Pre-mode
+            # rows echo the effective value; clients must never infer mode
+            # from `by`, pick cadence, or `on_the_clock` (HLD §4.4).
+            "mode": settings.get("mode", MODE_CPU),
+            # #295/#296/#305 — the caller's team id in this draft: the join
+            # key for "my team". In manual mode every pick is `by: "user"`
+            # while `picked_by_user_id` walks the order, so keying "my team"
+            # off `by` is wrong in exactly the mode that needs it.
+            "user_owner_id": user_owner or None,
         },
         "notice": dbs._notice(notice_code),
     }
