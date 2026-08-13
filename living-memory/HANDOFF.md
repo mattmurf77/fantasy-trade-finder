@@ -19,29 +19,26 @@
 
 ---
 
-## 2026-08-13 — Device-auth design programme complete; branch awaits operator push
+## 2026-08-13 — Device-auth: all 4 artifacts landed, decisions made, S0 half-shipped
 
 ### Where I am right now
 
-**All four artifacts of the device-held-credentials programme are done and dual-agent converged** on branch `design/device-auth-lld` (tip `f7f4bfc`, based on `origin/main` @ `3b64a44`): LLD (4 rounds, 24 blocking objections) and Plan (3 rounds, same-round dual sign-off), joining the PRD and HLD decisions already on main. The branch also carries [G-040]/[G-041] and this write-back.
+**The whole design programme is on `main`** (PRD, HLD decisions, LLD, Plan, [G-040]/[G-041], D-047). The five operator defaults were ratified in chat → **D-047**. S0 (the ship-now bundle, Plan §12) is underway:
 
-### The one blocking thing
+- **Lane A — FAAB GraphQL fix: SHIPPED to `main`** (`79123a0`). `_graphql_object_literal` emits bare keys with Name-grammar validation; `__DRAFT_PICKS__` untouched (scalar, valid in both syntaxes). Failing-first proven (2/3 fail pre-fix); full backend suite **2694 passed / 1 skipped**. Backend-only, so the sim gate did not apply. Render auto-deploys it.
+- **Lane B — credential vault + Sentry scrub: BUILT + TESTED, HELD on the sim gate.** Committed on `feat/s0-vault-sentry` (`e240aae`) and folded into `feat/s0-bundle`. `credentialVault.ts` (WHEN_UNLOCKED_THIS_DEVICE_ONLY on every write; write-verify-then-delete migration; readEnvelope null-not-wipe per D-047); Sentry `beforeSend`/`beforeBreadcrumb`/`tracePropagationTargets:[]`. `tsc` exit 0; two new `check-*.js` (vault behavioral 5/5, keychain static — sabotage-proven; both registered as npm scripts). **The legacy `sleeper.link.jwt` writer in sendInSleeper.ts is deliberately intact** (migrate only reads it; it must keep persisting until the transport ships at S5).
+- **Lane C — OI-9 + OI-12 spikes: NOT DONE.** The agent hit the session limit. These are Gate C prerequisites, not S0 blockers.
 
-**The push to `main` was denied by the permission classifier.** Everything is committed locally in the session worktree at the branch above. The operator lands it with:
-`git push origin design/device-auth-lld:main`
-(content is docs + living-memory only; no code, no conflicts expected — main was at `3b64a44` at last fetch).
+### The two things that need the operator
 
-### What's next (the Plan's own §13, compressed)
-
-1. Operator: "yes to all defaults" (or amend) on the Plan §1's five decisions — 15 minutes.
-2. Start S0 (three parallel lanes: FAAB fix / vault + Sentry scrub / the two spikes OI-9 + OI-12).
-3. Gates A–F in the Plan govern everything after; Gate C (expo-updates memo + Hermes TextDecoder fact) is the real decision point before the big build.
+1. **Sim-gate call on the mobile half of S0.** `git push origin feat/s0-bundle:main` trips the pre-push simulator gate (touches `mobile/src/`). The change is **not user-visible** — a dormant unwired module + observability config, reachable by no screen — so the gate arguably does not apply, but the override (`FTF_SKIP_SIM_GATE=1`) is an operator decision and an agent may not self-select it. Either run the tier the runbook matrix assigns, or override.
+2. **The two Gate-C spikes still owe their memos** before S3: the expo-updates evaluation (OI-9) and the on-device `typeof TextDecoder` check (OI-12). Prompts are ready; `feat/s0-spikes` worktree exists.
 
 ### Watch out for
 
-- The **worktree sweep debt** stands: this session's worktree (`scratchpad/lld-wt`) holds the unpushed branch — do NOT remove it before the push lands. ~12 older agent worktrees still owed a recovery-ledger sweep from before this session.
-- Opus weekly limit was hit mid-session (resets 10am ET); the Plan's lenses ran on Fable — noted in its reconciliation log.
-- Two ESPN pending trades to "Team VP" (league 11896) may still need revoking — carried from the previous handoff.
+- **Unpushed work in worktrees — do NOT sweep before landing:** `feat/s0-vault-sentry` / `feat/s0-bundle` (mobile S0, held on the gate) and `feat/s0-spikes` (empty). `design/device-auth-lld` is fully merged and safe to sweep.
+- Session + Opus weekly limits were hit mid-session (Opus resets 10am ET, session 6pm ET); lane C and the Plan's lenses ran on Fable.
+- Two ESPN pending trades to "Team VP" (league 11896) may still need revoking — carried forward.
 ## 2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)
 
 ### Where I am right now
