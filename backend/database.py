@@ -1990,6 +1990,16 @@ def _migrate_db() -> None:
     # contract as the two backfills above. See docs/runbook.md.
     backfill_ranking_method_from_tiers()
 
+    # P1-7 (audit A-16) — 'anchor' gains an unlock rule, so the pre-existing
+    # anchor cohort would fan out retroactively on their first poll. Same
+    # slot, same idempotent-every-boot contract. Imported lazily to keep the
+    # unlock bar defined in exactly one place (ranking_service).
+    try:
+        from .ranking_service import RankingService as _RS
+        backfill_anchor_unlocked_formats(_RS.ANCHOR_UNLOCK_MIN)
+    except Exception as e:
+        print(f"[backfill] anchor unlock backfill skipped: {e}")
+
     # ── Agent 1 additions — user_player_skips ─────────────────────────────
     # The table is created by metadata.create_all(); this block is for any
     # future additive ALTERs to that table. Kept idempotent like the rest.
@@ -2534,6 +2544,96 @@ def backfill_ranking_method_from_tiers() -> int:
         # scoped SQL undo is only expressible if the cohort was logged.
         print(f"[backfill] ranking_method: tagged {written}/{len(plan)} user(s) "
               f"'quickset' — cohort: {[uid for uid, _ in plan]}")
+    return written
+
+
+def backfill_anchor_unlocked_formats(min_overrides: int) -> int:
+    """P1-7 (audit A-16) — the fan-out suppression for the anchor cohort.
+
+    THIS EXISTS FOR ONE REASON, and it is the same reason
+    backfill_ranking_method_from_tiers pre-seeds unlocked_formats.
+
+    P1-7 gives `ranking_method = 'anchor'` its own unlock rule, so a user who
+    anchored 40+ players months ago flips locked -> unlocked on their FIRST
+    /api/rankings/progress poll after the deploy. That transition takes the
+    `was_first` branch, which emits ranking_complete_first_time AND pushes
+    "@user just unlocked Trade Finder" to every joined leaguemate. Without
+    this pre-seed the deploy produces a retroactive burst of pushes for work
+    nobody did today — the exact failure P0-1 raised and answered the same
+    way (hld.md S-03). Pre-seeding unlocked_formats short-circuits
+    mark_format_unlocked, so `was_first` is False and neither fires.
+
+    COHORT: ranking_method == 'anchor' AND, for at least one scoring format,
+    >= `min_overrides` stored tier_overrides entries in that format.
+
+    THE COUNT IS A DELIBERATE SUPERSET of the runtime predicate.
+    RankingService.board_override_count() restricts to pool-RESIDENT pids;
+    this cannot, because the player pool is not a database concept. Stored
+    count >= pool-resident count, so this may include a user sitting one or
+    two stale pids short of the bar. The direction is generous (it grants an
+    unlock a hair early; it can never lock anyone), and being generous is the
+    right side to err on for a suppression pass — a missed row costs a real
+    user a spurious push to their whole league.
+
+    NOT DONE FOR 'manual'. That arm was `unlocked = True` unconditionally, so
+    P1-7 only ever TIGHTENS it: no manual user can newly unlock, so no manual
+    user can newly fan out. (Anyone already unlocked keeps it through the
+    monotonic floor in get_rankings_progress.)
+
+    Idempotent by predicate, safe on every boot, and never raises: a failure
+    prints and returns what it wrote. Returns the number of rows written.
+    """
+    col = users_table.c.ranking_method
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(users_table.c.sleeper_user_id,
+                       users_table.c.tier_overrides,
+                       users_table.c.unlocked_formats)
+                .where(col == "anchor")
+            ).fetchall()
+    except Exception as e:
+        print(f"[backfill] anchor unlock cohort read failed: {e}")
+        return 0
+
+    plan: list[tuple[str, str]] = []
+    for row in rows:
+        overrides = _parse_per_format_json(row.tier_overrides, is_list=False)
+        qualifying = [f for f in SCORING_FORMATS
+                      if len(overrides.get(f) or {}) >= min_overrides]
+        if not qualifying:
+            continue
+        try:
+            existing = json.loads(row.unlocked_formats) if row.unlocked_formats else []
+            if not isinstance(existing, list):
+                existing = []
+        except (json.JSONDecodeError, TypeError):
+            existing = []
+        new = [f for f in qualifying if f not in existing]
+        if not new:
+            continue                      # already suppressed on an earlier boot
+        plan.append((row.sleeper_user_id, json.dumps(list(existing) + new)))
+
+    written = 0
+    for i in range(0, len(plan), 500):
+        chunk = plan[i:i + 500]
+        try:
+            with engine.begin() as conn:
+                for uid, uf in chunk:
+                    conn.execute(
+                        update(users_table)
+                        .where(users_table.c.sleeper_user_id == uid)
+                        .values(unlocked_formats=uf)
+                    )
+            written += len(chunk)
+        except Exception as e:
+            print(f"[backfill] anchor unlock chunk at {i} failed: {e}")
+
+    if plan:
+        # Same rule scope-p0-1.md §2 set for its own backfill: a scoped SQL
+        # undo is only expressible if the cohort was logged.
+        print(f"[backfill] anchor unlock: pre-seeded {written}/{len(plan)} user(s) "
+              f"— cohort: {[uid for uid, _ in plan]}")
     return written
 
 

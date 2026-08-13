@@ -11,6 +11,76 @@
 
 ---
 
+## 2026-08-12 — Feedback #300 (position-scoped trade candidates), shipped LIT with gates waived
+
+- **Change:** `5139b45` (PR #112), v1.13.1 **build 106**, both flags **ON**. Backend `medians` field on `/api/league/power-rankings`; mobile divider + Buyer/Seller bands + stacked-roster drill-in + Offer/Target handoff; rules A and B removed ([D-044](DECISIONS.md)); two analytics events.
+- **Verified on the merged tree, re-run by the orchestrator rather than taken from agent reports:** `pytest backend/tests -q` **2610 passed / 1 skipped**; `tsc --noEmit` exit 0; `testid-lint OK`; `check-league-drill-in` 29; `check-analytics-297-302` 35; `check-single-pin-actions` 17; `check-league-candidates-300` 67; `check-picks-subset-invariance` 72; `check-analytics-300` 51. **271 structural assertions.**
+- **Falsification:** 40 + 12 + 42 sabotages executed across the three build rounds. **One genuine false pass found and fixed** (S21: dropping `if (!query.isFetched) return` left the suite green because the assertion matched an identifier that also appears in the dep array). That is the **fifth** false-passing test caught in this session across five independently authored suites.
+- **Simulator gate: WAIVED by operator. Maestro execution: WAIVED by operator.** `06-position-trade-candidates.yaml` is authored and **has never run**. No `last-sim-run.json` written — not fabricated. **The 44pt hit-slop treatment, the divider and the rule-A removal have never executed on a device or simulator.** The operator confirmed the shipped build behaves in TestFlight, which is the only runtime evidence in existence for this feature.
+- **Analytics verified in production.** Deploy-then-probe run post-merge: 4 events posted, `{"accepted":4,"dropped":0,"rejected":[]}`, then every property read back out of `user_events.props` — both `league_pos_candidates_viewed` rows and both `league_candidate_pinned` mirror combinations `(offer, below)` / `(target, above)`. Note the trap this gate exists for: without `X-Device-Id` the response is `{"accepted":0,"dropped":0,"rejected":[{"reason":"no_identity"}]}`, which has `dropped == 0` and reads as a pass.
+- **Still true and worth repeating:** none of the six `check-*.js` suites run in CI. They are `npm run`-only, so **none of the 271 assertions gate anything**.
+
+---
+
+## 2026-08-12 — P1 audit remediation shipped (sim gate retired by operator, not waived)
+
+- **`express`: P1 remediation shipped — simulator gate SKIPPED, `FTF_SKIP_SIM_GATE=1`.** Not a
+  one-off waiver: operator decision **D-P1-08** retires the Maestro/simulator/screenshot
+  apparatus as standing policy — it consumed more budget than it returned and its quality
+  degraded as the surface grew. **TestFlight is now the primary QA method.** No
+  `qa/sim-runs/last-sim-run.json` written — **not fabricated**. The pre-push hook fired and was
+  overridden deliberately, with the operator's explicit go. `CLAUDE.md`, `githooks/pre-push` and
+  `docs/runbook.md` still describe the old policy and are **owed an update** (D-P1-08).
+- **Verified instead:** full backend suite **2663 passed / 1 skipped** (3m51s) on the rebased
+  tree; `npx tsc --noEmit` clean against a fresh in-worktree `npm ci`; `testid-lint` exit 0;
+  `check-anchor-labels.js` 20/20; `check-invite-social-proof.js` 13/13. Baselines measured on
+  this tree before editing, never quoted from another branch: 2467 → 2504 (P1-7) → 2663 (after
+  rebase onto `main` plus the two pre-ship fixes).
+- **NOT verified on device.** Five changed anchor rung labels, the anchor progress hint, both new
+  invite surfaces and the share-image footer are visual and have never rendered on a simulator or
+  a phone. This is the accepted cost of D-P1-08 and is owed on the TestFlight pass.
+- **Sabotage-proven guards.** The anchor-label AST walker **false-passed on its first cut** — it
+  inspected only the root of each initializer, so `key === '1_second' ? '1 2nd' : anchorLabel(key)`
+  slipped through; fixed to walk the whole subtree, all five mutations now fail as intended. The
+  tier-route 404 was proven to come from the flag guard rather than a missing route (body shape +
+  `url_map` membership). The `league_id` scrub exemption was proven narrow three ways: an email
+  under the same key is still redacted, a long digit run under any other key is still redacted,
+  and the allowlist is exact-key rather than substring.
+- **Analytics NOT yet proven end-to-end.** T1 registration ships in this push, but the corrected
+  probe (**HLD §H-6**: `X-Device-Id`, valid envelope, `accepted > 0` **and** `dropped == 0`, then
+  a read-back of `user_events.props`) runs against production **after** the Render deploy. Until
+  it passes, treat every new event as unproven — the endpoint returns 200 while dropping. The
+  original probe spec in this round would have passed against a broken build; that is why it was
+  corrected before use.
+- **Not shipped, deliberately:** email capture (built, then **reverted in full** — flag, policy,
+  docs and living-memory — by operator decision: the sequencing was backwards and no
+  email-sending infrastructure exists to consume it), P1-9 trade push and P1-10 Sleeper analytics
+  (both still hold unanswered build-blocking decisions), P1-11 (dropped, D-P1-01).
+
+---
+
+## 2026-08-12 — Send in MFL + Send in ESPN shipped live (sim gate WAIVED all session, CI never ran)
+
+- **`express`: Send in MFL + Send in ESPN + platform unlink + ESPN credential verification shipped — gates skipped by operator.** `FTF_SKIP_SIM_GATE=1` on every push (warning emitted each time); **no `qa/sim-runs/last-sim-run.json` written — not fabricated**. CI never ran: the operator directed direct-to-`main` pushes rather than PRs. `main` moved `3293f4a` → `cad99fb`.
+- **Verified instead of CI**, per push: targeted backend suites (178 → 135 → 123 → 122 depending on surface), 12→18 `mobile/tests/check-*.js` including main's own P0-6/P0-7 pins, `testid-lint` exit 0, `tsc --noEmit` clean on a fresh in-worktree `npm ci`. The full ~2,400-test suite was **deliberately not run** — it stalled four separate agents mid-session.
+- **Sabotage-proven guards** (each failed first, then restored): MFL pick hard-block (guard removed ⇒ the mocked write was reached with the pick silently dropped); ESPN pick + unmapped-asset hard-blocks; **cross-user unlink isolation** (removing the `WHERE user_id` clause made another user's row deletable — the security property that mattered most).
+- **TestFlight 1.13.0 builds 102/103/104/105, then 1.13.1 build 107.** Every status read from `eas-cli build:list --json`, never the exit code — **`eas build` exits 0 even when the remote build ERRORED** (a concurrent session lost builds 99/100 that way). Build 106 was another session's. **Build-ordering lesson: flags are server-side, so `espn.send` could not be enabled until a build containing the lazy send-triggered auth existed (103) — enabling a flag whose client code is absent from the installed build *degrades* it.**
+- **Live production verification, by content not by uptime:** `/api/feature-flags` serves `trade.send_in_mfl: true` and `espn.send: true` (neither key existed before); `DELETE /api/espn/link` and `DELETE /api/mfl/auth-link` both return 401 unauthenticated (route live and auth-gated, not 405).
+- **MFL write path LIVE-VERIFIED** — a real 2-for-2 proposal succeeded from the app (`trade_sent {platform:"mfl", outcome:"proposed"}`). Because the adapter **refuses ambiguous success**, that outcome is positive evidence the real import response parsed unambiguously. `pendingTrades` also read live: field vocabulary confirmed, `FP_0002_2028_2` confirms the pick encoder against a real trade.
+- **ESPN write validated without spending a real trade** — negative probes with a nonexistent `relatedTransactionId` returned 409 `TRAN_NOT_FOUND` for both `TRADE_ACCEPT` and `TRADE_DECLINE`, and `items:[]` returned 409 `TRAN_INVALID_TRADE_TEAM_COUNT` for propose. Both are validation-class errors only reachable *after* auth, so auth + envelope + `type` are all confirmed while nothing real was touched. **No real ESPN send has been made from the app — that remains owed.**
+- **Sleeper iOS reachability probe: PASS 4/4** (Chrome-spoofed and honest headers × Wi-Fi and cellular, all HTTP 200), run from TestFlight build 107 and reported via `sleeper_probe_result` analytics rather than transcription. Probe shipped, run, and **deleted the same day**; result in `../docs/plans/sleeper-ios-reachability-probe-result-2026-08-12.md`.
+- **Analytics correctness checked, not assumed:** `trade_sent`'s NULL top-level `platform` column initially looked like a repeat of the NULL-`platform` incident. It is not — that column is the *emitter* (`ios`/`server`), the fantasy platform lives in `props.platform`, and `sleeper_send_succeeded` behaves identically. New event names were added to `NON_INTENT_EVENTS` in the same commit that registered them.
+- **Flag-mirror trap fired twice.** Any new key in `config/features.json` must be mirrored into `release.json`, `onboarding-v2.json`, and `profiles-on.json` or `test_seed_ui_test_db.py` fails (69 tests). Caught both times before push.
+## 2026-08-11 — P1-7 anchor + manual unlock, derived rung labels (NOT merged, branch-only)
+
+- **Change:** branch `p1-remediation-2026-08-11`, three commits. (1) Per-method unlock ladder — `'anchor'` gains its first arm (audit A-16: it could never unlock), `'manual'` loses its unconditional `True` (A-17), both reading `RankingService.board_override_count()`; `_tiers_rule()` extracted; `database.backfill_anchor_unlocked_formats` added as the first-unlock fan-out suppression; additive `anchor_count`/`anchor_required` on `GET /api/rankings/progress`. (2) Anchor rung labels derived from `TIER_LABEL` (five of eight had drifted, not the two the audit found) + `mobile/tests/check-anchor-labels.js` + the wizard's unlock hint + `anchors.rung.*` testIDs. (3) The `anchors-done` seed profile and its `app_user.anchors` seeder handler.
+- **Verified (this worktree, re-run after every commit):** `pytest backend/tests -q` **2504 passed / 1 skipped**, against a **2467 / 1 baseline measured on this same tree before the first edit**. The +37 is fully accounted for and contains no pre-existing failures: `test_anchor_unlock.py` **29 new** (one case parametrized ×2), `test_pick_anchor.py` 17 → **18** (the D15 lane-separation assertion), `test_seed_ui_test_db.py` 69 → **76**. `npx tsc --noEmit` exit 0, no output; `testid-lint.sh` → `testid-lint OK`; `check-anchor-labels.js` **20/20**.
+- **Falsification — and it earned its keep.** Every assertion in `check-anchor-labels.js` was run against a deliberately sabotaged tree. **The first cut false-passed on the single most important mutation:** re-typing a label as `label: key === '1_second' ? '1 2nd' : anchorLabel(key)` — the original defect wearing a ternary — because the assertion inspected only the *root* of each `label` initializer. This is exactly the case the design cited as the reason an AST walk beats a grep, and the AST walk fell into it anyway. Fixed to search the whole initializer subtree and to whitelist two exact initializer shapes; all five mutations (ternary, template literal, indirection through another function, `no_value → 'waivers'`, inlined `BELOW_LADDER_LABEL`, dropped `ANCHOR_TIER` key) now fail as intended. Same family as [G-035](GOTCHAS.md).
+- **The seed fixture proves the unlock rather than assuming it.** `anchors-done.json` seeds `unlocked: false` deliberately — a seeded `unlocked_formats` row satisfies the monotonic floor *before* the new branch is consulted, so the obvious fixture would have gone green with the fix reverted ([G-037](GOTCHAS.md)). `_validate_anchors` now **refuses** the incoherent shape, and `test_anchors_done_actually_clears_the_unlock_bar` builds a real `RankingService` from the seeded board and asserts it clears the bar — so the fixture and the branch are proven to meet, not assumed to.
+- **Sim run: none.** Per [D-P1-08](../docs/plans/audit-p1-remediation/DECISIONS-p1.md) the Maestro/simulator apparatus is retired and TestFlight is primary QA. No `last-sim-run.json` written — **not fabricated**.
+- **Not verified on device, and it should be:** the wizard's new unlock hint (`anchors.unlock-hint`) and the five changed rung labels are visual changes no automated gate here can see. `check-anchor-labels.js` proves the labels are *derived*; it cannot prove they *render*. **Owed on the next TestFlight pass.**
+- **Same pre-existing gap as the batch below:** none of the `mobile/tests/check-*.js` scripts run in `.github/workflows/ci.yml`, so `check-anchor-labels.js` **gates nothing** until that job is wired. It is a `npm run test:anchor-labels` a human has to remember.
+
 ## 2026-08-11 — Feedback #297/#298/#299/#302 + batch analytics (sim gate DEFERRED, operator-directed)
 
 - **Change:** branch `feedback-integration-v2`, cut from `origin/main` @ `f65bab7`, merging `feedback-build-league-299-302` and `feedback-build-trades-297-298` plus an analytics round. #297 honest-empty lineup row; #298 single-pin deck recovery (V1) + the team-pill regenerate defect; #299 32pt League roster tiles (−47%, 728pt reclaimed on a 26-man roster, 4 → 8 players above the fold); #302 stack-header drill-in exit + the first Android `BackHandler` on that screen. Analytics: two new client events (`lineup_impact_unavailable`, `league_team_closed`), three widened props (`mode` on `find_trades_tapped` + `trade_card_viewed`, `source` on `find_trades_tapped` — the last a **bug fix**, that prop had been sent into an empty registry and popped on every row since #257).

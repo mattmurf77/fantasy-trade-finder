@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Linking, Pressable } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, Linking, Pressable } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
@@ -25,11 +25,14 @@ import { track } from '../api/events';
 // any field value, or any DOM content; the only data that ever leaves this
 // screen is the two cookies, and they come from the native store, not JS.
 //
-// On mount we CLEAR any existing ESPN cookies from the native store BEFORE
-// the first poll (clearEspnCookies), so every capture is a fresh login. A
-// stale pair from a prior session would otherwise be "captured" ~1s after
-// mount — before the user can even see the login — and a server-expired
-// espn_s2 would loop the user through 403s with no in-flow escape.
+// On mount we CLEAR the ESPN/Disney web session from the native store
+// BEFORE the WebView mounts or the first poll runs (clearEspnCookies — the
+// clear covers espn.com AND the Disney SSO domains, and the WebView is
+// gated on `storeCleared`), so every capture is a fresh login. A stale pair
+// from a prior session would otherwise be "captured" ~1s after mount —
+// before the user can even see the login — and (2026-08-12 incident) a
+// surviving Disney SSO session silently re-authenticates WHOEVER was last
+// signed in, making it impossible to switch ESPN accounts.
 
 // ESPN's login entry: bounces straight into Disney SSO and returns to a
 // logged-in state. Both cookies land on the `.espn.com` PARENT domain
@@ -153,6 +156,14 @@ export default function EspnConnectScreen() {
   const sawOtpRef = useRef(false);
   const unmountedRef = useRef(false);
   const storeClearedRef = useRef(false);
+  // State twin of storeClearedRef: the WebView itself only MOUNTS once the
+  // ESPN/Disney session clear has settled (2026-08-12 incident hardening).
+  // Rendering the login page before the clear completes would let it load
+  // with the previous account's session attached — Disney SSO then
+  // re-authenticates that account with no password prompt, and the user can
+  // never switch accounts. The ref gates the capture poll; this gates the
+  // page load itself.
+  const [storeCleared, setStoreCleared] = useState(false);
   // WebView imperative handle for the manual reload control + the one-time
   // automatic warm-up reload (see ESPN_LOGIN_URL's URL-decision comment).
   const webviewRef = useRef<WebView>(null);
@@ -284,10 +295,12 @@ export default function EspnConnectScreen() {
     };
   }, [clearWedgeTimer, sendMode]);
 
-  // Fresh-login guarantee FIRST, then poll: clear any stale ESPN cookies,
-  // and only once that settles start the 1s poll (login is an SPA/redirect
-  // dance, not a single load event we can hook). Nav-state changes also
-  // call tryCapture, but it bails until storeClearedRef flips.
+  // Fresh-login guarantee FIRST, then load + poll: clear the ESPN/Disney
+  // web session, and only once that settles mount the WebView (setStoreCleared
+  // below is what lets the login page load at all) and start the 1s poll
+  // (login is an SPA/redirect dance, not a single load event we can hook).
+  // Nav-state changes also call tryCapture, but it bails until
+  // storeClearedRef flips.
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
     (async () => {
@@ -298,6 +311,7 @@ export default function EspnConnectScreen() {
       }
       storeClearedRef.current = true;
       if (unmountedRef.current) return;
+      setStoreCleared(true);
       interval = setInterval(() => void tryCapture(), 1000);
     })();
     return () => {
@@ -409,6 +423,15 @@ export default function EspnConnectScreen() {
         ) : null}
       </View>
 
+      {/* The login page must NOT load until the ESPN/Disney session clear
+          settles — a pre-clear load would carry the previous account's
+          session and Disney SSO silently re-authenticates it (2026-08-12
+          incident). Structural: the WebView does not exist before then. */}
+      {!storeCleared ? (
+        <View style={[styles.web, styles.clearing]} testID="espn-connect.clearing">
+          <ActivityIndicator color={chalk.dim} />
+        </View>
+      ) : (
       <WebView
         testID="espn-connect.webview"
         ref={webviewRef}
@@ -446,6 +469,7 @@ export default function EspnConnectScreen() {
         setSupportMultipleWindows={false}
         style={styles.web}
       />
+      )}
     </View>
   );
 }
@@ -485,4 +509,6 @@ const styles = StyleSheet.create({
   // Retry action inside the store-failure banner — ice = action color.
   retryLink: { color: ice.base, marginTop: space.xs },
   web: { flex: 1, backgroundColor: ink.ink0 },
+  // Pre-clear placeholder — same footprint as the WebView, centered spinner.
+  clearing: { alignItems: 'center', justifyContent: 'center' },
 });

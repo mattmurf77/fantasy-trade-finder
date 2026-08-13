@@ -58,26 +58,75 @@ export function pickEspnCookies(bags: (CookieBag | null | undefined)[]): EspnCoo
 // there too).
 const ESPN_COOKIE_NAMES = ['espn_s2', 'SWID'] as const;
 
+// Disney OneID SSO hosts (ESPN's login IS Disney SSO — the /login page
+// bootstraps a registerdisney iframe). A surviving Disney session cookie
+// here silently re-authenticates the PREVIOUS account with no password
+// prompt, which is exactly the account-switch trap from the 2026-08-12
+// incident: the operator signed in with a friend's ESPN account and could
+// never sign in as themselves again. Cleared alongside the espn.com pair so
+// sign-in always starts genuinely unauthenticated. These hosts — plus
+// ESPN_COOKIE_DOMAINS above — are the ENTIRE clear surface; nothing outside
+// espn.com/Disney-SSO domains is ever touched.
+export const DISNEY_SSO_DOMAINS = [
+  'https://registerdisney.go.com',
+  'https://cdn.registerdisney.go.com',
+] as const;
+
 /**
- * Clear any existing ESPN auth cookies so every capture is a FRESH login.
+ * Clear every cookie currently set for ONE ESPN/Disney domain, by name —
+ * enumerate what that domain carries, then clearByName each. Scoped by
+ * construction: only names found on `domain` are cleared, and only from
+ * `domain` — cookies for any other site are untouchable from here. Never
+ * clearAll (the native store is app-wide).
+ */
+async function clearDomainCookies(domain: string, useWebKit: boolean): Promise<void> {
+  try {
+    const bag = await CookieManager.get(domain, useWebKit);
+    await Promise.all(
+      Object.keys(bag ?? {}).map((name) =>
+        CookieManager.clearByName(domain, name, useWebKit).catch(() => {}),
+      ),
+    );
+  } catch {
+    /* enumeration failed — the named espn_s2/SWID clears still run */
+  }
+}
+
+/**
+ * Clear the ESPN + Disney-SSO web session so every capture is a FRESH login.
  * Without this, a stale pair left from a prior session/capture gets
  * "captured" ~1s after mount — before the user can even see the login — and
- * a server-expired espn_s2 loops the user through 403s with no in-flow
- * escape. Clears both cookie names on both domains, in both native stores
- * (WKHTTPCookieStore via useWebKit:true AND NSHTTPCookieStorage — the
- * screen's sharedCookiesEnabled syncs between them, so a survivor in either
- * would resurface). Failures are swallowed per name: a partial clear still
- * beats no clear, and the poll only starts after this settles.
+ * (2026-08-12 incident) a surviving session re-authenticates WHOEVER was
+ * last signed in, making it impossible to switch ESPN accounts even after
+ * the stored credential is deleted server-side.
+ *
+ * Two layers, both scoped to ESPN/Disney domains only — never clearAll (the
+ * native store is app-wide; Sleeper's web session lives there too):
+ *   1. enumerate-and-clear every cookie on each ESPN + Disney SSO domain
+ *      (kills the full login session, not just the two captured cookies);
+ *   2. named clears of espn_s2/SWID (belt & braces if enumeration fails).
+ * Both native stores are hit (WKHTTPCookieStore via useWebKit:true AND
+ * NSHTTPCookieStorage — the screen's sharedCookiesEnabled syncs between
+ * them, so a survivor in either would resurface). Failures are swallowed
+ * per name: a partial clear still beats no clear, and the WebView only
+ * mounts after this settles.
  */
 export async function clearEspnCookies(): Promise<void> {
-  const clears: Promise<unknown>[] = [];
+  const domains: string[] = [...ESPN_COOKIE_DOMAINS, ...DISNEY_SSO_DOMAINS];
+  await Promise.all(
+    domains.flatMap((domain) => [
+      clearDomainCookies(domain, true),
+      clearDomainCookies(domain, false),
+    ]),
+  );
+  const named: Promise<unknown>[] = [];
   for (const domain of ESPN_COOKIE_DOMAINS) {
     for (const name of ESPN_COOKIE_NAMES) {
-      clears.push(CookieManager.clearByName(domain, name, true).catch(() => {}));
-      clears.push(CookieManager.clearByName(domain, name, false).catch(() => {}));
+      named.push(CookieManager.clearByName(domain, name, true).catch(() => {}));
+      named.push(CookieManager.clearByName(domain, name, false).catch(() => {}));
     }
   }
-  await Promise.all(clears);
+  await Promise.all(named);
 }
 
 /**

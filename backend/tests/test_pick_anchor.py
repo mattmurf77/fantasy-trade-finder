@@ -329,3 +329,27 @@ def test_anchor_scale_route_get_post_and_validation(harness):
                             data=json.dumps({"top_tier_firsts": bad}))
             assert r.status_code == 400
         assert saved == {"1qb_ppr": 3.0}
+
+
+# ── P1-7 / D15 — the lane separation the unlock rule rests on ──────────────
+
+def test_anchor_save_writes_no_tiers_position_and_no_swipe(harness):
+    """A-16's fact 4, pinned at the ROUTE boundary.
+
+    The 'anchor' unlock arm (server.get_rankings_progress) exists precisely
+    because this lane produces neither of the two evidence kinds the other
+    arms read: no `tiers_saved` row (the tiers/quickset rule) and no rank
+    swipe (the trio rule). If a future change makes the anchor lane call
+    save_tiers_position, audit option 1 stops being inert and this design's
+    stated rationale silently becomes wrong — so the absence is asserted
+    rather than assumed.
+    """
+    client, service, token, _ = harness
+    with patch.object(server, "save_tiers_position") as stp:
+        _post(client, token, {"player_id": "rb1", "anchor": "2_firsts"})
+    stp.assert_not_called()
+    assert service._interactions == {}
+    assert service._swipes == []
+    # …and the anchor DID land on the board, so the absence above is not
+    # simply a no-op route.
+    assert "rb1" in service._elo_overrides

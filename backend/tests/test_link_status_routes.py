@@ -311,3 +311,136 @@ def test_mfl_status_connected_from_session_only_cookie(client):
     assert body["connected"] is True
     assert body["mfl_username"] is None
     assert body["year"] is None
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/espn/link — disconnect (operator incident 2026-08-12: cookies
+# captured from someone else's ESPN sign-in had NO user-facing removal path
+# and had to be deleted straight from the production DB)
+# ---------------------------------------------------------------------------
+
+OTHER = "999888777666555444"
+
+
+def test_espn_unlink_deletes_row_and_status_flips(client):
+    from backend.sleeper_write import encrypt_token
+    c, token, engine, _ = client
+    db_module.upsert_espn_credential(USER, "{ABCD-1234}", encrypt_token("s2val"),
+                                     verified_at="2026-08-12T00:00:00+00:00")
+    assert c.get("/api/espn/link", headers=_h(token)).get_json()["connected"] is True
+
+    r = c.delete("/api/espn/link", headers=_h(token))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json() == {"connected": False}
+
+    with engine.connect() as conn:
+        assert conn.execute(select(db_module.espn_credentials_table)).fetchall() == []
+    assert c.get("/api/espn/link", headers=_h(token)).get_json() == {"connected": False}
+
+
+def test_espn_unlink_is_idempotent_when_nothing_stored(client):
+    """Deleting with no stored credential is a clean no-op, not an error —
+    the client may retry a disconnect or race another device's."""
+    c, token, _, _ = client
+    r = c.delete("/api/espn/link", headers=_h(token))
+    assert r.status_code == 200
+    assert r.get_json() == {"connected": False}
+    # and again — still clean
+    r = c.delete("/api/espn/link", headers=_h(token))
+    assert r.status_code == 200
+    assert r.get_json() == {"connected": False}
+
+
+def test_espn_unlink_404_when_flag_off(client):
+    c, token, _, _ = client
+    with patch.object(server, "is_enabled", lambda k: False):
+        r = c.delete("/api/espn/link", headers=_h(token))
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "feature_disabled"
+
+
+def test_espn_unlink_requires_session():
+    c = server.app.test_client()
+    with patch.object(server, "is_enabled", lambda k: k == "espn.link"):
+        r = c.delete("/api/espn/link")
+    assert r.status_code == 401
+
+
+def test_espn_unlink_only_deletes_callers_row(client):
+    """THE security property: one user's disconnect must never touch another
+    user's credential row. Sabotaging delete_espn_credential's WHERE clause
+    (deleting indiscriminately) must fail this test."""
+    from backend.sleeper_write import encrypt_token
+    c, token, engine, _ = client
+    db_module.upsert_espn_credential(USER, "{MINE-1}", encrypt_token("mine-s2"),
+                                     verified_at="2026-08-12T00:00:00+00:00")
+    db_module.upsert_espn_credential(OTHER, "{THEIRS-1}", encrypt_token("their-s2"),
+                                     verified_at="2026-08-12T00:00:00+00:00")
+
+    r = c.delete("/api/espn/link", headers=_h(token))
+    assert r.status_code == 200
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(db_module.espn_credentials_table)).fetchall()
+    remaining = {row._mapping["user_id"] for row in rows}
+    assert USER not in remaining, "caller's row must be deleted"
+    assert OTHER in remaining, "another user's row must be untouched"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/mfl/auth-link — disconnect (same gap as ESPN, audited + fixed
+# in the same pass; /api/mfl/link stores no credential and needs none)
+# ---------------------------------------------------------------------------
+
+def test_mfl_unlink_deletes_row_and_session_cookie(client):
+    """DELETE must clear BOTH storage locations — the encrypted row and the
+    key-less-deployment session-only copy — or GET would still say
+    connected:true via the fallback."""
+    from backend.sleeper_write import encrypt_token
+    c, token, engine, sess = client
+    db_module.upsert_mfl_credential(USER, "mfluser",
+                                    encrypt_token("MFL_USER_ID=abc"), 2026)
+    sess["mfl_cookie"] = "MFL_USER_ID=session-copy"
+    assert c.get("/api/mfl/auth-link", headers=_h(token)).get_json()["connected"] is True
+
+    r = c.delete("/api/mfl/auth-link", headers=_h(token))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json() == {"connected": False}
+
+    assert "mfl_cookie" not in sess
+    with engine.connect() as conn:
+        assert conn.execute(select(db_module.mfl_credentials_table)).fetchall() == []
+    assert c.get("/api/mfl/auth-link", headers=_h(token)).get_json() == {"connected": False}
+
+
+def test_mfl_unlink_is_idempotent_when_nothing_stored(client):
+    c, token, _, _ = client
+    r = c.delete("/api/mfl/auth-link", headers=_h(token))
+    assert r.status_code == 200
+    assert r.get_json() == {"connected": False}
+
+
+def test_mfl_unlink_404_when_flag_off(client):
+    c, token, _, _ = client
+    with patch.object(server, "is_enabled", lambda k: False):
+        r = c.delete("/api/mfl/auth-link", headers=_h(token))
+    assert r.status_code == 404
+
+
+def test_mfl_unlink_only_deletes_callers_row(client):
+    """Same security property as ESPN: user-scoped deletion only."""
+    from backend.sleeper_write import encrypt_token
+    c, token, engine, _ = client
+    db_module.upsert_mfl_credential(USER, "me",
+                                    encrypt_token("MFL_USER_ID=mine"), 2026)
+    db_module.upsert_mfl_credential(OTHER, "them",
+                                    encrypt_token("MFL_USER_ID=theirs"), 2026)
+
+    r = c.delete("/api/mfl/auth-link", headers=_h(token))
+    assert r.status_code == 200
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(db_module.mfl_credentials_table)).fetchall()
+    remaining = {row._mapping["user_id"] for row in rows}
+    assert USER not in remaining, "caller's row must be deleted"
+    assert OTHER in remaining, "another user's row must be untouched"

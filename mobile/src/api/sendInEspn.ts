@@ -12,7 +12,7 @@
 //   espn_asset_unmapped                    → hard block, nothing was sent
 //   verification_required | feature_disabled | espn_write_failed | bad_request
 
-import { api } from './client';
+import { api, apiRequest } from './client';
 
 export interface EspnLinkStatus {
   /** True only for a credential that PASSED a live authenticated ESPN read
@@ -34,6 +34,19 @@ export interface EspnLinkStatus {
 // letting the propose 409 into a dead end. Never returns the cookies.
 export async function getEspnLinkStatus(): Promise<EspnLinkStatus> {
   return api.get<EspnLinkStatus>('/api/espn/link');
+}
+
+// DELETE — disconnect: remove the stored espn_s2 + SWID pair server-side.
+// Mirrors unlinkSleeper. Idempotent (a no-credential delete is a clean
+// {connected:false}), scoped server-side to the caller's own row. Added
+// after the 2026-08-12 incident: cookies captured from someone else's ESPN
+// sign-in had no user-facing removal path. There is no device-side copy to
+// clear — the pair only ever lives server-side (encrypted) — and
+// EspnConnectScreen clears the WebView's ESPN/Disney session on every
+// mount, so after this resolves the user can immediately sign in as a
+// different ESPN account.
+export async function unlinkEspn(): Promise<{ connected: boolean }> {
+  return apiRequest<{ connected: boolean }>('/api/espn/link', { method: 'DELETE' });
 }
 
 export interface ProposeEspnTradePayload {

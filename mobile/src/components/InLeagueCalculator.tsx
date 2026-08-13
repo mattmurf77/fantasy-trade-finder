@@ -803,6 +803,16 @@ export default function InLeagueCalculator({
               sendTotal={ev.give_value}
               receiveTotal={ev.receive_value}
               verdictLine={shareVerdictLine(ev, opponent?.username ?? 'them')}
+              giveIds={giveIds}
+              receiveIds={receiveIds}
+              surface="calc_in_league"
+              // PR-14 — a package holding a league draft pick skips the
+              // rich landing: og_image can't resolve a pick_id against the
+              // players table and renders it as "Unknown player". Same
+              // predicate the tier badge already uses at `tierOf`.
+              hasPickAssets={[...giveIds, ...receiveIds].some(
+                (id) => playerById[id]?.pos === 'PICK',
+              )}
               fallbackText={[
                 `Trade idea vs @${opponent?.username ?? 'them'} (Dynasty Trade Finder · ${FORMAT_LABEL[format]})`,
                 `I send: ${giveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,

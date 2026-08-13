@@ -287,6 +287,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "notif.honest_winbacks",       # 05-04b: winback_dormant truthful copy + lifetime stop
     "growth.share_landing",
     "growth.rating_prompt",
+    # ── Tier-board sharing — OFF, and meant to stay off ─────────────────
+    # P1 audit remediation, operator decision D-P1-12
+    # (docs/plans/audit-p1-remediation/DECISIONS-p1.md): "sharing of
+    # rankings must not be live in any form." Sharing a tier board is not
+    # a product surface. Gates GET /og/tiers/<pos>/<username>.png and
+    # GET /s/tiers/<pos>/<username>; both 404 while dark, matching how the
+    # package routes close behind growth.share_landing. Those two routes
+    # shipped with NO guard at all — sessionless, no in-app link required,
+    # so any username's board was fetchable by guessing the URL. Default
+    # False here AND false in config/features.json: two independent OFFs.
+    # Do not flip without an explicit operator reversal of D-P1-12.
+    "growth.tier_board_share",
     # P0-3 (2026-08-09 mobile UX audit) — EMITTER ONLY. On: buildInviteUrl
     # emits /app/league/join/<id>?ref=<u>. Off (default): today's
     # /?league=<id>&ref=<u>, byte-identical. Never gates the ?league= reader,
@@ -312,6 +324,22 @@ FLAG_KEYS: tuple[str, ...] = (
     # pre-#293 rule where picks count only in All with no filter. Client-only:
     # no backend behavior rides this key.
     "league.picks_always_counted",
+    # #300 — League rankings positional trade candidates
+    # (docs/feedback/items/300-league-rankings-trade-candidates/).
+    # league.pos_candidates: the median divider on the League rankings list
+    # when EXACTLY ONE core position is selected — the labelled cutline plus
+    # the Buyer/Seller band emphasis and the stacked-roster drill-in. OFF
+    # (default) = the list renders exactly as it does today. Client-only
+    # today: the route's `medians` field is additive and ships UNFLAGGED
+    # (see the note in league_power_rankings_route) so the client never has
+    # to reason about a flag-on/field-absent state.
+    "league.pos_candidates",
+    # league.player_trade_handoff: the drill-in's row actions ("Offer" on
+    # your own players, "Target" on theirs) that pin the asset and route to
+    # the trade finder, replacing existing pins. OFF (default) = rows carry
+    # no action. Separate key from pos_candidates so the divider can ship
+    # without the write-side handoff.
+    "league.player_trade_handoff",
     # ── QA / testing surfaces ──
     # Kin of FTF_TEST_MODE, but runtime-flagged (not env-gated) so the
     # operator's phone can exercise a prod-shaped build. Every consumer must

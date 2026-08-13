@@ -48,7 +48,7 @@ import Toast from '../components/Toast';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
-import { getBaseUrl } from '../api/client';
+import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -521,18 +521,52 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           `Verdict: ${CALC_VERDICT_LABEL[demoEvaluation.verdict]}`,
         ];
     // S7 PRD-01 (growth.share_landing): shares carry a landing URL with
-    // ?ref= attribution. A hand-built calculator trade has no server object
-    // (no /s/ route exists for arbitrary packages — documented W3/backend
-    // handoff), so the site root is the landing page. Flag off: legacy
-    // link-free message, byte for byte.
+    // ?ref= attribution.
+    //
+    // audit P1-2: a hand-built calculator trade DOES have a server object —
+    // POST /api/share/package (backend/server.py:16999) mints one and
+    // /s/p/<short_id> (backend/server.py:17048) renders it as an OG card
+    // with a "Build your own trade" CTA. The comment that used to sit here
+    // claimed no such route existed; it was written before the route landed
+    // and was never revisited. resolveShareUrl walks the ladder and falls
+    // back to the plain ?ref= root whenever the mint can't be made.
+    // Flag off: legacy link-free message, byte for byte.
+    let landing = false;
     if (shareLandingOn) {
-      const ref = user?.username ? `?ref=${encodeURIComponent(user.username)}` : '';
-      lines.push(`Build your own: ${getBaseUrl()}/${ref}`);
+      const resolved = await resolveShareUrl({
+        // Demo mode's assets are mock ids (data/tradeCalcMock) and the
+        // server refuses demo sessions anyway — pass no ids so the ladder
+        // short-circuits and the demo message stays byte-identical.
+        giveIds: isLive ? liveSendIds : [],
+        receiveIds: isLive ? liveReceiveIds : [],
+        username: user?.username,
+        enabled: shareLandingOn,
+        isDemo: useSession.getState().isDemo,
+        surface: 'calc_live',
+        hasPickAssets: false,
+        onOutcome: (outcome, give_n, receive_n) =>
+          track(
+            'share_package_created',
+            { surface: 'calc_live', give_n, receive_n, outcome },
+            'Calculator',
+          ),
+      });
+      lines.push(`Build your own: ${resolved.url}`);
+      landing = resolved.rung === 'package';
     }
     try {
-      await Share.share({ message: lines.filter(Boolean).join('\n') });
-      if (shareLandingOn) {
-        track('calc_trade_shared', { mode }, 'Calculator');
+      const res = await Share.share({ message: lines.filter(Boolean).join('\n') });
+      // Dismissal-gated, matching TradesScreen's convention: the event
+      // counts completed shares, not opened sheets. Safe to narrow silently
+      // — calc_trade_shared has never landed a row (the name was absent
+      // from ALLOWED_CLIENT_EVENTS, so ingest dropped every envelope
+      // behind a 200), so there is no series to break.
+      if (shareLandingOn && res.action !== Share.dismissedAction) {
+        track(
+          'calc_trade_shared',
+          { mode, landing, ...(isLive ? { surface: 'calc_live' } : {}) },
+          'Calculator',
+        );
       }
     } catch {
       /* user dismissed or share unavailable — nothing to do */
@@ -873,6 +907,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 sendTotal={evalQuery.data.give_value}
                 receiveTotal={evalQuery.data.receive_value}
                 verdictLine={liveVerdictLine(evalQuery.data)}
+                giveIds={liveSendIds}
+                receiveIds={liveReceiveIds}
+                surface="calc_live"
+                // The live pool is the universal consensus pool — real
+                // Sleeper player ids, never pick ids.
+                hasPickAssets={false}
                 fallbackText={[
                   `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
                   `Side A: ${liveSendIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,

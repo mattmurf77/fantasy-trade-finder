@@ -180,6 +180,77 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #     exits; `via` is the only way to learn which one users find.
     "lineup_impact_unavailable",
     "league_team_closed",
+    # ── Feedback #300, 2026-08-12 ───────────────────────────────────────
+    # Tracking plan (the addendum this module's docstring demands):
+    # docs/feedback/items/300-league-rankings-trade-candidates/analytics.md.
+    # The operator flipped `league.pos_candidates` +
+    # `league.player_trade_handoff` ON at ship (d207b03) AND waived the
+    # simulator gate and the Maestro run, so these two events are the only
+    # evidence that will ever exist that the feature works in the wild.
+    #
+    # Exactly ONE of the two is also listed in
+    # analytics_queries.NON_INTENT_EVENTS, in this same commit — INTENT is
+    # derived by SUBTRACTION, so a passive name added here and nowhere else
+    # step-changes DAU/WAU with no error and no log.
+    #
+    #   league_pos_candidates_viewed — the EXPOSURE half, and NON_INTENT.
+    #     Fires when the user reaches the single-position candidate view
+    #     (the exact `candidatePos` memo the divider's own render gate
+    #     reads). Without it, a zero on the action below is unreadable:
+    #     nobody found the feature vs nobody wanted it. There is no
+    #     existing event to hang this on — `league_view` fires ONCE per
+    #     mount, before any pill is tapped; `league_subset_changed` fires
+    #     on the All/Starters/Bench control only (a position-pill tap
+    #     emits nothing today, anywhere); and `league_team_opened` fires
+    #     only for users who already acted, which is the population whose
+    #     absence is the thing being measured.
+    #
+    #   league_candidate_pinned — the ACTION half, and INTENT. The Offer /
+    #     Target row action: pins give/receive through useFinderTargets and
+    #     routes to the trade finder. This is the feature's conversion
+    #     moment and the one number worth reading.
+    "league_pos_candidates_viewed",
+    "league_candidate_pinned",
+    # ── P1 remediation, commit T1 — 2026-08-11 ──────────────────────────
+    # Plans: docs/plans/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md
+    # §10, LLD-p1-5.md §8}. Binding operator decisions: DECISIONS-p1.md.
+    #
+    # T1 is deliberately a REGISTRATION-ONLY commit and it lands BEFORE any
+    # P1 client emitter, because this registry is default-deny behind a 200
+    # (analytics_ingest.py counts + drops, no error signal on either side).
+    # A name that arrives after its track() call is silent, unrecoverable
+    # data loss with a success-shaped response.
+    #
+    # `share_package_created` and `invite_cta_shown` are ALSO added to
+    # analytics_queries.NON_INTENT_EVENTS in this same commit — INTENT is
+    # derived by SUBTRACTION, so a name registered here and nowhere else
+    # ships as INTENT and step-changes DAU/WAU on the day its emitter goes
+    # live. `calc_trade_shared` and `invite_cta_tapped` stay INTENT: both
+    # are real user decisions.
+    #
+    # NOT REGISTERED HERE, ON PURPOSE — three sets of names people will
+    # expect to find and must not assume are missing by accident:
+    #   * `tier_board_shared` — CANCELLED by D-P1-12 (sharing of rankings /
+    #     tier boards is not a product surface). Its routes are now flag-off.
+    #   * `email_captured` — CANCELLED by AN-6 (operator skipped the event).
+    #   * `sleeper_connect_opened/_failed/_captured/_abandoned` (P1-10) —
+    #     DEFERRED, not dropped. Their naming decision AN-1 is still open
+    #     with the operator, and this file is default-deny, so guessing a
+    #     name here would be worse than waiting. **A T1 AMENDMENT COMMIT IS
+    #     REQUIRED** for them before P1-10's client wiring ships. This file
+    #     is NOT final.
+    #
+    # P1-1/2 — the share loop. `calc_trade_shared` is a REPAIR, not a new
+    # signal: TradeCalculatorScreen.tsx has fired it since it shipped while
+    # the name was absent from this set, so every envelope was dropped
+    # behind a 200. There is NO historical series for it, which is also why
+    # the P1 build could safely narrow its firing conditions.
+    "calc_trade_shared", "share_package_created",
+    # P1-5 — the promoted invite CTA. `invite_shared` is NOT re-added: P0-3
+    # registered it above and T1 only EXTENDS its prop row (see
+    # CLIENT_EVENT_PROPS). Re-adding a name is harmless in a set but the
+    # prop-row edit is not, and the two are easy to confuse.
+    "invite_cta_shown", "invite_cta_tapped",
 })
 
 # ---------------------------------------------------------------------------
@@ -366,7 +437,21 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "quickset_prompt_shown":    frozenset({"screen", "position", "show_count"}),
     "quickset_prompt_accepted": frozenset({"screen", "position", "via"}),
     "quickset_prompt_snoozed":  frozenset({"screen", "position", "retired"}),
-    "trade_card_shared":     frozenset({"trade_id", "channel"}),
+    # +landing +surface (P1 T1, P1-1/2 — LLD-p1-1-2.md §10.3). MODIFIED IN
+    # PLACE, never delete-and-re-add: a three-way merge that resolves to the
+    # pre-existing row keeps the EVENT working and delivers every row
+    # hollowed out, with no error anywhere. Pre-edit contents, verbatim:
+    #     frozenset({"trade_id", "channel"})
+    # `landing` has been STRIPPED since it shipped — TradesScreen.tsx has
+    # sent it and analytics_ingest.py popped it silently on every row, so
+    # there is no historical `landing` to reconcile with. It is a boolean:
+    # TRUE when the shared artifact carried a rich landing (/s/trade/<id> or
+    # /s/p/<id>), FALSE when the link ladder degraded to a bare ?ref= — i.e.
+    # the rung-A hit rate as the RECIPIENT experienced it, not as the mint
+    # reported it. `channel` and `surface` are both RESERVED: no client has
+    # ever sent either. Registered so adding them is a client change alone.
+    "trade_card_shared":     frozenset({"trade_id", "channel", "landing",
+                                        "surface"}),
     "coach_mark_shown":      frozenset({"mark_key", "mark"}),
     "coach_mark_dismissed":  frozenset({"mark_key", "mark"}),
     "celebration_shown":     frozenset({"beat_key", "beat"}),
@@ -443,7 +528,25 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # the fourth value is the HLD S-17 account-only case (lld-p0-3 D-8);
     # values are not constrained by this registry, so it is the addendum
     # that carries the enum.
-    "invite_shared":           frozenset({"league_id"}),
+    # EXTENDED by P1 T1 (P1-5 — LLD-p1-5.md §8). MODIFIED IN PLACE, for the
+    # same reason as trade_card_shared above. Pre-edit contents, verbatim:
+    #     frozenset({"league_id"})
+    # `surface` ∈ league_home | matches_empty | trades_banner |
+    # members_overlay — CLOSED, 4 values. `members_overlay` is present per
+    # operator decision PR-9 (D-P1-13), which put the members-overlay invite
+    # button in scope; without it that surface's rows land surface-less.
+    # `not_joined` / `total_mates` are int | null. NULL IS HONEST, 0 IS A
+    # LIE: the Trades banner has no join counts and a stale league summary
+    # can leave them unknown — never substitute 0.
+    # `platform` is the LEAGUE platform (sleeper | espn | mfl | fleaflicker
+    # | unknown), the same sense league_selected.platform and
+    # league_view.platform carry above. It is NOT the device platform: that
+    # is a user_events COLUMN derived server-side in analytics_ingest.py
+    # (the NULL-`platform` incident), it is never a prop, and it must not
+    # become one.
+    "invite_shared":           frozenset({"league_id", "surface",
+                                          "not_joined", "total_mates",
+                                          "platform"}),
     "invite_link_opened":      frozenset({"league_id", "has_ref", "format",
                                           "auth_state"}),
     "invite_league_pinned":    frozenset({"league_id", "source",
@@ -517,6 +620,89 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # changes basis mid-focus. Bounded small integers; no league id, no
     # member id, no team name.
     "league_team_closed":     frozenset({"via", "dwell_ms", "rank"}),
+    # ── Feedback #300, 2026-08-12 ───────────────────────────────────────
+    # `position` is a CORE POSITION (QB | RB | WR | TE) — the single
+    # position the ranked list is filtered to. It is NOT a device platform
+    # and NOT a roster slot; the divider exists only for the four core
+    # positions the server publishes a median for.
+    #
+    # `divider` is the render OUTCOME, three closed values, each read
+    # straight off the memo the render itself reads — never re-derived:
+    #   shown     — the line drew (`cutAfter` non-null)
+    #   no_median — `medians[position]` absent from the payload: an old
+    #               server, or the position missing from the object. The
+    #               ops signal that the rollout is incomplete, and the
+    #               reason this is a three-valued prop rather than a
+    #               shown-only impression event.
+    #   no_split  — a median arrived but marks no boundary (every team on
+    #               one side, or a list too short to split), so the client
+    #               deliberately draws nothing.
+    "league_pos_candidates_viewed": frozenset({"position", "divider"}),
+    # The conversion moment. `verb` ∈ offer | target is the user's action;
+    # `side` ∈ above | below is the TAPPED TEAM's side of the median line.
+    #
+    # THE TWO ARE NOT REDUNDANT, and the reason is the mirror. The primary
+    # roster's verb is fixed by the side (above ⇒ target theirs, below ⇒
+    # offer yours), but the drill-in also stacks the MIRROR roster, whose
+    # rows carry the OPPOSITE verb. So all four combinations occur, and
+    # `mirror = (verb == 'target') == (side == 'below')` — i.e. the user
+    # acted against the direction the line chose for them. That rate is
+    # the direct test of the feature's central bet and it is unreadable
+    # from either prop alone.
+    #
+    # `rank` is the tapped team's 1-based ON-SCREEN rank at the moment of
+    # the pin (the same `selectedIdx` the drill-in header prints), so it
+    # is coherent with `side` even if the user changed basis mid-focus —
+    # which is also why it can differ from the `league_team_opened.rank`
+    # that preceded it. Bounded small integer; no league id, no member id,
+    # no team name, no player id.
+    #
+    # There is deliberately NO `band` prop (Buyer / Seller). Those labels
+    # drive no behaviour by operator ruling, and the band is a pure
+    # function of `rank` and `league_view.team_count` on the same mount.
+    # See the tracking plan's deliberately-not-instrumented section.
+    "league_candidate_pinned": frozenset({"verb", "position", "rank", "side"}),
+    # ── P1 remediation, commit T1 — 2026-08-11 ──────────────────────────
+    # P1-1/2, the share loop (LLD-p1-1-2.md §10.2 / §10.5).
+    #
+    # `mode` ∈ live | demo (the type also admits `league`, which never
+    # reaches the calculator's share path). `landing` is the same boolean
+    # documented on trade_card_shared above. `surface` ∈ calc_live |
+    # calc_in_league | trades_liked — a CLOSED enum, and OMITTED on the
+    # calculator's demo lane rather than faked. `tiers` is deliberately NOT
+    # a member: D-P1-12 cancelled tier-board sharing outright.
+    "calc_trade_shared":     frozenset({"mode", "landing", "surface"}),
+    # `outcome` ∈ ok | rate_limited | demo | failed — the rung-A SUCCESS
+    # rate, and the only way to tell "nobody shares" from "sharing is
+    # broken". Fired on every mint attempt that reached the server, and it
+    # is dismissal-INDEPENDENT: unlike calc_trade_shared it does not wait
+    # for the share sheet to resolve. That is precisely why it is a SYSTEM
+    # OUTCOME and not a user action — see NON_INTENT_EVENTS in
+    # analytics_queries.py. `give_n`/`receive_n` are 0–5 (server's
+    # _SHARE_PACKAGE_SIDE_MAX). The client-side `skipped` state fires NO
+    # event at all and is not an `outcome` value.
+    "share_package_created": frozenset({"surface", "give_n", "receive_n",
+                                        "outcome"}),
+    # P1-5, the promoted invite CTA (LLD-p1-5.md §8). Both rows carry the
+    # SAME four props as the extended invite_shared row above minus
+    # `league_id`, which stays exclusive to invite_shared — see that row for
+    # the closed `surface` enum, the null-not-zero rule on the counts, and
+    # the league-vs-device meaning of `platform`.
+    #
+    # invite_cta_shown is an IMPRESSION (the card rendered; the user has not
+    # chosen anything) and is NON_INTENT. invite_cta_tapped is a real
+    # decision and stays INTENT.
+    #
+    # Known measurement caveat, recorded so the number is not over-read
+    # later (D-P1-04 / HLD §H OG-12): on the Matches empty state the block
+    # sits inside a region with no scroll container, so
+    # invite_cta_shown{surface: matches_empty} is a MOUNT COUNTER, not a
+    # true impression, until that clipping is fixed. The league_home surface
+    # is unaffected and its rate is sound.
+    "invite_cta_shown":      frozenset({"surface", "not_joined",
+                                        "total_mates", "platform"}),
+    "invite_cta_tapped":     frozenset({"surface", "not_joined",
+                                        "total_mates", "platform"}),
 }
 
 

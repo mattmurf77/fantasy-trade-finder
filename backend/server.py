@@ -6180,8 +6180,16 @@ def get_rankings_progress():
             "threshold": 10,
             "unlocked": false,
             "total_required": 40,
-            "total_completed": 32
+            "total_completed": 32,
+            "anchor_count": 12,
+            "anchor_required": 40
         }
+
+    `unlocked` is per-method (see the ladder below). `anchor_count` /
+    `anchor_required` (P1-7, 2026-08-11) expose the BOARD-EVIDENCE bar used by
+    the 'anchor' and 'manual' methods, so those lanes can render a visible
+    progress hint the way the trio lane renders total_completed /
+    total_required. `anchor_required` is null for every other method.
     """
     sess = _require_session()
     sess["last_active"] = time.time()
@@ -6202,8 +6210,17 @@ def get_rankings_progress():
     # audit): `ranking_method` is now written at the POINT OF USE by the four
     # save handlers as well as by the chooser, so NULL here means "no ranking
     # action taken since the P0-1 fix", not "never visited the chooser".
-    # The ladder itself is UNCHANGED — 'anchor' still falls to the trio
-    # branch (audit A-16) and 'manual' still unlocks unconditionally (A-17).
+    #
+    # P1-7 (2026-08-11, audit A-16 + operator decision D-P1-10) —
+    # GOVERNING PRINCIPLE: *every ranking method must be able to unlock, and
+    # none may unlock without evidence of ranking work.* Two arms changed:
+    #   * 'anchor' had NO arm at all and fell to the trio rule below, which
+    #     the anchor lane can never satisfy — a structural dead end (A-16).
+    #   * 'manual' unlocked UNCONDITIONALLY, which post-P0-1 means one drag on
+    #     Manual Ranks (or one Quick Rank step — `via:'quickrank'` routes
+    #     through the same reorder handler) pins the method AND grants a
+    #     permanent unlock (A-17).
+    # Both now read the same durable evidence: the persisted board.
     g_user_id = sess["user_id"]
     ranking_method = None
     try:
@@ -6211,19 +6228,92 @@ def get_rankings_progress():
     except Exception:
         pass
 
+    def _tiers_rule() -> bool:
+        """Board-completeness unlock: all four positions committed through
+        /api/tiers/save for the ACTIVE format. Extracted so the tiers/quickset
+        branch and the two board-evidence branches' fallback clauses cannot
+        drift apart."""
+        try:
+            saved = get_tiers_saved(g_user_id, scoring_format=fmt)
+            return all(p in saved for p in POSITIONS)
+        except Exception:
+            return False
+
+    # Hoisted so the branches and the response payload read ONE value.
+    # Cheap: `service` is already in memory and this is a dict scan.
+    try:
+        _board_overrides = service.board_override_count()
+    except Exception:
+        _board_overrides = 0
+
     if ranking_method == "manual":
-        unlocked = True
+        # A-17 / P1-7. Was `unlocked = True`, unconditionally. A manual
+        # reorder writes an Elo override per reordered player
+        # (ranking_service.apply_reorder) and persists them via
+        # save_tier_overrides, so the same board evidence the anchor arm uses
+        # is available here. Strictly a TIGHTENING; the monotonic floor below
+        # means it can never re-lock anyone who has already been computed
+        # unlocked, and `or _tiers_rule()` can only ever add.
+        #
+        # THE THRESHOLD IS AN ASSUMPTION, NOT A DECISION — see
+        # RankingService.MANUAL_UNLOCK_MIN.
+        unlocked = (
+            _board_overrides >= RankingService.MANUAL_UNLOCK_MIN
+            or _tiers_rule()
+        )
     elif ranking_method in ("tiers", "quickset"):
         # 'quickset' (#119) commits through the same /api/tiers/save
         # contract as the Tiers board, so it unlocks the same way.
-        try:
-            saved = get_tiers_saved(g_user_id, scoring_format=fmt)
-            unlocked = all(p in saved for p in POSITIONS)
-        except Exception:
-            unlocked = False
+        unlocked = _tiers_rule()
+    elif ranking_method == "anchor":
+        # A-16 / P1-7. Anchors write Elo overrides (apply_anchor) and NOTHING
+        # ELSE: never a trio interaction, never a tiers_saved row. Without
+        # this arm 'anchor' fell to the trio rule and could NEVER unlock.
+        #
+        # The two alternatives the audit offered were both rejected, with
+        # proof, and must not be re-opened:
+        #
+        #   Option 1, "add 'anchor' to the tiers/quickset arm", is INERT.
+        #   That arm tests `tiers_saved`, which the anchor lane never writes
+        #   and is FORBIDDEN from writing — `_ANCHOR_VIA`'s contract above
+        #   (":no W1 surface may reach save_tiers_position / the merged-band
+        #   path", server.py ~:1284) — and structurally does not:
+        #   save_tiers_position does not occur anywhere in save_anchor_route.
+        #   An anchor-only user's tiers_saved is empty, so Option 1 leaves
+        #   them locked forever.
+        #
+        #   Option 2, "bump the interaction counter in apply_anchor", is
+        #   NON-DURABLE and cross-contaminating. `_interactions` is
+        #   OVERWRITTEN at session build from persisted rank swipes only, so
+        #   an in-memory bump dies on the next cold start. It would also hand
+        #   unlock credit to `via:'draft_room'` saves, which P0-1
+        #   deliberately excludes from writing ranking_method at all, and to
+        #   NULL-method users — a Draft Room long-press would silently be
+        #   worth 1/40th of a Trade Finder unlock. It also mixes units: a
+        #   trio interaction ORDERS three players, an anchor PRICES one.
+        #
+        # A DRAFT-ROOM-ONLY ANCHORER STAYS LOCKED, AND THAT IS INTENDED.
+        # Their ranking_method stays NULL (P0-1 skips via:'draft_room'), so
+        # this arm is never entered and the trio rule still applies. Their
+        # overrides accumulate and count later IF they ever answer one wizard
+        # question — because the predicate reads the BOARD, not the event
+        # stream. Deliberate: the board is the board, and retroactively
+        # discounting work the user genuinely did is the unfriendly reading.
+        # It cannot leak credit to anyone P0-1 excluded, because ENTERING
+        # this arm still requires a wizard answer.
+        unlocked = (
+            _board_overrides >= RankingService.ANCHOR_UNLOCK_MIN
+            or _tiers_rule()
+        )
     else:
         # 'trio' or null — original threshold logic
         unlocked = all(counts[p] >= threshold for p in POSITIONS)
+
+    # RL-8's hint: which board-evidence bar (if any) applies to this user.
+    _board_evidence_required = {
+        "anchor": RankingService.ANCHOR_UNLOCK_MIN,
+        "manual": RankingService.MANUAL_UNLOCK_MIN,
+    }.get(ranking_method)
 
     # Pull the user's prior unlocked formats now so we can apply a
     # monotonic floor to the per-method decision above. Users who already
@@ -6331,6 +6421,14 @@ def get_rankings_progress():
         "total_required":   total_required,
         "total_completed":  total_completed,
         "unlocked_formats": unlocked_formats_list,
+        # P1-7 / RL-8 — the visible progress hint for the board-evidence
+        # lanes. ADDITIVE and computed unconditionally so no client needs a
+        # branch; `anchor_required` is the bar that applies to THIS user's
+        # method (the anchor bar for anchorers, the manual bar for manual
+        # users), and is null for methods that do not use a board-evidence
+        # rule, so a client can render the hint iff it is non-null.
+        "anchor_count":     _board_overrides,
+        "anchor_required":  _board_evidence_required,
     })
 
 
@@ -6346,6 +6444,13 @@ def set_ranking_method_route():
     'quickset' (2026-07-12, #119) = the guided tier quick-set walk
     (QuickSetTiersScreen) promoted to a first-class method. Saves flow
     through /api/tiers/save, so unlock treats it like 'tiers'.
+
+    NOT THE ONLY WRITER since P0-1 (2026-08-11): the four board-save handlers
+    write the method at the point of use too, so most users never reach this
+    route. And since P1-7, every method has its OWN unlock rule in
+    get_rankings_progress — 'anchor' and 'manual' both unlock on
+    >= RankingService.{ANCHOR,MANUAL}_UNLOCK_MIN pool-resident board
+    overrides in the ACTIVE format, or on the tiers rule.
     """
     sess = _require_session()
     g_user_id = sess["user_id"]
@@ -16838,7 +16943,18 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
 
 @app.route("/og/tiers/<pos>/<username>.png")
 def og_tier_card(pos, username):
-    """Render a user's tier snapshot for a position as a 1200x630 PNG."""
+    """Render a user's tier snapshot for a position as a 1200x630 PNG.
+
+    404s while `growth.tier_board_share` is dark, which is its DEFAULT and
+    its intended resting state. Sharing of rankings / tier boards is not a
+    product surface (DECISIONS-p1.md D-P1-12): until that ruling is
+    reversed by the operator, this route is public exposure — it needs no
+    session and no in-app link, so any username's board was fetchable by
+    URL guess. The guard mirrors the package routes below (`/s/p/<id>`,
+    `/og/p/<id>.png`), which have always closed this way.
+    """
+    if not is_enabled("growth.tier_board_share"):
+        return jsonify({"error": "not_found"}), 404
     if _og_image is None:
         return _og_unavailable_response()
     # Attempt to detect the user's active format for nicer subtitle. Since
@@ -16934,7 +17050,15 @@ def _share_html(
 
 @app.route("/s/tiers/<pos>/<username>")
 def share_tiers_page(pos, username):
-    """HTML wrapper with OG tags for a tier snapshot share link."""
+    """HTML wrapper with OG tags for a tier snapshot share link.
+
+    404s while `growth.tier_board_share` is dark (its default). Same
+    reasoning as `og_tier_card` above — D-P1-12 rules tier-board sharing
+    out as a product surface, and this page leaked the same board with the
+    username spelled out in the title.
+    """
+    if not is_enabled("growth.tier_board_share"):
+        return jsonify({"error": "not_found"}), 404
     fmt = request.args.get("fmt", "1qb_ppr")
     if fmt not in SCORING_FORMATS:
         fmt = DEFAULT_SCORING
@@ -18863,10 +18987,17 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
-@app.route("/api/espn/link", methods=["GET", "POST"])
+@app.route("/api/espn/link", methods=["GET", "POST", "DELETE"])
 @_gate_unverified_write
 def espn_link():
     """Link (import) an ESPN league — and manage the ESPN account credential.
+
+    DELETE → drop the stored espn_s2/SWID pair (disconnect), mirroring
+    DELETE /api/sleeper/link. Idempotent: deleting with nothing stored is a
+    clean 200 {connected: false}. Scoped to the CALLER's row only. Added
+    after the 2026-08-12 incident: a user who signed in with someone else's
+    ESPN account had no way to remove the captured cookies short of a manual
+    production-DB delete.
 
     GET → link status, mirroring GET /api/sleeper/link (send-auth lazy flow,
     2026-08-11): {connected, expires_at, expired, verified_at}. Never returns
@@ -18903,12 +19034,22 @@ def espn_link():
         return jsonify({"error": "feature_disabled"}), 404
     from . import espn_service as _espn
     from .database import (get_espn_credential, upsert_espn_credential,
+                           delete_espn_credential,
                            upsert_espn_league, replace_espn_league_members)
 
     sess = _require_session()
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    if request.method == "DELETE":
+        # Write gate already applied by @_gate_unverified_write (DELETE is a
+        # mutating method) — mirroring the Sleeper DELETE's denial check.
+        # delete_espn_credential is user_id-scoped and a no-op when nothing
+        # is stored, so this is idempotent by construction.
+        delete_espn_credential(user_id)
+        log.info("espn_link: credential deleted (disconnect) user=%s", user_id)
+        return jsonify({"connected": False})
 
     if request.method == "GET":
         cred = get_espn_credential(user_id)
@@ -19427,6 +19568,63 @@ def _sleeper_lineup_slots(league_id: str) -> list[str] | None:
     return slots or None
 
 
+def _position_medians(teams: list[dict]) -> dict[str, dict]:
+    """#300 — the league's MEDIAN positional value per core position, with its
+    pick-equivalent label (docs/feedback/items/300-league-rankings-trade-
+    candidates/operator-answers-2026-08-12.md, the frozen design).
+
+    Shape: ``{QB|RB|WR|TE: {value, value_label}}``. The mobile client draws one
+    labelled divider on the League rankings list when exactly one core position
+    is selected; it can compute the median VALUE itself but cannot LABEL it —
+    labelling is server-side — which is the entire reason this field exists.
+
+    Three decisions, recorded because the field is a frozen cross-client
+    contract:
+
+    1. **Population = every team in the payload, the caller included.** The
+       divider is drawn on the very list `teams` serializes, and the frozen
+       design keeps the caller's own team in that list as the anchor ("there is
+       no separate section for it to be wrongly included in"). Excluding the
+       caller would put the line in a different place than the list it is drawn
+       across.
+    2. **Even team counts take the MEAN of the two middle values** — the
+       textbook median, and what a naive client-side implementation computes,
+       so the server's `value` and the client's agree. It also preserves the
+       property the design leans on for odd counts: an odd league leaves
+       exactly one team sitting ON the median, an even one leaves none.
+       Rounded to 1dp like every other value on this wire.
+    3. **`value_label` is UNGATED.** The per-team `value_label` under `#279`
+       rides the operator-only `aggregate_tier_labels` experiment, but
+       `_aggregate_pick_label` is a pure function of the value with no
+       experiment dependency — it is read directly here. A divider that
+       rendered a label for the operator and a blank for everyone else would
+       be worse than no divider.
+
+    SUBSET SCOPE — the All subset ONLY. `teams[].positions[P].value` is the
+    whole-roster positional subtotal; the client's Starters/Bench subsets are
+    derived client-side from `roster` + `starters`, and the frozen field shape
+    has no room for a per-subset median. The client must therefore render the
+    divider only while the subset is All, never label a Starters/Bench line
+    with this value. Empty `teams` → `{}` (no list, so no divider; never a
+    fabricated 0.0).
+    """
+    from .power_rankings import CORE_POSITIONS
+    if not teams:
+        return {}
+    out: dict[str, dict] = {}
+    for pos in CORE_POSITIONS:
+        values = sorted(
+            float((t.get("positions") or {}).get(pos, {}).get("value") or 0.0)
+            for t in teams
+        )
+        mid = len(values) // 2
+        median = (values[mid] if len(values) % 2
+                  else (values[mid - 1] + values[mid]) / 2.0)
+        median = round(median, 1)
+        out[pos] = {"value": median, "value_label": _aggregate_pick_label(median)}
+    return out
+
+
 @app.route("/api/league/power-rankings")
 def league_power_rankings_route():
     """GET /api/league/power-rankings?league_id=...&basis=consensus|personal|redraft
@@ -19556,6 +19754,17 @@ def league_power_rankings_route():
             "scoring_format":     fmt,
             "updated_at":         datetime.now(timezone.utc).isoformat(),
             "starters_available": starters_available,
+            # #300 — league median per core position + its pick-equivalent
+            # label, for the single-position median divider. Served
+            # UNFLAGGED alongside `league.pos_candidates` (which gates the
+            # client's divider): the field is additive — it changes no
+            # existing key — and costs one sort per core position, so a
+            # flag-on/field-absent state would only give the client a worse
+            # contract to reason about. Basis-aware for free: the medians
+            # are computed over the same `teams` this request priced, so a
+            # personal-basis read gets personal-basis medians. All subset
+            # only — see _position_medians.
+            "medians":            _position_medians(teams),
             "teams":              teams,
         })
     except Exception as e:
@@ -20940,7 +21149,7 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
     }
 
 
-@app.route("/api/mfl/auth-link", methods=["GET", "POST"])
+@app.route("/api/mfl/auth-link", methods=["GET", "POST", "DELETE"])
 @_gate_unverified_write
 def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
@@ -20951,6 +21160,13 @@ def mfl_auth_link():
     the (key-less-deployment) session-only cookie is present; MFL stamps no
     expiry on its cookie, so there is no expires_at/expired here — a dead
     cookie surfaces as 409 mfl_auth_expired at propose time.
+
+    DELETE → drop the stored MFL cookie (disconnect), mirroring
+    DELETE /api/sleeper/link. Removes BOTH storage locations — the encrypted
+    mfl_credentials row AND the key-less-deployment session-only copy — so
+    the GET above reports {connected: false} afterward whichever path stored
+    it. Idempotent; scoped to the caller's own row. Added after the
+    2026-08-12 ESPN incident (no user-facing credential removal).
     """
     if not is_enabled("mfl.auth_link"):
         return jsonify({"error": "feature_disabled"}), 404
@@ -20960,6 +21176,15 @@ def mfl_auth_link():
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    if request.method == "DELETE":
+        # Write gate already applied by @_gate_unverified_write.
+        from .database import delete_mfl_credential
+        delete_mfl_credential(user_id)
+        sess.pop("mfl_cookie", None)   # session-only fallback copy
+        log.info("mfl_auth_link: credential deleted (disconnect) user=%s",
+                 user_id)
+        return jsonify({"connected": False})
 
     if request.method == "GET":
         from .database import get_mfl_credential
@@ -22067,9 +22292,20 @@ def propose_trade_to_espn():
                         "message": "Your saved ESPN sign-in couldn't be read "
                                    "— connect ESPN again."}), 409
 
-    # PICKS HARD-BLOCK (players only). ESPN's pick-asset representation in
-    # items[] is UNVERIFIED (capture doc §Still unresolved 2) — a pick is
-    # refused loudly, never guessed at, never silently dropped.
+    # PICKS HARD-BLOCK (players only). This is PERMANENT, not a TODO.
+    #
+    # The original reason ("encoding unverified") is now obsolete: 2026-08-12
+    # research confirmed ESPN does carry pick legs, as
+    # {"type":"DRAFT_TRADE","overallPickNumber":N,"playerId":0,...}. But
+    # overallPickNumber is a slot in the CURRENT draft, and FTF's pick assets
+    # are multi-season future rungs ("2027 1st") for which ESPN has no
+    # representation at all. There is nothing to encode, not something we
+    # haven't decoded yet.
+    #
+    # In practice this costs users nothing — ESPN leagues don't trade future
+    # picks (operator-confirmed), which is a large part of why dynasty players
+    # are on Sleeper/MFL in the first place. Refused loudly, never guessed at,
+    # never silently dropped.
     picks = [p for p in give + receive if _is_ftf_pick_asset(league_id, p)]
     if picks:
         return jsonify({"error": "espn_pick_unsupported",

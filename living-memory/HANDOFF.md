@@ -9,69 +9,136 @@
 ---
 
 ## Table of Contents
-- [2026-08-12 — Feedback #297–#302 shipped to TestFlight; #300 specced and unbuilt](#2026-08-12--feedback-297302-shipped-to-testflight-300-specced-and-unbuilt)
+- [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
+- [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 ---
 
-## 2026-08-12 — Feedback #297–#302 shipped to TestFlight; #300 specced and unbuilt
+## 2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device
 
 ### Where I am right now
 
-**Everything from this batch is merged and swept.** `main` carries `f8acd71`
-(PR #108 — the four fixes + batch analytics, v1.12.1), `53bd19f` (PR #110 — the
-`.easignore` fix), and `62ff8d6` (PR #109 — the design record + the complete
-#300 spec). **TestFlight build 101 submitted and processing.** Items #297,
-#298, #299, #302 set `fixed`; #301 `declined`; #205 parked.
+**Two batches shipped from this session, both live in TestFlight.**
 
-Twelve branches and eight worktrees swept, ledgered first in
-[`../docs/recovery/2026-08-12-feedback-297-302-sweep.md`](../docs/recovery/2026-08-12-feedback-297-302-sweep.md).
+- **#297/#298/#299/#302 + batch analytics** — `f8acd71`, v1.12.1 build 101.
+- **#300 position-scoped trade candidates** — `5139b45`, **v1.13.1 build 106**, both flags **ON** (`league.pos_candidates`, `league.player_trade_handoff`). Operator confirmed it behaves in TestFlight.
 
-### What a next session should pick up
+All five items `fixed`; #301 `declined`; #205 parked. Analytics for both batches
+**verified in production by deploy-then-probe** — every property echoed back out
+of `user_events.props`, including the two #300 events and both mirror
+combinations `(offer, below)` / `(target, above)`.
 
-1. **#300 is build-ready and unbuilt.** Frozen design in
-   `docs/feedback/items/300-league-rankings-trade-candidates/operator-answers-2026-08-12.md`;
-   two mockup labs under `mockups/candidates-300*/`. **It needs a new API
-   field** (`medians` with pick-tier labels — the client can compute the median
-   value but cannot label it), which puts it on the bright line: full gates, not
-   a quick fix. Three items inside it are explicitly *not* to be relitigated —
-   Variant D was an operator override taken against the lab's advice, and the
-   reasoning is recorded with it.
-2. **The Android `BackHandler` is owed** with the first non-App-Store release.
-   It was built and withdrawn (`#302`) because no Android device or emulator
-   was available and the release is iOS-only. Its **absence is pinned** by two
-   test suites — restoring it turns them red, and the assertions must be
-   flipped in the same commit.
-3. **No `check-*.js` suite runs in CI.** Ten of them now, three added by this
-   batch, all `npm run`-only — so **81 structural assertions gate nothing**.
-   Proposed job is written in
-   `docs/feedback/items/297-lineup-impact-single-pin/status.md` §5.5.
-4. **Sim gate still deferred** by operator for this batch; two Maestro flows are
-   authored but never executed. No `last-sim-run.json` was written — not
-   fabricated.
+### The thing a next session most needs to know
 
-### What bit us, so it doesn't again
+**#300 shipped lit with the simulator gate and Maestro execution waived by the
+operator.** The 44pt hit-slop treatment on the drill-in rows, the median divider
+and the rule-A removal have **never executed on a device or simulator** — the
+authored flow `06-position-trade-candidates.yaml` has never run. TestFlight is
+the only runtime evidence that exists. Kill switch: set either flag `false`.
 
-- **`.easignore` cost two failed builds** — a bare `screens/` matched
-  `mobile/src/screens/`. Fixed and now anchored; full write-up in
-  [`GOTCHAS.md`](GOTCHAS.md) **G-036**, along with two adjacent traps: `eas
-  build` exits 0 on a failed remote build, and its logs are brotli-encoded.
-- **`origin/main` moved 21 commits mid-batch and falsified two premises**,
-  forcing a rebase and a complete analytics redo. An instrumentation gap
-  analysis is only valid against the `main` it will land on ([D-038](DECISIONS.md)).
-- **Four false-passing tests were caught**, in four independently authored
-  suites, every one by running assertions against a deliberately sabotaged
-  tree. Treat "my test passes" as unproven here until a sabotage fails it.
+**Rule A and rule B were removed from `togglePos`** — a deliberate reversal of
+#293/#294. A position filter no longer auto-adds `PICKS`; pick value is an
+explicit opt-in. The original reasoning is preserved in the code comments and in
+`config/features.json`'s flag block, not deleted. This was load-bearing for
+#300: with rule A live, tapping WR ranked by WR **+ capital** while the median
+measured WR alone, so no honest line could be drawn.
 
-### Active environment state
+### Owed
 
-`pytest backend/tests -q` → **2452 passed, 1 skipped** on the shipped tree.
-`tsc --noEmit` clean, `testid-lint OK`, structural suites 17 + 29 + 35.
-Analytics verified **in production** by a post-deploy probe: four events
-posted, every property echoed back out of `user_events.props` — including
-`source` on `find_trades_tapped`, dead since #257.
+1. **A simulator pass on #300** whenever one is next run — the flow exists.
+2. **`aggregate_tier_labels` is still operator-only**, so per-team pick-tier
+   labels are dark for most users. The **median's** label was de-gated
+   (`_aggregate_pick_label` is a pure function), so the divider labels correctly
+   for everyone — but the rows around it may not.
+3. **Decision 6 is half-built:** single-position rows use pick tiers; 2+
+   positions still falls back to a raw numeric. Closing it needs a server-side
+   combined label.
+4. **No `check-*.js` suite runs in CI** — now **six** of them, ~271 assertions
+   in this session's work alone, all honour-system.
+5. **22 open feedback items** as of close, up to #321.
+
+### What bit us
+
+- **`.easignore` cost two failed EAS builds** — a bare `screens/` matched
+  `mobile/src/screens/`. Fixed (`53bd19f`); write-up in [`GOTCHAS.md`](GOTCHAS.md)
+  **G-039**, with two adjacent traps: `eas build` exits 0 on a failed remote
+  build, and its logs are brotli-encoded.
+- **`main` moved 21 commits mid-batch and falsified two premises**, forcing a
+  rebase and a complete analytics redo ([D-038](DECISIONS.md)).
+- **Five false-passing tests** were caught across this session, in five
+  independently authored suites, every one by running assertions against a
+  deliberately sabotaged build rather than by review. Treat "my test passes" as
+  unproven here until a sabotage fails it.
+
+---
+
+## 2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built
+
+### Where things stand
+
+**Shipped and live.** `main` @ `cad99fb`. Both new send paths are ON in production —
+verified by content, not by a deploy badge: `/api/feature-flags` serves
+`trade.send_in_mfl: true` and `espn.send: true`. TestFlight 1.13.1 **build 107** is the
+current build. **MFL send is live-verified end-to-end** (a real 2-for-2 proposal
+succeeded; `trade_sent {platform:"mfl", outcome:"proposed"}`). ESPN send is shipped and
+its write envelope is validated, but **no real ESPN send has been made from the app yet**.
+
+**Designed, not built:** device-side platform auth (ADR-011 + HLD on
+`design/device-side-platform-auth`, unmerged). Its blocking unknown is **resolved** —
+Sleeper's Cloudflare edge accepts iPhone requests, PASS 4/4.
+
+### The five things a next session should know
+
+1. **Do NOT port the Chrome spoof to the device.** Honest iOS headers passed identically
+   (`docs/plans/sleeper-ios-reachability-probe-result-2026-08-12.md`). The server spoofs
+   because a datacenter IP needs cover; a phone doesn't, FTF has Sleeper's permission, and
+   a tolerated UA/fingerprint mismatch is a latent failure if Cloudflare tightens.
+2. **ESPN pending-trade reads: trust `mPendingTransactions`, not `mTransactions2`.** The
+   pending feed is self-pruning and authoritative. History freezes a proposal's `status` at
+   creation, so a **declined** proposal reads `PENDING` there forever (8/8 across two
+   leagues) and `isPending` is `true` even on `CANCELED` rows — it is junk, never branch on
+   it. This makes the planned inbox read *simpler* than designed: one call, not two.
+3. **MFL uses unix SECONDS; ESPN uses epoch MILLISECONDS.** Any normalized model across
+   platforms must convert or expiry dates land in 1970.
+4. **The MFL write path's only untested surfaces are `tradeResponse` and `pendingTrades`
+   writes.** Propose is proven. `qa/verify-mfl-send.py` covers the revoke half.
+5. **`eas build` exits 0 even when the remote build ERRORED.** Always read
+   `eas-cli build:list --json`. A concurrent session lost two builds to this.
+
+### Owed
+
+- **MFL client registration** (form + phone validation) before real traffic — unregistered
+  clients get the tightest rate limits. Operator, external.
+- **Sim gate** — waived by operator all session (`FTF_SKIP_SIM_GATE=1`); CI never ran on
+  any of today's pushes. Everything was verified by targeted tests instead.
+- **A real ESPN send from the app**, to confirm the response parsing the same way MFL's was.
+- **PRD/HLD/LLD/Plan for device-side auth** — the dual-agent run produced both PRD drafts
+  and was stopped before merging. **Re-frame before resuming:** the drafts were told the
+  goal was reducing blocking *volume*, and both optimized against that. The operator
+  corrected it — the driver is the **terms**, which concern credentialed calls, so public
+  reads staying on Render was never a gap and the "wrong traffic" critique mostly dissolves.
+  Sleeper offers **no allowlist**, so that fallback is dead too.
+
+### Traps this session paid for
+
+- **A stale-checkout `DECISIONS.md` commit would have destroyed 13 decision records.** Main
+  had issued D-026…D-038 from concurrent sessions while this session drafted its own D-026.
+  Renumbered to **D-039** and appended to main's file. `origin/main` moved **four times**
+  today. Claim IDs against `origin/main`, never your working tree.
+- **`.easignore` uses gitignore semantics** — a bare `screens/` matched at any depth and
+  stripped every app screen from the archive, killing two builds in another session. The fix
+  (`53bd19f`) was merged in *before* building here. Anchor every root entry.
+- **Adding any key to `config/features.json` requires mirroring it into three fixtures**
+  (`release`, `onboarding-v2`, `profiles-on`) or `test_seed_ui_test_db.py` fails. Bit twice.
+- **Three attempts to capture a live browser request by injecting a `fetch`/XHR hook all
+  failed identically** — a full page load destroys the injection, and `sessionStorage`
+  preserves captured *data* but not the *hook*. What worked was inverting it: make the call
+  deliberately and report the outcome as an analytics event.
+- **A permission-classifier block is not necessarily permanent** — the same
+  `FTF_SKIP_SIM_GATE=1 git push` was refused four times and succeeded unchanged on the fifth.
 
 ---
 

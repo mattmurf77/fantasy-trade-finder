@@ -3,24 +3,39 @@ appId: com.fantasytradefinder.app
 # profile: standard
 # flags: release
 #
-# TIER A — runs today, and needs NO flag forcing and NO pick data. It runs
-# against the default hermetic flag set: backend/tests/fixtures/flags/
-# release.json carries "league.picks_always_counted": false and the standard
-# profile does not override it, so the flag is OFF exactly as it will be for
-# every user until the operator flips it.
+# TIER A — runs today, and needs NO pick data.
+#
+# ══ THE FILENAME NO LONGER MATCHES THE FIXTURE — READ THIS FIRST ═════════
+# This header used to state that `backend/tests/fixtures/flags/release.json`
+# carries "league.picks_always_counted": false. It does NOT, and has not since
+# the operator shipped the flag ON on 2026-08-10 — release.json:139 reads
+# `true`. So `# flags: release` puts this flow in the flag-ON state, and
+# nothing in the repo pins it to OFF: there is no fixture with the key false,
+# and the `--flags` inline-JSON forcing described in 01's header is the only
+# way to actually reach the OFF arm. Corrected here rather than by editing
+# release.json, which is shared with every other flow and is not this change's
+# to move; filed for the operator in the #300 mobile status file.
 #
 # WHAT THIS PROVES — stated precisely, because it is easy to overclaim.
-# With `hasPicks` false in the seed, assertions (a) and (b) below hold for
-# TWO independent reasons (flag OFF *and* no picks), so this flow alone cannot
-# distinguish them. Its honest job is a NAVIGATION + SCREENSHOT-BASELINE
-# no-regression check: the screen still mounts, navigates and renders
-# identically to origin/main @ 7cea1fa under the shipped default. Diff the
-# screenshots below against the same steps captured on 7cea1fa before the
-# change lands — that baseline is the deliverable.
+# With `hasPicks` false in the seed, assertions (a) and (b) below hold no
+# matter what the flag says, so this flow cannot distinguish flag states at
+# all. Its honest job is a NAVIGATION + SCREENSHOT-BASELINE no-regression
+# check: the screen still mounts, navigates and renders identically to
+# origin/main @ 7cea1fa. Diff the screenshots below against the same steps
+# captured on 7cea1fa — that baseline is the deliverable.
+#
+# 2026-08-12 — section (b) USED to be titled "rule A stays dark with the flag
+# off". #294's rule A (first position tap auto-adds PICKS) was removed from
+# `togglePos` outright by operator decision, so there is no longer a rule to
+# be dark, in either flag state, and that claim is retired rather than
+# reworded. The two steps survive only for their screenshots; what replaced
+# the claim is `check-picks-subset-invariance.js` assertions 3e–3h, which pin
+# the rules' ABSENCE structurally and are seed-independent.
 #
 # The flag-OFF ARM is evidenced elsewhere, and deliberately not claimed here:
 #   • source level, seed-independent — check-picks-subset-invariance.js
-#     assertions 4b, 5a, 5b, 6c, 7c, 7g, 8b, 9b, 12b, 15d;
+#     assertions 4b, 5a, 5b, 6c, 7c, 7g, 8b, 9b, 12c, 15d (12b was cited here
+#     before 2026-08-12; 12c is the flag-freeness half after the re-pin);
 #   • with REAL pick data — the manual control T-S6b, which is the only test
 #     that can see flag-OFF against a league that actually holds picks.
 #
@@ -76,12 +91,19 @@ tags: [league]
 - tapOn:
     id: "league-summary.subset.all"
 
-# ── (b) tapping RB from All does NOT auto-add Picks — rule A stays dark ───
+# ── (b) screenshot baseline only: a position filter, then a subset switch ─
+# NOT a rule-A assertion any more (see the header). In this seed `hasPicks` is
+# false, so `assertNotVisible` on the Picks pill is true for a reason that has
+# nothing to do with filters — it is kept as a cheap guard that the pill row
+# renders at all, and the screenshots are the actual deliverable.
 - tapOn:
     id: "league-summary.posfilter.rb"
+- assertVisible:
+    id: "league-summary.posfilter.rb"
+    selected: true
 - assertNotVisible:
     id: "league-summary.posfilter.picks"
-- takeScreenshot: league-04-flagoff-rb-no-autoadd
+- takeScreenshot: league-04-flagoff-rb-filter
 - tapOn:
     id: "league-summary.subset.starters"
 - takeScreenshot: league-04-flagoff-rb-starters

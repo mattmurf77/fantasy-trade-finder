@@ -33,6 +33,8 @@ import { LinkSleeperForm } from '../components/LinkSleeperSheet';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
+import { getEspnLinkStatus, unlinkEspn } from '../api/sendInEspn';
+import { getMflLinkStatus, unlinkMfl } from '../api/sendInMfl';
 import {
   exportAccountData,
   getProfileVisibility,
@@ -257,6 +259,8 @@ export default function SettingsScreen({ navigation }: any) {
   // platform chooser, where each flag-gated link button lives.
   const mflLinkEnabled = useFlag('mfl.link');
   const fleaflickerLinkEnabled = useFlag('fleaflicker.link');
+  // MFL authenticated sign-in (#177) — powers the MFL disconnect row below.
+  const mflAuthLinkEnabled = useFlag('mfl.auth_link');
   const isDemo = useSession((s) => s.isDemo);
   const user = useSession((s) => s.user);
   const setUser = useSession((s) => s.setUser);
@@ -283,6 +287,26 @@ export default function SettingsScreen({ navigation }: any) {
     queryKey: ['sleeper-link'],
     queryFn: getSleeperLinkStatus,
     enabled: sleeperDisconnectEnabled && !isDemo && !user?.account_only,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  // ── ESPN / MFL account credentials (2026-08-12 incident) — power the
+  // per-platform disconnect rows, same posture as sleeperLinkQuery: a 404
+  // (flag dark) is a stable answer, and on any error the row simply doesn't
+  // render. Before these rows existed, removing a captured ESPN sign-in
+  // (e.g. a friend's account used to test) required a production-DB delete.
+  const espnLinkQuery = useQuery({
+    queryKey: ['espn-link'],
+    queryFn: getEspnLinkStatus,
+    enabled: espnLinkEnabled && !isDemo,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const mflLinkQuery = useQuery({
+    queryKey: ['mfl-link'],
+    queryFn: getMflLinkStatus,
+    enabled: mflAuthLinkEnabled && !isDemo,
     staleTime: 60_000,
     retry: false,
   });
@@ -501,6 +525,85 @@ export default function SettingsScreen({ navigation }: any) {
           text: 'Disconnect',
           style: 'destructive',
           onPress: () => void performDisconnectSleeper(),
+        },
+      ],
+    );
+  }
+
+  // ── Disconnect ESPN / MFL accounts (2026-08-12 incident) — same shape as
+  // the Sleeper disconnect: destructive confirm naming exactly what is
+  // deleted, then DELETE + status invalidation. After an ESPN disconnect the
+  // user can immediately sign in as a DIFFERENT account: the credential row
+  // is gone server-side and EspnConnectScreen clears the WebView's
+  // ESPN/Disney session on every mount.
+  const [espnDisconnecting, setEspnDisconnecting] = useState(false);
+  const [mflDisconnecting, setMflDisconnecting] = useState(false);
+
+  async function performDisconnectEspn() {
+    if (espnDisconnecting) return;
+    setEspnDisconnecting(true);
+    try {
+      await unlinkEspn();
+      queryClient.invalidateQueries({ queryKey: ['espn-link'] });
+      setToast({
+        msg: 'ESPN account disconnected — the stored sign-in cookies were deleted.',
+        tone: 'success',
+      });
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Couldn't disconnect — try again.", tone: 'warn' });
+    } finally {
+      setEspnDisconnecting(false);
+    }
+  }
+
+  function confirmDisconnectEspn() {
+    Alert.alert(
+      'Disconnect ESPN account?',
+      'This deletes the two ESPN sign-in cookies (espn_s2 and SWID) we ' +
+        'store. FTF will no longer be able to read private ESPN leagues or ' +
+        'send ESPN trades until you sign in again — and you can sign in as ' +
+        'a different ESPN account right away. Imported leagues stay.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => void performDisconnectEspn(),
+        },
+      ],
+    );
+  }
+
+  async function performDisconnectMfl() {
+    if (mflDisconnecting) return;
+    setMflDisconnecting(true);
+    try {
+      await unlinkMfl();
+      queryClient.invalidateQueries({ queryKey: ['mfl-link'] });
+      setToast({
+        msg: 'MFL sign-in disconnected — the stored session cookie was deleted.',
+        tone: 'success',
+      });
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Couldn't disconnect — try again.", tone: 'warn' });
+    } finally {
+      setMflDisconnecting(false);
+    }
+  }
+
+  function confirmDisconnectMfl() {
+    Alert.alert(
+      'Disconnect MFL sign-in?',
+      'This deletes the MFL session cookie we store. FTF will no longer be ' +
+        'able to send MFL trades or import private MFL leagues until you ' +
+        'sign in again — as this or any other MFL account. Imported ' +
+        'leagues stay.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => void performDisconnectMfl(),
         },
       ],
     );
@@ -1053,6 +1156,64 @@ export default function SettingsScreen({ navigation }: any) {
       )
     ) : null;
 
+  // ESPN account credential row (2026-08-12 incident). Renders only while a
+  // credential is actually stored — a "Not connected" placeholder would
+  // duplicate what the link flow already communicates. The disconnect is the
+  // user-facing removal path that previously didn't exist.
+  const espnLink = espnLinkQuery.data;
+  const espnDisconnectRow =
+    espnLinkEnabled && !isDemo && espnLink?.connected ? (
+      <Pressable
+        testID="settings.espn-disconnect"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: espnDisconnecting, busy: espnDisconnecting }}
+        onPress={confirmDisconnectEspn}
+        disabled={espnDisconnecting}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Disconnect ESPN account</Text>
+          <Text style={styles.rowSub}>
+            Connected — disconnecting deletes the stored ESPN sign-in cookies.
+            Sign in again anytime, as any ESPN account.
+          </Text>
+        </View>
+        {espnDisconnecting ? (
+          <ActivityIndicator color={chalk.dim} />
+        ) : (
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        )}
+      </Pressable>
+    ) : null;
+
+  // MFL sign-in row — same gap, same fix (audited in the same pass).
+  const mflLink = mflLinkQuery.data;
+  const mflDisconnectRow =
+    mflAuthLinkEnabled && !isDemo && mflLink?.connected ? (
+      <Pressable
+        testID="settings.mfl-disconnect"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: mflDisconnecting, busy: mflDisconnecting }}
+        onPress={confirmDisconnectMfl}
+        disabled={mflDisconnecting}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Disconnect MFL sign-in</Text>
+          <Text style={styles.rowSub}>
+            {mflLink?.mfl_username
+              ? `Signed in as ${mflLink.mfl_username} — disconnecting deletes the stored session cookie.`
+              : 'Signed in — disconnecting deletes the stored session cookie.'}
+          </Text>
+        </View>
+        {mflDisconnecting ? (
+          <ActivityIndicator color={chalk.dim} />
+        ) : (
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        )}
+      </Pressable>
+    ) : null;
+
   // Public-profile opt-in toggle (flag `profiles.user_toggle`). Only renders
   // once the stored value has loaded so the switch never lies.
   const publicProfileRow =
@@ -1220,6 +1381,8 @@ export default function SettingsScreen({ navigation }: any) {
             </Pressable>
           ) : null}
           {sleeperDisconnectRow}
+          {espnDisconnectRow}
+          {mflDisconnectRow}
           {publicProfileRow}
           {exportRow}
           <Pressable

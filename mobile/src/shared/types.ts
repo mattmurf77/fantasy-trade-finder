@@ -111,9 +111,20 @@ export interface RankingProgress {
   unlocked: boolean;
   total_required: number;
   total_completed: number;
-  ranking_method?: 'trio' | 'manual' | 'tiers' | null;
+  // 'anchor' and 'quickset' were missing from this union while the server has
+  // accepted both for a year (server.set_ranking_method_route). P1-7 makes
+  // the omission load-bearing: those are the two methods the hint below
+  // describes.
+  ranking_method?: 'trio' | 'manual' | 'tiers' | 'anchor' | 'quickset' | null;
   unlocked_formats?: ScoringFormat[];
   scoring_format?: ScoringFormat;
+  /** P1-7 / RL-8 — progress toward the BOARD-EVIDENCE unlock bar used by the
+   *  'anchor' and 'manual' methods (pool-resident entries in the persisted
+   *  board). `anchor_required` is null for every other method, so a client
+   *  renders the hint iff it is non-null. Optional: any cached pre-P1-7
+   *  response omits both, and the hint must degrade to nothing. */
+  anchor_count?: number;
+  anchor_required?: number | null;
 }
 
 // #238 — per-slot starting-lineup breakdown attached to /api/trade/evaluate

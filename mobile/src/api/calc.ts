@@ -3,7 +3,7 @@
 // which reuse the trade engine's universal pool + elo_to_value + _fairness_v3
 // so calculator numbers always match the finder's.
 
-import { apiRequest } from './client';
+import { ApiError, apiRequest } from './client';
 import type { PickSource } from './pickAssignment';
 import type { ScoringFormat, StarterImpactSlot, Tier } from '../shared/types';
 
@@ -299,4 +299,49 @@ export async function evaluateTradeInLeague(
       ...(oneSidedEveners ? { one_sided_eveners: true } : {}),
     },
   });
+}
+
+/** POST /api/share/package — mint a public landing for an arbitrary
+ *  give/receive build (backend/server.py:16999 create_share_package_route).
+ *  404 while `growth.share_landing` is dark; 400 `demo_session` for demo
+ *  users; 429 `rate_limited` at 20 mints/user/hour; 401 signed out.
+ *
+ *  Contract: NEVER throws and never rejects. Every failure comes back as an
+ *  outcome so the caller's ladder (utils/shareLinks.ts) can degrade honestly
+ *  and so share_package_created.outcome is not a lie.
+ *
+ *  A 404 is deliberately NOT distinguished from `failed`: the caller already
+ *  checked the flag, so a 404 means client/server flag disagreement — an
+ *  operational fault, not a product state. */
+export async function createSharePackage(
+  givePlayerIds: string[],
+  receivePlayerIds: string[],
+  signal?: AbortSignal,
+): Promise<
+  | { outcome: 'ok'; short_id: string; url: string; og_image: string }
+  | { outcome: 'rate_limited' | 'demo' | 'failed' }
+> {
+  try {
+    const r = await apiRequest<{
+      ok: boolean;
+      short_id: string;
+      url: string;
+      og_image: string;
+    }>('/api/share/package', {
+      method: 'POST',
+      signal,
+      body: { give_player_ids: givePlayerIds, receive_player_ids: receivePlayerIds },
+    });
+    if (!r?.ok || !r.url || !r.short_id) return { outcome: 'failed' };
+    return { outcome: 'ok', short_id: r.short_id, url: r.url, og_image: r.og_image };
+  } catch (e) {
+    if (e instanceof ApiError) {
+      if (e.status === 429) return { outcome: 'rate_limited' };
+      if (e.status === 400 && (e.body as { error?: string } | null)?.error === 'demo_session') {
+        return { outcome: 'demo' };
+      }
+    }
+    // 400 bad_package · 401 signed out · 404 flag dark · 5xx · offline · abort
+    return { outcome: 'failed' };
+  }
 }

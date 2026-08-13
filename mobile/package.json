@@ -15,14 +15,18 @@
     "test:mock-lifecycle": "node tests/check-mock-lifecycle.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
+    "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
+    "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",
     "test:trade-text": "node tests/check-trade-text.js",
     "test:send-button-platform": "node tests/check-send-button-platform.js",
     "test:single-pin-actions": "node tests/check-single-pin-actions.js",
     "test:league-drill-in": "node tests/check-league-drill-in.js",
-    "test:analytics-297-302": "node tests/check-analytics-297-302.js"
+    "test:analytics-297-302": "node tests/check-analytics-297-302.js",
+    "test:league-candidates-300": "node tests/check-league-candidates-300.js",
+    "test:anchor-labels": "node tests/check-anchor-labels.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

@@ -7,7 +7,6 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
-  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -63,7 +62,9 @@ import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 import LeagueProgressModule from '../components/LeagueProgressModule';
 import MarketPulseStrip from '../components/MarketPulseStrip';
 import TradeValueBar from '../components/TradeValueBar';
-import { buildInviteUrl } from '../components/InviteLeaguematesBanner';
+import { shareInvite } from '../components/InviteLeaguematesBanner';
+import InviteLeaguematesCard from '../components/InviteLeaguematesCard';
+import { inviteSocialProof } from '../utils/inviteSocialProof';
 
 // League home (tab v1; since #181 the pushed 'LeagueHome' sub-route of the
 // League tab's stack — the tab now LANDS on the rankings view, and this
@@ -125,6 +126,14 @@ export default function LeagueScreen() {
     (lg) => lg.league_id === leagueId && lg.platform === 'espn',
   );
   const showPickAssign = showPickAssignFlag && isEspn;
+  // P1-5 — the LEAGUE platform, for the invite events' `platform` prop.
+  // `isEspn` above is left exactly as it is: it drives the badge, the
+  // read-only note, the re-sync block and showPickAssign, and `!isEspn` is
+  // NOT the same question (MFL and Fleaflicker are live values in the type
+  // system). This is a telemetry dimension only — it gates nothing. See
+  // InviteLeaguematesCard's header for why the card ships on every platform.
+  const leaguePlatform =
+    cachedLeagues.find((lg) => lg.league_id === leagueId)?.platform ?? 'unknown';
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
   // ESPN Phase 1b: when re-sync fails because the stored cookies expired
@@ -280,6 +289,40 @@ export default function LeagueScreen() {
     tiersStatusQuery.refetch();
   };
 
+  // ── P1-5 · invite CTA impression (surface: league_home) ─────────────
+  // MUST sit above the `if (!leagueId)` early return below — Rules of
+  // Hooks — which is why it reads summaryQuery.data directly instead of the
+  // `summary` / `totalMates` / `joinedMates` derivations that live under
+  // that return.
+  //
+  // Keyed by leagueId rather than a bare boolean: a league switch does NOT
+  // unmount this screen (the session's `league` changes under it), so a
+  // boolean would suppress the impression forever after the first switch.
+  // One row per league per screen lifetime, despite `placeholderData:
+  // (prev) => prev` on eight queries making this screen re-render often.
+  //
+  // The guard is inviteSocialProof — the SAME predicate the card renders
+  // on — so the event and the card can never disagree about whether a CTA
+  // was on screen. That is what makes this a usable impression denominator.
+  // This surface has a real scroll container, so unlike the Matches
+  // surface it counts sightings honestly (see MatchesScreen's own note).
+  const inviteShownRef = useRef<string | null>(null);
+  useEffect(() => {
+    const s = summaryQuery.data as any;
+    if (!leagueId || !s) return;
+    const total  = typeof s.leaguemates_total  === 'number' ? s.leaguemates_total  : 0;
+    const joined = typeof s.leaguemates_joined === 'number' ? s.leaguemates_joined : 0;
+    if (inviteSocialProof(total, joined) === null) return;
+    if (inviteShownRef.current === leagueId) return;
+    inviteShownRef.current = leagueId;
+    track('invite_cta_shown', {
+      surface:     'league_home',
+      not_joined:  total - joined,
+      total_mates: total,
+      platform:    leaguePlatform,
+    }, 'LeagueHome');
+  }, [leagueId, summaryQuery.data, leaguePlatform]);
+
   // ── P0-7 · league_view (surface: league_home) ───────────────────────
   // Once per mount, never per re-render: `firedRef` is the guard and
   // `summaryQuery.isFetched` is the trigger, so the row carries settled
@@ -394,6 +437,18 @@ export default function LeagueScreen() {
     !!summary && !!coverage && (ringIncomplete || matchesZero || contrarianInsufficient);
   const worksNowVisible = matchesZero;
 
+  // P1-5 / PR-8 — ONE invite affordance per screen. This is the same
+  // predicate InviteLeaguematesCard renders on, computed once and consumed
+  // twice: by the card itself, and by the `onInvite` prop below that decides
+  // whether LeagueProgressModule's inline text link appears. Two invites on
+  // one screen is the problem this item exists to fix, restated.
+  // LeagueProgressModule is NOT edited — it already treats a missing
+  // `onInvite` as "render no link" at both of its invite branches, so the
+  // legacy affordance returns automatically in every state the card
+  // does not cover (and on a `git revert` of this item).
+  const inviteCardVisible =
+    !!summary && inviteSocialProof(totalMates, joinedMates) !== null;
+
   const totalTeamsN = summary
     ? num(summary.total_teams, num((summary as any)?.leaguemates_total) + 1)
     : 0;
@@ -409,19 +464,30 @@ export default function LeagueScreen() {
     navigation.navigate('Trades', { screen: 'TradesHome' });
   };
 
-  // Module "Invite leaguemates" — the OS share sheet with the same
-  // referral URL the InviteLeaguematesBanner builds (?league=&ref=).
+  // "Invite leaguemates" for BOTH League Home affordances — the promoted
+  // card and (when the card is withheld) the progress module's inline link.
+  // One handler, so the two paths always report the same surface.
+  //
+  // The URL format is owned by buildInviteUrl and deliberately NOT restated
+  // here: it changes with `growth.invite_join_link`, and a comment naming a
+  // format goes stale silently the moment that flag flips.
   async function inviteLeaguemates() {
+    // Kept from the original handler: this is a hoisted function
+    // declaration, so the `!leagueId` early return above does not narrow
+    // `leagueId` inside it.
     if (!leagueId) return;
-    const url = buildInviteUrl(leagueId, user?.username);
-    const where = summary?.league_name || league?.league_name || 'our league';
-    try {
-      await Share.share({
-        message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
-      });
-    } catch {
-      /* user dismissed the share sheet */
-    }
+    await shareInvite({
+      leagueId,
+      leagueName: summary?.league_name || league?.league_name,
+      username:   user?.username,
+      surface:    'league_home',
+      // null, not 0, while the summary has not landed — "unknown" and
+      // "everybody joined" are different facts.
+      notJoined:  summary ? totalMates - joinedMates : null,
+      totalMates: summary ? totalMates : null,
+      platform:   leaguePlatform,
+      screen:     'LeagueHome',
+    });
   }
 
   return (
@@ -515,6 +581,20 @@ export default function LeagueScreen() {
               ) : null}
             </Card>
         </View>
+
+        {/* P1-5 (audit A-14) — the promoted invite, directly under the hero
+            and ABOVE the day-one action row. Deliberately NOT gated on
+            `moduleVisible`: a fully-unlocked league still has un-joined
+            members, and today's inline link vanishes with the module, which
+            is exactly the state where a league has the most to gain from
+            one more member. The card renders nothing at all when the ask
+            isn't real, so an "everyone joined" league sees no gap. */}
+        <InviteLeaguematesCard
+          totalMates={totalMates}
+          joinedMates={joinedMates}
+          summaryArrived={!!summary}
+          onShare={inviteLeaguemates}
+        />
 
         {/* #229 (approved v3 mock) — day-one action row: Rank players
             LEFT / outlined-secondary, Find a trade RIGHT / solid ice.
@@ -741,7 +821,12 @@ export default function LeagueScreen() {
               totalTeams={totalTeamsN}
               showFoldLine={contrarianInsufficient}
               onRankPlayers={goRank}
-              onInvite={inviteLeaguemates}
+              /* P1-5 / PR-8 — the promoted card SUPPRESSES this inline link
+                 rather than coexisting with it. Omitting the prop is the
+                 whole mechanism: the module renders no link without it, at
+                 both of its invite branches, so this file stays the only
+                 one that changed. */
+              onInvite={inviteCardVisible ? undefined : inviteLeaguemates}
             />
           </>
         ) : null}
@@ -888,6 +973,32 @@ export default function LeagueScreen() {
               );
             })}
           </ScrollView>
+          {/* P1-5 / PR-9 — the overlay is the one place a user is looking
+              at a literal list of "Not joined" rows, so the action that
+              fixes that belongs here. Secondary weight: the overlay is a
+              reading surface, not a conversion surface. Reported under its
+              own `surface` value so the members overlay can be compared
+              against the promoted card rather than pooled with it. */}
+          {inviteCardVisible ? (
+            <Button
+              testID="league.members-invite"
+              label="Invite leaguemates"
+              variant="secondary"
+              style={styles.overlayInvite}
+              onPress={() =>
+                shareInvite({
+                  leagueId,
+                  leagueName: summary?.league_name || league?.league_name,
+                  username:   user?.username,
+                  surface:    'members_overlay',
+                  notJoined:  totalMates - joinedMates,
+                  totalMates,
+                  platform:   leaguePlatform,
+                  screen:     'LeagueHome',
+                })
+              }
+            />
+          ) : null}
         </View>
       </Modal>
     </SafeAreaView>
@@ -1096,6 +1207,7 @@ const styles = StyleSheet.create({
   overlayClosePressed: { backgroundColor: ink.ink3 },
   overlaySub: { color: chalk.dim },
   overlayList: { marginTop: space.xs },
+  overlayInvite: { marginTop: space.sm },
 
   joinedChip: {
     flexDirection: 'row',

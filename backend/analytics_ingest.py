@@ -163,8 +163,25 @@ _PII_VALUE_RES = (
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*"),                # bearer creds
     re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}"
                r"(?:\.[A-Za-z0-9_-]+)?"),                            # JWT shapes
-    re.compile(r"\b\d(?:[ -]?\d){15,}\b"),                           # 16-digit runs
 )
+# Long-digit-run rule, kept SEPARATE from the tuple above because it is the
+# only shape rule with a false-positive population (G-036, 2026-08-12).
+# It exists for card/account-number shapes in free text. Sleeper league ids
+# are 18 digits, so it matched every `league_id` we have ever sent —
+# `invite_shared`, `invite_link_opened`, `invite_league_pinned`,
+# `invite_pin_failed` and `outlook_strip_toggled` all stored "[scrubbed]".
+# ESPN ids are 6 digits and passed through, which is why spot-checks of the
+# data looked correct and the loss stayed invisible.
+_PII_NUMERIC_RUN_RE = re.compile(r"\b\d(?:[ -]?\d){15,}\b")   # 16+ digit runs
+
+# Props whose values are declared platform identifiers, not personal data.
+# Operator decision 2026-08-12: a league id is public within the league and
+# carries no personal information — scrubbing it destroyed per-league
+# analysis for no privacy gain. These keys skip the numeric-run rule ONLY;
+# every other shape rule (emails, bearer creds, JWTs) still applies, since
+# none of those can legitimately appear inside an id.
+_NUMERIC_ID_PROPS = frozenset({"league_id"})
+
 _PII_REPLACEMENT = "[scrubbed]"
 _CLIENT_ERROR_MSG_MAX = 200
 
@@ -182,6 +199,8 @@ def _scrub_pii(props: dict, event_type: str) -> tuple[dict, int]:
             new_v = v
             for rx in _PII_VALUE_RES:
                 new_v = rx.sub(_PII_REPLACEMENT, new_v)
+            if str(k) not in _NUMERIC_ID_PROPS:
+                new_v = _PII_NUMERIC_RUN_RE.sub(_PII_REPLACEMENT, new_v)
             if new_v != v:
                 scrubbed += 1
             v = new_v

@@ -11,7 +11,10 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
-| G-036 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
+| G-039 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
+| G-038 | A ranking method can be a permanent dead end, and nothing reports it | Backend / unlock ladder |
+| G-037 | An unlock-proving fixture that seeds `unlocked: true` proves nothing | Backend / test fixtures / monotonic floor |
+| G-036 | `league_id` analytics props store `"[scrubbed]"` for Sleeper leagues only | Backend / analytics ingest / PII scrub |
 | G-035 | A JSX "is this gated on X?" test passes on a build where X is ignored | Mobile / structural tests / AST |
 | G-034 | A seeded UI-test fixture is silently rewritten at Flask boot | Backend / test fixtures / migrations |
 | G-033 | A sim run goes red on an unrelated screen after adding one API call | Mobile / Maestro harness / VCR |
@@ -293,7 +296,21 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Fix:** read the **innermost** conditional only, and stop walking at the enclosing JSX element boundary (`nearestConditionText()`, fixed in `ba30464`).
 - **Prevention:** run every new assertion against a deliberately sabotaged tree before trusting it. This one was found *only* because the falsification pass was executed — it would not have surfaced in review, and unfixed it would have shipped the Tiers and FreeAgents rows rendering the tier badge twice. Four false-passing tests were caught this way in the #297–#302 batch alone; treat "my test passes" as unproven until the sabotage fails it. See [D-036](DECISIONS.md).
 
-### G-036 — a bare directory name in `.easignore` matches that name at ANY depth
+
+### G-037 — a fixture that seeds `unlocked: true` cannot prove an unlock
+- **Symptom:** you add a seed profile to prove a new unlock rule works. The test goes green immediately. It would also go green with the fix reverted.
+- **Cause:** `get_rankings_progress` applies a **monotonic floor** (`if not unlocked and fmt in unlocked_formats_list: unlocked = True`) *before* nothing — but crucially the floor is consulted after the per-method ladder and ORs into it, so any pre-seeded `users.unlocked_formats` row makes the answer `True` regardless of what the ladder decided. `seed_ui_test_db.py` calls `db.mark_format_unlocked` for every format in `world.unlocked_formats()`, which is non-empty exactly when the profile says `"unlocked": true`. The fixture therefore short-circuits the branch it exists to exercise.
+- **Fix:** seed `"unlocked": false` and let the branch compute it. This is also literally accurate — a user who has just crossed the bar has no *prior* unlock record; the row is written by `mark_format_unlocked` on their first `/api/rankings/progress` after the fix. `backend/tests/fixtures/profiles/anchors-done.json` is the worked example, and `_validate_anchors` now **refuses** the incoherent shape rather than leaving it as a comment.
+- **Prevention:** for any fixture whose purpose is "prove X unlocks", assert the floor is unseeded *in the test* (`unlocked_formats == []`), not just in the profile. Same family as G-035: a green structural test is unproven until you have watched it fail.
+
+---
+
+### G-038 — a ranking method can be a permanent dead end, and nothing reports it
+- **Symptom:** a cohort of users rank their whole board and Trade Finder never unlocks. No error, no log line, no analytics signal — the progress endpoint cheerfully answers `unlocked: false` forever. The League ring reads 0/4 and the push primer never arms, which looks like two more bugs rather than one.
+- **Cause:** `get_rankings_progress`'s unlock ladder is an `if/elif` chain **keyed on `ranking_method` strings**, with a trio-swipe rule in the `else`. `'anchor'` was a valid, first-class method with no arm, so it fell to the `else` — and the anchor lane writes Elo overrides and *never a swipe*, so the fallback rule was structurally unsatisfiable. Adding a method string is a one-line change; adding its unlock rule is a separate one nobody was prompted to make. P0-1 later widened the blast radius by writing methods at the point of use.
+- **Fix:** every method gets an explicit arm (P1-7). `'anchor'` and `'manual'` unlock on durable board evidence (`RankingService.board_override_count()`, counting pool-resident `users.tier_overrides`), or the tiers rule.
+- **Prevention:** the ladder's `else` is a **fallback for one specific method** (`'trio'`/null), not a default that suits everyone. Adding a value to `VALID` ranking methods without adding an arm makes it a dead end. Note the two traps in fixing it: the interaction counter is **rebuilt from persisted swipes on every session build**, so bumping it in a save handler evaporates on the next cold start; and a rule keyed on a shared write lane (`apply_anchor`) grants credit to surfaces that were deliberately excluded from writing the method at all.
+### G-039 — a bare directory name in `.easignore` matches that name at ANY depth
 - **Symptom:** an EAS iOS build errors after ~50s at the **Bundle JavaScript** phase with `Unable to resolve module ../screens/SignInScreen` (or any module), while `npx expo export --platform ios` succeeds locally from the same tree. Two builds failed this way (99, 100) on v1.12.1.
 - **Cause:** `.easignore` uses **gitignore semantics**. The entry `screens/`, added to exclude the top-level 135-capture screen library, also matched **`mobile/src/screens/`** — every screen in the app — and stripped it from the uploaded archive. The tree was never wrong; only the archive was. Proven with git's own matcher: `screens/` matches both `screens/a.png` and `mobile/src/screens/SignInScreen.tsx`; `/screens/` matches only the first.
 - **Fix:** anchor every root-level entry with a leading slash (`/screens/`). Landed as `53bd19f`; build 101 from that commit finished and submitted.
@@ -314,3 +331,10 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 ```
 
 Number sequentially. Don't delete entries even if "obviously fixed by now" — future-you will appreciate the history.
+
+### G-036 — a `league_id` analytics prop stores `"[scrubbed]"`, but only for Sleeper leagues
+- **Symptom:** an event is registered, its props survive ingest, the row lands — and `props.league_id` reads `"[scrubbed]"`. Per-league analysis returns one giant bucket. Spot-checking against an ESPN league shows a real id and makes the whole thing look fine.
+- **Cause:** `backend/analytics_ingest.py` `_PII_VALUE_RES` includes `\b\d(?:[ -]?\d){15,}\b` — a 16+ digit run, aimed at card numbers. **Sleeper league ids are 18 digits**, so they match. ESPN ids are ~6 digits and pass through untouched. The scrub happens *after* the prop allowlist, so every taxonomy-level check says the prop is fine.
+- **Scope:** `invite_shared`, `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`, `outlook_strip_toggled` — every event carrying `league_id` as a string prop.
+- **Fix:** not applied. Narrowing the regex weakens a real PII guard, and the honest alternatives (hash the id, or exempt a named prop key) are a decision the operator has not been asked. Pinned as behaviour by `test_p1_t1_league_id_is_redacted_by_the_pii_scrubber` so it cannot be rediscovered as a mystery, and recorded in the tracking plan so nobody plans a per-league metric on top of it.
+- **Prevention:** a value-shape PII regex silently redacts any identifier that happens to share the shape. When registering a prop that carries a platform id, post a realistic value through `POST /api/events` and read it back out of `user_events` — asserting the *key* survived is not enough. This is G-031's lesson one layer deeper: name survival, prop survival, and **value** survival are three separate silent failures.

@@ -4,13 +4,13 @@ import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 import { track } from '../api/events';
-import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
+import { useFeatureFlags } from '../state/useFeatureFlags';
 
 // Cold-start banner shown at the top of TradesScreen when NO league-mate
 // has submitted rankings yet. In that state every card is a consensus-basis
 // "fair-value idea" — the divergence engine (and mutual matching) needs at
-// least one ranked counterparty. The Invite button opens the OS share sheet
-// with the invite URL from buildInviteUrl below.
+// least one ranked counterparty. The Invite button delegates to shareInvite
+// below — the one share path behind every invite surface in the app.
 //
 // TWO accepted URL formats, and BOTH are parsed forever:
 //   • `/?league=<id>&ref=<username>` — every link ever shared. The web side
@@ -64,23 +64,94 @@ export function buildInviteUrl(leagueId: string, username?: string | null): stri
   return `${base}/?${params.join('&')}`;
 }
 
-export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
-  // `growth.share_landing` gates the `invite_shared` EVENT and nothing else.
-  // The URL format is decided inside buildInviteUrl, by its own flag.
-  const shareLandingOn = useFlag('growth.share_landing');
-  async function handleInvite() {
-    const url = buildInviteUrl(leagueId, username);
-    const where = leagueName || 'our league';
-    try {
-      const res = await Share.share({
-        message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
-      });
-      if (shareLandingOn && res.action !== Share.dismissedAction) {
-        track('invite_shared', { league_id: leagueId }, 'Trades');
-      }
-    } catch {
-      /* user dismissed the sheet — nothing to do */
+/** Where an invite was raised from. CLOSED SET — these four values are the
+ *  `surface` property's registered domain in the analytics taxonomy, so a
+ *  new surface needs a taxonomy change, not just a new string here. */
+export type InviteSurface =
+  | 'league_home'      // the promoted InviteLeaguematesCard, and League Home's inline link
+  | 'matches_empty'    // the mutual-empty state's invite block
+  | 'trades_banner'    // this banner
+  | 'members_overlay'; // the members overlay's footer action
+
+export interface ShareInviteArgs {
+  leagueId:   string;
+  leagueName?: string | null;
+  username?:  string | null;   // referrer attribution; omitted if unknown
+  surface:    InviteSurface;
+  /** int | null. `null` means HONESTLY UNKNOWN — never substitute 0. The
+   *  banner has no join counts at all, and a summary that hasn't landed is
+   *  not the same fact as "everyone joined". */
+  notJoined:  number | null;
+  totalMates: number | null;
+  /** The LEAGUE platform (sleeper|espn|mfl|fleaflicker|unknown), NEVER the
+   *  device platform — that is a server-derived column on user_events, and
+   *  conflating the two is the NULL-`platform` incident. */
+  platform:   string;
+  /** track()'s third argument: the route name. */
+  screen:     string;
+}
+
+/**
+ * THE invite share path. Every invite emission in the app goes through this
+ * one function, so four surfaces cannot drift into shipping four different
+ * URLs, four different messages, or four different event shapes.
+ *
+ * It lives beside buildInviteUrl rather than in utils/ on purpose: the
+ * banner already owns the URL builder, and putting the share path anywhere
+ * else would create a require cycle (util → banner → util) the moment this
+ * banner delegated to it.
+ *
+ * Order of operations is load-bearing. `invite_cta_tapped` fires BEFORE the
+ * OS sheet opens, so `invite_cta_tapped − invite_shared` is the share-sheet
+ * abandon rate. Firing it afterwards would make the two events
+ * tautologically equal and hide that funnel step entirely.
+ *
+ * `buildInviteUrl` is called AFTER the tap event so a throw inside it (it
+ * reads a feature flag) can never swallow the tap.
+ *
+ * The `growth.share_landing` conjunct that used to gate `invite_shared` is
+ * deliberately gone (PRD OG-9(a)). The flag key, its default in
+ * config/features.json, and every other read of it are untouched — this
+ * removes one READ, so that one flag-off configuration can no longer
+ * silently blind the invite funnel.
+ */
+export async function shareInvite(args: ShareInviteArgs): Promise<void> {
+  if (!args.leagueId) return;
+  const props = {
+    surface:     args.surface,
+    not_joined:  args.notJoined,
+    total_mates: args.totalMates,
+    platform:    args.platform,
+  };
+  track('invite_cta_tapped', props, args.screen);
+  const url = buildInviteUrl(args.leagueId, args.username);
+  const where = args.leagueName || 'our league';
+  try {
+    const res = await Share.share({
+      message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
+    });
+    if (res.action !== Share.dismissedAction) {
+      track('invite_shared', { league_id: args.leagueId, ...props }, args.screen);
     }
+  } catch {
+    /* user dismissed the sheet — nothing to do */
+  }
+}
+
+export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
+  async function handleInvite() {
+    // notJoined/totalMates are null, not 0: this banner's props carry the
+    // league-mate TOTAL but no join counts, and 0 would be a lie.
+    await shareInvite({
+      leagueId,
+      leagueName,
+      username,
+      surface:    'trades_banner',
+      notJoined:  null,
+      totalMates: null,
+      platform:   'unknown',   // no league platform is in scope at this mount
+      screen:     'Trades',
+    });
   }
 
   return (
