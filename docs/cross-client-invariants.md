@@ -541,6 +541,25 @@ Tests: `backend/tests/test_slot_values.py` (T-M6-01/02/03, including a per-modul
 
 ---
 
+## Mock-draft mode + typed-empty reason (#295/#296/#305)
+
+**`mode` is a CLOSED two-member enum:** `cpu` | `manual`. Server constants
+`MODE_CPU`/`MODE_MANUAL` (`backend/mock_draft_service.py`); client type
+`MockDraftMode` (`mobile/src/api/mockDraft.ts`). On the wire: optional on
+`POST /api/mock-draft` (absent/`null`/`""` = `cpu`; anything else → 400
+`bad_mode`), always present on `settings_echo`. `settings_echo.mode` is the
+only mode truth — no client may infer mode from `by`, cadence, or
+`on_the_clock`, and no client may key "my team" off `by` (use
+`settings_echo.user_owner_id` vs `picked_by_user_id`).
+
+**`user_not_in_draft`** joins the mock typed-empty reason vocabulary
+(server `REASON_USER_NOT_IN_DRAFT`; client: `MockEmptyReason` union member,
+`MockDraftScreen.emptyCopy` arm, `DraftRoomScreen` blocked arm
+`mock-entry.blocked.user_not_in_draft`). Fourth and last ladder rung; also
+produced by the `build_settings` `UserNotInDraft` raise, mapped to the
+byte-identical typed-empty at the create route. The reason enum stays OPEN
+on clients (`(string & {})` + `default:` arm).
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
