@@ -24,6 +24,49 @@ export const navigationIntegration = Sentry.reactNavigationIntegration({
 
 let _initialized = false;
 
+// ── Credential-leak scrub (device-auth S0, LLD §5.2) ────────────────────────
+//
+// The device transport (release 1+) attaches a raw Sleeper JWT to outbound
+// platform requests. Without these hooks, Sentry's default fetch/xhr
+// instrumentation would capture that request's URL, headers, and body as
+// breadcrumbs and event context — a credential-leak path into a third-party
+// SaaS that does not exist today. This closes it BEFORE the transport that
+// would open it ships. Verified against a real capture with tracing forced to
+// 1.0 at the pre-send gate (LLD §6.6 item 3) — not here, where CI cannot see a
+// live event.
+//
+// Hosts whose request breadcrumbs are dropped entirely. Kept local (not
+// imported from the transport's compiled allowlist) so this file has no
+// dependency on release-1 code and closes the exposure on its own schedule.
+const _SCRUB_HOSTS = new Set<string>(['sleeper.com']);
+
+function _hostname(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Drop any fetch/xhr breadcrumb aimed at a credentialed host. */
+export function scrubBreadcrumb(crumb: any): any | null {
+  if (crumb && (crumb.category === 'fetch' || crumb.category === 'xhr')) {
+    const h = _hostname(crumb.data?.url);
+    if (h && _SCRUB_HOSTS.has(h)) return null;
+  }
+  return crumb;
+}
+
+/** Strip request headers and body from every event, unconditionally. */
+export function scrubEvent(event: any): any {
+  if (event?.request) {
+    delete event.request.headers;
+    delete event.request.data;
+  }
+  return event;
+}
+
 export function initSentry(): boolean {
   if (_initialized) return true;
   const dsn =
@@ -52,6 +95,12 @@ export function initSentry(): boolean {
     // Don't send PII by default. Username + Sleeper user_id is set
     // explicitly via setUser() from useSession when the user signs in.
     sendDefaultPii: false,
+    // Credential-leak scrub (LLD §5.2): drop request breadcrumbs to a
+    // credentialed host, strip headers/body from every event, and never
+    // inject a sentry-trace/baggage header into an outbound platform request.
+    beforeBreadcrumb: scrubBreadcrumb,
+    beforeSend: scrubEvent,
+    tracePropagationTargets: [],
   });
   _initialized = true;
   return true;
