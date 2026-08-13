@@ -504,3 +504,11 @@
 Number sequentially. Never reuse a number even if a decision is fully superseded — mark it `SUPERSEDED by D-NNN` and keep the original.
 
 For substantial decisions (large refactors, vendor changes, API surface changes), also create a formal ADR in [`../docs/adr/`](../docs/adr/) and cross-reference from here.
+
+## D-045 — Device-Auth Programme: The Five Operator Defaults Ratified
+**Date:** 2026-08-13 (operator, in chat: "Aligned with the recommendations. Proceed")
+**Context:** The Plan (`docs/plans/device-side-platform-auth-plan-2026-08-13.md` §1) put five open items to the operator with recommended defaults, so a single yes could start work.
+**Decision:** All five defaults ratified: **OI-9** — run the expo-updates evaluation spike now, in parallel with S0/S1; the spike's written memo owns the Gate C decision (this ratification is *not* the OI-9 decision itself). **OI-3** — single-holder device model. **OI-14** — accept the LLD's deviation from PRD:144: `readEnvelope` returns `null` on a `user_id` mismatch; only session establishment wipes. **OI-4** — accept-and-monitor the old-build-reinstall custody downgrade; M1 non-zero is "investigate," never "page." **OI-15** — revocation stays behind a verified session for release 1; documented recovery is "sign back in, then disconnect"; revisit before public release.
+**Alternatives considered:** Per the Plan §1's table, each row names the rejected alternative and its cost.
+**Consequences:** S0 starts immediately (three lanes per Plan §13). OI-3/OI-4/OI-15 must be **re-confirmed in writing at Gate F** before the allowlist widens beyond the operator — ratified defaults may not silently stand in for that later call (Plan §1). The OI-9 spike session's prompt excludes Plan §10's recommendation, and its memo must name what evidence would have concluded "adopt first" (Plan §10 hygiene rules).
+**Status:** Active.
