@@ -199,6 +199,16 @@ The operator is effectively the only real user; others have tested lightly enoug
 
 **Net effect on the recommendation.** The case in §2.2 was weakened by measurement — a modest resilience benefit, and Sleeper's volume warning describing traffic this programme never moves. That reasoning is unchanged. **But the cost side just fell sharply**, since the expensive part was migration. OQ-5 ("is the full programme the right first bet at n=2") should be re-answered against the smaller number, and the answer is now more likely to be yes.
 
+### A3 — CORRECTION to A2: the server path is retained as a recovery capability
+
+**A2 as written broke rollback, and neither the operator nor the orchestrator caught it.** HLD review found the contradiction: §7 defines rollback as *"stop issuing leases → the server path resumes"*, but A2 deletes the stored credentials — so the server path resumes into a `not_linked` error. **Leases were only ever a *stop* primitive.** They halt device traffic so that something else can carry the load; delete that something and the stop leads into a hole. A2 therefore converted a reversible programme into a one-way door, which is the opposite of its intent.
+
+**Operator decision (2026-08-12): retain the server-side path.**
+
+> **R-ROLLBACK.** The server-side execution path (`sleeper_write.propose_trade` via `POST /api/trades/propose`) stays **in the tree, flag-reachable, and in CI** for as long as the device path exists. Rollback is: *withhold leases → confirm egress ceases → re-link → server path serves.* "Permanent dual-path as a steady state" remains withdrawn as a **user-facing commitment**; it is retained as a **recovery capability**. Deleting the server path is a separate, later decision requiring its own sign-off. The drill must be **rehearsed at cutover, not first attempted during an incident** — specifically, confirm `POST /api/trades/propose` still works end-to-end after a re-link, on the same build, so bit-rot is discovered on a calm day.
+
+**Why this matters more than it looks:** HLD review also established that **TLS/HTTP-2 fingerprinting at the edge (residual R7) has no fix at any layer** on device — server-side you can swap HTTP libraries, on a phone you cannot choose NSURLSession's fingerprint. If Cloudflare's posture shifts against the app's native signature, there is no hotfix and no OTA. **R-ROLLBACK is the designated response to the programme's worst plausible failure**, which is why it cannot be optional.
+
 **Do not silently generalise this.** These withdrawals hold *because* the user base is ~1. They must be revisited before the public App Store release — at which point migration machinery becomes necessary again for anyone who links between now and then.
 
 
