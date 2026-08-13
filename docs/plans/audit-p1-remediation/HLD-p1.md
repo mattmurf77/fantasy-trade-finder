@@ -96,6 +96,68 @@ that count:
 The open web-parity question for P1-9 resolved during the LLD wave: **web degrades safely, no web
 edit needed.** Close the risk row.
 
+### H-6 — The T1 probe as specced can pass against a broken build *(supersedes the probe wording in §C step 1 and in H-1)*
+
+Reported 2026-08-11 by the `/feedback` session after running this exact gate on the
+#297–302 batch. **Their first probe looked like a pass and was not:**
+
+```json
+{"accepted":0,"deduped":0,"dropped":0,"rejected":[{"index":0,"reason":"no_identity"}]}
+```
+
+`dropped == 0` was **trivially true** — the envelope was rejected before any event was
+processed. **A probe asserting only `dropped == 0` passes against a build where the event
+name is not registered at all**, which is the one assertion this gate exists to make.
+
+**The corrected probe.** Every clause is load-bearing:
+
+1. Send an **`X-Device-Id` header** (or `device_id` in the body), else the whole envelope
+   is rejected `no_identity` and nothing is evaluated.
+2. Send a valid envelope per `_validate_envelope`: `event_type`, `session_id` (8–64
+   chars), `event_id` matching `^[A-Za-z0-9_-]{8,64}$`, `seq` in 1..1,000,000.
+3. Assert **`accepted` > 0** *and* `dropped == 0`. Neither alone is sufficient.
+4. **Read the rows back** from `user_events.props` and confirm every declared property is
+   present. Unknown *types* are dropped with one counter bump; unknown *props* are popped
+   with a different one (`analytics_ingest.py:379-390`). Separate silent failures — only
+   a read-back catches the second.
+
+Their verified run: four events → `{"accepted":4,"dropped":0,"rejected":[]}`, then a direct
+read of `user_events` confirming each property. The read-back is what actually proved the
+pipeline — it showed that `source` on `find_trades_tapped`, dead since #257, now lands.
+
+**Still do not substitute `GET /api/admin/analytics/health`** — in-process counters, reset
+on deploy (H-1).
+
+### H-7 — Ship-path hazards, for whoever merges and releases
+
+From the same session, learned by paying for them:
+
+- **`eas build` exits 0 even when the remote build ERRORS.** A zero exit is not a
+  successful build. Verify with `eas-cli build:list --json` and read `status`.
+- **A green local `expo export` proves nothing about the uploaded archive** — it passed
+  twice while EAS failed twice, because the defect existed only in the upload.
+- **EAS build logs are brotli-encoded.** Take `logFiles[0]` from
+  `eas-cli build:view <id> --json` (signed URL, ~15 min TTL — download in the same
+  command) and decompress with node's `zlib.brotliDecompressSync`; each line is JSON with
+  a `msg` field.
+- **The native version is not in `app.json`** (bare workflow — EAS reads the Xcode
+  project). Bump both `MARKETING_VERSION` occurrences in `project.pbxproj` plus
+  `CFBundleShortVersionString` in `Info.plist`.
+- **`.easignore`: not applicable to this branch.** The bare `screens/` entry that stripped
+  every app screen was fixed in `53bd19f`, which **is** this branch's base. Verified —
+  line 20 reads `/screens/`, anchored to root.
+
+### H-8 — Re-check instrumentation premises against `main` immediately before building
+
+The `/feedback` session discarded and redid an entire analytics round because `main`
+advanced 21 commits mid-batch and falsified two premises — including "no registered event
+covers the League drill-in", true when checked and false by the time it shipped, because
+P0-7 landed `league_team_opened` underneath them.
+
+This round rebased onto `53bd19f` immediately before building, and `origin/main` was
+re-verified as still `53bd19f` after the first three build agents finished. **Any
+resumption of this work must re-verify before writing code** rather than rely on that.
+
 ---
 
 ## Preconditions
