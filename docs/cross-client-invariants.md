@@ -83,7 +83,32 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 
 ## Notification type strings
 
-`notifications.type` (in-app inbox): `trade_match`, `trade_accepted`, `trade_declined`. Used by mobile push handler (`mobile/src/hooks/usePushNotifications.ts`) and inbox renderers.
+`notifications.type` (the in-app bell inbox) — **nine values, and the failure mode is silent:**
+
+| Value | Written by | Mobile glyph | Tap target |
+|---|---|---|---|
+| `trade_match` | match creation | `match` / ice | Matches |
+| `trade_accepted` | match disposition | `check` / pos | Matches |
+| `trade_declined` | match disposition | `x` / neg | Matches |
+| `referral_joined` | session_init, first session with `invited_by` | `plus` / **flare** | League |
+| `league_member_joined` | session_init peer fanout, **coalesced 1/league/day** | `plus` / ice | League |
+| `league_member_unlocked_trades` | first board unlock | `rank` / ice | League |
+| `match_expiring` | 15-min cron | `match` / warn | Matches |
+| `deck_replenished` | weekly replenish job | `trade` / ice | Trades |
+| `counter_offer` | **no emitter today** — mapped so it renders correctly if the kind ever ships | `swap` / ice | Matches |
+
+**Four independent consumers, no shared source.** Adding a value without updating all four produces no error, no warning and no log line — just an anonymous grey bell with a dead tap that nobody notices until someone reads the code:
+
+| Client | Glyph | Tap |
+|---|---|---|
+| mobile | `ROW_GLYPHS` (`mobile/src/components/TopBar.tsx`) | `V2_*_KINDS` (`mobile/src/utils/deepLinks.ts`) |
+| web | `notifTypeIcon` (`web/js/app.js`) | `clickNotif` (`web/js/app.js`) |
+
+Pinned by `mobile/tests/check-notif-glyphs.js`, which reads all four from the real files. **Run it after touching any of them.**
+
+⚠ **Inbox types are not push kinds.** The DB writes `trade_accepted` / `trade_declined`; the paired *pushes* are `match_accepted` / (none). Listing only the push kind in a client table is how two of the four original types shipped with a glyph and a dead tap (fixed 2026-08-13). `mobile/src/hooks/usePushNotifications.ts` handles push kinds; the inbox renderers handle these.
+
+**An inbox row is not a push.** `_send_typed_push` has never written one. Rows are written beside a push at the call site, deliberately outside the dispatcher's prefs → bucket → cap → quiet-hours gates, all of which are statements about *interrupting* the user rather than about what belongs in a list they chose to open. `deck_replenished` is the proof: its push reaches zero users (reengagement bucket + `notif.reengagement_default_off`), and its row reaches everyone.
 
 ## Notification kinds vs. preference buckets
 

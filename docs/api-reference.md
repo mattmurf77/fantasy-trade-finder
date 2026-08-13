@@ -77,7 +77,7 @@ Sessions live in an in-memory dict (the hot path). With the flag ON, **verified*
 
 A session is **verified** when the app captured a Sleeper JWT whose `user_id` claim matches the session's user **and** the token was proven live against Sleeper's authenticated GraphQL API (`sleeper_write.verify_token_live` — Sleeper is the signature oracle, since the JWT's HS256 signature can't be checked locally). Verification happens in `POST /api/sleeper/link`; it stamps `sess["verified"]` and persists `users.verified_at`/`verified_via='sleeper'` (shared with P2's Apple/Google anchors).
 
-Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/import-apply`, `rankings/submit`, `tiers/save|copy-from-format|dismiss`, `anchor/save|scale`, `ranking-method`, `scoring/switch`, `trades/swipe|generate|flag`, `trades/matches/*/dismiss|disposition`, `league/preferences|asset-prefs|scoring`, `notifications/read|read-all|register-device|prefs`, `feedback`, `sleeper/link` DELETE) runs the gate (`@_gate_unverified_write`):
+Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/import-apply`, `rankings/submit`, `tiers/save|copy-from-format|dismiss`, `anchor/save|scale`, `ranking-method`, `scoring/switch`, `trades/swipe|generate|flag`, `trades/matches/*/dismiss|disposition`, `league/preferences|asset-prefs|scoring`, `notifications/read|read-all|dismiss-all|register-device|prefs`, `feedback`, `sleeper/link` DELETE) runs the gate (`@_gate_unverified_write`):
 
 | Caller | Result |
 |---|---|
@@ -564,9 +564,10 @@ Error contract (shared, `{platform}` = `mfl`\|`fleaflicker`): 404 `feature_disab
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/notifications` | Inbox |
+| GET | `/api/notifications` | Inbox — all live unread + the 20 most recent live read, `created_at DESC`. Rows with `dismissed_at` set are excluded |
 | POST | `/api/notifications/read` | Mark one read |
 | POST | `/api/notifications/read-all` | Mark all read |
+| POST | `/api/notifications/dismiss-all` | **"Clear all"** → `{ok, dismissed}`. Stamps `notifications.dismissed_at` on every live row for the session user and marks them read; the rows are retained, not deleted. Distinct from `read-all`: "seen" and "done with" are different facts. Replaces two client-local mechanisms that both lied (mobile's zustand clear re-hydrated on the next bell open; web's `ftf_dismissed_notifs` was per-browser) |
 | POST | `/api/notifications/register-device` | Register Expo push token (writes `device_tokens`). While `notif.tz_sync` is on, also adopts the request's `X-User-TZ` header into `notification_prefs.tz` when the stored value is still the ET default and the header is a valid IANA tz (teardown 05-01; `/api/session/init` does the same) |
 | GET | `/api/notifications/prefs` | Read push preferences (`notification_prefs`). While `notif.reengagement_default_off` is on, users with no stored pref are served `reengagement: 0` (teardown 05-04a) |
 | PUT | `/api/notifications/prefs` | Update push preferences (buckets + quiet hours) |

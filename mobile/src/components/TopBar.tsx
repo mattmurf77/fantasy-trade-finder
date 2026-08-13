@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   View,
   Text,
@@ -14,7 +15,15 @@ import type { IconName } from './chalkline';
 import { useNotifications, type AppNotification } from '../state/useNotifications';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
-import { getNotifications, markAllNotificationsRead } from '../api/notifications';
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  dismissAllNotifications,
+} from '../api/notifications';
+import { getLeagueSummary } from '../api/league';
+import { track } from '../api/events';
+import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
+import { shareInvite } from './InviteLeaguematesBanner';
 import { relativeTime } from '../utils/relativeTime';
 // Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
 // is a top-level const created at RootNav import time and only *read*
@@ -62,6 +71,13 @@ function stripLegacyEmoji(text: string): string {
 // match = ice link glyph · accepted = pos check · declined = neg x ·
 // everything else = chalk-dim bell. Keys are `data.type` (backend
 // notification types + push kinds).
+//
+// CROSS-CLIENT (docs/cross-client-invariants.md § Notification types): web
+// keeps a SECOND, independent map in web/js/app.js (notifTypeIcon) and a
+// second tap router (clickNotif). A type added here and not there renders
+// as an anonymous grey bell with a dead tap on the other client — no error,
+// no warning, nothing in a log. Add to both, always. Pinned by
+// mobile/tests/check-notif-glyphs.js.
 const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   trade_match:    { name: 'match', color: ice.base },
   new_match:      { name: 'match', color: ice.base },
@@ -69,6 +85,23 @@ const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   trade_accepted: { name: 'check', color: semantic.pos },
   match_accepted: { name: 'check', color: semantic.pos },
   trade_declined: { name: 'x',     color: semantic.neg },
+  // notif-inbox-growth, 2026-08-13. `referral_joined` and
+  // `league_member_joined` share the `plus` glyph because they are the same
+  // object — a person arrived. The COLOR carries the difference: flare is
+  // the informational highlight, reserved here for the one row that says
+  // the user's own invite worked. Everything else is ice.
+  referral_joined:               { name: 'plus',  color: flare.base },
+  league_member_joined:          { name: 'plus',  color: ice.base },
+  // They finished a board — a RANKED counterparty is what the matching
+  // engine actually needs, so the rank glyph, not another person glyph.
+  league_member_unlocked_trades: { name: 'rank',  color: ice.base },
+  match_expiring:                { name: 'match', color: semantic.warn },
+  deck_replenished:              { name: 'trade', color: ice.base },
+  // No backend emitter today (it is a bucket mapping and two client kind
+  // sets, nothing more). Mapped anyway so that if the kind ever ships it
+  // renders correctly on day one instead of grey-belling until someone
+  // notices. Costs one line; the alternative is a silent regression.
+  counter_offer:                 { name: 'swap',  color: ice.base },
 };
 const DEFAULT_ROW_GLYPH: { name: IconName; color: string } = {
   name: 'bell',
@@ -105,6 +138,12 @@ export default function TopBar() {
   const formatLabel = activeFormat
     ? FORMAT_TILE_LABEL[activeFormat] ?? null
     : null;
+  // Platform for the invite events comes from the CACHED LEAGUE LIST, never
+  // from the active-league slice (SavedLeague carries no platform) and never
+  // inferred from the id shape. Same derivation MatchesScreen uses.
+  const leagues   = useSession((s) => s.leagues);
+  const platform  =
+    leagues.find((lg) => lg.league_id === league?.league_id)?.platform ?? "unknown";
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // S5 PRD-02 (flag `notif.tap_routing_v2`): the bell hydrates from the
   // server inbox on open (the in-memory feed resets on relaunch, so without
@@ -115,7 +154,54 @@ export default function TopBar() {
   const tapV2 = useFlag('notif.tap_routing_v2');
   const [open, setOpen] = useState(false);
 
+  // ── Empty-state invite (GD-1) ────────────────────────────────────────
+  // The invite ask lives HERE and never as a standing inbox row. A row that
+  // is true for every user every day is not news, and the bell is the one
+  // surface where everything currently is — a permanent ask is how you
+  // teach someone to stop opening it. The empty state is structurally
+  // incapable of burying a receipt: it only exists when there is nothing to
+  // bury, and it disappears the moment the surface has content.
+  //
+  // Same <50%-penetration rule that already shipped on MatchesScreen
+  // (D-P1-13 PR-6), reading the SAME query key as League Home and Matches
+  // so the three surfaces share one cache entry and can never quote
+  // different numbers. Fetched only while the sheet is open on an empty
+  // list — the bell must not put a request on every app launch.
+  const summaryQuery = useQuery({
+    queryKey: ['league-summary', league?.league_id],
+    queryFn:  () => getLeagueSummary(league!.league_id),
+    enabled:  open && items.length === 0 && !!league?.league_id,
+    staleTime: 60_000,
+    placeholderData: (prev: any) => prev,
+  });
+  const summary = summaryQuery.data as any;
+  // int | null. NULL IS HONEST, 0 IS A LIE — the bell is global and opens
+  // with no active league at all, and before the summary lands. Neither
+  // case is "everyone joined".
+  const totalMates: number | null =
+    typeof summary?.leaguemates_total === 'number' ? summary.leaguemates_total : null;
+  const joinedMates: number | null =
+    typeof summary?.leaguemates_joined === 'number' ? summary.leaguemates_joined : null;
+  const inviteProof =
+    totalMates !== null && joinedMates !== null
+      ? inviteSocialProof(totalMates, joinedMates)
+      : null;
+  const invitePenetration =
+    totalMates !== null && joinedMates !== null && totalMates > 0
+      ? joinedMates / totalMates
+      : 1;
+  const inviteOffered = inviteProof !== null && invitePenetration < 0.5;
+
   const openSheet = () => {
+    // BEFORE markAllRead() — after it, unreadCount is always 0 and the
+    // event measures nothing. row_count is deliberately the PRE-hydration
+    // count: the server fetch below is async, and firing after it settles
+    // would lose every open that happens offline or mid-flight. Read it as
+    // "rows the user saw immediately".
+    track('notif_inbox_opened', {
+      unread_count: unreadCount,
+      row_count:    items.length,
+    }, 'TopBar');
     setOpen(true);
     // Mark read when the sheet is opened so the dot disappears.
     markAllRead();
@@ -145,11 +231,78 @@ export default function TopBar() {
   // Row tap (flag on): close the sheet and route through the same tap
   // router pushes use, off the row's stored payload (`data.type`,
   // `data.match_id`). Unroutable kinds are inert.
-  const onRowTap = (it: AppNotification) => {
+  const onRowTap = (it: AppNotification, position: number) => {
+    // Fired BEFORE the routing decision, on purpose. A row that is tapped
+    // and goes nowhere is the single most useful thing this event can
+    // record — it is exactly the referral_joined bug this batch fixes, and
+    // the only way anyone catches the next one. Moving this below the
+    // early return would make unroutable rows invisible.
+    track('notif_row_tapped', {
+      type:      String(it.data?.type ?? ''),
+      position,
+      age_hours: Math.max(0, Math.floor((Date.now() - it.receivedAt) / 3_600_000)),
+    }, 'TopBar');
     const target = resolveNotificationTarget(it.data);
     if (!target) return;
     setOpen(false);
     routeNotificationTap(target.tab, target.matchId);
+  };
+
+  // Fires once per open onto an empty list. Waits for the summary fetch so
+  // the counts are real rather than a transient null — but only while it is
+  // actually in flight: with no active league the query is disabled, never
+  // fetches, and the event fires immediately with honest nulls.
+  const emptyShownRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!open || items.length !== 0) { emptyShownRef.current = false; return; }
+    if (summaryQuery.isFetching) return;
+    if (emptyShownRef.current) return;
+    emptyShownRef.current = true;
+    track('notif_empty_state_shown', {
+      not_joined:     totalMates !== null && joinedMates !== null
+        ? totalMates - joinedMates : null,
+      total_mates:    totalMates,
+      invite_offered: inviteOffered,
+    }, 'TopBar');
+    if (inviteOffered) {
+      // ⚠ MOUNT COUNTER, not an impression counter — same D-P1-04 caveat
+      // the matches_empty surface carries. The empty state renders inside a
+      // plain <View> with no scroll ancestry. The sheet is short enough
+      // that clipping is unlikely, but this event witnesses a mount.
+      track('invite_cta_shown', {
+        surface:     'notif_empty',
+        not_joined:  totalMates !== null && joinedMates !== null
+          ? totalMates - joinedMates : null,
+        total_mates: totalMates,
+        platform:    platform,
+      }, 'TopBar');
+    }
+  }, [open, items.length, summaryQuery.isFetching, totalMates, joinedMates,
+      inviteOffered, platform]);
+
+  const onInviteFromInbox = () => {
+    setOpen(false);
+    void shareInvite({
+      leagueId:   league?.league_id || '',
+      leagueName: league?.league_name,
+      username:   useSession.getState().user?.username,
+      surface:    'notif_empty',
+      notJoined:  totalMates !== null && joinedMates !== null
+        ? totalMates - joinedMates : null,
+      totalMates,
+      platform:   platform,
+      screen:     'TopBar',
+    });
+  };
+
+  // "Clear all" now means it (GD-4). The server stamp lands first and is
+  // best-effort; the local clear runs either way so the button is never
+  // unresponsive on a flaky connection. A dropped server call costs a
+  // re-hydration on the next open — today's behavior, not a regression.
+  const onClearAll = () => {
+    void dismissAllNotifications().catch(() => {});
+    clearAll();
+    setOpen(false);
   };
 
   return (
@@ -293,28 +446,44 @@ export default function TopBar() {
             <Text style={type.heading} accessibilityRole="header">Notifications</Text>
             {items.length > 0 && (
               <Button
+                testID="topbar.notif-clear-all"
                 label="Clear all"
                 variant="ghost"
                 compact
-                onPress={() => {
-                  clearAll();
-                  setOpen(false);
-                }}
+                onPress={onClearAll}
               />
             )}
           </View>
 
           {items.length === 0 ? (
-            <View style={styles.empty}>
+            // The most-viewed state on this surface, and until now it did
+            // nothing. Two jobs: say what fills the bell (which teaches the
+            // loop without asking for anything), and — only under 50%
+            // penetration — carry the invite ask.
+            <View style={styles.empty} testID="topbar.notif-empty">
               <Icon name="bell" size={32} color={chalk.faint} />
               <Text style={styles.emptyTitle}>You're all caught up</Text>
               <Text style={styles.emptyBody}>
-                Trade matches and other alerts will appear here.
+                You'll hear when leaguemates rank players, match a trade, or join.
               </Text>
+              {inviteOffered ? (
+                <>
+                  <Text testID="topbar.notif-empty-proof" style={styles.emptyProof}>
+                    {inviteProof}
+                  </Text>
+                  <Text style={styles.emptyBody}>{INVITE_RATIONALE}</Text>
+                  <Button
+                    testID="topbar.notif-empty-invite"
+                    label="Invite leaguemates"
+                    variant="primary"
+                    onPress={onInviteFromInbox}
+                  />
+                </>
+              ) : null}
             </View>
           ) : (
             <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-              {items.map((it) => {
+              {items.map((it, idx) => {
                 const glyph =
                   ROW_GLYPHS[String(it.data?.type ?? '')] ?? DEFAULT_ROW_GLYPH;
                 const body = (
@@ -340,7 +509,7 @@ export default function TopBar() {
                   <Pressable
                     key={it.id}
                     testID={`topbar.notif-row.${it.id}`}
-                    onPress={() => onRowTap(it)}
+                    onPress={() => onRowTap(it, idx)}
                     style={({ pressed }) => [
                       styles.item,
                       !it.read && styles.itemUnread,
@@ -546,5 +715,13 @@ const styles = StyleSheet.create({
   emptyBody: {
     ...type.bodySm,
     textAlign: 'center',
+  },
+  // The social-proof line states a fact about THIS league, so it reads as
+  // content rather than as a nag — chalk-base, one step up from the body.
+  emptyProof: {
+    ...type.bodySm,
+    color: chalk.base,
+    textAlign: 'center',
+    marginTop: space.sm,
   },
 });

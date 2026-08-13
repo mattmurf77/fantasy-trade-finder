@@ -153,6 +153,28 @@ NON_INTENT_EVENTS = frozenset({
     # mock_pick_made, mock_abandoned — all three are real user decisions.
     "mock_completed",
     "mock_create_refused",
+    # Bell inbox instrumentation, 2026-08-13 — added in the SAME commit that
+    # added them to ALLOWED_CLIENT_EVENTS, for the reason stated above.
+    # Tracking plan: docs/plans/notif-inbox-growth/analytics.md.
+    #
+    #   notif_inbox_opened — NAVIGATION class, the peer of tab_selected and
+    #     league_view directly above. Opening the bell is a glance at a
+    #     surface, not a decision about anything on it. It is also the
+    #     DENOMINATOR for the other two, and a denominator that inflates
+    #     DAU is worse than no denominator at all: the bell sits in the
+    #     global TopBar on every tab, so admitting it would promote an idle
+    #     bell tap to a user-day from ship day.
+    #
+    #   notif_empty_state_shown — an IMPRESSION, fired when the sheet opens
+    #     onto nothing. Identical class to invite_cta_shown above. Every
+    #     firing is preceded in the same tap by a notif_inbox_opened, so it
+    #     can add no user-day that event has not already declined to add.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: notif_row_tapped. A
+    # user chose one row out of a list — the single number this batch was
+    # built to produce.
+    "notif_inbox_opened",
+    "notif_empty_state_shown",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -227,6 +228,33 @@ def _is_valid_pick_str(p) -> bool:
     return len(parts) == 5 and all(x.strip().lstrip("-").isdigit() for x in parts)
 
 
+_GRAPHQL_NAME_RE = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
+
+
+def _graphql_object_literal(v) -> str:
+    """Serialize a value as a GraphQL *literal* for inlining into query text.
+
+    GraphQL object literals use BARE keys; json.dumps quotes them, which is
+    invalid GraphQL syntax ({"sender": 1} must be {sender:1}). Scalars and
+    lists of scalars are unaffected — JSON and GraphQL agree there — which is
+    why __DRAFT_PICKS__ (a list of strings) still uses json.dumps unchanged.
+
+    Keys are validated against the GraphQL Name grammar and rejected
+    otherwise: a bare key is UNQUOTED in the output, so an unvalidated key
+    would be a direct injection into the query text.
+    """
+    if isinstance(v, dict):
+        for k in v:
+            if not isinstance(k, str) or not _GRAPHQL_NAME_RE.match(k):
+                raise SleeperWriteError(
+                    f"invalid GraphQL object key: {k!r}", kind="error")
+        return "{" + ",".join(
+            f"{k}:{_graphql_object_literal(x)}" for k, x in v.items()) + "}"
+    if isinstance(v, list):
+        return "[" + ",".join(_graphql_object_literal(x) for x in v) + "]"
+    return json.dumps(v)  # scalars: JSON and GraphQL agree
+
+
 def build_propose_trade_body(req: ProposeTradeRequest) -> dict:
     """Build the exact GraphQL request body for propose_trade.
 
@@ -264,7 +292,11 @@ def build_propose_trade_body(req: ProposeTradeRequest) -> dict:
         _PROPOSE_TRADE_TEMPLATE
         .replace("__LEAGUE_ID__", lid)
         .replace("__DRAFT_PICKS__", json.dumps(picks))
-        .replace("__WAIVER_BUDGET__", json.dumps(req.waiver_budget or []))
+        # NOT json.dumps: waiver_budget is a list of OBJECTS, and GraphQL
+        # object literals need bare keys ({sender:1}, not {"sender":1}).
+        # Dormant until FAAB trades populate this; fixed ahead of the device
+        # transport's strict guard (LLD 2026-08-13 §7.0).
+        .replace("__WAIVER_BUDGET__", _graphql_object_literal(req.waiver_budget or []))
     )
     return {
         "operationName": "propose_trade",

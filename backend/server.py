@@ -136,6 +136,9 @@ from .database import (
     # draft-extensions W3 M-D — live offline pick recording
     record_draft_picks, void_recorded_pick, load_recorded_picks,
     create_notification, get_notifications, mark_notifications_read,
+    # notif-inbox-growth (2026-08-13) — the inbox as a real surface
+    notification_exists_with_meta, create_or_coalesce_league_join_notification,
+    dismiss_all_notifications,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
     # Agent 4 additions — referral receipt helpers
@@ -6392,11 +6395,31 @@ def get_rankings_progress():
                     for _p in _members:
                         if not _p.get("joined") or not _p.get("user_id"):
                             continue
+                        _title = "New trade options in your league"
+                        _body  = (f"@{_my_username} just unlocked Trade Finder. "
+                                  f"Tap to look for matches.")
+                        # Inbox row FIRST, and independent of the push.
+                        # _send_typed_push does not write one (it never has
+                        # for any kind), and it is gated by prefs, buckets,
+                        # frequency caps and quiet hours — none of which
+                        # apply to the bell. A push suppressed by any of
+                        # those still leaves the receipt findable here.
+                        # Idempotent by construction: this block only runs
+                        # on _unlock_res["was_first"].
+                        _write_inbox_row(
+                            _p["user_id"], "league_member_unlocked_trades",
+                            title = _title,
+                            body  = _body,
+                            meta  = {"unlocker_user_id": g_user_id,
+                                     "unlocker_username": _my_username,
+                                     "league_id": _league_id,
+                                     "league_name": _league_name},
+                        )
                         _send_typed_push(
                             _p["user_id"],
                             "league_member_unlocked_trades",
-                            title = "New trade options in your league",
-                            body  = f"@{_my_username} just unlocked Trade Finder. Tap to look for matches.",
+                            title = _title,
+                            body  = _body,
                             data  = {"unlocker_user_id": g_user_id,
                                      "league_id": _league_id,
                                      "league_name": _league_name},
@@ -15147,6 +15170,20 @@ def session_init():
                         for _p in _peers:
                             if not _p.get("joined") or not _p.get("user_id"):
                                 continue
+                            # Inbox row, COALESCED per GD-8: one row per
+                            # league per UTC day. A five-person onboarding
+                            # wave is one event, so it reads as one row —
+                            # "3 leaguemates joined <league>" — rather than
+                            # three receipts that bury everything else on a
+                            # recency-ordered list. The push stays
+                            # per-pair; only the inbox folds.
+                            create_or_coalesce_league_join_notification(
+                                user_id      = _p["user_id"],
+                                league_id    = league_id,
+                                league_name  = league_name or "",
+                                new_username = _new_username,
+                                body         = "A new leaguemate can mean new trade matches.",
+                            )
                             _send_typed_push(
                                 _p["user_id"],
                                 "league_member_joined",
@@ -15537,6 +15574,39 @@ def read_all_notifications():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/notifications/dismiss-all", methods=["POST"])
+@_gate_unverified_write
+def dismiss_all_notifications_route():
+    """
+    POST /api/notifications/dismiss-all  { }  →  {ok, dismissed}
+
+    Server-side "Clear all" (operator decision GD-4). Stamps `dismissed_at`
+    on every live row for the session user; `get_notifications` filters them
+    out from then on, on EVERY client and every device.
+
+    This replaces two client-local mechanisms that both lied. Mobile's
+    "Clear all" emptied a zustand store and the rows re-hydrated on the next
+    bell open. Web's hid ids in localStorage, so an account cleared on a
+    phone was still full on a laptop, and vice versa. Tolerable while every
+    row was an old receipt; a broken promise the moment the surface carries
+    anything the user wants gone.
+
+    Rows are RETAINED, not deleted — they are the only history this surface
+    has, and a dismissal is a display decision, not a data one.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    uid = sess["user_id"]
+    if not uid:
+        return jsonify({"error": "user_id required"}), 400
+    try:
+        dismissed = dismiss_all_notifications(uid)
+        return jsonify({"ok": True, "dismissed": dismissed})
+    except Exception as e:
+        log.error("dismiss_all_notifications error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 # ---------------------------------------------------------------------------
 # Push dispatch — typed wrapper + raw Expo POST
 # ---------------------------------------------------------------------------
@@ -15701,6 +15771,54 @@ def _match_push_kind(user_id: str) -> str:
     return ("new_match"
             if notification_dedup_sent(user_id, "first_match", "lifetime")
             else "first_match")
+
+
+def _write_inbox_row(
+    user_id: str,
+    kind: str,
+    *,
+    title: str,
+    body: str,
+    meta: dict | None = None,
+) -> None:
+    """Write one bell-inbox row. Non-throwing — an inbox write must never
+    be able to fail the request or cron tick that provoked it.
+
+    ── WHY THIS IS A SEPARATE CALL AND NOT PART OF _send_typed_push ──
+    Because the inbox is not a push mirror and must not become one. The
+    dispatcher below applies prefs → bucket → frequency cap → quiet hours
+    → Expo. Every one of those gates is a statement about INTERRUPTING the
+    user, and none of them is a statement about what belongs in a list the
+    user chose to open. Folding create_notification into the dispatcher
+    would silently inherit all five: `deck_replenished` sits in the
+    reengagement bucket, which `notif.reengagement_default_off` forces to 0
+    for every user without a stored pref — its push reaches nobody, and its
+    inbox row would have reached nobody either.
+
+    So: call this BESIDE the push, at the call site, never inside it. The
+    convention is recorded in living-memory/LLD.md.
+
+    Idempotency is the CALLER'S job, and the caller cannot borrow the
+    push's. `_freq_cap_blocks` reads notification_events_log, which is only
+    written when a push actually leaves — a suppressed push logs nothing,
+    so a shared gate would let the row re-fire forever. Call sites are
+    either structurally once-only (a `was_first` unlock, a first-session
+    fanout, a weekly replenish marker) or use
+    `notification_exists_with_meta` (the 15-minute match_expiring cron).
+    """
+    if not user_id or not kind:
+        return
+    try:
+        create_notification(
+            user_id  = user_id,
+            type_    = kind,
+            title    = title,
+            body     = body,
+            metadata = meta or {},
+        )
+    except Exception as e:
+        log.warning("inbox row failed (non-fatal): user=%s kind=%s err=%s",
+                    user_id, kind, e)
 
 
 def _send_typed_push(
@@ -16156,6 +16274,24 @@ def _run_weekly_replenishment(now: datetime) -> dict:
                         f"{'s' if deck_size != 1 else ''} for your league.")
                 if expired_count > 0:
                     body += (f" {expired_count} expired — values moved.")
+                # THE POINT OF THIS ROW: the push above reaches ZERO users
+                # and always has. `deck_replenished` is in the reengagement
+                # bucket, and `notif.reengagement_default_off` forces that
+                # bucket to 0 for anyone without a stored pref row — which
+                # is everyone. The row reaches every user at zero push cost.
+                # Do NOT "fix" this by moving the kind's bucket: the push is
+                # correct as it is (a weekly deck refresh is the user's own
+                # state, not another human's action, so it does not get to
+                # interrupt anyone). The inbox row IS the fix.
+                # Idempotency: log_deck_replenish above is the weekly
+                # marker and runs before this block, one tick per league.
+                _write_inbox_row(
+                    uid, "deck_replenished",
+                    title = "Your new deck is ready",
+                    body  = body,
+                    meta  = {"league_id": lid, "deck_size": deck_size,
+                             "expired_count": expired_count},
+                )
                 _send_typed_push(
                     uid, "deck_replenished",
                     title = "Your new deck is ready",
@@ -16268,6 +16404,23 @@ def cron_realtime_tick():
         ]:
             if dec is not None:
                 continue   # already decided their side
+            # Inbox row, gated on the INBOX's own history. This endpoint
+            # runs every 15 minutes over the same pending matches, and the
+            # push's dedup (notification_events_log via _freq_cap_blocks)
+            # is only written when a push actually leaves — so a push
+            # suppressed by quiet hours or a bucket toggle would let this
+            # row re-fire 96 times a day for one match. Dismissed rows
+            # count as written: clearing it means done with it.
+            if not notification_exists_with_meta(
+                uid, "match_expiring", "match_id", r["id"],
+            ):
+                _write_inbox_row(
+                    uid, "match_expiring",
+                    title = "A trade match is expiring soon",
+                    body  = "Tap to review before it disappears.",
+                    meta  = {"match_id":  r["id"],
+                             "league_id": r.get("league_id")},
+                )
             _send_typed_push(
                 uid,
                 "match_expiring",

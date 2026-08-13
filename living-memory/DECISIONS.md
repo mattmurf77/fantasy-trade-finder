@@ -417,6 +417,22 @@
 **Consequences:** Reversibility becomes structural (a plain toggle is its own inverse) and strictly better — `{PICKS}` + RB − RB now returns to `{PICKS}` rather than costing the extra tap #294 accepted. #294's "hidden hand-chosen state axis" objection is obsolete. **What #293 originally complained about can return**: a rebuilding team's capital is no longer counted under a position filter unless the user asks. That is the intended trade, not an oversight. The flag still governs picks in all subsets, the bar segment, legend, pill, drill-in group and hint strings — only the auto-add is gone. Two Maestro flows and one structural suite were re-pinned; the original reasoning is preserved in the code comments and the `features.json` block rather than deleted.
 **Status:** Active. Shipped `5139b45`, v1.13.1 build 106.
 
+## D-045 — An Inbox Row Is Written Beside the Push, Never Inside the Dispatcher
+**Date:** 2026-08-13 (notif-inbox-growth; operator decisions GD-1…GD-8)
+**Context:** Six notification types that push today left no trace in the bell inbox, and `_send_typed_push` has never written one for any kind — 11 of 14 kinds had no inbox row at all. The obvious economy was to add `create_notification` inside the dispatcher and get all 14 at once.
+**Decision:** Rows are written **at the call site, beside the push**, via a thin `_write_inbox_row()`. The dispatcher stays push-only. Idempotency is the caller's job and may **not** borrow the push's.
+**Alternatives considered:** Writing the row inside `_send_typed_push` — rejected: its five gates (prefs → bucket → frequency cap → quiet hours → Expo) are each a statement about *interrupting* the user, and none is a statement about what belongs in a list the user chose to open. A row inheriting them would inherit `deck_replenished`'s: that kind sits in the `reengagement` bucket, which `notif.reengagement_default_off` forces to 0 for every user without a stored pref, so its push reaches **zero** users — and its inbox row would have reached zero users too, silently. Writing rows in a post-dispatch hook — rejected for the same reason plus a worse one: the hook only runs when a push leaves.
+**Consequences:** The inbox is now a surface with its own rules rather than a push mirror, which is what lets phase 1 ship to **every** user while push stays operator-only — nothing here waits on the push rollout. The cost is one extra line per call site and an explicit idempotency decision each time. `_freq_cap_blocks` reads `notification_events_log`, which is only written when a push **actually leaves**, so a suppressed push logs nothing: the 15-minute `match_expiring` cron would have re-written its row ~96×/day per match on a shared gate. It uses `notification_exists_with_meta`, keyed off the inbox's own rows; the other three sites are structurally once-only. Recorded in `living-memory/LLD.md` and `docs/cross-client-invariants.md`.
+**Status:** Active.
+
+## D-046 — The Bell Carries Receipts, Not Prompts; the Invite Ask Lives in the Empty State
+**Date:** 2026-08-13 (operator decisions GD-1, GD-3)
+**Context:** The operator asked to use the notification list for things we want users to *do* — invite leaguemates, re-rank players, learn about new members. The inbox today is an event log: everything in it is news. A prompt list is a different object, and prompts are always available while news is not, so mixing them without a rule converts the log into the prompt list.
+**Decision:** v1 ships **six receipt/social rows and zero prompt rows**. The invite ask goes in the bell's **empty state**, gated at the shipped <50%-penetration rule (`MatchesScreen.tsx`, D-P1-13 PR-6) — never a standing row. Ordering stays recency-only; no `priority`/`expires_at` columns until the first prompt row is approved.
+**Alternatives considered:** A standing invite row — rejected: it fails the slot test by construction (true for every user every day, therefore not news), and five in-screen invite surfaces already exist. A single-lifetime invite row fired at a moment of demonstrated need — defensible, and left on the table if the operator wants it. A pinned "for you" section — rejected: two lists in one sheet, solving a crowding problem six rows a month do not create.
+**Consequences:** What is protected is that **opening the bell is currently always worth it**. The empty state is structurally incapable of burying a receipt — it exists only when there is nothing to bury, and disappears the moment the surface has content. The honest cost of recency-only: unread rows never age out (`get_notifications` returns all unread), so a row can sit for weeks. Fine for receipts, not for prompts — a second, independent reason prompts wait. Phase 3 prompts are gated on `notif_row_tapped` showing the bell is used at all.
+**Status:** Active. Reasoning: `docs/business/product/2026-08-12-notification-inbox-growth-surface.md`.
+
 ---
 
 ## Decision index
@@ -467,6 +483,8 @@
 | D-042 | First-Unlock Fan-Out Is Suppressed by a Backfill, Not a Special Case | 2026-08-11 |
 | D-044 | A Position Filter Means That Position: Rules A and B Removed | 2026-08-12 |
 | D-043 | Shared Display Vocabularies Are Derived From One Constant | 2026-08-11 |
+| D-045 | An Inbox Row Is Written Beside the Push, Never Inside the Dispatcher | 2026-08-13 |
+| D-046 | The Bell Carries Receipts, Not Prompts; the Invite Ask Lives in the Empty State | 2026-08-13 |
 
 ---
 
@@ -486,3 +504,11 @@
 Number sequentially. Never reuse a number even if a decision is fully superseded — mark it `SUPERSEDED by D-NNN` and keep the original.
 
 For substantial decisions (large refactors, vendor changes, API surface changes), also create a formal ADR in [`../docs/adr/`](../docs/adr/) and cross-reference from here.
+
+## D-047 — Device-Auth Programme: The Five Operator Defaults Ratified
+**Date:** 2026-08-13 (operator, in chat: "Aligned with the recommendations. Proceed")
+**Context:** The Plan (`docs/plans/device-side-platform-auth-plan-2026-08-13.md` §1) put five open items to the operator with recommended defaults, so a single yes could start work.
+**Decision:** All five defaults ratified: **OI-9** — run the expo-updates evaluation spike now, in parallel with S0/S1; the spike's written memo owns the Gate C decision (this ratification is *not* the OI-9 decision itself). **OI-3** — single-holder device model. **OI-14** — accept the LLD's deviation from PRD:144: `readEnvelope` returns `null` on a `user_id` mismatch; only session establishment wipes. **OI-4** — accept-and-monitor the old-build-reinstall custody downgrade; M1 non-zero is "investigate," never "page." **OI-15** — revocation stays behind a verified session for release 1; documented recovery is "sign back in, then disconnect"; revisit before public release.
+**Alternatives considered:** Per the Plan §1's table, each row names the rejected alternative and its cost.
+**Consequences:** S0 starts immediately (three lanes per Plan §13). OI-3/OI-4/OI-15 must be **re-confirmed in writing at Gate F** before the allowlist widens beyond the operator — ratified defaults may not silently stand in for that later call (Plan §1). The OI-9 spike session's prompt excludes Plan §10's recommendation, and its memo must name what evidence would have concluded "adopt first" (Plan §10 hygiene rules).
+**Status:** Active.

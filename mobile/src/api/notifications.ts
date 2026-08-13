@@ -34,6 +34,18 @@ export async function markAllNotificationsRead() {
   return api.post<any>('/api/notifications/read-all', {});
 }
 
+// POST /api/notifications/dismiss-all — server-side "Clear all" (GD-4).
+// Distinct from read-all: "I have seen this" and "I am done with this" are
+// different facts. Before this existed, mobile's Clear all emptied a
+// zustand store and every row re-hydrated on the next bell open, and web's
+// hid ids in localStorage so an account cleared on a phone was still full
+// on a laptop. One server stamp replaces both.
+export async function dismissAllNotifications() {
+  return api.post<{ ok: boolean; dismissed: number }>(
+    '/api/notifications/dismiss-all', {},
+  );
+}
+
 // POST /api/notifications/register-device
 // Added during Phase 5. Backend persists the token so the match-create
 // hook can send pushes. Best-effort — we don't block the UX on it.

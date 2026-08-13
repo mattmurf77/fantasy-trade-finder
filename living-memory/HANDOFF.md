@@ -9,11 +9,93 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
+- [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-13 — Device-auth: all 4 artifacts landed, decisions made, S0 half-shipped
+
+### Where I am right now
+
+**The whole design programme is on `main`** (PRD, HLD decisions, LLD, Plan, [G-040]/[G-041], D-047). The five operator defaults were ratified in chat → **D-047**. S0 (the ship-now bundle, Plan §12) is underway:
+
+- **Lane A — FAAB GraphQL fix: SHIPPED to `main`** (`79123a0`). `_graphql_object_literal` emits bare keys with Name-grammar validation; `__DRAFT_PICKS__` untouched (scalar, valid in both syntaxes). Failing-first proven (2/3 fail pre-fix); full backend suite **2694 passed / 1 skipped**. Backend-only, so the sim gate did not apply. Render auto-deploys it.
+- **Lane B — credential vault + Sentry scrub: BUILT + TESTED, HELD on the sim gate.** Committed on `feat/s0-vault-sentry` (`e240aae`) and folded into `feat/s0-bundle`. `credentialVault.ts` (WHEN_UNLOCKED_THIS_DEVICE_ONLY on every write; write-verify-then-delete migration; readEnvelope null-not-wipe per D-047); Sentry `beforeSend`/`beforeBreadcrumb`/`tracePropagationTargets:[]`. `tsc` exit 0; two new `check-*.js` (vault behavioral 5/5, keychain static — sabotage-proven; both registered as npm scripts). **The legacy `sleeper.link.jwt` writer in sendInSleeper.ts is deliberately intact** (migrate only reads it; it must keep persisting until the transport ships at S5).
+- **Lane C — OI-9 + OI-12 spikes: NOT DONE.** The agent hit the session limit. These are Gate C prerequisites, not S0 blockers.
+
+### The two things that need the operator
+
+1. **Sim-gate call on the mobile half of S0.** `git push origin feat/s0-bundle:main` trips the pre-push simulator gate (touches `mobile/src/`). The change is **not user-visible** — a dormant unwired module + observability config, reachable by no screen — so the gate arguably does not apply, but the override (`FTF_SKIP_SIM_GATE=1`) is an operator decision and an agent may not self-select it. Either run the tier the runbook matrix assigns, or override.
+2. **The two Gate-C spikes still owe their memos** before S3: the expo-updates evaluation (OI-9) and the on-device `typeof TextDecoder` check (OI-12). Prompts are ready; `feat/s0-spikes` worktree exists.
+
+### Watch out for
+
+- **Unpushed work in worktrees — do NOT sweep before landing:** `feat/s0-vault-sentry` / `feat/s0-bundle` (mobile S0, held on the gate) and `feat/s0-spikes` (empty). `design/device-auth-lld` is fully merged and safe to sweep.
+- Session + Opus weekly limits were hit mid-session (Opus resets 10am ET, session 6pm ET); lane C and the Plan's lenses ran on Fable.
+- Two ESPN pending trades to "Team VP" (league 11896) may still need revoking — carried forward.
+## 2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)
+
+### Where I am right now
+
+**SHIPPED to `main` 2026-08-13** — rebased onto `3b64a44` and merged; Render auto-deploys the
+backend + web halves. Built from the pm-growth brief + operator decisions GD-1…GD-8; scope
+block and tracking plan in [`../docs/plans/notif-inbox-growth/`](../docs/plans/notif-inbox-growth/).
+
+| Commit | What |
+|---|---|
+| `3c7a69e` | pm-growth brief carried over + scope block + tracking plan |
+| `393b33d` | analytics registration ONLY — no emitter |
+| `5881a20` | backend: 4 inbox writes, GD-8 coalescing, server-side dismiss + column |
+| `687cb98` | both clients: glyphs, routing, instrumentation, empty state, Clear all |
+| `8e9bb5b` | docs + living-memory |
+
+### Blockers, resolved by the operator's ship directive (2026-08-13)
+
+1. **`counter_offer` ships as glyph + routing only, four write sites not five.** The kind has
+   no emitter anywhere in the backend — a bucket mapping and two client kind sets, nothing
+   more — so there was no push to write a row beside. Whether a counter-offer *feature* should
+   exist stays on NEXT as its own item; the kind now renders correctly if it ever ships.
+2. **Both adjacent dead-tap fixes stand as built**: mobile routing for
+   `trade_accepted`/`trade_declined` (only the push kind `match_accepted` was listed), and
+   web's `clickNotif` routing match rows to the Trades view while scrolling an element inside
+   the hidden Matches view.
+
+### What has never run
+
+Every row template, the empty state, the invite gate and all three analytics emitters are
+**unexecuted** — no simulator, no device, no browser. Sim gate + Maestro waived under D-P1-08;
+TestFlight is primary QA. The backend write sites are covered at the DB-helper level, not
+through their routes.
+
+### Next moves
+
+- ~~Merge~~ **DONE** — squash PR #113 → `main` @ `2b63511`; Render deploy confirmed live
+  (dismiss-all route answers 401, not 404); branch swept per
+  [`../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md`](../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md).
+- ~~Analytics probe~~ **PASSED** — three names posted to prod with `X-Device-Id` →
+  `{"accepted":3,"rejected":[]}`.
+- **EAS iOS build 109 (v1.13.2) FINISHED**; TestFlight submission `9668b9b2` was scheduled
+  at build time (`--auto-submit`). This eas-cli (21.6.x) has no submission-status command —
+  confirm arrival in TestFlight / the expo.dev submissions dashboard.
+- Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
+  At 3–5 users these are **directional reads, not experiments**.
+
+### Blocking nothing, but owed
+
+- **`.github/workflows/ci.yml` runs no `check-*.js` suite.** `check-notif-glyphs.js` gates
+  nothing, on a cross-client enum whose entire failure mode is silence. Seven suites now sit
+  in that position. One `npm run` step would fix it.
+- **6 `test_rookie_scope.py` failures are live on `origin/main`** and predate this branch
+  (verified by stashing). Nobody appears to be tracking them.
+- A stash `stash@{0}` (`wip-session-169-living-memory`) holds another session's uncommitted
+  living-memory + `.claude/settings.local.json` edits from `session-2026-08-11-169`. I moved
+  them aside to branch cleanly and did **not** apply them here. They are still there.
 
 ---
 

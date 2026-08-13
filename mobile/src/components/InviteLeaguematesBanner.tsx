@@ -71,7 +71,8 @@ export type InviteSurface =
   | 'league_home'      // the promoted InviteLeaguematesCard, and League Home's inline link
   | 'matches_empty'    // the mutual-empty state's invite block
   | 'trades_banner'    // this banner
-  | 'members_overlay'; // the members overlay's footer action
+  | 'members_overlay'  // the members overlay's footer action
+  | 'notif_empty';     // the bell sheet's empty state (GD-1)
 
 export interface ShareInviteArgs {
   leagueId:   string;
