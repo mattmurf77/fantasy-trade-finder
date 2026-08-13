@@ -1155,7 +1155,11 @@ def _starter_impact(league_id: str, caller_user_id: str,
     byte-identical to pre-#169.
     """
     from .power_rankings import optimal_starter_slots, optimal_starters
-    slots = _sleeper_lineup_slots(league_id)
+    # #311 — platform-aware template resolution (leagues.platform branch);
+    # Sleeper leagues delegate to _sleeper_lineup_slots unchanged. This is
+    # the ONLY call site switched: mock draft keeps its own fallback and the
+    # power-rankings call site is a deliberate deferral (plan #311).
+    slots = _league_lineup_slots(league_id)
     if not slots:
         return None
     rosters: dict[str, list[str]] = {}
@@ -19935,6 +19939,61 @@ def _sleeper_lineup_slots(league_id: str) -> list[str] | None:
     slots = [s for s in (meta.get("roster_positions") or [])
              if s in LINEUP_SLOT_ELIGIBILITY]
     return slots or None
+
+
+def _league_lineup_slots(league_id: str) -> list[str] | None:
+    """The league's starting-slot template, all platforms (#311).
+
+    ESPN/MFL league ids are NUMERIC (the `leagues` PK holds the
+    platform-native id), so id-shape checks cannot distinguish platforms —
+    resolution branches on the `leagues.platform` column instead:
+
+      1. `leagues` row lookup by PK (one indexed select: platform,
+         default_scoring). No leagues row → None (never guess a template
+         for an unknown league).
+      2. platform in ('espn', 'mfl', 'fleaflicker') → the app's one
+         standard template (`_MOCK_DEFAULT_LINEUP`), plus a trailing
+         SUPER_FLEX when default_scoring == 'sf_tep' (NULL reads as
+         '1qb_ppr', the database.py convention). These platforms expose no
+         roster_positions equivalent today; slot-FILLING stays 100%
+         value-based via power_rankings, so "starting lineup based on
+         dynasty values" holds — only the template is standardized.
+         Persisting each league's REAL template at import is the logged
+         phase-2 follow-up, not this helper.
+      3. platform 'sleeper' / NULL → _sleeper_lineup_slots(league_id),
+         byte-identical to the pre-#311 behavior (live meta via the #179
+         cache). Never consulted for platform leagues, so a numeric ESPN
+         id can no longer trigger a doomed Sleeper meta fetch.
+      4. Any other platform (e.g. demo leagues) → None — callers degrade
+         by omitting the starters/bench split, never fabricate.
+    """
+    if not league_id:
+        return None
+    from sqlalchemy import select as _sa_select
+    from .database import leagues_table, engine as _db_engine
+    try:
+        with _db_engine.connect() as conn:
+            row = conn.execute(
+                _sa_select(
+                    leagues_table.c.platform,
+                    leagues_table.c.default_scoring,
+                ).where(leagues_table.c.sleeper_league_id == str(league_id))
+            ).fetchone()
+    except Exception as e:
+        log.warning("_league_lineup_slots: leagues lookup failed for %s: %s",
+                    league_id, e)
+        return None
+    if row is None:
+        return None
+    platform = (row.platform or "sleeper").lower()
+    if platform in ("espn", "mfl", "fleaflicker"):
+        slots = list(_MOCK_DEFAULT_LINEUP)
+        if (row.default_scoring or "1qb_ppr") == "sf_tep":
+            slots.append("SUPER_FLEX")
+        return slots
+    if platform == "sleeper":
+        return _sleeper_lineup_slots(league_id)
+    return None
 
 
 def _position_medians(teams: list[dict]) -> dict[str, dict]:
