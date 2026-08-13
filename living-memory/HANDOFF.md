@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
 - [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
@@ -16,6 +17,52 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed
+
+### Where I am right now
+
+**#295/#296/#305 shipped** — `e71a654` (PR #114), TestFlight **build 110, v1.13.3**,
+submitted and processing. The mock draft works for the first time: the user is in
+their own draft, prompted at their slots, CPU resumes after each pick. New
+`mode: "cpu" | "manual"` ("You pick for: Your team / Every team"). All three items
+`fixed`. Analytics live and probe-verified in prod. **19 feedback items open.**
+
+### The two things a next session should do first
+
+1. **The Tier-1 sim run this ship owes.** Flows `d3` (retargeted to `draft-pre`)
+   and `d4-mock-manual-mode` are authored, lint-clean, never executed. The PRD
+   recommends Tier 1 explicitly; the operator shipped without it. This is the
+   third consecutive mock-draft batch to skip the sim — the first skip is why
+   the feature was broken for a week.
+2. **Verify on the operator's live leagues** — ffv3 (Sleeper, assigned order,
+   operator at slot 8) and Newton (ESPN 11896, 14 teams, randomized branch).
+   Newton showing 14 picks/round with the user prompted is the acceptance test
+   #305 stated.
+
+### What bit us, so it doesn't again
+
+- **The caller-excluded `sess["league"].members` convention claimed its third
+  victim** (FB #41, #291, now the mock). Five membership sites this time; the
+  fifth (`_mock_usernames`) was found only at LLD. When a surface reads
+  "everyone in the league", grep for ALL its member reads.
+- **The deploy-liveness poll trap:** the old build answers an unregistered event
+  with `accepted:1, dropped:1` — a loose grep on `accepted` reads that as live.
+  Require `accepted ≥ 1 AND dropped == 0`.
+- **The test-world seeder had traded away the QA user's round-1 pick**, so a
+  1-round mock completed at create in the fixtures too — the shipped bug
+  reproduced in miniature where no test could see it. Fixture worlds need the
+  same adversarial reading as prod.
+
+### Owed / open
+
+- Tier-1 sim run (above); `aggregate_tier_labels` still operator-only; #300
+  decision-6 combined label still server-side-pending; none of the twelve
+  `check-*.js` suites run in CI; 19 open feedback items (queue in the 2026-08-13
+  triage in this session's log — G2 numerics, G3 send-copy two-liner, G4
+  TradesHome batch are the natural next groups).
 
 ---
 

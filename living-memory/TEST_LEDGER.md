@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-13 — #295/#296/#305 mock-draft repair + manual mode (sim gate NOT run; Tier-1 owed)
+
+- **Change:** `e71a654` (PR #114), v1.13.3 **build 110**. Five membership sites, `UserNotInDraft` raise, `user_not_in_draft` ladder rung, `mode: cpu|manual`, five-event analytics family.
+- **Verified (merged tree, orchestrator-run):** `pytest backend/tests -q` **2714 passed / 1 skipped**; `tsc --noEmit` exit 0; `testid-lint OK`; ten `check-*` suites exit 0 (incl. new `check-mock-draft-modes` 78, `check-mock-user-not-in-draft` 18 — both proven red on the pre-build tree first: 27 and 8 FAILs).
+- **Falsification: 34 named sabotages** (19 backend + 15 mobile), all RED-then-green, apply-verified per mutation. Live engine demonstration of the operator's slot-8 scenario ran before go/no-go — four clauses asserted, not narrated.
+- **Sim gate: NOT RUN.** PRD recommends **Tier 1** (full-surface change to a feature that never worked; the prior two mock batches shipped without a sim run and the first is why the bug existed). Flows authored + lint-clean, never executed: `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` (retargeted to `draft-pre`), `d4-mock-manual-mode.yaml`. No `last-sim-run.json` written — not fabricated. **Owed at the next sim session, both flows + the blocked-entry state.**
+- **Deploy-then-probe: PASSED in prod.** Five events posted with full property sets → `{"accepted":5,"dropped":0}` → every prop read back from `user_events.props`. **New trap documented:** the deploy-liveness poll must require `accepted ≥ 1 AND dropped == 0` — the old build answers `accepted:1, dropped:1` (envelope fine, type dropped), which a loose grep reads as live.
+- Standing caveat: none of the twelve `check-*.js` suites run in CI.
+
+---
+
 ## 2026-08-13 — Notification inbox growth surface phase 1 (SHIPPED to `main`)
 
 - **Change:** five commits, rebased onto `3b64a44` and merged to `main` on the operator's ship directive (which also resolved the `counter_offer` four-not-five question and ratified the two adjacent dead-tap fixes). Taxonomy registration → backend inbox rows + coalescing + server-side dismiss → both clients (glyphs, routing, instrumentation, empty state) → docs. `express`-equivalent gate posture: **sim gate SKIPPED, `FTF_SKIP_SIM_GATE=1`**, per D-P1-08 restated in the build brief.
