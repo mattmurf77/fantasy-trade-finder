@@ -225,28 +225,14 @@ def fan_leagues_url(swid: str) -> str:
     )
 
 
-def fetch_fan_leagues(espn_s2: str, swid: str, timeout: int = 15,
-                      _opener=None) -> list[dict]:
-    """List every ESPN fantasy FOOTBALL league the signed-in fan belongs to.
-
-    Returns `[{"league_id", "league_name", "season", "team_name"}]`, newest
-    season first. Requires both cookies (this is inherently an
-    authenticated-fan lookup — there is no "public" fan profile). Raises
-    EspnAuthError on 401/403/404 (ESPN has no record for this SWID — the
-    same practical failure as a rejected/expired session from FTF's point of
-    view: paste/sign in again), EspnError(kind='parse') if the response
-    isn't JSON, EspnError(kind='input') if either cookie is missing.
-
-    UNVERIFIED SHAPE (2026-08-09): this fan-profile endpoint is not
-    documented by ESPN. The parse below (`_parse_fan_leagues`) targets the
-    shape LIVE-VERIFIED 2026-08-09 against an authenticated fan fetch on
-    the operator's real account: a top-level `preferences` array; football
-    rows are `typeId` 9 whose `metaData.entry` carries `abbrev: "FFL"`
-    (UPPERCASE — matched case-insensitively), `seasonId`, `entryMetadata.
-    teamName`, and `groups[]` with `groupId`/`groupName` per league. If
-    the shape drifts, `_parse_fan_leagues` degrades to an empty/partial
-    list rather than raising (never a 500) — see its docstring.
-    """
+def _fetch_fan_payload(espn_s2: str, swid: str, timeout: int = 15,
+                       _opener=None):
+    """One authenticated GET of the fan profile → the decoded JSON, whatever
+    shape it has. The single HTTP chokepoint behind BOTH fan-profile callers
+    (fetch_fan_leagues, probe_fan_profile) so they cannot drift apart in
+    error mapping: EspnAuthError on 401/403/404, EspnError(kind='http') on
+    anything else, EspnError(kind='parse') on non-JSON, EspnError(kind=
+    'input') if either cookie is missing."""
     if not espn_s2 or not swid:
         raise EspnError("espn_s2 and swid are required", kind="input")
 
@@ -281,11 +267,106 @@ def fetch_fan_leagues(espn_s2: str, swid: str, timeout: int = 15,
             raise EspnError(f"ESPN fan API HTTP {e.code}", kind="http") from e
 
         try:
-            data = json.loads(raw)
+            return json.loads(raw)
         except ValueError as e:
             raise EspnError("ESPN fan API returned non-JSON", kind="parse") from e
 
-    return _parse_fan_leagues(data)
+
+def probe_fan_profile(espn_s2: str, swid: str, timeout: int = 15,
+                      _opener=None) -> dict:
+    """Credential probe against the fan profile — the WEAK oracle.
+
+    Returns what the read actually PROVED, not just the football list:
+
+        {"football_leagues": [ ...fetch_fan_leagues rows... ],
+         "fantasy_entries":  int,   # fantasy entries of ANY sport
+         "recognized":       bool}  # payload had a readable `preferences`
+
+    Why this exists (verification-oracle fix, 2026-08-12): `fetch_fan_leagues`
+    alone cannot answer "did these cookies authenticate?", because
+    `_parse_fan_leagues` never raises — an unrecognised 200 comes back as an
+    empty list, indistinguishable from "authenticated fan with no football
+    leagues". Callers verifying a credential need those two cases separated,
+    so the counting happens here, over the raw payload.
+
+    STRENGTH CAVEAT: this endpoint keys on the SWID **in the URL path**, and
+    the only live evidence FTF has (2026-08-09) is that an UNKNOWN SWID 404s
+    — a SWID-existence result, not proof that ESPN validated `espn_s2`. So a
+    positive result here is corroborating evidence, not an authentication
+    guarantee; prefer an authenticated league read when one is available
+    (see server._espn_verify_credential). docs/integrations/espn.md §1.7.
+
+    Same errors as fetch_fan_leagues — it never invents a verdict of its own.
+    """
+    data = _fetch_fan_payload(espn_s2, swid, timeout=timeout, _opener=_opener)
+    return {
+        "football_leagues": _parse_fan_leagues(data),
+        "fantasy_entries": _count_fantasy_entries(data),
+        "recognized": isinstance(data, dict)
+                      and isinstance(data.get("preferences"), list),
+    }
+
+
+def _count_fantasy_entries(data) -> int:
+    """How many fantasy team entries — ANY sport — this fan payload carries.
+
+    A fantasy entry only exists for a registered fan who joined a league, so
+    a non-zero count is account-specific data rather than a generic profile.
+    Deliberately sport-agnostic: an ESPN account with only baseball/hockey
+    leagues is a LEGITIMATE credential, and rejecting it because
+    `football_leagues` is empty would be a false reject. NEVER raises (same
+    contract as _parse_fan_leagues)."""
+    n = 0
+    if not isinstance(data, dict):
+        return 0
+    try:
+        for pref in data.get("preferences") or []:
+            if not isinstance(pref, dict):
+                continue
+            entry = ((pref.get("metaData") or {}).get("entry")) or {}
+            if not isinstance(entry, dict):
+                continue
+            # The marker keys the fan shape carries for a fantasy team entry
+            # (see fetch_fan_leagues's UNVERIFIED SHAPE note). Any one of
+            # them means "this row describes a fantasy entry".
+            if any(k in entry for k in
+                   ("abbrev", "groups", "entryMetadata", "seasonId")):
+                n += 1
+    except Exception:
+        pass
+    return n
+
+
+def fetch_fan_leagues(espn_s2: str, swid: str, timeout: int = 15,
+                      _opener=None) -> list[dict]:
+    """List every ESPN fantasy FOOTBALL league the signed-in fan belongs to.
+
+    Returns `[{"league_id", "league_name", "season", "team_name"}]`, newest
+    season first. Requires both cookies (this is inherently an
+    authenticated-fan lookup — there is no "public" fan profile). Raises
+    EspnAuthError on 401/403/404 (ESPN has no record for this SWID — the
+    same practical failure as a rejected/expired session from FTF's point of
+    view: paste/sign in again), EspnError(kind='parse') if the response
+    isn't JSON, EspnError(kind='input') if either cookie is missing.
+
+    UNVERIFIED SHAPE (2026-08-09): this fan-profile endpoint is not
+    documented by ESPN. The parse below (`_parse_fan_leagues`) targets the
+    shape LIVE-VERIFIED 2026-08-09 against an authenticated fan fetch on
+    the operator's real account: a top-level `preferences` array; football
+    rows are `typeId` 9 whose `metaData.entry` carries `abbrev: "FFL"`
+    (UPPERCASE — matched case-insensitively), `seasonId`, `entryMetadata.
+    teamName`, and `groups[]` with `groupId`/`groupName` per league. If
+    the shape drifts, `_parse_fan_leagues` degrades to an empty/partial
+    list rather than raising (never a 500) — see its docstring.
+
+    NOT A CREDENTIAL ORACLE: because the parse degrades instead of raising,
+    an empty return means "no football leagues found" — which covers both a
+    real fan with none and a payload this code didn't recognise. Anything
+    VERIFYING a cookie pair must use `probe_fan_profile` (which reports the
+    difference) or an authenticated league read, never this list's emptiness.
+    """
+    return _parse_fan_leagues(
+        _fetch_fan_payload(espn_s2, swid, timeout=timeout, _opener=_opener))
 
 
 def _parse_fan_leagues(data) -> list[dict]:

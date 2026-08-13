@@ -780,7 +780,7 @@ ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-
 | `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext |
 | `espn_s2_encrypted` | text | **Fernet ciphertext** of the `espn_s2` cookie — never plaintext, never logged |
 | `expires_hint_at` | str | ISO UTC guess (~1yr community consensus; undocumented). NULL = unknown — 401s drive reconnect |
-| `verified_at` | str | ISO UTC of the last live authenticated ESPN read that PROVED this pair (credential-honesty fix, 2026-08-12). Stamped by both `/api/espn/link` store paths; NULL = never proven (legacy rows) → `GET /api/espn/link` reports not connected |
+| `verified_at` | str | ISO UTC of the last live authenticated ESPN read that PROVED this pair (credential-honesty fix, 2026-08-12). Means EXACTLY ONE THING: the **server** observed a successful **authenticated** read using this pair — never "the client captured cookies", "the user looked signed in", or "ESPN answered 200". Stamped by both `/api/espn/link` store paths; the credential-only path proves it via `server._espn_verify_credential` (authenticated read of a linked private league, else a fan-profile probe that returned account data — result asserted, not just exception-free). NULL = never proven (legacy rows) → `GET /api/espn/link` reports not connected. **Do not widen:** a device-reported "looks connected" signal needs its own column |
 | `created_at`, `updated_at` | str | |
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.

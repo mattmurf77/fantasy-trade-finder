@@ -1314,10 +1314,19 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 # expires_hint_at: cookie lifetime is undocumented (~1 year community
 # consensus) — a NULL hint means "unknown"; 401s drive the reconnect UX.
 # verified_at (2026-08-12, credential-honesty fix): when this pair last
-# PROVED itself against ESPN — stamped by the store paths after a live
-# authenticated read succeeds. NULL means never proven (legacy rows, or a
-# hypothetical store path that skipped verification): GET /api/espn/link
-# reports such a row as NOT connected, so the client re-runs the sign-in.
+# PROVED itself against ESPN. It means EXACTLY ONE THING — the SERVER
+# observed a successful AUTHENTICATED read from ESPN using this pair
+# (server._espn_verify_credential: an authenticated read of a linked private
+# league, else a fan-profile probe that returned account-specific data, with
+# the RESULT ASSERTED — a bare 200 is not a stamp). It is NOT "the client
+# captured cookies", NOT "the user appeared signed in", and NOT "no exception
+# was raised". NULL means never proven (legacy rows, or a store path that
+# skipped verification): GET /api/espn/link reports such a row as NOT
+# connected, so the client re-runs the sign-in.
+# DO NOT WIDEN THIS COLUMN: any device-reported or heuristic "looks connected"
+# signal added later needs its OWN column. The 2026-08-12 incident (a pair
+# stamped verified after a probe that proved nothing, surfacing as a 409 at
+# the next trade send) is what this narrowness protects against.
 # Folds into the auth epic's `linked_sources` when that lands.
 # ---------------------------------------------------------------------------
 

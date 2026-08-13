@@ -8,25 +8,32 @@ credential-only store.
                              2026-08-12) — an unproven pair reads as false.
   POST /api/espn/link      — credential-only branch: {espn_s2, swid} with NO
                              espn_league_id VERIFIES the pair with one live
-                             authenticated fan-profile read (patched here —
-                             tests never touch the network), then persists it
+                             read whose RESULT IS ASSERTED, then persists it
                              (encrypted, verified_at stamped) and returns
-                             {connected: true, verified: true}. Rejected pair
-                             → 403 espn_bad_credentials, NOT stored; ESPN
+                             {connected: true, verified: true, verified_via}.
+                             Rejected — or proved nothing — → 403
+                             espn_bad_credentials, NOT stored; ESPN
                              unreachable → 502 espn_unavailable, NOT stored.
   GET  /api/mfl/auth-link  — {connected, mfl_username, year}; also true for
                              the key-less session-only cookie fallback.
 
+The verification-oracle section at the bottom covers WHICH read counts as
+proof (verification-oracle fix, 2026-08-12): an authenticated read of a
+linked private league when the user has one, the weaker fan-profile probe
+otherwise, and an empty/unrecognised probe result never passing.
+
 Exercised through Flask's test client against an isolated in-memory SQLite
-DB with an injected session. ZERO network: the ONE live call the store path
-now makes (espn_service.fetch_fan_leagues) is patched in the fixture — an
-unpatched call would be a real HTTP request and a test failure by
-construction. The GET status paths still make no ESPN call at all (they
-must stay cheap: the send button reads them on every send).
+DB with an injected session. ZERO network, twice over: every probe is
+patched per-test, AND the `_no_live_espn` autouse fixture turns any
+unpatched ESPN call into an immediate AssertionError instead of a real HTTP
+request. The GET status paths still make no ESPN call at all (they must
+stay cheap: the send button reads them on every send).
 """
+import copy
 import json
 import os
 import urllib.error
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -39,9 +46,105 @@ from backend.database import metadata
 
 USER = "313560442465169408"
 
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+LEAGUE_FIXTURE = os.path.join(FIXTURES, "espn_league_snapshot_2026-07-11.json")
+LINKED_LEAGUE = "987654321"          # id inside the league fixture payload
+
 
 def _h(token):
     return {"X-Session-Token": token, "Content-Type": "application/json"}
+
+
+def _league_payload():
+    with open(LEAGUE_FIXTURE) as f:
+        return json.load(f)
+
+
+def _link_league(auth: str, league_id: str = LINKED_LEAGUE, season: int = 2026):
+    """Give USER a linked ESPN league row + membership binding.
+
+    `auth='cookie'` is a league ESPN only serves to an authenticated member
+    (the STRONG verification oracle); `auth='public'` is one anyone can read
+    (proves nothing about a cookie pair, so the route must not use it)."""
+    db_module.upsert_espn_league(
+        league_id=league_id, user_id=USER, name="Fixture League",
+        espn_season=season, espn_auth=auth, espn_my_team_id=1,
+        total_rosters=2)
+    db_module.replace_espn_league_members(league_id, [
+        {"user_id": USER, "username": "me", "display_name": "Me",
+         "player_ids": []},
+    ])
+
+
+@contextmanager
+def _fan_probe(football=(), fantasy_entries=None, recognized=True,
+               error=None, calls=None):
+    """Patch the fan-profile probe — under BOTH the name today's code calls
+    (`fetch_fan_leagues`) and the name the fixed route calls
+    (`probe_fan_profile`, patched with create=True so this same test runs
+    against the pre-fix tree). Either way: zero network."""
+    entries = len(football) if fantasy_entries is None else fantasy_entries
+
+    def _legacy(espn_s2, swid, timeout=15, _opener=None):
+        if calls is not None:
+            calls.append(("fan", espn_s2, swid))
+        if error:
+            raise error
+        return [dict(f) for f in football]
+
+    def _probe(espn_s2, swid, timeout=15, _opener=None):
+        if calls is not None:
+            calls.append(("fan", espn_s2, swid))
+        if error:
+            raise error
+        return {"football_leagues": [dict(f) for f in football],
+                "fantasy_entries": entries,
+                "recognized": recognized}
+
+    with patch.object(es, "fetch_fan_leagues", _legacy), \
+         patch.object(es, "probe_fan_profile", _probe, create=True):
+        yield
+
+
+@contextmanager
+def _league_read(payload=None, error=None, calls=None):
+    """Patch espn_service.fetch_league (the STRONG oracle) — never network."""
+    def _fetch(league_id, season, espn_s2=None, swid=None, timeout=15,
+               _opener=None):
+        if calls is not None:
+            calls.append(("league", str(league_id), espn_s2, swid))
+        if error:
+            raise error
+        return copy.deepcopy(payload if payload is not None
+                             else _league_payload())
+
+    with patch.object(es, "fetch_league", _fetch):
+        yield
+
+
+def _must_not_call(kind):
+    def _boom(*a, **kw):
+        raise AssertionError(f"{kind} must not be consulted here")
+    return _boom
+
+
+FFL = ({"league_id": "111", "league_name": "Dynasty", "season": 2026,
+        "team_name": "Team"},)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_espn():
+    """Hard network floor for this module. Every ESPN probe in the store path
+    is patched per-test; this makes an UNPATCHED one an immediate, obvious
+    test failure instead of a real request to ESPN (which is how a route
+    change that switches probes could otherwise start calling the network
+    from the suite)."""
+    def _boom(*a, **kw):
+        raise AssertionError("live ESPN call attempted from a test")
+
+    with patch.object(es, "_fetch_fan_payload", _boom), \
+         patch.object(es.urllib.request, "urlopen", _boom):
+        yield
 
 
 @pytest.fixture()
@@ -60,13 +163,20 @@ def client(monkeypatch):
     c = server.app.test_client()
 
     flags = {"espn.link", "mfl.auth_link"}
-    # Default probe: an authenticated fan with zero FFL leagues — a VALID
-    # credential (an empty league list is an honest success). Failure-mode
-    # tests re-patch this per-test. Never the network.
+    # Default probe: an authenticated fan whose profile came back with this
+    # account's fantasy data — the only thing that counts as proof on the
+    # weak oracle (verification-oracle fix, 2026-08-12; an EMPTY result is
+    # NOT an honest success, which is exactly the bug that shipped). Tests
+    # that care re-patch per-test. Never the network.
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "is_enabled", lambda k: k in flags), \
+         patch.object(es, "probe_fan_profile",
+                      lambda espn_s2, swid, timeout=15, _opener=None:
+                      {"football_leagues": [dict(FFL[0])],
+                       "fantasy_entries": 1, "recognized": True}), \
          patch.object(es, "fetch_fan_leagues",
-                      lambda espn_s2, swid, timeout=15, _opener=None: []):
+                      lambda espn_s2, swid, timeout=15, _opener=None:
+                      [dict(FFL[0])]):
         with server._sessions_lock:
             server._sessions[token] = sess
         try:
@@ -164,15 +274,13 @@ def test_credential_only_store_verifies_then_persists_encrypted_pair(client):
     s2 = "AEB%2FvS0me%2Bencoded%3Dvalue"
     swid = "{ABCD-1234}"
     probed = []
-    with patch.object(es, "fetch_fan_leagues",
-                      lambda espn_s2, swid, timeout=15, _opener=None:
-                      probed.append((espn_s2, swid)) or []):
+    with _fan_probe(football=FFL, calls=probed):
         r = c.post("/api/espn/link", headers=_h(token),
                    data=json.dumps({"espn_s2": s2, "swid": swid}))
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json() == {"connected": True, "stored": "credential",
-                            "verified": True}
-    assert probed == [(s2, swid)]                  # exactly one live probe
+                            "verified": True, "verified_via": "fan_profile"}
+    assert probed == [("fan", s2, swid)]           # exactly one live probe
 
     with engine.connect() as conn:
         row = conn.execute(select(db_module.espn_credentials_table)).fetchone()._mapping
@@ -196,10 +304,7 @@ def test_credential_only_store_rejected_pair_is_not_stored(client):
     not at their next trade send."""
     c, token, engine, _ = client
 
-    def _reject(espn_s2, swid, timeout=15, _opener=None):
-        raise es.EspnAuthError()
-
-    with patch.object(es, "fetch_fan_leagues", _reject):
+    with _fan_probe(error=es.EspnAuthError()):
         r = c.post("/api/espn/link", headers=_h(token),
                    data=json.dumps({"espn_s2": "stale-s2", "swid": "{BAD-1}"}))
     assert r.status_code == 403
@@ -215,14 +320,9 @@ def test_credential_only_store_espn_outage_is_retryable_not_stored(client):
     and the unproven pair still does not reach the DB."""
     c, token, engine, _ = client
 
-    def _http_5xx(espn_s2, swid, timeout=15, _opener=None):
-        raise es.EspnError("ESPN fan API HTTP 503", kind="http")
-
-    def _transport(espn_s2, swid, timeout=15, _opener=None):
-        raise urllib.error.URLError("dns failure")   # OSError subclass
-
-    for failure in (_http_5xx, _transport):
-        with patch.object(es, "fetch_fan_leagues", failure):
+    for failure in (es.EspnError("ESPN fan API HTTP 503", kind="http"),
+                    urllib.error.URLError("dns failure")):   # OSError subclass
+        with _fan_probe(error=failure):
             r = c.post("/api/espn/link", headers=_h(token),
                        data=json.dumps({"espn_s2": "good-s2", "swid": "{OK-1}"}))
         assert r.status_code == 502, r.get_data(as_text=True)
@@ -268,6 +368,191 @@ def test_credential_only_store_503s_without_encryption_key(client, monkeypatch):
     assert r.get_json()["error"] == "espn_unconfigured"
     with engine.connect() as conn:
         assert conn.execute(select(db_module.espn_credentials_table)).fetchall() == []
+
+
+# ---------------------------------------------------------------------------
+# POST /api/espn/link — WHAT the verification actually proves
+# (verification-oracle fix, 2026-08-12). Production repro: the operator's
+# first ESPN connect fired espn_connect_captured in ~10s with no login
+# prompt, the store returned {connected:true}, and the very next trade send
+# 409'd on a pre-flight that ESPN refused. The store's probe result was
+# never bound, and `_parse_fan_leagues` never raises — so a 200 whose
+# payload contained no fantasy evidence at all (what an anonymous/partial
+# cookie pair produces) sailed through as "verified".
+# ---------------------------------------------------------------------------
+
+def test_credential_only_store_refuses_a_probe_that_proved_nothing(client):
+    """FAILING-FIRST repro: the probe came back with NOTHING — no football
+    leagues, no fantasy entries of any sport. That is not a successful
+    authenticated read, so the pair must not be stored and must not be
+    stamped verified; the caller gets a credential verdict instead."""
+    c, token, engine, _ = client
+    with _fan_probe(), \
+         patch.object(es, "fetch_league", _must_not_call("the league oracle")):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "anon-s2", "swid": "{ANON-1}"}))
+    assert r.status_code == 403, r.get_data(as_text=True)
+    assert r.get_json()["error"] == "espn_bad_credentials"
+    with engine.connect() as conn:
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchall() == []
+    assert c.get("/api/espn/link", headers=_h(token)).get_json() == {
+        "connected": False}
+
+
+def test_credential_only_store_accepts_a_fan_with_football_leagues(client):
+    """The weak fallback's positive case: the fan profile lists real FFL
+    leagues, so the read returned account-specific data. Stored + stamped,
+    and the response records WHICH oracle proved it."""
+    c, token, engine, _ = client
+    with _fan_probe(football=FFL):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified_via"] == "fan_profile"
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(db_module.espn_credentials_table)).fetchone()._mapping
+    assert row["verified_at"]
+
+
+def test_credential_only_store_accepts_account_with_zero_football_leagues(client):
+    """NO FALSE REJECTS: a legitimate ESPN account can have zero FOOTBALL
+    leagues (baseball/hockey only, or a fresh fantasy account). The rule is
+    'the read returned this account's fantasy data', not 'there is at least
+    one football league' — so fantasy entries of any sport still pass."""
+    c, token, engine, _ = client
+    with _fan_probe(football=(), fantasy_entries=3):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{HOCKEY-1}"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified_via"] == "fan_profile"
+    with engine.connect() as conn:
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchone()._mapping[
+                "verified_at"]
+
+
+def test_credential_only_store_prefers_the_linked_league_oracle(client):
+    """A league the user already belongs to that ESPN only serves to an
+    authenticated member is a REAL authentication oracle (it is the read
+    that rejected the bad pair in production, as the send-path 409). When
+    one exists it is used, and the weak fan probe is not consulted."""
+    c, token, engine, _ = client
+    _link_league("cookie")
+    calls = []
+    with _league_read(calls=calls), \
+         patch.object(es, "probe_fan_profile",
+                      _must_not_call("the fan probe"), create=True), \
+         patch.object(es, "fetch_fan_leagues", _must_not_call("the fan probe")):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified_via"] == "league_read"
+    # probed the LINKED league, with the pair the client sent
+    assert calls == [("league", LINKED_LEAGUE, "s2", "{OK-1}")]
+    with engine.connect() as conn:
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchone()._mapping[
+                "verified_at"]
+
+
+def test_credential_only_store_league_oracle_rejection_is_403(client):
+    """ESPN 401/403 on the authenticated league read is a credential
+    verdict: 403 espn_bad_credentials, nothing stored, and no second-guess
+    via the weaker probe. The pair may be a valid sign-in for SOME account
+    (the incident's shape: someone else's cookies) — storing it anyway would
+    just defer the failure to the send, so the copy names the real recovery
+    instead."""
+    c, token, engine, _ = client
+    _link_league("cookie")
+    with _league_read(error=es.EspnAuthError()), \
+         patch.object(es, "probe_fan_profile",
+                      _must_not_call("the fan probe"), create=True), \
+         patch.object(es, "fetch_fan_leagues", _must_not_call("the fan probe")):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "bad", "swid": "{BAD-1}"}))
+    assert r.status_code == 403
+    body = r.get_json()
+    assert body["error"] == "espn_bad_credentials"
+    assert "owns your team" in body["message"]
+    with engine.connect() as conn:
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchall() == []
+
+
+def test_credential_only_store_league_oracle_outage_is_502(client):
+    """ESPN 5xx / transport failure on the strong oracle is NOT a verdict on
+    the cookies — retryable 502, nothing stored, and the fallback probe is
+    not used to manufacture an answer during an outage."""
+    c, token, engine, _ = client
+    _link_league("cookie")
+    for failure in (es.EspnError("ESPN HTTP 503", kind="http"),
+                    urllib.error.URLError("dns failure")):
+        with _league_read(error=failure), \
+             patch.object(es, "probe_fan_profile",
+                          _must_not_call("the fan probe"), create=True), \
+             patch.object(es, "fetch_fan_leagues",
+                          _must_not_call("the fan probe")):
+            r = c.post("/api/espn/link", headers=_h(token),
+                       data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+        assert r.status_code == 502, r.get_data(as_text=True)
+        assert r.get_json()["error"] == "espn_unavailable"
+        with engine.connect() as conn:
+            assert conn.execute(
+                select(db_module.espn_credentials_table)).fetchall() == []
+
+
+def test_credential_only_store_league_oracle_200_must_parse_as_a_league(client):
+    """BIND AND ASSERT: a 200 that doesn't parse into this league's team data
+    proves nothing (an edge/interstitial page answers 200 too). Treated as
+    'couldn't confirm' — retryable 502, nothing stored."""
+    c, token, engine, _ = client
+    _link_league("cookie")
+    with _league_read(payload={"not": "a league"}), \
+         patch.object(es, "probe_fan_profile",
+                      _must_not_call("the fan probe"), create=True), \
+         patch.object(es, "fetch_fan_leagues", _must_not_call("the fan probe")):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+    assert r.status_code == 502, r.get_data(as_text=True)
+    assert r.get_json()["error"] == "espn_unavailable"
+    with engine.connect() as conn:
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchall() == []
+
+
+def test_credential_only_store_public_linked_league_is_not_an_oracle(client):
+    """A PUBLIC league reads without any cookies, so a successful read of one
+    says nothing about the pair. The route must fall back to the fan probe
+    rather than treat that 200 as proof."""
+    c, token, engine, _ = client
+    _link_league("public")
+    calls = []
+    with _fan_probe(football=FFL, calls=calls), \
+         patch.object(es, "fetch_league",
+                      _must_not_call("a public league read")):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified_via"] == "fan_profile"
+    assert calls == [("fan", "s2", "{OK-1}")]
+
+
+def test_credential_only_store_purged_league_falls_back_to_fan_probe(client):
+    """ESPN purges old leagues: a 404 on the linked league means the ORACLE
+    is gone, not that the credential is bad. Fall back to the fan probe
+    instead of falsely rejecting a good sign-in."""
+    c, token, engine, _ = client
+    _link_league("cookie")
+    calls = []
+    with _league_read(error=es.EspnError("gone", kind="not_found")), \
+         _fan_probe(football=FFL, calls=calls):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["verified_via"] == "fan_profile"
+    assert calls == [("fan", "s2", "{OK-1}")]
 
 
 # ---------------------------------------------------------------------------

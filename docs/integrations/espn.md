@@ -124,9 +124,23 @@ ESPN leagues and let them pick, instead of asking for a league ID?"
 | Path | `/apis/v2/fans/{SWID}?showAirings=true&showFantasy=true` |
 | Method | `GET` |
 | URL builder | `backend/espn_service.py` (`fan_leagues_url`) |
-| Call function | `backend/espn_service.py` (`fetch_fan_leagues`) |
+| Call function | `backend/espn_service.py` (`fetch_fan_leagues` → list; `probe_fan_profile` → verification verdict; both over one `_fetch_fan_payload` chokepoint) |
 | Route | `GET /api/espn/my-leagues` (`backend/server.py`, `espn_my_leagues`) — flag `espn.league_picker` |
-| Second caller | `POST /api/espn/link`'s credential-only store (2026-08-12) uses the same read as its **pre-store verification probe** — see §2.4 item 1b |
+| Second caller | `POST /api/espn/link`'s credential-only store uses `probe_fan_profile` as its **fallback** verification oracle, only when no auth-gated linked league is available — see §2.4 item 1b |
+
+**⚠ NOT PROVEN TO BE AN AUTHENTICATION ORACLE.** The claim once recorded
+here and in code — "the fan API has no anonymous success mode" — is
+**evidenced only against an UNKNOWN SWID** (the 404 below). That is a
+SWID-*existence* result, not proof that ESPN validates `espn_s2` on this
+route: the SWID travels in the URL **path**, ESPN issues SWIDs to anonymous
+visitors, and no session here has ever observed what this host returns for a
+*known* SWID presented with a missing/invalid `espn_s2`. Until someone runs
+that specific experiment live (known SWID, no/garbage `espn_s2`, record the
+status and body), treat a fan-profile success as **corroborating evidence,
+not authentication**, and prefer an authenticated league read (§1.1 against
+a private league) whenever one is available. This is why the credential
+store demotes this probe to a fallback and records which oracle it used —
+the 2026-08-12 incident is what the over-claim cost.
 
 **Auth:** always cookie-mode — there is no "public" fan profile. Reads the
 session user's already-**stored** `espn_credentials` row (same
@@ -160,6 +174,15 @@ run against a real account to confirm or correct the parse
 `{"leagues": [{"league_id", "league_name", "season", "team_name"}]}`, newest
 season first. `[]` is a legitimate, honest answer (the account has no
 fantasy football leagues) — never fabricated.
+
+**`[]` is ambiguous, and that ambiguity is load-bearing.** Because the parse
+degrades instead of raising, an empty list means *either* "no football
+leagues" *or* "this payload wasn't recognised". For the picker that
+distinction doesn't matter; for **credential verification it is the whole
+question**, which is why verification calls `probe_fan_profile` instead —
+it also reports `fantasy_entries` (fantasy teams of ANY sport, so an account
+with only baseball/hockey leagues is not falsely rejected) and `recognized`.
+Verification never reads emptiness as success.
 
 Errors: 404 `feature_disabled` (flag off) · 403 `espn_auth_required` (no
 stored ESPN session yet, or ESPN rejects the stored one — same code as the
@@ -233,25 +256,64 @@ Related league-binding columns on the `leagues` table (`backend/database.py:254-
    ran WITH this pair attached, and the in-app flow only collects cookies after
    an anonymous read 403s (private league), so that fetch was a genuine
    authenticated proof — no second probe is made.
+   **Known residual (2026-08-12, not fixed by the oracle work below):** that
+   argument is about the *flow*, not the *read*. A manual paste against a
+   **public** league succeeds anonymously, so this path can still stamp
+   `verified_at` on a pair ESPN never validated. Smaller blast radius than the
+   credential-only path was — the `GET` honesty gate and the send pre-flight
+   both still catch it downstream — but the stamp is not honest. Fixing it
+   needs either an anonymous control read of the same league (one extra GET,
+   only when cookies were pasted) or routing this path through
+   `_espn_verify_credential` too.
 1b. **Credential-only store (send-auth lazy flow, 2026-08-11; verification
-   added 2026-08-12):** `POST /api/espn/link` with `espn_s2`+`swid` and NO
-   `espn_league_id` — the ESPN Connect WebView entered from the trade-send
-   path (the league is already imported; only the account credential is
-   missing). The route **verifies before storing**: one live authenticated
-   fan-profile read (`espn_service.fetch_fan_leagues`, §1.7 — the fan API has
-   no anonymous success mode; a cookie-less request for an unknown SWID 404s,
-   and 401/403/404 all map to `EspnAuthError`). Success → pair stored
-   encrypted with `verified_at` stamped, `{connected:true, stored:
-   "credential", verified:true}`. `EspnAuthError` → **403
-   `espn_bad_credentials`, nothing stored** — the user learns at sign-in
-   time, not at their next trade send. Any other failure (transport,
-   ESPN 5xx, non-JSON edge page) → **502 `espn_unavailable`, nothing
-   stored** — deliberately distinct: an outage is not a verdict on the
-   cookies, so a user with a good sign-in is told to retry, never to
-   re-authenticate. This closed the one credential-honesty gap among the
-   platforms: MFL proves credentials via `login` + `fetch_my_leagues` and
-   Sleeper via `verify_token_live` before storing; ESPN previously stored
-   the pair blind and reported `connected: true`.
+   added 2026-08-12, oracle corrected the same day):** `POST /api/espn/link`
+   with `espn_s2`+`swid` and NO `espn_league_id` — the ESPN Connect WebView
+   entered from the trade-send path (the league is already imported; only the
+   account credential is missing). The route **verifies before storing**, via
+   `server._espn_verify_credential`, and the probe's **result is bound and
+   asserted** — "no exception" is not a pass:
+
+   | Oracle | When used | What counts as proof |
+   |---|---|---|
+   | `league_read` (**strong**, preferred) | the user already has a linked league whose stored `espn_auth == 'cookie'` | one `fetch_league` (§1.1) with this pair returning a 200 that **parses into that league's teams**. ESPN refuses these without a valid member session, so this is a genuine authenticated read — it is the same pre-flight the send path runs, and the read that exposed the bad pair as a 409 in the 2026-08-12 incident |
+   | `fan_profile` (**weak**, fallback) | no linked league, or only PUBLIC ones (a public league reads with no cookies at all, so a 200 proves nothing) | `probe_fan_profile` (§1.7) returning **account-specific fantasy data**: football leagues, or fantasy entries of any other sport. Recorded as the weaker oracle on success — see the §1.7 warning |
+
+   Success → pair stored encrypted with `verified_at` stamped, `{connected:
+   true, stored:"credential", verified:true, verified_via:
+   "league_read"|"fan_profile"}`. Rejected pair, or a read that came back
+   with nothing to prove it → **403 `espn_bad_credentials`, nothing stored**
+   — the user learns at sign-in time, not at their next trade send. Any
+   other failure (transport, ESPN 5xx, non-JSON edge page, a 200 that
+   doesn't parse) → **502 `espn_unavailable`, nothing stored** —
+   deliberately distinct: an outage is not a verdict on the cookies, so a
+   user with a good sign-in is told to retry, never to re-authenticate. A
+   404 on the linked league (ESPN purges old leagues) means the *oracle* is
+   gone, not that the credential is bad: it falls back to the fan probe.
+
+   **No false rejects:** an ESPN account with zero *football* leagues
+   (baseball/hockey only, or new to fantasy) is legitimate, so the weak
+   oracle's rule is "the read returned this account's fantasy data", never
+   "there is at least one football league".
+
+   **Deliberate refusal (not a false reject):** when the strong oracle
+   401/403s, the pair may well be a valid sign-in for *some* ESPN account —
+   just not one that can open this user's linked private league (the
+   incident's shape: cookies captured from someone else's account). Storing
+   it would only defer the failure to the send, so it is refused, with copy
+   that names the recovery: sign in with the account that owns your team.
+
+   **What `verified_at` means:** the SERVER observed a successful
+   AUTHENTICATED read using this pair. Not "the client captured cookies",
+   not "the user looked signed in", not "ESPN answered 200". Any
+   device-reported signal added later needs its own column.
+
+   This closed the one credential-honesty gap among the platforms: MFL
+   proves credentials via `login` + `fetch_my_leagues` and Sleeper via
+   `verify_token_live` before storing; ESPN previously stored the pair blind
+   and reported `connected: true`. The first version of the fix still did,
+   in effect: it called the fan read for its exceptions alone and discarded
+   the value, and since `_parse_fan_leagues` never raises, an unrecognised
+   200 stamped `verified_at` anyway.
 2. **Re-link without pasting:** if the client sends no `espn_s2` on a repeat
    `POST /api/espn/link`, the backend falls back to the previously stored
    credential (`backend/server.py:18400-18412`) via `get_espn_credential`

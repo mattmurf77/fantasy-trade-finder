@@ -18987,6 +18987,111 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
+def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
+    """Prove an ESPN cookie pair against ESPN BEFORE it is stored.
+
+    Returns `(verdict, oracle, detail)`:
+      "ok"          — the server observed a successful AUTHENTICATED read
+                      with this exact pair. `oracle` names what proved it.
+      "bad"         — ESPN answered and the pair proved nothing (a rejection,
+                      or a read that returned no account-specific data).
+                      Credential verdict → 403 espn_bad_credentials.
+      "unavailable" — transport failure / 5xx / a 200 that didn't parse. NOT
+                      a verdict on the cookies → 502 espn_unavailable.
+
+    ORACLE CHOICE (verification-oracle fix, 2026-08-12). Two probes, in
+    strength order:
+
+    1. `league_read` (STRONG, preferred) — one `fetch_league` of a league the
+       user has ALREADY linked whose stored `espn_auth` is 'cookie', i.e. a
+       league ESPN refuses to serve without a valid member session. A 200
+       that parses into that league's team data is a genuine authenticated
+       read. This is the same pre-flight the ESPN send path runs, and it is
+       what actually rejected the bad pair in the production incident (as
+       the send's 409) after the store had already called it verified.
+    2. `fan_profile` (WEAK fallback) — used only when the user has no
+       auth-gated linked league (no ESPN league yet, or only PUBLIC ones,
+       which read fine with no cookies at all and so prove nothing). The fan
+       endpoint keys on the SWID in the URL path and FTF's only live evidence
+       is that an UNKNOWN SWID 404s — a SWID-existence result, not proof that
+       `espn_s2` was validated (docs/integrations/espn.md §1.7). So it is
+       accepted only when it returns account-specific fantasy data, and the
+       weaker oracle is recorded on every success.
+
+    ZERO FALSE REJECTS on the weak path: an ESPN account with no FOOTBALL
+    leagues (baseball/hockey only, or brand-new to fantasy) is legitimate, so
+    the rule is "the read returned this account's fantasy data" — entries of
+    ANY sport pass. Only a payload with no fantasy evidence at all — what an
+    anonymous or partial cookie pair produces — is refused.
+    """
+    from . import espn_service as _espn
+    from .database import load_espn_leagues_for_user
+
+    # 1. Strong oracle: an already-linked league ESPN only serves to a
+    #    signed-in member. PUBLIC links are skipped on purpose.
+    gated = None
+    try:
+        for lg in load_espn_leagues_for_user(user_id):
+            if (lg.get("espn_auth") or "") == "cookie" and \
+                    str(lg.get("league_id") or "").isdigit():
+                gated = lg
+                break
+    except Exception:
+        log.exception("espn verify: linked-league lookup failed for %s", user_id)
+
+    if gated:
+        lid = str(gated["league_id"])
+        try:
+            season = int(gated.get("season") or _ESPN_DEFAULT_SEASON)
+        except (TypeError, ValueError):
+            season = _ESPN_DEFAULT_SEASON
+        try:
+            raw = _espn.fetch_league(lid, season, espn_s2=espn_s2, swid=swid)
+        except _espn.EspnAuthError:
+            return "bad", "league_read", "rejected"
+        except _espn.EspnError as e:
+            if getattr(e, "kind", "") != "not_found":
+                return "unavailable", "league_read", getattr(e, "kind", "http")
+            # ESPN purges old leagues — the ORACLE is gone, which says
+            # nothing about the cookies. Fall through to the fan probe
+            # rather than falsely rejecting a good sign-in.
+            log.info("espn verify: linked league %s purged — falling back", lid)
+        except OSError as e:
+            log.warning("espn verify: league oracle transport failure: %s", e)
+            return "unavailable", "league_read", "transport"
+        else:
+            # BIND AND ASSERT the result: a 200 is only proof if it actually
+            # parses into this league's teams (edge/interstitial pages
+            # answer 200 too). Anything else is "couldn't confirm".
+            try:
+                teams = _espn.parse_league(raw)["teams"] if isinstance(raw, dict) else []
+            except Exception:
+                teams = []
+            if teams:
+                return "ok", "league_read", lid
+            log.warning("espn verify: league oracle 200 didn't parse (league=%s)",
+                        lid)
+            return "unavailable", "league_read", "unrecognized_payload"
+
+    # 2. Weak fallback: the fan profile. Result is BOUND and asserted — an
+    #    empty/unrecognised payload is NOT a pass (that was the bug).
+    try:
+        probe = _espn.probe_fan_profile(espn_s2, swid)
+    except _espn.EspnAuthError:
+        return "bad", "fan_profile", "rejected"
+    except (_espn.EspnError, OSError) as e:
+        log.warning("espn verify: fan probe unavailable [%s]: %s",
+                    getattr(e, "kind", "transport"), e)
+        return "unavailable", "fan_profile", getattr(e, "kind", "transport")
+
+    if probe.get("football_leagues"):
+        return "ok", "fan_profile", f"{len(probe['football_leagues'])} ffl"
+    if probe.get("fantasy_entries"):
+        # Real account, no FOOTBALL leagues — legitimate, not a rejection.
+        return "ok", "fan_profile", "no_football_leagues"
+    return "bad", "fan_profile", "no_account_data"
+
+
 @app.route("/api/espn/link", methods=["GET", "POST", "DELETE"])
 @_gate_unverified_write
 def espn_link():
@@ -19010,17 +19115,27 @@ def espn_link():
 
     POST body: {espn_league_id?, season?, team_id?, espn_s2?, swid?}
       • espn_s2+swid, NO espn_league_id → CREDENTIAL-ONLY store (send-auth
-        lazy flow): VERIFY the pair with one live authenticated fan-profile
-        read (espn_service.fetch_fan_leagues — ESPN's fan API has no
-        anonymous success mode), then persist it encrypted with verified_at
-        stamped and return {connected: true}. Used by the ESPN Connect
-        WebView entered from the trade-send path — the league is already
-        imported; only the account credential is missing. A rejected pair is
-        NOT stored: 403 espn_bad_credentials (sign in again). ESPN
-        unreachable/5xx is NOT a credential verdict: 502 espn_unavailable
-        (retry), and nothing is stored either. MFL (login + myleagues) and
-        Sleeper (verify_token_live) already refuse to store unproven
-        credentials — this brings ESPN to parity.
+        lazy flow): VERIFY the pair with one live read whose RESULT IS
+        ASSERTED (_espn_verify_credential — an authenticated read of an
+        already-linked private league when there is one, else the weaker
+        fan-profile probe, which must return account-specific fantasy data),
+        then persist it encrypted with verified_at stamped and return
+        {connected: true, verified_via: "league_read"|"fan_profile"}. Used by
+        the ESPN Connect WebView entered from the trade-send path — the
+        league is already imported; only the account credential is missing.
+        A pair ESPN rejects — or one whose read came back with nothing to
+        prove it — is NOT stored: 403 espn_bad_credentials (sign in again).
+        ESPN unreachable/5xx/unparseable is NOT a credential verdict: 502
+        espn_unavailable (retry), and nothing is stored either. MFL (login +
+        myleagues) and Sleeper (verify_token_live) already refuse to store
+        unproven credentials — this brings ESPN to parity.
+
+        `verified_at` MEANS EXACTLY ONE THING: the SERVER observed a
+        successful AUTHENTICATED read from ESPN using this pair. It is not
+        "the client captured cookies", not "the user looked signed in", and
+        not "ESPN answered 200". Any device-reported or heuristic signal
+        added later gets its OWN column — never widen this one, or the
+        honesty gate on GET degrades back into the bug it was added for.
       • no team_id  → PREVIEW: fetch + crosswalk, return the team list and
         match report; nothing is persisted.
       • team_id     → IMPORT: persist the league (platform='espn') + all
@@ -19089,33 +19204,50 @@ def espn_link():
         if not _sleeper_write.token_encryption_available():
             return jsonify({"error": "espn_unconfigured",
                             "message": "Credential encryption key missing."}), 503
-        # Verify BEFORE storing (credential-honesty fix, 2026-08-12): one
-        # live authenticated fan-profile read proves the pair works. The fan
-        # API has no anonymous success mode (a cookie-less request for an
-        # unknown SWID 404s — live-confirmed 2026-08-09, espn.md §1.7), and
-        # fetch_fan_leagues maps 401/403/404 to EspnAuthError. Without this,
-        # a bad capture was stored, reported {connected:true}, and only
-        # surfaced at the next trade send. MFL/Sleeper never had this gap.
-        try:
-            _espn.fetch_fan_leagues(espn_s2, swid)
-        except _espn.EspnAuthError:
-            # ESPN rejected the pair — a credential verdict, not an outage.
-            # Nothing is stored; the client re-runs the sign-in.
-            log.info("espn_link: credential verification rejected user=%s",
-                     user_id)
-            return jsonify({
-                "error": "espn_bad_credentials",
-                "message": "ESPN didn't accept that sign-in — nothing was "
-                           "saved. Sign in to ESPN again.",
-            }), 403
-        except (_espn.EspnError, OSError) as e:
-            # Transport failure / ESPN 5xx / non-JSON edge page (OSError
-            # covers urllib's URLError + socket timeouts). NOT a verdict on
-            # the cookies — a user with a good sign-in must never be told
-            # it's bad because ESPN was down. Distinct, retryable code;
-            # nothing stored (an unproven pair must not reach the DB).
+        # Verify BEFORE storing (credential-honesty fix, 2026-08-12;
+        # oracle fix same day): _espn_verify_credential runs ONE live read
+        # whose RESULT IS BOUND AND ASSERTED — preferring an authenticated
+        # read of an already-linked private league, falling back to the
+        # weaker fan-profile probe. Its verdict, not merely "no exception",
+        # decides whether anything is stored. The original version called
+        # fetch_fan_leagues without binding the return value; since
+        # _parse_fan_leagues never raises, a 200 with an unrecognised shape
+        # (what an anonymous/partial pair produces) was stored as verified,
+        # reported {connected:true}, and only surfaced as a 409 at the next
+        # trade send. MFL/Sleeper never had this gap.
+        verdict, oracle, detail = _espn_verify_credential(user_id, espn_s2, swid)
+        if verdict == "bad":
+            # ESPN answered and the pair proved nothing — a credential
+            # verdict, not an outage. Nothing is stored; the client re-runs
+            # the sign-in. One error code (the client maps it to a fresh
+            # sign-in); the message distinguishes the two ways to get here.
+            log.info("espn_link: credential verification failed user=%s "
+                     "oracle=%s detail=%s", user_id, oracle, detail)
+            if detail == "no_account_data":
+                msg = ("That ESPN sign-in didn't come back with your account, "
+                       "so nothing was saved. Sign in to ESPN again.")
+            elif oracle == "league_read":
+                # The pair may be a perfectly good sign-in for SOME ESPN
+                # account — just not one that can read this user's linked
+                # league (the incident's shape: cookies captured from
+                # someone else's account). Storing it would only defer the
+                # failure to the send, which is the bug being fixed, so it
+                # is refused — with copy that names the actual recovery.
+                msg = ("That ESPN account can't open your linked league, so "
+                       "nothing was saved. Sign in with the ESPN account "
+                       "that owns your team.")
+            else:
+                msg = ("ESPN didn't accept that sign-in — nothing was saved. "
+                       "Sign in to ESPN again.")
+            return jsonify({"error": "espn_bad_credentials",
+                            "message": msg}), 403
+        if verdict != "ok":
+            # Transport failure / ESPN 5xx / non-JSON edge page. NOT a
+            # verdict on the cookies — a user with a good sign-in must never
+            # be told it's bad because ESPN was down. Distinct, retryable
+            # code; nothing stored (an unproven pair must not reach the DB).
             log.warning("espn_link: credential verification unavailable "
-                        "[%s]: %s", getattr(e, "kind", "transport"), e)
+                        "user=%s oracle=%s detail=%s", user_id, oracle, detail)
             return jsonify({
                 "error": "espn_unavailable",
                 "message": "Couldn't reach ESPN to confirm the sign-in — "
@@ -19128,10 +19260,13 @@ def espn_link():
         except Exception:
             log.exception("espn_link: credential-only store failed")
             return jsonify({"error": "store_failed"}), 500
-        log.info("espn_link: credential-only store user=%s (verified)",
-                 user_id)
+        # Log WHICH oracle proved it: 'fan_profile' is the weaker one (see
+        # _espn_verify_credential), so a support question about a pair that
+        # verified and then failed at send time can be answered from logs.
+        log.info("espn_link: credential-only store user=%s (verified via %s "
+                 "— %s)", user_id, oracle, detail)
         return jsonify({"connected": True, "stored": "credential",
-                        "verified": True})
+                        "verified": True, "verified_via": oracle})
 
     if not league_id.isdigit():
         return jsonify({"error": "espn_bad_league_id",

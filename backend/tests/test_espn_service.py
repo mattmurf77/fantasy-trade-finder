@@ -308,6 +308,82 @@ def test_parse_fan_leagues_shape_drift_never_raises(bad_shape):
     assert es._parse_fan_leagues(bad_shape) == []
 
 
+def test_parse_fan_leagues_degrade_to_empty_is_load_bearing():
+    """PIN (verification-oracle fix, 2026-08-12): `_parse_fan_leagues` MUST
+    keep degrading to an empty list instead of raising — even on a payload
+    that actively misbehaves while being walked.
+
+    This contract is why an empty list can never mean "the credential is
+    good": the 2026-08-12 incident was a store path that called the fan
+    fetch for its exceptions alone, so an unrecognised 200 parsed to [] and
+    was recorded as verified. Anything verifying a credential must use
+    `probe_fan_profile` (which reports WHY the list is empty). If a future
+    change makes this parse raise, that mistake becomes invisible again —
+    hence the pin on both halves."""
+    class _Hostile(dict):
+        def get(self, *a, **kw):
+            raise RuntimeError("shape drift while walking the payload")
+
+    assert es._parse_fan_leagues({"preferences": [{"metaData": _Hostile()}]}) == []
+    assert es._parse_fan_leagues(_Hostile()) == []
+    # …and the emptiness is genuinely ambiguous: a REAL empty account and an
+    # unrecognised payload are the same value out of this function.
+    assert es._parse_fan_leagues({"preferences": []}) == \
+        es._parse_fan_leagues({"totally": "unrecognised"})
+
+
+def test_probe_fan_profile_separates_empty_from_unproven():
+    """The probe exists to answer what the list alone cannot: did this read
+    come back with THIS account's data? Football leagues, other-sport
+    entries, and nothing-at-all are three different answers."""
+    def _opener_for(payload):
+        def _opener(request, timeout=None):
+            return _FakeResp(json.dumps(payload))
+        return _opener
+
+    got = es.probe_fan_profile("s2", "{SWID}", _opener=_opener_for(FAN_PAYLOAD))
+    assert [lg["league_id"] for lg in got["football_leagues"]] == \
+        ["987654321", "111222333"]
+    assert got["fantasy_entries"] == 3        # incl. the baseball entry
+    assert got["recognized"] is True
+
+    # A legitimate account with NO football leagues (baseball only) — zero
+    # football, but real fantasy data: must remain distinguishable from
+    # "nothing was proven", or the route would falsely reject it.
+    baseball_only = {"preferences": [p for p in FAN_PAYLOAD["preferences"]
+                                     if p.get("typeId") != 9]}
+    got = es.probe_fan_profile("s2", "{SWID}",
+                               _opener=_opener_for(baseball_only))
+    assert got["football_leagues"] == [] and got["fantasy_entries"] == 1
+
+    # Nothing at all — an anonymous/partial pair's shape. This is the case
+    # that must NOT read as a successful authenticated read.
+    got = es.probe_fan_profile("s2", "{SWID}",
+                               _opener=_opener_for({"preferences": []}))
+    assert got["football_leagues"] == [] and got["fantasy_entries"] == 0
+    got = es.probe_fan_profile("s2", "{SWID}",
+                               _opener=_opener_for({"unrecognised": True}))
+    assert got["fantasy_entries"] == 0 and got["recognized"] is False
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_probe_fan_profile_shares_fetch_fan_leagues_error_mapping(code):
+    """Same chokepoint, same errors — the probe never invents a verdict of
+    its own, so the route's 403/502 split is unchanged by which one it calls."""
+    with pytest.raises(es.EspnAuthError):
+        es.probe_fan_profile("s2", "{SWID}", _opener=_opener_http_error(code))
+
+    def _non_json(request, timeout=None):
+        return _FakeResp("<html>maintenance</html>")
+    with pytest.raises(es.EspnError) as ei:
+        es.probe_fan_profile("s2", "{SWID}", _opener=_non_json)
+    assert ei.value.kind == "parse"
+
+    with pytest.raises(es.EspnError) as ei:
+        es.probe_fan_profile("", "{SWID}")
+    assert ei.value.kind == "input"
+
+
 def test_parse_fan_leagues_entry_without_abbrev_is_kept():
     # Missing `abbrev` entirely (vs. a non-"ffl" value) is kept rather than
     # dropped — better a possibly-mislabeled row surfaces than a real league
