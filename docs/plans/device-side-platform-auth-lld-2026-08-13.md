@@ -642,7 +642,7 @@ Added to `config/features.json`, **default false**, and mirrored into the three 
                 INSERT platform_leases (state='issued', digest_lock=digest)
                 if sp: sp.commit()
             except IntegrityError as e:
-                if not _is_unique_violation(e, "ux_platform_leases_digest_lock"):
+                if not _is_digest_lock_violation(e):   # DIALECT-ASYMMETRIC — see below
                     raise                         # NOT NULL / CHECK bugs must not be
                                                   # served as 409 send_in_flight
                 if sp: sp.rollback()              # Postgres: outer txn survives
@@ -667,6 +667,16 @@ Added to `config/features.json`, **default false**, and mirrored into the three 
 The SQLite leak is the trap: the pysqlite savepoint recipe (`isolation_level = None` plus an explicit `BEGIN`) is attached **only to `ingest_engine`** (`backend/database.py:92-99`, whose own comment says "SEPARATE listener — do NOT attach" and notes that "driver autocommit checks have churned across Python versions"). The main `engine` (`:62`) carries only `check_same_thread`, so pysqlite emits no `BEGIN`, the `SAVEPOINT` is outermost, and `RELEASE` **commits to disk** — after which the `_Rollback` cannot undo it. Measured directly: default engine → `rows after outer rollback = [('e','d1')]`; the same block on an engine carrying the `:92-99` recipe → clean. That orphan sits in `state='issued'` holding a `digest_lock`, so the user eats a phantom `409 send_in_flight` until the sweep clears it ~10 minutes later.
 
 Applying the recipe to the main engine instead would work, but its blast radius is all 111 `with engine.begin()` writers — not a change to make in passing for one route. The branch is the smaller correct move, and §6.3's `too_many_outstanding` rollback test must be **dialect-parameterised** so the SQLite path is actually exercised rather than assumed.
+
+**`_is_digest_lock_violation` cannot match on the index name, because only one dialect reports it.** Measured 2026-08-13:
+
+| Violation | PostgreSQL 18.3 | SQLite 3.50.4 |
+|---|---|---|
+| duplicate `digest_lock` | `duplicate key value violates unique constraint "ux_platform_leases_digest_lock"` — index name, also structured as `e.orig.diag.constraint_name`, SQLSTATE `23505` | `UNIQUE constraint failed: platform_leases.digest_lock` — **the column, never the index name** |
+| `NOT NULL` | `null value in column "state" … violates not-null constraint` | `NOT NULL constraint failed: platform_leases.state` |
+| `CHECK` | `violates check constraint "ck_platform_leases_lock_matches_state"` | `CHECK constraint failed: ck_platform_leases_lock_matches_state` — name **is** reported |
+
+So the helper is dialect-asymmetric by necessity: on Postgres match SQLSTATE `23505` **and** `diag.constraint_name == "ux_platform_leases_digest_lock"`; on SQLite match the message prefix `UNIQUE constraint failed:` **and** the column token `platform_leases.digest_lock`. An earlier draft of this block specified matching the index name on both, which **silently never matches on SQLite** — every duplicate tap would re-raise as a 500 instead of the `409 send_in_flight` §4.6 promises, and the §6.3 duplicate-tap test would fail in a way that invites someone to loosen it. Note the happier asymmetry: the CHECK name *is* portable, so the startup assertion (§5.4 item 6) can match on it directly.
 
 Two smaller points the block above encodes: the repo has **zero** existing `IntegrityError` handlers to copy (`backend/database.py:9584`, 111 self-contained `engine.begin()` writers), so this is new ground and the structure is the spec, not a sketch; and with a CHECK constraint plus five `nullable=False` columns now on the table, a bare `except IntegrityError` is ambiguous — it must discriminate on the constraint name, or a NOT NULL bug gets served to the client as "already sending."
 
