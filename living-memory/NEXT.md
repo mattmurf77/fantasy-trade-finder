@@ -62,6 +62,13 @@ Phase 1 is built on `feat/notif-inbox-growth` and unmerged (see [`HANDOFF.md`](H
 
 ### Immediate
 
+0. **Land + start the device-auth programme.** *(operator, 20 minutes to start)*
+   *Why now:* all four artifacts converged 2026-08-13; the branch `design/device-auth-lld`
+   is committed and **awaits an operator push to main** (classifier blocked the agent's).
+   Then: "yes to all defaults" on the Plan §1 decisions table starts S0 the same day —
+   S0 alone closes a live exposure (the 365-day JWT is iCloud-backup eligible today).
+   Plan: `docs/plans/device-side-platform-auth-plan-2026-08-13.md`.
+
 0a. **Verify #289 on the Dependables MFL league (62846).** *(5 minutes, live now)*
    *Why now:* it is the acceptance criterion the shipped batch never executed.
    Pass = franchise + player names; escalate = a high rate of `Player <mfl_id>`

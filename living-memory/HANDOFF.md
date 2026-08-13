@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
 - [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
@@ -18,6 +19,29 @@
 
 ---
 
+## 2026-08-13 — Device-auth design programme complete; branch awaits operator push
+
+### Where I am right now
+
+**All four artifacts of the device-held-credentials programme are done and dual-agent converged** on branch `design/device-auth-lld` (tip `f7f4bfc`, based on `origin/main` @ `3b64a44`): LLD (4 rounds, 24 blocking objections) and Plan (3 rounds, same-round dual sign-off), joining the PRD and HLD decisions already on main. The branch also carries [G-040]/[G-041] and this write-back.
+
+### The one blocking thing
+
+**The push to `main` was denied by the permission classifier.** Everything is committed locally in the session worktree at the branch above. The operator lands it with:
+`git push origin design/device-auth-lld:main`
+(content is docs + living-memory only; no code, no conflicts expected — main was at `3b64a44` at last fetch).
+
+### What's next (the Plan's own §13, compressed)
+
+1. Operator: "yes to all defaults" (or amend) on the Plan §1's five decisions — 15 minutes.
+2. Start S0 (three parallel lanes: FAAB fix / vault + Sentry scrub / the two spikes OI-9 + OI-12).
+3. Gates A–F in the Plan govern everything after; Gate C (expo-updates memo + Hermes TextDecoder fact) is the real decision point before the big build.
+
+### Watch out for
+
+- The **worktree sweep debt** stands: this session's worktree (`scratchpad/lld-wt`) holds the unpushed branch — do NOT remove it before the push lands. ~12 older agent worktrees still owed a recovery-ledger sweep from before this session.
+- Opus weekly limit was hit mid-session (resets 10am ET); the Plan's lenses ran on Fable — noted in its reconciliation log.
+- Two ESPN pending trades to "Team VP" (league 11896) may still need revoking — carried from the previous handoff.
 ## 2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)
 
 ### Where I am right now

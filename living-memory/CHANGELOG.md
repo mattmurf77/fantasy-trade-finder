@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-13 (device-side platform auth: LLD + Plan converged; all four artifacts done)
+
+- **The dual-agent design programme is complete.** LLD (4 rounds, 24 blocking objections resolved) and Plan (3 rounds, same-round dual sign-off) join the PRD and HLD decisions. All on branch `design/device-auth-lld` — **push to `main` was denied by the permission classifier; the branch awaits the operator.** Docs: `docs/plans/device-side-platform-auth-{lld,plan}-2026-08-13.md`.
+- **Six claims measured rather than asserted** (SQLite 3.50.4 / PG 18.3 / SA 2.0.49), two of which *refuted* the doc as drafted: `begin_nested()` on the main engine silently commits on SQLite (→ [G-040]), and unique-violation errors name the index on PG but only the column on SQLite (→ [G-041]). NULL-distinct unique index and the lock/state CHECK confirmed on both engines.
+- **The Plan's spine:** S0 safe bundle now (keychain accessibility — the 365-day JWT is iCloud-backup eligible *today* — Sentry scrub, FAAB fix); Gates A–F; S6 = the point of no return; R7 = the kill criterion with a graduated read; expo-updates spike owns the Gate C decision.
+- **Provenance:** PRD/HLD/LLD lenses ran on Opus; the Plan's on Fable (weekly Opus limit hit mid-programme).
+
 ## 2026-08-13 (notification inbox as a growth surface, phase 1 — SHIPPED to `main`)
 
 - **Six push kinds that left no trace now write a bell row**, and the bell has instrumentation for the first time ever. Built from the pm-growth brief ([`../docs/business/product/2026-08-12-notification-inbox-growth-surface.md`](../docs/business/product/2026-08-12-notification-inbox-growth-surface.md)) under operator decisions GD-1…GD-8. Phase 1 is **inbox rows only, no push change** — inbox rows bypass prefs, buckets, quiet hours and OS permission, so this ships to **every** user while push stays operator-only.
