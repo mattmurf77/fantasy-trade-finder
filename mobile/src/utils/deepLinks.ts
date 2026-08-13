@@ -254,12 +254,27 @@ function _buildQuery(qp: Record<string, unknown> | null | undefined): string {
 const V2_MATCH_KINDS = new Set([
   'trade_match', 'new_match', 'first_match', 'match_accepted',
   'match_expiring', 'counter_offer',
+  // `trade_accepted` / `trade_declined` are INBOX types, not push kinds —
+  // backend/server.py writes them as f"trade_{outcome}" while the paired
+  // push is `match_accepted`. Only the push kind was listed here, so two of
+  // the four original inbox types had a glyph and a dead tap (found by
+  // mobile/tests/check-notif-glyphs.js, 2026-08-13). Both carry `match_id`
+  // in metadata, so Matches is the right target and the deep param already
+  // resolves.
+  'trade_accepted', 'trade_declined',
   'weekly_digest', 'pending_review',
   'winback_matches', 'winback_dormant', 'season_start',
   'bundle_summary',
 ]);
+// `referral_joined` (notif-inbox-growth, 2026-08-13): written and live
+// since the referral loop shipped, but absent from every kind set here, so
+// resolveNotificationTarget returned null and the tap did nothing — on the
+// one row that says the user's own invite WORKED. It lands on League
+// because that is where the new member now is, and where the invite ask
+// they acted on lives.
 const V2_LEAGUE_KINDS = new Set([
   'league_member_joined', 'league_member_unlocked_trades',
+  'referral_joined',
 ]);
 const V2_RANK_KINDS = new Set(['finish_ranking']);
 // F10 (flag deck.replenishment): the weekly fresh-deck push lands on the

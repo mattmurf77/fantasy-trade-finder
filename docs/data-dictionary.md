@@ -572,17 +572,22 @@ There are exactly **seven** read sites (`_roster_eveners`, `_user_pick_share`, `
 
 ## `notifications`
 
-In-app inbox. Types: `trade_match`, `trade_accepted`, `trade_declined`.
+In-app bell inbox. **Not a push mirror** — `_send_typed_push` has never written a row here, and rows are written beside a push at the call site, never inside the dispatcher (see `docs/cross-client-invariants.md` § Notification type strings for why, and `living-memory/LLD.md`).
+
+Nine `type` values, a cross-client enum: `trade_match`, `trade_accepted`, `trade_declined`, `referral_joined`, `league_member_joined`, `league_member_unlocked_trades`, `match_expiring`, `deck_replenished`, `counter_offer`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | |
 | `user_id` | str | |
-| `type` | str | |
+| `type` | str | cross-client enum — see above |
 | `title`, `body` | str | |
-| `metadata_json` | JSON text | type-specific context (default `"{}"`) |
+| `metadata_json` | JSON text | type-specific context (default `"{}"`). `match_id` is the idempotency key for `match_expiring`; `league_id` + `joined_count` + `new_usernames` carry the `league_member_joined` coalescing state |
 | `is_read` | int | 0=unread, 1=read |
 | `created_at` | str | |
+| `dismissed_at` | str \| NULL | ISO UTC when the user cleared the row; **NULL = live**. `get_notifications` filters non-NULL out of both legs. Distinct from `is_read` on purpose — "I have seen this" and "I am done with this" are different facts. Rows are never deleted: they are the only history this surface has |
+
+**Read shape:** `get_notifications` returns ALL live unread + the most recent 20 live read, `created_at DESC`. Ordering is recency-only — there is no priority or expiry column, by decision (GD-3). An unread row therefore never ages out.
 
 ---
 

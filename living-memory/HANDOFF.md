@@ -9,11 +9,70 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Notification inbox growth surface built on a branch, unmerged](#2026-08-13--notification-inbox-growth-surface-built-on-a-branch-unmerged)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-13 — Notification inbox growth surface built on a branch, unmerged
+
+### Where I am right now
+
+**SHIPPED to `main` 2026-08-13** — rebased onto `3b64a44` and merged; Render auto-deploys the
+backend + web halves. Built from the pm-growth brief + operator decisions GD-1…GD-8; scope
+block and tracking plan in [`../docs/plans/notif-inbox-growth/`](../docs/plans/notif-inbox-growth/).
+
+| Commit | What |
+|---|---|
+| `3c7a69e` | pm-growth brief carried over + scope block + tracking plan |
+| `393b33d` | analytics registration ONLY — no emitter |
+| `5881a20` | backend: 4 inbox writes, GD-8 coalescing, server-side dismiss + column |
+| `687cb98` | both clients: glyphs, routing, instrumentation, empty state, Clear all |
+| `8e9bb5b` | docs + living-memory |
+
+### Blockers, resolved by the operator's ship directive (2026-08-13)
+
+1. **`counter_offer` ships as glyph + routing only, four write sites not five.** The kind has
+   no emitter anywhere in the backend — a bucket mapping and two client kind sets, nothing
+   more — so there was no push to write a row beside. Whether a counter-offer *feature* should
+   exist stays on NEXT as its own item; the kind now renders correctly if it ever ships.
+2. **Both adjacent dead-tap fixes stand as built**: mobile routing for
+   `trade_accepted`/`trade_declined` (only the push kind `match_accepted` was listed), and
+   web's `clickNotif` routing match rows to the Trades view while scrolling an element inside
+   the hidden Matches view.
+
+### What has never run
+
+Every row template, the empty state, the invite gate and all three analytics emitters are
+**unexecuted** — no simulator, no device, no browser. Sim gate + Maestro waived under D-P1-08;
+TestFlight is primary QA. The backend write sites are covered at the DB-helper level, not
+through their routes.
+
+### Next moves
+
+- **Mobile needs an EAS build to reach TestFlight** — the bell UI half of this feature is
+  invisible to users until then.
+- **Post-deploy analytics probe** (run it once Render finishes): the three names must
+  round-trip through `POST /api/events` **with `X-Device-Id` set** — without the header the
+  response is `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has
+  `dropped == 0` and reads as a pass.
+- Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
+  At 3–5 users these are **directional reads, not experiments**.
+
+### Blocking nothing, but owed
+
+- **`.github/workflows/ci.yml` runs no `check-*.js` suite.** `check-notif-glyphs.js` gates
+  nothing, on a cross-client enum whose entire failure mode is silence. Seven suites now sit
+  in that position. One `npm run` step would fix it.
+- **6 `test_rookie_scope.py` failures are live on `origin/main`** and predate this branch
+  (verified by stashing). Nobody appears to be tracking them.
+- A stash `stash@{0}` (`wip-session-169-living-memory`) holds another session's uncommitted
+  living-memory + `.claude/settings.local.json` edits from `session-2026-08-11-169`. I moved
+  them aside to branch cleanly and did **not** apply them here. They are still there.
 
 ---
 

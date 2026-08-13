@@ -4622,11 +4622,13 @@
     let _notifState    = [];   // current cached notifications (server-side, unfiltered)
     let _notifPollTimer = null;
 
-    // Locally-dismissed notification IDs (per browser). Persisted in
-    // localStorage so notifications cleared via the "Clear" button stay
-    // hidden across refreshes and poll cycles. The server still has the
-    // notifications — we just filter them out on render and in the badge
-    // count. Stored as a JSON array of IDs.
+    // LEGACY per-browser dismissal set. READ-ONLY since 2026-08-13: "Clear
+    // all" now dismisses server-side (GD-4, see clearVisibleNotifs below)
+    // and _saveDismissedNotifIds has no callers left. The read stays so
+    // rows this browser cleared BEFORE the cutover do not all reappear at
+    // once; it ages out as those rows fall past the read window. Do not
+    // add a new writer — that would restore the divergence the server-side
+    // dismissal exists to end.
     const LS_DISMISSED_NOTIFS = 'ftf_dismissed_notifs';
     function _getDismissedNotifIds() {
       try {
@@ -4636,13 +4638,8 @@
         return new Set(Array.isArray(arr) ? arr : []);
       } catch { return new Set(); }
     }
-    function _saveDismissedNotifIds(set) {
-      try {
-        // Cap to last 500 IDs to prevent unbounded localStorage growth.
-        const arr = Array.from(set).slice(-500);
-        localStorage.setItem(LS_DISMISSED_NOTIFS, JSON.stringify(arr));
-      } catch {}
-    }
+    // (_saveDismissedNotifIds was removed with the server-side dismissal —
+    //  the set has no writer by design. See clearVisibleNotifs.)
     function _visibleNotifs() {
       const dismissed = _getDismissedNotifIds();
       return (_notifState || []).filter(n => !dismissed.has(n.id));
@@ -4673,10 +4670,29 @@
       });  // e.g. "Apr 11, 2:34 PM"
     }
 
+    // SECOND glyph map — the mobile one is mobile/src/components/TopBar.tsx
+    // ROW_GLYPHS, and the two are independent by construction. A type added
+    // there and not here renders as an anonymous grey bell with a dead tap
+    // on web, with no error anywhere. Authoritative list of values:
+    // docs/cross-client-invariants.md § Notification types. Pinned by
+    // mobile/tests/check-notif-glyphs.js, which reads BOTH files.
     function notifTypeIcon(type) {
       if (type === 'trade_match')    return ICON.match;
       if (type === 'trade_accepted') return ICON.check;
       if (type === 'trade_declined') return ICON.x;
+      // notif-inbox-growth, 2026-08-13. Web's ICON set is smaller than
+      // mobile's Chalkline set, so these are the nearest honest matches
+      // rather than a glyph-for-glyph mirror: what has to agree across
+      // clients is that a type is RECOGNISED, not that the two draw the
+      // same path.
+      if (type === 'referral_joined')               return ICON.plus;
+      if (type === 'league_member_joined')          return ICON.plus;
+      if (type === 'league_member_unlocked_trades') return ICON.rank;
+      if (type === 'match_expiring')                return ICON.match;
+      if (type === 'deck_replenished')              return ICON.trade;
+      // Web's ICON set has no `swap`; mobile uses one. Nearest honest
+      // match, and it is still a recognised type rather than a grey bell.
+      if (type === 'counter_offer')                 return ICON.trade;
       return ICON.bell;
     }
 
@@ -4785,23 +4801,40 @@
     }
 
     /**
-     * Locally hide every notification currently visible in the dropdown.
-     * Adds their IDs to a localStorage-backed dismissed set so they don't
-     * reappear on refresh or the next poll. This is a client-only operation
-     * — the server still has the notifications, we just filter them out
-     * everywhere we render or count.
+     * "Clear all" — SERVER-SIDE since 2026-08-13 (operator decision GD-4).
+     *
+     * This used to be client-only: ids went into `ftf_dismissed_notifs` in
+     * localStorage and the rows were filtered out on render. Per browser.
+     * So an account cleared on a laptop was still full on a phone, and
+     * mobile had a third behaviour again (a zustand store that re-hydrated
+     * on the next bell open). One server stamp replaces both — this is a
+     * RECONCILIATION, deliberately not a third mechanism.
+     *
+     * The legacy localStorage set is still READ (_visibleNotifs), never
+     * written. Dropping the read would resurrect every row this browser
+     * cleared before today, which is the same broken promise pointed the
+     * other way. It ages out on its own as those rows fall past the read
+     * window; nothing needs to migrate it.
+     *
+     * The optimistic local hide runs whether or not the POST lands: a
+     * dropped request costs a re-render on the next poll, which is exactly
+     * today's behaviour, so the button is never unresponsive offline.
      */
-    function clearVisibleNotifs() {
+    async function clearVisibleNotifs() {
       const visible = _visibleNotifs();
       if (visible.length === 0) return;
-      const dismissed = _getDismissedNotifIds();
-      visible.forEach(n => { if (n && n.id != null) dismissed.add(n.id); });
-      _saveDismissedNotifIds(dismissed);
-      // Recompute badge from what's still visible (any newer notifications
-      // that arrived between fetch and clear would still be unread).
-      const remainingUnread = _visibleNotifs().filter(n => !n.is_read).length;
-      _updateNotifBadge(remainingUnread);
+      // Optimistic: drop them from the local cache so the panel empties now.
+      const clearedIds = new Set(visible.map(n => n && n.id).filter(id => id != null));
+      _notifState = (_notifState || []).filter(n => !clearedIds.has(n.id));
+      _updateNotifBadge(_visibleNotifs().filter(n => !n.is_read).length);
       _renderNotifList();
+      try {
+        await apiFetch('/api/notifications/dismiss-all', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({}),
+        });
+      } catch { /* next poll re-renders whatever the server still holds */ }
     }
 
     async function clickNotif(id, type, metadata) {
@@ -4822,26 +4855,49 @@
         _renderNotifList();
       }
 
-      // Navigate to the relevant section
+      // Navigate to the relevant section.
+      //
+      // SECOND tap router — the mobile one is resolveNotificationTarget in
+      // mobile/src/utils/deepLinks.ts. The two are independent, so a kind
+      // routed there and not here is an inert tap on web with nothing in
+      // any log. Kept in the same three groups mobile uses (match / league /
+      // trades) so the two can be diffed by eye.
       closeNotifPanel();
       const meta = (typeof metadata === 'string') ? JSON.parse(metadata) : (metadata || {});
       const matchId = meta.match_id;
 
-      if (type === 'trade_match' || type === 'trade_accepted' || type === 'trade_declined') {
-        // Switch to Find a Trade view (tier 1: Find Trades → Find a Trade)
-        {
-          switchView('trades');
-          // Refresh matches to make sure the target is rendered, then scroll
-          if (matchId) {
-            loadMatches().then(() => {
-              setTimeout(() => {
-                // match rows are rendered as match-card-{id}
-                const el = document.getElementById('match-card-' + matchId);
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }, 200);
-            }).catch(() => {});
-          }
+      const MATCH_TYPES  = ['trade_match', 'trade_accepted', 'trade_declined',
+                            'new_match', 'first_match', 'match_accepted',
+                            'match_expiring', 'counter_offer'];
+      const LEAGUE_TYPES = ['referral_joined', 'league_member_joined',
+                            'league_member_unlocked_trades'];
+      const TRADE_TYPES  = ['deck_replenished'];
+
+      if (MATCH_TYPES.indexOf(type) !== -1) {
+        // FIXED 2026-08-13 (notif-inbox-growth): this branch used to call
+        // switchView('trades') and then scroll to `match-card-<id>` — but
+        // that element is rendered by renderMatchesList into `matches-list`,
+        // which lives inside view-MATCHES (web/index.html). Every match
+        // notification tap therefore showed the Trades view and scrolled an
+        // element inside a hidden one: a dead tap since it shipped. Adding
+        // match_expiring beside it would have inherited the same bug, so it
+        // is corrected here rather than copied.
+        switchView('matches');
+        if (matchId) {
+          loadMatches().then(() => {
+            setTimeout(() => {
+              const el = document.getElementById('match-card-' + matchId);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 200);
+          }).catch(() => {});
         }
+      } else if (LEAGUE_TYPES.indexOf(type) !== -1) {
+        // referral_joined lands here for the same reason it does on mobile:
+        // the person who just joined is now in the league, and so is the
+        // invite ask the user acted on to get them there.
+        switchView('league');
+      } else if (TRADE_TYPES.indexOf(type) !== -1) {
+        switchView('trades');
       }
     }
 

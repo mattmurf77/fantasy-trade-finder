@@ -11,6 +11,20 @@
 
 ---
 
+## 2026-08-13 — Notification inbox growth surface phase 1 (SHIPPED to `main`)
+
+- **Change:** five commits, rebased onto `3b64a44` and merged to `main` on the operator's ship directive (which also resolved the `counter_offer` four-not-five question and ratified the two adjacent dead-tap fixes). Taxonomy registration → backend inbox rows + coalescing + server-side dismiss → both clients (glyphs, routing, instrumentation, empty state) → docs. `express`-equivalent gate posture: **sim gate SKIPPED, `FTF_SKIP_SIM_GATE=1`**, per D-P1-08 restated in the build brief.
+- **Backend:** `pytest backend/tests -q` → **2685 passed / 6 failed / 1 skipped**. The 6 failures are all in `test_rookie_scope.py`, are **pre-existing on `origin/main`** (verified by `git stash`-ing every change and re-running that file alone, which failed identically), and are **local-only**: CI runs Python 3.12 and is green on `main` (`gh run list --workflow ci.yml`); local is 3.14. **Not caused by this work, and not fixed by it.**
+- **New:** `backend/tests/test_notif_inbox_growth.py` — 13 tests over the three things whose failure mode is silent: GD-8 coalescing (one row per league per UTC day, incl. the yesterday boundary and the dismissed-row-is-not-a-target case), the `match_expiring` idempotency gate (incl. cross-type metadata comparison and the fail-closed path), and server-side dismissal (retention, per-user scoping, and that clearing is point-in-time rather than a mute).
+- **Mobile:** `npx tsc --noEmit` exit 0; `bash scripts/testid-lint.sh` OK; `node tests/check-notif-glyphs.js` **5/5**.
+- **`check-notif-glyphs.js` earned its keep on its first run.** It failed immediately on `trade_accepted` / `trade_declined` — the DB writes `f"trade_{outcome}"` while only the push kind `match_accepted` was in `V2_MATCH_KINDS`, so two of the four ORIGINAL inbox types had a glyph and a dead tap. Code review had not caught it; the test did, before any of this shipped.
+- **Web:** `node --check web/js/app.js` clean. **No web test harness exists**, so web's glyph map, tap router and the new `dismiss-all` call are covered only by the parity test's source-text assertions. The `switchView('matches')` fix and the dismiss round-trip have **never executed in a browser**.
+- **NOT verified anywhere:** every row template, the new empty state, the empty-state invite gate, and all three analytics emitters. Nothing has rendered on a simulator or a device. The four backend write sites have not fired against a real DB — their tests exercise the DB helpers directly, not the routes.
+- **Simulator gate + Maestro: WAIVED** under **D-P1-08**, restated by the operator in the build brief. No `qa/sim-runs/last-sim-run.json` written — **not fabricated**.
+- **Standing caveat, unchanged and now one suite worse:** no `check-*.js` suite runs in CI (`.github/workflows/ci.yml` runs pytest, `tsc`, and testid-lint only). `check-notif-glyphs.js` therefore **gates nothing**, on a cross-client enum whose whole failure mode is silence.
+
+---
+
 ## 2026-08-12 — Feedback #300 (position-scoped trade candidates), shipped LIT with gates waived
 
 - **Change:** `5139b45` (PR #112), v1.13.1 **build 106**, both flags **ON**. Backend `medians` field on `/api/league/power-rankings`; mobile divider + Buyer/Seller bands + stacked-roster drill-in + Offer/Target handoff; rules A and B removed ([D-044](DECISIONS.md)); two analytics events.
