@@ -67,5 +67,8 @@ settings.pick-pricing.*
 feedback-inbox.delete.*
 # DraftModeToggle builds ids from a variable prefix (MockChrome.tsx: testID={`${testIDPrefix}.real`})
 draft-room.mode.*
+# MockDraftScreen.tsx: testID={`mock-draft.empty.${emptyReason ?? 'unknown'}`}
+# (the typed-empty branch — #295's mock-draft.empty.user_not_in_draft rides it)
+mock-draft.empty.*
 # mock-entry blocked-panel ids are object properties rendered as testID={block.testID} (MockChrome.tsx)
 mock-entry.*

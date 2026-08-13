@@ -1,0 +1,181 @@
+appId: com.fantasytradefinder.app
+# tc: T-305-M2 — manual mode: toggle, picking-for, one-slot advance
+# profile: draft-pre
+# flags: release
+#
+# WHAT THIS FLOW IS FOR. #305's priority feature, at the level a person can
+# see: the setup sheet offers "You pick for → Every team"; a manual mock
+# stops at pick 1 with the user on the clock FOR ANOTHER TEAM (the
+# `mock-draft.clock.picking-for` sub-line names the choice); one confirmed
+# pick advances exactly ONE slot (never a CPU tail); and the next slot is
+# again the user's to pick. Completion is T-305-02's job (pytest), not this
+# flow's — 12 nondeterministic taps would buy nothing the one-slot-advance
+# assertion doesn't already prove.
+#
+# DETERMINISM: `draft-pre` seeds qa_draft at slot 8 (the seeder's rotate-5
+# derivation over member_order, app user first — mid-order, mirroring the
+# live ffv3 operator position), so picks 1 and 2 both belong to OTHER
+# teams and both `picking-for` assertions cannot race the user's own turn.
+# traded_picks is pinned to 0 in the profile (see d3's header for why).
+tags: [rookie, draft-room, mock]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble (law 10) — identical to d3's.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_draft"
+      - assertVisible:
+          text: ".*qa_draft.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    id: "tab.draft"
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.scroll"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: ".*Not started.*"
+    timeout: 40000
+
+# ── the Mock side ────────────────────────────────────────────────────────
+- tapOn:
+    id: "draft-room.mode.mock"
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.card"
+    timeout: 20000
+- assertNotVisible:
+    id: "mock-entry.blocked.*"
+# Normalise (RUN-9, as in d3): whichever card variant a prior run left, the
+# start action opens the same setup sheet.
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.start-over"
+    commands:
+      - tapOn:
+          id: "mock-entry.start-over"
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.run-it-back"
+    commands:
+      - tapOn:
+          id: "mock-entry.run-it-back"
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.start"
+    commands:
+      - tapOn:
+          id: "mock-entry.start"
+
+# ── setup: 1 round, EVERY TEAM ───────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "mock-setup-sheet"
+    timeout: 20000
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- tapOn:
+    id: "mock-setup.rounds.minus"
+- assertVisible:
+    id: "mock-setup.rounds.value"
+# The #305 control. Selecting it flips the field hint and the footNote to
+# the manual sentences (PRD §4.1, curly apostrophes — source bytes).
+- tapOn:
+    id: "mock-setup.mode.manual"
+- assertVisible: ".*You make each team’s pick, in draft order, from first to last..*"
+- takeScreenshot: rookie-d4-setup-manual-selected
+- tapOn:
+    id: "mock-setup.start"
+
+# ── on the clock, for another team ───────────────────────────────────────
+# A manual create stops at pick 1 with ZERO CPU picks. qa_draft sits at
+# slot 8, so pick 1 is another team's slot and the picking-for sub-line
+# must be there before any tap.
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.on-the-clock"
+    timeout: 40000
+- assertVisible:
+    id: "mock-draft.rail"
+- assertVisible:
+    id: "mock-draft.clock.picking-for"
+- assertVisible: "Tap a rookie below, then confirm."
+- takeScreenshot: rookie-d4-picking-for-pick-1
+
+# ── one pick, one-slot advance ───────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "mock-draft.undrafted-row..*"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- tapOn:
+    id: "mock-draft.undrafted-row..*"
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.confirm"
+    timeout: 20000
+- tapOn:
+    id: "mock-draft.confirm.draft"
+# ═══ T-305-M2's acceptance: the advance was exactly ONE slot. The clock
+#     meta reads `round 1 · pick 2 of 12 · 1 picks made` — a CPU tail would
+#     have run the count past 2, and a repaired-but-cpu mock would sit at
+#     the user's own slot with no picking-for sub-line. ═══
+- extendedWaitUntil:
+    visible:
+      id: "mock-draft.on-the-clock"
+    timeout: 40000
+- assertVisible: ".*pick 2 of 12.*"
+- assertVisible:
+    id: "mock-draft.clock.picking-for"
+- takeScreenshot: rookie-d4-picking-for-pick-2
+
+# ── teardown, not completion ─────────────────────────────────────────────
+- assertVisible:
+    id: "mock-draft.end"
+- tapOn:
+    id: "mock-draft.end"
+# Native Alert — iOS draws the buttons, no testID exists; multi-line
+# `text:` form is the documented exemption (see d3).
+- tapOn:
+    text: "End mock"
+- extendedWaitUntil:
+    visible:
+      id: "mock-entry.start"
+    timeout: 30000
+- takeScreenshot: rookie-d4-surface-cleared

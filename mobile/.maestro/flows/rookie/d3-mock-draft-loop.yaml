@@ -1,38 +1,43 @@
 appId: com.fantasytradefinder.app
-# tc: T-291-01 / T-291-03 — the mock loop, end to end, twice.
-# profile: standard + ffv3-predraft corpus merged into the fixture dir
-#          (identical to d2 — see the PRECONDITION note below)
-# flags: draft.room ON, draft.mock ON, draft.tab ON, draft.rank_inline OFF
+# tc: T-291-01 / T-291-03 / T-295-M1 — the mock loop, end to end, twice,
+#     with the user provably ON THE CLOCK before any tap.
+# profile: draft-pre
+# flags: release
 #
-# WHAT THIS FLOW IS FOR. Two acceptances the pytest suite structurally cannot
-# reach, because both are about what a person can SEE and DO:
+# WHAT THIS FLOW IS FOR. Three acceptances the pytest suite structurally
+# cannot reach, because all three are about what a person can SEE and DO:
+#
+#   #295  ".*You’re on the clock.*" BEFORE any row is tapped (curly
+#         apostrophe — Maestro matches source bytes). The shipped mock NEVER
+#         put a live-league user in their own draft: `owners` was built from
+#         the caller-excluded `league.members`, so every mock was born
+#         complete with zero user picks. #291's flow asserted the tap
+#         affordance and never asserted WHOSE turn it was — it would have
+#         passed on the defect. This assertion is the repair's UI
+#         acceptance: the user is in the draft, on the clock, at a real
+#         slot, before ever touching the board.
 #
 #   #291  `assertVisible: "Tap to draft"` BEFORE any row is tapped. The pick
 #         path always worked; the defect was that a tappable mock row looked
 #         exactly like a read-only Draft Room row until after it had been
-#         tapped. A tap-then-assert flow passes on that bug — the assertion
-#         has to land while the board is still untouched.
+#         tapped.
 #
-#   #292  The loop runs TWICE, and the second recap is dismissed. Completed
-#         mocks accumulate one row per finished mock and only the newest was
-#         ever reachable, so a per-row dismissal merely uncovered mock N-1.
-#         With two completed mocks on file, ONE dismissal must return the
-#         room to "No mock running" — not to the previous recap. That is why
-#         this flow is not one lap.
+#   #292  The loop runs TWICE, and the second recap is dismissed. With two
+#         completed mocks on file, ONE dismissal must return the room to
+#         "No mock running" — not to the previous recap.
 #
-# ⚠ PRECONDITION, inherited from d1/d2 and NOT introduced here.
-#   `backend/tests/fixtures/profiles/standard.json` declares exactly one
-#   league (990000000000000001). d1, d2 and this flow all target
-#   1312140920132497408, which appears in no profile, and the "corpus merged
-#   into the fixture dir" step those headers assume is unimplemented. Until
-#   the ffv3 league is added to a profile's `leagues[]`, step 2 below cannot
-#   find its row. Sized and raised in
-#   docs/feedback/items/290-mock-draft-engine/status.md — the fix is one
-#   profile entry and it repairs d1/d2 as a side effect.
+# RETARGET (#295 build): the old header pointed at the ffv3 league
+# (1312140920132497408), which appeared in no profile — the PRECONDITION
+# block it carried is repaired by this retarget, not worked around.
+# `draft-pre` is the purpose-built world: 12-team Sleeper league
+# 990000000000000001, status pre_draft, order assigned (qa_draft seeded at
+# slot 8 — mid-order, mirroring the live ffv3 operator position), and
+# traded_picks pinned to 0 so qa_draft's round-1 slot is not traded away
+# (with the seeder's traded formula, ANY nonzero count trades roster 1's
+# round-1 pick out and a 1-round mock would complete at create).
 #
 # Rounds are stepped 4 -> 1 so the user makes exactly ONE pick per lap and
-# the CPU tail resolves straight into the recap. ffv3's top-level `rounds` is
-# null; the 4 lives in `settings.rounds`.
+# the CPU tail resolves straight into the recap.
 tags: [rookie, draft-room, mock]
 ---
 - launchApp:
@@ -43,59 +48,89 @@ tags: [rookie, draft-room, mock]
     visible:
       id: "signin.username-input"
     timeout: 15000
+# Retry-hardened sign-in preamble (law 10): prove the typed username landed
+# BEFORE submitting — a raced inputText submits a partial name and books a
+# real VCR miss. `eraseText` first keeps retries idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_draft"
+      - assertVisible:
+          text: ".*qa_draft.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
 - tapOn:
-    id: "signin.username-input"
-- inputText: "qa_standard"
-- tapOn:
-    id: "signin.continue-btn"
-- extendedWaitUntil:
-    visible:
-      id: "leagues.row.1312140920132497408"
-    timeout: 30000
-- tapOn:
-    id: "leagues.row.1312140920132497408"
+    id: "leagues.row.990000000000000001"
 - extendedWaitUntil:
     visible:
       id: "tab.trades"
-    timeout: 30000
-
-- tapOn:
-    id: "tab.league"
+    timeout: 60000
+# Settle before switching tabs (law 8): the tab bar paints seconds before
+# routing settles and the Rank stack steals the tap back.
 - extendedWaitUntil:
     visible:
-      id: "league-summary.league-home"
-    timeout: 20000
+      id: "rank.more-ways"
+    timeout: 60000
+- waitForAnimationToEnd
 - tapOn:
-    id: "league-summary.league-home"
-- scrollUntilVisible:
-    element:
-      id: "league.draft-room-row"
-    direction: DOWN
-    timeout: 25000
-    visibilityPercentage: 100
-    speed: 30
-    centerElement: true
-- tapOn:
-    id: "league.draft-room-row"
+    id: "tab.draft"
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.scroll"
+    timeout: 60000
+# "Not started" is STATE_LABEL.upcoming — a fixture drifting back to a live
+# board fails HERE, naming the cause, not later on a blocked entry card.
+- extendedWaitUntil:
+    visible:
+      text: ".*Not started.*"
+    timeout: 40000
 
 # ── the Mock side of the room ────────────────────────────────────────────
-- extendedWaitUntil:
-    visible:
-      id: "draft-room.mode.mock"
-    timeout: 30000
 - tapOn:
     id: "draft-room.mode.mock"
 - extendedWaitUntil:
     visible:
       id: "mock-entry.card"
     timeout: 20000
-- assertVisible:
-    id: "mock-entry.start"
-- takeScreenshot: rookie-d3-mock-entry
+- assertNotVisible:
+    id: "mock-entry.blocked.*"
+# Normalise (RUN-9): the seeder does not clear `mock_drafts` between runs,
+# so a re-run may find an active mock (Resume / Start over) or a leftover
+# recap (run-it-back) instead of the virgin card. The three card variants
+# are mutually exclusive and every start action routes to the same onStart,
+# so at most one of these conditionals fires and all three end with the
+# setup sheet opening.
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.start-over"
+    commands:
+      - tapOn:
+          id: "mock-entry.start-over"
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.run-it-back"
+    commands:
+      - tapOn:
+          id: "mock-entry.run-it-back"
+- runFlow:
+    when:
+      visible:
+        id: "mock-entry.start"
+    commands:
+      - takeScreenshot: rookie-d3-mock-entry
+      - tapOn:
+          id: "mock-entry.start"
 
 # ── lap 1 ────────────────────────────────────────────────────────────────
-- tapOn:
-    id: "mock-entry.start"
 - extendedWaitUntil:
     visible:
       id: "mock-setup-sheet"
@@ -119,8 +154,11 @@ tags: [rookie, draft-room, mock]
     timeout: 40000
 - assertVisible:
     id: "mock-draft.rail"
-# ═══ #291's acceptance. This assertion runs BEFORE any row has been
-#     tapped — that is the whole point of it. ═══
+# ═══ #295's UI acceptance. The clock claims the USER'S turn — #291's flow
+#     never did. Curly apostrophe: the source byte in MockDraftScreen. ═══
+- assertVisible: ".*You’re on the clock.*"
+# ═══ #291's acceptance. These assertions run BEFORE any row has been
+#     tapped — that is the whole point of them. ═══
 - assertVisible: "Tap to draft"
 - assertVisible: "Tap a rookie below, then confirm."
 - takeScreenshot: rookie-d3-affordance-before-tap
@@ -177,6 +215,7 @@ tags: [rookie, draft-room, mock]
     visible:
       id: "mock-draft.on-the-clock"
     timeout: 40000
+- assertVisible: ".*You’re on the clock.*"
 
 - scrollUntilVisible:
     element:

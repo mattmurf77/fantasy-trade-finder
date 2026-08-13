@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "draft-pre",
-  "description": "The PRE-DRAFT twin of the `draft` profile: same 12-team SF TEP league and same 4-round snake, but status pre_draft, ZERO picks made, order already assigned. It exists because the mock draft is unreachable on every other profile \u2014 DraftRoomScreen refuses with mock-entry.blocked.live whenever board.state === 'live' (a mock snapshots its pool at creation and INV-10 forbids any later platform read, so one started mid-draft would keep offering players the league already took). `draft` is status drafting and `espn` derives live from recorded picks, so both block; only an upcoming board leaves mock-entry.start tappable. draft_order stays populated so the mock resolves a REAL order (order_source platform, not the randomized shuffle) \u2014 which is also the pre_draft state the seeder allows draft_order:false against, if the order-unknown board is ever wanted too. The undrafted list is the full 56-player rookie class: nothing is drafted, so no rookie is on a roster.",
+  "description": "The PRE-DRAFT twin of the `draft` profile: same 12-team SF TEP league and same 4-round snake, but status pre_draft, ZERO picks made, order already assigned. It exists because the mock draft is unreachable on every other profile \u2014 DraftRoomScreen refuses with mock-entry.blocked.live whenever board.state === 'live' (a mock snapshots its pool at creation and INV-10 forbids any later platform read, so one started mid-draft would keep offering players the league already took). `draft` is status drafting and `espn` derives live from recorded picks, so both block; only an upcoming board leaves mock-entry.start tappable. draft_order stays populated so the mock resolves a REAL order (order_source platform, not the randomized shuffle) \u2014 which is also the pre_draft state the seeder allows draft_order:false against, if the order-unknown board is ever wanted too. The undrafted list is the full 56-player rookie class: nothing is drafted, so no rookie is on a roster. SEEDED-WORLD PINS (#295/#296/#305, flows d3/d4): (1) qa_draft's round-1 slot is 8 \u2014 the seeder's rotate-5 derivation over member_order with the app user first places index 0 at slot 8 for a 12-team league, which keeps the user off slots 1\u20132 (d4's two picking-for assertions are deterministic) and mid-order (mirrors the live ffv3 operator position); this is generator-guaranteed, verified against seed_ui_test_db.py's uid_by_slot. (2) traded_picks is 0, NOT the old 6: the seeder's traded formula (orig_rid = i%teams+1, round = i%rounds+1) trades roster 1's round-1 pick away at i=0, and roster 1 IS qa_draft \u2014 with any nonzero count the user owns no round-1 slot, a 1-round mock completes at create, and d3's on-the-clock assertion can never pass. Traded-pick coverage lives in the pytest draft corpora (lakeview), not in this world.",
   "season": 2026,
   "flags_base": "release",
   "flag_overrides": {
@@ -80,7 +80,7 @@
         "type": "snake",
         "status": "pre_draft",
         "picks_made": 0,
-        "traded_picks": 6,
+        "traded_picks": 0,
         "draft_order": true
       }
     }
