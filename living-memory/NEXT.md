@@ -9,9 +9,28 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-13 — Notification inbox follow-ons
+
+Phase 1 is built on `feat/notif-inbox-growth` and unmerged (see [`HANDOFF.md`](HANDOFF.md)). These are what comes after it, in order.
+
+1. **Run one `npm run` step for the `check-*.js` suites in CI.** *(S, and overdue)* Seven structural suites — now including `check-notif-glyphs.js`, which guards a cross-client enum whose only failure mode is a silent grey bell — are `npm run`-only, so **none of them gates anything**. This has been noted in the ledger for three sessions running. `.github/workflows/ci.yml` already has a node job with `npm ci`.
+
+2. **Post-deploy analytics probe for the three `notif_*` names.** *(S, blocks reading any of it)* Registration is unproven until each name round-trips through `POST /api/events` **with `X-Device-Id` set** — without the header the response is `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has `dropped == 0` and reads as a pass. Then leave `notif_inbox_opened` alone for 14 days: **the riskiest assumption in the whole exercise is that anyone opens the bell**, and it is completely unmeasured before this ships.
+
+3. **Phase 2 — `referral_joined` push** (GD-5, `trade_matches` bucket, operator-only allowlist). Gated on the push rollout, not on phase 1.
+
+4. **`counter_offer` has no emitter.** *(operator/product call)* The kind is plumbed end to end — bucket, both clients' glyphs, both clients' routing — and nothing in the backend ever fires it. Either a counter-offer feature is wanted, or the kind should be retired rather than left looking implemented.
+
+5. **Roster-diff feasibility check for a re-rank prompt.** *(eng-backend, blocks GD-6)* Does league sync expose a usable roster diff? Phase-3 prompts wait on this **and** on item 2 showing the bell is used at all. A calendar-triggered re-rank is explicitly rejected — that is the `deck_replenished` mistake with a different noun.
+
+6. **6 failing `test_rookie_scope.py` tests on `origin/main`.** *(unowned)* Pre-date this branch, verified by stashing. Nobody is tracking them.
 
 ---
 

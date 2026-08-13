@@ -9,11 +9,69 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Notification inbox growth surface built on a branch, unmerged](#2026-08-13--notification-inbox-growth-surface-built-on-a-branch-unmerged)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-13 — Notification inbox growth surface built on a branch, unmerged
+
+### Where I am right now
+
+`feat/notif-inbox-growth`, four commits off `origin/main` @ `4c67309`. **Complete, green, and
+not merged.** Built from the pm-growth brief + operator decisions GD-1…GD-8; scope block and
+tracking plan in [`../docs/plans/notif-inbox-growth/`](../docs/plans/notif-inbox-growth/).
+
+| Commit | What |
+|---|---|
+| `9d5943e` | pm-growth brief carried over + scope block + tracking plan |
+| `ce4e268` | analytics registration ONLY — no emitter |
+| `4de44fd` | backend: 4 inbox writes, GD-8 coalescing, server-side dismiss + column |
+| `04ee442` | both clients: glyphs, routing, instrumentation, empty state, Clear all |
+
+### Decisions that need the operator, before merge
+
+1. **`counter_offer` has no emitter anywhere in the backend.** The brief listed it as one of
+   five `create_notification` sites "beside the existing `_send_typed_push` call". There is no
+   such call — it is a bucket mapping (`database.py`) and two client kind sets, nothing more.
+   Built as **four** write sites; `counter_offer` got glyph + routing only. If a counter-offer
+   feature is meant to exist, that is its own item.
+2. **Two adjacent fixes I made rather than shipped new code beside.** (a) mobile routing for
+   `trade_accepted`/`trade_declined` — two of the four ORIGINAL inbox types had a dead tap,
+   because only the push kind `match_accepted` was listed. (b) web's `clickNotif` routed match
+   rows to the Trades view while scrolling an element inside the hidden Matches view. Both are
+   outside the literal brief; both would have been inherited by the new rows.
+
+### What has never run
+
+Every row template, the empty state, the invite gate and all three analytics emitters are
+**unexecuted** — no simulator, no device, no browser. Sim gate + Maestro waived under D-P1-08.
+The backend write sites are covered at the DB-helper level, not through their routes.
+
+### Next moves
+
+- Merge to `main` (Render auto-deploys; the mobile half needs a build to reach TestFlight).
+- **Post-deploy analytics probe.** Registration is unproven until the three names round-trip
+  through `POST /api/events` with `X-Device-Id` set — without that header the response is
+  `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has `dropped == 0` and
+  reads as a pass.
+- Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
+  At 3–5 users these are **directional reads, not experiments**.
+
+### Blocking nothing, but owed
+
+- **`.github/workflows/ci.yml` runs no `check-*.js` suite.** `check-notif-glyphs.js` gates
+  nothing, on a cross-client enum whose entire failure mode is silence. Seven suites now sit
+  in that position. One `npm run` step would fix it.
+- **6 `test_rookie_scope.py` failures are live on `origin/main`** and predate this branch
+  (verified by stashing). Nobody appears to be tracking them.
+- A stash `stash@{0}` (`wip-session-169-living-memory`) holds another session's uncommitted
+  living-memory + `.claude/settings.local.json` edits from `session-2026-08-11-169`. I moved
+  them aside to branch cleanly and did **not** apply them here. They are still there.
 
 ---
 
