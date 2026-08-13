@@ -135,6 +135,24 @@ NON_INTENT_EVENTS = frozenset({
     # decision, and the growth action this whole round exists to measure).
     "share_package_created",
     "invite_cta_shown",
+    # ── #295/#296/#305 mock-draft family, 2026-08-13 — added in the SAME
+    # commit that registered the family in ALLOWED_CLIENT_EVENTS, for the
+    # reason stated at the top of this block (INTENT is derived by
+    # subtraction; a NON_INTENT name registered without its deny-list row
+    # silently step-changes DAU/retention from ship day). Per-event:
+    #
+    #   mock_completed — an OUTCOME, not an action. The final tap is
+    #     already counted by its own mock_pick_made (INTENT); this row only
+    #     witnesses the status flip and would double-count the user-day.
+    #
+    #   mock_create_refused — the IMPRESSION of a refusal. The user's tap
+    #     is already counted by the create attempt's surrounding intent
+    #     events; the refusal itself is something done TO the user.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: mock_started,
+    # mock_pick_made, mock_abandoned — all three are real user decisions.
+    "mock_completed",
+    "mock_create_refused",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
