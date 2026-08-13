@@ -373,12 +373,29 @@ interface RawContrarianResponse {
 }
 export async function getContrarianLeaderboard(
   leagueId: string,
-): Promise<{ rows: ContrarianRow[]; insufficient_data: boolean; message?: string }> {
+): Promise<{
+  rows: ContrarianRow[];
+  insufficient_data: boolean;
+  message?: string;
+  ranked_users?: number;   // #308 — in-format users with rankings, caller INCLUDED
+  needed?: number;         // #308 — 3 - ranked_users (server-computed)
+  format?: string;         // #308 — echo of the format the server gated on
+}> {
   const raw = await api.get<RawContrarianResponse>(
     `/api/league/contrarian?league_id=${encodeURIComponent(leagueId)}`,
   );
   if (raw?.insufficient_data) {
-    return { rows: [], insufficient_data: true, message: raw.message };
+    // #308 — thread the insufficient payload's own numbers through so the
+    // fold line can state the real gate (in-format members, live count)
+    // instead of a static sentence contradicting the any-format bar above.
+    return {
+      rows: [],
+      insufficient_data: true,
+      message: raw.message,
+      ranked_users: raw.ranked_users,
+      needed: raw.needed,
+      format: raw.format,
+    };
   }
   // Aggregate per user: collect every (user_id, deviation) tuple across all
   // four position blocks (both contrarian and consensus halves — they're the

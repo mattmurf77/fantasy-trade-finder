@@ -230,8 +230,13 @@ export default function LeagueScreen() {
     placeholderData: (prev) => prev,
   });
 
+  // #308 — the contrarian verdict varies with the session's active scoring
+  // format (the server gates on in-format boards), so the key must carry it
+  // like the sibling `progress` key below; without it a format toggle
+  // serves the other format's verdict for up to 5 minutes.
+  const activeFormat = useSession((s) => s.activeFormat);
   const contrarianQuery = useQuery({
-    queryKey: ['league-contrarian', leagueId],
+    queryKey: ['league-contrarian', leagueId, activeFormat],
     queryFn:  () => getContrarianLeaderboard(leagueId!),
     enabled:  !!leagueId,
     staleTime: 5 * 60_000,
@@ -248,7 +253,6 @@ export default function LeagueScreen() {
 
   // #229/#230 — the progress module's ring needs per-position ranking
   // state. Same keys as the Rank surfaces so the cache is shared.
-  const activeFormat = useSession((s) => s.activeFormat);
   const progressQuery = useQuery({
     queryKey: ['progress', leagueId, activeFormat],
     queryFn:  getProgress,
@@ -619,7 +623,9 @@ export default function LeagueScreen() {
         ) : null}
 
         {/* Matches roll-up — tiles route to the Matches tab (FB-37), each
-            deep-linking into its own segment (FB-91). `at` forces the param
+            deep-linking into its own segment (FB-91) scoped to THIS league
+            (#307 — `leagueId` sets MatchesScreen's league filter chip; the
+            active league is always in its chip row). `at` forces the param
             effect to re-fire when the same tile is tapped twice. #229
             zero-fold: both-zero tiles collapse into the progress module's
             unlock line and return once either count is > 0. */}
@@ -628,18 +634,20 @@ export default function LeagueScreen() {
             <TickLabel>Matches</TickLabel>
             <View style={styles.statRow}>
               <StatCard
+                testID="league.matches-mutual-tile"
                 label="Mutual matches"
                 sub="Liked by both sides"
                 value={summaryPending ? '—' : matchesMutual}
                 icon="match"
-                onPress={() => { tapAction('matches_mutual'); navigation.navigate('Matches', { segment: 'mutual', at: Date.now() }); }}
+                onPress={() => { tapAction('matches_mutual'); navigation.navigate('Matches', { segment: 'mutual', leagueId, at: Date.now() }); }}
               />
               <StatCard
+                testID="league.matches-awaiting-tile"
                 label="Awaiting them"
                 sub="Your like, waiting on theirs"
                 value={summaryPending ? '—' : matchesAwaiting}
                 icon="eye"
-                onPress={() => { tapAction('matches_awaiting'); navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() }); }}
+                onPress={() => { tapAction('matches_awaiting'); navigation.navigate('Matches', { segment: 'awaiting', leagueId, at: Date.now() }); }}
               />
             </View>
           </>
@@ -820,6 +828,10 @@ export default function LeagueScreen() {
               rankedMates={rankedOpps}
               totalTeams={totalTeamsN}
               showFoldLine={contrarianInsufficient}
+              /* #308 — the insufficient payload's own numbers drive the
+                 fold-line copy (in-format members, live remaining count). */
+              foldNeeded={contrarianQuery.data?.needed ?? null}
+              foldFormat={contrarianQuery.data?.format ?? null}
               onRankPlayers={goRank}
               /* P1-5 / PR-8 — the promoted card SUPPRESSES this inline link
                  rather than coexisting with it. Omitting the prop is the
@@ -1056,9 +1068,9 @@ function StatusChip({ label, color, icon, dim }: {
   );
 }
 
-function StatCard({ label, sub, value, icon, onPress }: {
+function StatCard({ label, sub, value, icon, onPress, testID }: {
   label: string; sub?: string; value: number | string; icon: IconName;
-  onPress?: () => void;
+  onPress?: () => void; testID?: string;
 }) {
   // Pressable when a destination is supplied (FB-37: Matches tiles route
   // to the Matches tab); plain tile otherwise. The chevron icon next to
@@ -1079,6 +1091,7 @@ function StatCard({ label, sub, value, icon, onPress }: {
   if (!onPress) return <View style={styles.statFlex}>{body(false)}</View>;
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       style={styles.statFlex}
       accessibilityRole="button"

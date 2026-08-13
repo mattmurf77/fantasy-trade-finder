@@ -4,7 +4,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { ink, chalk, ice, space, type, fonts } from '../theme/chalkline';
 import { Button, Card, Text } from './chalkline';
-import { matchesUnlockRemaining } from '../utils/leagueUnlocks';
+import { contrarianFoldLine, matchesUnlockRemaining } from '../utils/leagueUnlocks';
 
 // League progress module (#229/#230/#234 — approved mock
 // mockups/polish-lab-2026-08/empty-states-progress-v3.html). ONE card owns
@@ -19,11 +19,14 @@ import { matchesUnlockRemaining } from '../utils/leagueUnlocks';
 // and docs/feedback/items/265-mutual-match-threshold/):
 // - Mutual matches "unlock" once `matchesUnlockRemaining` (utils/
 //   leagueUnlocks.ts) hits 0 — see that module for the #265 threshold fix.
-// - Leaderboards + contrarian ranks return at 3 ranked members total —
-//   the backend /api/league/contrarian threshold; the fold-line copy is
-//   static because the host folds those sections on the server's own
-//   `insufficient_data` flag, not on a client-side recount. This is a
-//   DIFFERENT unlock from mutual matches — don't conflate the two again.
+// - Leaderboards + contrarian ranks return at 3 users with rankings in the
+//   ACTIVE scoring format (caller included) — the backend
+//   /api/league/contrarian threshold. The host folds those sections on the
+//   server's own `insufficient_data` flag, not on a client-side recount,
+//   and the fold-line copy (#308) states the gate's real population via
+//   `contrarianFoldLine(foldNeeded, foldFormat)` — the payload's own
+//   numbers, NOT the any-format bar count above it. This is a DIFFERENT
+//   unlock from mutual matches — don't conflate the two again.
 
 interface Props {
   /** Positions the caller has fully ranked (0–4); null while unknown. */
@@ -36,6 +39,9 @@ interface Props {
   compact?: boolean;
   /** Show the "Leaderboards and contrarian ranks appear…" fold line. */
   showFoldLine?: boolean;
+  /** Fold-line inputs from the contrarian insufficient payload (#308). */
+  foldNeeded?: number | null;
+  foldFormat?: string | null;
   /** Full variant's in-section CTA (solid ice per operator tweak). */
   onRankPlayers?: () => void;
   /** "Invite leaguemates" ghost action (OS share sheet). */
@@ -105,6 +111,8 @@ export default function LeagueProgressModule({
   totalTeams,
   compact = false,
   showFoldLine = false,
+  foldNeeded = null,
+  foldFormat = null,
   onRankPlayers,
   onInvite,
   testID,
@@ -212,9 +220,8 @@ export default function LeagueProgressModule({
           ) : null}
 
           {showFoldLine ? (
-            <Text style={styles.foldLine}>
-              Leaderboards and contrarian ranks appear here once 3 leaguemates
-              have ranked.
+            <Text testID="league.progress-foldline" style={styles.foldLine}>
+              {contrarianFoldLine(foldNeeded, foldFormat)}
             </Text>
           ) : null}
         </View>
