@@ -11,6 +11,8 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-041 | Catching IntegrityError by unique-index name never matches on SQLite | Backend / SQLAlchemy / dialects |
+| G-040 | begin_nested() on the main engine silently COMMITS on SQLite | Backend / SQLAlchemy / dialects |
 | G-039 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
 | G-038 | A ranking method can be a permanent dead end, and nothing reports it | Backend / unlock ladder |
 | G-037 | An unlock-proving fixture that seeds `unlocked: true` proves nothing | Backend / test fixtures / monotonic floor |
@@ -316,6 +318,18 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Fix:** anchor every root-level entry with a leading slash (`/screens/`). Landed as `53bd19f`; build 101 from that commit finished and submitted.
 - **Prevention:** **a green local bundle cannot clear an archive-scoped failure** — do not let it talk you out of reading the real log. Two further traps found on the way in: `eas build` **exits 0 even when the remote build ERRORS** (verify with `eas-cli build:list --json` and read `status`), and the build logs are **brotli**-encoded, so the CLI will not render them post-hoc and `curl --compressed` fails — fetch `logFiles[0]` from `eas-cli build:view <id> --json` (signed URL, ~15 min TTL) and decompress with node's `zlib.brotliDecompressSync`.
 - **History:** **second instance of this bug class in this same file.** An earlier version globbed `*.png` and stripped the app icon and splash assets, failing the identical phase. The rule is now stated at the top of `.easignore` rather than left implied by a war story. A worktree-vs-clone hypothesis cost a whole build cycle before the log was read — building from a linked git worktree was **ruled out** as a cause.
+### G-040 — `begin_nested()` on the main engine silently COMMITS on SQLite
+- **Symptom:** a `with engine.begin():` block that uses a SAVEPOINT (`conn.begin_nested()`) and later raises to roll the whole transaction back... leaves the savepointed rows **committed to disk** anyway. No error. Tests that assert "no orphan row after rollback" fail only on SQLite, and only on the main engine.
+- **Cause:** the pysqlite savepoint recipe (`isolation_level = None` + explicit `BEGIN` on the `"begin"` event) is attached **only to `ingest_engine`** (`backend/database.py:92-99` — its comment says "SEPARATE listener — do NOT attach"). The main `engine` (`:62`) has no recipe, so pysqlite emits no `BEGIN`, the `SAVEPOINT` becomes the *outermost* transaction, and `RELEASE` commits. Measured 2026-08-13 on SQLAlchemy 2.0.49 / SQLite 3.50.4: default engine leaves the row; an engine carrying the recipe rolls back clean.
+- **Fix:** don't use `begin_nested()` on the main engine's SQLite path. Where Postgres needs a SAVEPOINT to survive a caught `IntegrityError` (it aborts the txn; SQLite does **not** — a post-error SELECT succeeds), branch on `engine.dialect.name == "postgresql"` — the device-auth LLD §4.1 step 14 is the worked example.
+- **Prevention:** SQLite *not* aborting on constraint errors is the mirror trap: code that "works in dev" without the savepoint then breaks on Postgres with `InFailedSqlTransaction`. Any `IntegrityError` handler that issues further SQL must be tested **on both dialects**, dialect-parameterised, not assumed portable.
+### G-041 — catching `IntegrityError` by unique-index name never matches on SQLite
+- **Symptom:** an `except IntegrityError` that discriminates with `"ux_my_index" in str(e)` handles the duplicate correctly on Postgres and **re-raises as a 500 on SQLite** — i.e. on dev/test/CI, exactly where the ordinary duplicate-tap case runs.
+- **Cause:** the two dialects name **different identifiers for the same event**. Postgres: `duplicate key value violates unique constraint "ux_my_index"` (index name; also structured as `e.orig.diag.constraint_name`, SQLSTATE 23505). SQLite: `UNIQUE constraint failed: table.column` — **the column, never the index name**. Measured 2026-08-13 (PG 18.3 / SQLite 3.50.4).
+- **Fix:** dialect-asymmetric matching — PG on SQLSTATE + `diag.constraint_name`; SQLite on the `UNIQUE constraint failed:` prefix + the `table.column` token.
+- **Prevention:** the asymmetry is **unique-indexes only**: CHECK constraint names and NOT-NULL column names ARE reported by both dialects, so a startup assertion or handler keyed on a CHECK name is portable. Named CHECK constraints are therefore the more testable choice where either would do.
+
+---
 
 ---
 
