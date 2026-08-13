@@ -41,6 +41,16 @@ ESPN and MFL transports (release 2 / HLD D5 — MFL login is its own device-buil
 | **I8** | Capability negotiation + typed `426 upgrade_required`. |
 | **I9** | `sleeper_credentials` retained; the token write is gated, not deleted. |
 
+**Metric shorthand used throughout**, from the PRD's metrics table (PRD:78-84) — spelled out here because the PRD *also* overloads M1–M4 as migration milestones at PRD:100-103, and A2 withdrew that phasing:
+
+| | |
+|---|---|
+| **M1** | count of `sleeper_credentials` rows in the device-custody cohort — target zero |
+| **M4** | device guard refusals — **any non-zero value is an incident**, not a metric |
+| **M8** | leases issued vs outcomes reported; divergence means devices are going silent |
+
+M5 and M6 do not exist in the PRD table and are not referenced here.
+
 ### 1.4 Load-bearing existing code
 
 | Fact | Evidence |
@@ -56,7 +66,9 @@ ESPN and MFL transports (release 2 / HLD D5 — MFL login is its own device-buil
 | Sticky revocation keys off `connected: false` today | `mobile/src/api/sendInSleeper.ts:153-158` |
 | `sleeper.link.jwt` is written with **no** `keychainAccessible` | `mobile/src/api/sendInSleeper.ts:72,81-84` |
 | `SLOW_POST_PATHS` = 30 s; default POST = 15 s; `NO_RETRY_PATHS` applies to **GETs only** | `mobile/src/api/client.ts:230-248` |
-| Sentry `tracesSampleRate: 0.2`, no `beforeSend` anywhere in `mobile/src` | `mobile/src/observability/sentry.ts:41-45` |
+| Sentry `tracesSampleRate: __DEV__ ? 1.0 : 0.2`, no `beforeSend` anywhere in `mobile/src` | `mobile/src/observability/sentry.ts:41-45` |
+| `X-Device-Id` is **not** a global header — it is attached per call site | `mobile/src/api/client.ts:51-55` vs `auth.ts:39,97,590` |
+| `TextDecoder`, `atob`, `btoa`, `Buffer`, `base64-js`: **zero occurrences** in `mobile/src` | verified 2026-08-13 |
 | `is_enabled` is a **process-global boolean**, no per-caller dimension | `backend/feature_flags.py:768-770` |
 | Tester allowlist keyed on `device:<X-Device-Id>` is the existing per-device gate | `backend/server.py:18131-18145` |
 | Migration idiom: `create_all()` then per-column `ALTER` in its own txn | `backend/database.py:2706-2709`, `1980-1988` |
@@ -71,7 +83,7 @@ Flagged because each changes the schema or rollout plan, not merely the wording.
 
 > **Resolution:** the device-custody link lives in `platform_links` and **no `sleeper_credentials` row is written at all**. Strictly less migration risk, same steady state.
 
-**(b) There is no `verified_at` column on `sleeper_credentials`.** It exists only on `espn_credentials` (`backend/database.py:1316-1320`). Sleeper verification state lives in the session (`sess["verified"]`, `backend/server.py:12491`) and in `users.verified_via` (`backend/server.py:12500`). `platform_links` carries its own `verified_at`; nothing is added to `sleeper_credentials`.
+**(b) There is no `verified_at` column on `sleeper_credentials`.** It exists only on `espn_credentials` (`backend/database.py:1338`; the narrowness comment governing it is `:1326-1329`). Sleeper verification state lives in the session (`sess["verified"]`, `backend/server.py:12491`) and in `users.verified_via` (`backend/server.py:12500`). `platform_links` carries its own `verified_at`; nothing is added to `sleeper_credentials`.
 
 **(c) The token-write suppression cannot be a global flag.** `is_enabled` is process-global (`backend/feature_flags.py:768-770`), so a global "stop writing tokens" flag breaks **every binary in the field simultaneously** — including the ones that cannot be fixed. The gate is the client's declared capability (§2.1), with a flag layered on top as a kill switch. This is elaborated in §4.5 and §7.2, and it is the single most consequential correction in this document.
 
@@ -162,7 +174,7 @@ Mints a single-use, server-recorded authorization for **one** outbound platform 
 | 404 | `feature_disabled` | `trade.send_in_sleeper` or `platform.device_transport` off |
 | 409 | `no_device_credential` | no live `platform_links` row for (user, `sleeper`), or a `device_id` mismatch |
 | 409 | `credential_rejected` | `platform_links.rejected_at` set (R8) |
-| 409 | `send_in_flight` | an open lease with the same `request_digest` exists |
+| 409 | `send_in_flight` | an open lease with the same `request_digest` exists. **Body carries `{error, lease_id, issued_at, retry_after_s}`** — `retry_after_s` derived from the holder's `digest_until`, since that is when the sweep will release it |
 | 409 | `too_many_outstanding` | open leases ≥ `MAX_OUTSTANDING_LEASES` |
 | 413 | `body_too_large` | built body > `MAX_BODY_BYTES` |
 | 426 | `upgrade_required` | §2.1 |
@@ -181,7 +193,7 @@ and refuses the lease outright if any other name appears (which subsumes `author
 
 `x-sleeper-graphql-op` travels because Sleeper's own client sends it (`backend/sleeper_write.py:287`) and is explicitly non-authoritative for the guard.
 
-**`_BROWSER_HEADERS` (`backend/sleeper_write.py:50-58`) cannot appear in a lease** — `user-agent`, `origin`, `referer` are not on the allowlist. That is the compiled expression of PRD §2.4's "do not port `_BROWSER_HEADERS` to the device."
+**The Chrome-spoofing headers cannot appear in a lease** — `user-agent`, `origin`, `referer` and `accept-language` are not on the allowlist. That is the compiled expression of PRD §2.4's "do not port `_BROWSER_HEADERS` to the device." Stated as those four names rather than as "`_BROWSER_HEADERS`" because `accept` is *also* a member of that dict (`backend/sleeper_write.py:57`) and **is** allowlisted, so the blanket claim would not survive a reader checking `sleeper_write.py:50-58`.
 
 ### 2.3 `POST /api/platform/outcome`
 
@@ -194,16 +206,18 @@ Auth: session required. **Not** gated on `sess["verified"]` — a report is not 
 ```ts
 {
   lease_id: string;
-  result: 'ok' | 'http_error' | 'network_error' | 'aborted_before_send'
-        | 'refused_by_guard' | 'no_credential';
+  result: 'ok' | 'http_error' | 'network_error' | 'aborted_before_send' | 'refused';
   http_status?: number | null;    // iff result is 'ok' | 'http_error'
   response_b64?: string | null;   // RAW platform bytes, UNPARSED (I1), capped
   truncated?: boolean;            // device hit max_response_bytes
-  guard_reason?: string | null;   // §4.2 enum, iff 'refused_by_guard'
+  refusal?: SendRefusal | null;   // iff result === 'refused'. §2.6 enum. THE DISCRIMINATOR.
+  guard_reason?: GuardRefusal|null; // iff refusal === 'guard_refused'. §4.2 enum.
   request_digest?: string | null; // advisory echo; compared and logged, never authoritative
   duration_ms?: number | null;
 }
 ```
+
+> **`refusal` is not optional decoration — without it three things in this document are unbuildable.** An earlier draft had `result: 'refused_by_guard'` with only `guard_reason`, typed to the `GuardRefusal` enum, which contains no transport-layer member. That shape can express *none* of §2.6's ten `SendRefusal` values. Concretely: (i) §4.3's rule that any refusal at steps 1–9 reports before the network — so the lock releases immediately — could not hold for a header or epoch refusal, stranding the lease as `unknown` for the full `DIGEST_WINDOW`; (ii) §6.4's negative control counts a `host_not_allowed` refusal, so the merge gate could not be built; (iii) §2.2 promises `authorization` gets its own code "so the I4 case is separately observable," but the server would never learn it — making the single highest-value signal in the threat model invisible to M4. `guard_reason` is now strictly a sub-discriminator of `refusal === 'guard_refused'`.
 
 **200 — identical shape whether this is the first report or the fifth**
 
@@ -238,11 +252,31 @@ Auth: session required. **Not** gated on `sess["verified"]` — a report is not 
 
 Behaviour is selected by the client's declared capability, **not** by a global flag (§1.5c).
 
-| `transport_v` | `sleeper.device_custody` | Token write |
+Suppression fires only when **all** of the following hold — this predicate must be **identical** to the one `/lease` uses at §4.1 step 2, plus a known fingerprint:
+
+```python
+def device_custody_active(caps, user_id, device_id) -> bool:
+    return (caps.transport_v >= 1
+            and caps.ops is not None            # KNOWN fingerprint, not merely a version claim
+            and is_enabled("sleeper.device_custody")
+            and device_transport_enabled(user_id, device_id))   # same helper as /lease
+```
+
+| Client | Condition | Token write |
 |---|---|---|
-| `0` (legacy binary) | any | **writes** `sleeper_credentials` — unchanged, `backend/server.py:12480-12487` |
-| `≥ 1` | off | writes (kill switch: reverts new binaries to old behaviour) |
-| `≥ 1` | on | **does not write**; upserts `platform_links` instead |
+| legacy binary | `transport_v = 0` | **writes** `sleeper_credentials` — unchanged, `backend/server.py:12480-12487` |
+| capable binary | `device_custody_active(...)` false | writes (kill switch, and the fallback for every case below) |
+| capable binary | `device_custody_active(...)` true | **does not write**; upserts `platform_links` instead |
+
+> **Every clause in that predicate closes a way to strand a user with no token row and no working lease.** (i) A binary claiming `transport_v=1` with a fingerprint the server does not recognise — exactly what a staged server rollout produces — would otherwise get device custody at link time and `426` at every lease, killing *both* paths; `caps.ops is not None` sends it down the writing branch instead. (ii) `sleeper.device_custody` is a plain global `is_enabled` with no per-device dimension (`backend/feature_flags.py:768-770`), while `/lease` is allowlist-gated — so without `device_transport_enabled` here, S8 would move every non-operator's credential into a custody mode the server refuses to serve, and their fallback `POST /api/trades/propose` returns `409 sleeper_not_linked` (`backend/server.py:12608-12609`). **Any doubt resolves toward writing the row**, because a spurious token row is a custody weakness the operator can see and fix, while a missing one is a dead feature the user cannot.
+
+**Three client-side prerequisites, each of which silently defeats the design if missed:**
+
+1. **`linkSleeperToken` must emit `X-FTF-Caps`.** It calls `api.post` with no headers (`mobile/src/api/sendInSleeper.ts:46-48`) and `client.ts` adds no global one, so without this edit **every replay arrives as `transport_v = 0` and writes a `sleeper_credentials` row on every fresh session** — defeating G1 on the design's own happy path, silently, while everything appears to work.
+2. **`X-Device-Id` must be attached to `linkSleeperToken`, `/lease`, and `/outcome`.** It is **not** a global header: `client.ts:51-55` sends `X-Device`, `X-OS-Version`, `X-App-Version`, `X-User-TZ`, and `X-Device-Id` is attached per-call in six places (`auth.ts:39,97,590`, `events.ts:287`, `flags.ts:37`, `recordedPicks.ts:275`) — none of them this route. §3.1 makes `platform_links.device_id` non-nullable, so a device-custody link without it **500s on insert**, and §7.2's operator-only rollout has nothing to key on. Missing `X-Device-Id` on this route is a `400`, mirroring §2.2.
+3. **The Fernet gate must move inside the writing branch.** `backend/server.py:12442` returns `503 sleeper_unconfigured` before anything else runs; under device custody no ciphertext is ever produced, so that check must not gate the custody path.
+
+**On a successful device-custody upsert:** set `revoked_at = NULL`, `rejected_at = NULL`, `verified_at = now`, and leave `epoch` **unchanged** (a re-link is not a revocation). Stated because nothing else in this document clears either field — and if they survive a re-link, one disconnect makes `GET` return `revoked: true` forever (so every new binary wipes its own vault on the next session), and one 401 makes `/lease` return `409 credential_rejected` forever, falsifying §5.3's "retryable after re-capture." Both are permanent bricks from a single ordinary event. `test_platform_link_contract.py` covers both.
 
 Everything before the store is unchanged and must stay unchanged: the shape check (`:12446`), the expiry check (`:12448`), the `token_user_mismatch` claim gate (`:12455-12458`), and the live oracle (`:12467-12476`). Session verification (`sess["verified"]`, `users.verified_via`, the persisted-session force-upsert at `:12489-12514`) is identical in both branches.
 
@@ -287,7 +321,7 @@ Two rules, both non-negotiable:
 // mobile/src/transport/platformTransport.ts
 export type SendRefusal =
   | 'host_not_allowed' | 'method_not_allowed' | 'header_not_allowed'
-  | 'auth_header_present' | 'body_too_large' | 'guard_refused'
+  | 'auth_header_present' | 'body_too_large' | 'bad_base64' | 'guard_refused'
   | 'user_mismatch' | 'stale_epoch' | 'no_credential' | 'not_foreground';
 
 export interface SendResult {
@@ -346,7 +380,7 @@ export async function migrateLegacySlot(userId: string): Promise<'migrated'|'non
 
 `migrateLegacySlot` implements HLD blocking fix 4: read `sleeper.link.jwt` (`sendInSleeper.ts:72`), write the envelope with correct accessibility, **verify the read-back byte-for-byte**, then delete the legacy key. Order matters — delete-then-write loses the credential on a Keychain failure. `writeEnvelope` returns `false` rather than throwing (matching the swallow-and-continue posture at `sendInSleeper.ts:85-87`), and `migrateLegacySlot` returns `'failed'` **without deleting**. Two Keychain copies of a 365-day full-account credential, one outside the wipe and epoch logic, is the failure this prevents.
 
-**Specified here because neither source doc did:** `readEnvelope(userId)` returns `null` — it does **not** wipe — when the stored `user_id` differs. The wipe on mismatch fires from the session-establishment path, where the current user is authoritative. A wipe triggered by any caller passing a stale id is a self-inflicted denial of service.
+**A deliberate deviation from a normative PRD line, not a gap-fill.** PRD §Custody says "`user_id` mismatch ⇒ **wipe**" (PRD:144). This LLD instead has `readEnvelope(userId)` return `null` — it does **not** wipe — when the stored `user_id` differs. The wipe on mismatch fires from the session-establishment path, where the current user is authoritative. A wipe triggered by any caller passing a stale id is a self-inflicted denial of service.
 
 ---
 
@@ -411,16 +445,26 @@ platform_leases_table = Table("platform_leases", metadata,
     Column("http_status",    Integer),
     Column("transaction_id", String),
     Column("platform_error", String),
-    Column("guard_reason",   String),
+    Column("refusal",        String),   # SendRefusal — §2.6. The discriminator.
+    Column("guard_reason",   String),   # GuardRefusal — only when refusal='guard_refused'
     Index("ux_platform_leases_digest_lock", "digest_lock", unique=True),
     Index("ix_platform_leases_user_state",  "user_id", "state"),
     Index("ix_platform_leases_issued_at",   "issued_at"),
+    # The lock is a DENORMALIZED second copy of state. Nothing else enforces
+    # the equivalence, and both failure directions are severe: a terminal state
+    # that forgets to null the lock is a PERMANENT phantom 409 for that user,
+    # and an early null permits a duplicate send. Both dialects honour a CHECK
+    # at create_all time, and this is a new table, so there is no migration risk.
+    CheckConstraint("(state = 'issued') = (digest_lock IS NOT NULL)",
+                    name="ck_platform_leases_lock_matches_state"),
 )
 ```
 
 **The `digest_lock` NULL trick is the concurrency primitive, and the choice over a partial index is deliberate.** A partial unique index (`WHERE state='issued'`) expresses the same constraint, but its syntax differs by dialect and a silently-ignored index is a duplicate-send bug that appears only under concurrency. NULL-distinctness in a plain `UNIQUE` index needs no dialect branch and survives the `DATABASE_URL` swap the project already plans for. One nullable column gives an atomic, engine-enforced "one open send per logical request" with no read-then-write race.
 
 > **Verified empirically, 2026-08-13, rather than assumed from the standard.** Three rows with `digest_lock IS NULL` insert successfully and a duplicate non-NULL value is refused, on **SQLite 3.50.4** (`UNIQUE constraint failed`) and on **PostgreSQL 18.3** (`duplicate key value violates unique constraint`). Postgres treats index NULLs as distinct by default; `NULLS NOT DISTINCT` is opt-in from PG15 and must never be added to this index. A startup assertion (§5.4 item 6) checks the index exists, because a missing one fails open.
+
+**The index is global, but `user_id` is a digest component** (§3.5 Rule B), so two users can never collide — worth stating, because a global unique index on a digest otherwise reads as a cross-user denial-of-service waiting to happen.
 
 An in-process dict would be wrong here for a separate reason: Render runs more than one worker, so a process-local lock does not stop two taps landing on two workers. (`backend/draft_board_service.py:177` uses one — correct for a cache, wrong for this.)
 
@@ -553,36 +597,54 @@ Added to `config/features.json`, **default false**, and mirrored into the three 
 
 ```
  1. _TEST_MODE                                  -> 599 test_mode_lease_disabled   [fail closed]
- 2. is_enabled('trade.send_in_sleeper') and is_enabled('platform.device_transport')
-                                                -> else 404 feature_disabled
+ 2. device_transport_enabled(user_id, device_id) -> else 404 feature_disabled
+      == is_enabled('trade.send_in_sleeper')
+         and is_enabled('platform.device_transport')
+         and in_tester_allowlist(device_id, user_id)      # THE named helper, below
  3. sess = _require_session(); user_id          -> else 401 no_user
  4. sess['verified']                            -> else 403 verification_required
  5. caps = _client_caps(); device_id = X-Device-Id  -> else 400 bad_request
  6. schema check: reject unknown top-level keys -> else 400
- 7. link = get_platform_link(user_id, 'sleeper')
+ 7. (op_type, root_field) in caps.ops           -> else 426 upgrade_required
+      MOVED UP from after the body build: `op` is present in the request at
+      step 6 and nothing below is needed to decide it, so a skewed client no
+      longer costs a live Sleeper roster fetch before its 426.
+ 8. link = get_platform_link(user_id, 'sleeper')
       none | revoked_at set  -> 409 no_device_credential
       rejected_at set        -> 409 credential_rejected
       device_id mismatch     -> 409 no_device_credential  [do not disclose the other device]
- 8. validate args; resolve rosters via _fetch_league_rosters   (§5.2 wraps its failure)
- 9. body = sleeper_write.build_propose_trade_body(req)   # or reject_trade
-10. body_bytes = serialize_body(body);  len <= MAX_BODY_BYTES -> else 413
-11. GUARD PARITY: run the SERVER's copy of the guard over body_bytes
+ 9. validate args; resolve rosters via _fetch_league_rosters   (§5.2 wraps its failure)
+10. body = sleeper_write.build_propose_trade_body(req)   # or reject_trade
+11. body_bytes = serialize_body(body);  len <= MAX_BODY_BYTES -> else 413
+12. GUARD PARITY: run the SERVER's copy of the guard over body_bytes
       refuse -> 500 lease_self_check_failed, log, DO NOT issue
-12. (op_type, root_field) in caps.ops           -> else 426 upgrade_required
 13. digest = compute_request_digest(...)
-14. INSERT platform_leases (state='issued', digest_lock=digest)
-      IntegrityError on ux_platform_leases_digest_lock -> 409 send_in_flight
-15. open-lease count <= MAX_OUTSTANDING_LEASES  -> else 409 too_many_outstanding, ROLL BACK 14
-16. return the lease
+14. with engine.begin() as conn:                  # ONE transaction, steps 14-15
+      sp = conn.begin_nested()                    # SAVEPOINT — see below
+      try:
+          INSERT platform_leases (state='issued', digest_lock=digest)
+          sp.commit()
+      except IntegrityError:                      # ux_platform_leases_digest_lock
+          sp.rollback()                           # outer txn SURVIVES
+          holder = SELECT ... WHERE digest_lock = digest
+          -> 409 send_in_flight {lease_id, issued_at, retry_after_s}
+      if open_lease_count(conn, user_id) > MAX_OUTSTANDING_LEASES:
+          raise _Rollback                         # unwinds the whole begin() block
+                                                  -> 409 too_many_outstanding
+15. return the lease
 ```
+
+**The `begin_nested()` is not stylistic — without it step 14 cannot execute on Postgres.** The 409 promised by §4.6 and §5.3 carries the holder's `lease_id` and `retry_after_s`, which requires a `SELECT` *after* the failed `INSERT`. On Postgres the transaction is aborted the moment the constraint fires, and any subsequent statement raises `InFailedSqlTransaction` — the rule this document itself states in §7.5 ("Postgres aborts the whole transaction on any error even when Python catches it"). A SAVEPOINT is what lets the outer transaction survive the caught error. Note also that the repo has **zero** existing `IntegrityError` handlers to copy and every writer is a self-contained `with engine.begin() as conn:` block (`backend/database.py:9584`, 111 occurrences), so this is new ground and the block structure above is the spec, not a sketch.
+
+**Step 15's ordering after the insert is still deliberate.** Counting first is a TOCTOU; counting after means the loser unwinds.
+
+**`in_tester_allowlist` is the same helper §2.4 uses, and that identity is the point.** See §7.2 — a custody gate wider than the lease gate strands users with no token row and no lease.
 
 **Steps 1 and 4 are inherited, not invented.** `/api/trades/propose` fails closed under `_TEST_MODE` with `599` (`backend/server.py:12574-12578`) and refuses an unverified session with `403` (`:12592-12595`). The lease endpoint is the route that replaces it and carries the identical gates. Without step 1, a Maestro run mints a real lease and the device makes a real Sleeper write — and the counter that would have caught it (`completed_proposes`, `backend/test_support.py:82`) is server-side and reads zero.
 
-**Step 11 is the highest-value line in this document.** The identical guard, ported to Python and driven by the identical corpus, runs before a lease is issued. It buys nothing against a compromised backend — the attacker just removes it. It buys everything against the ordinary failure mode: a body-shape hotfix the device would refuse. Without step 11 that hotfix produces a device refusal **indistinguishable from an attack**, and M4 pages the operator — the exact risk D3 set out to avoid. With it, the failure surfaces in CI or as a 500 on one request.
+**Step 12 is the highest-value line in this document.** The identical guard, ported to Python and driven by the identical corpus, runs before a lease is issued. It buys nothing against a compromised backend — the attacker just removes it. It buys everything against the ordinary failure mode: a body-shape hotfix the device would refuse. Without step 11 that hotfix produces a device refusal **indistinguishable from an attack**, and M4 pages the operator — the exact risk D3 set out to avoid. With it, the failure surfaces in CI or as a 500 on one request.
 
 This is a second implementation of a security control, which is normally a smell. It is acceptable because the *device's* copy is the control and the server's is a **liveness** check: a server-side false-accept cannot weaken the device, and a server-side false-reject surfaces as a 500 on the operator's own build. The two are pinned by a shared corpus file (§6.1a), and a divergence on any corpus entry is a build failure.
-
-**Step 15 after step 14 is deliberate.** Counting first is a TOCTOU; counting after means the loser rolls back. The rollback is cheap and correct; the race is not.
 
 ### 4.2 The GraphQL guard
 
@@ -592,13 +654,19 @@ This is a second implementation of a security control, which is normally a smell
 
 ```ts
 export type GuardRefusal =
-  | 'too_large' | 'bad_json' | 'duplicate_json_key' | 'not_object'
-  | 'query_not_string' | 'control_char' | 'spread_token'
-  | 'unterminated_string' | 'unterminated_block_string'
-  | 'no_operation' | 'trailing_tokens' | 'bad_operation_type'
-  | 'empty_selection_set' | 'non_field_selection' | 'malformed_alias'
-  | 'malformed_directive' | 'unbalanced_group' | 'reserved_field'
-  | 'too_many_root_fields' | 'depth_exceeded' | 'too_complex' | 'op_not_allowed';
+  // Stage A — envelope
+  | 'too_large' | 'bad_json' | 'duplicate_json_key' | 'escaped_body_key'
+  | 'not_object' | 'unknown_body_key' | 'query_not_string'
+  // Stage B — lexer
+  | 'control_char' | 'unexpected_character' | 'spread_token'
+  | 'unterminated_string' | 'unterminated_block_string' | 'too_complex'
+  // Stage C — parser
+  | 'fragment_definition' | 'bad_operation_type' | 'no_operation'
+  | 'malformed_directive' | 'unbalanced_group' | 'depth_exceeded'
+  | 'non_field_selection' | 'malformed_alias' | 'empty_selection_set'
+  | 'trailing_tokens'
+  // Stage C — the gate
+  | 'reserved_field' | 'too_many_root_fields' | 'op_not_allowed';
 
 export function guard(bodyBytes: Uint8Array):
   | { ok: true; opType: 'query'|'mutation'|'subscription'; rootFields: string[] }
@@ -607,13 +675,29 @@ export function guard(bodyBytes: Uint8Array):
 
 Input is the **decoded `body_b64` bytes** — the exact bytes that will be sent. `guard()` takes bytes rather than a parsed object specifically so no caller can be handed the object and forget.
 
+#### 4.2.1 Runtime primitives — named, because this codebase has never used them
+
+The guard needs UTF-8 decoding with validation, and the transport needs base64 in both directions. **`TextDecoder`, `atob`, `btoa`, `Buffer`, and `base64-js` have zero occurrences in `mobile/src`** at `3b64a44`. Neither source draft named a source for any of them, and the gap is dangerous in a specific way: the test harness transpiles the guard and runs it under **plain node**, where `TextDecoder` is a global — so a green CI run proves nothing about Hermes on RN 0.81. If the global turns out to be absent on-device and someone substitutes a hand-rolled decoder, `fatal: true` disappears silently, and with it the rejection of overlong encodings and lone surrogates — inside the module this document calls the security control.
+
+Required before S3, in this order:
+
+1. **Establish what Hermes actually provides** for `TextDecoder` and base64 on the RN version in `mobile/package.json`. This is a device fact, so it joins §6.6.
+2. If `TextDecoder` is absent, the "zero imports" rule forces a **hand-written UTF-8 validating decoder inside `gqlGuard.ts`**, which then needs its own corpus rows (overlong encodings, lone surrogates, truncated sequences, `U+FFFF`) — it becomes part of the security control, not a utility.
+3. Any polyfill instead gets a `living-memory/DEPENDENCIES.md` entry and must not break the import-free rule — which likely means it cannot be used, and (2) applies.
+4. Base64 decode failure has a typed refusal, `bad_base64` (§2.6), because §4.3 step 6 decodes inside a function specified never to throw.
+
+Until step 1 is answered this is **OI-12**, and it gates S3 rather than S4: the guard cannot be called correct on a primitive nobody has confirmed exists.
+
 #### Stage A — envelope
 
 1. `bodyBytes.length > MAX_BODY_BYTES` → `too_large`.
-2. UTF-8 decode with `fatal: true`. Failure → `bad_json`.
-3. **Scan for duplicate top-level JSON keys before parsing.** `JSON.parse` silently keeps the last value for a repeated key; a receiving server may keep the first. `{"query":"mutation{propose_trade…}","query":"mutation{evil}"}` therefore validates one document and executes another. A `JSON.parse` reviver cannot see duplicates, so this needs a minimal key-scan over the top-level object. Duplicate → `duplicate_json_key`.
-4. Parse. Must be a JSON **object**; an array → `not_object`. That is PRD rule 4's batching refusal, and it is a *type* check, not a special case.
-5. `typeof parsed.query === 'string'` → else `query_not_string`.
+2. UTF-8 decode with `fatal: true` (§4.2.1 names the implementation). Failure → `bad_json`.
+3. **Scan for duplicate top-level JSON keys before parsing.** `JSON.parse` silently keeps the last value for a repeated key; a receiving server may keep the first. `{"query":"mutation{propose_trade…}","query":"mutation{evil}"}` therefore validates one document and executes another.
+   **The scan must compare *unescaped* key text, not raw bytes.** A byte-comparing scan is defeated by `{"query":"mutation{evil}","query":"<benign>"}` — `JSON.parse` unescapes `query` to `query`, last-wins leaves the benign document in `parsed.query`, and a raw-text scan sees two different keys and flags nothing. Implement as a JSON string-lexer that decodes each top-level key before comparing. **Simplification permitted and preferred:** refuse outright any top-level key containing a `\`, since no legitimate body has one. Duplicate → `duplicate_json_key`; escaped key → `escaped_body_key`.
+4. Parse. Must be a JSON **object**: `parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)` → else `not_object`. That is PRD rule 4's batching refusal, and it is a *type* check, not a special case. **The `null` arm is not pedantry** — `JSON.parse("null")` yields `typeof 'object'` and is not an array, so a two-clause check admits it and `parsed.query` then throws a `TypeError` out of a function specified never to throw (§2.6, §6.1c), producing an unreported outcome and an `unknown`.
+5. **Top-level key allowlist:** the key set must be a subset of `{query, variables, operationName}` → else `unknown_body_key`. Real bodies always carry all three (`backend/sleeper_write.py:270-273`, `:357`). Without this the guard inspects `query` and nothing else, so an `extensions` key — GraphQL's persisted-query / APQ channel — would ride to Sleeper entirely unexamined and could name an operation the guard never sees. This is the same principle §2.2 applies to the lease request ("unknown top-level keys are a 400"), applied in the place it matters most.
+6. `typeof parsed.query === 'string'` → else `query_not_string`. A `String` **object** fails this check and is refused, which is correct — the strict `typeof` is deliberate.
+7. `parsed.query.length > MAX_DOC_BYTES` → `too_large`. **Step 1 does not cover this:** it bounds the whole body against `MAX_BODY_BYTES` (65_536), so an 8_193-byte query inside a 10 KB body would otherwise be accepted while corpus case 21 demands it be refused.
 
 #### Stage B — lexer over `parsed.query`
 
@@ -622,17 +706,18 @@ Not a regex (PRD rule 2). Single left-to-right pass producing atomic tokens. **S
 Ignored tokens: space, tab, CR, LF, `,`, and `U+FEFF` anywhere. The GraphQL spec makes the BOM an ignored token; treating it as an error refuses a legitimate document, and treating it as a Name character lets it split an identifier.
 
 - `#` starts a comment to the next line terminator — **only outside strings**.
-- `"` starts a string: `\` consumes the next character; an unescaped `"` ends it; a raw line terminator inside → `unterminated_string`. Skipping 2 on `\` is correct for every GraphQL escape — the longest is `\uXXXX`, and after skipping `\u` the four hex digits are ordinary characters. No escape's second character is `"` other than `\"`, which is precisely the one that must not terminate.
-- `"""` starts a block string, ending at the first `"""` not immediately preceded by `\`. Block strings escape **only** `\"""`; a lone `\` is literal, so a generic backslash skip would let an attacker hide the closing delimiter.
+- **`"""` is tested BEFORE `"`.** Ordering is load-bearing: read as a sequential algorithm with `"` first, `"""` lexes as an empty string followed by a stray quote, and the block-string body becomes live tokens. A block string ends at the first `"""` not immediately preceded by `\`. Block strings escape **only** `\"""`; a lone `\` is literal, so a generic backslash skip would let an attacker hide the closing delimiter.
+- `"` starts a single-line string: `\` consumes the next character; an unescaped `"` ends it; a raw line terminator inside → `unterminated_string`. Skipping 2 on `\` is correct for every GraphQL escape — the longest is `\uXXXX`, and after skipping `\u` the four hex digits are ordinary characters. No escape's second character is `"` other than `\"`, which is precisely the one that must not terminate.
 - Any code point `< 0x20` other than tab/CR/LF → `control_char`.
 - `...` is emitted as **one token**, and **any `...` anywhere → `spread_token`**. One total rule covering fragment spreads *and* inline fragments; combined with refusing the Name `fragment` at definition position, it discharges PRD rule 1 without reasoning about where a spread might hide.
 - Names match `/[_A-Za-z][_0-9A-Za-z]*/`. Numbers and strings are opaque tokens.
 - Punctuators: `{}()[]:=|&@$!`.
+- **Terminal branch: any character matching none of the above → `unexpected_character`. The lexer's final branch is a refusal and never a skip.** This closes the fail-open that an enumerate-what-is-valid spec invites. Without it an if/else scanner written from this section silently skips `;`, `%`, `?`, `'`, `..`, a stray `\`, U+00A0 and every other byte — the exact opposite of PRD rule 6 and §5.4 item 2 — and the TS and Python copies would each invent a different name for the case, which the shared corpus's `expect_reason` contract cannot absorb.
 - After the scan, `tokens.length > MAX_DOC_TOKENS` → `too_complex`. A DoS bound, fail closed.
 
 #### Stage C — single-definition parse
 
-6. First token is a Name in `{query, mutation, subscription}` → that is `opType`, consume. Else if it is `{` → `opType = 'query'` (anonymous shorthand). Else → `bad_operation_type`. The Name `fragment` at this position → `spread_token`'s sibling refusal.
+6. First token is a Name in `{query, mutation, subscription}` → that is `opType`, **consume it**. Else if it is `{` → `opType = 'query'` (anonymous shorthand), **peek only, do not consume** — step 10 needs to see that same `{`, and consuming it here makes shorthand refuse as `no_operation` instead of reaching the allowlist, contradicting corpus case 18. Else → `bad_operation_type`. The Name `fragment` at this position → **`fragment_definition`** (a named code, not "spread_token's sibling").
    **Shorthand is parsed, not special-cased.** It then fails the allowlist because `DEVICE_OPS` contains no `query:` pair. A dedicated "refuse shorthand" branch is one more branch to get wrong and breaks the moment release 2 adds a query op.
 7. Optional operation Name — consumed and **discarded**. The label is non-authoritative (PRD R3-fix A). It is not even returned from `guard()`, so no caller can accidentally depend on it.
 8. **The positional anchor.** Optional variable definitions: a balanced `(`…`)` group, balanced **over the token stream, not the raw text**. `_PROPOSE_TRADE_TEMPLATE` (`sleeper_write.py:204`) opens with `mutation propose_trade($k_adds: [String], …)`, so a naive "first `{`" reads a type name or a default-value literal. `($x: Foo = {a: "}"})` — a brace inside a string inside an object default — falls out correctly for free, because the lexer already made the string atomic.
@@ -652,6 +737,21 @@ Ignored tokens: space, tab, CR, LF, `,`, and `U+FEFF` anywhere. The GraphQL spec
 16. **Every** `(opType, field)` pair must be in `DEVICE_OPS` → else `op_not_allowed`.
 
 > Step 16 stays a loop over all fields even though step 15 caps the count at 1. The cap is **belt, not braces**. A reviewer removing the loop because "the cap makes it dead" would reintroduce the exact hole PRD rule 3 exists to close. The source comment says so.
+
+#### `skipBalanced` — one definition, used by steps 8, 9 and 11
+
+```
+skipBalanced(tokens, at, open, close) -> { next: int, maxDepth: int }
+```
+
+Two properties the prose above would otherwise leave to the implementer, and both must be pinned because the TS and Python copies have to agree on the *refusal reason*, not merely on refusing:
+
+- **A matched stack, not a kind-agnostic counter.** `( [ ) ]` refuses under either reading, but they produce different codes (`unbalanced_group` vs `non_field_selection`), and a mismatch between the two implementations is a §6.1(a) parity build failure. Push on `(`/`[`/`{`, pop only on the matching closer, mismatch → `unbalanced_group`.
+- **It returns the maximum nesting it reached**, and **every call site checks it** — steps 8 (variable definitions), 9 (directive arguments) and 11 (nested selection sets). `maxDepth > MAX_DOC_DEPTH` → `depth_exceeded`.
+
+> **This is what makes `MAX_DOC_DEPTH` real.** In the prose above the constant appeared once, inside a step that says the nested group is "not descended into" — no counter, no increment point, no origin — while corpus case 21 demands a depth-33 document be refused. Returning the depth from the skip is the only way the bound exists at all, and routing steps 8 and 9 through the same function is what stops an attacker from putting the nesting somewhere the check never looks.
+
+EOF before balance → `unbalanced_group`.
 
 #### Stage D — transmit the same bytes
 
@@ -692,7 +792,9 @@ The device POSTs `bodyBytes` verbatim. `JSON.parse` was inspection, never a tran
  5. headers lowercased: in ALLOWED_HEADERS, no dup, printable-ASCII values
       'authorization' present -> 'auth_header_present'   [I4, distinct code]
       anything else           -> 'header_not_allowed'
- 6. bodyBytes = base64Decode(lease.request.body_b64); len <= MAX_BODY_BYTES -> else 'body_too_large'
+ 6. bodyBytes = base64Decode(lease.request.body_b64)
+      decode failure          -> 'bad_base64'      [typed; this fn must never throw]
+      len > MAX_BODY_BYTES    -> 'body_too_large'
  7. guard(bodyBytes)                              -> else 'guard_refused' + guardReason
  8. lease.credential_user_id === env.user_id      -> else 'user_mismatch'   [I5]
  9. AppState === 'active'                         -> else 'not_foreground', report
@@ -721,9 +823,9 @@ Any refusal at steps 1–9 reports to `/outcome` **before anything reaches the n
 
 ### 4.4 Outcome handling and idempotency
 
-**Device side.** `/outcome` is retried up to 3 times with backoff (400 ms / 1.2 s / 3.6 s, matching `SESSION_INIT_BACKOFF_MS` at `mobile/src/api/client.ts:269`) and, if all fail, **queued to AsyncStorage and re-sent on next foreground**. Bounded at 20 entries, drops oldest, holds no credential. The queue exists because an unreported outcome becomes `unknown`, and `unknown` is the state that sends a user to check Sleeper manually for a send that succeeded.
+**Device side.** `/outcome` is retried up to 3 times with backoff **400 ms / 1.2 s / 3.6 s — the `RETRY_BASE_MS` × `RETRY_FACTOR` ladder at `mobile/src/api/client.ts:249-250`**, *not* `SESSION_INIT_BACKOFF_MS`, which is `[400, 1200]` (two retries, ~1.6 s) at `client.ts:269`. If all fail, the report is **queued to AsyncStorage and re-sent on next foreground**: bounded at 20 entries, drops oldest, holds no credential. The queue exists because an unreported outcome becomes `unknown`, and `unknown` is the state that sends a user to check Sleeper by hand for a send that in fact succeeded.
 
-Note `NO_RETRY_PATHS` (`client.ts:240-246`) is an exclusion list applied to **GETs only** (`client.ts:236-239`), so making this POST retryable requires an explicit opt-in flag on the request, not an edit to that list. `/lease` must **not** be retried.
+**Making this POST retryable is a real client change, not a list edit.** `canRetry` hard-codes `method === 'GET' && !NO_RETRY_PATHS…` at `client.ts:453-455`; `NO_RETRY_PATHS` (`client.ts:240-246`) is an exclusion list that never applies to POSTs, and `RequestOptions` (`client.ts:281-289`) has no opt-in field. Add one named option, scoped so it **cannot widen retry for any other POST**, and cite both the constants block and the enforcement site in the code comment. `/lease` must **not** be retried — a retried lease is a second lease.
 
 **Server side**, a single conditional statement, never read-then-write:
 
@@ -746,14 +848,19 @@ The `IN ('issued','unknown')` predicate is the concrete expression of I2, and ge
 | `result` | State | Lock | Note |
 |---|---|---|---|
 | `aborted_before_send` | `aborted` | released | The only result reachable *without* the request leaving the device. Backgrounding between lease and send must not lock the user out for ~10 minutes on a send that never happened. |
-| `refused_by_guard` | `refused` | released | Never reached the platform. **Any occurrence is an M4 incident** and pages the operator. |
+| `refused` | `refused` | released | **Every one of §2.6's ten `SendRefusal` values maps here**, stored in `platform_leases.refusal`, with `guard_reason` populated only when `refusal === 'guard_refused'`. Never reached the platform. `guard_refused`, `auth_header_present`, `host_not_allowed`, `method_not_allowed` and `header_not_allowed` are **M4 incidents** and page the operator; `no_credential`, `stale_epoch`, `not_foreground`, `body_too_large` and `bad_base64` are ordinary and must not. |
 | `network_error` | `failed` | released | Did not reach the platform, or we cannot tell. `unknown` is reserved for a **missing** report (HLD blocking fix 2). |
-| `http_error` / `ok` | `failed` / `ok` | released | Server parses and classifies. |
-| `no_credential` | `refused` | released | |
+| `http_error` / `ok` | `failed` / `ok` | released | Server parses and classifies — but see the truncation rule below. |
 
-**The required refactor.** `parse_graphql_response(op, raw, http_status)` is extracted verbatim from `sleeper_write._post_graphql`'s response half (`backend/sleeper_write.py:308-335`) — the HTTPError→`SleeperAuthError` mapping on 401/403, the non-JSON guard, the `errors`-on-200 handling with its auth-keyword sniff, and the `{transaction_id, status, raw}` shape. `_post_graphql` then *calls* it. This is what makes A3's R-ROLLBACK real: the server path and the device path interpret Sleeper's responses through **one** function, so the recovery path cannot bit-rot into a different parser while nobody is looking.
+**Truncation is not failure.** A `truncated: true` body with a 2xx status fails `json.loads` and would classify as `failed` through the non-JSON arm at `sleeper_write.py:322` — reporting a **successful send as a failure**, the exact error §5.1 says the copy must never make. Rule: `truncated == true` with a 2xx never yields `ok` **or** `failed`; it takes the `network_error` copy ("check Sleeper before resending"). `MAX_RESPONSE_BYTES` also needs measuring, because the `propose_trade` selection set returns `metadata`, `settings`, and `player_map` (`sleeper_write.py:207-210`) — OI-13.
 
-**R8 — credential invalidation.** `http_error` with status ∈ {401, 403}, or an `ok` response whose `errors` array matches the auth heuristic at `sleeper_write.py:329`, sets `platform_links.rejected_at`. Subsequent `/lease` calls return `409 credential_rejected` — deliberately distinct from `no_device_credential`, so the client prompts re-capture rather than "not connected." The vault is **not** wiped: a single 401 is not a user decision, and only an explicit disconnect wipes. This mirrors the server path's existing behaviour at `backend/server.py:12642-12654`.
+**The required refactor — and it is not a verbatim extraction.** `parse_graphql_response(op, raw_bytes, http_status)` takes over the parts of `sleeper_write._post_graphql`'s response half (`backend/sleeper_write.py:308-335`) that are pure functions of bytes and status: the non-JSON guard, the `errors`-on-200 handling with its auth-keyword sniff, the 401/403 → `SleeperAuthError` mapping, and the `{transaction_id, status, raw}` shape. `_post_graphql` then *calls* it.
+
+**What must stay behind**, because it cannot move: the `urllib.error.HTTPError` / `URLError` arms (`:308-317`) operate on **exception objects**, not bytes — the caller converts them to a status before calling — and `_ob.ok(status=200, response_bytes=len(raw))` at `:333` is bound to the `observe_call` context opened at `:302-304`. **The device path must not fire `api_observability`**, or every device send records a phantom server-side outbound Sleeper call and the egress telemetry becomes a fiction. State the split in the docstring.
+
+This is what makes A3's R-ROLLBACK real: the server path and the device path interpret Sleeper's responses through **one** function, so the recovery path cannot bit-rot into a different parser while nobody is looking.
+
+**R8 — credential invalidation.** `http_error` with status ∈ {401, 403}, or an `ok` response whose `errors` array matches the auth heuristic at `sleeper_write.py:329`, sets `platform_links.rejected_at`. Subsequent `/lease` calls return `409 credential_rejected` — deliberately distinct from `no_device_credential`, so the client prompts re-capture rather than "not connected." The vault is **not** wiped: a single 401 is not a user decision, and only an explicit disconnect wipes. **This deliberately diverges from the server path**, which deletes the credential outright on `SleeperAuthError` (`backend/server.py:12650`) and on expiry (`:12615`). The divergence is the point — the server could always re-obtain a token by prompting; under device custody the wiped copy is the only one. Stated explicitly because an earlier draft claimed this "mirrors" the server path, and a reader who checked the cite would have concluded one of the two was wrong.
 
 ### 4.5 Sticky revocation — every caller that must change
 
@@ -761,12 +868,15 @@ HLD blocking fix 5 says ordering is the fix. **Ordering alone is insufficient, a
 
 | # | Site | Today | Under device custody | Required change |
 |---|---|---|---|---|
-| 1 | `mobile/src/api/sendInSleeper.ts:153-158` (`_runReplay`) | `!connected` → `clearPersistedSleeperToken()` | **erases the credential the design depends on** | key off `revoked === true`; on `connected && !revoked && custody==='device'`, skip the replay |
+| 1 | `mobile/src/api/sendInSleeper.ts:153-158` (`_runReplay`) | `!connected` → `clearPersistedSleeperToken()` | **erases the credential the design depends on** | key the wipe off `revoked === true` instead of `!connected`. **That is the only change at this site — the replay itself stays unconditional.** See the warning below. |
+
+> **The replay must NOT be skipped under device custody, and an earlier draft of this section said it should.** `POST /api/sleeper/link` is what sets `sess["verified"]` (`backend/server.py:12491`), and `/lease` step 4 hard-requires it (§4.1). For a Sleeper-only user that route is the only thing that can verify their session — provider auth (`server.py:18425`, `:18446`) and the MFL oracle (`:21392`) also set the flag, but a Sleeper-only user reaches none of them. Skipping the replay would make the first send after any new session token return `403 verification_required` with no client-side recovery, which is the feature not working at all. §2.4 already says the device replays "on every fresh session"; this row must not contradict it.
 | 2 | `mobile/src/api/sendInSleeper.ts:54-58` (`unlinkSleeper`) | DELETE then wipe local | correct intent | also `wipeEnvelope()`, drop queued outcomes; server bumps `epoch` |
-| 3 | `mobile/src/components/SendInSleeperButton.tsx:184-201` | post-webview focus check → "Not connected" | false negative | same union / `revoked` logic |
-| 4 | `mobile/src/components/SendInSleeperButton.tsx:379-402` | pre-send gate → "Connect Sleeper first" | **feature silently dead** | same, plus route to `/lease` when `custody==='device'` |
-| 5 | `mobile/src/screens/SettingsScreen.tsx:286-292` | `connected:false` → the disconnect row does not render | **the user cannot disconnect at all** | union — and this is a **policy** failure, not a UX one: that row is the "disconnect at any time" control (`SettingsScreen.tsx:495-498`) |
-| 6 | `mobile/src/api/sendInSleeper.ts:185`, `:380` | `expired:true` treated as not-connected | device holds the live token | `expired` is advisory under device custody |
+| 3 | `mobile/src/components/SendInSleeperButton.tsx:184-201` | post-webview focus check → "Not connected"; `connected = !!status.connected && !status.expired` at `:185` | false negative | same union / `revoked` logic, **and** `expired` becomes advisory — the device holds the live token, so the server's staleness hint must not gate the send |
+| 4 | `mobile/src/components/SendInSleeperButton.tsx:379-402` | pre-send gate → "Connect Sleeper first"; same `!status.expired` conjunct at `:380` | **feature silently dead** | same as row 3, plus route to `/lease` when `custody==='device'` |
+| 5 | `mobile/src/screens/SettingsScreen.tsx:1127-1128` (the render gate; `:286-292` is only the `useQuery`) | `connected:false` → the disconnect row does not render | **the user cannot disconnect at all** | union — and this is a **policy** failure, not a UX one: that row is the "disconnect at any time" control (`SettingsScreen.tsx:495-498`) |
+
+**Five sites, not six.** An earlier draft listed the `expired` conjunct as a sixth site citing `sendInSleeper.ts:185`/`:380` — that file is 238 lines, so those line numbers cannot exist in it, and `sendInSleeper.ts:159-160` says the opposite in as many words ("`expired: true` describes the server's copy and does not short-circuit"). The real conjunct lives inside rows 3 and 4, which is where the requirement is now folded. Left as its own row it would have been implemented against the wrong file and quietly dropped.
 
 **The old-binary set.** Sites 1, 3, 4, 5 ship in every TestFlight build up to and including `1.13.2` (`mobile/app.json:5`) and **cannot be fixed** — no OTA (PRD §3 non-goals). What §2.5's union contract buys them is precisely one thing: **the credential is not erased** (site 1). It does not keep the feature working. An old binary reads `connected: true`, replays its JWT to `POST /api/sleeper/link` (site 1 → `sendInSleeper.ts:170`), then sends via `POST /api/trades/propose`, which reads `get_sleeper_credential` (`backend/server.py:12607-12609`) and returns `409 sleeper_not_linked` when no token row exists.
 
@@ -826,7 +936,7 @@ Three device outcomes are genuinely different and are routinely collapsed into o
 | `no_credential` | vault has nothing for this user | no | after re-capture | Prompt Connect. **Distinct from `credential_rejected`:** nothing was ever there, versus it was and the platform said no. |
 | `stale_epoch` | §4.3 step 2 | no | after re-link | Silent re-lease once, then prompt. |
 | `credential_rejected` | R8, from the server's parse | **yes** | after re-capture | Server has set `rejected_at`; the next lease 409s. Prompt re-capture, do **not** wipe. |
-| `send_in_flight` | `UNIQUE(digest_lock)` | no | after `retry_after_s` | "Already sending." Not an error state in the UI. |
+| `send_in_flight` | `UNIQUE(digest_lock)` | no | after `retry_after_s` | Not an error state in the UI. **The copy must not assert a send is in progress** — a lease orphaned by an app *kill* generates no report, so §4.4's queue is empty and the lock is held for the full `DIGEST_WINDOW` with nothing actually sending. Say "this trade was already submitted — check Sleeper before resending," and surface `retry_after_s`. |
 | `upgrade_required` | D3 capability negotiation | no | **no** | Alert + App Store link. **Never a silent fallback** — that would hide the skew D3 exists to make visible. |
 | `guard_refused` | a compiled device guard | **no** | **no** | Deep-link fallback + report. **Any occurrence is an M4 incident.** Never auto-retried — retrying a refused document is retrying an attack. |
 
@@ -867,7 +977,10 @@ Minimum corpus, all **failing-first**:
 | 8 | `league_players` query (`trade_block_service.py:73`) | refuse (`op_not_allowed`) |
 | 9 | FAAB-populated `propose_trade` **after** the §7.0 fix | allow |
 | 10 | FAAB-populated body **before** the fix | pinned either way, so the sequencing dependency is visible in CI |
-| 11 | Duplicate `"query"` JSON key | refuse |
+| 11 | Duplicate `"query"` JSON key, literal | refuse (`duplicate_json_key`) |
+| 11a | **Escaped duplicate key** `{"query":"mutation{evil}","query":"<benign>"}` | refuse (`escaped_body_key`). **The one that defeats a byte-comparing scan:** `JSON.parse` unescapes to `query`, last-wins leaves the benign document in `parsed.query`, and a raw-text scan sees two different keys. Without this row the hole ships green. |
+| 11b | Body with an `extensions` key (APQ / persisted query) | refuse (`unknown_body_key`) |
+| 11c | Body is literal `null`; body is `"a string"`; body is `123` | refuse (`not_object`) ×3 — `null` is the one a two-clause type check admits, after which `parsed.query` throws |
 | 12 | BOM prefix; BOM mid-document | allow ×2 |
 | 13 | `#` inside a string; `}` inside a string; `"""` block string containing `{` | allow ×3 |
 | 14 | `\\` before a closing quote | allow |
@@ -882,7 +995,17 @@ Minimum corpus, all **failing-first**:
 
 **(b) Differential oracle.** A dev-only test parses every corpus entry with `graphql-js`'s `parse()` and asserts (i) for `allow` entries the extracted `(opType, rootFields)` equals what `graphql-js` reports, and (ii) every entry `graphql-js` cannot parse is refused. This turns "we think our lexer is right" into "it agrees with the reference implementation." `graphql` is **not** a mobile dependency today (`mobile/package.json`); adding it as a `devDependency` needs a `living-memory/DEPENDENCIES.md` entry and it must never enter the app bundle. OI-5.
 
-**(c) Fuzz.** 10k seeded byte-level and token-level mutations of the two real documents. One assertion: `guard()` never returns `ok:true` with a pair outside `DEVICE_OPS`, and **never throws**. Throwing is a failure — an exception on the send path becomes an untyped outcome and then an `unknown`.
+**(c) Fuzz — differential, not self-referential.** 10k seeded byte-level and token-level mutations of the two real documents, fed to **both** implementations. Assertions:
+
+1. `guard()` **never throws**. An exception on the send path becomes an untyped outcome and then an `unknown`.
+2. For every input where `guard()` returns `ok`, **`graphql-js.parse()` must also succeed and its `(opType, rootFields)` must equal the guard's**.
+3. The TS guard and the Python parity guard return the same verdict *and the same reason*; any divergence is auto-appended to the shared corpus.
+
+> **Assertion 2 is the one that matters, and an earlier draft omitted it.** The weaker check — "never returns `ok` with a pair outside `DEVICE_OPS`" — is passed by a guard that parses `mutation { propose_trade(...){...} evil(...){...} }` and returns `ok, rootFields: ['propose_trade']`, silently dropping the second field. That is precisely the parser-differential the whole control exists to prevent, and 10k mutations would never flag it. A self-referential oracle cannot detect the only bug class that matters.
+
+**Corpus case 10 is exempt from assertion (ii) of (b)** and is deleted once §7.0 lands: the pre-fix FAAB body is rejected by `graphql-js` (quoted keys in an object literal) while the specified algorithm skips it inside a balanced argument group and returns `ok`. The corpus schema carries an explicit `oracle_exempt: true` for it, so the exemption is visible rather than a mystery failure.
+
+**(d) Enum coverage, statically asserted.** Every member of `GuardRefusal` must appear as some corpus entry's `expect_reason`. The table above leaves roughly nine untested (`bad_json`, `query_not_string`, `bad_operation_type`, `no_operation`, `non_field_selection`, `malformed_alias`, `malformed_directive`, `unbalanced_group`, `too_complex`, plus the newly added `unexpected_character`, `unknown_body_key`, `escaped_body_key`, `fragment_definition`), and an untested refusal path is one a refactor can delete without failing anything. The assertion makes the enum and the corpus unable to drift.
 
 Harness: `mobile/tests/check-gql-guard.js`, transpiling the real TS with the project `typescript` and running under plain node (`mobile/tests/check-espn-nav-policy.js:14-35`).
 
@@ -930,18 +1053,29 @@ Real threads against the real engine — a mocked DB proves nothing about a uniq
 
 ### 6.5 Maestro
 
-Per the feature gates, `mobile/.maestro/flows/trade-send/sleeper-device-transport.yaml`, sibling to `mfl-send-gating.yaml`. Covers: flag off ⇒ server path, no lease requested; flag on ⇒ lease requested, guard passes, outcome reported; `426` ⇒ upgrade alert; `409 send_in_flight` on a double tap; the refusal path. `testID`s must pass `mobile/scripts/testid-lint.sh`. Authoring follows the 23 laws in `mobile/.maestro/README.md`.
+Per the feature gates, `mobile/.maestro/flows/trade-send/sleeper-device-transport.yaml`, sibling to `mfl-send-gating.yaml`. `testID`s must pass `mobile/scripts/testid-lint.sh`; authoring follows the 23 laws in `mobile/.maestro/README.md`.
+
+**Scoped to what is observable under `_TEST_MODE`, which is less than it looks.** An earlier draft specified "flag on ⇒ lease requested, guard passes, outcome reported" — unachievable: §4.1 step 1 fails `/lease` closed with `599` under `_TEST_MODE`, and §6.4 gates the run on `leases_issued_under_test == 0` ("any lease is a defect"). That flow either cannot pass or trips the rails gate it runs beside. The flow therefore covers:
+
+- flag off ⇒ server path, **no lease requested**;
+- `599` handling ⇒ the send falls back cleanly, no crash, no misleading copy;
+- `426` ⇒ the upgrade alert renders;
+- the sticky-revocation regression (`revoked: true` wipes, `connected:false, revoked:false` retains);
+- the injected negative control from §6.4.
+
+**Injection must deliver a mocked 200 through the same `/lease` call site**, not a second entry point into `executeLease` — otherwise it becomes a second call site and breaks §6.2's static `check-no-lease-no-call.js` invariant, which is the thing actually guaranteeing no unauthorized egress.
 
 ### 6.6 Provable only on device
 
 Stated plainly so nobody claims coverage they do not have:
 
 1. `WHEN_UNLOCKED_THIS_DEVICE_ONLY` actually excluding the item from an iCloud backup.
-2. Cloudflare's acceptance of iOS's TLS/HTTP-2 fingerprint under real load (R7 — no device-side fix, no hotfix; the remedy is R-ROLLBACK).
-3. Sentry's real breadcrumb and header behaviour on a live send with tracing at 1.0.
-4. Keychain survival across app update and across delete-and-reinstall ("uninstall is not revocation").
-5. The `AppState` transition timing that drives `aborted_before_send`.
-6. Whether a real old binary (`1.13.2` from TestFlight) leaves its credential intact against the new `GET` contract. §6.2's fixture test is a proxy, not a substitute.
+2. Cloudflare's acceptance of iOS's TLS/HTTP-2 fingerprint under real load (R7 — no device-side fix, no hotfix; the remedy is R-ROLLBACK). Note §3.5's `serialize_body` also changes the **wire bytes** of the one call proven live: `_post_graphql` currently sends `json.dumps(body)` with insertion order `operationName, variables, query` and `", "`/`": "` separators (`sleeper_write.py:295`), described in-code as "verbatim structure from the capture" (`:196`), while canonicalization emits sorted keys and tight separators. Almost certainly irrelevant — Cloudflare fingerprints TLS and HTTP/2, not JSON whitespace — but R7 is this programme's decisive risk and the change should not be invisible.
+3. Sentry's real breadcrumb and header behaviour on a live send with tracing at 1.0. **The capture must come from a release build with the rate overridden**, not a dev build: `tracesSampleRate` is `__DEV__ ? 1.0 : 0.2` (`sentry.ts:45`), so dev is already 1.0 and proves nothing about the release path.
+4. **Whether Hermes provides `TextDecoder` and base64 at all** (§4.2.1 / OI-12). CI runs the guard under plain node, where these are globals; that result does not transfer.
+5. Keychain survival across app update and across delete-and-reinstall ("uninstall is not revocation").
+6. The `AppState` transition timing that drives `aborted_before_send`.
+7. Whether a real old binary (`1.13.2` from TestFlight) leaves its credential intact against the new `GET` contract. §6.2's fixture test is a proxy, not a substitute.
 
 ---
 
@@ -980,7 +1114,9 @@ Key names must be validated against `/^[_A-Za-z][_0-9A-Za-z]*$/` and rejected ot
 | **S5** | Client sticky-revocation rewrite (all six sites in §4.5); `X-FTF-Caps` emission | yes | old-binary fixture test green |
 | **S6** | **Build ships to TestFlight carrying S2 + S5** | — | **the credential-safety gate** |
 | **S7** | `platform.device_transport` on for the operator device only | yes — flag off | one real send + the R-ROLLBACK drill rehearsed |
-| **S8** | `sleeper.device_custody` on | yes — flag off | M4 zero; M8 divergence zero for 7 days |
+| **S8** | `sleeper.device_custody` on — **only for the cohort `platform.device_transport` already serves** | yes — flag off | M4 zero; M8 divergence zero for 7 days |
+
+> **S8's cohort must never be wider than S7's.** `sleeper.device_custody` is a plain global `is_enabled` (`backend/feature_flags.py:768-770`) while `/lease` is tester-allowlist gated, so flipping it alone moves *every* capable user's credential into device custody while leaving `/lease` closed to them — `404 feature_disabled` on the new path and `409 sleeper_not_linked` on the old one (`backend/server.py:12608-12609`). The feature would be dead for everyone but the operator, with their credential stranded in a mode the server refuses to serve. §2.4's `device_custody_active` predicate enforces this by construction; the stage gate is the human-readable restatement of the same rule.
 
 **S2 and S5 must both be in the field before `sleeper.device_custody` goes on anywhere** (HLD blocking fix 5(iii)). This is a weaker and more accurate statement than "before any row is deleted": under A3 no rows are deleted, and the hazard is not deletion but **absence** — the first user whose link is written in device-custody mode is the first user whose `GET` would have said `connected: false`.
 
@@ -1035,3 +1171,11 @@ No data backfill: A2 removed the cohort problem. Existing `sleeper_credentials` 
 | **OI-8** | The authenticated pending-outgoing read is the only thing that converts `unknown` into known (HLD "Corrections"). Unexplored, architecturally compatible under I1 — the server would parse the forwarded bytes. Scoped follow-up, not a limitation. | — | pm-technical |
 | **OI-9** | PRD OQ-4: `expo-updates` addresses R1–R6 as a class while this design addresses R1–R2, and is to be evaluated **first**. Nothing here resolves it, and every "no OTA, cannot fix old binaries" constraint above is downstream of it. | S0 | operator |
 | **OI-10** | `MAX_OUTSTANDING_LEASES = 3` has no empirical basis. It is a blast-radius bound, **not** a security control — a lease is inert without the credential on that device — so getting it wrong is a UX cost, not a safety one. | S4 | eng-backend |
+| **OI-11** | **The sweep cron is a hard liveness dependency.** §4.4's per-lease UPDATE and §4.7's sweep cannot deadlock or cross-release each other's locks (both are keyed by `lease_id`, and a released lock is already NULL) — verified, no defect. But if the 5-minute cron stops, `issued` rows hold their locks indefinitely and every affected user is stuck on `409 send_in_flight` with no self-recovery. Needs an alert on `count(*) WHERE state='issued' AND now > digest_until`, and the cron named as a dependency in §4.7. | S4 | eng-backend |
+| **OI-12** | **Does Hermes provide `TextDecoder` and base64?** §4.2.1. Zero occurrences in `mobile/src`, and CI runs the guard under node where both are globals — so a green build is not evidence. If absent, the import-free rule forces a hand-written UTF-8 validating decoder *inside the security control*, with its own corpus. | **S3** | eng-mobile |
+| **OI-13** | `MAX_RESPONSE_BYTES = 262_144` unmeasured against a real `propose_trade` response, whose selection set returns `metadata`, `settings`, and `player_map` (`sleeper_write.py:207-210`). Truncation is now handled safely (§4.4) rather than misreported, but a routinely-truncated response makes every send read as "couldn't reach Sleeper." | S4 | eng-backend |
+| **OI-14** | **Deviation from PRD:144** — that line says a `user_id` mismatch wipes the vault; §2.7 returns `null` instead and wipes only from the session-establishment path. The LLD's reasoning is that any caller passing a stale id could otherwise cause a self-inflicted denial of service. This is an operator call, not a drafting choice. | S4 | operator |
+| **OI-15** | `DELETE /api/sleeper/link` is gated on a verified session today (`backend/server.py:12418-12420`, `_verified_write_denial`). §2.5 makes it the **sole** writer of `revoked`, and under device custody revocation is the only recall mechanism — so a user whose session lapsed cannot revoke. Deliberate, or a gap to close before S8? | S8 | operator |
+| **OI-16** | `epoch` is typed non-nullable on `GET /api/sleeper/link` (§2.5) but lives only on `platform_links` (§3.1). Specify what `GET` returns when only a `sleeper_credentials` row exists, and what `DELETE` does when no `platform_links` row exists. | S2 | eng-backend |
+| **OI-17** | Nothing computes, registers, or CI-pins `TRANSPORT_OP_SETS` against the client's `DEVICE_OPS`. Every other cross-client invariant here gets a `check-*` test (§6.2); this one gets only a `docs/cross-client-invariants.md` row. Failure is loud (426 to everyone, caught by one operator device at S7), so not blocking — but add `mobile/tests/check-transport-caps-fingerprint.js`. | S5 | eng-mobile |
+| **OI-18** | `x-sleeper-graphql-op` is allowlisted with a **free-text, server-chosen value** that is transmitted to Sleeper. The guard bounds the verb in the *body*; this header names a verb outside the guard's reach. Cheapest fix: have the device synthesize it from the parsed root field rather than accept it from the lease. | S4 | eng-architect |
