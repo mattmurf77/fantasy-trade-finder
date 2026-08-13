@@ -547,6 +547,42 @@ def test_p0_impression_events_are_non_intent():
         assert name in q.INTENT_EVENTS
 
 
+def test_notif_inbox_events_registered_and_classified():
+    """Bell inbox instrumentation, 2026-08-13 (docs/plans/notif-inbox-growth/
+    analytics.md). Registered before any emitter ships, with the two passive
+    names on the NON_INTENT deny-list in the same commit.
+
+    The classification assertions are the load-bearing half. The bell lives
+    in the global TopBar on every tab, so if notif_inbox_opened ever reads
+    as intent, DAU/WAU becomes approximately bell-tap count from ship day
+    and every retention series breaks at that seam — silently, permanently,
+    and with a 200 on every request.
+    """
+    import backend.analytics_taxonomy as tax
+    import backend.analytics_queries as q
+
+    assert {"notif_inbox_opened", "notif_row_tapped",
+            "notif_empty_state_shown"} <= tax.ALLOWED_CLIENT_EVENTS
+
+    # Prop rows, asserted exactly: an unregistered prop key is STRIPPED at
+    # ingest (analytics_ingest._scrub_props), so a missing key is silent
+    # loss, not an error. `type` on notif_row_tapped is the whole point of
+    # the batch — without it we cannot learn which rows earn their slot.
+    assert tax.CLIENT_EVENT_PROPS["notif_inbox_opened"] == frozenset(
+        {"unread_count", "row_count"})
+    assert tax.CLIENT_EVENT_PROPS["notif_row_tapped"] == frozenset(
+        {"type", "position", "age_hours"})
+    assert tax.CLIENT_EVENT_PROPS["notif_empty_state_shown"] == frozenset(
+        {"not_joined", "total_mates", "invite_offered"})
+
+    # Passive → NON_INTENT. Active → INTENT.
+    for name in ("notif_inbox_opened", "notif_empty_state_shown"):
+        assert name in q.NON_INTENT_EVENTS
+        assert name not in q.INTENT_EVENTS
+    assert "notif_row_tapped" in q.INTENT_EVENTS
+    assert "notif_row_tapped" not in q.NON_INTENT_EVENTS
+
+
 def test_wat_send_leg_is_live():
     """The north star's send leg left WAT_DARK with the P0-7 registration."""
     import backend.analytics_queries as q

@@ -251,6 +251,20 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # CLIENT_EVENT_PROPS). Re-adding a name is harmless in a set but the
     # prop-row edit is not, and the two are easy to confuse.
     "invite_cta_shown", "invite_cta_tapped",
+    # Notification-inbox growth surface, 2026-08-13 — the bell's first
+    # instrumentation of any kind. Tracking plan:
+    # docs/plans/notif-inbox-growth/analytics.md.
+    #
+    # REGISTERED BEFORE ANY EMITTER EXISTS. This commit adds no track()
+    # call anywhere; the client wiring lands two commits later. That order
+    # is the whole point — a name that arrives after its track() call is
+    # dropped behind a 200 and the data is unrecoverable.
+    #
+    # `notif_inbox_opened` and `notif_empty_state_shown` are ALSO added to
+    # NON_INTENT_EVENTS in analytics_queries.py in THIS commit; see the
+    # block there. `notif_row_tapped` stays INTENT — it is the one number
+    # this whole batch exists to produce.
+    "notif_inbox_opened", "notif_row_tapped", "notif_empty_state_shown",
 })
 
 # ---------------------------------------------------------------------------
@@ -532,9 +546,18 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # same reason as trade_card_shared above. Pre-edit contents, verbatim:
     #     frozenset({"league_id"})
     # `surface` ∈ league_home | matches_empty | trades_banner |
-    # members_overlay — CLOSED, 4 values. `members_overlay` is present per
-    # operator decision PR-9 (D-P1-13), which put the members-overlay invite
-    # button in scope; without it that surface's rows land surface-less.
+    # members_overlay | notif_empty — CLOSED, 5 values. `members_overlay` is
+    # present per operator decision PR-9 (D-P1-13), which put the
+    # members-overlay invite button in scope; without it that surface's rows
+    # land surface-less. `notif_empty` is the bell sheet's empty state
+    # (operator decision GD-1, 2026-08-13): the invite ask lives THERE and
+    # never as a standing inbox row, gated at the same <50%-penetration rule
+    # MatchesScreen already ships. Registered in the same commit that adds
+    # the three notif_* names below, and BEFORE the client can emit it —
+    # `surface` values are carried by this comment rather than enforced by
+    # code (CLIENT_EVENT_PROPS constrains prop KEYS, not values), so an
+    # unregistered value is not rejected, it is merely undocumented, which
+    # is worse. Mirror: mobile InviteLeaguematesBanner.tsx `InviteSurface`.
     # `not_joined` / `total_mates` are int | null. NULL IS HONEST, 0 IS A
     # LIE: the Trades banner has no join counts and a stale league summary
     # can leave them unknown — never substitute 0.
@@ -703,6 +726,32 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                         "total_mates", "platform"}),
     "invite_cta_tapped":     frozenset({"surface", "not_joined",
                                         "total_mates", "platform"}),
+    # ── Bell inbox, 2026-08-13 ────────────────────────────────────────────
+    # Tracking plan: docs/plans/notif-inbox-growth/analytics.md. MOBILE
+    # ONLY — web/js/app.js has no analytics SDK (no track(), no /api/events
+    # caller), so none of these three is a product-wide rate. Said here
+    # because the number is easier to over-read than to re-derive.
+    #
+    # notif_inbox_opened — `unread_count` is read BEFORE markAllRead()
+    #   runs (after, it is always 0). `row_count` is the PRE-HYDRATION row
+    #   count: the server fetch is async and lands later, so this is "rows
+    #   the user saw immediately", never "rows the server holds". Firing
+    #   after the network settles would lose every offline open, which is
+    #   why it is measured this way.
+    "notif_inbox_opened":    frozenset({"unread_count", "row_count"}),
+    # notif_row_tapped — fired BEFORE resolveNotificationTarget, so a tap
+    #   on an unroutable kind is still recorded. That is deliberate: a row
+    #   tapped that goes nowhere is exactly the referral_joined bug this
+    #   batch fixes, and this event is the only way to catch the next one.
+    #   `type` is the row's data.type verbatim ('' when absent).
+    "notif_row_tapped":      frozenset({"type", "position", "age_hours"}),
+    # notif_empty_state_shown — `not_joined`/`total_mates` are int | null,
+    #   under the SAME rule as the invite rows above: NULL IS HONEST, 0 IS
+    #   A LIE. The bell is global — it opens with no active league and
+    #   before /api/league/summary lands, and neither case is "everyone
+    #   joined". `invite_offered` is whether the penetration gate opened.
+    "notif_empty_state_shown": frozenset({"not_joined", "total_mates",
+                                          "invite_offered"}),
 }
 
 
