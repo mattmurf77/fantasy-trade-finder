@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-12 — Feedback #300 (position-scoped trade candidates), shipped LIT with gates waived
+
+- **Change:** `5139b45` (PR #112), v1.13.1 **build 106**, both flags **ON**. Backend `medians` field on `/api/league/power-rankings`; mobile divider + Buyer/Seller bands + stacked-roster drill-in + Offer/Target handoff; rules A and B removed ([D-044](DECISIONS.md)); two analytics events.
+- **Verified on the merged tree, re-run by the orchestrator rather than taken from agent reports:** `pytest backend/tests -q` **2610 passed / 1 skipped**; `tsc --noEmit` exit 0; `testid-lint OK`; `check-league-drill-in` 29; `check-analytics-297-302` 35; `check-single-pin-actions` 17; `check-league-candidates-300` 67; `check-picks-subset-invariance` 72; `check-analytics-300` 51. **271 structural assertions.**
+- **Falsification:** 40 + 12 + 42 sabotages executed across the three build rounds. **One genuine false pass found and fixed** (S21: dropping `if (!query.isFetched) return` left the suite green because the assertion matched an identifier that also appears in the dep array). That is the **fifth** false-passing test caught in this session across five independently authored suites.
+- **Simulator gate: WAIVED by operator. Maestro execution: WAIVED by operator.** `06-position-trade-candidates.yaml` is authored and **has never run**. No `last-sim-run.json` written — not fabricated. **The 44pt hit-slop treatment, the divider and the rule-A removal have never executed on a device or simulator.** The operator confirmed the shipped build behaves in TestFlight, which is the only runtime evidence in existence for this feature.
+- **Analytics verified in production.** Deploy-then-probe run post-merge: 4 events posted, `{"accepted":4,"dropped":0,"rejected":[]}`, then every property read back out of `user_events.props` — both `league_pos_candidates_viewed` rows and both `league_candidate_pinned` mirror combinations `(offer, below)` / `(target, above)`. Note the trap this gate exists for: without `X-Device-Id` the response is `{"accepted":0,"dropped":0,"rejected":[{"reason":"no_identity"}]}`, which has `dropped == 0` and reads as a pass.
+- **Still true and worth repeating:** none of the six `check-*.js` suites run in CI. They are `npm run`-only, so **none of the 271 assertions gate anything**.
+
+---
+
 ## 2026-08-12 — P1 audit remediation shipped (sim gate retired by operator, not waived)
 
 - **`express`: P1 remediation shipped — simulator gate SKIPPED, `FTF_SKIP_SIM_GATE=1`.** Not a

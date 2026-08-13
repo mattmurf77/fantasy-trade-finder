@@ -9,10 +9,69 @@
 ---
 
 ## Table of Contents
+- [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device
+
+### Where I am right now
+
+**Two batches shipped from this session, both live in TestFlight.**
+
+- **#297/#298/#299/#302 + batch analytics** — `f8acd71`, v1.12.1 build 101.
+- **#300 position-scoped trade candidates** — `5139b45`, **v1.13.1 build 106**, both flags **ON** (`league.pos_candidates`, `league.player_trade_handoff`). Operator confirmed it behaves in TestFlight.
+
+All five items `fixed`; #301 `declined`; #205 parked. Analytics for both batches
+**verified in production by deploy-then-probe** — every property echoed back out
+of `user_events.props`, including the two #300 events and both mirror
+combinations `(offer, below)` / `(target, above)`.
+
+### The thing a next session most needs to know
+
+**#300 shipped lit with the simulator gate and Maestro execution waived by the
+operator.** The 44pt hit-slop treatment on the drill-in rows, the median divider
+and the rule-A removal have **never executed on a device or simulator** — the
+authored flow `06-position-trade-candidates.yaml` has never run. TestFlight is
+the only runtime evidence that exists. Kill switch: set either flag `false`.
+
+**Rule A and rule B were removed from `togglePos`** — a deliberate reversal of
+#293/#294. A position filter no longer auto-adds `PICKS`; pick value is an
+explicit opt-in. The original reasoning is preserved in the code comments and in
+`config/features.json`'s flag block, not deleted. This was load-bearing for
+#300: with rule A live, tapping WR ranked by WR **+ capital** while the median
+measured WR alone, so no honest line could be drawn.
+
+### Owed
+
+1. **A simulator pass on #300** whenever one is next run — the flow exists.
+2. **`aggregate_tier_labels` is still operator-only**, so per-team pick-tier
+   labels are dark for most users. The **median's** label was de-gated
+   (`_aggregate_pick_label` is a pure function), so the divider labels correctly
+   for everyone — but the rows around it may not.
+3. **Decision 6 is half-built:** single-position rows use pick tiers; 2+
+   positions still falls back to a raw numeric. Closing it needs a server-side
+   combined label.
+4. **No `check-*.js` suite runs in CI** — now **six** of them, ~271 assertions
+   in this session's work alone, all honour-system.
+5. **22 open feedback items** as of close, up to #321.
+
+### What bit us
+
+- **`.easignore` cost two failed EAS builds** — a bare `screens/` matched
+  `mobile/src/screens/`. Fixed (`53bd19f`); write-up in [`GOTCHAS.md`](GOTCHAS.md)
+  **G-039**, with two adjacent traps: `eas build` exits 0 on a failed remote
+  build, and its logs are brotli-encoded.
+- **`main` moved 21 commits mid-batch and falsified two premises**, forcing a
+  rebase and a complete analytics redo ([D-038](DECISIONS.md)).
+- **Five false-passing tests** were caught across this session, in five
+  independently authored suites, every one by running assertions against a
+  deliberately sabotaged build rather than by review. Treat "my test passes" as
+  unproven here until a sabotage fails it.
 
 ---
 

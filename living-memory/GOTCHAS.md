@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-039 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
 | G-038 | A ranking method can be a permanent dead end, and nothing reports it | Backend / unlock ladder |
 | G-037 | An unlock-proving fixture that seeds `unlocked: true` proves nothing | Backend / test fixtures / monotonic floor |
 | G-036 | `league_id` analytics props store `"[scrubbed]"` for Sleeper leagues only | Backend / analytics ingest / PII scrub |
@@ -309,6 +310,12 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Cause:** `get_rankings_progress`'s unlock ladder is an `if/elif` chain **keyed on `ranking_method` strings**, with a trio-swipe rule in the `else`. `'anchor'` was a valid, first-class method with no arm, so it fell to the `else` — and the anchor lane writes Elo overrides and *never a swipe*, so the fallback rule was structurally unsatisfiable. Adding a method string is a one-line change; adding its unlock rule is a separate one nobody was prompted to make. P0-1 later widened the blast radius by writing methods at the point of use.
 - **Fix:** every method gets an explicit arm (P1-7). `'anchor'` and `'manual'` unlock on durable board evidence (`RankingService.board_override_count()`, counting pool-resident `users.tier_overrides`), or the tiers rule.
 - **Prevention:** the ladder's `else` is a **fallback for one specific method** (`'trio'`/null), not a default that suits everyone. Adding a value to `VALID` ranking methods without adding an arm makes it a dead end. Note the two traps in fixing it: the interaction counter is **rebuilt from persisted swipes on every session build**, so bumping it in a save handler evaporates on the next cold start; and a rule keyed on a shared write lane (`apply_anchor`) grants credit to surfaces that were deliberately excluded from writing the method at all.
+### G-039 — a bare directory name in `.easignore` matches that name at ANY depth
+- **Symptom:** an EAS iOS build errors after ~50s at the **Bundle JavaScript** phase with `Unable to resolve module ../screens/SignInScreen` (or any module), while `npx expo export --platform ios` succeeds locally from the same tree. Two builds failed this way (99, 100) on v1.12.1.
+- **Cause:** `.easignore` uses **gitignore semantics**. The entry `screens/`, added to exclude the top-level 135-capture screen library, also matched **`mobile/src/screens/`** — every screen in the app — and stripped it from the uploaded archive. The tree was never wrong; only the archive was. Proven with git's own matcher: `screens/` matches both `screens/a.png` and `mobile/src/screens/SignInScreen.tsx`; `/screens/` matches only the first.
+- **Fix:** anchor every root-level entry with a leading slash (`/screens/`). Landed as `53bd19f`; build 101 from that commit finished and submitted.
+- **Prevention:** **a green local bundle cannot clear an archive-scoped failure** — do not let it talk you out of reading the real log. Two further traps found on the way in: `eas build` **exits 0 even when the remote build ERRORS** (verify with `eas-cli build:list --json` and read `status`), and the build logs are **brotli**-encoded, so the CLI will not render them post-hoc and `curl --compressed` fails — fetch `logFiles[0]` from `eas-cli build:view <id> --json` (signed URL, ~15 min TTL) and decompress with node's `zlib.brotliDecompressSync`.
+- **History:** **second instance of this bug class in this same file.** An earlier version globbed `*.png` and stripped the app icon and splash assets, failing the identical phase. The rule is now stated at the top of `.easignore` rather than left implied by a war story. A worktree-vs-clone hypothesis cost a whole build cycle before the log was read — building from a linked git worktree was **ruled out** as a cause.
 
 ---
 

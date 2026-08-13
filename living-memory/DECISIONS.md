@@ -409,6 +409,14 @@
 **Consequences:** A change to the ladder's vocabulary now flows into the wizard automatically, which is the point. `mobile/tests/check-anchor-labels.js` (`npm run test:anchor-labels`) enforces it with five independently-failing AST assertions. **Its first cut was defeated by `label: key === '1_second' ? '1 2nd' : anchorLabel(key)`** — it inspected only the root of each initializer — and was fixed to walk the whole subtree; see G-035. Three copies of the ladder vocabulary remain in mobile (`TIER_LABEL`, `TierBadge.tsx`, `chalkline/Badge.tsx`); they agree today but are not derived, and are filed to `NEXT.md` together with the `tierForElo` floor gap.
 **Status:** Active.
 
+## D-044 — A Position Filter Means That Position: Rules A and B Removed
+**Date:** 2026-08-12 (feedback #300; reverses part of #293/#294)
+**Context:** `league.picks_always_counted` shipped 2026-08-10 with two toggle rules. **Rule A** auto-added `PICKS` on the first position tap so draft capital never silently vanished under a filter. **Rule B** cleared the filter to All when removing a position left no core position, "instead of stranding the user in a picks-only ranking they never asked for". #300's median divider then found rule A load-bearing in the wrong direction: with it live, tapping WR ranked the league by **WR + capital** while any median measures WR alone, so no honest line could be drawn — and in a pick-carrying league (i.e. all of them) the feature sat one undiscoverable tap from invisible.
+**Decision:** Remove both. A position filter means that position; pick value is an explicit opt-in. Operator ruling: *"All leagues have picks. They should not be selected along with a position filter. Only by explicit user action."*
+**Alternatives considered:** Keeping rule A and gating the divider on `PICKS` absent — built first, and rejected: it left the natural path (tap WR from All) reaching nothing, which is the #205 tenet failure of requiring the user to know how the app works. Narrowing rule B — impossible: with rule A gone, every `PICKS` is hand-chosen, so rule B's trigger set and the case the ruling protects are the same states.
+**Consequences:** Reversibility becomes structural (a plain toggle is its own inverse) and strictly better — `{PICKS}` + RB − RB now returns to `{PICKS}` rather than costing the extra tap #294 accepted. #294's "hidden hand-chosen state axis" objection is obsolete. **What #293 originally complained about can return**: a rebuilding team's capital is no longer counted under a position filter unless the user asks. That is the intended trade, not an oversight. The flag still governs picks in all subsets, the bar segment, legend, pill, drill-in group and hint strings — only the auto-add is gone. Two Maestro flows and one structural suite were re-pinned; the original reasoning is preserved in the code comments and the `features.json` block rather than deleted.
+**Status:** Active. Shipped `5139b45`, v1.13.1 build 106.
+
 ---
 
 ## Decision index
@@ -457,6 +465,7 @@
 | D-040 | T1 Registers Four Analytics Names and Defers Four; the File Is Not Final | 2026-08-11 |
 | D-041 | Unlock Is Per-Method and Reads the Board, Not the Event Stream | 2026-08-11 |
 | D-042 | First-Unlock Fan-Out Is Suppressed by a Backfill, Not a Special Case | 2026-08-11 |
+| D-044 | A Position Filter Means That Position: Rules A and B Removed | 2026-08-12 |
 | D-043 | Shared Display Vocabularies Are Derived From One Constant | 2026-08-11 |
 
 ---
