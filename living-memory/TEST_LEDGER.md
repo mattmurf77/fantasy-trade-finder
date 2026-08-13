@@ -11,6 +11,43 @@
 
 ---
 
+## 2026-08-12 — P1 audit remediation shipped (sim gate retired by operator, not waived)
+
+- **`express`: P1 remediation shipped — simulator gate SKIPPED, `FTF_SKIP_SIM_GATE=1`.** Not a
+  one-off waiver: operator decision **D-P1-08** retires the Maestro/simulator/screenshot
+  apparatus as standing policy — it consumed more budget than it returned and its quality
+  degraded as the surface grew. **TestFlight is now the primary QA method.** No
+  `qa/sim-runs/last-sim-run.json` written — **not fabricated**. The pre-push hook fired and was
+  overridden deliberately, with the operator's explicit go. `CLAUDE.md`, `githooks/pre-push` and
+  `docs/runbook.md` still describe the old policy and are **owed an update** (D-P1-08).
+- **Verified instead:** full backend suite **2663 passed / 1 skipped** (3m51s) on the rebased
+  tree; `npx tsc --noEmit` clean against a fresh in-worktree `npm ci`; `testid-lint` exit 0;
+  `check-anchor-labels.js` 20/20; `check-invite-social-proof.js` 13/13. Baselines measured on
+  this tree before editing, never quoted from another branch: 2467 → 2504 (P1-7) → 2663 (after
+  rebase onto `main` plus the two pre-ship fixes).
+- **NOT verified on device.** Five changed anchor rung labels, the anchor progress hint, both new
+  invite surfaces and the share-image footer are visual and have never rendered on a simulator or
+  a phone. This is the accepted cost of D-P1-08 and is owed on the TestFlight pass.
+- **Sabotage-proven guards.** The anchor-label AST walker **false-passed on its first cut** — it
+  inspected only the root of each initializer, so `key === '1_second' ? '1 2nd' : anchorLabel(key)`
+  slipped through; fixed to walk the whole subtree, all five mutations now fail as intended. The
+  tier-route 404 was proven to come from the flag guard rather than a missing route (body shape +
+  `url_map` membership). The `league_id` scrub exemption was proven narrow three ways: an email
+  under the same key is still redacted, a long digit run under any other key is still redacted,
+  and the allowlist is exact-key rather than substring.
+- **Analytics NOT yet proven end-to-end.** T1 registration ships in this push, but the corrected
+  probe (**HLD §H-6**: `X-Device-Id`, valid envelope, `accepted > 0` **and** `dropped == 0`, then
+  a read-back of `user_events.props`) runs against production **after** the Render deploy. Until
+  it passes, treat every new event as unproven — the endpoint returns 200 while dropping. The
+  original probe spec in this round would have passed against a broken build; that is why it was
+  corrected before use.
+- **Not shipped, deliberately:** email capture (built, then **reverted in full** — flag, policy,
+  docs and living-memory — by operator decision: the sequencing was backwards and no
+  email-sending infrastructure exists to consume it), P1-9 trade push and P1-10 Sleeper analytics
+  (both still hold unanswered build-blocking decisions), P1-11 (dropped, D-P1-01).
+
+---
+
 ## 2026-08-12 — Send in MFL + Send in ESPN shipped live (sim gate WAIVED all session, CI never ran)
 
 - **`express`: Send in MFL + Send in ESPN + platform unlink + ESPN credential verification shipped — gates skipped by operator.** `FTF_SKIP_SIM_GATE=1` on every push (warning emitted each time); **no `qa/sim-runs/last-sim-run.json` written — not fabricated**. CI never ran: the operator directed direct-to-`main` pushes rather than PRs. `main` moved `3293f4a` → `cad99fb`.

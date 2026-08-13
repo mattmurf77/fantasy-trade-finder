@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-08-12 (P1 audit remediation: tier-board exposure closed, share loop wired, invite promoted, anchors unlockable)
+
+- **A live privacy exposure was closed.** `/og/tiers/<pos>/<username>.png` and `/s/tiers/<pos>/<username>` shipped with **no guard at all** — no session, no flag, no in-app link — so any user's rankings board was fetchable by guessing a URL. Both now 404 behind `growth.tier_board_share`, **OFF as its resting state** per D-P1-12 (sharing of rankings is not a product surface). The operator believed this had already been disabled; what had been disabled was the public *profile* surface, a different thing.
+- **The share loop is wired end-to-end.** Every shared trade image and message now carries a link back; the share-package landing is called from both the calculator and the liked-but-unmatched path. **Two false comments** claiming the route didn't exist were the reason nobody wired it — the audit found one, the build found the second on the path it called "the more common case". Trades containing picks fall back to the simple link rather than rendering "Unknown player".
+- **Invite promoted with a penetration rule:** below 50% of leaguemates joined, invite leads the Matches empty state; at or above, "Find a trade" leads. Social proof comes from an aggregate already on `/api/league/summary` — no new endpoint, no flag dependency. Ships on **all** platforms: the claim that non-Sleeper invites are dead was traced and **did not hold** (nothing platform-conditional in the emit path), so gating would have suppressed a working outcome.
+- **Anchor users can unlock.** `'anchor'` was a valid ranking method with no arm in the unlock branch, so those users fell to a swipe rule anchoring never satisfies. Five of eight rung labels contradicted the app's own vocabulary (the audit found two); labels are now **derived** from the canonical ladder with an AST test preventing re-divergence. Unlock backfill matched to P0-1's so no burst of "@user just unlocked" pushes.
+- **`league_id` is no longer scrubbed as PII** (G-036). The 16+-digit rule, aimed at card numbers, matched every 18-digit Sleeper league id — five event types stored `"[scrubbed]"`. ESPN's 6-digit ids passed through, which is why spot-checks looked fine. Exemption is exact-key and skips that one rule only.
+- **Reverted before shipping:** email capture. Built, then dropped in full — flag, policy, docs and living-memory. Sequencing was backwards: plaintext PII, indefinite retention, no removal path and no legal review, in exchange for 3–5 addresses that **no email-sending infrastructure exists to use**.
+- **Gates:** 2663 passed / 1 skipped; `tsc` clean; simulator gate skipped under D-P1-08 (retired as policy, TestFlight is now primary QA). Analytics registration ships **unproven** until the corrected post-deploy probe runs — the probe as originally specced would have passed against a broken build. See [`TEST_LEDGER.md`](TEST_LEDGER.md).
+
+---
+
 ## 2026-08-12 (Send in MFL + Send in ESPN live; ESPN write proven; Sleeper device-calls unblocked)
 
 - **Both new send paths are LIVE in production.** `main` @ `cad99fb`; prod `/api/feature-flags` serves `trade.send_in_mfl: true` and `espn.send: true` (neither key existed before). TestFlight 1.13.0 builds 102–105, then 1.13.1 build 107. Every build status read from `eas-cli build:list --json`, never the exit code — **`eas build` exits 0 even when the remote build ERRORED** (a concurrent session lost two builds to that).
