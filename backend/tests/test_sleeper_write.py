@@ -257,3 +257,44 @@ def test_propose_graphql_generic_error_raises_write():
 def test_propose_empty_token_raises_auth():
     with pytest.raises(SleeperAuthError):
         sw.propose_trade("", _REQ)
+
+
+# ---------------------------------------------------------------------------
+# FAAB object-literal encoding (device-auth S0, LLD §7.0)
+#
+# GraphQL object literals use BARE keys; json.dumps quotes them, which is
+# invalid syntax. Dormant until FAAB trades populate waiver_budget, and fixed
+# ahead of the device transport's strict guard so the guard never approves a
+# body Sleeper must reject.
+# ---------------------------------------------------------------------------
+
+def test_faab_budget_inlines_bare_keys():
+    body = build_propose_trade_body(ProposeTradeRequest(
+        league_id="999", my_roster_id=1, their_roster_id=2,
+        give_player_ids=["1"], receive_player_ids=["2"],
+        waiver_budget=[{"sender": 1, "receiver": 2, "amount": 5}],
+    ))
+    q = body["query"]
+    assert "waiver_budget: [{sender:1,receiver:2,amount:5}]" in q
+    assert '"sender"' not in q          # the json.dumps bug, pinned
+
+
+def test_faab_budget_bad_key_raises():
+    # A bare key is unquoted in the query text, so an unvalidated key is a
+    # direct injection into the document. Reject anything outside the
+    # GraphQL Name grammar.
+    with pytest.raises(SleeperWriteError):
+        build_propose_trade_body(ProposeTradeRequest(
+            league_id="999", my_roster_id=1, their_roster_id=2,
+            give_player_ids=["1"], receive_player_ids=["2"],
+            waiver_budget=[{"sender) { x } evil(y: 1": 1}],
+        ))
+
+
+def test_faab_empty_budget_unchanged():
+    # The empty case must keep emitting exactly what the live capture showed.
+    body = build_propose_trade_body(ProposeTradeRequest(
+        league_id="999", my_roster_id=1, their_roster_id=2,
+        give_player_ids=["1"], receive_player_ids=["2"],
+    ))
+    assert "waiver_budget: []" in body["query"]
