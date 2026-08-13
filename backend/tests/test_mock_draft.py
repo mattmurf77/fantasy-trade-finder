@@ -3051,13 +3051,17 @@ def test_295_16_a_short_order_is_not_an_order():
     floor (red: `teams == 2`)."""
     ctx = make_ctx(players=linear_players(20))
     owners = [f"o{i}" for i in range(8)]
+    # user o1 is inside the degenerate 2-entry order, so the sabotaged build
+    # reaches the teams assertion (the named red is `teams == 2`, not the
+    # INV-6 raise).
     settings = mds.build_settings(
-        ctx, owners=owners, user_owner_id="o3", rounds=1,
+        ctx, owners=owners, user_owner_id="o1", rounds=1,
         order=["o1", "o2"], order_source=mds.ORDER_SOURCE_ASSIGNED,
         traded_slots={(1, 2): "o5"}, rng=random.Random(5))
     assert settings["order_source"] == mds.ORDER_SOURCE_RANDOMIZED
     assert settings["teams"] == 8
-    assert "o3" in settings["order"]
+    assert "o1" in settings["order"]
+    assert "o3" in settings["order"]      # non-order owners join the shuffle
     assert sorted(settings["order"]) == sorted(owners)
     # The overlay drops WITH the order it was keyed against.
     assert settings["ownership"] == {}
