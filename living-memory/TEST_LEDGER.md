@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-08-13 — Device-auth S0 (FAAB fix shipped; vault + Sentry scrub held, Maestro waived)
+
+- **Change:** S0, the ship-now bundle (Plan §12). **Lane A — FAAB GraphQL object-literal fix: SHIPPED to `main`** (`79123a0`), backend-only so the pre-push sim gate did not apply. **Lane B — `credentialVault.ts` + legacy migration + Sentry credential-leak scrub: built, tested, HELD** on `feat/s0-bundle` awaiting an unrelated release. **Maestro gate WAIVED by the operator** ("Waive the Maestro gate"); no flow was authored or run.
+- **The waiver is defensible on this change specifically:** S0 adds **no user-visible surface**. `credentialVault.ts` is referenced by no other module (verified by `git grep`), and the Sentry change is init config. There is nothing for a flow to drive. This does **not** extend to S4/S5, where the transport becomes reachable.
+- **Backend:** `pytest backend/tests -q` → **2694 passed / 1 skipped / 0 failed** (286s). **Note the discrepancy with the entry below**, which recorded 6 `test_rookie_scope.py` failures: those are [G-028] — they fail only in checkouts carrying real data, and this is a clean worktree with no `data/` DB. **My green is the easier condition, not a fix.**
+- **FAAB fix proven failing-first:** the 3 new tests were run against the pre-fix module via `git stash` → **2 failed / 1 passed**; against the fix → **3 passed**. The bare-key assertion and the injection-guard assertion are the two that flipped.
+- **Mobile:** every `check-*.js` in `tests/` and `scripts/` → **24 passed / 0 failed** (22 pre-existing + 2 new). `tsc --noEmit` exit **0**, zero errors.
+- **`check-keychain-accessible.js` is sabotage-proven:** appending a bare `setItemAsync("k","v")` to the vault made it exit 1; removing it returned exit 0. Its first cut was **too literal** — it demanded the accessibility inline and so failed the real code, which passes a `WRITE_OPTS` const. Fixed to resolve a same-file options identifier. A check that only passes when the option is inlined would have been abandoned the first time someone refactored.
+- **`check-vault-subsumes-legacy.js`: 5/5** — migrate deletes the legacy slot and the token lands in the vault; **a simulated write failure RETAINS the legacy slot** (never delete-then-lose); no legacy slot ⇒ `none` with no vault write; a `user_id` mismatch returns `null` and does **not** wipe (D-047).
+- **Sentry scrub behaviourally verified, 9 assertions** (drops credentialed-host fetch breadcrumbs incl. mixed-case host, keeps our-API and non-fetch crumbs, strips `request.headers`/`request.data`, keeps `request.url`, tolerates absent fields).
+- **NOT verified anywhere — stated plainly:** nothing in lane B has executed on a simulator or a device. `WHEN_UNLOCKED_THIS_DEVICE_ONLY` actually excluding the item from an iCloud backup, Keychain survival across app update/reinstall, and the Sentry scrub's behaviour against a **real** captured event at tracing 1.0 are all device facts (LLD §6.6 items 1, 3, 5) and remain owed at Gates D/E. The vault has never run on hardware; its tests run against an in-memory SecureStore mock.
+- **Analytics: none added, and none were needed.** S0 emits zero events — the diff adds no `track()` call site and the vault is unreferenced. Instrumenting dormant code would be dead instrumentation. The spec for the events S4/S5 **will** owe (closing OI-20, plus a `platform_vault_migrated` event the LLD never named) is in [`../docs/plans/device-side-platform-auth-analytics-spec-2026-08-13.md`](../docs/plans/device-side-platform-auth-analytics-spec-2026-08-13.md).
+
 ## 2026-08-13 — #295/#296/#305 mock-draft repair + manual mode (sim gate NOT run; Tier-1 owed)
 
 - **Change:** `e71a654` (PR #114), v1.13.3 **build 110**. Five membership sites, `UserNotInDraft` raise, `user_not_in_draft` ladder rung, `mode: cpu|manual`, five-event analytics family.
