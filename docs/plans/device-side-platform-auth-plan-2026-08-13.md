@@ -28,8 +28,8 @@ The LLD carries 20 open items; most are engineering calls with named owners. **F
 | # | Decision | Recommended default | Decided by | Cost of deferring past that point |
 |---|---|---|---|---|
 | **OI-9** | `expo-updates`: evaluate before committing (PRD OQ-4; "upstream of the whole programme") | **Run a 1–2 day spike in parallel with S0/S1; decision written to `living-memory/DECISIONS.md` before S3.** Both lenses' full reasoning in §10. | **Gate C** — before S3 | If the spike would have changed your mind, everything after S3 is sunk cost. The spike costs 1–2 days; skipping it saves almost nothing and risks weeks. |
-| **OI-3** | Two-device model: single-holder (second link overwrites `device_id`, LLD §3.1) vs multi-holder | **Single-holder, as written.** You have one phone, and single-holder is the only model that can't leave a forgotten device holding a live credential. | Before S4 (schema PK); **re-confirmed in writing at Gate F** | Changing later is a primary-key change on a shipped table. |
-| **OI-14** | Vault on `user_id` mismatch: PRD:144 says wipe; LLD §2.7 returns `null`, wiping only from session establishment | **Accept the LLD deviation.** The PRD-literal version lets any caller with a stale id destroy the only copy of the credential. | **Gate C** — before the vault ships | Builders guess between two disagreeing normative documents, inside a custody control. |
+| **OI-3** | Two-device model: single-holder (second link overwrites `device_id`, LLD §3.1) vs multi-holder | **Single-holder, as written.** You have one phone, and single-holder is the only model that can't leave a forgotten device holding a live credential. | Before S4 (schema PK); **re-confirmed in writing at Gate F** | The PK ships dark at S1 and stays cheap to change until the first `platform_links` row is written at S7 — so Gate F's re-confirmation is a real decision point, not ceremony. After rows exist, changing it is a migration on a live custody table. |
+| **OI-14** | Vault on `user_id` mismatch: PRD:144 says wipe; LLD §2.7 returns `null`, wiping only from session establishment. S0 *implements* the LLD reading (`null`, no wipe); Gate C ratifies or overrides it before any send path consumes it — the mismatch path is only exercised from S4. | **Accept the LLD deviation.** The PRD-literal version lets any caller with a stale id destroy the only copy of the credential. | **Gate C** — before the vault ships | Builders guess between two disagreeing normative documents, inside a custody control. |
 | **OI-4** | Old-build reinstall silently restores server custody (H4): accept-and-monitor, or refuse the link? | **Accept and monitor.** The alternative breaks that user's sends entirely — the wrong failure direction. Internalize the consequence: **M1 can go non-zero without an incident**; non-zero M1 is "investigate," never "page." | Before S8; **re-confirmed at Gate F** | Purely interpretive until testers exist: someone reads M1 as a breach signal. |
 | **OI-15** | `DELETE /api/sleeper/link` needs a verified session; under device custody it is the only revocation writer, so a lapsed session cannot revoke | **Keep the gate for release 1; document "re-login, then disconnect"; revisit before any public release.** | Before S8; **re-confirmed at Gate F** | Negligible at n≈3. Real before volume: revocation is the user's only recall and it's behind a login they may have lost. |
 
@@ -57,7 +57,7 @@ One operator directing agent sessions; "days" are operator-attended working days
 | **S7** | Both flags on together, allowlist = operator only (§7.2); Sentry release-build capture at tracing 1.0; **one real send**; rollback drill same day; 7-day soak | S | 1 + 7 elapsed | — | S6; **Gate E** |
 | **S8** | Widen allowlist (~2 testers); no flag changes; soak per widening | XS | ~0 | — | S7; **Gate F** |
 
-**Totals: ~18–25 attended days, ~4–6 calendar weeks**, the last ~2 weeks mostly elapsed soak and TestFlight latency.
+**Totals: ~18–25 attended days, ~4–6 calendar weeks**, the last ~2 weeks mostly elapsed soak and TestFlight latency. (Per-stage maxima sum to ~26; the total assumes the stated S4/S5 overlap. **The total is an uncalibrated stage-sum** — it excludes gate/review friction, which for the LLD alone was 4 rounds and 24 blocking objections, and it pre-absorbs the OI-12-absent branch as "top of range" when the LLD calls that branch a sub-project. **If Hermes lacks `TextDecoder`, S3 is re-estimated at Gate C rather than assumed to fit the ceiling.**)
 
 **Why S3 is honestly the risk concentration:** a hand-written lexer/parser that *is* the security control, implemented twice, pinned by corpus + oracle + fuzz — with a possible hand-rolled UTF-8 validating decoder hiding inside if OI-12 comes back "Hermes has no `TextDecoder`," which moves the estimate to the top of its range and adds decoder corpus rows (overlong encodings, lone surrogates). Budget it; don't shave it.
 
@@ -125,8 +125,10 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 | `ok`, `transaction_id` parsed, offer visible in Sleeper | pass | Run the drill (§7), then start the 7-day soak clock. |
 | **Edge rejection: Cloudflare error page, 1010, or a JS-challenge body in `response_b64`** | **R7 — the kill criterion** | **STOP. Do not iterate.** Not one day of header tweaks: the design already forbids the spoofing headers on device, and the probe passed 4/4 — an edge rejection now is a fact about Cloudflare, not your code. Flags off, drill, decision memo, park the programme (F1). |
 | 200 with GraphQL `errors` matching the auth heuristic, or 401/403 | R8 — credential, not architecture | Pause, re-capture, retry. Not a kill. |
-| `guard_refused` / `lease_self_check_failed` | our parser bug (M4 formally, but the only device is yours) | Fix via corpus row, re-run. **Escalates to a programme pause if parity cannot be stabilized in two fix cycles** — that questions the dual-implementation premise itself and goes back to review, not a third patch. |
-| `network_error` / `unknown` | indeterminate by design (I1) | Check Sleeper by hand — at n=1 you can. Offer present ⇒ transport worked, reporting is broken: fix reporting. Absent ⇒ retry once. |
+| `guard_refused` / `lease_self_check_failed` | our parser bug (M4 formally, but the only device is yours) | Fix via corpus row, re-run. **Escalates to a programme pause if parity cannot be stabilized in two fix cycles.** The two-cycle rule is the *operational test* for §8's semantics-vs-corpus abort: a divergence a corpus row fixes was a corpus gap; one that survives a corpus row is semantic, and the dual-implementation premise goes back to review, not to a third patch. |
+| `network_error` / `unknown`, first occurrence | indeterminate by design (I1) | Check Sleeper by hand — at n=1 you can. Offer present ⇒ transport worked, reporting is broken: fix reporting. Absent ⇒ retry once; if it persists, go to the next row — do **not** keep iterating. |
+| **Persistent `network_error` from the device while a same-day, same-credential server-path send succeeds** | **suspected R7 at the handshake layer** — TLS/HTTP-2 fingerprint enforcement can manifest as resets/timeouts with **no response body at all**, so the clean-403 row above never fires | **Stop iterating.** Re-run the 4/4 reachability probe from the device. Probe fails ⇒ R7, treat as the kill row. Probe passes ⇒ a transport bug in our code — debug that, not headers. The server-path control send is the discriminator, and R-ROLLBACK means you always have it. |
+| **A single, transient edge challenge** (one JS-challenge page, then clean sends) | possibly noise — Cloudflare serves challenges for network-reputation reasons unrelated to the app | Pause device sends, re-probe. One transient challenge does **not** trigger "close the programme" — over-triggering the terminal action on one noisy observation is its own failure. **Recurrence across sessions or devices ⇒ R7, close.** |
 | **Pre-send Sentry capture shows any injected header on a platform request** | scrub defective | **Hard stop before the send** — a precondition, not a finding. |
 
 **Soak criteria:** M4 = 0 and M8 divergence = 0 for 7 days, **with monitoring proven live by synthetic injection before the clock starts** — otherwise "zero for 7 days" means "nobody looked for 7 days." Any M4 event from a non-operator device at S8: shrink the allowlist to zero the same hour, then investigate. The allowlist, not the flag, is the per-device brake.
@@ -147,9 +149,9 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 
 **Gate A — start S0: GO now.** No preconditions.
 
-**Gate B — start S1/S2:**
+**Gate B — start S2** (S1 has no serial dependency and needs no gate)**:**
 ☐ OI-16 answered (epoch semantics when only a token row exists).
-☐ §2.5's custody-precedence rule + §5.3's `feature_disabled` row **re-reviewed by a fresh adversarial pass** — the LLD's own log names them the least-reviewed lines, and they are the rollback path.
+☐ §2.5's custody-precedence rule + §5.3's `feature_disabled` row re-reviewed by a **fresh adversary-lens subagent that authored neither the LLD nor the S2 change**, scoped to attacking the both-rows rollback state specifically, producing a **dated written verdict filed in the programme docs**. Named performer, independence requirement, and artifact are the point: without them, the S2 implementing session reads the two sections, thinks for a minute, and checks the box — self-attestation by the party the review must be independent of, on the LLD's own least-reviewed lines, which are the rollback path. **No verdict artifact, no S2 merge.**
 ☐ `test_platform_link_contract.py` covers the both-rows state.
 
 **Gate C — start S3. The programme's real decision gate:**
@@ -164,12 +166,12 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 ☐ `check-transport-caps-fingerprint.js` green (a mismatch is 426-for-everyone, permanently, for this binary).
 ☐ All five §4.5 sites rewritten; old-binary fixture green; **`linkSleeperToken` emits `X-FTF-Caps`** (the silent-G1-defeat check).
 ☐ A real server-path send verified **after** `serialize_body` landed (the wire-bytes change rides the recovery path too).
-☐ Sentry capture from a **release** build, tracing forced to 1.0: no injected header on a platform request.
 ☐ OI-20 events registered; sweep alert (OI-11) and unknown-fingerprint alert (§2.1) demonstrably firing.
 ☐ The drill script written into `docs/runbook.md` — before the build, not after.
 
 **Gate E — S7 flags on (both together, operator device only):**
 ☐ Gate D's build installed on the operator's device.
+☐ **Sentry capture from the shipped S6 build, tracing forced to 1.0, taken with flags on but BEFORE the first send: no injected header on the platform request.** This can only exist once flags are on — a device platform request requires the transport live — which is why it is a Gate E pre-send precondition and not a Gate D checkbox; an earlier draft placed it at Gate D, where it was unsatisfiable and would have been waved through, on a credential-leak check. A dirty capture is a hard stop before the send (§6 row 6).
 ☐ One real send, lease id logged.
 ☐ Drill executed same day, all four steps, artifact in TEST_LEDGER.
 ☐ M4 pager + M8 divergence query proven by synthetic injection before the 7-day clock starts.
@@ -179,7 +181,7 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 ☐ **Written answers to OI-3, OI-4, OI-15** — these govern other people's devices and may not be defaulted past this point.
 ☐ Per-widening: soak clean before the next device.
 
-**Standing abort triggers, any stage:** R7 manifests (→ §6 row 2, close the programme) · guard parity divergence unresolvable by a corpus addition — the implementations disagree on *semantics* — stop S3, the dual-implementation premise has failed · any M4 event during S7/S8 from the paging set (`guard_refused`, `auth_header_present`, `host_not_allowed`, `method_not_allowed`, `header_not_allowed`): flags off first, investigate second · sweep cron stalled >1 hour with open leases: flags off until the alert path is fixed.
+**Standing abort triggers, any stage:** R7 manifests — per §6's graduated read: a clean edge rejection, a failed device re-probe, or challenges recurring across sessions; never a single transient observation (→ close the programme) · guard parity divergence unresolvable by a corpus addition — the implementations disagree on *semantics* — stop S3, the dual-implementation premise has failed · any M4 event during S7/S8 from the paging set (`guard_refused`, `auth_header_present`, `host_not_allowed`, `method_not_allowed`, `header_not_allowed`): flags off first, investigate second · sweep cron stalled >1 hour with open leases: flags off until the alert path is fixed.
 
 ---
 
@@ -189,9 +191,10 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 
 **Self-attested (slip is silent), each now bound to an artifact:**
 
+- Gate B's adversarial re-review of the rollback lines → the dated written verdict (§8). No verdict, no S2 merge.
 - S7's "one real send + drill" → the TEST_LEDGER artifact (§7). No artifact, no S8.
 - The soaks → monitoring proven live by synthetic injection before each clock starts.
-- **§6.6's seven device-only facts** — the LLD gives them a section but no stage, owner, or evidence format; left as-is they get checked "implicitly by S7 working," which is exactly the self-attestation to forbid. Bound here: items 3–4 at Gate C, items 1, 5, 6, 7 at Gate D, item 2 *is* the S7/S8 soak and is never fully discharged. Each check is one TEST_LEDGER line: date, device, build, observed result.
+- **§6.6's seven device-only facts** — the LLD gives them a section but no stage, owner, or evidence format; left as-is they get checked "implicitly by S7 working," which is exactly the self-attestation to forbid. Bound here: item 4 (Hermes primitives) at Gate C; items 1, 5, 6, 7 at Gate D; item 3 (the Sentry capture) at Gate E, pre-send; item 2 *is* the S7/S8 soak and is never fully discharged. Each check is one TEST_LEDGER line: date, device, build, observed result.
 - The operator decisions → Gates C and F name them; the implementing session may not resolve them by writing code.
 
 ---
@@ -204,7 +207,7 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 
 **The risk lens's argument:** nearly every hard constraint in this plan — the irreversible §7.2 ordering, the S6 point of no return, the old-binary machinery, OI-4's permanent residual — is downstream of "no OTA." Adopt it and "field builds cannot be fixed" becomes "fixed in hours," deleting or demoting most of what makes this plan brittle. And the urgency picture cuts the same way: the Sleeper agreement already covers the current architecture (PRD §2.1), the traffic Sleeper's warning describes stays on Render regardless (§2.2), and at n=1 the realized custody benefit is one JWT. There is no clock.
 
-**Recommendation:** run the spike; expected outcome is **"adopt later, with `mobile/src/transport/` carved out of OTA scope"** — proceed with this programme now, because the TCB question means OTA-first is not the safe default it appears, and the old-binary machinery it would obsolete costs only ~2–3 of the 18–25 days (the union GET contract is needed under OTA anyway, since an update is not guaranteed applied). **But the spike owns the decision, not this paragraph.** If it concludes adoption is trivial *and* safe for the custody threat model, the honest move is to take it and re-derive §7.2 — that is the best outcome a plan can have, per the risk lens, and the execution lens does not disagree; it only bets the spike won't conclude that.
+**Recommendation:** run the spike; expected outcome is **"adopt later, with `mobile/src/transport/` carved out of OTA scope"** — proceed with this programme now, because the TCB question means OTA-first is not the safe default it appears, and the old-binary machinery it would obsolete costs only ~2–3 of the 18–25 days (the union GET contract is needed under OTA anyway, since an update is not guaranteed applied). **But the spike owns the decision, not this paragraph** — and two hygiene rules keep that true: the spike session's prompt **excludes this section**, so the "expected outcome" sentence cannot anchor the analysis it delegates to; and the DECISIONS.md memo must state **what evidence would have concluded "adopt first"** — a memo that cannot name its own disconfirming evidence is a rationalization, not an evaluation. If it concludes adoption is trivial *and* safe for the custody threat model, the honest move is to take it and re-derive §7.2 — that is the best outcome a plan can have, per the risk lens, and the execution lens does not disagree; it only bets the spike won't conclude that.
 
 ---
 
@@ -223,7 +226,7 @@ What it does buy: elimination of the aggregate at-rest breach target (one Fernet
 
 ## 12. Effort vs. value at n=1 — and the half-time plan
 
-**Worth doing now regardless of the programme (~3–4 days): all of S0.** The 365-day JWT is iCloud-backup eligible *today*; the Sentry scrub closes a leak path the transport would widen; the FAAB fix is a latent production bug. PRD §10's ship-now bundle; needs no further approval.
+**Worth doing now regardless of the programme (2–3 days, per §2): all of S0.** The 365-day JWT is iCloud-backup eligible *today*; the Sentry scrub closes a leak path the transport would widen; the FAAB fix is a latent production bug. PRD §10's ship-now bundle; needs no further approval.
 
 **Worth doing now because it is the programme (~15–20 days): S1–S7 as specced.** The corpus/fuzz rigor is not gold-plating — it is the control, and the LLD's review history is the evidence a lighter version ships holes. The dialect-branched transaction is the one table where a divergence is a duplicate real-money trade offer.
 
