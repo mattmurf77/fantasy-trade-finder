@@ -108,6 +108,7 @@ from .database import (
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
     load_awaiting_trades,
+    retract_awaiting_likes,
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
@@ -13090,6 +13091,86 @@ def get_awaiting_trades():
     except Exception as e:
         log.warning("get_awaiting_trades error: %s", e)
         return jsonify([])
+
+
+@app.route("/api/trades/awaiting/dismiss", methods=["POST"])
+@_gate_unverified_write
+def dismiss_awaiting_trade():
+    """
+    POST /api/trades/awaiting/dismiss                              (#318)
+    Body (JSON, all fields required):
+      { league_id, my_give: [ids], my_receive: [ids], partner_id }
+
+    Dismisses one "Awaiting them" tile by retracting the caller's like
+    rows: EVERY trade_decisions row of the CALLER with decision='like',
+    the same league_id, and set-equal give/receive (order-insensitive,
+    frozenset — load_awaiting_trades' dedup key) gets
+    retracted_at=<now ISO UTC>. No Elo signal, no swipe row, no effect on
+    trade_matches. `partner_id` is used ONLY to invalidate that user's
+    cached trade-deck job (best-effort, in-process) so their next generate
+    excludes the offer; it can never mutate the partner's data.
+
+    Responses (frozen contract — the Matches mobile client codes against
+    these exact bytes):
+      200 {"status": "ok", "dismissed_likes": <int >= 0>}
+          0 is still "ok" (idempotent repeat, or key already matured/
+          absent — never a 404).
+      400 {"error": "league_id, my_give, my_receive, partner_id are required"}
+      400 {"error": "session not initialised"}
+
+    A like re-swiped AFTER a dismissal writes a fresh row with NULL
+    retracted_at, so the trade legitimately reappears in Awaiting.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+
+    body = request.get_json(silent=True) or {}
+    league_id  = body.get("league_id")
+    my_give    = body.get("my_give")
+    my_receive = body.get("my_receive")
+    partner_id = body.get("partner_id")
+    if not league_id or not my_give or not my_receive or not partner_id:
+        return jsonify({"error": "league_id, my_give, my_receive, "
+                                 "partner_id are required"}), 400
+
+    dismissed = retract_awaiting_likes(
+        user_id=g_user_id,
+        league_id=str(league_id),
+        give_player_ids=[str(p) for p in my_give],
+        receive_player_ids=[str(p) for p in my_receive],
+    )
+
+    # Touch point 4 (plan #318): drop the PARTNER's cached deck job so their
+    # next /api/trades/generate regenerates without the retracted offer
+    # instead of serving the <=30-min-old snapshot. Best-effort, in-process.
+    try:
+        _invalidate_trade_jobs(user_id=str(partner_id),
+                               league_id=str(league_id))
+    except Exception as inv_err:
+        log.warning("awaiting-dismiss: partner deck invalidation failed: %s",
+                    inv_err)
+
+    # Server-fired INTENT event — only when >=1 row was newly marked (an
+    # idempotent 0-row repeat is not a fresh user intent).
+    if dismissed >= 1:
+        try:
+            record_event(
+                g_user_id,
+                "awaiting_trade_dismissed",
+                league_id = str(league_id),
+                source    = "api",
+                props     = {"partner_id": str(partner_id),
+                             "dismissed_likes": dismissed},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(awaiting_trade_dismissed) failed: %s",
+                        ev_err)
+
+    return jsonify({"status": "ok", "dismissed_likes": dismissed})
 
 
 @app.route("/api/trades/matches/<int:match_id>/dismiss", methods=["POST"])
