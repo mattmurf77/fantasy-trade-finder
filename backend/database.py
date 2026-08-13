@@ -813,21 +813,35 @@ recorded_picks_table = Table("recorded_picks", metadata,
 # notifications_table — in-app notification inbox
 # ---------------------------------------------------------------------------
 #
-# type: one of 'trade_match', 'trade_accepted', 'trade_declined'
+# type: a CROSS-CLIENT ENUM — both clients map it to a glyph and a tap
+#   destination from independent tables, and an unknown value degrades to a
+#   grey bell with a dead tap rather than an error. Adding a value here
+#   without adding it to BOTH clients is therefore silent, not loud. The
+#   authoritative list is docs/cross-client-invariants.md § Notification
+#   types; mirrors are mobile TopBar.tsx ROW_GLYPHS + deepLinks.ts V2_*
+#   sets, and web/js/app.js notifTypeIcon + clickNotif.
+#     trade_match · trade_accepted · trade_declined · referral_joined ·
+#     league_member_joined · league_member_unlocked_trades ·
+#     match_expiring · deck_replenished · counter_offer
 # metadata_json: JSON-encoded dict with context fields, e.g.:
 #   { "match_id": 42, "partner_username": "joe", "give": ["CeeDee Lamb"], "receive": ["Tyreek Hill"] }
 # is_read: 0 = unread, 1 = read
+# dismissed_at: ISO UTC when the user cleared the row, NULL = live. Read
+#   filters it out (get_notifications). Distinct from is_read on purpose —
+#   "I have seen this" and "I am done with this" are different facts, and
+#   collapsing them is what made "Clear all" a lie on both clients.
 # ---------------------------------------------------------------------------
 
 notifications_table = Table("notifications", metadata,
     Column("id",            Integer, primary_key=True, autoincrement=True),
     Column("user_id",       String,  nullable=False),
-    Column("type",          String,  nullable=False),   # trade_match | trade_accepted | trade_declined
+    Column("type",          String,  nullable=False),   # see the enum above
     Column("title",         String),
     Column("body",          String),
     Column("metadata_json", Text,    default="{}"),
     Column("is_read",       Integer, default=0),        # 0 = unread, 1 = read
     Column("created_at",    String),
+    Column("dismissed_at",  String),                    # NULL = live
 )
 
 # ---------------------------------------------------------------------------
@@ -1976,6 +1990,10 @@ def _migrate_db() -> None:
         # ESPN credential-honesty fix (2026-08-12) — last successful live
         # auth proof; NULL = never proven → GET /api/espn/link reads false.
         ("espn_credentials",   "verified_at",           "VARCHAR"),
+        # notif-inbox-growth (2026-08-13) — server-side "Clear all" (GD-4).
+        # NULL = live; existing rows are all live, which is the correct
+        # backfill and needs no separate pass.
+        ("notifications",      "dismissed_at",          "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -8727,10 +8745,205 @@ def create_notification(
     return row
 
 
+def notification_exists_with_meta(
+    user_id:  str,
+    type_:    str,
+    meta_key: str,
+    meta_val,
+    scan_limit: int = 500,
+) -> bool:
+    """True if this user already has a `type_` row whose metadata carries
+    `meta_key == meta_val`.
+
+    THE IDEMPOTENCY GATE FOR CRON-DRIVEN INBOX ROWS, and the reason it has
+    to exist: the push dispatcher's dedup lives inside _send_typed_push
+    (_freq_cap_blocks → notification_events_log), and that log is only
+    written when a push actually LEAVES. A push suppressed by a bucket
+    toggle or quiet hours writes nothing — so an inbox row that reused the
+    push's dedup would re-fire on every tick. /api/cron/realtime-tick runs
+    every 15 minutes over the same pending matches, which is 96 duplicate
+    rows a day for one match. The inbox needs its own gate, keyed off the
+    inbox's own rows.
+
+    Compared in Python rather than SQL: metadata is a JSON text column and
+    a portable JSON predicate across SQLite and Postgres is not worth the
+    coupling here. Bounded by `scan_limit` newest-first so the scan cannot
+    grow with account age.
+
+    DISMISSED ROWS STILL COUNT — deliberately. "Once written, never
+    rewritten": a user who clears an expiring-match row has said they are
+    done with it, and re-writing it 15 minutes later is precisely the nag
+    this surface exists to avoid.
+    """
+    if not user_id or not type_ or not meta_key:
+        return False
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(notifications_table.c.metadata_json)
+                .where(notifications_table.c.user_id == user_id)
+                .where(notifications_table.c.type    == type_)
+                .order_by(notifications_table.c.created_at.desc())
+                .limit(scan_limit)
+            ).fetchall()
+        target = str(meta_val)
+        for r in rows:
+            try:
+                meta = json.loads(r[0] or "{}")
+            except Exception:
+                continue
+            if meta_key in meta and str(meta[meta_key]) == target:
+                return True
+        return False
+    except Exception as e:
+        print(f"[notification_exists_with_meta] {user_id}/{type_} failed: {e}")
+        # Fail CLOSED: on a read error, claim the row exists. A missing
+        # inbox row is a lost receipt; a duplicated one on every cron tick
+        # is the surface losing the user's trust. The former is recoverable
+        # by the next real event, the latter is not.
+        return True
+
+
+def create_or_coalesce_league_join_notification(
+    user_id:      str,
+    league_id:    str,
+    league_name:  str,
+    new_username: str,
+    body:         str,
+) -> dict | None:
+    """Write (or fold into) the `league_member_joined` inbox row for this
+    user + league + UTC day. Operator decision GD-8: **one row per league
+    per day** — a five-person onboarding wave should read as one event,
+    because it is one.
+
+    Folding an arrival into an existing row REWRITES it and resets it to
+    unread, bumping created_at to now. That is deliberate on a
+    recency-ordered list (GD-3): the row is not a stale receipt of the
+    first join, it is the current state of today's wave, and it is news
+    again each time it changes.
+
+    Returns the row dict, or None on failure (never raises — an inbox
+    write must not be able to fail a session_init).
+    """
+    if not user_id or not league_id:
+        return None
+    day_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).isoformat()
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(notifications_table.c.id,
+                       notifications_table.c.metadata_json)
+                .where(notifications_table.c.user_id    == user_id)
+                .where(notifications_table.c.type       == "league_member_joined")
+                .where(notifications_table.c.created_at >= day_start)
+                # A dismissed row is NOT a coalescing target — folding a new
+                # arrival into it would resurrect something the user cleared.
+                # A genuinely new joiner starts a fresh row instead.
+                .where(notifications_table.c.dismissed_at.is_(None))
+                .order_by(notifications_table.c.created_at.desc())
+                .limit(50)
+            ).fetchall()
+
+        existing_id, meta = None, {}
+        for r in rows:
+            try:
+                m = json.loads(r[1] or "{}")
+            except Exception:
+                continue
+            if str(m.get("league_id")) == str(league_id):
+                existing_id, meta = r[0], m
+                break
+
+        # Names accumulate in order of arrival, deduped, capped. The cap is
+        # a storage bound, not a display one — `joined_count` stays exact so
+        # the title never under-reports a wave bigger than the list.
+        names: list = list(meta.get("new_usernames") or [])
+        if meta.get("new_username") and meta["new_username"] not in names:
+            names.insert(0, meta["new_username"])
+        if new_username and new_username not in names:
+            names.append(new_username)
+        count = int(meta.get("joined_count") or 0)
+        count = count + 1 if existing_id else 1
+
+        if count <= 1:
+            title = (f"@{new_username} joined {league_name}"
+                     if league_name else f"@{new_username} joined your league")
+        else:
+            title = (f"{count} leaguemates joined {league_name}"
+                     if league_name else f"{count} leaguemates joined your league")
+
+        new_meta = {
+            **meta,
+            "league_id":     league_id,
+            "league_name":   league_name,
+            "new_username":  new_username,
+            "new_usernames": names[:10],
+            "joined_count":  count,
+        }
+
+        if existing_id is None:
+            return create_notification(
+                user_id=user_id, type_="league_member_joined",
+                title=title, body=body, metadata=new_meta,
+            )
+
+        row = {
+            "title":         title,
+            "body":          body,
+            "metadata_json": json.dumps(new_meta),
+            "is_read":       0,
+            "created_at":    _now(),
+        }
+        with engine.begin() as conn:
+            conn.execute(
+                notifications_table.update()
+                .where(notifications_table.c.id == existing_id)
+                .values(**row)
+            )
+        return {"id": existing_id, "user_id": user_id,
+                "type": "league_member_joined", **row}
+    except Exception as e:
+        print(f"[create_or_coalesce_league_join_notification] "
+              f"{user_id}/{league_id} failed: {e}")
+        return None
+
+
+def dismiss_all_notifications(user_id: str) -> int:
+    """Server-side "Clear all" (operator decision GD-4). Stamps
+    `dismissed_at` on every live row for the user and marks them read.
+    Returns the number of rows affected.
+
+    Before this, "Clear all" was a lie on both clients in two different
+    ways: mobile emptied a zustand store and the rows re-hydrated on the
+    next open, and web hid ids in localStorage so the same account cleared
+    on a phone was still full on a laptop. One server-side dismissal
+    replaces both — it does not add a third mechanism.
+    """
+    if not user_id:
+        return 0
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(
+                notifications_table.update()
+                .where(notifications_table.c.user_id == user_id)
+                .where(notifications_table.c.dismissed_at.is_(None))
+                .values(dismissed_at=_now(), is_read=1)
+            )
+        return int(res.rowcount or 0)
+    except Exception as e:
+        print(f"[dismiss_all_notifications] {user_id} failed: {e}")
+        return 0
+
+
 def get_notifications(user_id: str, read_limit: int = 20) -> list[dict]:
     """
     Return notifications for a user, newest first.
     Always returns ALL unread + the most recent `read_limit` read notifications.
+
+    Dismissed rows (`dismissed_at IS NOT NULL`) are excluded from both legs —
+    that is what makes "Clear all" true rather than cosmetic (GD-4). The rows
+    are retained, not deleted: they are the only history this surface has.
     """
     with engine.connect() as conn:
         # All unread
@@ -8740,6 +8953,7 @@ def get_notifications(user_id: str, read_limit: int = 20) -> list[dict]:
                 and_(
                     notifications_table.c.user_id  == user_id,
                     notifications_table.c.is_read  == 0,
+                    notifications_table.c.dismissed_at.is_(None),
                 )
             )
             .order_by(notifications_table.c.created_at.desc())
@@ -8752,6 +8966,7 @@ def get_notifications(user_id: str, read_limit: int = 20) -> list[dict]:
                 and_(
                     notifications_table.c.user_id == user_id,
                     notifications_table.c.is_read == 1,
+                    notifications_table.c.dismissed_at.is_(None),
                 )
             )
             .order_by(notifications_table.c.created_at.desc())
