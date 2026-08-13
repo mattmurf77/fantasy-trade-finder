@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-13 — Notification inbox growth surface built on a branch, unmerged](#2026-08-13--notification-inbox-growth-surface-built-on-a-branch-unmerged)
+- [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
 - [2026-08-12 — Feedback #297–#302 and #300 both shipped; #300 is lit and unproven on-device](#2026-08-12--feedback-297302-and-300-both-shipped-300-is-lit-and-unproven-on-device)
 - [2026-08-12 — Send in MFL + Send in ESPN live; device-side auth designed, not built](#2026-08-12--send-in-mfl--send-in-espn-live-device-side-auth-designed-not-built)
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
@@ -18,7 +18,7 @@
 
 ---
 
-## 2026-08-13 — Notification inbox growth surface built on a branch, unmerged
+## 2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)
 
 ### Where I am right now
 
@@ -59,8 +59,9 @@ through their routes.
   [`../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md`](../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md).
 - ~~Analytics probe~~ **PASSED** — three names posted to prod with `X-Device-Id` →
   `{"accepted":3,"rejected":[]}`.
-- **EAS iOS build 109 (v1.13.2) submitted with `--auto-submit`** — confirm it reaches
-  TestFlight review/testers; status via `eas build:list --json`, never the exit code.
+- **EAS iOS build 109 (v1.13.2) FINISHED**; TestFlight submission `9668b9b2` was scheduled
+  at build time (`--auto-submit`). This eas-cli (21.6.x) has no submission-status command —
+  confirm arrival in TestFlight / the expo.dev submissions dashboard.
 - Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
   At 3–5 users these are **directional reads, not experiments**.
 
