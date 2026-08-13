@@ -106,7 +106,7 @@ X-FTF-Caps: transport_v=1;ops=<16 lowercase hex chars>
 
 **Why a fingerprint and not `transport_v` alone.** D3's decisive argument is that the server must know the device's compiled root-field set to build a body the device will accept. A hand-bumped integer can lie — it is the `operationName` defect one layer up. The server holds `TRANSPORT_OP_SETS: dict[str, frozenset[tuple[str, str]]]` keyed by fingerprint, and an **unknown fingerprint is treated as no capability**, never as "probably fine."
 
-Server helper: `_client_caps() -> Caps`, `Caps = NamedTuple(transport_v: int, ops: frozenset[tuple[str,str]] | None)`.
+Server helper: `_client_caps() -> Caps`, `Caps = NamedTuple(transport_v: int, ops: frozenset[str] | None)` — **`frozenset[str]`, not `frozenset[tuple]`**. One wire form, `"{op_type}:{root_field}"`, is used everywhere the op set is named: the fingerprint input, `caps.ops`, the client's `DEVICE_OPS`, `guard()`'s `allowedOps`, and the corpus's op-set dimension. §6.1(a) makes any parity divergence a build failure, so two representations of the same set is a defect waiting to be written.
 
 **`TRANSPORT_OP_SETS` is append-only while any build carrying an entry may still be in the field, and pruning it is a silent, compound failure.** Registry membership is load-bearing twice: `caps.ops` feeds the parity self-check (§4.1 step 12) and `caps.ops is not None` gates custody (§2.4). Drop an old fingerprint during a cleanup and every in-field device on that build simultaneously (i) falls out of device custody, so its next session replay **writes a `sleeper_credentials` row** and G1 is quietly defeated, and (ii) gets `426` at every lease, so the feature is dead — with no alert, and with M1 drifting non-zero in a way OI-4 has already trained the operator to read as benign. Required: a counter and alert on unknown-fingerprint requests to both `/api/sleeper/link` and `/lease`, and a comment on the registry saying entries are removable only once no build carrying them can still be installed.
 
@@ -262,7 +262,7 @@ Auth: session required. **Not** gated on `sess["verified"]` — a report is not 
 
 Behaviour is selected by the client's declared capability, **not** by a global flag (§1.5c).
 
-Suppression fires only when **all** of the following hold — this predicate must be **identical** to the one `/lease` uses at §4.1 step 2, plus a known fingerprint:
+Suppression fires only when **all** of the following hold — this predicate must be **identical** to the one `/lease` uses at §4.1 step 6, plus a known fingerprint:
 
 ```python
 def device_custody_active(caps, user_id, device_id) -> bool:
@@ -315,6 +315,18 @@ Response gains two keys; the existing four are unchanged so old clients keep par
   epoch: number;        // NEW
 }
 ```
+
+**`custody` is a record-precedence rule, and a `sleeper_credentials` row always wins:**
+
+```
+custody = 'server'  if a sleeper_credentials row exists          # the path that WORKS
+        = 'device'  elif a platform_links row exists, not revoked
+        = 'none'    otherwise
+```
+
+> **Both rows co-existing is not a corner case — it is exactly what the documented rollback produces.** Shrinking the tester allowlist (§7.2 S8, §7.3 step 1) makes `device_custody_active()` false, so the unconditional session replay (§4.5 row 1) writes a `sleeper_credentials` row again and the server path starts working. But the `platform_links` row is still live — §2.4 explicitly clears `revoked_at`/`rejected_at` and nothing re-sets them. If `GET` kept reporting `custody: 'device'`, §4.5 row 4 would keep routing to `/lease`, which now returns `404 feature_disabled`, and the user would be **permanently unable to send despite holding a perfectly good token row** — on the rollback path, which is the one that must never strand anyone.
+>
+> It has to be a precedence rule rather than a live evaluation of `device_custody_active()`, because `GET /api/sleeper/link` does not carry `X-FTF-Caps` (§2.1 lists only `/lease`, `/outcome`, and `POST /link`), so the server cannot compute the predicate on a GET. `test_platform_link_contract.py` asserts the both-rows case explicitly.
 
 Two rules, both non-negotiable:
 
@@ -497,6 +509,9 @@ platform_lease_reports_table = Table("platform_lease_reports", metadata,
     Column("http_status",     Integer),
     Column("applied",         Integer, nullable=False),   # 0 = duplicate or rejected
     Column("rejected_reason", String),                    # device_mismatch|user_mismatch|duplicate
+    # NOTE: a 404 unknown_lease is NOT recorded here. `lease_id` would be
+    # attacker-chosen, so recording it gives one authenticated session
+    # unbounded, 90-day-retained write amplification. Counter only.
     Index("ix_lease_reports_lease", "lease_id"),
 )
 ```
@@ -633,7 +648,8 @@ Added to `config/features.json`, **default false**, and mirrored into the three 
 12. GUARD PARITY: guard(body_bytes, allowed_ops=caps.ops)   # THIS device's set
       refuse -> 500 lease_self_check_failed, log, DO NOT issue
 13. digest = compute_request_digest(...)
-14. class _Rollback(Exception): pass
+14. _IS_POSTGRES = engine.dialect.name == "postgresql"   # idiom: database.py:78
+    class _Rollback(Exception): pass
     try:
         with engine.begin() as conn:              # ONE transaction, insert + count
             # DIALECT BRANCH — see the two measurements below.
@@ -647,9 +663,19 @@ Added to `config/features.json`, **default false**, and mirrored into the three 
                                                   # served as 409 send_in_flight
                 if sp: sp.rollback()              # Postgres: outer txn survives
                 holder = SELECT ... WHERE digest_lock = digest
-                if holder is None:
-                    retry the INSERT once; if it fails again -> null-safe 409
-                -> 409 send_in_flight {lease_id, issued_at, retry_after_s}
+                if holder is not None:
+                    -> 409 send_in_flight {lease_id, issued_at, retry_after_s}
+                # holder is None: the sweep or a concurrent /outcome nulled the
+                # lock in the gap. Retry ONCE, inside its own savepoint on PG so
+                # a second violation cannot abort the outer txn.
+                sp2 = conn.begin_nested() if _IS_POSTGRES else None
+                try:
+                    INSERT platform_leases (...)   # same row
+                    if sp2: sp2.commit()
+                    # SUCCESS -> fall through to the count check below
+                except IntegrityError:
+                    if sp2: sp2.rollback()
+                    -> 409 send_in_flight {lease_id: null, retry_after_s: DIGEST_WINDOW}
             if open_lease_count(conn, user_id) > MAX_OUTSTANDING_LEASES:
                 raise _Rollback                   # unwinds the whole begin() block
     except _Rollback:
@@ -678,7 +704,7 @@ Applying the recipe to the main engine instead would work, but its blast radius 
 
 So the helper is dialect-asymmetric by necessity: on Postgres match SQLSTATE `23505` **and** `diag.constraint_name == "ux_platform_leases_digest_lock"`; on SQLite match the message prefix `UNIQUE constraint failed:` **and** the column token `platform_leases.digest_lock`. An earlier draft of this block specified matching the index name on both, which **silently never matches on SQLite** — every duplicate tap would re-raise as a 500 instead of the `409 send_in_flight` §4.6 promises, and the §6.3 duplicate-tap test would fail in a way that invites someone to loosen it. Note the happier asymmetry: the CHECK name *is* portable, so the startup assertion (§5.4 item 6) can match on it directly.
 
-Two smaller points the block above encodes: the repo has **zero** existing `IntegrityError` handlers to copy (`backend/database.py:9584`, 111 self-contained `engine.begin()` writers), so this is new ground and the structure is the spec, not a sketch; and with a CHECK constraint plus five `nullable=False` columns now on the table, a bare `except IntegrityError` is ambiguous — it must discriminate on the constraint name, or a NOT NULL bug gets served to the client as "already sending."
+Two smaller points the block above encodes: the repo has **zero** existing `IntegrityError` handlers to copy (`backend/database.py:9584`, 111 self-contained `engine.begin()` writers), so this is new ground and the structure is the spec, not a sketch; and with a CHECK constraint plus five `nullable=False` columns now on the table, a bare `except IntegrityError` is ambiguous — it must discriminate as `_is_digest_lock_violation` does above — constraint name on Postgres, column token on SQLite — or a NOT NULL bug gets served to the client as "already sending."
 
 **Step 14's count check, ordered after the insert, is still deliberate.** Counting first is a TOCTOU; counting after means the loser unwinds.
 
@@ -990,6 +1016,7 @@ Three device outcomes are genuinely different and are routinely collapsed into o
 | `send_in_flight` | `UNIQUE(digest_lock)` | no | after `retry_after_s` | Not an error state in the UI. **The copy must not assert a send is in progress** — a lease orphaned by an app *kill* generates no report, so §4.4's queue is empty and the lock is held for the full `DIGEST_WINDOW` with nothing actually sending. Say "this trade was already submitted — check Sleeper before resending," and surface `retry_after_s`. |
 | `upgrade_required` | D3 capability negotiation | no | **no** | Alert + App Store link. **Never a silent fallback** — that would hide the skew D3 exists to make visible. |
 | `guard_refused` | a compiled device guard | **no** | **no** | Deep-link fallback + report. **Any occurrence is an M4 incident.** Never auto-retried — retrying a refused document is retrying an attack. |
+| `feature_disabled` | `/lease` 404 — the flag is off, or this device left the allowlist | no | no | **Fall back to `POST /api/trades/propose`. No user-visible error.** This is the rollback path, not a failure: the token row exists (or will after the next replay), so the send simply takes the server route. Omitting this row is how a rollback turns into a dead feature. |
 
 There is deliberately **no `lease_expired`**. `expires_at` is UX only and the server never rejects on it; a stale lease surfaces as a normal outcome with `late: true`.
 
@@ -1100,7 +1127,7 @@ Real threads against the real engine — a mocked DB proves nothing about a uniq
 | `device_outcomes_refused` | `== 1` — **the negative control** |
 | `device_outcomes_sent` | `== 0` |
 
-**The negative control:** one deliberate lease per run whose URL points at a sinkholed host, driven through `/__test__` injection. It must be **blocked and counted** — the device refuses (`host_not_allowed`) and reports, and the server counts. Without it a misconfigured fence yields a green run with real egress. The counter is server-side because a device-side counter is unreportable by a client that is by definition misbehaving; a client that goes silent instead is caught by M8's lease-vs-outcome divergence.
+**The negative control:** one deliberate lease per run whose URL points at a sinkholed host, driven through `/__test__` injection. **It is persisted in `platform_leases` like any other lease, and flagged `synthetic=1`** — otherwise the device's refusal report hits `/outcome` and gets `404 unknown_lease`, `device_outcomes_refused` never reaches 1, and the S4 exit gate is unsatisfiable (the same shape round 3 caught when this moved S3→S4). The `synthetic` flag is what excludes it from `leases_issued_under_test == 0`. It must be **blocked and counted** — the device refuses (`host_not_allowed`) and reports, and the server counts. Without it a misconfigured fence yields a green run with real egress. The counter is server-side because a device-side counter is unreportable by a client that is by definition misbehaving; a client that goes silent instead is caught by M8's lease-vs-outcome divergence.
 
 ### 6.5 Maestro
 
@@ -1158,7 +1185,7 @@ Key names must be validated against `/^[_A-Za-z][_0-9A-Za-z]*$/` and rejected ot
 | # | Ships | Reversible | Gate to leave |
 |---|---|---|---|
 | **S0** | §7.0 FAAB fix; Sentry scrub; `keychainAccessible` read-then-rewrite; vault subsumes and deletes `sleeper.link.jwt` | yes | independent of the programme (PRD §10). `check-vault-subsumes-legacy.js` green |
-| **S1** | `platform_links` + `platform_leases` + `platform_lease_reports` via `create_all`; startup assertion on `ux_platform_leases_digest_lock` | yes | index assertion passes on both dialects |
+| **S1** | `platform_links` + `platform_leases` + `platform_lease_reports` via `create_all`; startup assertion on **both** `ux_platform_leases_digest_lock` and `ck_platform_leases_lock_matches_state` (§5.4 item 6 — `create_all` is a no-op against a pre-existing dev table, so the CHECK can be silently absent while the index assertion passes) | yes | both assertions pass on both dialects |
 | **S2** | **`GET /api/sleeper/link` union contract + `revoked`** — server only, no client change | yes | `test_platform_link_contract.py` green |
 | **S3** | Guard + corpus + differential oracle + fuzz; **server-side parity guard**; `parse_graphql_response` extracted | yes | §6.1 green; `vcr_misses == 0` |
 | **S4** | `/lease` + `/outcome` + transport module + vault; **rails swap + negative control, in this same PR**; both flags **off** | yes | §6.3 green; `device_outcomes_refused == 1` |
@@ -1226,7 +1253,7 @@ No data backfill: A2 removed the cohort problem. Existing `sleeper_credentials` 
 | **OI-8** | The authenticated pending-outgoing read is the only thing that converts `unknown` into known (HLD "Corrections"). Unexplored, architecturally compatible under I1 — the server would parse the forwarded bytes. Scoped follow-up, not a limitation. | — | pm-technical |
 | **OI-9** | PRD OQ-4: `expo-updates` addresses R1–R6 as a class while this design addresses R1–R2, and is to be evaluated **first**. Nothing here resolves it, and every "no OTA, cannot fix old binaries" constraint above is downstream of it. | S0 | operator |
 | **OI-10** | `MAX_OUTSTANDING_LEASES = 3` has no empirical basis. It is a blast-radius bound, **not** a security control — a lease is inert without the credential on that device — so getting it wrong is a UX cost, not a safety one. | S4 | eng-backend |
-| **OI-11** | **The sweep cron is a hard liveness dependency.** §4.4's per-lease UPDATE and §4.7's sweep cannot deadlock or cross-release each other's locks (both are keyed by `lease_id`, and a released lock is already NULL) — verified, no defect. But if the 5-minute cron stops, `issued` rows hold their locks indefinitely and every affected user is stuck on `409 send_in_flight` with no self-recovery. Needs an alert on `count(*) WHERE state='issued' AND now > digest_until`, and the cron named as a dependency in §4.7. | S4 | eng-backend |
+| **OI-11** | **The sweep cron is a hard liveness dependency.** §4.4's per-lease UPDATE and §4.7's sweep cannot deadlock or cross-release each other's locks (both are keyed by `lease_id`, and a released lock is already NULL) — verified, no defect. But if the 5-minute cron stops, `issued` rows hold their locks indefinitely and every affected user is stuck on `409 send_in_flight` with no self-recovery. **It costs the outstanding-lease budget too:** `open_lease_count(conn, user_id)` is defined as `state='issued'` for that user, which includes leases already past `digest_until` that the sweep has not reaped — so a stalled cron walks the user into `429 too_many_outstanding` as well. Needs an alert on `count(*) WHERE state='issued' AND now > digest_until`, and the cron named as a dependency in §4.7. | S4 | eng-backend |
 | **OI-12** | **Does Hermes provide `TextDecoder` and base64?** §4.2.1. Zero occurrences in `mobile/src`, and CI runs the guard under node where both are globals — so a green build is not evidence. If absent, the import-free rule forces a hand-written UTF-8 validating decoder *inside the security control*, with its own corpus. | **S3** | eng-mobile |
 | **OI-13** | `MAX_RESPONSE_BYTES = 262_144` unmeasured against a real `propose_trade` response, whose selection set returns `metadata`, `settings`, and `player_map` (`sleeper_write.py:207-210`). Truncation is now handled safely (§4.4) rather than misreported, but a routinely-truncated response makes every send read as "couldn't reach Sleeper." | S4 | eng-backend |
 | **OI-14** | **Deviation from PRD:144** — that line says a `user_id` mismatch wipes the vault; §2.7 returns `null` instead and wipes only from the session-establishment path. The LLD's reasoning is that any caller passing a stale id could otherwise cause a self-inflicted denial of service. This is an operator call, not a drafting choice. | S4 | operator |
@@ -1236,3 +1263,59 @@ No data backfill: A2 removed the cohort problem. Existing `sleeper_credentials` 
 | **OI-19** | `epoch` is not a `request_digest` component (§3.5 Rule B). A disconnect and re-link therefore leaves an orphaned lock that still matches the retried trade, so the user can eat `409 send_in_flight` for the full `DIGEST_WINDOW` on a send that never happened. Adding it frees the lock on re-link at zero cost — the only reason it is an OI rather than a change is that it widens the digest's meaning, which OI-6's window measurement should settle together. | S4 | eng-backend |
 | **OI-20** | §7.6 requires lease/outcome analytics events registered in `backend/analytics_taxonomy.py` **before first emission**, but this document names no event, no property, and no platform dimension anywhere. The NULL-`platform` incident it cites as precedent is exactly the failure of not speccing them up front, so this is owed before S4, not at it. | S4 | eng-analytics |
 | **OI-18** | `x-sleeper-graphql-op` is allowlisted with a **free-text, server-chosen value** that is transmitted to Sleeper. The guard bounds the verb in the *body*; this header names a verb outside the guard's reach. Cheapest fix: have the device synthesize it from the parsed root field rather than accept it from the lease. | S4 | eng-architect |
+
+---
+
+## Reconciliation Log
+
+**Document type:** LLD  **Rounds run:** 4 (the skill's cap)  **Converged:** substantially — see the sign-off note
+
+Two Opus agents drafted this independently (implementer lens / reviewer lens), the orchestrator merged them into a candidate, and three cross-review rounds followed. **24 blocking objections** were raised and resolved.
+
+### Round-by-round
+
+**Round 1 — independent drafts.** Both lenses converged on the architecture and diverged on four mechanisms. The merge took the stronger argument in each case rather than splitting the difference:
+
+| Contested | Merged as | Why |
+|---|---|---|
+| Capability declaration | `X-FTF-Caps` header with an ops-set **fingerprint** | A hand-bumped integer can lie — the `operationName` defect one layer up. Also forced, not preferred: it must ride `POST /api/sleeper/link`, whose body is `{token}`, and `/lease` rejects unknown body keys as the mechanism enforcing the transport invariant. |
+| Custody gate | keyed on declared `transport_v`, flag as kill switch | `is_enabled` is process-global (`feature_flags.py:768-770`), so a global flag breaks every field binary at once — including ones with no OTA path. |
+| Header policy | **allowlist**, not denylist | `cookie` attaches a credential as effectively as `authorization`; a denylist only blocks what someone thought of. |
+| In-flight register | nullable `digest_lock` + plain `UNIQUE` | Dialect-portable with no silent-ignore risk, versus a partial index whose syntax differs per dialect. |
+
+Both lenses later **conceded all four** explicitly.
+
+**Round 2 — 13 blocking.** Four found by *both* lenses independently: the replay contradiction (would have 403'd every send forever); `/outcome` unable to express transport refusals (made I4 unobservable and the §6.4 gate unbuildable); the custody/lease predicate mismatch (stranded users with neither path); and the lexer's missing terminal branch (fail-open in the security control). Adversary-only: escaped duplicate JSON key, `null` body surviving the type check, no top-level key allowlist, `MAX_DOC_BYTES` unreferenced, `MAX_DOC_DEPTH` with no counter, Postgres transaction abort, `revoked_at`/`rejected_at` never cleared, self-referential fuzz. Author-only: `linkSleeperToken` sending no `X-FTF-Caps` (would defeat G1 on the happy path, silently), `X-Device-Id` not ambient, the Maestro flow being unachievable under `_TEST_MODE`, and several miscitations.
+
+**Round 3 — 7 blocking, mostly consequences of round 2's fixes.** Including a defect in the orchestrator's own round-2 savepoint fix. Adversary: `credential_user_id` referenced but never defined (I5 unimplementable), the parity guard checking the wrong op set, `TRANSPORT_OP_SETS` with no retention rule, `MAX_DOC_BYTES` unit ambiguity. Author: the savepoint leaking an orphan row on SQLite, S7's gate being unreachable, stale step references.
+
+**Round 4 — author signed off; adversary raised 3.** Two of the three (constraint-name asymmetry, retry-returns-409) had already been found and fixed by the orchestrator while the agents ran, so they are convergent validation rather than open work. The third — `custody` undefined when both a `sleeper_credentials` and a live `platform_links` row exist — was new, real, and sits on the documented rollback path; it is fixed in §2.5 with a precedence rule plus a `feature_disabled` row in §5.3.
+
+### Verified rather than asserted
+
+Claims a reader would otherwise have to take on faith, measured by the orchestrator on **SQLite 3.50.4**, **PostgreSQL 18.3**, and **SQLAlchemy 2.0.49**:
+
+| Claim | Result |
+|---|---|
+| A plain `UNIQUE` index admits multiple NULLs on both dialects | **Confirmed** — 3 NULLs admitted, duplicate non-NULL refused. Dissolves the partial-index open item. |
+| `(state='issued') = (digest_lock IS NOT NULL)` catches both drift directions | **Confirmed** on both; the NULL-propagation worry is closed by `state NOT NULL`. |
+| The round-2 savepoint is safe on SQLite | **Refuted** — leaks an orphan `issued` row, because the pysqlite recipe is attached only to `ingest_engine` (`database.py:92-99`), never the main `engine` (`:62`). |
+| SQLite aborts the transaction on `IntegrityError` | **Refuted** — it does not; the holder `SELECT` succeeds, so the savepoint is a Postgres-only requirement. Hence the dialect branch. |
+| A unique violation names the index on both dialects | **Refuted** — Postgres names the index; SQLite names the **column** and never the index. CHECK and NOT NULL names *are* portable. |
+| §1.5's three code contradictions | **Confirmed** — `token_encrypted nullable=False`, the upsert raising on a falsy ciphertext, no `verified_at` on `sleeper_credentials`, `is_enabled` taking only a key. |
+
+One reviewer submitted ten citation corrections described as uniformly off by one line. Spot-checking found **three of five wrong** (`sleeper_write.py:287`, `:333`, and `trade_block_service.py:73` were correct as originally cited) and its replacement for the one real error also wrong (`json.dumps` is `:284`). Only the verified correction was applied; that lens re-checked and conceded in round 4. Applying the list as given would have introduced errors into a document whose value rests on its claims being checkable.
+
+### Unresolved disagreements
+
+**None on substance.** Every blocking objection from all four rounds is either applied or recorded as a numbered open item with an owner and a blocking stage.
+
+**One process caveat, stated plainly:** the two lenses never returned `SIGN-OFF: yes` in the *same* round. Round 4 ended author-yes / adversary-no(3), and the three fixes above were applied **after** the cap rather than being re-reviewed by a fifth round. Two were independent orchestrator findings the adversary duplicated; the third (§2.5 custody precedence) is the only change in this document that has had **no adversarial pass**. Treat §2.5's precedence rule and §5.3's `feature_disabled` row as the least-reviewed lines here.
+
+### What the open items mean
+
+**20 open items** (OI-1 … OI-20), each with an owner and the stage it blocks. Three gate work before implementation starts:
+
+- **OI-12 gates S3** — nobody has confirmed the phone's JavaScript engine provides the text-decoding primitive the guard needs. It appears nowhere in `mobile/src`, and the tests run where it exists for free, so a green build would prove nothing. If it is absent, the import-free rule forces a hand-written validating decoder *inside* the security control, with its own test corpus.
+- **OI-9 is upstream of the whole programme** — `expo-updates` addresses this class of risk more broadly, and every "no OTA, cannot fix old builds" constraint in §7.2 is downstream of not having it.
+- **OI-3 / OI-4 / OI-14 / OI-15 are operator calls**, not engineering ones: the two-device custody model, whether reinstalling an old build should silently restore server custody, the PRD deviation on wiping the vault, and whether a lapsed session should still be able to revoke.
