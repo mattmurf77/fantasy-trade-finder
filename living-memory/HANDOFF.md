@@ -54,12 +54,13 @@ through their routes.
 
 ### Next moves
 
-- **Mobile needs an EAS build to reach TestFlight** — the bell UI half of this feature is
-  invisible to users until then.
-- **Post-deploy analytics probe** (run it once Render finishes): the three names must
-  round-trip through `POST /api/events` **with `X-Device-Id` set** — without the header the
-  response is `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has
-  `dropped == 0` and reads as a pass.
+- ~~Merge~~ **DONE** — squash PR #113 → `main` @ `2b63511`; Render deploy confirmed live
+  (dismiss-all route answers 401, not 404); branch swept per
+  [`../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md`](../docs/recovery/2026-08-13-notif-inbox-growth-sweep.md).
+- ~~Analytics probe~~ **PASSED** — three names posted to prod with `X-Device-Id` →
+  `{"accepted":3,"rejected":[]}`.
+- **EAS iOS build 109 (v1.13.2) submitted with `--auto-submit`** — confirm it reaches
+  TestFlight review/testers; status via `eas build:list --json`, never the exit code.
 - Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
   At 3–5 users these are **directional reads, not experiments**.
 
