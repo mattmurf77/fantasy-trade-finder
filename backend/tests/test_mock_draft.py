@@ -921,6 +921,16 @@ from backend.trade_service import League, LeagueMember         # noqa: E402
 ROUTE = "/api/mock-draft"
 ROUTE_TOKEN = "test-token-w2-01"
 OPERATOR = "313560442465169408"
+#: The shared route session's caller — a QA id, NOT the operator's, so route
+#: creates never write mock rows under a real user in the local dev DB. The
+#: two corpus e2e tests (T-295-01/T-295-03) use OPERATOR because the recorded
+#: leagues' orders name that id, and clean up the rows they create.
+QA_CALLER = "990000000000000042"
+#: The shared session's rookie pool: p1..p30, strictly descending consensus.
+#: p21..p28 are rostered by the four opponents, p29/p30 by the caller, so the
+#: consensus pool is exactly p1..p20 — one player per slot of a default
+#: 5-team x 4-round mock.
+_SESSION_POOL_IDS = [f"p{i}" for i in range(1, 31)]
 
 
 def _pin_flags(**overrides) -> dict:
@@ -954,27 +964,72 @@ def client():
     return server.app.test_client()
 
 
+def _abandon_all_mocks(user_id: str, league_id: str) -> None:
+    """Retire every surfaceable mock row for `(user, league)` — test hygiene
+    so one test's create can never leak into another's GET."""
+    from backend.database import load_current_mock_draft, update_mock_draft
+    row = load_current_mock_draft(user_id, league_id)
+    while row:
+        update_mock_draft(row["id"], user_id, status="abandoned")
+        row = load_current_mock_draft(user_id, league_id)
+
+
+def _session_player_rows(requested):
+    rows = {pid: {"full_name": f"Rookie {pid}",
+                  "position": ("WR", "RB", "TE", "QB")[i % 4], "team": "ARI",
+                  "rookie_year": "2026", "search_rank": i + 1}
+            for i, pid in enumerate(_SESSION_POOL_IDS)}
+    return {pid: rows[pid] for pid in requested if pid in rows}
+
+
 @pytest.fixture()
-def session(monkeypatch):
-    pool = [Player(id="p1", name="Rookie One", position="WR", team="ARI", age=22)]
+def session(monkeypatch, tmp_path):
+    """The shared route session, in the PRODUCTION shape (#295 §7.0 rewrite).
+
+    The shipped fixture put the caller INSIDE ``league.members`` — the exact
+    inverse of ``/api/session/init``'s convention, and the coincidence that
+    blinded #291. The contract, pinned by ``test_295_02``:
+
+    * ``league.members`` holds the FOUR caller-excluded opponents (4 + the
+      caller = 5 teams, over ``MOCK_MIN_TEAMS``), small disjoint rosters;
+    * the caller's roster rides ``sess["user_roster"]``, never ``members``;
+    * ``sess["display_name"]`` is set.
+
+    Hermetic: ``_SLEEPER_FIXTURES_DIR`` points at an EMPTY dir, so a board
+    read on the create path is a fixture MISS that raises inside
+    ``build_board`` (which catches and degrades to the honest no-order
+    board) — never a live call.
+    """
+    positions = ("WR", "RB", "TE", "QB")
+    pool = [Player(id=pid, name=f"Rookie {pid}", position=positions[i % 4],
+                   team="ARI", age=22)
+            for i, pid in enumerate(_SESSION_POOL_IDS)]
+    elo = {pid: 2000.0 - i for i, pid in enumerate(_SESSION_POOL_IDS)}
     service = RankingService(players=pool)
+    opponents = [
+        LeagueMember(user_id=f"99000000000000010{k}", username=f"opp{k}",
+                     roster=[f"p{21 + 2 * k}", f"p{22 + 2 * k}"],
+                     elo_ratings={})
+        for k in range(4)
+    ]
     league = League(league_id=LAKEVIEW_LEAGUE, name="Lakeview", platform="sleeper",
-                    members=[LeagueMember(user_id=OPERATOR, username="op",
-                                          roster=[], elo_ratings={})])
-    sess = {"user_id": OPERATOR, "league": league, "players": pool,
+                    members=opponents)
+    sess = {"user_id": QA_CALLER, "league": league, "players": pool,
+            "user_roster": ["p29", "p30"], "display_name": "QA Caller",
             "services": {"1qb_ppr": service}, "service": service,
             "trade_svc": object(), "active_format": "1qb_ppr", "last_active": 0.0}
-    monkeypatch.setattr(server, "_get_universal_pool",
-                        lambda fmt: (pool, {"p1": 1500.0}))
-    monkeypatch.setattr(server, "_rookie_player_ids", lambda season: {"p1"})
+    monkeypatch.setattr(server, "_get_universal_pool", lambda fmt: (pool, elo))
+    monkeypatch.setattr(server, "_rookie_player_ids",
+                        lambda season: set(_SESSION_POOL_IDS))
     monkeypatch.setattr(server, "get_league_draft_context",
                         lambda lid: {"platform": "sleeper", "season": 2026})
     monkeypatch.setattr(server, "_sleeper_lineup_slots", lambda lid: STANDARD_LINEUP)
-    monkeypatch.setattr(dbs, "database_players",
-                        lambda ids: {"p1": {"full_name": "Rookie One",
-                                            "position": "WR", "team": "ARI",
-                                            "rookie_year": "2026",
-                                            "search_rank": 1}})
+    monkeypatch.setattr(dbs, "database_players", _session_player_rows)
+    empty_fixtures = tmp_path / "no-sleeper-fixtures"
+    empty_fixtures.mkdir(exist_ok=True)
+    monkeypatch.setattr(server, "_SLEEPER_FIXTURES_DIR", str(empty_fixtures))
+    monkeypatch.setattr(server, "_SLEEPER_RECORD", False)
+    _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
     with server._sessions_lock:
         server._sessions[ROUTE_TOKEN] = sess
     try:
@@ -982,10 +1037,29 @@ def session(monkeypatch):
     finally:
         with server._sessions_lock:
             server._sessions.pop(ROUTE_TOKEN, None)
+        _abandon_all_mocks(QA_CALLER, LAKEVIEW_LEAGUE)
 
 
 def _post(client, path=ROUTE, **body):
     return client.post(path, json=body, headers={"X-Session-Token": ROUTE_TOKEN})
+
+
+def test_295_02_the_route_fixture_is_production_shaped(session):
+    """T-295-02 — the fixture-contract tripwire (sabotage: re-add the caller
+    to the fixture's members; this test must fail on the PRE-rewrite fixture
+    too).
+
+    The app-wide convention is that ``league.members`` NEVER contains the
+    caller (``/api/session/init`` refuses to re-add them) and the caller's
+    roster rides ``sess["user_roster"]``. The shipped fixture inverted that —
+    the exact coincidence that let #291's suite pass while every live mock
+    was born user-less. The suite must fail if anyone "fixes" it back.
+    """
+    member_ids = {str(m.user_id) for m in session["league"].members}
+    assert str(session["user_id"]) not in member_ids
+    assert session["user_id"], "the shared fixture's caller must be a real id"
+    assert session.get("user_roster"), "the caller's roster rides the session"
+    assert session.get("display_name")
 
 
 def test_w2_01_flag_off_404s_every_mock_route(client, flag_off, session):
@@ -1062,14 +1136,16 @@ def test_the_abort_criterion_is_enforced_at_the_route(client, flag_on, session):
     contract itself is unchanged and still covered when the gate is closed.
     """
     assert mds.CPU_MODEL_VALIDATED is True
-    resp = _post(client, league_id=LAKEVIEW_LEAGUE)
+    resp = _post(client, league_id=LAKEVIEW_LEAGUE, rng_seed=7)
     assert resp.status_code == 200
     body = resp.get_json()
-    # The gate no longer refuses. Any remaining typed-empty must come from a
-    # DIFFERENT rung of the ladder (this fixture league is under MOCK_MIN_TEAMS),
-    # never from the calibration gate.
+    # The gate no longer refuses — and post-#295 the shared session is a
+    # 5-team league that clears the WHOLE ladder, so an open gate now means
+    # a real created mock, not a typed-empty from a later rung.
     assert body.get("reason") != "cpu_model_unvalidated", body
     assert body["schema"] == 1
+    assert not body.get("empty"), body
+    assert body.get("mock_id")
 
 
 def test_get_with_no_mock_is_a_typed_empty_not_a_404(client, flag_on, session):
@@ -1263,12 +1339,12 @@ def test_w2_20_g2_the_capability_probe_answers_without_starting_a_mock(
     cap = payload["capability"]
     assert set(cap) == {"can_start", "reason", "teams", "min_teams",
                         "rounds_default", "rounds_max", "type", "order_source"}
-    assert cap["can_start"] is False
-    # Operator override 2026-08-06: the calibration gate is OPEN, so the first
-    # refusal a 1-member session league hears is the size rung. The property
-    # under test is unchanged — the probe reports the SAME first refusal the
-    # create route would, whatever that rung happens to be.
-    assert cap["reason"] == mds.REASON_LEAGUE_TOO_SMALL
+    # Post-#295 the probe counts the CALLER too (R4/INV-3): 4 caller-excluded
+    # members + the caller = 5 teams, over the floor, so the honest answer is
+    # can_start. The refusal answers are pinned by T-295-08/T-295-09.
+    assert cap["can_start"] is True
+    assert cap["reason"] is None
+    assert cap["teams"] == 5
     assert cap["min_teams"] == mds.MOCK_MIN_TEAMS
     assert (cap["rounds_default"], cap["rounds_max"]) == (mds.DEFAULT_ROUNDS, 8)
 
@@ -2589,7 +2665,7 @@ def test_290_13_no_player_lookup_uses_an_uncrosswalked_id(
     safe by construction because `ctx.player_rows` is keyed on
     `_rookie_player_ids(season)`; this test is what keeps it that way.
     """
-    allowed = {"p1"}
+    allowed = set(_SESSION_POOL_IDS)      # the fixture's whole rookie class
     seen = []
 
     def _strict_players(ids):
@@ -2597,11 +2673,10 @@ def test_290_13_no_player_lookup_uses_an_uncrosswalked_id(
         seen.append(got)
         extra = got - allowed
         assert not extra, f"player lookup used non-rookie ids: {sorted(extra)}"
-        return {"p1": {"full_name": "Rookie One", "position": "WR",
-                       "team": "ARI", "rookie_year": "2026", "search_rank": 1}}
+        return _session_player_rows(got)
 
     monkeypatch.setattr(dbs, "database_players", _strict_players)
-    created = _post(client, league_id=LAKEVIEW_LEAGUE)
+    created = _post(client, league_id=LAKEVIEW_LEAGUE, rng_seed=13)
     assert created.status_code in (200, 201), created.get_data()
     got = client.get(f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}",
                      headers={"X-Session-Token": ROUTE_TOKEN})
