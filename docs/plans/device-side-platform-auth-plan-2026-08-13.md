@@ -166,12 +166,13 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 ☐ `check-transport-caps-fingerprint.js` green (a mismatch is 426-for-everyone, permanently, for this binary).
 ☐ All five §4.5 sites rewritten; old-binary fixture green; **`linkSleeperToken` emits `X-FTF-Caps`** (the silent-G1-defeat check).
 ☐ A real server-path send verified **after** `serialize_body` landed (the wire-bytes change rides the recovery path too).
+☐ *Recommended, not required:* a **proxy Sentry capture** on a release-configuration dev build with flags overridden locally — same scrub code, not the shipped binary. It cannot substitute for Gate E's shipped-build capture, but it surfaces a scrub defect **before** the point of no return, converting a Gate E hard stop from "reship" into "fix before cutting the build."
 ☐ OI-20 events registered; sweep alert (OI-11) and unknown-fingerprint alert (§2.1) demonstrably firing.
 ☐ The drill script written into `docs/runbook.md` — before the build, not after.
 
 **Gate E — S7 flags on (both together, operator device only):**
 ☐ Gate D's build installed on the operator's device.
-☐ **Sentry capture from the shipped S6 build, tracing forced to 1.0, taken with flags on but BEFORE the first send: no injected header on the platform request.** This can only exist once flags are on — a device platform request requires the transport live — which is why it is a Gate E pre-send precondition and not a Gate D checkbox; an earlier draft placed it at Gate D, where it was unsatisfiable and would have been waved through, on a credential-leak check. A dirty capture is a hard stop before the send (§6 row 6).
+☐ **Sentry capture from the shipped S6 build, tracing forced to 1.0, taken with flags on but BEFORE the first send: no injected header on the platform request.** This can only exist once flags are on — a device platform request requires the transport live — which is why it is a Gate E pre-send precondition and not a Gate D checkbox; an earlier draft placed it at Gate D, where it was unsatisfiable and would have been waved through, on a credential-leak check. A dirty capture is a hard stop before the send (§6's pre-send Sentry row).
 ☐ One real send, lease id logged.
 ☐ Drill executed same day, all four steps, artifact in TEST_LEDGER.
 ☐ M4 pager + M8 divergence query proven by synthetic injection before the 7-day clock starts.
@@ -187,7 +188,7 @@ Ranked by irrecoverability × silence. Annoyances excluded.
 
 ## 9. Self-attested vs. verifiable — where the plan would silently slip
 
-**CI enforces (slip is loud):** S0–S5's gates are all machine-checked, and the S4 negative control is the rare gate that fails when the *fence* breaks, not just the feature.
+**CI enforces (slip is loud):** S0–S5's CI gates are machine-checked (Gate B's adversarial verdict is the exception, and it is artifact-bound below), and the S4 negative control is the rare gate that fails when the *fence* breaks, not just the feature.
 
 **Self-attested (slip is silent), each now bound to an artifact:**
 
@@ -246,6 +247,41 @@ What it does buy: elimination of the aggregate at-rest breach target (one Fernet
 4. Gate B: the §2.5/§5.3 adversarial re-review + OI-16, then S2. *(day 3)*
 5. Gate C: read the OI-9 memo and the OI-12 answer; green-light or re-derive. *(~day 3–4)*
 6. S3 begins, sized 6–9 days; everything after follows §3's chain.
-7. Book two calendar holds now: the **Sentry release-build capture** for the day the S6 build clears processing, and the **rollback drill** for the day of the first real send.
+7. Book two calendar holds now: **the whole S7 sequence — flags on → Sentry capture → send → drill — for the day the S6 build clears processing** (the capture cannot happen pre-flags, so it is not separable from the send day), and the **rollback drill** for the day of the first real send.
 
 Session hygiene per repo convention: CHANGELOG entry per stage merged; TEST_LEDGER per sim run, per drill, and per device-fact check; HANDOFF overwritten at every stop with the stage cursor; worktree sweep at every stage end.
+
+---
+
+## Reconciliation Log
+
+**Document type:** Plan  **Rounds run:** 3  **Converged:** yes — both lenses signed off in round 3
+
+> **Model note:** the PRD, HLD decisions, and LLD used Opus lenses; this Plan's lenses ran on Fable (Opus weekly limit hit mid-programme). Recorded for honesty about provenance, not as a caveat on the content — every blocking objection in this log was verified against the documents before being applied.
+
+### Round 1 — independent drafts
+
+The two drafts converged, unusually, on the sequencing itself: **S0 immediately, S1–S2 behind it, a decision gate before S3.** What differed:
+
+| Contested | Resolved as | Why |
+|---|---|---|
+| OI-3/OI-4/OI-15: ratify-by-default now (execution) vs may-not-be-defaulted (risk) | **Both, staged:** defaults ratified now for build purposes; written answers required at Gate F before other people's devices are involved | The lenses were right at different stages. |
+| expo-updates posture: proceed-lean with the TCB argument (execution) vs spike-owns-the-decision (risk) | §10 records both; the recommendation leans proceed **with the spike holding the veto**, plus two hygiene rules (the spike prompt excludes §10; the memo must name its own disconfirming evidence) | The execution lens's trusted-computing-base argument is new relative to all source docs and is disclosed as a bet, not a finding. |
+| Day totals: stated (execution) vs refused as anchoring (risk) | Stated, **labeled an uncalibrated stage-sum**, with mandatory S3 re-estimation at Gate C if `TextDecoder` is absent | An operator needs a number; the label keeps it honest. |
+
+### Round 2 — cross-review: 3 blocking, all applied
+
+- **Execution lens:** the Sentry capture was scheduled in three mutually inconsistent places, and the Gate D copy was **unsatisfiable** — a capture of a device platform request requires flags on, which is S7. An unsatisfiable checkbox gets waved through, on a credential-leak check. → Moved to Gate E as the pre-send precondition.
+- **Risk lens:** Gate B's "fresh adversarial pass" had no performer, independence rule, or artifact — the S2 session would have self-attested the review of the LLD's own least-reviewed lines (the rollback path). → Named performer (an adversary subagent that authored neither the LLD nor S2), dated written verdict, "no verdict, no S2 merge."
+- **Risk lens:** the kill table could not classify the two most likely *non-clean* R7 presentations — handshake-layer enforcement (resets/timeouts, no response body) dead-ended in "retry once," and a single transient JS challenge would have triggered "close the programme" on one noisy observation. → Two graduated rows, using the same-day server-path control send as the discriminator (R-ROLLBACK guarantees it exists).
+
+Both lenses verified the merge honored the risk lens's standing sign-off conditions (Gate D not relaxed; one-stage-one-PR; Gate F written answers) and that nothing load-bearing was dropped from either draft. The execution lens conceded both merge deltas it was asked to defend (OI-1 and OI-14 as blocking checkboxes).
+
+### Round 3 — confirmation: both sign off
+
+- Execution lens verified the Sentry fix end-to-end (§2, §3, §6, Gates D/E, §9, §13 all consistent; no residual Gate-D placement) and that the new kill-table rows route coherently.
+- Risk lens verified both its fixes applied without weakening, and **accepted the Gate E Sentry placement over its own round-2 suggestion** — the Gate D version could only ever have been waved through, and the residual exposure (a defective scrub leaking during the capture itself) is bounded to the operator's own JWT and irreducible under any placement. Its supplement — a proxy capture on a release-configuration dev build at Gate D, converting a post-ship hard stop into a pre-ship fix — was adopted as a recommended-not-required Gate D item.
+
+### Unresolved disagreements
+
+None. The one position overridden during reconciliation (the risk lens's Gate D Sentry placement) was re-put to that lens in round 3 and explicitly conceded with reasoning, not silently dropped.
