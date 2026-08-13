@@ -26,7 +26,8 @@
     "test:league-drill-in": "node tests/check-league-drill-in.js",
     "test:analytics-297-302": "node tests/check-analytics-297-302.js",
     "test:league-candidates-300": "node tests/check-league-candidates-300.js",
-    "test:anchor-labels": "node tests/check-anchor-labels.js"
+    "test:anchor-labels": "node tests/check-anchor-labels.js",
+    "test:notif-glyphs": "node tests/check-notif-glyphs.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
