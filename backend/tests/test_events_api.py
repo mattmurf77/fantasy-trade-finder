@@ -790,18 +790,15 @@ def test_p1_t1_every_declared_prop_survives_the_round_trip(harness):
     assert body["accepted"] == len(sent) and body["dropped"] == 0
 
     by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
-    # `invite_shared.league_id` is the ONE prop whose VALUE legitimately does
-    # not round-trip — see
-    # test_p1_t1_league_id_is_redacted_by_the_pii_scrubber below. Key
-    # survival is still asserted for it; only value equality is exempted,
-    # and only there.
-    value_exempt = {("invite_shared", "league_id")}
+    # Every prop now round-trips by VALUE, with no exemptions. Until
+    # 2026-08-12 `invite_shared.league_id` was exempt here because the PII
+    # scrubber ate it (G-036); that exemption is gone because the cause is
+    # fixed, not because the assertion was inconvenient. See
+    # test_p1_t1_league_id_survives_the_pii_scrubber below.
     for name, props in sent.items():
         stored = json.loads(by_type[name]["props"])
         for k, v in props.items():
             assert k in stored, f"{name}.{k} was STRIPPED at ingest"
-            if (name, k) in value_exempt:
-                continue
             assert stored[k] == v, f"{name}.{k} changed value"
 
 
@@ -836,21 +833,19 @@ def test_p1_t1_invite_shared_row_was_extended_not_replaced(harness):
     assert "league_id" in props
 
 
-def test_p1_t1_league_id_is_redacted_by_the_pii_scrubber(harness):
-    """PRE-EXISTING BEHAVIOUR, found while writing T1 and pinned here so it
-    is not rediscovered as a mystery. NOT introduced by T1 and NOT fixed by
-    it — the prop belongs to P0-3's row.
+def test_p1_t1_league_id_survives_the_pii_scrubber(harness):
+    """G-036, fixed 2026-08-12 by operator decision: a league id is not PII.
 
-    `analytics_ingest._PII_VALUE_RES` includes `\\b\\d(?:[ -]?\\d){15,}\\b`
-    (a 16+ digit run, aimed at card numbers). **Sleeper league ids are 18
-    digits**, so every `league_id` string prop stores the literal
-    "[scrubbed]" rather than the id — on `invite_shared`, and equally on
-    `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed` and
-    `outlook_strip_toggled`. Per-league invite analysis is therefore not
-    possible from these rows today, however the taxonomy reads.
+    The scrubber's 16+-digit-run rule exists for card/account shapes in free
+    text. **Sleeper league ids are 18 digits**, so it matched every
+    `league_id` we have ever sent — `invite_shared`, `invite_link_opened`,
+    `invite_league_pinned`, `invite_pin_failed` and `outlook_strip_toggled`
+    all stored the literal "[scrubbed]". ESPN ids are 6 digits and passed
+    through, which is why the loss was invisible to spot-checks.
 
-    An ESPN league id (short, numeric) is unaffected, which is why this can
-    look like it works when spot-checked on the wrong league.
+    The fix exempts declared id props from that ONE rule. This test asserts
+    both halves of that: the id survives, and the exemption did not quietly
+    disable the rest of the scrubber for the same prop.
     """
     client, engine = harness
     _post(client, [
@@ -863,8 +858,35 @@ def test_p1_t1_league_id_is_redacted_by_the_pii_scrubber(harness):
     ])
     rows = {r._mapping["event_type"]: json.loads(r._mapping["props"])
             for r in _rows(engine)}
-    assert rows["invite_shared"]["league_id"] == "[scrubbed]"
+    assert rows["invite_shared"]["league_id"] == "990000000000000001"
     assert rows["invite_link_opened"]["league_id"] == "184622"
+
+
+def test_p1_t1_id_exemption_does_not_disarm_the_rest_of_the_scrubber():
+    """The exemption is narrow by construction, and stays narrow.
+
+    Skipping the numeric-run rule for an id prop must not become a hole for
+    genuine PII that happens to arrive under that key, and must not leak to
+    any other key. Asserted at the function rather than through the endpoint
+    so a routing change cannot make it vacuously pass.
+    """
+    from backend.analytics_ingest import _scrub_pii
+
+    # Exempt key: the id survives, but real PII in the same value does not.
+    clean, n = _scrub_pii({"league_id": "990000000000000001"}, "invite_shared")
+    assert clean["league_id"] == "990000000000000001" and n == 0
+
+    clean, n = _scrub_pii({"league_id": "a@b.com"}, "invite_shared")
+    assert clean["league_id"] == "[scrubbed]" and n == 1
+
+    # Non-exempt key: a long digit run is still redacted.
+    clean, n = _scrub_pii({"note": "4111111111111111111"}, "client_error")
+    assert clean["note"] == "[scrubbed]" and n == 1
+
+    # The exemption is a key allowlist, not a substring match.
+    clean, _ = _scrub_pii({"not_a_league_id_really": "990000000000000001"},
+                          "invite_shared")
+    assert clean["not_a_league_id_really"] == "[scrubbed]"
 
 
 def test_p1_t1_trade_card_shared_landing_is_no_longer_stripped(harness):

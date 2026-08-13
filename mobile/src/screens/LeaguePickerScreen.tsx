@@ -517,11 +517,18 @@ export default function LeaguePickerScreen({
         {/* P0-3 — the invite notice. ABOVE the list, INSIDE this branch: it
             must never leak into the `cached.length === 0` branch, whose
             literal "No 2026 NFL leagues found for this account." sentence is
-            asserted verbatim by capture/leagues@fresh.yaml. */}
+            asserted verbatim by capture/leagues@fresh.yaml.
+
+            The copy is platform-NEUTRAL by necessity: an invite link carries
+            only a league id, so at this point we do not know which platform
+            the league lives on. Naming Sleeper here (as this did until
+            2026-08-12) sent ESPN, MFL and Fleaflicker invitees to the wrong
+            app entirely — the one platform they were guaranteed not to be
+            joining. Surfaced while tracing PR-7 in the P1 round. */}
         {showInviteNotice ? (
           <Text testID="leaguepicker.invite-notice" style={styles.inviteNotice}>
-            You're not in that league yet — pick one below, or join the league
-            on Sleeper and open the invite again.
+            You're not in that league yet — pick one below, or join it on your
+            fantasy platform and open the invite again.
           </Text>
         ) : null}
         <FlatList
