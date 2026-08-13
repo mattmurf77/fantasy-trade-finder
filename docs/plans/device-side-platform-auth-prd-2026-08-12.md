@@ -173,6 +173,37 @@ The dead Sleeper public-detection hypothesis is still carried as open in: **HLD 
 
 ---
 
+## OPERATOR AMENDMENT — 2026-08-12, after sign-off
+
+Two constraints the four review rounds spent significant effort on are **withdrawn by the operator**, and both were load-bearing. This amendment supersedes the sections named below; the rest of the document stands.
+
+### A1 — Public-read coverage is not a concern. **OQ-1 is CLOSED.**
+The document's single unresolved disagreement — whether Sleeper's agreement covers automated *unauthenticated* access — is withdrawn as a question. **No unresolved disagreements remain.** The reasoning in §2.1 is unaffected: public reads stay on Render because moving them is strictly worse, which was never contingent on the answer.
+
+### A2 — Credential migration is not a concern. **§6 largely dissolves.**
+The operator is effectively the only real user; others have tested lightly enough that breaking their link is acceptable. **Interpretation, stated so it is checkable: no migration machinery is required — a clean cutover in which stored credentials are deleted and users re-link is acceptable.** If that reading is wrong, this amendment is wrong.
+
+**What that removes.** Most of the programme's cost was migration machinery, not the transport:
+
+| Withdrawn | Was |
+|---|---|
+| §6's phased migration (M1–M4), dual-run, and the deletion gate | The largest section, and the hardest to get right |
+| The 14-day cooling-off and the point-of-no-return marker | Restored at round-2 objection 3 — no longer needed |
+| The pre-2026-07-12 cohort problem | Round-2 objection 8, in full |
+| "Permanent dual-path" as a steady state | A forever-maintenance burden, and forever-testing |
+| The dual-custody window (**"strictly worse than today for an unbounded period"**) | The programme's largest self-inflicted risk — **gone entirely** |
+| M7 (dual custody), and M2's `nullable=False` schema collision | M2 becomes "delete the row"; no `ALTER` decision needed |
+| Two-device revocation as a migration concern | Still a design question, no longer a migration one |
+
+**What survives untouched:** the transport design and its normative parser requirements; leases as the only device rollback primitive; the compiled host allowlist; credential storage on device; the test-rail gap; the Sentry scrub; the `keychainAccessible` fix; the no-OTA risk; and the ESPN release-2 gates (reachability probe + terms read).
+
+**Net effect on the recommendation.** The case in §2.2 was weakened by measurement — a modest resilience benefit, and Sleeper's volume warning describing traffic this programme never moves. That reasoning is unchanged. **But the cost side just fell sharply**, since the expensive part was migration. OQ-5 ("is the full programme the right first bet at n=2") should be re-answered against the smaller number, and the answer is now more likely to be yes.
+
+**Do not silently generalise this.** These withdrawals hold *because* the user base is ~1. They must be revisited before the public App Store release — at which point migration machinery becomes necessary again for anyone who links between now and then.
+
+
+---
+
 ## Reconciliation Log
 
 **Document type:** PRD · **Rounds run:** 4 (cap) · **Converged:** yes — both lenses signed off in round 4 · **Lenses:** A = Product/Feasibility, B = Engineering/Adversary
@@ -193,7 +224,7 @@ Both lenses were briefed that the goal was reducing **call volume** so Sleeper w
 ### Round 4 — both signed off
 No blocking objections. B supplied six **normative** parser requirements without which "parse the root field" could be rebuilt as a defeatable regex — including the fragment-spread empty set, string-literal breakout (repo-grounded: `build_propose_trade_body` inlines attacker-influenced literals into the query text), transport batching via a JSON array, and the fact that op labels and root fields **diverge in this repo** (`ftf_token_probe` → `__typename`). All folded in, with the control's honest limit stated: it bounds the **verb**, not the **object**.
 
-### Unresolved disagreements
+### Unresolved disagreements — **CLOSED by the operator amendment above; retained for provenance**
 
 **OQ-1 — does Sleeper's agreement cover automated *unauthenticated* access?** Carried unresolved to the operator.
 - **A's position:** §11.1's crawl/scrape bullets and §11.3's "whether directly" wording may reach FTF's public reads (the bulk dump, per-session sweeps, ADP) — which would place FTF's *largest* Sleeper surface outside the agreement.
