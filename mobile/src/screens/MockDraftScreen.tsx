@@ -34,13 +34,16 @@
 // row-action lane stays behind W1's own flag (`draft.rank_inline`) — this
 // screen must not ship W1 behavior unflagged.
 //
-// ── No analytics yet, deliberately ──────────────────────────────────────
-// `backend/analytics_taxonomy.py` is DEFAULT-DENY and carries no mock
-// events; this wave owns mobile/ only, so any track() call here would be
-// dropped server-side while reading like working instrumentation. Register
-// the events first, then wire the calls.
+// ── Analytics (#295/#296/#305) ──────────────────────────────────────────
+// The five mock events are REGISTERED in `backend/analytics_taxonomy.py`
+// (the registration commit precedes the emitters — DEFAULT-DENY silently
+// drops unregistered names behind a 200). This screen fires the three
+// session-side events: `mock_pick_made` (slot captured in `onMutate` — the
+// response's `on_the_clock` is the NEXT slot), `mock_completed`
+// (NON_INTENT, fired only on the active→complete transition, never from a
+// GET) and `mock_abandoned`. `DraftRoomScreen` fires the create-side pair.
 
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -86,6 +89,7 @@ import {
   type MockPick,
 } from '../api/mockDraft';
 import { setAssetPref } from '../api/league';
+import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
 import { useSession } from '../state/useSession';
@@ -140,6 +144,12 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
   const onClock = state?.on_the_clock ?? null;
   const isUserTurn = state?.status === 'active' && !!onClock?.is_user;
   const userOwnerId = useMemo(() => resolveUserOwnerId(state), [state]);
+  // #305 — whether the slot on the clock belongs to the USER'S OWN team.
+  // In cpu mode this is always true on the user's turn; in manual mode it
+  // distinguishes "your pick" from "you're picking for {team}". Keys off
+  // `user_owner_id`, never off `by` (HLD §4.3).
+  const forOwnTeam =
+    !onClock?.roster_id || !userOwnerId || String(onClock.roster_id) === userOwnerId;
 
   // ── mutations ─────────────────────────────────────────────────────────
 
@@ -154,15 +164,84 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
     [queryClient, leagueId],
   );
 
+  // The slot the user is about to fill, captured BEFORE the mutation: the
+  // response's `on_the_clock` is the NEXT slot and must not be read for the
+  // pick event's round/pick_no.
+  const pickedSlotRef = useRef<{
+    round: number;
+    pick_no: number;
+    roster_id: string | null;
+    prevStatus: string | null;
+  } | null>(null);
+
   const pickMutation = useMutation({
     mutationFn: (row: UndraftedRow) =>
       pickInMockDraft(state?.mock_id as number, row.player_id),
+    onMutate: () => {
+      pickedSlotRef.current = onClock
+        ? {
+            round: onClock.round,
+            pick_no: onClock.pick_no,
+            roster_id: onClock.roster_id,
+            prevStatus: state?.status ?? null,
+          }
+        : null;
+    },
     onSuccess: (next) => {
       haptics.selection();
       setSelected(null);
+      const picked = pickedSlotRef.current;
+      pickedSlotRef.current = null;
+      if (next && !isMockEmpty(next)) {
+        const ns = next as MockDraftState;
+        const echo = ns.settings_echo;
+        // LEAGUE platform from the session league cache — never the device
+        // platform, never inferred from the id's shape.
+        const platform =
+          useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+            ?.platform ?? 'unknown';
+        if (picked) {
+          track(
+            'mock_pick_made',
+            {
+              platform,
+              mode: echo?.mode ?? null,
+              round: picked.round,
+              pick_no: picked.pick_no,
+              // "My team" is user_owner_id vs the slot's owner — NEVER `by`
+              // (in manual mode every pick is `by: "user"`). Always true in
+              // cpu mode.
+              for_own_team:
+                picked.roster_id != null && echo?.user_owner_id
+                  ? String(picked.roster_id) === String(echo.user_owner_id)
+                  : true,
+            },
+            'MockDraft',
+          );
+          // NON_INTENT outcome, fired only on the active → complete
+          // transition — a resumed recap render is structurally unable to
+          // re-emit because a GET never runs this handler.
+          if (picked.prevStatus === 'active' && ns.status === 'complete') {
+            track(
+              'mock_completed',
+              {
+                platform,
+                mode: echo?.mode ?? null,
+                rounds: echo?.rounds ?? null,
+                teams: echo?.teams ?? null,
+                // The user's TEAM's picks — never a `by === "user"` count,
+                // which would be every pick in manual mode.
+                user_picks: ns.my_picks.length,
+              },
+              'MockDraft',
+            );
+          }
+        }
+      }
       applyResponse(next);
     },
     onError: (err) => {
+      pickedSlotRef.current = null;
       setSelected(null);
       setToast({ msg: readErrorCopy(err, "Couldn't make that pick."), tone: 'warn' });
     },
@@ -197,6 +276,19 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
           text: done ? 'Clear' : 'End mock',
           style: 'destructive',
           onPress: () => {
+            // INTENT — the tap is the decision; the network result is not.
+            // Fired BEFORE the abandon promise on purpose.
+            track(
+              'mock_abandoned',
+              {
+                platform:
+                  useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+                    ?.platform ?? 'unknown',
+                mode: state?.settings_echo?.mode ?? null,
+                picks_made: state?.picks.length ?? 0,
+              },
+              'MockDraft',
+            );
             abandonMockDraft(mockId)
               .catch(() => undefined)
               .finally(() => {
@@ -207,7 +299,7 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
         },
       ],
     );
-  }, [state?.mock_id, state?.status, navigation, queryClient, leagueId]);
+  }, [state, navigation, queryClient, leagueId]);
 
   useLayoutEffect(() => {
     const done = state?.status === 'complete';
@@ -296,11 +388,21 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
     return persona.source === 'default' ? label : `${label} · ${persona.source}`;
   }, [state, onClock?.roster_id]);
 
-  const clockName = useMemo(() => {
-    if (!state || !onClock?.roster_id) return null;
-    const slot = state.order.find((o) => o.owner_user_id === onClock.roster_id);
-    return ownerNameOf(slot?.owner_username, onClock.roster_id);
-  }, [state, onClock?.roster_id]);
+  // ONE owner-name map for every active-board render site (clock card,
+  // ticker who-column) — same D-16 ladder the recap rail applies. A map
+  // miss is an owner the order cannot name, and every consumer falls back
+  // to its own honest placeholder rather than a raw id.
+  const ownerNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of state?.order ?? []) {
+      if (o.owner_user_id) m.set(o.owner_user_id, ownerNameOf(o.owner_username, o.owner_user_id));
+    }
+    return m;
+  }, [state?.order]);
+
+  const clockName = onClock?.roster_id
+    ? ownerNames.get(String(onClock.roster_id)) ?? null
+    : null;
 
   /** Picks that landed since the user's last one — the run they missed. */
   const sinceUserPick = useMemo(() => {
@@ -370,13 +472,19 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
             <OnTheClockCard
               onClock={onClock}
               isUser={isUserTurn}
+              forOwnTeam={forOwnTeam}
               who={clockName}
               persona={personaLine}
               total={state.order.length}
               made={state.picks.length}
             />
 
-            <PickTicker picks={state.picks} newest={sinceUserPick} userOwnerId={userOwnerId} />
+            <PickTicker
+              picks={state.picks}
+              newest={sinceUserPick}
+              userOwnerId={userOwnerId}
+              nameOf={ownerNames}
+            />
 
             {myPickSlots.length ? (
               <View style={styles.section}>
@@ -476,7 +584,15 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
               </Text>
               {selected.team ? ` · ${selected.team}` : ''}
               {` · consensus #${selected.rank}`}
-              {onClock ? ` · your pick ${onClock.round}.${String(onClock.slot).padStart(2, '0')}` : ''}
+              {/* #305 — "your pick" only when the slot is the user's OWN
+                  team's; picking for another team names that team. */}
+              {onClock
+                ? forOwnTeam
+                  ? ` · your pick ${onClock.round}.${String(onClock.slot).padStart(2, '0')}`
+                  : clockName
+                    ? ` · ${clockName}’s pick ${onClock.round}.${String(onClock.slot).padStart(2, '0')}`
+                    : ` · pick ${onClock.round}.${String(onClock.slot).padStart(2, '0')}`
+                : ''}
             </Text>
           </View>
           <View style={styles.confirmBtns}>
@@ -541,6 +657,7 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
 function OnTheClockCard({
   onClock,
   isUser,
+  forOwnTeam,
   who,
   persona,
   total,
@@ -548,6 +665,8 @@ function OnTheClockCard({
 }: {
   onClock: MockDraftState['on_the_clock'];
   isUser: boolean;
+  /** #305 — false only in manual mode, on another team's slot. */
+  forOwnTeam: boolean;
   who: string | null;
   persona: string | null;
   total: number;
@@ -560,14 +679,32 @@ function OnTheClockCard({
         <Text style={styles.clockPick}>
           {onClock.round}.{String(onClock.slot).padStart(2, '0')}
         </Text>
-        <Text style={[styles.clockWho, !isUser && { color: chalk.base }]} numberOfLines={1}>
-          {isUser ? 'You’re on the clock' : `${who ?? 'A computer drafter'} is on the clock`}
+        {/* Flare stays reserved for the user's OWN turn; an on-behalf turn
+            reads in chalk like a CPU turn's headline (approved frame). */}
+        <Text
+          style={[styles.clockWho, (!isUser || !forOwnTeam) && { color: chalk.base }]}
+          numberOfLines={1}
+        >
+          {isUser
+            ? forOwnTeam
+              ? 'You’re on the clock'
+              : who
+                ? `You’re picking for ${who}`
+                : 'You’re picking for this team'
+            : `${who ?? 'A computer drafter'} is on the clock`}
         </Text>
       </View>
       <Text style={styles.clockMeta}>
         round {onClock.round} · pick {onClock.pick_no} of {total} · {made} picks made
         {persona && !isUser ? ` · ${persona}` : ''}
       </Text>
+      {/* #305 — the reminder, at the moment of confusion ("why am I picking
+          for Jake?"), that drafting every team was the user's own choice. */}
+      {isUser && !forOwnTeam ? (
+        <Text testID="mock-draft.clock.picking-for" style={styles.clockHow}>
+          You chose to pick for every team in this mock.
+        </Text>
+      ) : null}
       {/* #291 — "You're on the clock" said WHOSE turn it was and never HOW to
           act. One instruction line, inside the existing card, no new testID. */}
       {isUser ? (
@@ -583,10 +720,16 @@ function PickTicker({
   picks,
   newest,
   userOwnerId,
+  nameOf,
 }: {
   picks: MockPick[];
   newest: number;
   userOwnerId: string | null;
+  /** #305 — owner id → display name (the shared D-16 map). Without it the
+   *  manual-mode who-column would render "—" for every non-own pick: all
+   *  manual picks are `by: "user"`, so the shipped `by`-keyed fallback
+   *  never says whose team a pick landed on. */
+  nameOf?: Map<string, string>;
 }) {
   const recent = useMemo(() => [...picks].reverse().slice(0, TICKER_DEPTH), [picks]);
   if (!recent.length) return null;
@@ -614,7 +757,16 @@ function PickTicker({
               {p.team ? ` · ${p.team}` : ''}
             </Text>
             <Text style={styles.tickerWho} numberOfLines={1}>
-              {mine ? 'You' : p.by === 'cpu' ? 'CPU' : '—'}
+              {/* "You" keys on the user's TEAM (`picked_by_user_id`), never
+                  on `by`; a manual-mode pick for another team names that
+                  team. "—" survives only for an owner nobody can name. */}
+              {mine
+                ? 'You'
+                : p.by === 'cpu'
+                  ? 'CPU'
+                  : (p.picked_by_user_id != null
+                      ? nameOf?.get(String(p.picked_by_user_id))
+                      : undefined) ?? '—'}
             </Text>
           </View>
         );
@@ -733,12 +885,18 @@ function Recap({
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-/** The session user's owner id, read off the payload rather than the
- *  session: `settings_echo` does not echo `user_owner_id`, but the engine
- *  advances the CPU until the user is on the clock, so an ACTIVE mock
- *  always identifies them — and a complete one has their picks. */
+/** The session user's owner id — the join key for every "my team" render.
+ *
+ *  #305: `settings_echo.user_owner_id` is read FIRST and is the only source
+ *  that is sound in manual mode, where `is_user` is true on EVERY owned
+ *  slot (the roster_id on the clock is whichever team is up) and
+ *  `my_picks` is empty until the user's own team has picked. The shipped
+ *  inference survives below as the old-server fallback only — sound there
+ *  because cpu is the only mode an old server can produce. */
 function resolveUserOwnerId(state: MockDraftState | null): string | null {
   if (!state) return null;
+  const echoed = state.settings_echo?.user_owner_id;
+  if (echoed != null && echoed !== '') return String(echoed);
   if (state.on_the_clock?.is_user && state.on_the_clock.roster_id) {
     return String(state.on_the_clock.roster_id);
   }
@@ -790,6 +948,8 @@ function emptyCopy(reason: string | null): string {
       return 'There’s no rookie class loaded yet, so there’s nobody to draft.';
     case 'cpu_model_unvalidated':
       return 'The computer drafters aren’t ready yet.';
+    case 'user_not_in_draft':
+      return 'We couldn’t find your team in this league’s draft, so there’s no seat for you to draft from.';
     default:
       return 'This mock draft isn’t available right now.';
   }

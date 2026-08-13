@@ -274,19 +274,55 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const mockRes = mockQuery.data;
   const activeMock: MockDraftState | null =
     mockRes && !isMockEmpty(mockRes) ? (mockRes as MockDraftState) : null;
+  // #295 R9 — the GET typed-empty's `capability` ride-along, consumed. With
+  // no row on file the probe already ran the refusal ladder, so the entry
+  // card can render disabled BEFORE any POST (the HLD §3.3 promise the
+  // shipped client never implemented). Only a `no_active_mock` empty
+  // carries a probe worth reading.
+  const probeReason =
+    mockRes && isMockEmpty(mockRes) && mockRes.reason === 'no_active_mock'
+      ? mockRes.capability?.reason ?? null
+      : null;
 
   const createMock = useMutation({
     mutationFn: (setup: MockSetupResult) =>
-      createMockDraft({ leagueId: leagueId as string, rounds: setup.rounds, type: setup.type }),
+      createMockDraft({
+        leagueId: leagueId as string,
+        rounds: setup.rounds,
+        type: setup.type,
+        mode: setup.mode,
+      }),
     onSuccess: (res) => {
+      // LEAGUE platform, from the same cached list league_view reads —
+      // never the device platform, never inferred from the id's shape
+      // (the InLeagueCalculator convention verbatim).
+      const platform =
+        useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+          ?.platform ?? 'unknown';
       if (isMockEmpty(res)) {
         // A typed-empty refusal is not an error — it is the honest state
         // arriving late (gap G2). Close the sheet and mute the card.
+        track('mock_create_refused', { platform, reason: res.reason }, 'DraftRoom');
         setPostRefusal(res.reason);
         setSetupOpen(false);
         queryClient.setQueryData(['mock-draft', leagueId, 'consensus'], res);
         return;
       }
+      // Props read off the server's RESOLVED settings_echo, never the
+      // sheet's request values — a clamped `rounds` or degraded
+      // `order_source` must report as resolved.
+      track(
+        'mock_started',
+        {
+          platform,
+          teams: res.settings_echo?.teams ?? null,
+          rounds: res.settings_echo?.rounds ?? null,
+          type: res.settings_echo?.type ?? null,
+          order_source: res.settings_echo?.order_source ?? null,
+          mode: res.settings_echo?.mode ?? null,
+        },
+        'DraftRoom',
+      );
       setSetupOpen(false);
       queryClient.setQueryData(['mock-draft', leagueId, 'consensus'], res);
       navigation?.navigate?.('MockDraft', { leagueId });
@@ -314,6 +350,20 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
         title: 'Mock draft',
         body: `The ${board.season} rookie class loads after the NFL draft (late April). There's nobody to draft yet.`,
         cta: 'Available in late April',
+      };
+    }
+    if (postRefusal === 'user_not_in_draft' || probeReason === 'user_not_in_draft') {
+      // #295 — the fourth ladder rung: the session user could not be placed
+      // in the resolved draft. One arm serves both triggers: `postRefusal`
+      // after a POST, `probeReason` pre-POST from the GET `capability` —
+      // the "disabled entry state" is this same card rendered before the
+      // user ever taps. A fact, no false remedy: the only reachable trigger
+      // is a state the user cannot act on.
+      return {
+        testID: 'mock-entry.blocked.user_not_in_draft',
+        title: 'Mock draft',
+        body: "We couldn't find your team in this league's draft, so there's no seat for you to draft from.",
+        cta: "Your team isn't in this draft",
       };
     }
     if (board.kind === 'startup') {
@@ -352,7 +402,7 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
       };
     }
     return null;
-  }, [board, postRefusal]);
+  }, [board, postRefusal, probeReason]);
 
   const mockMeta = useMemo(() => {
     if (!board) return null;
@@ -603,11 +653,12 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
       header={
         mockOn ? (
           <>
-            {/* No track() here on purpose. `backend/analytics_taxonomy.py`
-                is DEFAULT-DENY and carries no mock events, and this wave
-                owns mobile/ only — firing `draft_room_mode_switched` would
-                be dropped server-side while reading like live
-                instrumentation. Register the events, then add the calls. */}
+            {/* The mock-draft event family (#295/#296/#305) is now
+                REGISTERED in `backend/analytics_taxonomy.py` (registration
+                commit precedes the emitters) and this screen fires
+                `mock_started` / `mock_create_refused` from the create
+                mutation. `draft_room_mode_switched` remains unregistered,
+                so the toggle itself still deliberately emits nothing. */}
             {/* #292 dead-end 3 — `postRefusal` was never cleared, so ONE
                 transient refusal muted the card for the rest of the session.
                 Re-entering Mock mode is the user asking again; the card must
