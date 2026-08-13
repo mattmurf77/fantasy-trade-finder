@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-08-13 (notification inbox as a growth surface, phase 1 — branch `feat/notif-inbox-growth`, NOT merged)
+## 2026-08-13 (notification inbox as a growth surface, phase 1 — SHIPPED to `main`)
 
 - **Six push kinds that left no trace now write a bell row**, and the bell has instrumentation for the first time ever. Built from the pm-growth brief ([`../docs/business/product/2026-08-12-notification-inbox-growth-surface.md`](../docs/business/product/2026-08-12-notification-inbox-growth-surface.md)) under operator decisions GD-1…GD-8. Phase 1 is **inbox rows only, no push change** — inbox rows bypass prefs, buckets, quiet hours and OS permission, so this ships to **every** user while push stays operator-only.
 - **Rows are written beside the push at the call site, never inside `_send_typed_push`** ([D-045]). The dispatcher's five gates are all statements about *interrupting*; inheriting them would have made `deck_replenished`'s inbox row reach zero users exactly as its push does. Idempotency cannot be borrowed either — `notification_events_log` is only written when a push actually leaves, so the 15-minute `match_expiring` cron would have re-written its row ~96×/day per match. It uses `notification_exists_with_meta`.
@@ -20,7 +20,7 @@
 - **"Clear all" now means it.** New `notifications.dismissed_at` + `POST /api/notifications/dismiss-all`. Replaces mobile's zustand clear (rows re-hydrated on the next open) and web's per-browser localStorage set; web's set becomes read-only so pre-cutover clears survive. Rows are retained, never deleted.
 - **Zero prompt rows, deliberately** ([D-046]). The invite ask lives in the **empty state**, gated at the shipped <50%-penetration rule — never a standing row, because a row true for every user every day is not news. Ordering stays recency-only; no schema for priority/expiry until a prompt row is actually approved.
 - **Analytics registered one commit ahead of any emitter**: `notif_inbox_opened` + `notif_empty_state_shown` (NON_INTENT, added to `NON_INTENT_EVENTS` in the same commit — the bell is in the global TopBar, so intent-by-default would step-change DAU on ship day) and `notif_row_tapped` (INTENT). `surface` enum gains `notif_empty`. **Mobile only — web has no analytics SDK at all**, so these are not a product-wide bell open rate.
-- **Gates:** 13 new backend tests; full suite green except 6 `test_rookie_scope` failures **pre-existing on `origin/main`** (verified by stashing). `tsc` clean, `testid-lint OK`, new `check-notif-glyphs.js` 5/5. Sim gate + Maestro waived under D-P1-08. See [`TEST_LEDGER.md`](TEST_LEDGER.md).
+- **Gates:** 13 new backend tests; full suite green except 6 `test_rookie_scope` failures which are **local-only** (Python 3.14; CI on 3.12 is green on `main`, verified via `gh run list`). `tsc` clean, `testid-lint OK`, new `check-notif-glyphs.js` 5/5. Sim gate + Maestro waived under D-P1-08. **Shipped on the operator's directive**, which also resolved the `counter_offer` question (glyph + routing only, four write sites) and ratified both adjacent dead-tap fixes. See [`TEST_LEDGER.md`](TEST_LEDGER.md).
 
 ---
 

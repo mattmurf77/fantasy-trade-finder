@@ -22,43 +22,44 @@
 
 ### Where I am right now
 
-`feat/notif-inbox-growth`, four commits off `origin/main` @ `4c67309`. **Complete, green, and
-not merged.** Built from the pm-growth brief + operator decisions GD-1…GD-8; scope block and
-tracking plan in [`../docs/plans/notif-inbox-growth/`](../docs/plans/notif-inbox-growth/).
+**SHIPPED to `main` 2026-08-13** — rebased onto `3b64a44` and merged; Render auto-deploys the
+backend + web halves. Built from the pm-growth brief + operator decisions GD-1…GD-8; scope
+block and tracking plan in [`../docs/plans/notif-inbox-growth/`](../docs/plans/notif-inbox-growth/).
 
 | Commit | What |
 |---|---|
-| `9d5943e` | pm-growth brief carried over + scope block + tracking plan |
-| `ce4e268` | analytics registration ONLY — no emitter |
-| `4de44fd` | backend: 4 inbox writes, GD-8 coalescing, server-side dismiss + column |
-| `04ee442` | both clients: glyphs, routing, instrumentation, empty state, Clear all |
+| `3c7a69e` | pm-growth brief carried over + scope block + tracking plan |
+| `393b33d` | analytics registration ONLY — no emitter |
+| `5881a20` | backend: 4 inbox writes, GD-8 coalescing, server-side dismiss + column |
+| `687cb98` | both clients: glyphs, routing, instrumentation, empty state, Clear all |
+| `8e9bb5b` | docs + living-memory |
 
-### Decisions that need the operator, before merge
+### Blockers, resolved by the operator's ship directive (2026-08-13)
 
-1. **`counter_offer` has no emitter anywhere in the backend.** The brief listed it as one of
-   five `create_notification` sites "beside the existing `_send_typed_push` call". There is no
-   such call — it is a bucket mapping (`database.py`) and two client kind sets, nothing more.
-   Built as **four** write sites; `counter_offer` got glyph + routing only. If a counter-offer
-   feature is meant to exist, that is its own item.
-2. **Two adjacent fixes I made rather than shipped new code beside.** (a) mobile routing for
-   `trade_accepted`/`trade_declined` — two of the four ORIGINAL inbox types had a dead tap,
-   because only the push kind `match_accepted` was listed. (b) web's `clickNotif` routed match
-   rows to the Trades view while scrolling an element inside the hidden Matches view. Both are
-   outside the literal brief; both would have been inherited by the new rows.
+1. **`counter_offer` ships as glyph + routing only, four write sites not five.** The kind has
+   no emitter anywhere in the backend — a bucket mapping and two client kind sets, nothing
+   more — so there was no push to write a row beside. Whether a counter-offer *feature* should
+   exist stays on NEXT as its own item; the kind now renders correctly if it ever ships.
+2. **Both adjacent dead-tap fixes stand as built**: mobile routing for
+   `trade_accepted`/`trade_declined` (only the push kind `match_accepted` was listed), and
+   web's `clickNotif` routing match rows to the Trades view while scrolling an element inside
+   the hidden Matches view.
 
 ### What has never run
 
 Every row template, the empty state, the invite gate and all three analytics emitters are
-**unexecuted** — no simulator, no device, no browser. Sim gate + Maestro waived under D-P1-08.
-The backend write sites are covered at the DB-helper level, not through their routes.
+**unexecuted** — no simulator, no device, no browser. Sim gate + Maestro waived under D-P1-08;
+TestFlight is primary QA. The backend write sites are covered at the DB-helper level, not
+through their routes.
 
 ### Next moves
 
-- Merge to `main` (Render auto-deploys; the mobile half needs a build to reach TestFlight).
-- **Post-deploy analytics probe.** Registration is unproven until the three names round-trip
-  through `POST /api/events` with `X-Device-Id` set — without that header the response is
-  `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has `dropped == 0` and
-  reads as a pass.
+- **Mobile needs an EAS build to reach TestFlight** — the bell UI half of this feature is
+  invisible to users until then.
+- **Post-deploy analytics probe** (run it once Render finishes): the three names must
+  round-trip through `POST /api/events` **with `X-Device-Id` set** — without the header the
+  response is `{"accepted":0,...,"rejected":[{"reason":"no_identity"}]}`, which has
+  `dropped == 0` and reads as a pass.
 - Watch `notif_inbox_opened` for 14 days before anyone argues about which rows earn a slot.
   At 3–5 users these are **directional reads, not experiments**.
 
