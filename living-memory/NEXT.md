@@ -129,7 +129,7 @@ Phase 1 is built on `feat/notif-inbox-growth` and unmerged (see [`HANDOFF.md`](H
 ### Near-term
 
 5. **Decide `trade.finder_config_consolidated` (flag false).** +716 lines of `TradesScreen.tsx` sit uncommitted; docs already updated as though shipped.
-6. **Graduate or kill `deck.value_model`.** The F8 replay harness runs nightly — the gate is checkable now.
+6. **Graduate or kill `deck.value_model`.** The F8 replay harness runs nightly — the gate is checkable now. Now formalized as **P1-1 of [`../docs/plans/trade-relevance-engine/`](../docs/plans/trade-relevance-engine/)** (2026-08-14, HLD/LLD/PRDs shipped): the signed-off D4 criterion (pinned artifact, 21 counted nights, symmetric kill) + `train.value_model` flag split replace ad-hoc gate-reading; dev starts at PRD P0's B1, and the operator decision queue in `reconciliation-log.md` gates the rest.
 7. **Light `outlook.odds` (decision + lighting checklist).** Corrected 2026-08-11 — the earlier claim that the flag was absent from `config/features.json` was stale: it is **present and `false`** there, so the endpoint is reachable, just flag-dark. Built on both ends (backend `/api/league/outlook` + LeagueSummary section; frame-E collapsed strip **shipped dark 2026-08-11**, `f27c0f5` — `docs/feedback/items/169-outlook-league-summary/`). Lighting owes: a Maestro flow for the section + strip states and a seeded outlook fixture for the harness (the `outlook_strip_toggled` event ships specced + wired with the strip build — operator rejected that waiver) — see `docs/feedback/items/169-outlook-league-summary/scope.md` §1/§3.
 
 ### Medium-term

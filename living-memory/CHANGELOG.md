@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-14 (trade-relevance engine: X-algorithm research → audit → HLD/LLD signed off → 5 PRDs — SHIPPED to `main`, docs only)
+
+- **Nine reference docs + seven planning artifacts, all dual-agent authored** (Fable subagents, adversarial loops per `.claude/skills/dual-agent-doc-review`). X open-sourced its For You algorithm 2026-08-13 (`xai-org/x-algorithm` @ `a389166`); four subagents documented it in [`../reference/x-algorithm/`](../reference/x-algorithm/) (real prod weights: report −234 vs favorite +0.5; 1024-event behavior sequence as identity; zero human labels). A fifth mapped FTF's own recommender → [`../docs/plans/trade-relevance-engine/`](../docs/plans/trade-relevance-engine/): `ftf-current-state.md` (supersedes tiktok-discovery/current-state.md), `audit-x-vs-ftf.md`, `enhancement-plan.md` (P0 close loops → P1 learned ranker → P2 market/FA/pre-join history → P3 archetypes + value decomposition → P4 presentation).
+- **hld.md and lld.md SIGNED OFF** (4 adversarial rounds each); **prds/ P0–P4** dual-drafted + cross-reviewed (8 blockers fixed; parents amended in-place, ⟨PRD-AMENDED⟩ marks). Full objection/fix record + **operator decision queue** (⛔: Sleeper OQ-1 public reads, Postgres timing, D4/harm-check ratification, D6 bypass set, WAU/MDE, vblend audit storage) in `reconciliation-log.md`.
+- **Reviews caught real defects pre-build:** P0-3 join semantics inverted vs `create_trade_match`; `surface='push'` rows would poison six impression readers; the vblend validator rejected its own default blend; D4's window graded a different artifact nightly; P2's "day-zero" promise arithmetically false at the call budget (→ 48h/7d SLO); the August archetype coverage gate fails on rookie-heavy rosters.
+- **Live bug found in passing:** `_save_deck_outcome_safe` (`server.py:3657`) accepts foreign/stale impression ids → another user's taste vector poisoned. Operator spun up a fix session (task chip); the P0 PRD's R6 specs the same validation.
+- **Cross-session supersession noted at ship time:** P0-1 (register the dropped client events) was independently shipped today by the G-031 session (PR #116) — the P0 PRD carries a dated note; remaining P0-1 work is verification-only.
+
+---
+
 ## 2026-08-14 (Dynasty Year in Review P0: roster-history capture — branch `feat/roster-history`)
 
 - **The ownership side of team value is finally being written down.** `player_value_history` has logged the market side daily since 2026-07-26; rosters were overwritten on every sync with zero rows of history. Two new append-only tables ([ADR-011](../docs/adr/adr-011-league-state-history-is-append-only.md)): `league_roster_history` (one row per team per ISO week, key `(league_id, team_key, scoring_format, period_key)`) and `league_board_history` (complete member boards — C5/C6 in one table, deliberately NOT a fork of `elo_history`). Built from the pm-growth plan + two 3-round adversarial reviews under operator rulings **YR-1…YR-8**; scope + premise checks in [`../docs/plans/dynasty-year-in-review/scope.md`](../docs/plans/dynasty-year-in-review/scope.md).
