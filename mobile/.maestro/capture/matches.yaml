@@ -2,7 +2,7 @@ appId: com.fantasytradefinder.app
 # tc: TC-CAP-MATCHES
 # profile: standard
 # flags: release
-# captures: skeleton, populated--mutual, populated--awaiting, error
+# captures: skeleton, populated--mutual, value-expanded, populated--awaiting, awaiting-value-expanded, error, value-error
 # source: mobile/src/screens/MatchesScreen.tsx, mobile/src/components/TradeCard.tsx, mobile/src/components/LeagueProgressModule.tsx
 # interactive-stop: populated--mutual
 #
@@ -89,6 +89,48 @@ tags: [capture, matches]
 - waitForAnimationToEnd
 - takeScreenshot: matches__populated--mutual
 
+# ── #319 value disclosure (mutual) ───────────────────────────────────────
+# Expand the FIRST mutual tile's "Trade value" disclosure: the lazy
+# /api/trade/evaluate fires on expand only, so the settle anchor is the
+# bar's own header copy. Law 5: never waitForAnimationToEnd across the
+# "Valuing…" spinner — the text assert IS the settle.
+- scrollUntilVisible:
+    element:
+      id: "matches.value-details"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+- tapOn:
+    id: "matches.value-details"
+- extendedWaitUntil:
+    visible:
+      text: ".*Dynasty value swing.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: matches__value-expanded
+# Open-in-calc rides the live #190 prefill; the seeded row is the ACTIVE
+# league, so no league switch happens. calc.find-a-trade renders on every
+# calculator mode (TradeCalculatorScreen #213) — the one stable anchor.
+- scrollUntilVisible:
+    element:
+      id: "matches.open-in-calc"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+- tapOn:
+    id: "matches.open-in-calc"
+- extendedWaitUntil:
+    visible:
+      id: "calc.find-a-trade"
+    timeout: 30000
+# Back to the inbox for the awaiting captures.
+- tapOn:
+    id: "tab.matches"
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.awaiting"
+    timeout: 20000
+
 # ── populated--awaiting ──────────────────────────────────────────────────
 # Lazily fetched on first open (awaitingQuery `enabled: segment === 'awaiting'`),
 # against /api/trades/awaiting — a different path, so the latency above does
@@ -101,6 +143,26 @@ tags: [capture, matches]
     timeout: 30000
 - waitForAnimationToEnd
 - takeScreenshot: matches__populated--awaiting
+
+# ── #319 value disclosure (awaiting) ─────────────────────────────────────
+# Only the awaiting FlatList is mounted on this segment, so the first
+# matches.value-details is the awaiting row's. Same expand grammar; the
+# awaiting expand fires NO analytics (waived — match_opened allows only
+# match_id and awaiting rows have none).
+- scrollUntilVisible:
+    element:
+      id: "matches.value-details"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+- tapOn:
+    id: "matches.value-details"
+- extendedWaitUntil:
+    visible:
+      text: ".*Dynasty value swing.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: matches__awaiting-value-expanded
 
 # ── launch 2: error ──────────────────────────────────────────────────────
 # clearState wipes the stored session, but the keychain keeps the last
@@ -151,3 +213,41 @@ tags: [capture, matches]
     timeout: 60000
 - waitForAnimationToEnd
 - takeScreenshot: matches__error
+
+# ── #319 evaluate failure → honest disclosure error ──────────────────────
+# matches/all is dead this launch but /api/trades/awaiting is healthy, so
+# the awaiting segment still populates — expand there with the evaluate
+# route armed to 500. COUNT=2: the disclosure's evaluate is a react-query
+# QUERY (retry: 1), same budget rule as the matches/all injection above.
+# Body is the real production 500 (server.py handle_unexpected_error).
+# Sabotage (run-time, per the plan): point INJECT_PATH at a wrong route and
+# the error assert below MUST fail against a healthy bar.
+- runScript:
+    file: helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trade/evaluate"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "2"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- tapOn:
+    id: "matches.segment.awaiting"
+- extendedWaitUntil:
+    visible:
+      text: ".*Waiting on @.*"
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "matches.value-details"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+- tapOn:
+    id: "matches.value-details"
+- extendedWaitUntil:
+    visible:
+      text: ".*Could not value this trade.*"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: matches__value-error
