@@ -327,7 +327,13 @@ export default function QuickSetTiersScreen() {
               quicksetCompletedPositions: [...donePositions, position],
             });
           }
-          track('quickset_completed', { position, onboarding: onboardingReturn }, 'QuickSetTiers');
+          // No client `quickset_completed` here either (2026-08-13): the name
+          // is SERVER-fired (per completed position, on the scoped save) and
+          // the taxonomy's client/server namespaces are disjoint by an
+          // import-time assert, so this call was dropped behind a 200 since
+          // it shipped. Removed rather than renamed — the server row is the
+          // authoritative completion; its lost `onboarding` prop is recorded
+          // as accepted loss in the 2026-08-13 tracking-plan addendum.
         }
         if (onboardingReturn) {
           // Item 7 exit: no Quick Rank offer (suppressed by ruling F2), post
