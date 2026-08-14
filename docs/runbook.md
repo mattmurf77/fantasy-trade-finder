@@ -294,6 +294,20 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 
 **`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe. **2026-07-26 (market-data readiness):** the endpoint was never provisioned in `render.yaml`. A dedicated `value-snapshot-daily` cron was added but **broke Render blueprint sync** (new blueprint cron = new billable resource needing approval) and was removed same-day. The operative mechanism is the **`hourly-tick` idempotent fallback guard**: it writes today's snapshot whenever any format is missing (response gains a `value_snapshot` key when the fallback ran), so cadence is guaranteed by the existing hourly cron alone — a lost day requires hourly-tick down ~24h. If a dedicated cron is ever wanted, create it manually in the Render dashboard rather than via blueprint.
 
+**`roster-snapshot` monitoring (ADR-011, 2026-08-14):** the weekly league-state sweep (Writer B) rides `daily-tick` behind the `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate; on-sync capture (Writer A) needs no scheduler at all. **The `source` column is the liveness instrument** — one week after ship, run:
+
+```sql
+SELECT source, count(*) FROM league_roster_history GROUP BY 1;
+```
+
+| Reading | Meaning | Action |
+|---|---|---|
+| `'weekly'` rows covering ≥95% of synced leagues, two consecutive weeks | Scheduled path proven live | Question retired. The manual route stays as the operator lever |
+| **Zero `'weekly'` rows after one week** | `daily-tick` is not firing | Escalate the cron migration; until it lands, run `POST /api/cron/roster-snapshot` by hand weekly (CRON_SECRET). Writer A keeps capturing throughout |
+| `'weekly'` present but <95% coverage | Sweep budget too small, or the daemon is dying | Read the per-league `roster-sweep: … fetch_ms=` log lines (emitted from day one) and raise `_ROSTER_SNAPSHOT_SWEEP_BUDGET`. **The budget and the daemon thread are a pair** — anyone removing the daemon must drop the budget to ~10 in the same change |
+
+Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate history** (and never write a snapshot from `league_members`, which is client-posted and possibly stale; the sweep fetches live). ESPN-private skips surface as `espn_reconnect` bell rows to the linking user plus `skips` counters in the sweep log — an expired cookie is a visible re-auth ask, not a silent hole.
+
 ---
 
 ## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)

@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-14 — Dynasty Year in Review P0: roster-history capture (branch `feat/roster-history`)
+
+- **Change:** ADR-011 — `league_roster_history` + `league_board_history`, three write triggers (on-sync at 8 sites, daily-tick daemon sweep on all four platforms, manual cron route), flag `market.roster_history` ON, `espn_reconnect` notification type, `ix_pvh_format_date`. **FULL GATES** (schema + data collection — the bright line; not express-eligible). Scope block: `docs/plans/dynasty-year-in-review/scope.md`.
+- **Backend:** `pytest backend/tests -q` (excluding `test_rookie_scope.py`, known local-3.14-only — CI on 3.12 is green on main) → **2725 passed / 1 skipped**. New `test_roster_history.py`: **22 tests** pinning precedence-not-recency (weekly beats sync; weekly never hash-suppressed; sync-over-sync suppressed on same hash; backfill never overwrites), NULL-not-zero `team_value`, `changed_from_prev`, synthetic-id owner rejection, the owner re-stamp leaving roster facts untouched, board idempotency + `board_updated_at`, per-owner pick exclusions, stalest-first sweep ordering, the weekday gate + `=7` kill lever, the platform hook swallowing failures, and the ESPN nudge firing once per credential-expiry episode.
+- **Two pre-existing pins honoured, found by the suite:** the flag-off daily-tick payload stays byte-identical (`test_deck_replenishment`), and the five flag-fixture mirrors gained the new key surgically (`test_seed_ui_test_db`; `all-on.json` is an overlay and needs nothing).
+- **Review-doc correction found by the FIRST test run:** their ISO-boundary example ("2026-12-31 is 2027-W01") is factually wrong — 2026 is a 53-week ISO year (`2026-W53`); the real crossing is 2025-12-29 ⇒ `2026-W01`. Both pinned.
+- **Mobile:** `tsc --noEmit` clean (worktree, node_modules symlinked); `check-notif-glyphs.js` **10 types, 5/5**.
+- **NOT verified live:** no writer has fired against a real platform API — the sweep adapters are covered by the import routes' shared helpers plus unit tests, not by a live sweep. The first production evidence will be the `source`-column liveness read one week post-ship (runbook § roster-snapshot monitoring). Sim gate + Maestro: **WAIVED** (D-P1-08; server-only + one bell row type). No `qa/sim-runs/last-sim-run.json` — not fabricated.
+
+---
+
 ## 2026-08-14 — sleeper FAAB Q-016 (docs-only; no new tests, no posture change)
 
 - **Change:** docs + living-memory only — module docstring caveat in `backend/sleeper_write.py`, `docs/integrations/sleeper.md`, [Q-016](OPEN_QUESTIONS.md). **No behavior touched, no tests added.**
