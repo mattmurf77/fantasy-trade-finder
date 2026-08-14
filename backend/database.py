@@ -1878,6 +1878,8 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Consensus seed blend (#145/#148 — data_loader, applied at pool build) ──
     ("ktc_blend_weight",      0.5,    "#145: KeepTradeCut weight in the consensus seed blend (0=DP-only kill switch, 1=KTC ordering only); takes effect on next pool build/boot"),
     ("tep_te_uplift",         1.18,   "#148: TE value multiplier for sf_tep seeds (TE premium); 1=off; calibrated 2026-07-17 so top-8 sf_tep TE seeds clear their 1qb analogs"),
+    ("qb_1qb_cap_elo",     1785.0,    "#313: max seed Elo a QB may reach in 1qb_ppr (top of the first_1 band) — 1QB QB values are compressed onto it, order preserved; <=0 disables the compression"),
+    ("qb_1qb_cap_knee_elo", 1580.0,   "#313: seed Elo below which 1qb_ppr QB values pass through untouched (the first_1 floor); compression applies only above it; <=0 disables"),
     # ── Package diminishing-returns weights (up to 5 players) ─────────────
     ("package_weight_1",      1.00,   "Value weight for 1st (best) player in a trade package"),
     ("package_weight_2",      0.75,   "Value weight for 2nd player in a trade package"),

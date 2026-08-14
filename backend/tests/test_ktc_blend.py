@@ -17,7 +17,8 @@ Fixtures (no network):
 These tests pin:
   1. parse_ktc_players extracts playersArray and drops rookie-draft-pick
      (RDP) rows — universe unchanged.
-  2. BLEND-OFF BYTE IDENTITY: ktc_blend_weight=0 + tep_te_uplift=1 returns
+  2. BLEND-OFF BYTE IDENTITY: ktc_blend_weight=0 + tep_te_uplift=1 (+ the
+     #313 QB cap off — it is a later stage of the same function) returns
      the DP maps untouched (kill switch = the pre-#145 pipeline exactly).
      Mandatory guardrail.
   3. Fail-soft: _ktc_consensus swallows a fetch failure (→ {}), and the
@@ -110,7 +111,12 @@ def test_real_ktc_consensus_parses_fixture_html(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_blend_off_is_byte_identical(monkeypatch):
+    # #313 added a THIRD seed-stage knob (1QB QB compression) downstream of
+    # the blend, so "the pre-#145 pipeline" now means every seed knob
+    # neutral: blend 0, uplift 1, cap off. The #313 kill switch has its own
+    # byte-identity pin in test_qb_1qb_cap.
     monkeypatch.setattr(dl, "_blend_config", lambda: (0.0, 1.0))
+    monkeypatch.setattr(dl, "_qb_cap_config", lambda: (0.0, 0.0))
     for fmt in ("1qb_ppr", "sf_tep"):
         elo, val, pos = _dp_maps(fmt)
         elo_before, val_before = dict(elo), dict(val)
@@ -145,6 +151,7 @@ def test_ktc_consensus_swallows_fetch_failure(monkeypatch):
 
 def test_blend_with_empty_ktc_is_dp_only(monkeypatch):
     monkeypatch.setattr(dl, "_blend_config", lambda: (0.5, 1.0))
+    monkeypatch.setattr(dl, "_qb_cap_config", lambda: (0.0, 0.0))  # #313 off
     monkeypatch.setattr(dl, "_ktc_consensus", lambda: {})
     elo, val, pos = _dp_maps("1qb_ppr")
     val_before = dict(val)
