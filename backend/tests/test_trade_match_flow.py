@@ -480,3 +480,37 @@ def test_load_recent_league_likes_filters_self_old_and_passes(mem_engine):
     assert likes[0]["user_id"] == OPP
     assert likes[0]["give_player_ids"] == ["r1"]
     assert likes[0]["receive_player_ids"] == ["g1"]
+
+
+# ---------------------------------------------------------------------------
+# #318 — retracted likes are invisible to the RECEIVER's two read paths
+# (plan #318 tests 2 and 3; the dismisser-side + route coverage lives in
+# test_awaiting_dismiss.py)
+# ---------------------------------------------------------------------------
+
+def test_retracted_like_excluded_from_recent_league_likes(mem_engine):
+    """Plan #318 test 2: after dismissal, load_recent_league_likes (the
+    likes-you deck-injection feed) no longer surfaces the retracted like."""
+    from backend.database import retract_awaiting_likes
+    with mem_engine.begin() as conn:
+        _insert_like(conn, OPP, LEAGUE, ["r1"], ["g1"], age_days=1)
+
+    assert len(load_recent_league_likes(LEAGUE, exclude_user_id=ME)) == 1
+
+    marked = retract_awaiting_likes(OPP, LEAGUE, ["r1"], ["g1"])
+    assert marked == 1
+    assert load_recent_league_likes(LEAGUE, exclude_user_id=ME) == []
+
+
+def test_retracted_like_never_matures_into_match(mem_engine):
+    """Plan #318 test 3: the receiver swiping the exact mirror AFTER the
+    dismissal finds no match — a retracted like cannot mature."""
+    from backend.database import retract_awaiting_likes
+    # OPP liked: give x1 for a1 — the mirror of ME giving a1 for x1.
+    with mem_engine.begin() as conn:
+        _insert_like(conn, OPP, LEAGUE, ["x1"], ["a1"], age_days=1)
+
+    assert check_for_match(ME, LEAGUE, OPP, ["a1"], ["x1"]) is True
+
+    assert retract_awaiting_likes(OPP, LEAGUE, ["x1"], ["a1"]) == 1
+    assert check_for_match(ME, LEAGUE, OPP, ["a1"], ["x1"]) is False
