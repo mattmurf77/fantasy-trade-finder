@@ -30,6 +30,8 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 - [`elo_history`](#elo_history)
 - [`asset_preferences`](#asset_preferences)
 - [`player_value_history`](#player_value_history)
+- [`league_roster_history`](#league_roster_history)
+- [`league_board_history`](#league_board_history)
 - [`rank_sets`](#rank_sets)
 - [`rank_set_entries`](#rank_set_entries)
 - [`rank_set_adoptions`](#rank_set_adoptions)
@@ -660,6 +662,60 @@ Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_hi
 Constraint: `uq_value_snapshot` on `(player_id, scoring_format, snapshot_date)` — the daily upsert (INSERT OR REPLACE / ON CONFLICT DO UPDATE) is idempotent, so a same-day cron retry overwrites rather than duplicating. Written via `record_value_snapshots`; read via `load_value_history` / `load_value_extremes` / `load_value_snapshot_baseline` (FB4-61: oldest prior-day snapshot in the trailing 30d window — the baseline for the consensus positional-rank trend on `/api/rankings`). Retention: keep-forever in v1 (~700 players × 2 formats × 365 ≈ 0.5M rows/yr; revisit with a downsample-to-weekly policy after year one).
 
 **2026-07-12 (#117) scale migration:** rows written before the consensus seed recalibration stored old-scale (`elo = 1200 + dp/10000 × 600`) values; `database._migrate_db` rescaled them in place to the new value-affine scale (closed-form, invertible), guarded by the one-time `model_config` marker row `value_history_seed_scale = 2.0`. See docs/runbook.md → "8-tier ladder + consensus seed recalibration".
+
+**Index (ADR-011, 2026-08-14):** `ix_pvh_format_date` on `(scoring_format, snapshot_date)` — the recap's league-wide query (`WHERE scoring_format = ? AND snapshot_date IN (…)`) had no leading-column match against `uq_value_snapshot` (which leads with `player_id`) and would full-scan.
+
+---
+
+## `league_roster_history`
+
+Append-only **ownership-side** snapshots (ADR-011, #46 Wrapped P0) — `player_value_history` logs the market side daily; this logs who held which roster, weekly. The half `league_members.roster_data` was overwriting on every sync. Written by three triggers through one precedence-aware upsert (`upsert_roster_snapshots`): on-sync (beside the two `league_members` writers, own transaction after theirs commits), the `daily-tick` weekday-gated sweep (server-side fetch, all four platforms — YR-8), and `POST /api/cron/roster-snapshot`. Flag `market.roster_history` gates the writes, never the table.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `league_id` | str | |
+| `team_key` | str | **The platform-native team slot, never derived from a user id** (SWID rotates): `sleeper:<lid>.r<roster_id>` / `espn:<lid>.t<team_id>` / `mfl:<lid>.f<franchise_id>` / `fleaflicker:<lid>.t<team_id>`. Weak fallback `sleeper:<lid>.u<user_id>` when the roster map is unavailable |
+| `team_key_quality` | str | `'strong'` \| `'weak'` — the recap declines to chart weak-keyed teams rather than fragmenting them silently |
+| `platform` | str | `sleeper` \| `espn` \| `mfl` \| `fleaflicker` |
+| `owner_user_id` | str, nullable | **Re-stampable attribute, never part of the key** — resolved forward at link time (`restamp_roster_history_owner`); synthetic member ids are stored as NULL |
+| `scoring_format` | str | one format per league (`leagues.default_scoring`) |
+| `period_key` | str | ISO-week bucket label, **ISO week-numbering year** (`'2026-W33'`; 2025-12-29 ⇒ `'2026-W01'`) — never an instant |
+| `period_kind` | str | `'week'` today; `'day'` reserved |
+| `snapshot_date` / `snapshot_at` | str | `"YYYY-MM-DD"` (the pvh join key) / ISO UTC instant |
+| `player_ids` | JSON text | sorted array — the input of record |
+| `starter_ids` | JSON text, nullable | the platform-**set** lineup (the fact; the optimal lineup is an analysis, computed at read time) |
+| `pick_ids` | JSON text, nullable | `draft_picks.pick_id`s, uncontested/unorphaned only |
+| `pick_ids_excluded` | JSON text, nullable | slots this team asserted that the contested/orphaned filter withheld — non-empty ⇒ recap suppresses pick flow for the league |
+| `pick_source` | str, nullable | `'platform'` \| `'user'` \| `'mixed'` (ADR-010: `'user'` is never rendered as fact) |
+| `roster_hash` | str | 16-hex set-semantics hash; suppresses EXTRA intra-week sync writes only — **never the weekly write** |
+| `changed_from_prev` | int, nullable | 0/1 vs the team's previous period; NULL = first observation |
+| `player_count` / `valued_player_count` | int | coverage pair — K/DEF/deep-bench ids have no pvh row, ever |
+| `team_value` | float, nullable | `compute_power_rankings` consensus-basis players total. **NULL, never 0, when nothing prices.** Renderers grey NULL or `valued < 0.8 × count`, never interpolate |
+| `team_value_picks` | float, nullable | pick capital, separate pipeline (pool_value) |
+| `value_basis_date` | str, nullable | the pvh `snapshot_date` actually used (nearest ≤) |
+| `in_season` | int, nullable | NULL in P0 |
+| `source` | str | `'sync'` \| `'weekly'` \| `'backfill'` — **precedence, not recency**: weekly outranks sync. Doubles as the rollback lever and the cron liveness detector |
+
+Constraint: `uq_roster_snapshot` on `(league_id, team_key, scoring_format, period_key)`. Indexes: `ix_lrh_team_period`, `ix_lrh_league_period`, `ix_lrh_owner_period`. Volume: ~240 rows/league-season. Retention: one policy with `player_value_history` (ADR-011).
+
+---
+
+## `league_board_history`
+
+Weekly **complete** board snapshots per member (C5/C6, YR-3 — ADR-011). Deliberately not a fork of `elo_history`, which stays as the event log: changed-only writes cannot rebuild a board at date D, it has no uniqueness constraint, and row-per-player weekly is ~270× these rows. Read accessors (P3) must take a caller identity and assert league membership; there is no public-URL read path (the surviving half of D-P1-12).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` / `league_id` / `scoring_format` | str | |
+| `period_key` / `snapshot_date` / `snapshot_at` | str | as `league_roster_history` |
+| `elos` | JSON text | `{player_id: round(elo,1)}` — the whole board |
+| `player_count` | int | |
+| `board_updated_at` | str, nullable | `member_rankings.updated_at` at capture — distinguishes "re-ranked this week" from "re-snapshotted an unchanged board"; "Your calls" is built on exactly that distinction |
+| `source` | str | `'sync'` \| `'weekly'` \| `'backfill'` |
+
+Constraint: `uq_board_snapshot` on `(user_id, league_id, scoring_format, period_key)`. Indexes: `ix_lbh_league_period`, `ix_lbh_user_period`.
 
 ---
 

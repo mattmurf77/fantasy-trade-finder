@@ -49,6 +49,7 @@
   "picks.owned_sync": true,
   "picks.rank_year_labels": true,
   "market.trade_capture": true,
+  "market.roster_history": true,
   "market.movers": true,
   "trade.picks_in_pool": true,
   "trade.asset_ideas": true,

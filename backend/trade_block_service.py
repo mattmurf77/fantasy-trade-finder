@@ -158,19 +158,27 @@ def parse_trade_block(league_players: list[dict], rosters: list[dict]) -> list[d
     return entries
 
 
-def sync_league_trade_block(league_id: str, *, _opener=None) -> int:
+def sync_league_trade_block(league_id: str, *, _opener=None,
+                            rosters: list[dict] | None = None) -> int:
     """Fetch + validate + store the league's trade block. Returns row count.
 
     No-op (returns 0 without touching the table) for non-Sleeper league
     ids (demo leagues, plus platform-imported ESPN/MFL/Fleaflicker rows
     whose native ids are numeric) — same guard pairing as
     server._fetch_sleeper_league_meta.
+
+    `rosters` (ADR-011): the session-init daemon now fetches the v1
+    rosters ONCE and shares them between this sync and the roster-history
+    snapshot — the roster_id → owner_id mapping used to be fetched here
+    and thrown away, which is exactly what the snapshot's team_key needs.
+    None preserves the self-fetching behavior for every other caller.
     """
     if not league_id or not str(league_id).isdigit() \
             or is_linked_platform_league(league_id):
         return 0
     league_players = fetch_league_players(league_id, _opener=_opener)
-    rosters = _fetch_rosters(league_id, _opener=_opener)
+    if rosters is None:
+        rosters = _fetch_rosters(league_id, _opener=_opener)
     entries = parse_trade_block(league_players, rosters)
     replace_trade_block(league_id, entries)
     return len(entries)

@@ -368,6 +368,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # (backend/sleeper_trades_service.py). Capture ONLY — raw payload
     # retained, no scoring/aggregation/UI. Off ⇒ no fetch, no rows.
     "market.trade_capture",
+    # market.roster_history (ADR-011, #46 Wrapped P0): weekly league-state
+    # snapshots into league_roster_history + league_board_history — the
+    # ownership-side twin of the value snapshots. Gates the WRITES at every
+    # call site (on-sync hooks, the daily-tick sweep, the manual cron
+    # route), never the tables' creation, so flipping it mid-season is a
+    # behavior change and not a schema surprise. Default ON at merge, like
+    # its three sibling capture flags in the same daemon — capture that
+    # ships dark is capture that did not happen, and the urgency argument
+    # is about days. D-P1-07 does not bar it (that decision is about read
+    # routes with external references; this gates a write with none). The
+    # env knob FTF_ROSTER_SNAPSHOT_WEEKDAY=7 kills only the sweep half.
+    "market.roster_history",
     # market.movers: GET /api/market/movers (#243 "Market pulse" strip) —
     # top risers/fallers by trailing-window % change of FTF community value
     # (player_value_history consensus_value snapshots, the data #57 /
