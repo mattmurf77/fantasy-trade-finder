@@ -12,3 +12,7 @@
   living-memory) is byte-identical on `main`.
 - Deleted 2026-08-14 (reflog recovery expires ~2026-11-12).
 - Recovery: `git branch claude/elegant-mccarthy-ef63f8 7016850`
+
+Addendum (same sweep): `ship-evidence-taxonomy` @ `60824a4` also deleted — its tip
+IS post-push `main` (pushed as `4733f78..60824a4`), so deletion loses nothing.
+Recovery: `git branch ship-evidence-taxonomy 60824a4`.
