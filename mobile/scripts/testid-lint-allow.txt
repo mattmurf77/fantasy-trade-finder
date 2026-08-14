@@ -77,4 +77,8 @@ mock-entry.*
 #   testID={c.id === 'all' ? 'matches.league-chip.all' : `matches.league-chip.${c.id}`}
 # Referenced by flows/league/07-matches-tile-scoped.yaml, which is
 # merge-gated on that edit landing.
+# MatchesScreen.tsx (#307 frozen chip contract): the per-league chips template
+# their id — testID={c.id === 'all' ? 'matches.league-chip.all' : `matches.league-chip.${c.id}`}.
+# Covers the static 'all' literal too (it sits inside the same JSX expression,
+# invisible to the lint's testID= grep). Asserted by wave-league's Maestro flow.
 matches.league-chip.*

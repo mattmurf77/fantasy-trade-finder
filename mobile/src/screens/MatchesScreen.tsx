@@ -21,7 +21,13 @@ import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
 import HelpSheet from '../components/HelpSheet';
-import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
+import {
+  getAllMatches,
+  getAwaitingTrades,
+  dismissMatch,
+  dismissAwaitingTrade,
+} from '../api/trades';
+import MatchValueSection from '../components/MatchValueSection';
 import {
   getAssetPrefs,
   setAssetPref,
@@ -112,11 +118,23 @@ export default function MatchesScreen() {
   // segment: navigate('Matches', { segment, at }). `at` (a timestamp)
   // changes on every tap so re-tapping the same tile still lands on the
   // requested segment after the user has toggled away.
+  //
+  // #307 (frozen contract, wave-league @ 6368e31 §4.3) — the param set gains
+  // an optional `leagueId`: a producer (League home's Matches tiles) scopes
+  // this inbox to its league. Lenient consumer: an id not in filterChips
+  // degrades to the existing "No matches in this league yet" empty state —
+  // never a crash, never a silent ignore. Absent/empty leagueId leaves
+  // filterLeagueId untouched, so push-tap routing and plain tab presses are
+  // unaffected by construction. Keying on `at` preserves the re-tap
+  // contract: tile → manually toggle the chip to "All" → tile again still
+  // rescopes, because `at` changed even though leagueId didn't (S-10).
   const route = useRoute<any>();
   useEffect(() => {
     const s = route.params?.segment;
     if (s === 'mutual' || s === 'awaiting') setSegment(s);
-  }, [route.params?.segment, route.params?.at]);
+    const lid = route.params?.leagueId;
+    if (typeof lid === 'string' && lid) setFilterLeagueId(lid);
+  }, [route.params?.segment, route.params?.leagueId, route.params?.at]);
 
   // Stable query key — `'all'` not the active league. The endpoint returns
   // every-league results, so league switching shouldn't invalidate this
@@ -195,24 +213,68 @@ export default function MatchesScreen() {
     },
   });
 
+  // #318 — mirror of dismissMutation, against the awaiting cache. The like
+  // is keyed by the row tuple (no single id — see dismissAwaitingTrade); the
+  // cache row is keyed `${league_id}:${trade_id}` (the list's keyExtractor).
+  // Server-fired analytics (`awaiting_trade_dismissed`) — no client event.
+  const dismissAwaitingMutation = useMutation({
+    mutationFn: (row: AwaitingTrade) => dismissAwaitingTrade(row),
+    onMutate: async (row) => {
+      const prev = queryClient.getQueryData<AwaitingTrade[]>(['awaiting-trades']);
+      if (prev) {
+        queryClient.setQueryData(
+          ['awaiting-trades'],
+          prev.filter((a) => `${a.league_id}:${a.trade_id}` !== `${row.league_id}:${row.trade_id}`),
+        );
+      }
+      return { prev };
+    },
+    onError: (_err, _row, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['awaiting-trades'], ctx.prev);
+      // Undo path: same reasoning as the mutual mutation above — the row was
+      // removed at TAP time, so ctx.prev is the already-filtered list;
+      // refetch to honestly restore the failed-dismiss row.
+      if (swipeUndoOn) {
+        queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+      }
+      setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+    },
+  });
+
   // ── Dismiss undo (S3 PRD-03, flag ux.swipe_undo) ─────────────────────
   // Same design decision as the Trades pass-undo: the archive POST is
   // DELAYED for UNDO_HOLD_MS rather than reversed (there is no un-dismiss
-  // endpoint). The row is removed optimistically at tap time; Undo restores
-  // the snapshotted list and drops the pending write. A second dismiss,
-  // or unmount, flushes the pending one first.
-  const pendingDismissRef = useRef<{
-    id: string;
-    prev: TradeMatch[] | undefined;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
+  // endpoint — #318's route is idempotent, so the delayed POST is also
+  // retry-safe). The row is removed optimistically at tap time; Undo
+  // restores the snapshotted list and drops the pending write. A second
+  // dismiss, or unmount, flushes the pending one first. #318 generalizes
+  // the holder: `kind` selects which cache + mutation the flush targets.
+  const pendingDismissRef = useRef<
+    | {
+        kind: 'match';
+        id: string;
+        prev: TradeMatch[] | undefined;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | {
+        kind: 'awaiting';
+        row: AwaitingTrade;
+        prev: AwaitingTrade[] | undefined;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | null
+  >(null);
 
   function flushPendingDismiss() {
     const p = pendingDismissRef.current;
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
-    dismissMutation.mutate(p.id);
+    if (p.kind === 'match') dismissMutation.mutate(p.id);
+    else dismissAwaitingMutation.mutate(p.row);
   }
   const flushPendingDismissRef = useRef(flushPendingDismiss);
   flushPendingDismissRef.current = flushPendingDismiss;
@@ -222,8 +284,15 @@ export default function MatchesScreen() {
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
-    if (p.prev) queryClient.setQueryData(['matches', 'all'], p.prev);
-    track('match_dismiss_undone', { match_id: p.id }, 'Matches');
+    if (p.kind === 'match') {
+      if (p.prev) queryClient.setQueryData(['matches', 'all'], p.prev);
+      track('match_dismiss_undone', { match_id: p.id }, 'Matches');
+    } else {
+      // Awaiting undo fires nothing — the mutual path's event above is
+      // already unregistered/dropped by ingest; we don't replicate a dead
+      // emitter (plan § Analytics, waived in writing).
+      if (p.prev) queryClient.setQueryData(['awaiting-trades'], p.prev);
+    }
   }
 
   // Commit any pending dismiss on unmount — leaving ends the undo window.
@@ -241,7 +310,10 @@ export default function MatchesScreen() {
       return;
     }
     // Double-fire guard: the tile's Dismiss can only be pending once.
-    if (pendingDismissRef.current?.id === m.match_id) return;
+    if (
+      pendingDismissRef.current?.kind === 'match'
+      && pendingDismissRef.current.id === m.match_id
+    ) return;
     flushPendingDismiss();
     // Optimistic removal now; the POST waits out the undo window.
     const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
@@ -252,6 +324,7 @@ export default function MatchesScreen() {
       );
     }
     pendingDismissRef.current = {
+      kind: 'match',
       id: m.match_id,
       prev,
       timer: setTimeout(() => flushPendingDismissRef.current(), UNDO_HOLD_MS),
@@ -261,6 +334,96 @@ export default function MatchesScreen() {
       tone: 'success',
       holdMs: UNDO_HOLD_MS,
       action: { label: 'Undo', onPress: undoDismiss },
+    });
+  }
+
+  // #318 — mirror of handleDismiss for the awaiting segment. Honest UI
+  // guarantees are identical: optimistic removal is reversed on error (S-9),
+  // and the delayed-POST undo means a post-window failure refetches so the
+  // row reappears rather than staying invisibly un-dismissed.
+  function handleDismissAwaiting(a: AwaitingTrade) {
+    haptics.selection();
+    if (!swipeUndoOn) {
+      dismissAwaitingMutation.mutate(a);
+      return;
+    }
+    const rowKey = `${a.league_id}:${a.trade_id}`;
+    // Double-fire guard, keyed the way the list is keyed.
+    if (
+      pendingDismissRef.current?.kind === 'awaiting'
+      && `${pendingDismissRef.current.row.league_id}:${pendingDismissRef.current.row.trade_id}` === rowKey
+    ) return;
+    flushPendingDismiss();
+    const prev = queryClient.getQueryData<AwaitingTrade[]>(['awaiting-trades']);
+    if (prev) {
+      queryClient.setQueryData(
+        ['awaiting-trades'],
+        prev.filter((x) => `${x.league_id}:${x.trade_id}` !== rowKey),
+      );
+    }
+    pendingDismissRef.current = {
+      kind: 'awaiting',
+      row: a,
+      prev,
+      timer: setTimeout(() => flushPendingDismissRef.current(), UNDO_HOLD_MS),
+    };
+    setToast({
+      msg: 'Dismissed',
+      tone: 'success',
+      holdMs: UNDO_HOLD_MS,
+      action: { label: 'Undo', onPress: undoDismiss },
+    });
+  }
+
+  // #319 — hand a Matches row to the manual calculator, prefilled (#190
+  // contract). Matches is a cross-league inbox but TradeCalculatorScreen
+  // hard-wires In-league mode to the ACTIVE league, so a cross-league row
+  // switches leagues FIRST via useSession.switchLeague — the same machinery
+  // the TopBar switcher uses (it re-runs the backend league handshake, then
+  // persists the new active league; plain setLeague would leave the server
+  // session bound to the old league). A row whose league is no longer in the
+  // cached list toasts honestly instead of navigating into the wrong league.
+  async function handleOpenInCalc(row: {
+    league_id: string;
+    counterparty_user_id: string;
+    my_side_player_ids: string[];
+    their_side_player_ids: string[];
+  }) {
+    haptics.selection();
+    // App-wide convention name (TradesScreen's #190 emitter). Known gap,
+    // stated honestly: not yet in ALLOWED_CLIENT_EVENTS, so ingest
+    // accepts-and-drops it today — as it does the existing TradesScreen
+    // emitter. Registration is a flagged repo-wide defect; firing the
+    // conventional name lights this up the moment registration lands.
+    track('trade_edit_in_calculator_tapped', undefined, 'Matches');
+    if (row.league_id !== activeLeagueId) {
+      const target = leagues.find((l) => l.league_id === row.league_id);
+      if (!target) {
+        setToast({ msg: 'Switch to that league to open the calculator', tone: 'warn' });
+        return;
+      }
+      try {
+        await useSession.getState().switchLeague({
+          league_id: target.league_id,
+          league_name: target.name,
+        });
+      } catch {
+        setToast({ msg: 'Could not switch leagues — try again', tone: 'warn' });
+        return;
+      }
+    }
+    // TradeCalculator is registered in the Trades tab's stack — from the
+    // Matches tab the navigate must be nested (same pattern as the
+    // empty-state "Find a trade" CTA below).
+    navigation.navigate('Trades', {
+      screen: 'TradeCalculator',
+      params: {
+        prefill: {
+          opponentUserId: row.counterparty_user_id,
+          giveIds: row.my_side_player_ids,
+          receiveIds: row.their_side_player_ids,
+        },
+      },
     });
   }
 
@@ -574,6 +737,9 @@ export default function MatchesScreen() {
           return (
             <Pressable
               key={c.id}
+              // #307 frozen §4.3 — asserted by the LeagueHome group's Maestro
+              // flow; selection stays asserted via accessibilityState below.
+              testID={c.id === 'all' ? 'matches.league-chip.all' : `matches.league-chip.${c.id}`}
               accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={`Filter: ${c.name}`}
@@ -755,6 +921,21 @@ export default function MatchesScreen() {
                         }
                       : undefined
                   }
+                  // #319 — expandable value disclosure + open-in-calc, under
+                  // the send button (TradeCard's final block).
+                  footer={
+                    <MatchValueSection
+                      matchKey={item.match_id}
+                      matchId={item.match_id}
+                      leagueId={item.league_id}
+                      giveIds={item.my_side_player_ids}
+                      receiveIds={item.their_side_player_ids}
+                      opponentUsername={item.counterparty_username}
+                      opponentUserId={item.counterparty_user_id}
+                      isActiveLeague={item.league_id === activeLeagueId}
+                      onOpenInCalc={() => handleOpenInCalc(item)}
+                    />
+                  }
                 />
               </View>
             )}
@@ -845,6 +1026,34 @@ export default function MatchesScreen() {
                           setMenuTarget({ leagueId: item.league_id, player: p, side });
                         }
                       : undefined
+                  }
+                  // #318 + #319 — the awaiting card's footer carries BOTH the
+                  // Dismiss affordance and the value disclosure. Dismiss sits
+                  // first, directly under the send button (TradeCard itself
+                  // is out of this wave's footprint beyond the footer prop —
+                  // wave-trades owns its internals, S-2/S-6 pin that). The
+                  // deck never passes a footer, so it renders exactly as
+                  // before.
+                  footer={
+                    <View style={styles.awaitingFooter}>
+                      <Button
+                        testID="matches.awaiting-dismiss"
+                        variant="pass"
+                        label="Dismiss"
+                        onPress={() => handleDismissAwaiting(item)}
+                        disabled={dismissAwaitingMutation.isPending}
+                      />
+                      <MatchValueSection
+                        matchKey={`${item.league_id}:${item.trade_id}`}
+                        leagueId={item.league_id}
+                        giveIds={item.my_side_player_ids}
+                        receiveIds={item.their_side_player_ids}
+                        opponentUsername={item.counterparty_username}
+                        opponentUserId={item.counterparty_user_id}
+                        isActiveLeague={item.league_id === activeLeagueId}
+                        onOpenInCalc={() => handleOpenInCalc(item)}
+                      />
+                    </View>
                   }
                 />
               </View>
@@ -1107,6 +1316,9 @@ const styles = StyleSheet.create({
   },
   // Timestamps are data — Plex Mono, chalk-faint (ActivityRow convention).
   matchTime: { ...type.data, color: chalk.faint },
+  // #318/#319 — the awaiting card's footer stack: Dismiss row above the
+  // value disclosure, spaced on the card's inner rhythm.
+  awaitingFooter: { gap: space.sm },
   centered: {
     flex: 1,
     alignItems: 'center',
