@@ -62,12 +62,17 @@ Phase 1 is built on `feat/notif-inbox-growth` and unmerged (see [`HANDOFF.md`](H
 
 ### Immediate
 
-0. **Land + start the device-auth programme.** *(operator, 20 minutes to start)*
-   *Why now:* all four artifacts converged 2026-08-13; the branch `design/device-auth-lld`
-   is committed and **awaits an operator push to main** (classifier blocked the agent's).
-   Then: "yes to all defaults" on the Plan §1 decisions table starts S0 the same day —
-   S0 alone closes a live exposure (the 365-day JWT is iCloud-backup eligible today).
-   Plan: `docs/plans/device-side-platform-auth-plan-2026-08-13.md`.
+0. **Run the two Gate-C spikes.** *(sized, blocks S3)*
+   *Why now:* device-auth **S0 shipped 2026-08-13** (FAAB fix, credential vault
+   + legacy migration, Sentry credential-leak scrub; Maestro waived by the
+   operator). The next stage, S3's GraphQL guard, is gated on two unanswered
+   facts: **OI-9** the expo-updates evaluation memo (the PRD ordered it
+   evaluated *first*, and nobody has), and **OI-12** whether Hermes provides
+   `TextDecoder` — zero occurrences in `mobile/src`, and CI runs under node
+   where it is a global, so every green build so far is non-evidence. If it is
+   absent, the import-free rule forces a hand-written UTF-8 validating decoder
+   *inside* the security control and S3 must be re-estimated at Gate C.
+   Gates: [`../docs/plans/device-side-platform-auth-plan-2026-08-13.md`](../docs/plans/device-side-platform-auth-plan-2026-08-13.md) §8.
 
 0a. **Verify #289 on the Dependables MFL league (62846).** *(5 minutes, live now)*
    *Why now:* it is the acceptance criterion the shipped batch never executed.
