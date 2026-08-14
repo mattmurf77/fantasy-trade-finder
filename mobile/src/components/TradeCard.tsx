@@ -87,6 +87,10 @@ interface Props {
     onLike: () => void;
     disabled?: boolean;
   };
+  // #319 — rendered as the card's FINAL block, after the actions/send rows.
+  // The Matches inbox mounts MatchValueSection (and the awaiting Dismiss row)
+  // here; every other caller omits it and the card renders byte-identically.
+  footer?: React.ReactNode;
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -134,6 +138,7 @@ function TradeCardComp({
   hideMatchStrength = false,
   hideLockButton = false,
   disposition,
+  footer,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -668,6 +673,7 @@ function TradeCardComp({
           </View>
         )
       )}
+      {footer ?? null}
     </View>
   );
 }

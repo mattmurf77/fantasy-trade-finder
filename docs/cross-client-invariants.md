@@ -576,6 +576,33 @@ Tests: `backend/tests/test_slot_values.py` (T-M6-01/02/03, including a per-modul
 
 ---
 
+## Trade side order — give-left / get-right, everywhere (#209/#216; violation class #312)
+
+What the user sends renders left/first; what they get renders right/second, on every
+surface showing both sides: deck cards, the player board's TRADE AWAY/TRADE FOR
+columns, idea rows (give → swap glyph → receive), the featured window, the DNA
+sheet's target chips AND add buttons, and the clipboard text ("I send:" before
+"I get:", `tradeText.ts`). Pinned by `mobile/tests/check-dna-side-order.js`.
+
+**Send-availability copy (#309):** `NO_SEND_REASON` never claims "Sleeper-only".
+Stable, test-pinned shape: platform-NAMED tail "copy this trade to propose it in
+<Platform>"; Fleaflicker's reason may say "yet" (no send path built). Pinned by
+`check-trade-text.js` cases 12–15 + 29.
+
+## League unlock thresholds (#265, #308 — both were conflation incidents)
+
+Two unlocks on the League home progress module count DIFFERENT populations at
+DIFFERENT thresholds — never conflate them:
+
+| Unlock | Threshold | Population | Source of truth |
+|---|---|---|---|
+| Mutual matches | `MATCH_UNLOCK_MATES = 1` ranked leaguemate | any format, caller EXCLUDED | `mobile/src/utils/leagueUnlocks.ts` (#265); backend basis `trade_service.py generate_trades` |
+| Leaderboards / contrarian ranks | 3 users with ≥1 stored ranking | ACTIVE scoring format only, caller INCLUDED | `/api/league/contrarian` (`backend/server.py`; `CONTRARIAN_UNLOCK_USERS` mirrors it client-side) |
+
+Scoring-format display labels are pinned now that two surfaces render them
+(TopBar format tile; #308 fold line): `1qb_ppr` → "1QB", `sf_tep` → "SF TEP"
+(`TopBar.tsx FORMAT_TILE_LABEL`, `leagueUnlocks.ts FOLD_FORMAT_LABEL`).
+
 ## Mock-draft mode + typed-empty reason (#295/#296/#305)
 
 **`mode` is a CLOSED two-member enum:** `cpu` | `manual`. Server constants

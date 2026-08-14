@@ -68,6 +68,16 @@
 //      invariant, never two trade summaries on the pinned surface. It is why
 //      V1 was chosen over "just delete both gates" (V2). Sabotage: drop the
 //      term and the "mystery second trade card" returns.
+//   9a (#317) `singlePinDeckActive`'s initializer carries a NEGATED
+//      `pinIdeaResumed` term — the deck-done resume: an explicit tile tap
+//      after the deck is finished re-presents the featured window. Sabotage:
+//      drop the term — resume can never show the window; the #317 dead
+//      click returns.
+//   9b (#317) `setPinIdeaResumed(true)` is called ONLY inside
+//      `handleSelectIdea` — the resume is the user's own gesture. Sabotage:
+//      set it from an effect on `deckExhausted` instead — that is an
+//      automatic snap-back to the featured window, the exact regression
+//      assertion 7 exists to prevent; 9b pins the trigger to the tap path.
 //
 // Structural, not textual: parses the real TSX with the project's own
 // TypeScript and walks the AST, like check-picks-subset-invariance.js. A grep
@@ -477,6 +487,74 @@ if (!featured) {
     '8 — `FeaturedTradeWindow` is gated on `singlePinDeckActive`',
     'without it the read-only featured window and the deck card render ' +
       'together — the "mystery second trade card" #241 removed',
+  );
+}
+
+// ── 9 (#317) — deck-done resume: explicit tap only, through the gate ───────
+
+// 9a — the deck yields the leading slot when (and only when) the user
+// resumed an idea: the gate's initializer must NEGATE `pinIdeaResumed`.
+// (7a/7b above keep holding on the same initializer: `deck.length` stays,
+// `topCard` stays out — the resume works THROUGH the #298 gate, not around
+// it, which is also why assertion 8 needs no change.)
+if (!deckActiveDecl || !deckActiveDecl.initializer) {
+  fail('9a — `singlePinDeckActive` initializer present', 'declaration not found');
+} else {
+  const init = deckActiveDecl.initializer;
+  const negated = findAll(
+    host,
+    (n) =>
+      ts.isPrefixUnaryExpression(n) &&
+      n.operator === ts.SyntaxKind.ExclamationToken &&
+      referencesIdentifier(host, n.operand, 'pinIdeaResumed'),
+  ).some((n) => n.getStart(host) >= init.getStart(host) && n.getEnd() <= init.getEnd());
+  assert(
+    negated,
+    '9a — `singlePinDeckActive` carries a negated `pinIdeaResumed` term',
+    `saw: ${flat(host, init)} — without it a deck-done tile tap can never ` +
+      're-present the featured window (the #317 dead click)',
+  );
+}
+
+// 9b — the flag flips true ONLY inside handleSelectIdea (the tap handler).
+// An automatic setter (an effect on deckExhausted) is the #298-assertion-7
+// regression wearing #317's clothes.
+const selectIdeaFn = findAll(
+  host,
+  (n) =>
+    ts.isFunctionDeclaration(n) && n.name && n.name.text === 'handleSelectIdea',
+)[0];
+
+const resumeSetTrueCalls = findAll(
+  host,
+  (n) =>
+    ts.isCallExpression(n) &&
+    ts.isIdentifier(n.expression) &&
+    n.expression.text === 'setPinIdeaResumed' &&
+    n.arguments.length === 1 &&
+    n.arguments[0].kind === ts.SyntaxKind.TrueKeyword,
+);
+
+if (!selectIdeaFn) {
+  fail('9b — `handleSelectIdea` is declared', 'function not found');
+} else {
+  const outside = resumeSetTrueCalls.filter(
+    (n) =>
+      n.getStart(host) < selectIdeaFn.getStart(host) ||
+      n.getEnd() > selectIdeaFn.getEnd(),
+  );
+  const detail9b =
+    resumeSetTrueCalls.length === 0
+      ? 'no setPinIdeaResumed(true) anywhere — the resume path is gone'
+      : outside.length > 0
+        ? `automatic setter outside the tap handler at ${where(host, outside[0])} ` +
+          '— an auto snap-back, the exact #298-assertion-7 regression'
+        : undefined;
+  assert(
+    resumeSetTrueCalls.length > 0 && outside.length === 0,
+    '9b — `setPinIdeaResumed(true)` fires only from `handleSelectIdea` ' +
+      `(${resumeSetTrueCalls.length} call${resumeSetTrueCalls.length === 1 ? '' : 's'})`,
+    detail9b,
   );
 }
 

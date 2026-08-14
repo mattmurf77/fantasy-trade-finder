@@ -1,0 +1,146 @@
+appId: com.fantasytradefinder.app
+# tc: feedback #307 — Matches tiles land on the Matches tab scoped to the league
+# profile: standard
+# flags: release
+#
+# ══ MERGE-GATED ON THE MATCHES GROUP'S BUILD (same wave, contract §4.3) ══
+# This flow taps `matches.league-chip.all` / `matches.league-chip.<id>` —
+# testIDs the Matches group adds to MatchesScreen.tsx's chip row alongside
+# the param-effect extension that consumes `leagueId`. Until their build
+# lands, this flow fails at the first chip assertion — correctly, because a
+# receiver that ignores the param leaves the filter wherever the user last
+# put it, which is exactly #307's report. Do not run before their edit
+# merges; do not weaken the assertion to make it pass without it.
+#
+# It has NEVER been executed on a simulator (D-P1-08 retired the sim
+# apparatus; TestFlight is primary QA), so treat every step as
+# authored-not-proven and eyeball the screenshots on the first green run
+# (law 23).
+#
+# ══ WHAT THIS PROVES ════════════════════════════════════════════════════
+# #307's report: "Mutual matches link on the league home should route
+# directly to the matches tab with that league selected." The chain:
+#
+#   tap league.matches-mutual-tile  → Matches tab, mutual segment selected,
+#                                     AND the league chip for the seeded
+#                                     league selected (not "All", not
+#                                     whatever was picked last)
+#   toggle the chip to All by hand,
+#   tab back, re-tap the tile       → rescopes to the league chip again —
+#                                     the `at` re-fire contract (the param
+#                                     effect keys on `at`, which changes per
+#                                     tap even though `leagueId` didn't)
+#
+# The second leg is the exact regression the §4.3 Matches-side sabotage
+# describes: key the effect on `leagueId` alone and first-tap demos pass
+# while re-tap-after-manual-change silently dies.
+#
+# Selection is asserted through `selected:` — the chips carry
+# accessibilityState={{selected}} (MatchesScreen chip row), as does the
+# segment control.
+tags: [league, matches]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Law 10 — a raced inputText submits a partial name and books a real VCR
+# miss; eraseText first makes the retry idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+# Law 8 — settle on a surface control before touching a tab.
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.league"
+# The League tab roots at the rankings screen (#181); LeagueHome is pushed
+# from its "League home" row.
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 30000
+- tapOn:
+    id: "league-summary.league-home"
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 30000
+
+# ── 1. First tap: the tile lands scoped ──────────────────────────────────
+# standard seeds matches_seed {mutual: 2}, so the tiles render (both-zero
+# folds them). Law 2 — scroll the tile genuinely into view before tapping.
+- scrollUntilVisible:
+    element:
+      id: "league.matches-mutual-tile"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "league.matches-mutual-tile"
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.mutual"
+    timeout: 20000
+- assertVisible:
+    id: "matches.segment.mutual"
+    selected: true
+# THE ASSERTION #307 IS ABOUT: the league chip for the sender's active
+# league is selected — not "All".
+- assertVisible:
+    id: "matches.league-chip.990000000000000001"
+    selected: true
+- takeScreenshot: league-07-first-tap-scoped
+
+# ── 2. Toggle away by hand ───────────────────────────────────────────────
+- tapOn:
+    id: "matches.league-chip.all"
+- assertVisible:
+    id: "matches.league-chip.all"
+    selected: true
+
+# ── 3. Re-tap the tile: `at` re-fires the effect and rescopes ────────────
+- tapOn:
+    id: "tab.league"
+# LeagueHome is still on top of the League stack (re-tap pop only fires on
+# a FOCUSED tab tap; we arrive from Matches).
+- extendedWaitUntil:
+    visible:
+      id: "league.hero"
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "league.matches-mutual-tile"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "league.matches-mutual-tile"
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.mutual"
+    timeout: 20000
+- assertVisible:
+    id: "matches.league-chip.990000000000000001"
+    selected: true
+- takeScreenshot: league-07-retap-rescopes

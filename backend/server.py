@@ -108,6 +108,7 @@ from .database import (
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
     load_awaiting_trades,
+    retract_awaiting_likes,
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
@@ -1155,7 +1156,11 @@ def _starter_impact(league_id: str, caller_user_id: str,
     byte-identical to pre-#169.
     """
     from .power_rankings import optimal_starter_slots, optimal_starters
-    slots = _sleeper_lineup_slots(league_id)
+    # #311 — platform-aware template resolution (leagues.platform branch);
+    # Sleeper leagues delegate to _sleeper_lineup_slots unchanged. This is
+    # the ONLY call site switched: mock draft keeps its own fallback and the
+    # power-rankings call site is a deliberate deferral (plan #311).
+    slots = _league_lineup_slots(league_id)
     if not slots:
         return None
     rosters: dict[str, list[str]] = {}
@@ -13088,6 +13093,86 @@ def get_awaiting_trades():
         return jsonify([])
 
 
+@app.route("/api/trades/awaiting/dismiss", methods=["POST"])
+@_gate_unverified_write
+def dismiss_awaiting_trade():
+    """
+    POST /api/trades/awaiting/dismiss                              (#318)
+    Body (JSON, all fields required):
+      { league_id, my_give: [ids], my_receive: [ids], partner_id }
+
+    Dismisses one "Awaiting them" tile by retracting the caller's like
+    rows: EVERY trade_decisions row of the CALLER with decision='like',
+    the same league_id, and set-equal give/receive (order-insensitive,
+    frozenset — load_awaiting_trades' dedup key) gets
+    retracted_at=<now ISO UTC>. No Elo signal, no swipe row, no effect on
+    trade_matches. `partner_id` is used ONLY to invalidate that user's
+    cached trade-deck job (best-effort, in-process) so their next generate
+    excludes the offer; it can never mutate the partner's data.
+
+    Responses (frozen contract — the Matches mobile client codes against
+    these exact bytes):
+      200 {"status": "ok", "dismissed_likes": <int >= 0>}
+          0 is still "ok" (idempotent repeat, or key already matured/
+          absent — never a 404).
+      400 {"error": "league_id, my_give, my_receive, partner_id are required"}
+      400 {"error": "session not initialised"}
+
+    A like re-swiped AFTER a dismissal writes a fresh row with NULL
+    retracted_at, so the trade legitimately reappears in Awaiting.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+
+    body = request.get_json(silent=True) or {}
+    league_id  = body.get("league_id")
+    my_give    = body.get("my_give")
+    my_receive = body.get("my_receive")
+    partner_id = body.get("partner_id")
+    if not league_id or not my_give or not my_receive or not partner_id:
+        return jsonify({"error": "league_id, my_give, my_receive, "
+                                 "partner_id are required"}), 400
+
+    dismissed = retract_awaiting_likes(
+        user_id=g_user_id,
+        league_id=str(league_id),
+        give_player_ids=[str(p) for p in my_give],
+        receive_player_ids=[str(p) for p in my_receive],
+    )
+
+    # Touch point 4 (plan #318): drop the PARTNER's cached deck job so their
+    # next /api/trades/generate regenerates without the retracted offer
+    # instead of serving the <=30-min-old snapshot. Best-effort, in-process.
+    try:
+        _invalidate_trade_jobs(user_id=str(partner_id),
+                               league_id=str(league_id))
+    except Exception as inv_err:
+        log.warning("awaiting-dismiss: partner deck invalidation failed: %s",
+                    inv_err)
+
+    # Server-fired INTENT event — only when >=1 row was newly marked (an
+    # idempotent 0-row repeat is not a fresh user intent).
+    if dismissed >= 1:
+        try:
+            record_event(
+                g_user_id,
+                "awaiting_trade_dismissed",
+                league_id = str(league_id),
+                source    = "api",
+                props     = {"partner_id": str(partner_id),
+                             "dismissed_likes": dismissed},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(awaiting_trade_dismissed) failed: %s",
+                        ev_err)
+
+    return jsonify({"status": "ok", "dismissed_likes": dismissed})
+
+
 @app.route("/api/trades/matches/<int:match_id>/dismiss", methods=["POST"])
 @_gate_unverified_write
 def dismiss_trade_match(match_id):
@@ -19935,6 +20020,61 @@ def _sleeper_lineup_slots(league_id: str) -> list[str] | None:
     slots = [s for s in (meta.get("roster_positions") or [])
              if s in LINEUP_SLOT_ELIGIBILITY]
     return slots or None
+
+
+def _league_lineup_slots(league_id: str) -> list[str] | None:
+    """The league's starting-slot template, all platforms (#311).
+
+    ESPN/MFL league ids are NUMERIC (the `leagues` PK holds the
+    platform-native id), so id-shape checks cannot distinguish platforms —
+    resolution branches on the `leagues.platform` column instead:
+
+      1. `leagues` row lookup by PK (one indexed select: platform,
+         default_scoring). No leagues row → None (never guess a template
+         for an unknown league).
+      2. platform in ('espn', 'mfl', 'fleaflicker') → the app's one
+         standard template (`_MOCK_DEFAULT_LINEUP`), plus a trailing
+         SUPER_FLEX when default_scoring == 'sf_tep' (NULL reads as
+         '1qb_ppr', the database.py convention). These platforms expose no
+         roster_positions equivalent today; slot-FILLING stays 100%
+         value-based via power_rankings, so "starting lineup based on
+         dynasty values" holds — only the template is standardized.
+         Persisting each league's REAL template at import is the logged
+         phase-2 follow-up, not this helper.
+      3. platform 'sleeper' / NULL → _sleeper_lineup_slots(league_id),
+         byte-identical to the pre-#311 behavior (live meta via the #179
+         cache). Never consulted for platform leagues, so a numeric ESPN
+         id can no longer trigger a doomed Sleeper meta fetch.
+      4. Any other platform (e.g. demo leagues) → None — callers degrade
+         by omitting the starters/bench split, never fabricate.
+    """
+    if not league_id:
+        return None
+    from sqlalchemy import select as _sa_select
+    from .database import leagues_table, engine as _db_engine
+    try:
+        with _db_engine.connect() as conn:
+            row = conn.execute(
+                _sa_select(
+                    leagues_table.c.platform,
+                    leagues_table.c.default_scoring,
+                ).where(leagues_table.c.sleeper_league_id == str(league_id))
+            ).fetchone()
+    except Exception as e:
+        log.warning("_league_lineup_slots: leagues lookup failed for %s: %s",
+                    league_id, e)
+        return None
+    if row is None:
+        return None
+    platform = (row.platform or "sleeper").lower()
+    if platform in ("espn", "mfl", "fleaflicker"):
+        slots = list(_MOCK_DEFAULT_LINEUP)
+        if (row.default_scoring or "1qb_ppr") == "sf_tep":
+            slots.append("SUPER_FLEX")
+        return slots
+    if platform == "sleeper":
+        return _sleeper_lineup_slots(league_id)
+    return None
 
 
 def _position_medians(teams: list[dict]) -> dict[str, dict]:

@@ -610,7 +610,9 @@ def _install_starter_world(monkeypatch, *, slots=("RB", "WR"),
     seed.update({p.id: elo for p, elo in _SI_EXTRA})
     monkeypatch.setitem(
         srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
-    monkeypatch.setattr(srv, "_sleeper_lineup_slots",
+    # #311 — _starter_impact resolves the template via _league_lineup_slots
+    # (platform branch); patch the new seam directly.
+    monkeypatch.setattr(srv, "_league_lineup_slots",
                         lambda league_id: list(slots) if slots else None)
     monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
         {"user_id": CALLER, "player_ids": list(caller_roster)},
@@ -797,7 +799,7 @@ def test_starter_impact_slots_rank_ties_broken_by_player_id(monkeypatch):
     seed = dict(_SEED, rb_tie_a=1700.0, rb_tie_b=1700.0)
     monkeypatch.setitem(
         srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
-    monkeypatch.setattr(srv, "_sleeper_lineup_slots", lambda league_id: ["RB"])
+    monkeypatch.setattr(srv, "_league_lineup_slots", lambda league_id: ["RB"])
     monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
         {"user_id": CALLER, "player_ids": ["rb_tie_a"]},
         {"user_id": OPP,    "player_ids": ["rb_tie_b"]},
@@ -855,3 +857,155 @@ def test_values_endpoint_shape_and_etag():
         r2 = c.get("/api/trade/values?scoring_format=1qb_ppr",
                    headers={"If-None-Match": etag})
         assert r2.status_code == 304
+
+
+# ── #311 — platform-aware template resolution (_league_lineup_slots) ─────
+# ESPN/MFL/Fleaflicker leagues have NO roster_positions equivalent, so the
+# helper serves the app's one standard template (_MOCK_DEFAULT_LINEUP, plus
+# SUPER_FLEX for sf_tep) keyed off the leagues.platform column — never off
+# id shape (platform league ids are numeric too). Sleeper resolution and
+# the no-row/demo omission are byte-identical to pre-#311.
+
+from unittest.mock import MagicMock  # noqa: E402
+
+_311_QBS = [
+    (_P("qb_one", "First Signal",  "QB", "BUF", 27), 1850.0),
+    (_P("qb_two", "Second Signal", "QB", "WAS", 23), 1820.0),
+]
+
+_STANDARD_1QB_LABELS = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX"]
+
+
+def _install_league_row(monkeypatch, league_id, *, platform,
+                        default_scoring=None):
+    """Isolated in-memory DB, one leagues row (or none when platform is
+    None) — _league_lineup_slots reads it live, nothing is monkeypatched
+    over the helper itself."""
+    from sqlalchemy import create_engine, insert as _insert
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    db.metadata.create_all(eng)
+    if platform is not None or default_scoring is not None:
+        with eng.begin() as conn:
+            conn.execute(_insert(db.leagues_table).values(
+                sleeper_league_id=str(league_id), user_id=CALLER,
+                platform=platform, default_scoring=default_scoring))
+    monkeypatch.setattr(db, "engine", eng)
+    return eng
+
+
+def _install_platform_world(monkeypatch, league_id, *, platform,
+                            default_scoring=None, seed_row=True,
+                            caller_roster=("good", "bench", "wr_low",
+                                           "qb_one", "qb_two"),
+                            opp_roster=("stud", "mid")):
+    """Full Mode B world where the template comes from the REAL
+    _league_lineup_slots over a seeded leagues row. Returns (seed,
+    sleeper_fetch_mock)."""
+    _install_league_row(monkeypatch, league_id,
+                        platform=platform if seed_row else None,
+                        default_scoring=default_scoring if seed_row else None)
+    players = (_POOL_PLAYERS + [p for p, _ in _SI_EXTRA]
+               + [p for p, _ in _311_QBS])
+    seed = dict(_SEED)
+    seed.update({p.id: elo for p, elo in _SI_EXTRA})
+    seed.update({p.id: elo for p, elo in _311_QBS})
+    monkeypatch.setitem(
+        srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
+    monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
+        {"user_id": CALLER, "player_ids": list(caller_roster)},
+        {"user_id": OPP,    "player_ids": list(opp_roster)},
+    ])
+    monkeypatch.setattr(srv, "load_draft_picks", lambda *a, **k: [])
+    monkeypatch.setattr(
+        srv, "load_asset_preferences",
+        lambda user_id=None, league_id=None: {"untouchables": [], "targets": [],
+                                              "not_interested": []},
+    )
+    # Any Sleeper meta fetch in these tests is either mocked (test 4) or a
+    # BUG (tests 1-3, 6) — never let one reach the network.
+    fetch_mock = MagicMock(return_value={})
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta", fetch_mock)
+    monkeypatch.setattr(srv, "_FA_LEAGUE_META_CACHE", {})
+    return seed, fetch_mock
+
+
+def _evaluate_platform(monkeypatch, league_id):
+    return _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": str(league_id), "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+
+
+def test_espn_league_gets_standard_1qb_template(monkeypatch):
+    # Numeric PK + platform='espn' + NULL scoring → standard 1QB template.
+    _install_platform_world(monkeypatch, "777001", platform="espn")
+    d = _evaluate_platform(monkeypatch, "777001")
+    si = d.get("starter_impact")
+    assert si is not None, "starter_impact must appear for ESPN leagues (#311)"
+    assert [s["slot"] for s in si["slots"]] == _STANDARD_1QB_LABELS
+
+
+def test_espn_sf_tep_league_appends_super_flex_and_seats_second_qb(monkeypatch):
+    _install_platform_world(monkeypatch, "777002", platform="espn",
+                            default_scoring="sf_tep")
+    d = _evaluate_platform(monkeypatch, "777002")
+    si = d["starter_impact"]
+    labels = [s["slot"] for s in si["slots"]]
+    assert labels == _STANDARD_1QB_LABELS + ["SUPER_FLEX"]
+    sf = si["slots"][-1]
+    # qb_one takes the QB slot; the SECOND QB lands in SUPER_FLEX.
+    assert sf["before"] is not None
+    assert sf["before"]["player_id"] == "qb_two"
+    assert sf["before"]["position"] == "QB"
+
+
+def test_mfl_league_gets_standard_1qb_template(monkeypatch):
+    # The branch is platform-tuple wide, not ESPN-only.
+    _install_platform_world(monkeypatch, "777003", platform="mfl")
+    d = _evaluate_platform(monkeypatch, "777003")
+    si = d.get("starter_impact")
+    assert si is not None, "starter_impact must appear for MFL leagues (#311)"
+    assert [s["slot"] for s in si["slots"]] == _STANDARD_1QB_LABELS
+
+
+def test_fleaflicker_league_gets_standard_1qb_template(monkeypatch):
+    # Operator scope call #1 (plan #311): fleaflicker included.
+    _install_platform_world(monkeypatch, "777005", platform="fleaflicker")
+    d = _evaluate_platform(monkeypatch, "777005")
+    assert d.get("starter_impact") is not None
+
+
+def test_sleeper_league_template_still_meta_derived(monkeypatch):
+    # platform NULL + digit id → the existing Sleeper path, byte-identical:
+    # meta roster_positions filtered to LINEUP_SLOT_ELIGIBILITY, NOT the
+    # standard template.
+    _, fetch_mock = _install_platform_world(monkeypatch, "888001",
+                                            platform=None, seed_row=False)
+    _install_league_row(monkeypatch, "888001", platform=None,
+                        default_scoring="1qb_ppr")  # row with NULL platform
+    fetch_mock.return_value = {"roster_positions": [
+        "QB", "RB", "RB", "WR", "BN", "K", "IDP_FLEX", "FLEX"]}
+    got = srv._league_lineup_slots("888001")
+    assert got == ["QB", "RB", "RB", "WR", "FLEX"]
+    assert got == srv._sleeper_lineup_slots("888001")
+    assert fetch_mock.called
+
+
+def test_no_leagues_row_still_omits_starter_impact(monkeypatch):
+    # league_demo has no leagues row → template None → field omitted, as
+    # before. Never serve the standard template for an unknown league.
+    _install_platform_world(monkeypatch, "league_demo", platform=None,
+                            seed_row=False)
+    d = _evaluate_platform(monkeypatch, "league_demo")
+    assert "starter_impact" not in d
+    assert srv._league_lineup_slots("league_demo") is None
+
+
+def test_numeric_espn_id_never_fetches_sleeper_meta(monkeypatch):
+    # The platform branch must run BEFORE any digit-shaped Sleeper probe.
+    _, fetch_mock = _install_platform_world(monkeypatch, "777004",
+                                            platform="espn")
+    slots = srv._league_lineup_slots("777004")
+    assert slots == list(srv._MOCK_DEFAULT_LINEUP)
+    assert not fetch_mock.called

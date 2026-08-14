@@ -58,7 +58,10 @@ import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
-import TradeDnaSheet, { type TradeIntent } from '../components/TradeDnaSheet';
+import TradeDnaSheet, {
+  TRADE_INTENT_LABEL,
+  type TradeIntent,
+} from '../components/TradeDnaSheet';
 import TradeHomeUtilityRow from '../components/TradeHomeUtilityRow';
 import TradingWithStrip from '../components/TradingWithStrip';
 import TradeBuildCanvas from '../components/TradeBuildCanvas';
@@ -780,6 +783,7 @@ export default function TradesScreen({ navigation, route }: any) {
           'Trades');
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
+    setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
     pendingScrollToDeckRef.current = true; // #276
     generateMutation.mutate({});
   }
@@ -915,6 +919,30 @@ export default function TradesScreen({ navigation, route }: any) {
         : undefined,
     [assetPrefsQuery.data],
   );
+
+  // #315 — row 2 of the outlook receipt: the OTHER configurations set
+  // through the sheet, so the banner honestly summarizes what "Change"
+  // edits. Middle-dot separated, only set parts included. Team scope and
+  // specific players are deliberately EXCLUDED — those are the interactive
+  // filters mounted directly below the banner (#314); repeating them as
+  // text one row above their own pills is the #205 "too much information"
+  // failure. Empty ⇒ the receipt renders exactly its pre-#315 single row.
+  const receiptDetails = useMemo(() => {
+    const posLabel = (p: string) => (p === 'PICK' ? 'Picks' : p);
+    const parts: string[] = [];
+    const chasing = prefsQuery.data?.acquire_positions ?? [];
+    const shopping = prefsQuery.data?.trade_away_positions ?? [];
+    if (chasing.length > 0) {
+      parts.push(`Chasing ${chasing.map(posLabel).join(', ')}`);
+    }
+    if (shopping.length > 0) {
+      parts.push(`Shopping ${shopping.map(posLabel).join(', ')}`);
+    }
+    if (intentModesOn && tradeIntent) parts.push(TRADE_INTENT_LABEL[tradeIntent]);
+    const offTable = untouchableIds?.size ?? 0;
+    if (offTable > 0) parts.push(`${offTable} off the table`);
+    return parts.join(' · ');
+  }, [prefsQuery.data, intentModesOn, tradeIntent, untouchableIds]);
 
   const untouchableMutation = useMutation({
     mutationFn: ({ playerId, list }: {
@@ -1104,7 +1132,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // swiped-out and deck-summary states instead of snapping back to the
   // featured window mid-session.
   const singlePinFeatured = !firstRun && !!singlePin;
-  const singlePinDeckActive = singlePinFeatured && deck.length > 0;
+  // #317 — "the user tapped an idea tile AFTER finishing the pinned deck".
+  // Flipped true ONLY inside handleSelectIdea's explicit-tap path (never
+  // from an effect — #298 assertion 7 exists precisely to stop automatic
+  // snap-backs to the featured window); reset on pin change/sweep (the
+  // pinKey/ideasUpdatedAt effect below) and on every search start
+  // (handleFindTrades / resetDeckForNewTargets / the legacy inline CTA),
+  // so a new deck re-takes the slot exactly as #298 specified.
+  const [pinIdeaResumed, setPinIdeaResumed] = useState(false);
+  // #317: `&& !pinIdeaResumed` — while resumed, the layout IS the pre-deck
+  // single-pin layout (featured window leads, rail at mount 1, deck
+  // wrapper — summary card included — steps aside via its existing gate).
+  // Still keyed on `deck.length`, still never `topCard` (#298 7a/7b).
+  const singlePinDeckActive =
+    singlePinFeatured && deck.length > 0 && !pinIdeaResumed;
   // #298 analytics — ONE derivation of the `mode` prop, read by both
   // find_trades_tapped and trade_card_viewed. Deliberately a property on
   // two events that already fire here, not a new event name: #298 is a
@@ -1166,6 +1207,9 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     setFeaturedIdea(null);
     setIdeaHistory([]);
+    // #317 — a new pin or a fresh sweep invalidates the resumed window
+    // exactly like it invalidates the idea references above.
+    setPinIdeaResumed(false);
   }, [pinKey, ideasUpdatedAt]);
 
   // #243 — pin-mode collapsed controls (V1, approved mock
@@ -1192,6 +1236,29 @@ export default function TradesScreen({ navigation, route }: any) {
   const featuredShown = featuredIdea ?? bestIdea;
 
   function handleSelectIdea(idea: AssetIdea) {
+    // #317 — deck-done resume. With a pinned deck finished (summary or
+    // exhausted card holding the slot, no live card, no job running — the
+    // deckExhausted shape, which summaryVisible refines), an explicit tile
+    // tap re-presents the featured window with this idea: the deck yields
+    // the slot only on the user's own gesture, so #298's "never snap back
+    // automatically" and #241's one-trade-summary both hold. The window is
+    // HIDDEN here, so no row is "in window" (featuredKey is nulled at the
+    // panel mount) and the usual same-idea no-op does not apply — tapping
+    // the best-idea row must present it too, not dead-click.
+    const deckFinished =
+      singlePinFeatured && deck.length > 0 && !topCard && job?.status !== 'running';
+    if (singlePinDeckActive && deckFinished) {
+      haptics.selection();
+      if (featuredShown && assetIdeaKey(idea) !== assetIdeaKey(featuredShown)) {
+        setIdeaHistory((h) => [...h, featuredShown].slice(-FEATURED_HISTORY_CAP));
+      }
+      setFeaturedIdea(idea);
+      setPinIdeaResumed(true);
+      // No scrollTo: the window wasn't on screen, so its measured y is
+      // stale (useRef(0) → a jump to page top); the layout swap surfaces
+      // it at the top of the content anyway.
+      return;
+    }
     // No no-op taps: the in-window row is inert (also disabled in the row).
     if (!featuredShown || assetIdeaKey(idea) === assetIdeaKey(featuredShown)) {
       return;
@@ -1200,10 +1267,14 @@ export default function TradesScreen({ navigation, route }: any) {
     const replaced = featuredShown;
     setIdeaHistory((h) => [...h, replaced].slice(-FEATURED_HISTORY_CAP));
     setFeaturedIdea(idea);
-    mainScrollRef.current?.scrollTo({
-      y: featuredWindowY.current,
-      animated: true,
-    });
+    // #317 — mid-deck taps (live card showing, window hidden) keep their
+    // behavior EXCEPT the stale-y scrollTo, which jumped to the page top.
+    if (!singlePinDeckActive) {
+      mainScrollRef.current?.scrollTo({
+        y: featuredWindowY.current,
+        animated: true,
+      });
+    }
   }
 
   function handleFeaturedBack() {
@@ -2004,6 +2075,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setEdits({});
     setSwapTarget(null);
+    setPinIdeaResumed(false); // #317 — the next deck re-takes the slot
   }
 
   // FB #156 — entering or changing a hub finder mode/scope starts a clean
@@ -3498,7 +3570,17 @@ export default function TradesScreen({ navigation, route }: any) {
       loading={assetIdeasQuery.isFetching}
       pinnedName={singlePin!.player.name}
       direction={singlePin!.direction}
-      featuredKey={featuredShown ? assetIdeaKey(featuredShown) : null}
+      // #317 — while the deck holds the slot the featured window is NOT on
+      // screen, so no row may carry the "IN WINDOW" tag or be tap-disabled
+      // (that inert row was half the dead click). Nulled exactly when the
+      // window's own gate (:featuredShown && !singlePinDeckActive) hides it.
+      featuredKey={
+        singlePinDeckActive
+          ? null
+          : featuredShown
+            ? assetIdeaKey(featuredShown)
+            : null
+      }
       onSelectIdea={handleSelectIdea}
     />
   ) : null;
@@ -3624,15 +3706,17 @@ export default function TradesScreen({ navigation, route }: any) {
             for the bigger-icon utility row (Draft/Free agents/Manual calc,
             no league or player reference on the button itself, #272
             verbatim) and adds the League/Trading-with pill strip (#270
-            verbatim, second sentence). Control (or any non-guided mode)
-            renders `TradeFinderModeBar` exactly as before — byte-identical. */}
+            verbatim, second sentence — mounted BELOW the outlook receipt
+            since #314). Control (or any non-guided mode) renders
+            `TradeFinderModeBar` exactly as before — byte-identical. */}
         {/* P0-2 — one conditional host View so the mode-bar region can be
             measured (onLayout) and the Toast can clear it instead of clipping
             the chips. The condition is HOISTED onto the wrapper: an
-            unconditional wrapper would still be a flex child when both slots
-            are null, and the ScrollView's own `gap` would then apply on both
-            sides of a zero-height view. `modeBarWrap`'s gap replicates the
-            content container's gap between the two slots it now contains. */}
+            unconditional wrapper would still be a flex child when the slot
+            is null, and the ScrollView's own `gap` would then apply on both
+            sides of a zero-height view. #314 moved the TradingWithStrip out
+            of this wrapper (below the receipt); the wrapper keeps the
+            utility-row/mode-bar slot. */}
         {finderMode || showInlineHome ? (
           <View
             style={styles.modeBarWrap}
@@ -3677,26 +3761,22 @@ export default function TradesScreen({ navigation, route }: any) {
               />
             )
           ) : null}
-          {showInlineHome ? (
-            <TradingWithStrip
-              leagueName={league?.league_name ?? null}
-              opponentName={scopedOpponentName ?? null}
-              onOpenLeaguePicker={openLeaguePickerFromStrip}
-              onOpenTeamPicker={openTeamPickerFromStrip}
-            />
-          ) : null}
           </View>
         ) : null}
-        {/* #231 — outlook bias receipt (self-contained; single-line mount).
-            #246: Change opens the DNA sheet over the deck. Also stands in
-            as variant B's "prefs summary line" (canvas mock frames) — the
-            page has no existing single string combining outlook + chasing/
-            shopping positions + trade-idea lane, and building one just for
-            this experiment would duplicate state TradeDnaSheet already owns
-            privately; this receipt is the closest existing analog (same
-            "Change" affordance, same data source) — see status doc. */}
+        {/* #231 — outlook bias receipt (self-contained for row 1; #315 adds
+            the host-composed `details` row 2). #246: Change opens the DNA
+            sheet over the deck. Also stands in as variant B's "prefs summary
+            line" (canvas mock frames) — the page has no existing single
+            string combining outlook + chasing/shopping positions +
+            trade-idea lane, and building one just for this experiment would
+            duplicate state TradeDnaSheet already owns privately; this
+            receipt is the closest existing analog (same "Change"
+            affordance, same data source) — see status doc. */}
         {finderMode ? (
-          <OutlookBiasReceipt onChange={() => setDnaSheetOpen(true)} />
+          <OutlookBiasReceipt
+            details={receiptDetails}
+            onChange={() => setDnaSheetOpen(true)}
+          />
         ) : null}
 
         {/* #257 (operator decision Q2) — dismissing the full sheet does NOT
@@ -3720,6 +3800,26 @@ export default function TradesScreen({ navigation, route }: any) {
               Preferences changed — tap to refresh
             </Text>
           </Pressable>
+        ) : null}
+
+        {/* #314 — the on-page filters sit BELOW the receipt and its
+            transient refresh nudge (which stays glued to the banner it
+            refers to): the banner summarizes the configuration, the
+            filters act on it. Moved out of `modeBarWrap` above — so
+            `modeBarBottom` now measures the utility row only and the
+            Toast overlaps this zone, the same class of overlap the
+            receipt already lived with (accepted, plan §3). The strip's
+            own `showInlineHome` gate travels with it; the control
+            variant renders none of this. Its pill row is flex, so the
+            held-for-operator "Players" pill (#314's interpretive step)
+            can later slot in beside "Trading with" without relayout. */}
+        {showInlineHome ? (
+          <TradingWithStrip
+            leagueName={league?.league_name ?? null}
+            opponentName={scopedOpponentName ?? null}
+            onOpenLeaguePicker={openLeaguePickerFromStrip}
+            onOpenTeamPicker={openTeamPickerFromStrip}
+          />
         ) : null}
 
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
@@ -4276,6 +4376,7 @@ export default function TradesScreen({ navigation, route }: any) {
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => {
               track('find_trades_tapped', { mode: deckMode }, 'Trades');
+              setPinIdeaResumed(false); // #317 — parity with handleFindTrades
               generateMutation.mutate({});
             }}
             style={styles.findBtn}
@@ -5068,8 +5169,15 @@ export default function TradesScreen({ navigation, route }: any) {
                   {sessionTally.passed} passed · {sessionTally.liked} liked ·{' '}
                   {sessionTally.proposed} proposed
                 </Text>
+                {/* #316 — never "after waivers": dynasty leagues barely use
+                    waivers and the deck actually refreshes via the weekly
+                    replenishment cron + the always-mounted Find-more-trades
+                    CTA above. "Find more trades" is quoted verbatim from
+                    that CTA's label in this exact state. Pinned by the
+                    smoke/12 flow's deck-done step. */}
                 <Text style={styles.emptyBody}>
-                  Fresh trades arrive after waivers.
+                  Fresh ideas land every week — or tap Find more trades to
+                  search again now.
                 </Text>
                 <View style={styles.summaryBtnRow}>
                   <Button

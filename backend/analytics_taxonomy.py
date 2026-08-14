@@ -389,6 +389,20 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     #   outcome   platform-confirmed result ('accepted'|'rejected'|'revoked')
     # league_id rides the envelope column. No trade contents/ids/PII.
     "trade_responded",
+    # awaiting_trade_dismissed (#318, 2026-08-13 — tracking-plan addendum in
+    # docs/feedback/items/311-lineup-values-nonsleeper/): the caller
+    # retracted an "Awaiting them" like via POST /api/trades/awaiting/
+    # dismiss. SERVER-fired because only the server knows how many like
+    # rows the dismiss actually marked (`dismissed_likes`) — the client
+    # fires nothing (one event, one source of truth; trade_match precedent).
+    # Fired ONLY when dismissed_likes >= 1: an idempotent 0-row repeat is
+    # not a fresh intent, so no phantom INTENT rows. INTENT by default —
+    # deliberately NOT in analytics_queries.NON_INTENT_EVENTS (a deliberate
+    # destructive user action belongs in WAT/DAU).
+    # Props: partner_id (deck-invalidation target, trade_match's naming),
+    # dismissed_likes (rows newly marked, int >= 1). league_id rides the
+    # envelope column, never a prop. No platform prop — source 'api'.
+    "awaiting_trade_dismissed",
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",

@@ -558,3 +558,31 @@ export async function getAwaitingTrades(): Promise<AwaitingTrade[]> {
   const res = await api.get<any>('/api/trades/awaiting');
   return asArray<any>(res).map(normalizeAwaitingTrade);
 }
+
+// #318 — dismiss a one-sided like from the "Awaiting them" inbox.
+// Contract (wave-backend, 2026-08-13):
+//   POST /api/trades/awaiting/dismiss
+//   { league_id, my_give: [ids], my_receive: [ids], partner_id }   all required
+//   → 200 {"status":"ok","dismissed_likes":<int ≥ 0>}   0 is still ok — never 404
+//   → 400 {"error":"league_id, my_give, my_receive, partner_id are required"}
+// The row carries no single server id — the like is keyed on the tuple the
+// awaiting payload itself is keyed on (load_awaiting_trades): my_give /
+// my_receive are the CALLER's perspective, which is exactly how the
+// normalizer above stored them (my_side_player_ids ← raw.my_give,
+// their_side_player_ids ← raw.my_receive), so the wrapper maps them back.
+// Success is `status === "ok"` regardless of dismissed_likes; the route is
+// idempotent (repeat → 200 {"dismissed_likes":0}), which is what makes the
+// delayed-POST undo pattern retry-safe. The server fires
+// `awaiting_trade_dismissed` itself — the client fires no event here.
+// Receiver-deck suppression is entirely server-side.
+export async function dismissAwaitingTrade(row: AwaitingTrade) {
+  return api.post<{ status: string; dismissed_likes: number }>(
+    '/api/trades/awaiting/dismiss',
+    {
+      league_id: row.league_id,
+      my_give: row.my_side_player_ids,
+      my_receive: row.their_side_player_ids,
+      partner_id: row.counterparty_user_id,
+    },
+  );
+}

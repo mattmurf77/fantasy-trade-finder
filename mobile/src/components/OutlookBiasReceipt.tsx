@@ -53,7 +53,22 @@ export function outlookReceiptCovers(
   return !!resolved && !!LEAN[resolved];
 }
 
-export default function OutlookBiasReceipt({ onChange }: { onChange: () => void }) {
+export default function OutlookBiasReceipt({
+  onChange,
+  details,
+}: {
+  onChange: () => void;
+  /** #315 — optional dim second row summarizing the sheet's OTHER
+   *  configurations (chasing/shopping positions, trade-idea lane,
+   *  untouchables count), composed by the HOST from state it already owns
+   *  — the receipt stays self-contained for row 1, presentational for
+   *  row 2. Empty/absent ⇒ row 1 renders exactly the pre-#315 banner.
+   *  The banner caps at two rows ("can spill to two rows", never three):
+   *  this row is one ellipsized line. Team scope and specific players are
+   *  deliberately not summarized here — those are the interactive filters
+   *  #314 mounted directly below the banner. */
+  details?: string;
+}) {
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
   const directionOn = useFlag('trade.outlook_direction');
@@ -77,34 +92,46 @@ export default function OutlookBiasReceipt({ onChange }: { onChange: () => void 
 
   return (
     <View testID="trades.outlook-receipt" style={styles.receipt}>
-      <View style={styles.tick} />
-      <Text style={styles.text} numberOfLines={2}>
-        Leaning <Text style={styles.strong}>{entry.lean}</Text> —{' '}
-        {declared ? "you're" : 'you look'}{' '}
-        <Text style={styles.strong}>{entry.name}</Text>.
-      </Text>
-      <Pressable
-        testID="trades.outlook-receipt.change"
-        accessibilityRole="button"
-        accessibilityLabel="Change outlook"
-        hitSlop={8}
-        onPress={onChange}
-      >
-        {({ pressed }) => (
-          <Text style={[styles.change, pressed && { color: ice.press }]}>
-            Change
-          </Text>
-        )}
-      </Pressable>
+      <View style={styles.row}>
+        <View style={styles.tick} />
+        <Text style={styles.text} numberOfLines={2}>
+          Leaning <Text style={styles.strong}>{entry.lean}</Text> —{' '}
+          {declared ? "you're" : 'you look'}{' '}
+          <Text style={styles.strong}>{entry.name}</Text>.
+        </Text>
+        <Pressable
+          testID="trades.outlook-receipt.change"
+          accessibilityRole="button"
+          accessibilityLabel="Change outlook"
+          hitSlop={8}
+          onPress={onChange}
+        >
+          {({ pressed }) => (
+            <Text style={[styles.change, pressed && { color: ice.press }]}>
+              Change
+            </Text>
+          )}
+        </Pressable>
+      </View>
+      {/* #315 — row 2, only when the host composed a non-empty summary.
+          One dim ellipsized line (13pt bodySm ≥ the 11px floor); no new
+          colors, ink/chalk only. Gated on `details` so the no-other-config
+          state renders exactly today's one-row banner. */}
+      {details ? (
+        <Text
+          testID="trades.outlook-receipt.details"
+          style={styles.details}
+          numberOfLines={1}
+        >
+          {details}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   receipt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
     backgroundColor: ink.ink2,
     borderWidth: 1,
     borderColor: ink.line,
@@ -112,9 +139,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: space.sm,
     marginBottom: space.md,
+    gap: 2,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
   tick: { width: 3, height: 12, backgroundColor: flare.base },
   text: { ...type.bodySm, flex: 1, color: chalk.dim },
   strong: { color: chalk.base, fontFamily: fonts.uiSemi },
   change: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
+  // Indented past the flare tick (3pt) + the row gap so the summary reads
+  // as a sub-line of the lean sentence, not a second tick row.
+  details: { ...type.bodySm, color: chalk.dim, marginLeft: 3 + space.sm },
 });

@@ -314,6 +314,14 @@ trade_decisions_table = Table("trade_decisions", metadata,
     Column("receive_player_ids", Text,    nullable=False),    # JSON array
     Column("decision",           String,  nullable=False),    # 'like' | 'pass'
     Column("created_at",         String),
+    # #318 — awaiting-dismiss. ISO UTC when the user retracted this like from
+    # the "Awaiting them" list; NULL = live. A retracted like is invisible to
+    # load_awaiting_trades / load_recent_league_likes / check_for_match, but
+    # the row itself is never rewritten: swipe-Elo history, impressions
+    # training joins and _past_decision_keys deliberately still see it (a
+    # dismissed offer must not resurface in the DISMISSER's own deck). A
+    # later re-like writes a fresh row with NULL — that is the revive path.
+    Column("retracted_at",       String),
 )
 
 # All members (including the logged-in user) for every league session_init has seen.
@@ -1994,6 +2002,10 @@ def _migrate_db() -> None:
         # NULL = live; existing rows are all live, which is the correct
         # backfill and needs no separate pass.
         ("notifications",      "dismissed_at",          "VARCHAR"),
+        # #318 — awaiting-dismiss retraction marker. NULL = live like;
+        # existing rows are all live, which is the correct backfill and
+        # needs no separate pass (same shape as dismissed_at above).
+        ("trade_decisions",    "retracted_at",          "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4451,6 +4463,9 @@ def load_recent_league_likes(
                     trade_decisions_table.c.user_id    != exclude_user_id,
                     trade_decisions_table.c.decision   == "like",
                     trade_decisions_table.c.created_at >= cutoff,
+                    # #318 — a retracted like must not feed the receiver's
+                    # likes-you deck injection.
+                    trade_decisions_table.c.retracted_at.is_(None),
                 )
             ).order_by(trade_decisions_table.c.id.desc())
         ).fetchall()
@@ -6598,6 +6613,8 @@ def check_for_match(
                     trade_decisions_table.c.league_id  == league_id,
                     trade_decisions_table.c.decision   == "like",
                     trade_decisions_table.c.created_at >= cutoff.isoformat(),
+                    # #318 — a retracted like can never mature into a match.
+                    trade_decisions_table.c.retracted_at.is_(None),
                 )
             )
         ).fetchall()
@@ -6888,6 +6905,8 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
                 and_(
                     trade_decisions_table.c.user_id  == user_id,
                     trade_decisions_table.c.decision == "like",
+                    # #318 — a retracted like never renders in Awaiting.
+                    trade_decisions_table.c.retracted_at.is_(None),
                 )
             ).order_by(trade_decisions_table.c.created_at.desc()).limit(500)
         ).fetchall()
@@ -7004,6 +7023,69 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         })
 
     return result
+
+
+def retract_awaiting_likes(
+    user_id: str,
+    league_id: str,
+    give_player_ids: list[str],
+    receive_player_ids: list[str],
+) -> int:
+    """#318 — dismiss an "Awaiting them" trade by retracting its like rows.
+
+    Marks EVERY live like row of `user_id` in `league_id` whose give/receive
+    sets are set-equal to the given lists (order-insensitive, frozenset —
+    the exact key load_awaiting_trades dedups by, so one dismiss kills every
+    re-liked duplicate of the same underlying trade) with
+    retracted_at = now (ISO UTC).
+
+    Returns the number of rows NEWLY marked; 0 for an idempotent repeat or
+    an absent/already-matured key — callers treat 0 as success, never 404.
+
+    Deliberately NOT deleted and decision NOT rewritten: swipe-Elo history,
+    impressions training joins and _past_decision_keys keep seeing the row
+    (a dismissed offer must not resurface in the dismisser's own deck).
+    Set-equality is compared in Python — give/receive live as JSON text, so
+    SQL cannot compare them order-insensitively.
+    """
+    give_key    = frozenset(str(p) for p in give_player_ids)
+    receive_key = frozenset(str(p) for p in receive_player_ids)
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            select(
+                trade_decisions_table.c.id,
+                trade_decisions_table.c.give_player_ids,
+                trade_decisions_table.c.receive_player_ids,
+            ).where(
+                and_(
+                    trade_decisions_table.c.user_id      == user_id,
+                    trade_decisions_table.c.league_id    == league_id,
+                    trade_decisions_table.c.decision     == "like",
+                    trade_decisions_table.c.retracted_at.is_(None),
+                )
+            )
+        ).fetchall()
+
+        ids: list[int] = []
+        for r in rows:
+            try:
+                g  = frozenset(str(p) for p in json.loads(r.give_player_ids))
+                rc = frozenset(str(p) for p in json.loads(r.receive_player_ids))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if g == give_key and rc == receive_key:
+                ids.append(r.id)
+
+        if not ids:
+            return 0
+        conn.execute(
+            trade_decisions_table.update()
+            .where(trade_decisions_table.c.id.in_(ids))
+            .values(retracted_at=now)
+        )
+    return len(ids)
 
 
 # K-factors for disposition ELO signals — loaded live from model_config.

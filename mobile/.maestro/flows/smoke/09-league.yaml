@@ -33,4 +33,11 @@ tags: [smoke, league]
     visible:
       id: "league.hero"
     timeout: 20000
+# #308 — standard seeds only 2 in-format ranked users (qa_standard +
+# qa_opp_ranked) < the contrarian gate's 3, so the progress module renders
+# the fold line here. Presence assertion (law 2: `visible:` counts
+# off-screen ScrollView children — that is what we want: "the module
+# renders the dynamic fold line", not "it is on screen").
+- assertVisible:
+    id: "league.progress-foldline"
 - takeScreenshot: smoke-09-league

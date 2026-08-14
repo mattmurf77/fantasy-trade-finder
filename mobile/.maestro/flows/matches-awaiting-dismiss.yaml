@@ -1,0 +1,129 @@
+appId: com.fantasytradefinder.app
+# tc: TC-MAT-318
+# profile: standard
+# flags: release
+# source: mobile/src/screens/MatchesScreen.tsx, mobile/src/api/trades.ts
+#
+# #318 (mobile half) — dismiss from "Awaiting them". `standard` seeds
+# awaiting: 1, so the legs run in dependency order against the ONE row:
+#   M-2 failure injection FIRST (the rollback restores the row),
+#   M-1 happy dismiss second (consumes the row),
+#   M-3 empty state last (the emptied list self-selects the empty branch).
+#
+# `flags: release` has ux.swipe_undo ON, so a dismiss removes the row
+# optimistically and HOLDS the POST for the 5 s undo window (delayed-POST
+# pattern — no un-dismiss endpoint; the route is idempotent so the delayed
+# POST is retry-safe). Timeouts below absorb the hold; no fixed sleeps.
+#
+# DEPENDS ON wave-backend: POST /api/trades/awaiting/dismiss ships on the
+# `wave-backend` branch — this flow goes green only on the merged wave.
+# Authored + lint-clean this session; first run happens at the wave's
+# pre-ship sim gate.
+#
+# Run-time sabotage (plan 2026-08-13): break the onError snapshot-restore in
+# MatchesScreen's dismissAwaitingMutation and the M-2 reappearance assert
+# below MUST fail. (The structural twin is
+# mobile/tests/check-awaiting-dismiss.js assertion 16.)
+tags: [matches, dismiss]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.matches"
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.awaiting"
+    timeout: 20000
+- tapOn:
+    id: "matches.segment.awaiting"
+- extendedWaitUntil:
+    visible:
+      text: ".*Waiting on @.*"
+    timeout: 30000
+
+# ── M-2: failure injection — the row must come back ──────────────────────
+# Law 13: armed BEFORE the tap that can fire the POST. COUNT=1: this is a
+# bare POST mutation (mutations retry: 0). Body is the real production 500
+# (server.py handle_unexpected_error). The POST is HELD ~5 s by the undo
+# window before it fires and fails — the 20 s waits absorb that.
+- runScript:
+    file: ../capture/helpers/inject.js
+    env:
+      INJECT_KIND: fail_next
+      INJECT_PATH: "/api/trades/awaiting/dismiss"
+      INJECT_STATUS: "500"
+      INJECT_COUNT: "1"
+      INJECT_BODY: '{"error": "internal_error", "message": "Unexpected server error."}'
+- assertTrue: ${output.inject.ok}
+- scrollUntilVisible:
+    element:
+      id: "matches.awaiting-dismiss"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- tapOn:
+    id: "matches.awaiting-dismiss"
+# Optimistic removal + undo toast happen instantly…
+- extendedWaitUntil:
+    visible:
+      text: ".*Dismissed.*"
+    timeout: 10000
+# …then the held POST fires, 500s, and the screen must confess: error toast
+# AND the row honestly reappears (onError restore + refetch). Breaking the
+# rollback makes BOTH of these fail — that is the run-time sabotage above.
+- extendedWaitUntil:
+    visible:
+      text: ".*Could not dismiss — try again.*"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      text: ".*Waiting on @.*"
+    timeout: 15000
+- takeScreenshot: matches-awaiting-dismiss__rollback
+
+# ── M-1: happy path — row count decrements, undo toast shows ─────────────
+- scrollUntilVisible:
+    element:
+      id: "matches.awaiting-dismiss"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- tapOn:
+    id: "matches.awaiting-dismiss"
+- extendedWaitUntil:
+    visible:
+      text: ".*Dismissed.*"
+    timeout: 10000
+
+# ── M-3: the last row's dismissal self-selects the empty state ───────────
+# `standard` seeds exactly one awaiting row, so the optimistic removal
+# empties the visible list and the existing "No pending trades." branch
+# renders on its own — no new empty-state code (plan §318).
+- extendedWaitUntil:
+    visible:
+      text: ".*No pending trades.*"
+    timeout: 15000
+- assertNotVisible:
+    text: ".*Waiting on @.*"
+- takeScreenshot: matches-awaiting-dismiss__empty
