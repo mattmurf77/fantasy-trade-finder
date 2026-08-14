@@ -53,7 +53,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `RankImportSheet` | Paste-first rankings import (flag `ranks.import`): parse preview → match/review → apply |
 | `SwapSuggestSheet` | Deck swap-suggestions sheet: one-tap replacements for one asset on the top card; marks owned picks |
 | `TradeFinderModeBar` | Acquire tab's mode chip strip (Guided/Team/Player/Calc/Free agents, optional Draft chip under `draft.room`) |
-| `LeagueProgressModule` | Card owning every league unlock: positions-ranked ring, ranked-members bar, unlock sentence with invite link |
+| `LeagueProgressModule` | Card owning every league unlock: positions-ranked ring, ranked-members bar, unlock sentence with invite link. Fold line is dynamic (#308): `contrarianFoldLine(foldNeeded, foldFormat)` from the contrarian insufficient payload — in-format members + live remaining count, a DIFFERENT population from the any-format bar above it |
 | `MarketPulseStrip` | Compact top-riser/top-faller line (flag `market.movers`); opens a full Risers/Fallers sheet |
 | `TopBar` | Global header: active-league cluster (opens switcher) + scoring-format tile + bell + settings gear |
 
