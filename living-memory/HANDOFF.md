@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree)
+- [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
 - [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
@@ -26,9 +26,10 @@
 
 ### Where I am right now
 
-Complete and green on branch `feat/roster-history` (worktree `.claude/worktrees/roster-history`,
-base `5dcf29f`). Nine commits: design docs → scope block → schema → writers → tests → fixes →
-docs. **FULL gates** — schema + data collection, scope block filled, no express. Ship next.
+**SHIPPED** — squash PR #120 → `main` @ `81dd6d2`, CI green, Render deployed, and **capture is
+LIVE**: Writer C was fired once against prod and swept 11/12 leagues (131 roster rows + 16
+board rows, `source='weekly'`, period `2026-W33`) across Sleeper, ESPN (stored-cookie) and
+MFL. Branch + worktree swept per the recovery ledger. **FULL gates** — scope block filled.
 
 ### The load-bearing facts for whoever touches this
 
@@ -52,8 +53,11 @@ docs. **FULL gates** — schema + data collection, scope block filled, no expres
 - **P1:** C5 personal-Elo cadence backstop is COVERED by `league_board_history`; remaining
   P1 item is the backfill audit. **P2:** end-of-season fetchers + ESPN/MFL transaction-log
   retention check. **P3:** recap compute + UI + the nine analytics events (addendum first).
-- The sweep has **never run against a live platform API** — first real evidence is the
-  liveness read one week post-ship.
+- ~~The sweep has never run live~~ — it has now (one manual Writer C run, above). Still
+  owed: the FIRST scheduled `daily-tick` firing is the real liveness evidence (run the
+  `source`-column read next week); the `espn_reconnect` path has no expired cookie to
+  exercise it yet; mobile renders the new type as a grey bell until the next TestFlight
+  build picks it up (deliberate — not worth a build alone).
 
 ---
 
