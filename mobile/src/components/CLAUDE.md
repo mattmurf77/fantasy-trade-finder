@@ -55,7 +55,6 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `TradeFinderModeBar` | Acquire tab's mode chip strip (Guided/Team/Player/Calc/Free agents, optional Draft chip under `draft.room`) |
 | `LeagueProgressModule` | Card owning every league unlock: positions-ranked ring, ranked-members bar, unlock sentence with invite link. Fold line is dynamic (#308): `contrarianFoldLine(foldNeeded, foldFormat)` from the contrarian insufficient payload — in-format members + live remaining count, a DIFFERENT population from the any-format bar above it |
 | `TradingWithStrip` | Inline-home (`trades_home_inline` strip/canvas) two-pill League / "Trading with" filter row; taps open the host's existing pickers directly. #314: mounts BELOW `OutlookBiasReceipt` (+ the prefs-changed nudge), outside `modeBarWrap`; a third "Players" pill is a documented seam HELD for an operator decision. testIDs `trades.trading-with-strip`, `.league`, `.team`. Pinned by `mobile/tests/check-trades-banner-region.js` |
-| `LeagueProgressModule` | Card owning every league unlock: positions-ranked ring, ranked-members bar, unlock sentence with invite link |
 | `MarketPulseStrip` | Compact top-riser/top-faller line (flag `market.movers`); opens a full Risers/Fallers sheet |
 | `TopBar` | Global header: active-league cluster (opens switcher) + scoring-format tile + bell + settings gear |
 
