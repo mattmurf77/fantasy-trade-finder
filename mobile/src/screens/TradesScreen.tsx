@@ -5068,8 +5068,15 @@ export default function TradesScreen({ navigation, route }: any) {
                   {sessionTally.passed} passed · {sessionTally.liked} liked ·{' '}
                   {sessionTally.proposed} proposed
                 </Text>
+                {/* #316 — never "after waivers": dynasty leagues barely use
+                    waivers and the deck actually refreshes via the weekly
+                    replenishment cron + the always-mounted Find-more-trades
+                    CTA above. "Find more trades" is quoted verbatim from
+                    that CTA's label in this exact state. Pinned by the
+                    smoke/12 flow's deck-done step. */}
                 <Text style={styles.emptyBody}>
-                  Fresh trades arrive after waivers.
+                  Fresh ideas land every week — or tap Find more trades to
+                  search again now.
                 </Text>
                 <View style={styles.summaryBtnRow}>
                   <Button
