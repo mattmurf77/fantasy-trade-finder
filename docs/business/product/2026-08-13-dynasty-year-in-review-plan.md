@@ -47,6 +47,15 @@ the values. We do not have the rosters. **Every attribution stat in the recap th
 described — value trajectory, biggest jumps and who owned them, trade P&L, buy-low grades —
 is a join between a table that exists and a table that does not.**
 
+**One caveat on "already running", added after review.** The dedicated `value-snapshot-daily`
+cron does **not** exist — it was added to `render.yaml` and reverted the same day (`1e50d3e`,
+"broke blueprint sync"). `docs/architecture.md:230` still claims otherwise and is **drifted and
+false**. The operative mechanism is the `hourly-tick` idempotent fallback guard
+(`docs/runbook.md:295`), which rides a cron service that *is* declared. Whether the declared
+crons actually fire is **unverified** — the settling query is in
+[the plans README](../../plans/dynasty-year-in-review/README.md). The capture design below
+works either way; only the urgency of the Render cron migration turns on the answer.
+
 **The deadline is Week 1, roughly four weeks out.** Dynasty rosters churn hardest between now
 and mid-September: camp cuts, startup drafts, final-roster moves. A snapshot process that goes
 live in October produces a 2026 recap that opens in October. Miss it and the next chance is a
@@ -136,7 +145,7 @@ months if nobody writes it down today?**
 | C3 | **Draft pick ownership over time** | Pick flow; "what your first became" | ✗ build |
 | C4 | Consensus player value, daily | Value jumps; buy-low/sell-high; trade aging | ✓ **live** |
 | C5 | User's personal Elo over time | "Your calls" — the most defensible stat we have | ~ **partial** — event-driven; needs a cadence backstop |
-| C6 | Leaguemates' valuations over time | Board divergence | ✗ gap (gated on privacy — YR-3) |
+| C6 | **Leaguemates' valuations over time** | Board divergence; league-comparative stats | ✗ **BUILD** — in scope per the YR-3 ruling. `member_rankings` is delete+insert on every submit, so this is perishable on the same terms as C1 |
 | C7 | FTF suggestions shown + decisions | "The one that got away" | ✓ live |
 | C8 | FTF matches and dispositions | Trades made through FTF, aged | ✓ live |
 | C9 | Executed trades, raw | Trade P&L | ✓ live, **Sleeper only** — ESPN/MFL gap |
@@ -167,6 +176,13 @@ is storing.
 
 ## 5. Capture spec — the part that is time-critical
 
+> **SUPERSEDED, 2026-08-13.** §5.1 and §5.2 below were reviewed by the `an-data-architect` and
+> `eng-architect` personas over three adversarial rounds. **The build spec is now
+> [`docs/plans/dynasty-year-in-review/`](../../plans/dynasty-year-in-review/README.md)** —
+> final DDL, write seam, transaction isolation and scheduling topology. The sketch below is
+> retained for the reasoning trail; **build from the plans folder, not from here.** Three
+> corrections the review forced are recorded inline.
+
 ### 5.1 What to build
 
 One new table. Sketch, not a schema decision — `eng-backend` owns the final shape:
@@ -187,16 +203,25 @@ league_roster_history
 Plus the equivalent for pick ownership (C3), which can be a thinner table or a periodic
 serialisation of `draft_picks` rows per league.
 
-### 5.2 Cadence — I'd go finer than four weeks, and it costs nothing
+### 5.2 Cadence — SETTLED: weekly
 
-The operator proposed every four weeks. **Recommend instead: write a snapshot whenever a
-league sync produces a roster whose hash differs from the last stored one, plus a weekly
-scheduled backstop for leagues nobody opens.**
+**Operator ruling (YR-1): a weekly grid.** Not the original four-week proposal, and not the
+opportunistic-on-sync variant as the primary mechanism. Build to weekly; an on-sync
+change-detect write may be added if it is genuinely free, but the weekly job is the contract
+and the thing that must not be allowed to miss.
 
-The reasoning, in cost terms:
+The reasoning that produced the move from four weeks to one, retained because it also explains
+why a *missed* weekly run matters:
 
-- **No extra API calls.** Sync already fetches rosters. Snapshotting is a hash comparison and
-  an occasional insert on data already in memory.
+- ~~**No extra API calls.** Sync already fetches rosters. Snapshotting is a hash comparison and
+  an occasional insert on data already in memory.~~ **CORRECTED — this was wrong.**
+  `upsert_league_members` has one caller, `session_init`, and the rosters arrive
+  **client-supplied in the request body** (`server.py:14686-14690`). A cron reading
+  `league_members` would stamp possibly-months-old data with this week's period key —
+  fabricating history. A server-side fetch is required for the scheduled path. Partly
+  recovered: `trade_block_service._fetch_rosters` already retrieves the
+  `roster_id → owner_id` mapping in the same daemon and discards it, so the *team-key* half
+  costs nothing extra. See the review docs for the reconciled write path.
 - **Storage is not a constraint.** ~30 ids per team, 12 teams, weekly for 20 weeks = **240
   rows per league-season**. A hundred leagues is 24,000 rows. This is not a number that
   should influence a cadence decision, and it shouldn't be allowed to.
@@ -294,7 +319,7 @@ The operator called it one of the strongest and most unique. Tracing the loop:
 | **The share moment** | League-wide superlatives are inherently a league-chat artifact. A per-league leaderboard is something you send to eleven people, ten of whom are not users |
 | **The invite surface** | League sections are complete for every team (§5.3), so a non-user sees *their own team's season* rendered by a product they have not installed. That is the strongest invite this product will ever have — and it is seasonal, one shot a year |
 | **The ranking loop** | Tier 1 makes ranking pay off. Rank → your calls get graded → the recap is better → rank more. This closes the loop GD-6 declined to nag people into |
-| **Platform-agnostic reach** | Serves ESPN and MFL leagues, not just Sleeper — this is an addressable-market argument, not just a feature parity one |
+| **Platform-agnostic reach** | Serves ESPN, MFL and Fleaflicker leagues, not just Sleeper — an addressable-market argument, not just feature parity. **Operator ruling YR-8 (2026-08-14): this claim must be TRUE, not caveated** — the weekly sweep fetches rosters **server-side on every platform**, so no platform's history depends on someone opening the app. Verified feasible: MFL's `rosters` export and Fleaflicker's entire read API are public (`mfl_service.py:432`, `fleaflicker_service.py:15`); ESPN public leagues need no cookies and private leagues use the linking user's stored `espn_credentials` (Fernet-encrypted `espn_s2`+SWID, `database.py:1355`). The one honest edge: a private ESPN league whose linker's cookie has expired degrades to app-open capture **plus a "reconnect ESPN" nudge** — an expiring cookie becomes a visible re-auth ask, never a silent gap |
 | **Retention across the trough** | Feb–March is the seasonal trough (`docs/business/context.md`). A December artifact that people revisit and argue about is a bridge into the rookie-draft ramp |
 
 **One caution.** The recap is a *seasonal spike*, not a growth engine. It fires once a year and
@@ -340,15 +365,41 @@ recap.** It is cheap insurance on a year of data, with three consumers.
 
 ## 10. Decisions needed
 
-| # | Decision | Recommendation |
+**All seven answered by the operator on 2026-08-13. These are binding on any build.**
+
+| # | Decision | **Operator ruling** |
 |---|---|---|
-| **YR-1** | **Snapshot cadence** — every 4 weeks as proposed, or opportunistic-on-sync + weekly backstop | **Opportunistic + weekly backstop.** Costs no extra API calls, storage is negligible, and 4-week resolution against daily values mis-attributes the mid-season trades the recap is about (§5.2). If a fixed grid is preferred, make it weekly |
-| **YR-2** | **Store computed team value alongside the roster, or roster only?** | **Both.** Roster for attribution and recomputation, stored total so the user's chart doesn't change shape after a model tweak — the precedent `player_value_history` already set |
-| **YR-3** | **Does the recap expose one manager's valuations to leaguemates?** | **No, not in v1.** D-P1-12 says ranking sharing is not a product surface. Keep valuation-derived stats self-only; league-wide sections use *market* values, which are public by nature. Revisit as a deliberate reversal, not a side effect |
-| **YR-4** | **Is "the one that got away" in scope?** | **In, self-only, with the tone rule** (§9). It is the most shareable Tier-1 stat and the most likely to backfire |
-| **YR-5** | **Tier 3 (regular season / playoffs) scope** | **One screen, ~20% of the surface.** Include it for completeness and cross-platform consistency; do not let it grow |
-| **YR-6** | **Snapshot every team, or only FTF users' teams?** | **Every team.** Zero marginal cost, and it means a leaguemate who joins in November arrives to a full season of their own history — the single best first-run experience the product can offer a late joiner (§5.3) |
-| **YR-7** | **Does P0 proceed independently of a recap commitment?** | **Yes.** It is insurance on a year of data with three consumers (#46, #33, #17). It should not wait on a decision about whether the recap ships |
+| **YR-1** | **Snapshot cadence** | **WEEKLY.** A fixed weekly grid, not the 4-week proposal and not the opportunistic-on-sync variant. Build to a weekly cadence; an on-sync change-detect write is an acceptable *addition* if it costs nothing, but weekly is the contract |
+| **YR-2** | **Store computed team value alongside the roster?** | **BOTH.** Roster ids for attribution and recomputation; stored team value so a later model change cannot alter the shape of a season chart already shown to a user |
+| **YR-3** | **Does the recap expose one manager's valuations to leaguemates?** | **YES — permitted, and this is a scope expansion.** See the clarification below. Valuation-derived comparative stats are allowed in the recap **and on League Home** |
+| **YR-4** | **"The one that got away" in scope?** | **YES.** Self-only, with the tone rule in §9 |
+| **YR-5** | **Tier 3 (regular season / playoffs) scope** | **~20% of the surface.** One screen |
+| **YR-6** | **Snapshot every team, or only FTF users' teams?** | **EVERY TEAM** |
+| **YR-7** | **Does P0 proceed independently of a recap commitment?** | **YES.** Capture work starts now, on its own justification |
+| **YR-8** | **Platform parity of capture** (added 2026-08-14) | **The platform-agnostic claim must be true, not caveated.** The weekly sweep fetches server-side on all four platforms — Sleeper (public), MFL (public `rosters` export), Fleaflicker (public API), ESPN (cookie-free for public leagues; stored encrypted `espn_s2`+SWID for private ones). ESPN-private cookie expiry degrades to app-open capture + a visible "reconnect ESPN" nudge. This adds the per-platform sweep adapters to **P0 scope** — the fetch functions already exist (`espn_service.fetch_league`, `mfl_service.fetch_rosters`, `fleaflicker_service.fetch_league_bundle`); the new work is the sweep calling them |
+
+### YR-3 clarification — the scope of D-P1-12, narrowed
+
+The operator's ruling, in substance: *"I just didn't want the share-rankings literal feature
+yet — it's not an issue to show it on recaps or even on the League Home page."*
+
+**This narrows how [`D-P1-12`](../../plans/audit-p1-remediation/DECISIONS-p1.md#d-p1-12--rankingtier-board-sharing-is-not-a-product-surface)
+should be read**, and the distinction is worth stating precisely because this plan is not the
+last thing that will run into it:
+
+| | Status |
+|---|---|
+| **Public, unauthenticated share routes for tier boards** (`/og/tiers/<pos>/<username>.png`, `/s/tiers/<pos>/<username>` — fetchable by URL guess, no in-app link required) | **Still prohibited.** This is what D-P1-12 actually found and shut down, and the live-exposure takedown it called for is unaffected by this ruling |
+| **In-app display of a user's valuations to their own leaguemates**, inside an authenticated league context — recap sections, League Home | **Permitted** |
+
+The line is *public URL exposure*, not *leaguemates can see your board*. A recap section
+comparing your valuations to your league's is in scope. A shareable public image of your tier
+board is not.
+
+**Consequence for this plan:** C6 (leaguemates' valuations over time) moves from "gap, gated
+on privacy" to **in scope**, and "where your board diverged" (§6 Tier 1) is a buildable
+league-comparative stat rather than a self-only one. `member_rankings` is replaced on every
+submit, so **capturing its history is now a P0/P1 capture item, not a deferred one.**
 
 ---
 
