@@ -1,12 +1,21 @@
 appId: com.fantasytradefinder.app
 # tc: TC-P0-6-ESPN-COPY
 # profile: espn
-# flags: release
+# flags: release-espn-send-off
 #
 # ACCEPTANCE, verbatim: "a matched ESPN user has a stated reason and at least
 # one useful action". This flow proves both halves on the mutual-match tile —
-# the reason (".*Sending is Sleeper-only.*") and the action (a real tap on
+# the reason (".*Sending isn.t available.*") and the action (a real tap on
 # send-in-sleeper.copy, acknowledged by the "Copied" label flip).
+#
+# FIXTURE (#309): `espn.send` went true in release on 2026-08-12, so an ESPN
+# league now renders the LIVE send button under plain release and the
+# fallback this flow proves became unreachable under its own fixture
+# (pre-existing drift, caught in the 2026-08-13 planning round). The flow
+# runs under release-espn-send-off.json — release verbatim minus `espn.send`
+# — the engaged-kill-switch state, which is exactly the state the reason
+# copy now honestly describes ("isn't available right now", never
+# "Sleeper-only": the #309 fix).
 #
 # The sign-in preamble is copied VERBATIM from capture/matches@espn.yaml,
 # including its retry-hardened inputText block (law 10 — a raced inputText
@@ -21,7 +30,7 @@ appId: com.fantasytradefinder.app
 #
 # MAESTRO CANNOT READ THE iOS PASTEBOARD. This flow proves the affordance and
 # the acknowledgement; the copied STRING is proved by
-# mobile/tests/check-trade-text.js (28 cases over the pure formatter) plus one
+# mobile/tests/check-trade-text.js (29 cases over the pure formatter) plus one
 # manual paste recorded in living-memory/TEST_LEDGER.md.
 #
 # No injections and no ESPN egress — same reasoning as capture/matches@espn.yaml.
@@ -76,9 +85,10 @@ tags: [p0, matches, espn]
 # The structural half: the fallback container mounted at all.
 - assertVisible:
     id: "send-in-sleeper.unavailable"
-# THE STATED REASON half of acceptance.
+# THE STATED REASON half of acceptance (#309 copy — `isn.t` because the
+# source byte is a typographic apostrophe, tradeText.ts NO_SEND_REASON.espn).
 - assertVisible:
-    text: ".*Sending is Sleeper-only.*"
+    text: ".*Sending isn.t available.*"
 # …and the send itself is still correctly absent on a non-Sleeper league.
 - assertNotVisible:
     text: ".*Send in Sleeper.*"

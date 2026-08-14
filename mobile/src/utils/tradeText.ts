@@ -39,11 +39,18 @@ export function resolveSendPlatform(
  *  mirrors FreeAgentsScreen's NO_ADD_REASON (#179), minus its {title, body}
  *  shape — that reason is an Alert payload and needs a title; this one renders
  *  inline, where a title would be a second line of chrome. Keyed exhaustively
- *  so a fifth SendPlatform is a compile error here. */
+ *  so a fifth SendPlatform is a compile error here.
+ *
+ *  #309 — never claims "Sleeper-only": MFL and ESPN sends are live
+ *  (`trade.send_in_mfl` / `espn.send`), so this fallback now renders only
+ *  when a send path is genuinely unavailable — an engaged ESPN/MFL kill
+ *  switch, the cold-start window before the flag payload lands, or a
+ *  Fleaflicker league (no send path built yet, hence its honest "yet").
+ *  Pinned by check-trade-text.js cases 15 + 29. */
 export const NO_SEND_REASON: Record<Exclude<SendPlatform, 'sleeper'>, string> = {
-  espn:        'Sending is Sleeper-only for now — copy this trade to propose it in ESPN.',
-  mfl:         'Sending is Sleeper-only for now — copy this trade to propose it in MyFantasyLeague.',
-  fleaflicker: 'Sending is Sleeper-only for now — copy this trade to propose it in Fleaflicker.',
+  espn:        'Sending isn’t available right now — copy this trade to propose it in ESPN.',
+  mfl:         'Sending isn’t available right now — copy this trade to propose it in MyFantasyLeague.',
+  fleaflicker: 'Sending isn’t available for Fleaflicker leagues yet — copy this trade to propose it in Fleaflicker.',
 };
 
 /** Which mount the affordance is rendering in. Declared here, in the pure
