@@ -52,9 +52,9 @@ conflicts and the full suite was re-run on the merged tree.
    Watch `deck_outcome_rejects` after deploy; a high `no_user`/`stale` count
    would mean real clients are sending outcomes we now drop (offline queues
    older than 30 days are lost by design).
-2. `docs/plans/trade-relevance-engine/lld.md` (P0-3) specs this same
-   validation inside a larger initiative but is **not in this tree** — when
-   that lands, reconcile against this shipped subset rather than rebuilding.
+2. `docs/plans/trade-relevance-engine/` (landed on `main` the same day, mid-ship)
+   specs this same validation inside the larger initiative (P0 PRD R6) — when
+   P0 builds, reconcile against this shipped subset rather than rebuilding.
 
 ## 2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)
 

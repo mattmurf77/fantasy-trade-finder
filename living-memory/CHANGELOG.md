@@ -13,13 +13,23 @@
 
 ## 2026-08-14 (deck-outcome impression-ownership validation — taste-poisoning hole closed)
 
-- **Security/correctness fix, backend-only.** `_save_deck_outcome_safe` accepted any client-supplied `impression_id` and wrote `deck_outcomes` + (under `deck.taste_vectors`) the **impression owner's** taste vector — so a stale or foreign id let one session label and taste-poison another user's history. Found by the dual-agent LLD review; standalone subset of the trade-relevance-engine P0-3 spec (initiative not in this tree).
+- **Security/correctness fix, backend-only.** `_save_deck_outcome_safe` accepted any client-supplied `impression_id` and wrote `deck_outcomes` + (under `deck.taste_vectors`) the **impression owner's** taste vector — so a stale or foreign id let one session label and taste-poison another user's history. Found by the trade-relevance-engine dual-agent LLD review (docs landed same day, entry below); standalone subset of that initiative's P0 validation spec — when P0 builds, reconcile against this shipped fix rather than rebuilding (its PRD R6 specs the same check).
 - **Fix:** helper now requires `acting_user_id` (route-resolved, never body) and writes only when the impression exists, is owned by the acting user, and was served ≤30 days ago. All six call sites covered (swipe, flag, /api/events side-channel, Sleeper/MFL/ESPN propose). Rejects are counted-and-dropped ([D-050](DECISIONS.md)) — response contracts byte-identical; counters (`no_user`/`unknown`/`foreign`/`stale`) on `GET /api/admin/analytics/health` as `deck_outcome_rejects`.
 - **Tests:** helper-level (foreign/stale/unknown/no-user reject + legitimate-path regression, `test_deck_taste.py`) and route-level (`test_deck_signal_v2.py`); full backend suite green pre-merge AND re-run on the tree merged with PR #120 (see [TEST_LEDGER.md](TEST_LEDGER.md)). Scope block: [`docs/plans/deck-outcome-validation/scope.md`](../docs/plans/deck-outcome-validation/scope.md); api-reference updated.
-- **Shipped:** operator-directed; [PR #119](https://github.com/mattmurf77/fantasy-trade-finder/pull/119), CI green (backend-tests, mobile-typecheck, testid-lint). Merge race with PR #120 (roster history) resolved en route — its D-049 stands, this decision renumbered D-050. Sim-gate tier 4 (backend-only), no sim run required.
+- **Shipped:** operator-directed; [PR #119](https://github.com/mattmurf77/fantasy-trade-finder/pull/119), CI green (backend-tests, mobile-typecheck, testid-lint). Merge races with PR #120 (roster history — its D-049 stands, this decision renumbered D-050) and the trade-relevance docs push resolved en route. Sim-gate tier 4 (backend-only), no sim run required.
 
 ---
 
+
+## 2026-08-14 (trade-relevance engine: X-algorithm research → audit → HLD/LLD signed off → 5 PRDs — SHIPPED to `main`, docs only)
+
+- **Nine reference docs + seven planning artifacts, all dual-agent authored** (Fable subagents, adversarial loops per `.claude/skills/dual-agent-doc-review`). X open-sourced its For You algorithm 2026-08-13 (`xai-org/x-algorithm` @ `a389166`); four subagents documented it in [`../reference/x-algorithm/`](../reference/x-algorithm/) (real prod weights: report −234 vs favorite +0.5; 1024-event behavior sequence as identity; zero human labels). A fifth mapped FTF's own recommender → [`../docs/plans/trade-relevance-engine/`](../docs/plans/trade-relevance-engine/): `ftf-current-state.md` (supersedes tiktok-discovery/current-state.md), `audit-x-vs-ftf.md`, `enhancement-plan.md` (P0 close loops → P1 learned ranker → P2 market/FA/pre-join history → P3 archetypes + value decomposition → P4 presentation).
+- **hld.md and lld.md SIGNED OFF** (4 adversarial rounds each); **prds/ P0–P4** dual-drafted + cross-reviewed (8 blockers fixed; parents amended in-place, ⟨PRD-AMENDED⟩ marks). Full objection/fix record + **operator decision queue** (⛔: Sleeper OQ-1 public reads, Postgres timing, D4/harm-check ratification, D6 bypass set, WAU/MDE, vblend audit storage) in `reconciliation-log.md`.
+- **Reviews caught real defects pre-build:** P0-3 join semantics inverted vs `create_trade_match`; `surface='push'` rows would poison six impression readers; the vblend validator rejected its own default blend; D4's window graded a different artifact nightly; P2's "day-zero" promise arithmetically false at the call budget (→ 48h/7d SLO); the August archetype coverage gate fails on rookie-heavy rosters.
+- **Live bug found in passing:** `_save_deck_outcome_safe` (`server.py:3657`) accepts foreign/stale impression ids → another user's taste vector poisoned. Operator spun up a fix session (task chip); the P0 PRD's R6 specs the same validation.
+- **Cross-session supersession noted at ship time:** P0-1 (register the dropped client events) was independently shipped today by the G-031 session (PR #116) — the P0 PRD carries a dated note; remaining P0-1 work is verification-only.
+
+---
 
 ## 2026-08-14 (Dynasty Year in Review P0: roster-history capture — branch `feat/roster-history`)
 
