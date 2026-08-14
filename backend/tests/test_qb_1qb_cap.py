@@ -246,3 +246,31 @@ def test_cap_applies_after_the_ktc_blend(monkeypatch):
     assert seed_elo_for_value(
         0.5 * 3000.0 + 0.5 * 10000.0) > CAP_ELO, (
         "fixture drift: the un-capped blended value must exceed the cap")
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: the cap survives the whole loader path, not just the blend
+# ---------------------------------------------------------------------------
+
+def test_fetch_dynasty_process_serves_capped_1qb_qbs(monkeypatch):
+    """The pool builder's real entry point — a refactor that stops routing
+    through _apply_consensus_blend must not silently drop the cap."""
+    import io
+
+    csv = ("player,pos,team,age,value_1qb,value_2qb\n"
+           "Josh Allen,QB,BUF,30.1,7025,10208\n"
+           "Bijan Robinson,RB,ATL,24.5,9580,8089\n")
+    monkeypatch.setattr(
+        dl.urllib.request, "urlopen",
+        lambda req, timeout=10: io.BytesIO(csv.encode("utf-8")))
+    monkeypatch.setattr(dl, "_ktc_consensus", lambda: {})   # hermetic
+
+    e1, v1, _ = dl._fetch_dynasty_process(scoring="1qb_ppr")
+    assert e1["josh allen"] <= CAP_ELO
+    assert _tier(e1["josh allen"]) == "first_1"
+    assert v1["josh allen"] < 7025.0
+    assert v1["bijan robinson"] == 9580.0            # RB untouched
+
+    e2, v2, _ = dl._fetch_dynasty_process(scoring="sf_tep")
+    assert v2["josh allen"] == 10208.0               # sf_tep untouched
+    assert _tier(e2["josh allen"], "QB", "sf_tep") == "firsts_4plus"

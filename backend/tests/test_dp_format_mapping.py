@@ -61,6 +61,11 @@ def _mock_fetch(monkeypatch):
     # Patch the source to empty for deterministic, order-independent DP-only
     # values (monkeypatch auto-reverts after the test).
     monkeypatch.setattr(data_loader, "_ktc_consensus", lambda: {})
+    # Same reasoning for the #313 1QB QB compression, a later stage of the
+    # same seed pipeline: it re-prices 1qb_ppr QB values on purpose, which
+    # would move the raw column reads asserted below. Knobs off = raw DP.
+    # (That the compression IS applied is pinned by test_qb_1qb_cap.py.)
+    monkeypatch.setattr(data_loader, "_qb_cap_config", lambda: (0.0, 0.0))
 
 
 def test_each_format_reads_its_own_value_column(monkeypatch):
