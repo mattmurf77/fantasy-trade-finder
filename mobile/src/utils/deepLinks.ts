@@ -275,6 +275,9 @@ const V2_MATCH_KINDS = new Set([
 const V2_LEAGUE_KINDS = new Set([
   'league_member_joined', 'league_member_unlocked_trades',
   'referral_joined',
+  // ADR-011: the "reconnect ESPN" sweep nudge. League is the closest tab
+  // to the platform-link flows; the row's body carries the instruction.
+  'espn_reconnect',
 ]);
 const V2_RANK_KINDS = new Set(['finish_ranking']);
 // F10 (flag deck.replenishment): the weekly fresh-deck push lands on the

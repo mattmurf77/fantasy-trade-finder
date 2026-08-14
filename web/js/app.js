@@ -4693,6 +4693,8 @@
       // Web's ICON set has no `swap`; mobile uses one. Nearest honest
       // match, and it is still a recognised type rather than a grey bell.
       if (type === 'counter_offer')                 return ICON.trade;
+      // ADR-011 — the weekly roster sweep's "reconnect ESPN" nudge.
+      if (type === 'espn_reconnect')                return ICON.unlock;
       return ICON.bell;
     }
 
@@ -4870,7 +4872,8 @@
                             'new_match', 'first_match', 'match_accepted',
                             'match_expiring', 'counter_offer'];
       const LEAGUE_TYPES = ['referral_joined', 'league_member_joined',
-                            'league_member_unlocked_trades'];
+                            'league_member_unlocked_trades',
+                            'espn_reconnect'];   // ADR-011 sweep nudge
       const TRADE_TYPES  = ['deck_replenished'];
 
       if (MATCH_TYPES.indexOf(type) !== -1) {

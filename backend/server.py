@@ -140,6 +140,8 @@ from .database import (
     # notif-inbox-growth (2026-08-13) — the inbox as a real surface
     notification_exists_with_meta, create_or_coalesce_league_join_notification,
     dismiss_all_notifications,
+    # ADR-011 — roster/board history capture (#46 Wrapped P0)
+    load_history_sweep_leagues, restamp_roster_history_owner,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
     # Agent 4 additions — referral receipt helpers
@@ -15367,6 +15369,23 @@ def session_init():
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
 
+            # ── Shared v1 rosters fetch (trade-block + roster-history) ──
+            # ADR-011: trade_block_service used to fetch roster_id →
+            # owner_id and throw it away; the roster-history snapshot's
+            # team_key needs exactly that mapping. Fetch ONCE here, hand
+            # it to both consumers. Failure leaves it None — trade-block
+            # refetches for itself, the snapshot falls back to weak keys.
+            _rh_roster_rows: list | None = None
+            try:
+                if (str(league_id).isdigit()
+                        and not is_linked_platform_league(league_id)
+                        and (is_enabled("sleeper.trade_block")
+                             or is_enabled("market.roster_history"))):
+                    from .trade_block_service import _fetch_rosters as _tb_fetch
+                    _rh_roster_rows = _tb_fetch(league_id)
+            except Exception as _rr_err:
+                log.warning("  shared rosters fetch failed (continuing): %s", _rr_err)
+
             # ── FB-147: Sleeper trade-block sync ─────────────────────
             # One public GraphQL read + one v1 rosters read per session
             # init, snapshot-replaced per league. Best-effort — a Sleeper
@@ -15375,7 +15394,7 @@ def session_init():
             try:
                 if is_enabled("sleeper.trade_block"):
                     from .trade_block_service import sync_league_trade_block
-                    _n_blk = sync_league_trade_block(league_id)
+                    _n_blk = sync_league_trade_block(league_id, rosters=_rh_roster_rows)
                     _invalidate_trade_block_cache(league_id)
                     log.info("  ✅ trade block synced (%d assets on the block)", _n_blk)
             except Exception as blk_err:
@@ -15451,6 +15470,23 @@ def session_init():
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
             except Exception as tr_err:
                 log.warning("  trade capture failed (continuing): %s", tr_err)
+
+            # ── ADR-011: roster + board history snapshot (source='sync') ──
+            # LAST on purpose, and the ordering is load-bearing: the pick
+            # fold-in reads draft_picks, which the owned-pick sibling block
+            # ABOVE writes for this same league — a snapshot that ran
+            # earlier would race the sync populating it and store a quietly
+            # short pick_ids array, invisible until December. Sleeper-only
+            # here (platform leagues snapshot at their import/refresh
+            # routes with native team keys). Own transaction; best-effort.
+            try:
+                if (is_enabled("market.roster_history")
+                        and str(league_id).isdigit()
+                        and not is_linked_platform_league(league_id)):
+                    _sleeper_roster_history_on_sync(
+                        league_id, all_members_for_db, _rh_roster_rows)
+            except Exception as rh_err:
+                log.warning("  roster-history snapshot failed (continuing): %s", rh_err)
         except Exception:
             # Daemon top-level catch — see docstring. Never silently die.
             log.exception("session/init background writes crashed")
@@ -16392,6 +16428,358 @@ def _run_weekly_replenishment(now: datetime) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# ADR-011 — league-state history capture (#46 Wrapped P0)
+# ---------------------------------------------------------------------------
+# Three triggers, one writer (backend/roster_history.py):
+#   A. on-sync   — _sleeper_roster_history_on_sync (session-init daemon,
+#                  LAST block) + _platform_roster_history_on_sync (after
+#                  each of the seven replace_espn_league_members callers'
+#                  transactions commit). No scheduler dependency — the only
+#                  mechanism whose correctness is independent of whether
+#                  the declared crons actually fire.
+#   B. weekly    — _kickoff_roster_snapshot_sweep, called from daily-tick
+#                  behind a >= weekday gate (the _run_weekly_replenishment
+#                  house pattern: one missed cron run doesn't skip the
+#                  week; the existing 'weekly' row for the period caps the
+#                  work at once). Server-side fetch on ALL FOUR platforms
+#                  (YR-8), on a DAEMON THREAD unconditionally: with
+#                  --workers 1, an inline sweep is total app unavailability
+#                  for its whole duration, and at ~240 leagues gunicorn's
+#                  --timeout 120 reaps the worker outright. Per-league
+#                  fetch-ms is logged from day one so the budget (not the
+#                  thread) is what a later measurement tunes — if anyone
+#                  drops the daemon they must drop the budget to ~10 in
+#                  the same change.
+#   C. manual    — POST /api/cron/roster-snapshot (below, with the other
+#                  cron routes): the operator's by-hand lever, and a
+#                  one-line workflow addition if the cron migration lands.
+#
+# The `source` column is the liveness detector: zero 'weekly' rows one
+# week post-ship ⇒ daily-tick is not firing (runbook § roster-snapshot
+# monitoring has the read + the retirement rule).
+
+_ROSTER_SNAPSHOT_SWEEP_BUDGET = 50   # matches _DRAFT_STATUS_SWEEP_BUDGET
+
+
+def _roster_snapshot_weekday_gate() -> int:
+    """FTF_ROSTER_SNAPSHOT_WEEKDAY (default 1 = Tuesday-eligible onward).
+    Setting 7 can never pass (weekday() is 0-6) — the deploy-free lever
+    that kills only the sweep while on-sync capture keeps running."""
+    try:
+        return int(os.environ.get("FTF_ROSTER_SNAPSHOT_WEEKDAY", "1"))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _do_league_history_snapshot(league_id: str, platform: str,
+                                teams: list[dict], source: str) -> dict:
+    """Shared trigger tail: format + pool + priced picks in, both history
+    tables written. The value contract lives here: team_value comes out of
+    compute_power_rankings' consensus basis via the SAME
+    _power_picks_by_owner pricing the Power Rankings screen uses, so the
+    two can never disagree about a team."""
+    from . import roster_history as _rh
+    fmt = get_league_scoring(league_id) or "1qb_ppr"
+    pool_players, seed = _get_universal_pool(fmt)
+    players_meta = {p.id: p for p in pool_players}
+    picks_by_owner = _power_picks_by_owner(league_id, fmt)
+    stats = _rh.snapshot_league_rosters(
+        league_id, platform, fmt, teams, source,
+        seed=seed, players_meta=players_meta,
+        picks_by_owner=picks_by_owner,
+        pick_read_source=_pick_read_source())
+    board_stats = _rh.snapshot_league_boards(league_id, source)
+    log.info("roster-history: league=%s platform=%s source=%s rosters=%s boards=%s",
+             league_id, platform, source, stats, board_stats)
+    return {"rosters": stats, "boards": board_stats}
+
+
+def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
+                                    roster_rows: list | None) -> None:
+    """Writer A, Sleeper half. `members` is the client-posted membership
+    (ownerless teams already dropped — which is exactly why these rows are
+    source='sync' and yield to 'weekly'); `roster_rows` is the shared v1
+    rosters fetch, whose roster_id → owner_id map is what makes team_key
+    platform-native. No map ⇒ weak keys, stamped as such — the recap
+    declines to chart weak-keyed teams rather than fragmenting silently."""
+    owner_map: dict[str, tuple] = {}
+    for r in roster_rows or []:
+        oid = str(r.get("owner_id") or "")
+        rid = r.get("roster_id")
+        if oid and rid is not None:
+            owner_map[oid] = (rid, r.get("starters") or None)
+    teams = []
+    for m in members or []:
+        uid = str(m.get("user_id") or "")
+        if not uid:
+            continue
+        hit = owner_map.get(uid)
+        if hit is not None:
+            rid, starters = hit
+            teams.append({"team_key": f"sleeper:{league_id}.r{rid}",
+                          "team_key_quality": "strong",
+                          "member_user_id": uid,
+                          "player_ids": m.get("player_ids") or [],
+                          "starter_ids": starters})
+        else:
+            teams.append({"team_key": f"sleeper:{league_id}.u{uid}",
+                          "team_key_quality": "weak",
+                          "member_user_id": uid,
+                          "player_ids": m.get("player_ids") or [],
+                          "starter_ids": None})
+    _do_league_history_snapshot(league_id, "sleeper", teams, "sync")
+
+
+def _platform_roster_history_on_sync(league_id: str, platform: str,
+                                     members: list[dict], *,
+                                     my_user_id: str | None = None,
+                                     my_team_key: str | None = None) -> None:
+    """Writer A, platform half — called AFTER replace_espn_league_members'
+    transaction has committed, never inside it (a snapshot failure inside
+    that engine.begin() block would roll back the delete+insert and leave
+    the league with ZERO members). Member dicts carry `team_key` threaded
+    from the import site, where the platform-native id is in scope.
+
+    Also the late-joiner re-stamp: at link time we know the joining user's
+    native team, so their team's whole recorded season resolves to them in
+    one idempotent UPDATE — no mapping table."""
+    if not is_enabled("market.roster_history"):
+        return
+    try:
+        teams = [{"team_key": m["team_key"],
+                  "team_key_quality": "strong",
+                  "member_user_id": str(m.get("user_id") or ""),
+                  "player_ids": m.get("player_ids") or [],
+                  "starter_ids": None}
+                 for m in (members or []) if m.get("team_key")]
+        _do_league_history_snapshot(league_id, platform, teams, "sync")
+        if my_user_id and my_team_key:
+            restamp_roster_history_owner(league_id, my_team_key, my_user_id)
+    except Exception as e:
+        log.warning("roster-history platform snapshot failed (continuing): %s", e)
+
+
+def _espn_reconnect_nudge(lg: dict, *, reason: str) -> None:
+    """YR-8's one honest edge, made visible: a private ESPN league whose
+    stored cookie can't authenticate degrades to on-sync capture PLUS this
+    bell row — an expiring credential becomes a re-auth ask, never a
+    silent gap in the user's season. Once per expiry episode: keyed on the
+    credential's verified_at, which only changes when a working cookie is
+    stored, so a broken one nags exactly once."""
+    uid = str(lg.get("user_id") or "")
+    lid = str(lg.get("league_id") or "")
+    if not uid or not lid:
+        return
+    try:
+        from .database import get_espn_credential
+        cred = get_espn_credential(uid) or {}
+        episode = cred.get("verified_at") or cred.get("updated_at") or "missing"
+        key = f"{lid}:{episode}"
+        if notification_exists_with_meta(uid, "espn_reconnect", "nudge_key", key):
+            return
+        _write_inbox_row(
+            uid, "espn_reconnect",
+            title="Reconnect ESPN to keep your league history",
+            body=("Your saved ESPN sign-in stopped working, so weekly "
+                  "roster snapshots for this league are paused. Reconnect "
+                  "to resume them."),
+            meta={"league_id": lid, "nudge_key": key, "reason": reason},
+        )
+    except Exception as e:
+        log.warning("espn reconnect nudge failed (continuing): %s", e)
+
+
+def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
+    """YR-8 platform adapters: server-side roster fetch → the writer's
+    team shape, reusing the exact fetch/parse/crosswalk helpers the import
+    routes already call. Returns (teams, None) or (None, skip_reason) —
+    an unsupported or failing platform is a LEGIBLE hole, never a silent
+    one."""
+    platform = lg.get("platform") or "sleeper"
+    lid = str(lg["league_id"])
+
+    if platform == "sleeper":
+        rows = _fetch_league_rosters(lid)
+        if not rows:
+            return None, "sleeper_fetch_failed"
+        teams = []
+        for r in rows:
+            rid = r.get("roster_id")
+            if rid is None:
+                continue
+            oid = str(r.get("owner_id") or "")
+            tk = f"sleeper:{lid}.r{rid}"
+            teams.append({"team_key": tk,
+                          "team_key_quality": "strong",
+                          # Ownerless team: the team_key doubles as the
+                          # member id (synthetic prefix ⇒ owner_user_id
+                          # NULL) — the orphan rows YR-6 exists to keep.
+                          "member_user_id": oid or tk,
+                          "player_ids": [str(p) for p in (r.get("players") or [])],
+                          "starter_ids": r.get("starters") or None})
+        return teams, None
+
+    if platform == "espn":
+        from . import espn_service as _espn
+        season = lg.get("espn_season") or _ESPN_DEFAULT_SEASON
+        s2 = swid = None
+        if (lg.get("espn_auth") or "public") == "cookie":
+            from .database import get_espn_credential
+            cred = get_espn_credential(str(lg.get("user_id") or ""))
+            if not cred:
+                _espn_reconnect_nudge(lg, reason="missing")
+                return None, "espn_credentials_missing"
+            try:
+                s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+                swid = cred.get("swid")
+            except Exception:
+                _espn_reconnect_nudge(lg, reason="undecryptable")
+                return None, "espn_credentials_undecryptable"
+        try:
+            league, mapped = _espn_import_payload(lid, season, s2, swid)
+        except _espn.EspnAuthError:
+            _espn_reconnect_nudge(lg, reason="expired")
+            return None, "espn_auth_expired"
+        except _espn.EspnError:
+            return None, "espn_fetch_failed"
+        my_tid = lg.get("espn_my_team_id")
+        my_uid = str(lg.get("user_id") or "")
+        teams = []
+        for t in league["teams"]:
+            mid = my_uid if (my_uid and t.team_id == my_tid) \
+                else _espn_member_id(lid, t)
+            teams.append({"team_key": f"espn:{lid}.t{t.team_id}",
+                          "team_key_quality": "strong",
+                          "member_user_id": mid,
+                          "player_ids": mapped["rosters"].get(t.team_id, []),
+                          "starter_ids": None})
+        return teams, None
+
+    if platform == "mfl":
+        from . import mfl_service as _mfl
+        year = lg.get("platform_season") or _MFL_DEFAULT_YEAR
+        host = lg.get("platform_host")
+        try:
+            if not host:
+                host = _mfl.resolve_host(lid, year)
+            # cookie=None — the rosters export is public (YR-8); a private
+            # league that 403s lands in the except and stays a counted skip.
+            raw = _mfl.fetch_league_bundle(lid, year, host, cookie=None)
+            parsed = _mfl.parse_bundle(raw)
+            mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
+        except Exception:
+            return None, "mfl_fetch_failed"
+        my_fid = lg.get("platform_my_team")
+        my_uid = str(lg.get("user_id") or "")
+        teams = []
+        for fr in parsed["franchises"]:
+            fid = fr["franchise_id"]
+            mid = my_uid if (my_uid and fid == my_fid) else _mfl_member_id(lid, fid)
+            teams.append({"team_key": f"mfl:{lid}.f{fid}",
+                          "team_key_quality": "strong",
+                          "member_user_id": mid,
+                          "player_ids": mapped["rosters"].get(fid, []),
+                          "starter_ids": None})
+        return teams, None
+
+    if platform == "fleaflicker":
+        from . import fleaflicker_service as _flea
+        try:
+            raw = _flea.fetch_league_bundle(lid)
+            parsed = _flea.parse_bundle(raw)
+            mapped = _flea.map_teams(parsed, _shared_crosswalk())
+        except Exception:
+            return None, "fleaflicker_fetch_failed"
+        my_tid = lg.get("platform_my_team")
+        my_uid = str(lg.get("user_id") or "")
+        teams = []
+        for t in parsed["teams"]:
+            tid = t["team_id"]
+            mid = my_uid if (my_uid and tid == my_tid) else _flea_member_id(lid, tid)
+            teams.append({"team_key": f"fleaflicker:{lid}.t{tid}",
+                          "team_key_quality": "strong",
+                          "member_user_id": mid,
+                          "player_ids": mapped["rosters"].get(tid, []),
+                          "starter_ids": None})
+        return teams, None
+
+    return None, f"unsupported_platform_{platform}"
+
+
+def _run_roster_snapshot_sweep(now: datetime, budget: int) -> dict:
+    """Writer B's body — runs INSIDE the daemon thread. Stalest-first over
+    every stored league, skipping any that already holds a 'weekly' row
+    for the current period (that row is the per-week marker; re-runs after
+    the >= gate cost nothing). One fetch + one transaction per league;
+    per-league fetch ms logged from day one — that log is what sets the
+    budget later, not the thread."""
+    from . import roster_history as _rh
+    period = _rh.iso_period_key(now)
+    stats: dict = {"period_key": period, "eligible": 0, "swept": 0,
+                   "skipped_done": 0, "deferred": 0, "errors": 0,
+                   "skips": {}}
+    leagues = load_history_sweep_leagues(period)
+    processed = 0
+    for lg in leagues:
+        if lg.get("has_current_weekly"):
+            stats["skipped_done"] += 1
+            continue
+        stats["eligible"] += 1
+        if processed >= budget:
+            stats["deferred"] += 1
+            continue
+        processed += 1
+        t0 = time.perf_counter()
+        try:
+            teams, skip = _sweep_fetch_teams(lg)
+        except Exception as e:
+            teams, skip = None, f"adapter_crashed:{e.__class__.__name__}"
+        fetch_ms = int((time.perf_counter() - t0) * 1000)
+        log.info("roster-sweep: league=%s platform=%s fetch_ms=%d %s",
+                 lg["league_id"], lg.get("platform") or "sleeper", fetch_ms,
+                 (skip or f"teams={len(teams or [])}"))
+        if teams is None:
+            stats["skips"][skip] = stats["skips"].get(skip, 0) + 1
+            stats["errors"] += 1
+            continue
+        try:
+            _do_league_history_snapshot(
+                lg["league_id"], lg.get("platform") or "sleeper",
+                teams, "weekly")
+            stats["swept"] += 1
+        except Exception as e:
+            log.warning("roster-sweep: snapshot write failed league=%s: %s",
+                        lg["league_id"], e)
+            stats["errors"] += 1
+    return stats
+
+
+def _start_roster_snapshot_daemon(now: datetime, budget: int) -> None:
+    def _body():
+        try:
+            stats = _run_roster_snapshot_sweep(now, budget)
+            log.info("roster-sweep done: %s", stats)
+        except Exception:
+            log.exception("roster-snapshot sweep crashed")
+    threading.Thread(target=_body, name="roster-snapshot-sweep",
+                     daemon=True).start()
+
+
+def _kickoff_roster_snapshot_sweep(now: datetime | None = None) -> dict:
+    """Writer B's daily-tick entry: weekday >= gate, then a daemon start.
+    Returns immediately either way — the tick never blocks on network."""
+    from . import roster_history as _rh
+    if not is_enabled("market.roster_history"):
+        return {"disabled": True}
+    now = now or datetime.now(timezone.utc)
+    gate = _roster_snapshot_weekday_gate()
+    if now.weekday() < gate:
+        return {"gated": True, "weekday_gate": gate}
+    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET)
+    return {"started": True, "period_key": _rh.iso_period_key(now)}
+
+
+# ---------------------------------------------------------------------------
 # Cron-tick endpoints — called by Render Cron jobs over HTTP
 # ---------------------------------------------------------------------------
 # Three endpoints:
@@ -16470,6 +16858,26 @@ def _summary_push(items: list[dict]) -> tuple[str, str]:
     total = sum(by_kind.values())
     return (f"{total} update{'s' if total != 1 else ''} overnight",
             "Tap to review.")
+
+
+@app.route("/api/cron/roster-snapshot", methods=["POST"])
+def cron_roster_snapshot():
+    """ADR-011 Writer C — the manual/external lever for the weekly roster
+    sweep. Nothing schedules it: it exists so the operator can force a
+    snapshot by hand the week something goes wrong, and so the cron
+    migration (whenever it lands) is a one-line workflow addition rather
+    than a code change. Deliberately NO weekday gate — a manual invocation
+    IS the operator overriding the calendar. Same daemon + budget as the
+    daily-tick path; the existing 'weekly' row per period keeps a forced
+    re-run idempotent."""
+    _require_cron_auth()
+    from . import roster_history as _rh
+    if not is_enabled("market.roster_history"):
+        return jsonify({"ok": False, "disabled": True})
+    now = datetime.now(timezone.utc)
+    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET)
+    return jsonify({"ok": True, "started": True,
+                    "period_key": _rh.iso_period_key(now)})
 
 
 @app.route("/api/cron/realtime-tick", methods=["POST"])
@@ -16828,8 +17236,22 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: class-load monitor failed (continuing): %s", e)
 
+    # ── ADR-011 Writer B — weekly roster-snapshot sweep kickoff ──
+    # Behind the >= weekday gate (FTF_ROSTER_SNAPSHOT_WEEKDAY, default 1),
+    # on a daemon so the tick never blocks on N league fetches. The
+    # response counter is operator telemetry; the real liveness read is
+    # `SELECT source, count(*) FROM league_roster_history GROUP BY 1`
+    # (runbook § roster-snapshot monitoring).
+    roster_snapshot_stats: dict | None = None
+    try:
+        roster_snapshot_stats = _kickoff_roster_snapshot_sweep(now)
+    except Exception as e:
+        log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
+
     log.info("daily-tick: %s", counters)
     extra: dict = {}
+    if roster_snapshot_stats is not None:
+        extra["roster_snapshot"] = roster_snapshot_stats
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
     if replenish_stats is not None:
@@ -19675,6 +20097,9 @@ def espn_link():
             "username":     t.owner_display or t.name,
             "display_name": t.name,
             "player_ids":   mapped["rosters"].get(t.team_id, []),
+            # ADR-011 — the platform-native team slot, captured at the one
+            # line where it is in scope (it used to be discarded here).
+            "team_key":     f"espn:{league_id}.t{t.team_id}",
         })
     try:
         upsert_espn_league(
@@ -19690,6 +20115,11 @@ def espn_link():
     except Exception:
         log.exception("espn_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — AFTER the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "espn", members,
+        my_user_id=user_id, my_team_key=f"espn:{league_id}.t{team_id}")
 
     r = mapped["report"]
     log.info("espn_link: user=%s league=%s season=%s teams=%d auth=%s "
@@ -19859,6 +20289,7 @@ def espn_import():
             "username":     t.owner_display or t.name,
             "display_name": t.name,
             "player_ids":   mapped["rosters"].get(t.team_id, []),
+            "team_key":     f"espn:{league_id}.t{t.team_id}",   # ADR-011
         })
     try:
         upsert_espn_league(
@@ -19874,6 +20305,11 @@ def espn_import():
     except Exception:
         log.exception("espn_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "espn", members,
+        my_user_id=user_id, my_team_key=f"espn:{league_id}.t{my_team_id}")
 
     return jsonify({
         "ok": True,
@@ -21386,7 +21822,8 @@ def mfl_link():
         mid = user_id if fid == franchise_id else _mfl_member_id(league_id, fid)
         members.append({"user_id": mid, "username": fr["name"],
                         "display_name": fr["name"],
-                        "player_ids": mapped["rosters"].get(fid, [])})
+                        "player_ids": mapped["rosters"].get(fid, []),
+                        "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
             league_id=league_id, user_id=user_id,
@@ -21398,6 +21835,11 @@ def mfl_link():
     except Exception:
         log.exception("mfl_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "mfl", members,
+        my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — normalize MFL owned picks into draft_picks (same store Sleeper
     # writes). Best-effort, gated on picks.owned_sync; runs after members are
@@ -21524,7 +21966,8 @@ def mfl_import():
         mid = user_id if fid == my_team else _mfl_member_id(league_id, fid)
         members.append({"user_id": mid, "username": fr["name"],
                         "display_name": fr["name"],
-                        "player_ids": mapped["rosters"].get(fid, [])})
+                        "player_ids": mapped["rosters"].get(fid, []),
+                        "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
             league_id=league_id, user_id=row["user_id"],
@@ -21536,6 +21979,11 @@ def mfl_import():
     except Exception:
         log.exception("mfl_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "mfl", members,
+        my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{my_team}")
 
     # #158 — re-normalize MFL owned picks on manual refresh (see mfl_link).
     if is_enabled("picks.owned_sync"):
@@ -21626,7 +22074,8 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         mid = user_id if fid == franchise_id else _mfl_member_id(league_id, fid)
         members.append({"user_id": mid, "username": fr["name"],
                         "display_name": fr["name"],
-                        "player_ids": mapped["rosters"].get(fid, [])})
+                        "player_ids": mapped["rosters"].get(fid, []),
+                        "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     upsert_platform_league(
         league_id=league_id, user_id=user_id,
         name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
@@ -21634,6 +22083,11 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         total_rosters=parsed["total_teams"], host=host,
         future_picks=parsed["future_picks"])
     replace_espn_league_members(league_id, members)
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "mfl", members,
+        my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — same best-effort owned-pick normalization as the public path.
     if is_enabled("picks.owned_sync"):
@@ -23005,7 +23459,8 @@ def fleaflicker_link():
         mid = user_id if tid == team_id else _flea_member_id(league_id, tid)
         members.append({"user_id": mid, "username": t["name"],
                         "display_name": t["name"],
-                        "player_ids": mapped["rosters"].get(tid, [])})
+                        "player_ids": mapped["rosters"].get(tid, []),
+                        "team_key": f"fleaflicker:{league_id}.t{tid}"})  # ADR-011
     try:
         upsert_platform_league(
             league_id=league_id, user_id=user_id,
@@ -23016,6 +23471,11 @@ def fleaflicker_link():
     except Exception:
         log.exception("fleaflicker_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "fleaflicker", members,
+        my_user_id=user_id, my_team_key=f"fleaflicker:{league_id}.t{team_id}")
 
     r = mapped["report"]
     log.info("fleaflicker_link: user=%s league=%s teams=%d match_rate=%.1f%% "
@@ -23109,7 +23569,8 @@ def fleaflicker_import():
         mid = user_id if tid == my_team else _flea_member_id(league_id, tid)
         members.append({"user_id": mid, "username": t["name"],
                         "display_name": t["name"],
-                        "player_ids": mapped["rosters"].get(tid, [])})
+                        "player_ids": mapped["rosters"].get(tid, []),
+                        "team_key": f"fleaflicker:{league_id}.t{tid}"})  # ADR-011
     try:
         upsert_platform_league(
             league_id=league_id, user_id=row["user_id"],
@@ -23121,6 +23582,11 @@ def fleaflicker_import():
     except Exception:
         log.exception("fleaflicker_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # ADR-011 Writer A — after the membership transaction committed.
+    _platform_roster_history_on_sync(
+        league_id, "fleaflicker", members,
+        my_user_id=user_id, my_team_key=f"fleaflicker:{league_id}.t{my_team}")
 
     return jsonify({
         "ok": True, "league_id": league_id, "name": parsed["name"],
