@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-14 — Feedback wave #307-#319 (sim gate NOT run; owed with the #295 Tier-1 debt)
+
+- **Change:** `7057d86` (PR #117) + `7fb1e34` version bump, v1.13.4 **build 111**. Eleven items, four groups.
+- **Verified (merged tree, orchestrator-run):** pytest **2737 passed / 1 skipped** · tsc exit 0 · testid-lint OK · 19 structural suites all exit 0 (~600 assertions; two "FAIL"-looking greps were the literal strings "FAIL-OPEN"/case text — exit codes are the authority).
+- **Falsification:** 48 named sabotages across the four groups, all RED-then-green, apply-verified. One agent caught its own mis-sequenced two-part sabotage producing a bogus pass (the sixth false-pass-shaped defect this session).
+- **Sim: NOT RUN.** Owed: the wave's flows (`07-matches-tile-scoped`, `matches-awaiting-dismiss` + 500-injection leg, `trades-banner-region`, repointed `p0-6-espn-copy-trade`) + the standing #295 Tier-1 debt (`d3`/`d4`). Known stale pre-existing: `smoke/09-league.yaml` waits on `league.hero` at a tab root that has been `LeagueRankings` since #181. `release-inline-strip.json` cannot exist as planned (experiment overlay ≠ flag key) — the #314/#315 flow runs under plain `release`.
+- **QA riders:** #309 — verify real send buttons on the awaiting + calculator mounts for MFL/ESPN (operator retracted their confirmation; tripwire OPEN). #318 — server-fired `awaiting_trade_dismissed` verifies on first real dismissal (route liveness proven 405→401; the event needs a session).
+
+---
+
 ## 2026-08-13 — Dropped-emitter backlog registration (built on branch; NOT shipped — bright-line hold)
 
 - **Change:** branch `claude/elegant-mccarthy-ef63f8` (worktree), from `origin/main` @ `60fccc7`, rebased onto `1e69562`. 27 long-dropped mobile `track()` names registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (props mirror the shipped emitters verbatim), 8 of them added to `NON_INTENT_EVENTS` in the same change; client `quickset_completed` emitter deleted from `QuickSetTiersScreen.tsx` (server-authoritative name, disjointness assert). Addendum: `docs/business/analytics/2026-08-13-dropped-emitter-backlog.md`; cross-client-invariants + G-031 + NEXT 0h updated. Zeroes the G-031 backlog.
