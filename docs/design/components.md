@@ -135,3 +135,10 @@ Left-aligned, not centered-hero: ice tick + `display` headline ("Rank your leagu
 ## Screen coverage check
 
 Every screen listed in the audit maps to the above: Login (Auth), League select (LeagueRow), Method select (MethodTile), Rank/trio (PlayerCard, PositionTabs, UnlockBar), Trade Finder (TradeCard, FairnessMeter, CoverageBar, slider), Matches (TradeCard match variant, VerdictPanel = Toast+EmptyState patterns), Activity/Trends (ActivityRow, TrendBar = StrengthBar), Tiers (TierBin), Rookie board (sheet + FilterTabs), Outlook (sheet + MethodTile-style options), Notifications (NotificationRow), Settings/Profile (hairline key-value rows + forms), Player detail (PlayerCard header + ActivityRow history).
+
+## OutlookBiasReceipt / TradingWithStrip / deck-done (2026-08-13 wave)
+
+- **OutlookBiasReceipt** — two-row spec: row 1 = lean + Change affordance; optional dim 13pt row 2 = config summary (host-composed `details`); ≤2 rows total. Team/players never in row 2 — they are the interactive pills below (#315).
+- **TradingWithStrip** — two pills (League / "Trading with") positioned BELOW the receipt (+ the prefs-changed nudge), outside `modeBarWrap` (#314). A third "Players" pill is a reserved seam, HELD for an operator decision.
+- **Deck-done summary** — a tile tap on the ideas rail re-presents the featured window (user gesture only — never auto; #317, preserving #241/#298 invariants).
+

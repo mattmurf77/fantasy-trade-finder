@@ -276,3 +276,9 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Exit choke point** — A single helper that every control ending an interaction must route through, so the interaction's terminating event cannot be forgotten by a control added later. `closeTeam` in `LeagueSummaryScreen.tsx` is the reference implementation: all five League drill-in exits route through it, and the file contains exactly one bare `setSelectedId(null)`, inside it.
 
+**Standard lineup template** — The scoring-format-keyed fallback starting lineup (QB/2RB/3WR/TE/FLEX; sf_tep appends SUPER_FLEX) used for platform leagues (ESPN/MFL/Fleaflicker) that expose no `roster_positions` equivalent; slot filling stays value-optimal (#311).
+
+**Retracted like** — A like the user dismissed from "Awaiting them" (`trade_decisions.retracted_at`); invisible to the counterparty's deck injection and to match maturation; a fresh like revives the trade (#318).
+
+**Waivers (vocabulary rule)** — A tier key and free-agency concept only — never user-facing copy for the weekly deck refresh, which is not waiver-driven (#316).
+
