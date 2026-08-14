@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-14 (feedback wave: eleven items across League, Matches, Trades, backend — v1.13.4 build 111)
+
+- **Four parallel plan→build groups, disjoint file ownership, one integration.** #307 (League match tiles land on Matches league-scoped, frozen param contract built by both sides independently) · #308 (the contrarian fold line stops lying — the gate counts in-format callers-included, the bar counts any-format callers-excluded, and the copy described neither; now dynamic + a cache key missing `activeFormat` fixed) · #309 (send copy no longer claims "Sleeper-only", false since 08-12) · #311 (MFL/ESPN/Fleaflicker trade summaries get starting lineups via a platform-aware standard template) · #312 (DNA add-button row obeys give-left/get-right — now a cross-client invariant) · #314-partial (filters below the banner; Players pill HELD) · #315 (banner details row) · #316 (deck-done copy drops the false "after waivers" mechanic) · #317 (deck-done tile taps re-present the featured window; #241/#298 invariants preserved by construction) · #318 (dismiss awaiting trades — `retracted_at` like-retraction, four suppression points incl. receiver-deck injection and match maturation, idempotent route, 5s undo, server-fired event) · #319 (Matches value disclosure + open-in-calc).
+- **Gates (merged tree, orchestrator-run):** pytest **2737/1**; tsc clean; 19 `check-*` suites ~600 assertions all green; **48 named sabotages** RED-then-green across the groups. Deploy proven by content (dismiss route 405→401). Shipped `7057d86` (PR #117) + `7fb1e34` (v1.13.4), **build 111** submitted.
+- **Process notes:** one build agent ended its turn waiting on a monitor (the documented stall pattern — resumed by nudge); one group voided its own plan's Maestro waiver when the fixture turned out to cover the state; two groups' plan defects (setLeague vs switchLeague, unreachable cross-tab navigate, dismiss placement vs footprint directive) were built around with documentation rather than improvised silently.
+- **Sim gate: NOT run** — flows authored across all four groups (incl. the 500-injection dismiss rollback), never executed. #317's resume and #318's undo ship on static evidence; owed with the next sim session, plus the #309 QA rider (verify real send buttons on awaiting + calculator mounts for MFL/ESPN — the operator retracted their earlier confirmation as not having checked those surfaces specifically).
+- **Held for the operator:** calculator group (D-306-1 graduate `aggregate_tier_labels`), #313 (D-313 value-side QB cap), the #314 Players pill.
+
+---
+
 ## 2026-08-14 (G-031 backlog zeroed — 27 dropped client events registered, colliding quickset_completed emitter deleted)
 
 - **Every remaining silently-dropped mobile event now lands in `user_events`.** The 2026-08-11 sweep's "29 remaining" (mostly teardown S3/S4 instrumentation — help surface, prompt arbiter, push primers, undo family, player context menu, settings mode changes, rating prompt — dark since ship): 27 names registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` with props mirroring the shipped emitters verbatim; 8 impression/dismissal/outcome-class names into `NON_INTENT_EVENTS` same-commit (DAU-seam rule); the other 19 are real user decisions and stay INTENT.
