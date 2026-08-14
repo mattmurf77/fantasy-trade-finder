@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-13 — Dropped-emitter backlog built on branch; ship HELD on operator's bright-line yes](#2026-08-13--dropped-emitter-backlog-built-on-branch-ship-held-on-operators-bright-line-yes)
+- [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
 - [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
 - [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
@@ -21,14 +21,16 @@
 
 ---
 
-## 2026-08-13 — Dropped-emitter backlog built on branch; ship HELD on operator's bright-line yes
+## 2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed
 
 ### Where I am right now
 
-The G-031 dropped-emitter backlog (NEXT 0h — "29 remaining") is **built and
-verified on branch `claude/elegant-mccarthy-ef63f8`** (worktree
-`elegant-mccarthy-ef63f8`, from `origin/main` @ `60fccc7`), **not merged**:
-taxonomy is a bright-line surface and the operator has not yet confirmed.
+The G-031 dropped-emitter backlog (NEXT 0h — "29 remaining") is **SHIPPED**:
+operator confirmed the bright-line taxonomy change, PR
+[#116](https://github.com/mattmurf77/fantasy-trade-finder/pull/116) squash-merged
+to `main` @ `4733f78` with CI green (backend-tests, mobile-typecheck,
+testid-lint). Deploy-then-probe result in `TEST_LEDGER.md`. Branch + worktree
+swept per `docs/recovery/2026-08-14-taxonomy-batch-sweep.md`.
 
 - **27 names registered** in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`
   (props mirror the shipped emitters verbatim — no reserved keys, no renames);
@@ -44,20 +46,21 @@ taxonomy is a bright-line surface and the operator has not yet confirmed.
   observability/mock-draft/pick-assignment suites). Mobile `tsc` NOT run — no
   `node_modules` in the worktree; owed at merge.
 
-### What a next session should do
+### What a next session should know
 
-1. **Get the operator's confirming yes** (bright-line: taxonomy change).
-2. On yes: merge to `main`, run mobile `tsc --noEmit` in the main checkout,
-   deploy-then-probe at least one newly registered name against prod
-   `POST /api/events` with `X-Device-Id` (require `accepted ≥ 1 AND
-   dropped == 0` — the loose-grep trap from build 110), add the CHANGELOG
-   entry, then sweep the worktree per the recovery ledger.
-3. The seam: rows for all 27 names begin at ship day; 19 are INTENT, so
+1. **The seam:** rows for all 27 names begin 2026-08-14; 19 are INTENT, so
    INTENT coverage widens — don't trend per-feature action counts across it.
+2. **The `onboarding` split on quickset completions is gone** (accepted loss,
+   recorded in the addendum). If it's ever wanted, that's a NEW client name
+   via a fresh addendum — never a resurrection of `quickset_completed`.
+3. Most of the newly measurable surfaces sit behind still-dark teardown
+   flags (`ux.*`, `growth.rating_prompt`) — zero rows for those is the flag,
+   not a bug. The flagless ones (undo family, untouchable, settings modes,
+   trios) should show rows immediately.
 
 ### Blocking
 
-Operator decision only. No open technical questions.
+Nothing. Done end-to-end.
 
 ### Where I am right now
 

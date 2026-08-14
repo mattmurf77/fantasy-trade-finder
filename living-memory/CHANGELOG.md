@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-14 (G-031 backlog zeroed — 27 dropped client events registered, colliding quickset_completed emitter deleted)
+
+- **Every remaining silently-dropped mobile event now lands in `user_events`.** The 2026-08-11 sweep's "29 remaining" (mostly teardown S3/S4 instrumentation — help surface, prompt arbiter, push primers, undo family, player context menu, settings mode changes, rating prompt — dark since ship): 27 names registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` with props mirroring the shipped emitters verbatim; 8 impression/dismissal/outcome-class names into `NON_INTENT_EVENTS` same-commit (DAU-seam rule); the other 19 are real user decisions and stay INTENT.
+- **`quickset_completed`'s client emitter deleted, not registered** — server-authoritative name, namespaces disjoint by import-time assert. Accepted loss: its client-only `onboarding` prop (addendum records it; a future need means a NEW name, never an alias).
+- **Seam:** no historical series exists for any of the 27 (every prior envelope destroyed on arrival); don't trend per-feature action counts across 2026-08-14. Addendum: [`docs/business/analytics/2026-08-13-dropped-emitter-backlog.md`](../docs/business/analytics/2026-08-13-dropped-emitter-backlog.md); cross-client-invariants backlog note now reads **0**.
+- **Shipped:** PR [#116](https://github.com/mattmurf77/fantasy-trade-finder/pull/116) squash → `main` @ `4733f78`, CI green (backend-tests, mobile-typecheck, testid-lint); operator confirmed the bright-line taxonomy change. 243 backend tests + import asserts + `tsc` clean pre-merge. Deploy-then-probe: see [`TEST_LEDGER.md`](TEST_LEDGER.md). Sim gate n/a (zero user-visible behavior).
+
+---
+
 ## 2026-08-13 (#295/#296/#305 — the mock draft works; manual mode; v1.13.3 build 110)
 
 - **The mock draft has never let any user pick, on any platform, since it was enabled** — three reports (#295, #296, #305) of one defect. The create route read `sess["league"].members` — caller-excluded by app-wide convention, its third bite after FB #41 and #291 — as "everyone in the league", so every mock completed at create with zero user picks. Newton's "13 picks per round in a 14-team league" was the same missing member. **Five** membership sites fixed (two found only in this round's LLD, incl. `_mock_usernames`, which would have rendered the user's own recap rows "Unassigned"); a `build_settings` `UserNotInDraft` raise makes a born-broken row unwritable; `user_not_in_draft` joins the capability ladder as the fourth rung.

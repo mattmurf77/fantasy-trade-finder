@@ -17,7 +17,7 @@
 - **Verified:** import-time asserts pass (namespace disjointness + props coverage; direct import probe). `pytest backend/tests/test_events_api.py backend/tests/test_analytics_p0.py -q` → **64 passed**. `pytest backend/tests/test_api_observability.py backend/tests/test_mock_draft.py backend/tests/test_pick_assignment.py -q` → **179 passed**. Mobile `npx tsc --noEmit` exit **0** (run in the worktree via a node_modules symlink from the main checkout).
 - **NOT verified yet:** deploy-then-probe — owed post-ship for at least one newly registered name (`accepted ≥ 1 AND dropped == 0`, with `X-Device-Id` set, per the build-110 trap).
 - **Sim gate: not applicable** — backend registries + one telemetry-line removal; zero user-visible behavior. Maestro delta n/a for the same reason.
-- **SHIP:** operator confirmed the bright-line taxonomy change 2026-08-13 ("Ship it"); merge in progress — ship evidence appended below on completion.
+- **SHIP EVIDENCE (2026-08-14, post-merge):** squash PR [#116](https://github.com/mattmurf77/fantasy-trade-finder/pull/116) → `main` @ `4733f78`; PR CI green (backend-tests 6m7s, mobile-typecheck 43s, maestro-testid-lint 7s). **Deploy-then-probe PASSED:** `help_opened {topic: matching}` posted to prod `POST /api/events` with `X-Device-Id` set, polled through the deploy — old build answered `{"accepted":1,"dropped":1}` twice (the accepted-and-dropped trap, caught by the strict condition), new build answered `{"accepted":1,"deduped":0,"dropped":0,"rejected":[]}`. Branch swept per `docs/recovery/2026-08-14-taxonomy-batch-sweep.md` (tip `7016850`, content-verified empty diff vs post-merge main).
 
 ---
 
