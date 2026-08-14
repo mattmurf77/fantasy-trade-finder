@@ -7,10 +7,25 @@
 ---
 
 ## Table of Contents
+- [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
 - [2026-06-07 — Open Items (perf-optimization)](#2026-06-07--open-items-perf-optimization)
 - [2026-05-21 — Open Items](#2026-05-21--open-items)
 - [Closed Questions (kept for cross-reference)](#closed-questions-kept-for-cross-reference)
 - [Conventions](#conventions)
+
+---
+
+## 2026-08-14 — Open Items (sleeper propose_trade)
+
+### Q-016 — What is the element type of Sleeper's `propose_trade(waiver_budget:)`?
+- **Why it matters:** `79123a0` (2026-08-13) fixed the *syntax* of the inlined FAAB arg — `json.dumps` emitted quoted object keys, which GraphQL cannot parse. That fix is correct and shipped. But it fixed the encoding of a shape **nobody has ever observed**, and if the shape itself is wrong the first FAAB trade still fails — just with a type error instead of a parse error. Two sources disagree, and neither is a capture of a non-empty value:
+  - The 2026-07-02 capture runbook (§C2) asserts `[{sender, receiver, amount}]` — but the captured payload only ever showed `waiver_budget: []`. That object shape is an **inference**. `ProposeTradeRequest.waiver_budget` encodes it anyway.
+  - The public `__schema` dump cited in [`../docs/plans/sleeper-pending-trades-feasibility-2026-08-12.md`](../docs/plans/sleeper-pending-trades-feasibility-2026-08-12.md) says `draft_picks` **and** `waiver_budget` are `[String]`. It is demonstrably right about `draft_picks` (matches the live capture field-for-field), which is meaningful corroboration.
+  - Likely encoding by symmetry with picks: a comma-string `"<sender>,<receiver>,<amount>"` — **unproven, do not build on it.**
+- **Action to unblock:** capture one real FAAB-bearing trade proposal from Sleeper's own web client (same injected-interceptor method as the 2026-07-02 capture, runbook §C2).
+- **Workaround in the meantime:** none needed — **non-blocking**. No caller populates `waiver_budget`; the empty case `[]` is valid under every candidate answer and is the only shape production sends. Treat FAAB-over-Sleeper as **unimplemented** rather than merely untested, and do not wire a caller to it until this resolves.
+- **Owner:** operator (needs a live capture, not a decision).
+- **Asked on:** 2026-08-14.
 
 ---
 

@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-14 (sleeper FAAB: the encoding fix is right, the *shape* it encodes is unverified — Q-016)
+
+- **Docs-only. No code change** — `79123a0` (2026-08-13) already fixed the `waiver_budget` GraphQL encoding, and correctly. This session independently reproduced the bug from the 2026-08-12 device-side-auth review and converged on the same design (`_graphql_object_literal`, bare keys, GraphQL-Name-validated). **The duplicate implementation was discarded, not pushed.**
+- **Worth noting as a concurrency data point, not a mistake:** `79123a0` was **not** on `origin/main` at this session's start fetch (`7dfcd16`, 08-12 22:27) — it landed 08-13 18:20, mid-session, from a parallel session. Both sessions independently found the same latent bug and wrote near-identical fixes. The re-fetch-before-push is what caught it. Two sessions converging on one dormant bug is cheap; two sessions pushing rival implementations of it is not.
+- **What survived is the part nobody had recorded.** The shipped fix encodes `[{sender, receiver, amount}]` — a shape that has **never been observed**. The 2026-07-02 capture only ever showed `waiver_budget: []`; the object shape is an *inference* from the runbook. Meanwhile the public `__schema` dump says the arg is `[String]`, and it is demonstrably right about `draft_picks`. If it is right about `waiver_budget` too, the shape is wrong at the **type** level — the bare-key fix makes the document parseable, not acceptable, and the first FAAB trade still fails.
+- **Filed as [Q-016]** with the caveat mirrored into `backend/sleeper_write.py`'s module docstring (which asserted the inferred shape as fact) and `docs/integrations/sleeper.md`. **Treat FAAB-over-Sleeper as unimplemented, not merely untested** — non-blocking, since no caller populates it and `[]` is valid under every candidate answer. Needs one real FAAB capture to close.
+- **Verified against the merged tree:** `pytest backend/tests/test_sleeper_write.py backend/tests/test_sleeper_write_route.py -q` → 37 passed. No behavior touched. See [TEST_LEDGER.md].
+
+---
+
 ## 2026-08-14 (feedback wave: eleven items across League, Matches, Trades, backend — v1.13.4 build 111)
 
 - **Four parallel plan→build groups, disjoint file ownership, one integration.** #307 (League match tiles land on Matches league-scoped, frozen param contract built by both sides independently) · #308 (the contrarian fold line stops lying — the gate counts in-format callers-included, the bar counts any-format callers-excluded, and the copy described neither; now dynamic + a cache key missing `activeFormat` fixed) · #309 (send copy no longer claims "Sleeper-only", false since 08-12) · #311 (MFL/ESPN/Fleaflicker trade summaries get starting lineups via a platform-aware standard template) · #312 (DNA add-button row obeys give-left/get-right — now a cross-client invariant) · #314-partial (filters below the banner; Players pill HELD) · #315 (banner details row) · #316 (deck-done copy drops the false "after waivers" mechanic) · #317 (deck-done tile taps re-present the featured window; #241/#298 invariants preserved by construction) · #318 (dismiss awaiting trades — `retracted_at` like-retraction, four suppression points incl. receiver-deck injection and match maturation, idempotent route, 5s undo, server-fired event) · #319 (Matches value disclosure + open-in-calc).

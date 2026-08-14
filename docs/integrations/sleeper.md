@@ -198,7 +198,21 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   receiving roster_id) and `k_drops/v_drops` (player_id → giving roster_id) —
   **every traded player appears in both arrays**, paired positionally
   (`backend/sleeper_write.py:18-21,244-257`). `draft_picks` and `waiver_budget`
-  are inlined into the query string, not sent as GraphQL variables.
+  are inlined into the query string, not sent as GraphQL variables. Inlined
+  object args must be GraphQL **literals** (bare keys — `{sender:1}`), not JSON;
+  `_graphql_object_literal()` does that encoding. `draft_picks` is unaffected —
+  a list of strings is spelled identically in both syntaxes.
+- ⚠️ **`waiver_budget`'s element type is unresolved — FAAB is unimplemented,
+  not merely untested.** The 2026-07-02 capture only ever showed
+  `waiver_budget: []`, so the `[{sender, receiver, amount}]` shape in
+  `ProposeTradeRequest` is an **inference**, never an observation. The public
+  `__schema` dump cited in
+  [`../plans/sleeper-pending-trades-feasibility-2026-08-12.md`](../plans/sleeper-pending-trades-feasibility-2026-08-12.md)
+  says both `draft_picks` and `waiver_budget` are `[String]` — and it is
+  demonstrably right about `draft_picks`, which corroborates it. If it is right
+  about `waiver_budget` too, the shape is wrong at the *type* level, which the
+  bare-key encoding fix does not address. No caller populates FAAB today;
+  resolve against a real capture before one does (living-memory Q-016).
 
 ---
 

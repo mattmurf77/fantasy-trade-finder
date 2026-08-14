@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-14 — sleeper FAAB Q-016 (docs-only; no new tests, no posture change)
+
+- **Change:** docs + living-memory only — module docstring caveat in `backend/sleeper_write.py`, `docs/integrations/sleeper.md`, [Q-016](OPEN_QUESTIONS.md). **No behavior touched, no tests added.**
+- **Ran:** `pytest backend/tests/test_sleeper_write.py backend/tests/test_sleeper_write_route.py -q` → **37 passed**, against the merged tree at `2f0fcbb`. Targeted by operator instruction; the full suite was not run and no posture is claimed from this entry beyond these two files.
+- **Independently re-verified `79123a0`'s fix rather than trusting the commit message** — built `propose_trade` bodies and parsed them with a real GraphQL parser (`graphql.parse`, ambient dev dep, not in requirements): pre-fix FAAB body → `Syntax Error: Expected Name, found String 'sender'`; post-fix FAAB body, empty body, and draft-picks body → all parse. Confirms both the fix and its claim that `__DRAFT_PICKS__` was never affected.
+- **The limit of all of the above:** every test here proves the document *parses*. **Nothing proves Sleeper accepts it** — the `[{sender, receiver, amount}]` element type is unverified ([Q-016](OPEN_QUESTIONS.md)) and no test can settle it without a real FAAB capture. A green suite on this path is not evidence FAAB works.
+
+---
+
 ## 2026-08-14 — Feedback wave #307-#319 (sim gate NOT run; owed with the #295 Tier-1 debt)
 
 - **Change:** `7057d86` (PR #117) + `7fb1e34` version bump, v1.13.4 **build 111**. Eleven items, four groups.

@@ -20,7 +20,15 @@ Captured facts (runbook §C1–C3):
         v_adds[i]  = roster_id that RECEIVES  k_adds[i]
         v_drops[i] = roster_id that GIVES UP  k_drops[i]
     league_id + draft_picks are inlined into the query string; adds/drops ride
-    as variables. FAAB rides in waiver_budget:[{sender,receiver,amount}].
+    as variables.
+  - ⚠️ FAAB (`waiver_budget`) is UNRESOLVED — treat it as unimplemented, not
+    merely untested. The [{sender,receiver,amount}] shape below is an
+    INFERENCE: the 2026-07-02 capture only ever showed `waiver_budget: []`, so
+    no non-empty value has ever been observed. The public __schema dump says
+    the arg is `[String]` — and it is demonstrably right about draft_picks.
+    If so the shape is wrong at the TYPE level, which the 2026-08-13
+    bare-key encoding fix does not address (it makes the document parseable,
+    not acceptable). Get a real FAAB capture first — see living-memory Q-016.
 
 This module has no Flask / DB imports on purpose — it is pure and unit-testable.
 The HTTP call is injectable via `_opener` so tests never touch the network.
