@@ -783,6 +783,7 @@ export default function TradesScreen({ navigation, route }: any) {
           'Trades');
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
+    setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
     pendingScrollToDeckRef.current = true; // #276
     generateMutation.mutate({});
   }
@@ -1131,7 +1132,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // swiped-out and deck-summary states instead of snapping back to the
   // featured window mid-session.
   const singlePinFeatured = !firstRun && !!singlePin;
-  const singlePinDeckActive = singlePinFeatured && deck.length > 0;
+  // #317 — "the user tapped an idea tile AFTER finishing the pinned deck".
+  // Flipped true ONLY inside handleSelectIdea's explicit-tap path (never
+  // from an effect — #298 assertion 7 exists precisely to stop automatic
+  // snap-backs to the featured window); reset on pin change/sweep (the
+  // pinKey/ideasUpdatedAt effect below) and on every search start
+  // (handleFindTrades / resetDeckForNewTargets / the legacy inline CTA),
+  // so a new deck re-takes the slot exactly as #298 specified.
+  const [pinIdeaResumed, setPinIdeaResumed] = useState(false);
+  // #317: `&& !pinIdeaResumed` — while resumed, the layout IS the pre-deck
+  // single-pin layout (featured window leads, rail at mount 1, deck
+  // wrapper — summary card included — steps aside via its existing gate).
+  // Still keyed on `deck.length`, still never `topCard` (#298 7a/7b).
+  const singlePinDeckActive =
+    singlePinFeatured && deck.length > 0 && !pinIdeaResumed;
   // #298 analytics — ONE derivation of the `mode` prop, read by both
   // find_trades_tapped and trade_card_viewed. Deliberately a property on
   // two events that already fire here, not a new event name: #298 is a
@@ -1193,6 +1207,9 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     setFeaturedIdea(null);
     setIdeaHistory([]);
+    // #317 — a new pin or a fresh sweep invalidates the resumed window
+    // exactly like it invalidates the idea references above.
+    setPinIdeaResumed(false);
   }, [pinKey, ideasUpdatedAt]);
 
   // #243 — pin-mode collapsed controls (V1, approved mock
@@ -1219,6 +1236,29 @@ export default function TradesScreen({ navigation, route }: any) {
   const featuredShown = featuredIdea ?? bestIdea;
 
   function handleSelectIdea(idea: AssetIdea) {
+    // #317 — deck-done resume. With a pinned deck finished (summary or
+    // exhausted card holding the slot, no live card, no job running — the
+    // deckExhausted shape, which summaryVisible refines), an explicit tile
+    // tap re-presents the featured window with this idea: the deck yields
+    // the slot only on the user's own gesture, so #298's "never snap back
+    // automatically" and #241's one-trade-summary both hold. The window is
+    // HIDDEN here, so no row is "in window" (featuredKey is nulled at the
+    // panel mount) and the usual same-idea no-op does not apply — tapping
+    // the best-idea row must present it too, not dead-click.
+    const deckFinished =
+      singlePinFeatured && deck.length > 0 && !topCard && job?.status !== 'running';
+    if (singlePinDeckActive && deckFinished) {
+      haptics.selection();
+      if (featuredShown && assetIdeaKey(idea) !== assetIdeaKey(featuredShown)) {
+        setIdeaHistory((h) => [...h, featuredShown].slice(-FEATURED_HISTORY_CAP));
+      }
+      setFeaturedIdea(idea);
+      setPinIdeaResumed(true);
+      // No scrollTo: the window wasn't on screen, so its measured y is
+      // stale (useRef(0) → a jump to page top); the layout swap surfaces
+      // it at the top of the content anyway.
+      return;
+    }
     // No no-op taps: the in-window row is inert (also disabled in the row).
     if (!featuredShown || assetIdeaKey(idea) === assetIdeaKey(featuredShown)) {
       return;
@@ -1227,10 +1267,14 @@ export default function TradesScreen({ navigation, route }: any) {
     const replaced = featuredShown;
     setIdeaHistory((h) => [...h, replaced].slice(-FEATURED_HISTORY_CAP));
     setFeaturedIdea(idea);
-    mainScrollRef.current?.scrollTo({
-      y: featuredWindowY.current,
-      animated: true,
-    });
+    // #317 — mid-deck taps (live card showing, window hidden) keep their
+    // behavior EXCEPT the stale-y scrollTo, which jumped to the page top.
+    if (!singlePinDeckActive) {
+      mainScrollRef.current?.scrollTo({
+        y: featuredWindowY.current,
+        animated: true,
+      });
+    }
   }
 
   function handleFeaturedBack() {
@@ -2031,6 +2075,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setEdits({});
     setSwapTarget(null);
+    setPinIdeaResumed(false); // #317 — the next deck re-takes the slot
   }
 
   // FB #156 — entering or changing a hub finder mode/scope starts a clean
@@ -3525,7 +3570,17 @@ export default function TradesScreen({ navigation, route }: any) {
       loading={assetIdeasQuery.isFetching}
       pinnedName={singlePin!.player.name}
       direction={singlePin!.direction}
-      featuredKey={featuredShown ? assetIdeaKey(featuredShown) : null}
+      // #317 — while the deck holds the slot the featured window is NOT on
+      // screen, so no row may carry the "IN WINDOW" tag or be tap-disabled
+      // (that inert row was half the dead click). Nulled exactly when the
+      // window's own gate (:featuredShown && !singlePinDeckActive) hides it.
+      featuredKey={
+        singlePinDeckActive
+          ? null
+          : featuredShown
+            ? assetIdeaKey(featuredShown)
+            : null
+      }
       onSelectIdea={handleSelectIdea}
     />
   ) : null;
@@ -4321,6 +4376,7 @@ export default function TradesScreen({ navigation, route }: any) {
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => {
               track('find_trades_tapped', { mode: deckMode }, 'Trades');
+              setPinIdeaResumed(false); // #317 — parity with handleFindTrades
               generateMutation.mutate({});
             }}
             style={styles.findBtn}
