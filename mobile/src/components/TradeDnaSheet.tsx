@@ -196,6 +196,13 @@ const TRADE_INTENTS: { key: NonNullable<TradeIntent>; label: string; tid: string
   { key: 'tier_down', label: 'Tier down', tid: 'tier-down' },
 ];
 
+// #315 — the outlook receipt's details row re-states the selected lane;
+// derived from TRADE_INTENTS so the row's word can never drift from the
+// chip the user actually tapped.
+export const TRADE_INTENT_LABEL = Object.fromEntries(
+  TRADE_INTENTS.map((i) => [i.key, i.label]),
+) as Record<NonNullable<TradeIntent>, string>;
+
 interface Props {
   visible: boolean;
   /** Pure dismiss — every edit already autosaved on tap (#236). */

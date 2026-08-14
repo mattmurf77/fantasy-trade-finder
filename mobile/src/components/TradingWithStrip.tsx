@@ -16,6 +16,16 @@ import { haptics } from '../utils/haptics';
 // just opened directly instead of via the sheet's close-then-reopen dance
 // (openTeamPickerFromSheet/openLeaguePickerFromSheet would pop the full
 // sheet back open on close, which defeats the point of this strip).
+//
+// #314 SEAM (held for an operator decision — do not build without one):
+// a third "Players" pill would slot in as a sibling Pressable AFTER the
+// "Trading with" pill, inside the same `styles.row`. The pills are
+// `flex: 1` with `minWidth: 0` and ellipsized values, so a third pill is
+// purely additive — no relayout. Its planned wiring (plan §3, #314 fix 2):
+// label "Players", value "Any players" / "N picked" from
+// pinnedGive.length + pinnedReceive.length (host-supplied), tap → a new
+// `onOpenPlayers` prop that opens the full sheet (the specific-players
+// home) — never a second Modal.
 
 interface Props {
   leagueName: string | null;

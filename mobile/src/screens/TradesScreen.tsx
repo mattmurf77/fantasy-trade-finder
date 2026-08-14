@@ -58,7 +58,10 @@ import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
-import TradeDnaSheet, { type TradeIntent } from '../components/TradeDnaSheet';
+import TradeDnaSheet, {
+  TRADE_INTENT_LABEL,
+  type TradeIntent,
+} from '../components/TradeDnaSheet';
 import TradeHomeUtilityRow from '../components/TradeHomeUtilityRow';
 import TradingWithStrip from '../components/TradingWithStrip';
 import TradeBuildCanvas from '../components/TradeBuildCanvas';
@@ -915,6 +918,30 @@ export default function TradesScreen({ navigation, route }: any) {
         : undefined,
     [assetPrefsQuery.data],
   );
+
+  // #315 — row 2 of the outlook receipt: the OTHER configurations set
+  // through the sheet, so the banner honestly summarizes what "Change"
+  // edits. Middle-dot separated, only set parts included. Team scope and
+  // specific players are deliberately EXCLUDED — those are the interactive
+  // filters mounted directly below the banner (#314); repeating them as
+  // text one row above their own pills is the #205 "too much information"
+  // failure. Empty ⇒ the receipt renders exactly its pre-#315 single row.
+  const receiptDetails = useMemo(() => {
+    const posLabel = (p: string) => (p === 'PICK' ? 'Picks' : p);
+    const parts: string[] = [];
+    const chasing = prefsQuery.data?.acquire_positions ?? [];
+    const shopping = prefsQuery.data?.trade_away_positions ?? [];
+    if (chasing.length > 0) {
+      parts.push(`Chasing ${chasing.map(posLabel).join(', ')}`);
+    }
+    if (shopping.length > 0) {
+      parts.push(`Shopping ${shopping.map(posLabel).join(', ')}`);
+    }
+    if (intentModesOn && tradeIntent) parts.push(TRADE_INTENT_LABEL[tradeIntent]);
+    const offTable = untouchableIds?.size ?? 0;
+    if (offTable > 0) parts.push(`${offTable} off the table`);
+    return parts.join(' · ');
+  }, [prefsQuery.data, intentModesOn, tradeIntent, untouchableIds]);
 
   const untouchableMutation = useMutation({
     mutationFn: ({ playerId, list }: {
@@ -3624,15 +3651,17 @@ export default function TradesScreen({ navigation, route }: any) {
             for the bigger-icon utility row (Draft/Free agents/Manual calc,
             no league or player reference on the button itself, #272
             verbatim) and adds the League/Trading-with pill strip (#270
-            verbatim, second sentence). Control (or any non-guided mode)
-            renders `TradeFinderModeBar` exactly as before — byte-identical. */}
+            verbatim, second sentence — mounted BELOW the outlook receipt
+            since #314). Control (or any non-guided mode) renders
+            `TradeFinderModeBar` exactly as before — byte-identical. */}
         {/* P0-2 — one conditional host View so the mode-bar region can be
             measured (onLayout) and the Toast can clear it instead of clipping
             the chips. The condition is HOISTED onto the wrapper: an
-            unconditional wrapper would still be a flex child when both slots
-            are null, and the ScrollView's own `gap` would then apply on both
-            sides of a zero-height view. `modeBarWrap`'s gap replicates the
-            content container's gap between the two slots it now contains. */}
+            unconditional wrapper would still be a flex child when the slot
+            is null, and the ScrollView's own `gap` would then apply on both
+            sides of a zero-height view. #314 moved the TradingWithStrip out
+            of this wrapper (below the receipt); the wrapper keeps the
+            utility-row/mode-bar slot. */}
         {finderMode || showInlineHome ? (
           <View
             style={styles.modeBarWrap}
@@ -3677,26 +3706,22 @@ export default function TradesScreen({ navigation, route }: any) {
               />
             )
           ) : null}
-          {showInlineHome ? (
-            <TradingWithStrip
-              leagueName={league?.league_name ?? null}
-              opponentName={scopedOpponentName ?? null}
-              onOpenLeaguePicker={openLeaguePickerFromStrip}
-              onOpenTeamPicker={openTeamPickerFromStrip}
-            />
-          ) : null}
           </View>
         ) : null}
-        {/* #231 — outlook bias receipt (self-contained; single-line mount).
-            #246: Change opens the DNA sheet over the deck. Also stands in
-            as variant B's "prefs summary line" (canvas mock frames) — the
-            page has no existing single string combining outlook + chasing/
-            shopping positions + trade-idea lane, and building one just for
-            this experiment would duplicate state TradeDnaSheet already owns
-            privately; this receipt is the closest existing analog (same
-            "Change" affordance, same data source) — see status doc. */}
+        {/* #231 — outlook bias receipt (self-contained for row 1; #315 adds
+            the host-composed `details` row 2). #246: Change opens the DNA
+            sheet over the deck. Also stands in as variant B's "prefs summary
+            line" (canvas mock frames) — the page has no existing single
+            string combining outlook + chasing/shopping positions +
+            trade-idea lane, and building one just for this experiment would
+            duplicate state TradeDnaSheet already owns privately; this
+            receipt is the closest existing analog (same "Change"
+            affordance, same data source) — see status doc. */}
         {finderMode ? (
-          <OutlookBiasReceipt onChange={() => setDnaSheetOpen(true)} />
+          <OutlookBiasReceipt
+            details={receiptDetails}
+            onChange={() => setDnaSheetOpen(true)}
+          />
         ) : null}
 
         {/* #257 (operator decision Q2) — dismissing the full sheet does NOT
@@ -3720,6 +3745,26 @@ export default function TradesScreen({ navigation, route }: any) {
               Preferences changed — tap to refresh
             </Text>
           </Pressable>
+        ) : null}
+
+        {/* #314 — the on-page filters sit BELOW the receipt and its
+            transient refresh nudge (which stays glued to the banner it
+            refers to): the banner summarizes the configuration, the
+            filters act on it. Moved out of `modeBarWrap` above — so
+            `modeBarBottom` now measures the utility row only and the
+            Toast overlaps this zone, the same class of overlap the
+            receipt already lived with (accepted, plan §3). The strip's
+            own `showInlineHome` gate travels with it; the control
+            variant renders none of this. Its pill row is flex, so the
+            held-for-operator "Players" pill (#314's interpretive step)
+            can later slot in beside "Trading with" without relayout. */}
+        {showInlineHome ? (
+          <TradingWithStrip
+            leagueName={league?.league_name ?? null}
+            opponentName={scopedOpponentName ?? null}
+            onOpenLeaguePicker={openLeaguePickerFromStrip}
+            onOpenTeamPicker={openTeamPickerFromStrip}
+          />
         ) : null}
 
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-

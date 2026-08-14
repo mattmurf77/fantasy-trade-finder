@@ -72,3 +72,9 @@ draft-room.mode.*
 mock-draft.empty.*
 # mock-entry blocked-panel ids are object properties rendered as testID={block.testID} (MockChrome.tsx)
 mock-entry.*
+# --- 2026-08-13 TradesHome wave ---
+# TradeDnaSheet.tsx: testID={`dna.outlook.${o.key}`} / testID={`dna.chase.${p.tid}`}
+dna.outlook.*
+dna.chase.*
+# AssetIdeasPanel.tsx: testID={`featured-trade.idea.${assetIdeaKey(idea)}`}
+featured-trade.idea.*

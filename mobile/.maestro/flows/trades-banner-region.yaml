@@ -1,0 +1,134 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TRD-314-315
+# profile: standard
+# flags: release
+# tags: [trades, banner]
+#
+# #314 + #315 — the "change" banner region on the guided TradesHome.
+#
+# WHAT THIS PROVES (the #315 end-to-end path): declaring an outlook and a
+# chasing position through the full sheet makes OutlookBiasReceipt render
+# WITH its new `details` second row ("Chasing WR"), i.e. the banner now
+# presents the sheet's other configurations. Sabotage: revert the #315
+# receipt/host changes → trades.outlook-receipt.details never mounts and
+# the assert goes red.
+#
+# WHAT THIS DELIBERATELY DOES NOT PROVE, and why:
+#  • The #314 strip position (TradingWithStrip below the receipt). Two
+#    reasons, both structural: (a) Maestro cannot assert the vertical order
+#    of two visible elements; (b) the plan's `release-inline-strip.json`
+#    fixture CANNOT work on this harness — `trades_home_inline.strip` is an
+#    EXPERIMENT client_config overlay, not a FLAG_KEYS entry, so
+#    feature_flags._load_from_env drops it from FTF_FLAGS and the seeder
+#    has no experiments support (capture/calc.yaml's header records the
+#    same: "the hermetic backend leaves this unit on control"). Plan defect
+#    reported in status-2026-08-13.md. The enforceable artifact for the
+#    move is mobile/tests/check-trades-banner-region.js (assertion 1).
+#  • The prefs-changed strip: it only arms when a deck exists
+#    (handleEditSheetClose gates on deck.length > 0); generating a deck
+#    here would spend 60s proving #257's contract, not this wave's.
+#
+# ENTRY — the receipt renders only when an outlook RESOLVES, and the
+# fixtures do not guarantee an inference (sheets-trade-dna.yaml's header
+# records this), so the flow DECLARES one through the sheet itself: the
+# legacy editDna route param (TradesScreen, still honoured) opens the full
+# sheet deterministically via the launch-argument two-launch dance (law 17;
+# openLink is dead on iOS 18). mode=guided rides along so consolidateOn
+# mounts the FULL sheet, same as the shipping guided landing.
+tags: [trades, banner]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in (law 10) — a raced inputText submits a partial
+# username and books a real VCR miss; eraseText makes the retry idempotent.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 60000
+
+# ── open the full sheet via the legacy editDna param (two-launch dance) ──
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: Trades
+      FTFTestRouteParams: 'mode=guided&editDna=1'
+- extendedWaitUntil:
+    visible:
+      id: "dna.done"
+    timeout: 30000
+- waitForAnimationToEnd
+
+# ── declare: outlook All-in, chasing WR ──────────────────────────────────
+# The receipt renders only for a resolved DIRECTIONAL outlook; championship
+# maps to "All-in" in its LEAN table. Autosave fires per tap (#236).
+- scrollUntilVisible:
+    element:
+      id: "dna.outlook.championship"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "dna.outlook.championship"
+- scrollUntilVisible:
+    element:
+      id: "dna.chase.wr"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "dna.chase.wr"
+- scrollUntilVisible:
+    element:
+      id: "dna.done"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "dna.done"
+- extendedWaitUntil:
+    notVisible:
+      id: "dna.done"
+    timeout: 10000
+
+# ── #315: the banner presents the other configurations ───────────────────
+# The save flush invalidates ['league-prefs'] and the receipt + details row
+# render off the refetch — extendedWaitUntil absorbs it.
+- extendedWaitUntil:
+    visible:
+      id: "trades.outlook-receipt"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "trades.outlook-receipt.details"
+    timeout: 30000
+- assertVisible:
+    text: ".*Chasing WR.*"
+# Law 23 — the frame gets eyeballed on the tier-1 run.
+- takeScreenshot: trades-banner-region
