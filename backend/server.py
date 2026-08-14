@@ -17250,7 +17250,10 @@ def cron_daily_tick():
 
     log.info("daily-tick: %s", counters)
     extra: dict = {}
-    if roster_snapshot_stats is not None:
+    # Serialized only when the flag is on — flag-off tick payloads stay
+    # byte-identical (the _run_weekly_replenishment convention, and
+    # test_deck_replenishment pins the equivalent for its key).
+    if roster_snapshot_stats is not None and not roster_snapshot_stats.get("disabled"):
         extra["roster_snapshot"] = roster_snapshot_stats
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
