@@ -17,3 +17,32 @@ export const MATCH_UNLOCK_MATES = 1;
 export function matchesUnlockRemaining(rankedMates: number): number {
   return Math.max(0, MATCH_UNLOCK_MATES - rankedMates);
 }
+
+// ── Leaderboards / contrarian fold line (#308) ───────────────────────────
+// The /api/league/contrarian gate counts users with stored rankings in the
+// ACTIVE scoring format, caller INCLUDED — a different population AND a
+// different threshold from MATCH_UNLOCK_MATES above. Don't conflate them.
+export const CONTRARIAN_UNLOCK_USERS = 3; // /api/league/contrarian gate, caller INCLUDED, active format only
+
+const FOLD_FORMAT_LABEL: Record<string, string> = {
+  '1qb_ppr': '1QB',
+  sf_tep: 'SF TEP',
+}; // mirrors TopBar's FORMAT_TILE_LABEL (TopBar.tsx) — pinned in docs/cross-client-invariants.md
+
+/** Fold-line sentence for the leaderboards/contrarian unlock.
+ *  needed/format come from the contrarian insufficient payload; both
+ *  nullable because placeholderData can briefly serve a stale shape. */
+export function contrarianFoldLine(
+  needed: number | null | undefined,
+  format: string | null | undefined,
+): string {
+  const label = format ? FOLD_FORMAT_LABEL[format] : undefined;
+  const where = label ? ` in ${label}` : '';
+  if (needed == null || needed <= 0) {
+    return `Leaderboards and contrarian ranks appear once ${CONTRARIAN_UNLOCK_USERS} members have ranked${where}.`;
+  }
+  return (
+    `Leaderboards and contrarian ranks appear once ${CONTRARIAN_UNLOCK_USERS} members ` +
+    `have ranked${where} — ${needed} more to go.`
+  );
+}
