@@ -29,7 +29,18 @@ appId: com.fantasytradefinder.app
 #
 # 60s budget on the generate covers the trade-job poll backoff (800→4000ms),
 # matching 06-trades-deck.yaml. Deck order is server-chosen: structural
-# assertions only, never a player name.
+# assertions only, never a player name — which is also why the deck-done
+# pass loop below is a bounded repeat-while (deck SIZE is server-chosen).
+#
+# EXTENDED 2026-08-13 (#316 + #317): after the like, the flow finishes the
+# deck and pins two more fixes on the deck-done state —
+#  • #316: the summary card's copy is the "Fresh ideas land…" line, never
+#    the nonsensical "after waivers" (sabotage: revert the string → red).
+#  • #317: a tile tap on the "More ways to land <pin>" rail AFTER deck-done
+#    re-presents the featured window (deck summary yields the slot) instead
+#    of dead-clicking under a still-mounted summary (sabotage: revert the
+#    pinIdeaResumed mechanism → trades.deck-summary stays visible and its
+#    notVisible assert goes red).
 tags: [smoke, trades]
 ---
 - launchApp:
@@ -163,3 +174,53 @@ tags: [smoke, trades]
       id: "trades.find-btn"
     timeout: 20000
 - takeScreenshot: smoke-12-trades-single-pin
+
+# ── #316/#317: finish the deck — bounded pass loop ───────────────────────
+# Deck size is server-chosen (flow law: structural assertions only), so the
+# bound is a generous iteration cap; the loop exits the moment the pass
+# button unmounts (deck done → summary card takes the slot; the earlier
+# like already tallied ≥1 disposition, which is what summaryVisible needs).
+- repeat:
+    times: 40
+    while:
+      visible:
+        id: "trades.pass-btn"
+    commands:
+      - tapOn:
+          id: "trades.pass-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.deck-summary"
+    timeout: 20000
+# #316 — the deck-done copy names the real mechanisms, never "waivers".
+- assertVisible:
+    text: ".*Fresh ideas land.*"
+
+# ── #317: a tile tap after deck-done re-presents the featured window ─────
+# The rail renders BELOW the deck slot while the deck holds it (#298 second
+# mount), so scroll a row into full view before tapping (law 2).
+- scrollUntilVisible:
+    element:
+      id: "featured-trade.idea.*"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: "featured-trade.idea.*"
+# The deck (summary card included) yields the leading slot on the user's
+# own gesture — never automatically (#298 assertion 7; pinned structurally
+# by check-single-pin-actions 9a/9b).
+- extendedWaitUntil:
+    notVisible:
+      id: "trades.deck-summary"
+    timeout: 10000
+# …and the featured window is back with the tapped idea (under release,
+# trades.player_offers_calc renders it as the editable in-league calculator
+# — featured-trade.window is the stable container either way).
+- extendedWaitUntil:
+    visible:
+      id: "featured-trade.window"
+    timeout: 20000
+# Law 23 — this frame gets eyeballed on the tier-1 run.
+- takeScreenshot: smoke-12-trades-single-pin-resume

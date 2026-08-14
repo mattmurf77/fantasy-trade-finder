@@ -124,8 +124,13 @@ check('14 every reason NAMES its platform',
     /MyFantasyLeague/.test(NO_SEND_REASON.mfl),
     /Fleaflicker/.test(NO_SEND_REASON.fleaflicker),
   ], [true, true, true]);
-check('15 every reason carries the shared "Sleeper-only" explanation',
-  Object.values(NO_SEND_REASON).every((v) => v.includes('Sleeper-only')), true);
+// 15 (REWRITTEN for #309 — the old case asserted the opposite): the copy
+// claimed "Sending is Sleeper-only for now", which became false the day the
+// MFL/ESPN send paths went live (2026-08-12, D-026). No reason may ever make
+// that claim again — the fallback renders in states (kill switch, cold
+// flags, Fleaflicker) where the claim is wrong.
+check('15 no reason claims "Sleeper-only" (#309 — MFL/ESPN sends are live)',
+  Object.values(NO_SEND_REASON).some((v) => v.includes('Sleeper-only')), false);
 
 // ── SEND_SURFACES ───────────────────────────────────────────────────────
 // 16: pins the dimension values P0-7 registers in the analytics taxonomy.
@@ -215,6 +220,12 @@ check('28 always opens "Trade proposal" and closes with the footer',
     return lines[0].startsWith('Trade proposal')
       && lines[lines.length - 1] === '(Built with Fantasy Trade Finder)';
   }), true);
+
+// 29 (#309): the action clause survives the copy fix — every reason still
+// tells the user what they CAN do. Appended, never renumbered (case
+// numbering is append-only; 27 pins the no-URL rule).
+check('29 every reason carries the "copy this trade" action clause',
+  Object.values(NO_SEND_REASON).every((v) => v.includes('copy this trade')), true);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
