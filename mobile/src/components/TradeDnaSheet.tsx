@@ -803,19 +803,15 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
                   ))}
                 </View>
               ) : null}
+              {/* #312 — GIVE-LEFT / GET-RIGHT (the #209/#216 ruling): what
+                  you send renders left/first on every side-by-side trade
+                  surface (player board AWAY/FOR, idea rows, featured
+                  window, clipboard "I send:"/"I get:"). This row was the
+                  app's one violation — authored get-first because acquire
+                  is the sheet's headline motive. Pure child-order swap;
+                  testIDs/labels/handlers untouched. Pinned by
+                  mobile/tests/check-dna-side-order.js. */}
               <View style={styles.addRow}>
-                <Pressable
-                  testID="dna.targets.add-get"
-                  accessibilityRole="button"
-                  accessibilityLabel="Add someone to get"
-                  onPress={() => full.targeting!.onAdd('acquire')}
-                  style={({ pressed }) => [
-                    styles.addBtn,
-                    pressed && { backgroundColor: ink.ink3 },
-                  ]}
-                >
-                  <Text style={styles.addBtnText}>+ Add someone to get</Text>
-                </Pressable>
                 <Pressable
                   testID="dna.targets.add-send"
                   accessibilityRole="button"
@@ -827,6 +823,18 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
                   ]}
                 >
                   <Text style={styles.addBtnText}>+ Add someone to send</Text>
+                </Pressable>
+                <Pressable
+                  testID="dna.targets.add-get"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add someone to get"
+                  onPress={() => full.targeting!.onAdd('acquire')}
+                  style={({ pressed }) => [
+                    styles.addBtn,
+                    pressed && { backgroundColor: ink.ink3 },
+                  ]}
+                >
+                  <Text style={styles.addBtnText}>+ Add someone to get</Text>
                 </Pressable>
               </View>
             </>
