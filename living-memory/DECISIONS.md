@@ -485,6 +485,9 @@
 | D-043 | Shared Display Vocabularies Are Derived From One Constant | 2026-08-11 |
 | D-045 | An Inbox Row Is Written Beside the Push, Never Inside the Dispatcher | 2026-08-13 |
 | D-046 | The Bell Carries Receipts, Not Prompts; the Invite Ask Lives in the Empty State | 2026-08-13 |
+| D-047 | Device-Auth Programme: The Five Operator Defaults Ratified | 2026-08-13 |
+| D-048 | `expo-updates` Is Not Adopted; the Carve-Out It Assumed Does Not Exist | 2026-08-13 |
+| D-049 | Foreign/Stale Deck Impression IDs Are Counted-and-Dropped, Never 4xx'd | 2026-08-14 |
 
 ---
 
@@ -519,4 +522,12 @@ For substantial decisions (large refactors, vendor changes, API surface changes)
 **Decision:** **Do not adopt.** Not before S3, not in release 1. Full reasoning: [`../docs/plans/device-side-platform-auth-oi9-expo-updates-memo-2026-08-13.md`](../docs/plans/device-side-platform-auth-oi9-expo-updates-memo-2026-08-13.md). Adoption would delete PRD §8's non-negotiable "compiled into the binary, never read from a server response," so it is a **PRD amendment, not a config change**.
 **Alternatives considered:** *Adopt first* — rejected; see the memo's four disconfirming facts, each checkable, any one of which flips the verdict. *Adopt later with a transport carve-out* — **rejected as impossible**: the unit of replacement is the whole JS bundle, and the only real carve-out (moving the allowlist and op set to native) would destroy the §6.1 test harness.
 **Consequences:** Gate C's OI-9 box is discharged. **Three corrections to the Plan's own §10**, which the orchestrator authored and the independent evaluation overturned: the predicted carve-out is impossible; the trusted-computing-base argument was overstated (Render is the adversary, Expo/EAS is a different trust domain — the accurate cost is that OTA makes the operator's existing build-time reach *instant, silent, and invisible in the version string*, and signing cannot help because it is the same principal on the same laptop, nor stop a signed rollback); and OTA obsoletes **none** of the old-binary machinery, because `EXUpdatesEnabled` is `false` in every shipped build so it can never reach `1.13.2`. Sequencing: OTA is native, so it could not benefit anything before S6 and never belonged on Gate C at all. Re-open trigger: **the first public App Store release**, where the memo's disconfirming fact 3 flips; memo §9 makes that re-open executable. Provenance gap logged as **OI-22** — the R-list cannot be verified against any source in the repo.
+**Status:** Active.
+
+## D-049 — Foreign/Stale Deck Impression IDs Are Counted-and-Dropped, Never 4xx'd
+**Date:** 2026-08-14
+**Context:** LLD review found `_save_deck_outcome_safe` wrote a `deck_outcomes` row (and, under `deck.taste_vectors`, mutated the *impression owner's* taste vector) for any client-supplied ≤64-char `impression_id` — a stale or foreign id poisoned another user's personalization. The fix had to pick a rejection style and a recency bound.
+**Decision:** The helper takes a required `acting_user_id` (route-resolved, never a body field) and writes only when the impression exists, is owned by the acting user, and was served ≤30 days ago (`_DECK_OUTCOME_MAX_AGE_DAYS`, code constant). Everything else is **silently dropped and counted** — routes keep their exact status codes (always-200 for the /api/events side-channel, unchanged 200/201 elsewhere); rejects surface as `deck_outcome_rejects` on `GET /api/admin/analytics/health` (in-process, reset-on-deploy, same pattern as the ingest health counters).
+**Alternatives considered:** *4xx on invalid ids* — rejected: `impression_id` is an optional additive telemetry field; failing the parent action (a swipe, a real Sleeper/MFL/ESPN send) over telemetry inverts priorities, and the analytics convention here is accept-and-drop. *Config-key recency bound* — rejected: no operational reason to tune it without a deploy; a constant is greppable and simpler.
+**Consequences:** One extra indexed-PK SELECT per outcome write (trivial at FTF QPS; the taste path already did this read). `/api/events` outcome side-channel now requires a live session token — dead-token batches drop their deck signals (counted as `no_user`) instead of writing unattributed labels. Late-arriving offline signals older than 30 days are lost by design. Supersedable by the fuller trade-relevance-engine P0-3 work when that initiative lands.
 **Status:** Active.

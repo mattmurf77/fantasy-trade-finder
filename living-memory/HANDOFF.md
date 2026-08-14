@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-14 — Deck-outcome ownership validation built + green; branch awaits operator review](#2026-08-14--deck-outcome-ownership-validation-built--green-branch-awaits-operator-review)
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
 - [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
@@ -18,6 +19,42 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-14 — Deck-outcome ownership validation built + green; branch awaits operator review
+
+### Where I am right now
+
+The LLD-review validation hole in `_save_deck_outcome_safe` (any client-supplied
+`impression_id` wrote `deck_outcomes` and, under `deck.taste_vectors`, the
+**impression owner's** taste vector — cross-user taste poisoning) is **fixed,
+tested and documented** on worktree branch `claude/charming-lalande-6dc6b6`
+(worktree `charming-lalande-6dc6b6`, branched from `origin/main` @ `5dcf29f`).
+**Committed locally, not pushed, not merged** — awaiting operator review.
+
+- Helper now requires `acting_user_id` (route-resolved); writes only for an
+  existing, self-owned, ≤30-day-old impression. Six call sites updated
+  (swipe, flag, /api/events, Sleeper/MFL/ESPN propose). Rejects
+  counted-and-dropped ([D-049](DECISIONS.md)); counters on
+  `/api/admin/analytics/health` as `deck_outcome_rejects`.
+- Full backend suite **2741 passed / 1 skipped**. Scope block:
+  `docs/plans/deck-outcome-validation/scope.md`; api-reference updated.
+
+### What a next session should know
+
+1. **To ship:** operator reviews → merge/push to `main` (Render auto-deploys).
+   Sim-gate tier 4 (backend-only) — no sim run owed; tier call is in the scope
+   block if the operator wants to override to tier 3.
+2. **Behavior note:** the /api/events deck-signal side-channel now requires a
+   live session token — dead-token batches drop deck signals as `no_user`.
+   Watch `deck_outcome_rejects` after deploy; a high `no_user`/`stale` count
+   would mean real clients are sending outcomes we now drop (offline queues
+   older than 30 days are lost by design).
+3. `docs/plans/trade-relevance-engine/lld.md` (P0-3) specs this same
+   validation inside a larger initiative but is **not in this tree** — when
+   that lands, reconcile against this shipped subset rather than rebuilding.
+4. After merge, sweep this worktree per the recovery-ledger convention.
 
 ---
 

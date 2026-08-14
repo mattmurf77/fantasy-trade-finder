@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-14 (deck-outcome impression-ownership validation — taste-poisoning hole closed)
+
+- **Security/correctness fix, backend-only.** `_save_deck_outcome_safe` accepted any client-supplied `impression_id` and wrote `deck_outcomes` + (under `deck.taste_vectors`) the **impression owner's** taste vector — so a stale or foreign id let one session label and taste-poison another user's history. Found by the dual-agent LLD review; standalone subset of the trade-relevance-engine P0-3 spec (initiative not in this tree).
+- **Fix:** helper now requires `acting_user_id` (route-resolved, never body) and writes only when the impression exists, is owned by the acting user, and was served ≤30 days ago. All six call sites covered (swipe, flag, /api/events side-channel, Sleeper/MFL/ESPN propose). Rejects are counted-and-dropped ([D-049](DECISIONS.md)) — response contracts byte-identical; counters (`no_user`/`unknown`/`foreign`/`stale`) on `GET /api/admin/analytics/health` as `deck_outcome_rejects`.
+- **Tests:** helper-level (foreign/stale/unknown/no-user reject + legitimate-path regression, `test_deck_taste.py`) and route-level (`test_deck_signal_v2.py`); full backend suite **2741 passed / 1 skipped**. Scope block: [`docs/plans/deck-outcome-validation/scope.md`](../docs/plans/deck-outcome-validation/scope.md); api-reference updated.
+- **On the worktree branch `claude/charming-lalande-6dc6b6`, NOT merged** — awaiting operator review/push (sim-gate tier 4, no sim run required).
+
+---
+
 ## 2026-08-14 (sleeper FAAB: the encoding fix is right, the *shape* it encodes is unverified — Q-016)
 
 - **Docs-only. No code change** — `79123a0` (2026-08-13) already fixed the `waiver_budget` GraphQL encoding, and correctly. This session independently reproduced the bug from the 2026-08-12 device-side-auth review and converged on the same design (`_graphql_object_literal`, bare keys, GraphQL-Name-validated). **The duplicate implementation was discarded, not pushed.**

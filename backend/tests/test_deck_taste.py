@@ -199,7 +199,7 @@ def test_flag_off_no_stamp_and_no_writes(mem_engine):
     with ExitStack() as stack:
         stack.enter_context(patch.object(server, "_deck_signal_v2_enabled", lambda: True))
         stack.enter_context(patch.object(server, "_deck_taste_enabled", lambda: False))
-        server._save_deck_outcome_safe(iid, "like")
+        server._save_deck_outcome_safe(iid, "like", acting_user_id=ME)
     assert load_user_taste(ME) == []
 
 
@@ -494,7 +494,8 @@ def test_update_and_serving_never_throw(mem_engine):
     with ExitStack() as stack:
         stack.enter_context(patch.object(server, "_deck_signal_v2_enabled", lambda: True))
         stack.enter_context(patch.object(server, "_deck_taste_enabled", lambda: True))
-        server._save_deck_outcome_safe("nonexistent-impression", "like")
+        server._save_deck_outcome_safe("nonexistent-impression", "like",
+                                       acting_user_id=ME)
 
 
 def test_unknown_impression_or_zero_reward_writes_nothing(mem_engine):
@@ -502,3 +503,76 @@ def test_unknown_impression_or_zero_reward_writes_nothing(mem_engine):
     assert load_user_taste(ME) == []
     _seed_liked_impressions(mem_engine, PICK_CARD(), 1, action="undo")
     assert load_user_taste(ME) == []
+
+
+# ---------------------------------------------------------------------------
+# Impression-ownership validation — a client-supplied impression_id only
+# writes when it exists, belongs to the ACTING user, and is recent. Anything
+# else is counted-and-dropped: no deck_outcomes row, no taste write.
+# ---------------------------------------------------------------------------
+
+def _outcome_count(eng):
+    with eng.connect() as conn:
+        return conn.execute(text("SELECT COUNT(*) FROM deck_outcomes")).scalar()
+
+
+def _call_outcome_safe(iid, acting_user_id):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(server, "_deck_signal_v2_enabled", lambda: True))
+        stack.enter_context(patch.object(server, "_deck_taste_enabled", lambda: True))
+        server._save_deck_outcome_safe(iid, "like", acting_user_id=acting_user_id)
+
+
+def test_foreign_impression_rejected_writes_nothing(mem_engine):
+    attrs = taste.card_taste_attrs(PICK_CARD(), PLAYERS, SEED)
+    iid = uuid.uuid4().hex
+    with mem_engine.begin() as conn:
+        _insert_impression(conn, iid, features={"taste_attrs": attrs},
+                           user_id=OPP)   # owned by the OTHER user
+    before = server.deck_outcome_reject_counters()
+
+    _call_outcome_safe(iid, acting_user_id=ME)
+
+    assert _outcome_count(mem_engine) == 0, "foreign id must not label anyone"
+    assert load_user_taste(OPP) == [], "owner's taste vector stays untouched"
+    assert load_user_taste(ME) == []
+    after = server.deck_outcome_reject_counters()
+    assert after["foreign"] == before["foreign"] + 1
+
+
+def test_unknown_stale_and_unauthenticated_rejected(mem_engine):
+    before = server.deck_outcome_reject_counters()
+
+    # Unknown impression_id ⇒ counted, nothing written.
+    _call_outcome_safe(uuid.uuid4().hex, acting_user_id=ME)
+    # Stale impression (own, but past the recency bound) ⇒ counted-and-dropped.
+    stale_iid = uuid.uuid4().hex
+    with mem_engine.begin() as conn:
+        _insert_impression(conn, stale_iid, user_id=ME,
+                           age_days=server._DECK_OUTCOME_MAX_AGE_DAYS + 15)
+    _call_outcome_safe(stale_iid, acting_user_id=ME)
+    # No route-resolved user (e.g. /api/events with a dead token) ⇒ dropped.
+    fresh_iid = uuid.uuid4().hex
+    with mem_engine.begin() as conn:
+        _insert_impression(conn, fresh_iid, user_id=ME)
+    _call_outcome_safe(fresh_iid, acting_user_id=None)
+
+    assert _outcome_count(mem_engine) == 0
+    assert load_user_taste(ME) == []
+    after = server.deck_outcome_reject_counters()
+    assert after["unknown"] == before["unknown"] + 1
+    assert after["stale"] == before["stale"] + 1
+    assert after["no_user"] == before["no_user"] + 1
+
+
+def test_own_recent_impression_still_writes_outcome_and_taste(mem_engine):
+    attrs = taste.card_taste_attrs(PICK_CARD(), PLAYERS, SEED)
+    iid = uuid.uuid4().hex
+    with mem_engine.begin() as conn:
+        _insert_impression(conn, iid, features={"taste_attrs": attrs},
+                           user_id=ME)
+    _call_outcome_safe(iid, acting_user_id=ME)
+
+    assert _outcome_count(mem_engine) == 1, "the legitimate path is unchanged"
+    rows = {r["attr"]: r for r in load_user_taste(ME)}
+    assert rows[attrs[0]]["w_short"] == pytest.approx(1.0)

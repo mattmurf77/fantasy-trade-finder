@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-14 — Deck-outcome impression-ownership validation (full backend suite green)
+
+- **Change:** backend-only — `_save_deck_outcome_safe` ownership/existence/recency validation + `deck_outcome_rejects` health counters; branch `claude/charming-lalande-6dc6b6`, not merged.
+- **Ran:** full backend suite `pytest backend/tests/ -q` → **2741 passed, 1 skipped** (4m12s, local SQLite). Includes 4 new/extended validation tests: `test_deck_taste.py` (foreign id writes nothing — owner's taste untouched; unknown/stale/no-user counted; own-recent path still writes outcome + taste) and `test_deck_signal_v2.py::test_foreign_or_stale_impression_rejected_across_routes` (swipe/flag//api/events all 200-but-write-nothing). Two pre-existing signal tests updated to seed real impressions (they minted ids with no backing row — exactly the pattern the fix rejects).
+- **Sim gate:** tier 4 (backend-only, no route-contract change for legitimate clients) — no sim run; tier call recorded in [`docs/plans/deck-outcome-validation/scope.md`](../docs/plans/deck-outcome-validation/scope.md) for operator override pre-merge.
+
+---
+
 ## 2026-08-14 — sleeper FAAB Q-016 (docs-only; no new tests, no posture change)
 
 - **Change:** docs + living-memory only — module docstring caveat in `backend/sleeper_write.py`, `docs/integrations/sleeper.md`, [Q-016](OPEN_QUESTIONS.md). **No behavior touched, no tests added.**

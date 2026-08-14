@@ -5166,12 +5166,13 @@ def load_deck_impression(impression_id: str) -> dict | None:
                 deck_impressions_table.c.user_id,
                 deck_impressions_table.c.league_id,
                 deck_impressions_table.c.features_json,
+                deck_impressions_table.c.served_at,
             ).where(deck_impressions_table.c.impression_id == impression_id)
         ).first()
     if row is None:
         return None
     return {"user_id": row.user_id, "league_id": row.league_id,
-            "features_json": row.features_json}
+            "features_json": row.features_json, "served_at": row.served_at}
 
 
 def load_user_taste(user_id: str) -> list[dict]:

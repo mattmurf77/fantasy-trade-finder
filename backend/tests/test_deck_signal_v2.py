@@ -74,6 +74,18 @@ def _insert_decision(conn, user_id, give_ids, recv_ids, decision,
     })
 
 
+def _insert_impression(conn, iid, user_id=ME, league_id=LEAGUE, age_days=0.0):
+    """A served impression row — outcome routes only accept an impression_id
+    that exists, is owned by the acting user, and is recent."""
+    served = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    conn.execute(text(
+        "INSERT INTO deck_impressions "
+        "(impression_id, user_id, league_id, deck_job_id, card_index, "
+        " features_json, propensity, shape_bucket, served_at) "
+        "VALUES (:iid, :uid, :lid, 'job-x', 0, '{}', 1.0, '1x1', :served)"
+    ), {"iid": iid, "uid": user_id, "lid": league_id, "served": served})
+
+
 def _insert_member_ranking(conn, user_id, player_id, updated_at,
                            league_id=LEAGUE, scoring_format="1qb_ppr"):
     conn.execute(text(
@@ -316,6 +328,8 @@ def test_swipe_like_outcome(harness):
     )
     trade_svc._trade_cards[card.trade_id] = card
     iid = uuid.uuid4().hex
+    with eng.begin() as conn:
+        _insert_impression(conn, iid)
     with _signal(True):
         res = _post(client, "/api/trades/swipe", {
             "trade_id": "manual1", "decision": "like",
@@ -340,6 +354,8 @@ def test_swipe_without_impression_id_writes_nothing(harness):
 def test_bad_trade_flag_writes_not_interested(harness):
     client, job, trade_svc, eng = harness
     iid = uuid.uuid4().hex
+    with eng.begin() as conn:
+        _insert_impression(conn, iid)
     with _signal(True):
         res = _post(client, "/api/trades/flag", {
             "give_player_ids": ["g1"], "receive_player_ids": ["r1"],
@@ -348,6 +364,35 @@ def test_bad_trade_flag_writes_not_interested(harness):
     assert res.status_code in (200, 201), res.get_data(as_text=True)
     rows = _outcome_rows(eng)
     assert [(r.impression_id, r.action) for r in rows] == [(iid, "not_interested")]
+
+
+def test_foreign_or_stale_impression_rejected_across_routes(harness):
+    """Ownership validation: a foreign or stale impression_id riding the
+    swipe, flag, or /api/events routes is accepted (always-200) but writes
+    no deck_outcomes row — one session can't label another user's history."""
+    client, job, trade_svc, eng = harness
+    foreign, stale = uuid.uuid4().hex, uuid.uuid4().hex
+    with eng.begin() as conn:
+        _insert_impression(conn, foreign, user_id=OPP)      # another user's
+        _insert_impression(conn, stale, age_days=45)        # own, but stale
+    with _signal(True):
+        cards = _run_job(eng, job)
+        res = _post(client, "/api/trades/swipe", {
+            "trade_id": cards[0]["trade_id"], "decision": "pass",
+            "impression_id": foreign, "dwell_ms": 1000,
+        })
+        assert res.status_code == 200, res.get_data(as_text=True)
+        res = _post(client, "/api/trades/flag", {
+            "give_player_ids": ["g1"], "receive_player_ids": ["r1"],
+            "league_id": LEAGUE, "impression_id": stale,
+        })
+        assert res.status_code in (200, 201), res.get_data(as_text=True)
+        res = _post(client, "/api/events", {"events": [
+            {"event_type": "deck_card_viewed",
+             "props": {"impression_id": foreign, "dwell_ms": 700}},
+        ]})
+        assert res.status_code == 200
+    assert _outcome_rows(eng) == []
 
 
 def test_events_viewed_and_undo_append(harness):

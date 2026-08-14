@@ -82,7 +82,8 @@ from .database import (
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
-    save_deck_impressions, save_deck_outcome, load_board_state,
+    save_deck_impressions, save_deck_outcome, load_deck_impression,
+    load_board_state,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
     # frozen legacy seam, global prior base rate)
     load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
@@ -3659,22 +3660,73 @@ def _log_deck_signal_impressions(
     return imp_by_card
 
 
+# Impression-ownership validation (LLD-review fix, 2026-08-14). impression_id
+# arrives in client-supplied bodies, and the taste update it triggers mutates
+# the IMPRESSION OWNER's vector — so an unvalidated id lets one session write
+# outcomes (and taste) into another user's history. Rejects are silent
+# (always-200 analytics convention) but counted, surfaced on
+# /api/admin/analytics/health as deck_outcome_rejects.
+_DECK_OUTCOME_MAX_AGE_DAYS = 30
+_deck_outcome_reject_lock = threading.Lock()
+_deck_outcome_rejects: dict[str, int] = {
+    "no_user":    0,   # route resolved no authenticated user (e.g. dead token)
+    "unknown":    0,   # impression_id not in deck_impressions
+    "foreign":    0,   # impression exists but belongs to another user
+    "stale":      0,   # served_at older than _DECK_OUTCOME_MAX_AGE_DAYS
+}
+
+
+def _deck_outcome_reject(reason: str, impression_id: str) -> None:
+    with _deck_outcome_reject_lock:
+        _deck_outcome_rejects[reason] = _deck_outcome_rejects.get(reason, 0) + 1
+    log.warning("deck outcome rejected (%s): impression_id=%s",
+                reason, impression_id[:64])
+
+
+def deck_outcome_reject_counters() -> dict[str, int]:
+    """Snapshot for the admin analytics health route (reset on deploy)."""
+    with _deck_outcome_reject_lock:
+        return dict(_deck_outcome_rejects)
+
+
 def _save_deck_outcome_safe(
     impression_id,
     action: str,
     *,
+    acting_user_id,
     dwell_ms=None,
     detail_expanded=None,
     calc_opened=None,
 ) -> None:
     """Flag-gated, never-throwing deck_outcomes append. The single call
     idiom for every route that accepts an optional impression_id: absent id
-    or flag off ⇒ exact pre-F1 behavior (no write, no error path)."""
+    or flag off ⇒ exact pre-F1 behavior (no write, no error path).
+
+    `acting_user_id` is the route-resolved session user, never a body field.
+    The write only happens when the impression exists, is owned by the
+    acting user, and was served within _DECK_OUTCOME_MAX_AGE_DAYS — anything
+    else is counted-and-dropped, so a stale or foreign impression_id can
+    never label (or taste-poison) another user's history."""
     if not impression_id or not isinstance(impression_id, str):
         return
     if not _deck_signal_v2_enabled():
         return
     try:
+        if not acting_user_id:
+            _deck_outcome_reject("no_user", impression_id)
+            return
+        imp = load_deck_impression(impression_id[:64])
+        if imp is None:
+            _deck_outcome_reject("unknown", impression_id)
+            return
+        if imp["user_id"] != acting_user_id:
+            _deck_outcome_reject("foreign", impression_id)
+            return
+        age_days = _taste_service._age_days(
+            imp.get("served_at"), datetime.now(timezone.utc))
+        if age_days > _DECK_OUTCOME_MAX_AGE_DAYS:
+            _deck_outcome_reject("stale", impression_id)
+            return
         dw = int(dwell_ms) if isinstance(dwell_ms, (int, float)) and not isinstance(dwell_ms, bool) else None
         save_deck_outcome(
             impression_id   = impression_id[:64],
@@ -7151,6 +7203,7 @@ def ingest_client_events_route():
                     _save_deck_outcome_safe(
                         _props.get("impression_id"),
                         _action,
+                        acting_user_id=user_id,
                         dwell_ms=_props.get("dwell_ms"),
                     )
         except Exception as sig_err:
@@ -7178,6 +7231,7 @@ def analytics_health_route():
     return jsonify({
         "since":                  "deploy",
         "counters":               counters,
+        "deck_outcome_rejects":   deck_outcome_reject_counters(),
         "wal":                    boot["wal"],
         "event_id_index_present": boot["event_id_index_present"],
         "wal_file_bytes":         wal_file_bytes(),
@@ -10219,6 +10273,7 @@ def swipe_trade():
         _save_deck_outcome_safe(
             body.get("impression_id"),
             decision,   # 'like' | 'pass' (validated by record_decision above)
+            acting_user_id  = g_user_id,
             dwell_ms        = body.get("dwell_ms"),
             detail_expanded = body.get("detail_expanded"),
             calc_opened     = body.get("calc_opened"),
@@ -10521,7 +10576,8 @@ def flag_bad_trade():
     # F1 (deck.signal_v2) — a bad-trade flag is the deck's explicit
     # "not interested" signal (the accompanying pass swipe records its own
     # outcome). Optional additive field; absent/flag-off ⇒ no-op.
-    _save_deck_outcome_safe(body.get("impression_id"), "not_interested")
+    _save_deck_outcome_safe(body.get("impression_id"), "not_interested",
+                            acting_user_id=g_user_id)
 
     status = 200 if result.get("duplicate") else 201
     return jsonify({
@@ -12777,7 +12833,8 @@ def propose_trade_to_sleeper():
     # F1 (deck.signal_v2) — proposal-sent outcome when the deck card that
     # sourced this send carried an impression_id. Additive/optional; only
     # reached on a successful Sleeper propose.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+                            acting_user_id=user_id)
     # P0-7 — the send actually landed in Sleeper. This is the ONLY place
     # in the product that knows that, which is why the success leg is
     # server-fired while attempt/failure are client-fired (hld.md S-30).
@@ -22435,7 +22492,8 @@ def propose_trade_to_mfl():
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+                            acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11) — confirmed-success
     # only; every failure branch (incl. the mfl_asset_unmapped hard block)
     # returned before this. `platform` is mandatory/non-null. MFL picks ARE
@@ -22920,7 +22978,8 @@ def propose_trade_to_espn():
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
     # routes; additive/optional, only reached on a successful ESPN write.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose")
+    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+                            acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11, rescoped to non-Sleeper
     # platforms only) — confirmed-success ONLY; every failure branch (incl.
     # both 422 hard blocks) returned before this. `platform` is mandatory/
