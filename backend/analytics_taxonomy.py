@@ -278,6 +278,57 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # block there. `notif_row_tapped` stays INTENT — it is the one number
     # this whole batch exists to produce.
     "notif_inbox_opened", "notif_row_tapped", "notif_empty_state_shown",
+    # ── Dropped-emitter backlog registration, 2026-08-13 ─────────────────
+    # Tracking plan (the addendum this module's docstring demands):
+    # docs/business/analytics/2026-08-13-dropped-emitter-backlog.md.
+    #
+    # REGISTRATION ONLY — every name below has a LIVE mobile track() call
+    # that has been counted-and-dropped (dropped_unknown_type) behind a 200
+    # since it shipped. This is the remainder of the 2026-08-11 sweep that
+    # found 33 of 73 emitted names unregistered (G-031); most are teardown
+    # S3/S4 instrumentation whose metrics have been dark since ship.
+    # NO new emitter ships in this commit; prop rows below mirror what the
+    # shipped emitters actually send TODAY.
+    #
+    # Eight of these are impression / dismissal / exposure class and land
+    # in analytics_queries.NON_INTENT_EVENTS in this SAME commit (the
+    # DAU-seam rule; see that file). The rest are real user decisions and
+    # stay INTENT — which still moves INTENT coverage on ship day, so the
+    # seam date is recorded in the addendum.
+    #
+    # DELIBERATELY ABSENT: `quickset_completed`. The client emitter in
+    # QuickSetTiersScreen.tsx collided with the server-fired name (the
+    # scoped save fires the authoritative row) — registering it here would
+    # trip the import-time disjointness assert below and take the app down
+    # at boot. The client emitter is REMOVED in this same commit; its
+    # `onboarding` prop (was this walk an onboarding return?) is the one
+    # signal that dies with it, recorded as accepted loss in the addendum.
+    #
+    # Interrupt arbiter + prompt surfaces (teardown S4 PRD-04,
+    # flag ux.prompt_arbiter):
+    "prompt_shown", "apple_banner_dismissed",
+    "push_primer_shown", "push_primer_accepted", "push_primer_dismissed",
+    # Help surface (teardown S4 PRD-01, flag ux.help_surface):
+    "help_opened", "help_read_more_tapped",
+    # Player context menu (teardown S3 PRD-02, flag ux.player_context_menu):
+    "player_menu_opened",
+    # Undo affordances (teardown S3 PRD-03 toast-undo family):
+    "calc_clear_undone", "match_dismiss_undone", "suppression_undo_tapped",
+    # Trades deck card actions + pin lifecycle:
+    "deck_summary_viewed", "demo_bridge_tapped",
+    "trade_asset_removed", "trade_edit_in_calculator_tapped",
+    "trade_keep_side_tapped", "trade_pin_cleared",
+    "trade_swap_suggest_opened", "untouchable_toggled",
+    # Trios entry + session exposure (onboarding 8b retention metric):
+    "trio_entry_tapped", "trio_session_started",
+    # Settings:
+    "notif_denied_settings_shown", "notif_denied_settings_tapped",
+    "pick_pricing_mode_changed", "stud_tax_mode_changed",
+    # Guided tour re-enable (Settings row; the tour family is above):
+    "guide_tour_reenabled",
+    # Rating prompt REQUEST (growth.rating_prompt) — the OS decides whether
+    # a dialog actually appears; we can only instrument the request:
+    "rating_prompt_requested",
 })
 
 # ---------------------------------------------------------------------------
@@ -787,6 +838,50 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   joined". `invite_offered` is whether the penetration gate opened.
     "notif_empty_state_shown": frozenset({"not_joined", "total_mates",
                                           "invite_offered"}),
+    # ── Dropped-emitter backlog registration, 2026-08-13 ─────────────────
+    # Every row mirrors what the SHIPPED emitter sends today — no reserved
+    # keys, no reconciliation renames (the addendum records call sites).
+    # `surface` on prompt_shown is the InterruptSurface enum
+    # (quickset_prompt | coach_mark | apple_banner | outlook_banner —
+    # mobile useInterruptCoordinator.ts, the values are carried there).
+    "prompt_shown":            frozenset({"surface"}),
+    "apple_banner_dismissed":  frozenset(),
+    # push_primer_shown.trigger ∈ session | want_it (usePushPriming.ts);
+    # push_primer_dismissed.declines is the post-increment decline count.
+    "push_primer_shown":       frozenset({"trigger"}),
+    "push_primer_accepted":    frozenset(),
+    "push_primer_dismissed":   frozenset({"declines"}),
+    # `topic` is the HelpSheet topic key (matching | trade_pricing today).
+    "help_opened":             frozenset({"topic"}),
+    "help_read_more_tapped":   frozenset({"topic"}),
+    # `surface` ∈ matches | matches_awaiting | trades | trios (the trios
+    # mount omits `side`); `side` ∈ give | receive where present.
+    "player_menu_opened":      frozenset({"surface", "side"}),
+    "calc_clear_undone":       frozenset(),
+    "match_dismiss_undone":    frozenset({"match_id"}),
+    "suppression_undo_tapped": frozenset(),
+    # sessionTally spread + deck length at summary render.
+    "deck_summary_viewed":     frozenset({"passed", "liked", "proposed",
+                                          "deck_size"}),
+    "demo_bridge_tapped":      frozenset(),
+    "trade_asset_removed":     frozenset({"side"}),
+    "trade_edit_in_calculator_tapped": frozenset(),
+    "trade_keep_side_tapped":  frozenset({"side"}),
+    # `restored` — whether clearing the pin restored a pre-pin deck snapshot.
+    "trade_pin_cleared":       frozenset({"restored"}),
+    "trade_swap_suggest_opened": frozenset({"side"}),
+    # `marked` is the RESULTING untouchable state (post-toggle).
+    "untouchable_toggled":     frozenset({"marked"}),
+    "trio_entry_tapped":       frozenset({"from"}),
+    "trio_session_started":    frozenset(),
+    "notif_denied_settings_shown":  frozenset(),
+    "notif_denied_settings_tapped": frozenset(),
+    "pick_pricing_mode_changed":    frozenset({"mode"}),
+    "stud_tax_mode_changed":        frozenset({"mode"}),
+    "guide_tour_reenabled":         frozenset(),
+    # `version` is the app version the request fired under (StoreReview
+    # once-per-version backoff key).
+    "rating_prompt_requested":      frozenset({"trigger", "version"}),
 }
 
 

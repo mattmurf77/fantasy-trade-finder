@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-13 — Dropped-emitter backlog built on branch; ship HELD on operator's bright-line yes](#2026-08-13--dropped-emitter-backlog-built-on-branch-ship-held-on-operators-bright-line-yes)
 - [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
 - [2026-08-13 — Notification inbox growth surface SHIPPED (PR #113, build 109)](#2026-08-13--notification-inbox-growth-surface-shipped-pr-113-build-109)
@@ -20,7 +21,43 @@
 
 ---
 
-## 2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed
+## 2026-08-13 — Dropped-emitter backlog built on branch; ship HELD on operator's bright-line yes
+
+### Where I am right now
+
+The G-031 dropped-emitter backlog (NEXT 0h — "29 remaining") is **built and
+verified on branch `claude/elegant-mccarthy-ef63f8`** (worktree
+`elegant-mccarthy-ef63f8`, from `origin/main` @ `60fccc7`), **not merged**:
+taxonomy is a bright-line surface and the operator has not yet confirmed.
+
+- **27 names registered** in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`
+  (props mirror the shipped emitters verbatim — no reserved keys, no renames);
+  8 impression/dismissal/outcome-class names added to `NON_INTENT_EVENTS` in
+  the same change (DAU-seam rule).
+- **1 emitter deleted:** client `quickset_completed`
+  (`QuickSetTiersScreen.tsx`) — server-authoritative name, disjointness
+  assert makes registration impossible. Accepted loss: its `onboarding` prop.
+- **Docs:** addendum `docs/business/analytics/2026-08-13-dropped-emitter-backlog.md`
+  (per-event table: call sites, props, INTENT class, teardown-PRD source);
+  cross-client-invariants updated (backlog 29 → 0); G-031 + NEXT 0h updated.
+- **Verified:** import asserts + 243 backend tests green (events/analytics/
+  observability/mock-draft/pick-assignment suites). Mobile `tsc` NOT run — no
+  `node_modules` in the worktree; owed at merge.
+
+### What a next session should do
+
+1. **Get the operator's confirming yes** (bright-line: taxonomy change).
+2. On yes: merge to `main`, run mobile `tsc --noEmit` in the main checkout,
+   deploy-then-probe at least one newly registered name against prod
+   `POST /api/events` with `X-Device-Id` (require `accepted ≥ 1 AND
+   dropped == 0` — the loose-grep trap from build 110), add the CHANGELOG
+   entry, then sweep the worktree per the recovery ledger.
+3. The seam: rows for all 27 names begin at ship day; 19 are INTENT, so
+   INTENT coverage widens — don't trend per-feature action counts across it.
+
+### Blocking
+
+Operator decision only. No open technical questions.
 
 ### Where I am right now
 

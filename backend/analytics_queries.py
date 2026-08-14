@@ -175,6 +175,45 @@ NON_INTENT_EVENTS = frozenset({
     # built to produce.
     "notif_inbox_opened",
     "notif_empty_state_shown",
+    # ── Dropped-emitter backlog registration, 2026-08-13 — added in the
+    # SAME commit that registered 27 long-dropped live emitters in
+    # ALLOWED_CLIENT_EVENTS (tracking plan:
+    # docs/business/analytics/2026-08-13-dropped-emitter-backlog.md).
+    # Per-event:
+    #
+    #   prompt_shown / push_primer_shown / notif_denied_settings_shown —
+    #     IMPRESSIONS. The user did nothing; a surface rendered. Same
+    #     class as invite_cta_shown above.
+    #
+    #   apple_banner_dismissed / push_primer_dismissed — dismissal-class,
+    #     like quickset_abandoned and league_team_closed: something shown
+    #     TO the user was waved away. The accepted twins stay INTENT.
+    #
+    #   deck_summary_viewed — an end-of-deck IMPRESSION; every firing is
+    #     preceded in-session by the swipes that produced the tally.
+    #
+    #   trio_session_started — fires on RankScreen MOUNT, once per visit:
+    #     navigation class, the peer of league_view and notif_inbox_opened.
+    #     The retention read that consumes it queries the name directly and
+    #     is unaffected by intent classification.
+    #
+    #   rating_prompt_requested — a SYSTEM OUTCOME: the client asked
+    #     StoreKit for a review dialog the OS may never show. Nothing the
+    #     user chose.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: every other name in
+    # the 2026-08-13 batch — undo taps, menu opens, mode changes, help
+    # opens, pin/keep/swap/remove card actions, push_primer_accepted,
+    # notif_denied_settings_tapped, trio_entry_tapped — all real user
+    # decisions, the peers of find_trades_tapped and league_team_opened.
+    "prompt_shown",
+    "push_primer_shown",
+    "notif_denied_settings_shown",
+    "apple_banner_dismissed",
+    "push_primer_dismissed",
+    "deck_summary_viewed",
+    "trio_session_started",
+    "rating_prompt_requested",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

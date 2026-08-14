@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-13 — Dropped-emitter backlog registration (built on branch; NOT shipped — bright-line hold)
+
+- **Change:** branch `claude/elegant-mccarthy-ef63f8` (worktree), from `origin/main` @ `60fccc7`, rebased onto `1e69562`. 27 long-dropped mobile `track()` names registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (props mirror the shipped emitters verbatim), 8 of them added to `NON_INTENT_EVENTS` in the same change; client `quickset_completed` emitter deleted from `QuickSetTiersScreen.tsx` (server-authoritative name, disjointness assert). Addendum: `docs/business/analytics/2026-08-13-dropped-emitter-backlog.md`; cross-client-invariants + G-031 + NEXT 0h updated. Zeroes the G-031 backlog.
+- **Verified:** import-time asserts pass (namespace disjointness + props coverage; direct import probe). `pytest backend/tests/test_events_api.py backend/tests/test_analytics_p0.py -q` → **64 passed**. `pytest backend/tests/test_api_observability.py backend/tests/test_mock_draft.py backend/tests/test_pick_assignment.py -q` → **179 passed**. Mobile `npx tsc --noEmit` exit **0** (run in the worktree via a node_modules symlink from the main checkout).
+- **NOT verified yet:** deploy-then-probe — owed post-ship for at least one newly registered name (`accepted ≥ 1 AND dropped == 0`, with `X-Device-Id` set, per the build-110 trap).
+- **Sim gate: not applicable** — backend registries + one telemetry-line removal; zero user-visible behavior. Maestro delta n/a for the same reason.
+- **SHIP:** operator confirmed the bright-line taxonomy change 2026-08-13 ("Ship it"); merge in progress — ship evidence appended below on completion.
+
+---
+
 ## 2026-08-13 — Device-auth S0 (FAAB fix shipped; vault + Sentry scrub held, Maestro waived)
 
 - **Change:** S0, the ship-now bundle (Plan §12). **Lane A — FAAB GraphQL object-literal fix: SHIPPED to `main`** (`79123a0`), backend-only so the pre-push sim gate did not apply. **Lane B — `credentialVault.ts` + legacy migration + Sentry credential-leak scrub: built, tested, HELD** on `feat/s0-bundle` awaiting an unrelated release. **Maestro gate WAIVED by the operator** ("Waive the Maestro gate"); no flow was authored or run.
