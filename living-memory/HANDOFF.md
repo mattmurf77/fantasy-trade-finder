@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree)
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
 - [2026-08-13 — Mock draft repaired + manual mode shipped (v1.13.3 build 110); Tier-1 sim owed](#2026-08-13--mock-draft-repaired--manual-mode-shipped-v1133-build-110-tier-1-sim-owed)
 - [2026-08-13 — Device-auth design programme complete; branch awaits operator push](#2026-08-13--device-auth-design-programme-complete-branch-awaits-operator-push)
@@ -18,6 +19,41 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)
+
+### Where I am right now
+
+Complete and green on branch `feat/roster-history` (worktree `.claude/worktrees/roster-history`,
+base `5dcf29f`). Nine commits: design docs → scope block → schema → writers → tests → fixes →
+docs. **FULL gates** — schema + data collection, scope block filled, no express. Ship next.
+
+### The load-bearing facts for whoever touches this
+
+1. **Precedence, not recency:** `weekly` (server-fetched, orphans included) outranks `sync`
+   (client-posted). The on-sync writer no-ops when a weekly row holds the period. Breaking
+   this silently deletes orphan teams (YR-6).
+2. **The snapshot block is LAST in the session-init daemon** — the pick fold-in reads
+   `draft_picks`, which the owned-pick sibling block writes. Reordering makes `pick_ids`
+   quietly short.
+3. **Never move the platform snapshot call inside `replace_espn_league_members`'s
+   transaction** (zero-members failure mode). Seven callers, all hooked after commit.
+4. **Gate 0 is still with the operator** (the `player_value_history` density query — the
+   plans README). It changes cron-migration urgency, not this design. One week post-ship,
+   run the `source`-column liveness read (runbook).
+5. **The review docs' ISO example was wrong** (2026-12-31 = `2026-W53`); tests pin the truth.
+6. **C3 shipped in P0** — the mock-draft branches that blocked it are merged (PR #114),
+   though the stale branch refs still exist on origin.
+
+### Owed / next
+
+- **P1:** C5 personal-Elo cadence backstop is COVERED by `league_board_history`; remaining
+  P1 item is the backfill audit. **P2:** end-of-season fetchers + ESPN/MFL transaction-log
+  retention check. **P3:** recap compute + UI + the nine analytics events (addendum first).
+- The sweep has **never run against a live platform API** — first real evidence is the
+  liveness read one week post-ship.
 
 ---
 

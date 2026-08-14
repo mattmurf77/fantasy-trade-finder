@@ -102,6 +102,10 @@ const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   // renders correctly on day one instead of grey-belling until someone
   // notices. Costs one line; the alternative is a silent regression.
   counter_offer:                 { name: 'swap',  color: ice.base },
+  // ADR-011 / YR-8: the weekly roster sweep hit an expired stored ESPN
+  // cookie — a credential problem became a visible re-auth ask instead of
+  // a silent gap in the user's season history. warn = action wanted.
+  espn_reconnect:                { name: 'reload', color: semantic.warn },
 };
 const DEFAULT_ROW_GLYPH: { name: IconName; color: string } = {
   name: 'bell',

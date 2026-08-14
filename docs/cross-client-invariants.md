@@ -96,6 +96,7 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 | `match_expiring` | 15-min cron | `match` / warn | Matches |
 | `deck_replenished` | weekly replenish job | `trade` / ice | Trades |
 | `counter_offer` | **no emitter today** — mapped so it renders correctly if the kind ever ships | `swap` / ice | Matches |
+| `espn_reconnect` | weekly roster sweep hitting an expired/missing stored ESPN cookie (ADR-011/YR-8) — once per credential-expiry episode, keyed on `verified_at` | `reload` / warn | League |
 
 **Four independent consumers, no shared source.** Adding a value without updating all four produces no error, no warning and no log line — just an anonymous grey bell with a dead tap that nobody notices until someone reads the code:
 

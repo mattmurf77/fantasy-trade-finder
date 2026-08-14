@@ -53,6 +53,10 @@ const TYPES = [
   'referral_joined',
   'league_member_joined', 'league_member_unlocked_trades',
   'match_expiring', 'deck_replenished', 'counter_offer',
+  // ADR-011 (roster-history P0): the weekly sweep's "reconnect ESPN"
+  // nudge — written server-side when a private league's stored cookie
+  // stops authenticating.
+  'espn_reconnect',
 ];
 
 // ── 1. mobile ROW_GLYPHS ──────────────────────────────────────────────────

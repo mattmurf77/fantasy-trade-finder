@@ -1014,6 +1014,173 @@ player_value_history_table = Table("player_value_history", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# league_roster_history — append-only league-state snapshots (#46 Wrapped)
+# ---------------------------------------------------------------------------
+# ADR-011. player_value_history above logs the MARKET side daily; this logs
+# the OWNERSHIP side. A team's value is roster x values — this is the half
+# that league_members.roster_data was overwriting on every sync (zero rows
+# of history before 2026-08).
+#
+# WRITTEN FROM three triggers, one idempotent writer (roster_history.py):
+#   A. on-sync — beside the two league_members writers, in its OWN
+#      transaction AFTER theirs commits. NEVER inside
+#      replace_espn_league_members' engine.begin() block: a snapshot
+#      failure there would roll back the delete+insert and leave the league
+#      with ZERO members (and G-040 rules out begin_nested as a middle
+#      ground on main-engine SQLite).
+#   B. the daily-tick weekday >= gate (server-side fetch, every platform,
+#      every team — YR-6/YR-8).
+#   C. POST /api/cron/roster-snapshot — the manual/external lever.
+#
+# team_key is the platform-native TEAM SLOT, never derived from a user id:
+#   sleeper:<lid>.r<roster_id> | espn:<lid>.t<team_id>
+#   | mfl:<lid>.f<franchise_id> | fleaflicker:<lid>.t<team_id>
+# ESPN's synthetic member id is SWID-first and SWID rotates on re-import
+# (see the orphaned-pick notes below), so a user_id-derived key would split
+# one team's season into partial charts with no error anywhere.
+# owner_user_id is a nullable, RE-STAMPABLE attribute — resolved forward
+# via leagues.espn_my_team_id / platform_my_team when a manager later
+# links. The re-stamp does not violate append-only: the FACT ("team T held
+# roster R in period P") never changes; only our knowledge of who was
+# behind T does.
+#
+# PRECEDENCE, NOT RECENCY, on upsert: 'weekly' (server-fetched, every team,
+# orphans included) outranks 'sync' (client-posted, drops ownerless
+# rosters). The on-sync writer does nothing when a 'weekly' row already
+# holds the period; the weekly writer does a full update. Recency here
+# would let a Friday app-open silently delete the week's orphan teams and
+# break YR-6 invisibly.
+#
+# team_value is denormalised alongside the roster ids for the reason
+# player_value_history denormalises consensus_value: a later model change
+# must not rewrite the shape of a season chart already shown to a user.
+# It is compute_power_rankings' consensus-basis players total — NEVER a
+# fresh summation (or the Wrapped chart and the Power Rankings screen show
+# different numbers for the same team). NULL, never 0, when nothing
+# prices: a zero renders as a roster wipe; a NULL renders as a gap. Charts
+# grey any week where team_value IS NULL or valued_player_count <
+# 0.8 * player_count, and never interpolate.
+# ---------------------------------------------------------------------------
+league_roster_history_table = Table("league_roster_history", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("league_id",          String,  nullable=False),
+    Column("team_key",           String,  nullable=False),
+    # 'strong' = platform-native slot id. 'weak' = user_id-derived fallback
+    # (Sleeper sync with no roster map in hand). The recap DECLINES to
+    # chart weak-keyed teams rather than fragmenting them silently — weak
+    # keys are visible and countable; silent fragmentation is neither.
+    Column("team_key_quality",   String,  nullable=False),  # 'strong'|'weak'
+    Column("platform",           String,  nullable=False),  # sleeper|espn|mfl|fleaflicker
+    Column("owner_user_id",      String),  # NULLABLE ATTRIBUTE, never part of the key
+    Column("scoring_format",     String,  nullable=False),  # '1qb_ppr'|'sf_tep'
+    # BUCKET LABEL, not an instant — '2026-W33' from now.isocalendar(),
+    # the deck_replenish_log.iso_week shape. Uses the ISO week-numbering
+    # YEAR, never .year: 2026-12-31 is 2027-W01, and a %Y-keyed label
+    # would sort and dedupe wrong at the boundary. An instant in the key
+    # (the plan's original snapshot_at sketch) enforces nothing — two runs
+    # in one week would make two rows and "value at week W" two answers.
+    Column("period_key",         String,  nullable=False),
+    Column("period_kind",        String,  nullable=False),  # 'week' today; 'day' later
+    Column("snapshot_date",      String,  nullable=False),  # 'YYYY-MM-DD' — the pvh join key
+    Column("snapshot_at",        String,  nullable=False),  # ISO UTC instant of the write
+    Column("player_ids",         Text,    nullable=False),  # JSON array, SORTED
+    Column("starter_ids",        Text),   # platform-set lineup (the historical FACT;
+                                          # the optimal lineup is an ANALYSIS, derivable
+                                          # at read time — capture inputs, compute outputs)
+    Column("pick_ids",           Text),   # JSON array of draft_picks.pick_id —
+                                          # uncontested, unorphaned only (P1 fold-in;
+                                          # nullable from day one)
+    # Contested/orphaned slots excluded from pick_ids at snapshot time, so
+    # an ESPN league with contested assertions is DISTINGUISHABLE from one
+    # that owned no picks. Non-empty => the recap suppresses pick flow for
+    # this league entirely rather than rendering it partially.
+    Column("pick_ids_excluded",  Text),
+    Column("pick_source",        String),  # 'platform'|'user'|'mixed' — ADR-010:
+                                           # 'user' => never render pick flow as fact
+    # sha256(",".join(sorted ids)).hexdigest()[:16] — set semantics. NEVER
+    # suppresses the weekly write: team_value moves weekly even when the
+    # roster does not, and a hash-suppressed grid puts holes in exactly the
+    # chart YR-2 exists to stabilise. Its jobs are changed_from_prev and
+    # suppressing EXTRA intra-week on-sync writes.
+    Column("roster_hash",        String,  nullable=False),
+    Column("changed_from_prev",  Integer),  # 0|1|NULL(first observation)
+    Column("player_count",       Integer, nullable=False),
+    # Of player_count, how many priced. The universal pool is DP-seeded
+    # skill positions only, while league_members stores RAW client ids
+    # including K/DEF (#151) — so a roster is never fully priced, and this
+    # is what keeps the gap legible instead of invisible.
+    Column("valued_player_count", Integer, nullable=False),
+    Column("team_value",         Float),   # players only; NULL when nothing prices
+    Column("team_value_picks",   Float),   # SEPARATE: pick pool_value is a different
+                                           # pipeline than player consensus
+    Column("value_basis_date",   String),  # the pvh snapshot_date actually used
+                                           # (nearest <= target)
+    Column("in_season",          Integer), # 0|1|NULL — distinguishes an alarming gap
+                                           # from an off-season no-op; NULL in P0
+    # 'sync' (client-posted at a league open) | 'weekly' (server-fetched
+    # sweep — daily-tick gate or the manual cron route) | 'backfill'.
+    # DOUBLE DUTY: the rollback lever (DELETE … WHERE source='sync' AND
+    # snapshot_at > '<bad-deploy>') and the cron liveness detector (zero
+    # 'weekly' rows one week post-ship => daily-tick is not firing).
+    Column("source",             String,  nullable=False),
+    UniqueConstraint("league_id", "team_key", "scoring_format", "period_key",
+                     name="uq_roster_snapshot"),
+)
+Index("ix_lrh_team_period",   league_roster_history_table.c.league_id,
+                              league_roster_history_table.c.team_key,
+                              league_roster_history_table.c.period_key)
+Index("ix_lrh_league_period", league_roster_history_table.c.league_id,
+                              league_roster_history_table.c.period_key)
+Index("ix_lrh_owner_period",  league_roster_history_table.c.owner_user_id,
+                              league_roster_history_table.c.period_key)
+
+# ---------------------------------------------------------------------------
+# league_board_history — weekly COMPLETE board snapshots (C5 + C6, YR-3)
+# ---------------------------------------------------------------------------
+# NOT a fork of elo_history, which stays exactly as it is: the event-driven
+# "what moved when" log. elo_history writes only players whose Elo CHANGED
+# in a submission, so it structurally cannot rebuild a complete board at
+# date D without folding forward from row one; it has no uniqueness
+# constraint of any kind, so a weekly append to it would not be idempotent
+# (a double run silently doubles every board); and row-per-player weekly is
+# ~1.6M rows at 100 leagues vs ~6,000 JSON-per-board here (270x).
+# Different grain, different question.
+#
+# NOT related to wrapped_events (below), which is a FROZEN behavioural
+# EVENT stream and stores no valuations.
+#
+# YR-3 permits in-app, authenticated, league-context display of one
+# manager's valuations to another. Every P3 read accessor must take
+# league_id AND a caller identity and assert league membership, as
+# load_member_rankings does. There is no public-URL read path — that is
+# the half of D-P1-12 still standing, and growth.tier_board_share stays
+# false.
+# ---------------------------------------------------------------------------
+league_board_history_table = Table("league_board_history", metadata,
+    Column("id",               Integer, primary_key=True, autoincrement=True),
+    Column("user_id",          String,  nullable=False),
+    Column("league_id",        String,  nullable=False),
+    Column("scoring_format",   String,  nullable=False),
+    Column("period_key",       String,  nullable=False),   # '2026-W33'
+    Column("snapshot_date",    String,  nullable=False),   # 'YYYY-MM-DD'
+    Column("snapshot_at",      String,  nullable=False),   # ISO UTC
+    Column("elos",             Text,    nullable=False),   # JSON {player_id: round(elo,1)}
+    Column("player_count",     Integer, nullable=False),
+    # member_rankings.updated_at at capture. Distinguishes "re-ranked this
+    # week" from "we re-snapshotted an unchanged board" — without it, one
+    # observation repeated five times reads as five observations, and
+    # "Your calls" (P3) is built on exactly that distinction.
+    Column("board_updated_at", String),
+    Column("source",           String,  nullable=False),   # 'sync'|'weekly'|'backfill'
+    UniqueConstraint("user_id", "league_id", "scoring_format", "period_key",
+                     name="uq_board_snapshot"),
+)
+Index("ix_lbh_league_period", league_board_history_table.c.league_id,
+                              league_board_history_table.c.period_key)
+Index("ix_lbh_user_period",   league_board_history_table.c.user_id,
+                              league_board_history_table.c.period_key)
+
+# ---------------------------------------------------------------------------
 # model_config — runtime-tunable multiplier constants
 # ---------------------------------------------------------------------------
 # Stores every hardcoded constant used by the trade/ranking engine so they
@@ -2190,6 +2357,13 @@ def _migrate_db() -> None:
          "user_id, scoring_format, snapshot_at"),
         ("ix_players_position", "players",
          "position"),
+        # ADR-011 (roster-history P0) — player_value_history's only index
+        # today is uq_value_snapshot, which leads with player_id. The
+        # league-wide recap query (WHERE scoring_format = ? AND
+        # snapshot_date IN (...)) has no leading-column match and would
+        # full-scan a table projected at ~0.5M rows/yr. Free now.
+        ("ix_pvh_format_date", "player_value_history",
+         "scoring_format, snapshot_date"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
         try:
@@ -9440,6 +9614,233 @@ def load_elo_history(
 # ---------------------------------------------------------------------------
 # player_value_history accessors (backlog #57 / #17)
 # ---------------------------------------------------------------------------
+
+def upsert_roster_snapshots(rows: list[dict]) -> dict:
+    """One league's snapshot batch, one transaction (ADR-011).
+
+    PRECEDENCE, NOT RECENCY. 'weekly' rows are server-fetched (every team,
+    orphans included); 'sync' rows are client-posted (ownerless rosters
+    already dropped). So:
+
+      weekly   -> full update, always. Never hash-suppressed: team_value
+                  moves weekly even when the roster does not, and a
+                  hash-suppressed grid puts holes in exactly the chart
+                  YR-2 exists to stabilise.
+      sync     -> nothing when a 'weekly' row already holds the period
+                  (recency would silently delete the week's orphan teams
+                  and break YR-6, invisibly). Over an earlier 'sync' row:
+                  update when the hash changed, skip when it did not (the
+                  hash's job is suppressing EXTRA intra-week sync writes).
+      backfill -> insert-only; never overwrites any observation.
+
+    Returns counters {'inserted','updated','skipped_precedence',
+    'skipped_unchanged'} so tick responses and tests can see what happened.
+    """
+    stats = {"inserted": 0, "updated": 0,
+             "skipped_precedence": 0, "skipped_unchanged": 0}
+    if not rows:
+        return stats
+    t = league_roster_history_table
+    with engine.begin() as conn:
+        for row in rows:
+            existing = conn.execute(
+                select(t.c.id, t.c.source, t.c.roster_hash).where(
+                    (t.c.league_id      == row["league_id"]) &
+                    (t.c.team_key       == row["team_key"]) &
+                    (t.c.scoring_format == row["scoring_format"]) &
+                    (t.c.period_key     == row["period_key"])
+                )
+            ).fetchone()
+            if existing is None:
+                conn.execute(insert(t).values(**row))
+                stats["inserted"] += 1
+                continue
+            src = row.get("source")
+            if src == "weekly":
+                conn.execute(t.update().where(t.c.id == existing.id).values(**row))
+                stats["updated"] += 1
+            elif src == "sync":
+                if existing.source == "weekly":
+                    stats["skipped_precedence"] += 1
+                elif existing.roster_hash == row.get("roster_hash"):
+                    stats["skipped_unchanged"] += 1
+                else:
+                    conn.execute(t.update().where(t.c.id == existing.id).values(**row))
+                    stats["updated"] += 1
+            else:  # backfill — never overwrite a real observation
+                stats["skipped_precedence"] += 1
+    return stats
+
+
+def load_prev_roster_hashes(league_id: str, scoring_format: str,
+                            before_period: str) -> dict[str, str]:
+    """Latest roster_hash per team_key from any period BEFORE
+    `before_period`, for changed_from_prev. period_key labels
+    ('2026-W33') compare correctly as strings — zero-padded weeks and the
+    ISO week-numbering year keep lexicographic order == chronological
+    order, including the December boundary ('2026-W53' < '2027-W01')."""
+    t = league_roster_history_table
+    out: dict[str, str] = {}
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(t.c.team_key, t.c.period_key, t.c.roster_hash)
+                .where(
+                    (t.c.league_id      == league_id) &
+                    (t.c.scoring_format == scoring_format) &
+                    (t.c.period_key     <  before_period)
+                )
+                .order_by(t.c.team_key, t.c.period_key.desc())
+            ).fetchall()
+        for r in rows:
+            out.setdefault(r.team_key, r.roster_hash)   # first = latest per team
+    except Exception as e:
+        print(f"[load_prev_roster_hashes] {league_id} failed: {e}")
+    return out
+
+
+def restamp_roster_history_owner(league_id: str, team_key: str,
+                                 owner_user_id: str) -> int:
+    """Resolve a team's history to a newly-linked manager (ADR-011).
+
+    Not a violation of append-only: the fact ("team T held roster R in
+    period P") never changes; owner_user_id is a late-resolving pointer to
+    who we now know was behind T. This is what makes the late-joiner growth
+    claim (plan §5.3) true on ESPN/MFL — a manager who links in November
+    inherits their team's full season on day one. Idempotent."""
+    if not league_id or not team_key or not owner_user_id:
+        return 0
+    t = league_roster_history_table
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(
+                t.update()
+                .where((t.c.league_id == league_id) & (t.c.team_key == team_key))
+                .values(owner_user_id=owner_user_id)
+            )
+        return int(res.rowcount or 0)
+    except Exception as e:
+        print(f"[restamp_roster_history_owner] {league_id}/{team_key} failed: {e}")
+        return 0
+
+
+def latest_value_snapshot_date(scoring_format: str,
+                               on_or_before: str) -> str | None:
+    """Newest player_value_history snapshot_date <= on_or_before for a
+    format (the load_value_snapshot_baseline nearest-<= idiom) — recorded
+    on each roster snapshot as value_basis_date so the December read can
+    grey unjoinable weeks with a reason instead of a guess."""
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(func.max(player_value_history_table.c.snapshot_date))
+                .where(
+                    (player_value_history_table.c.scoring_format == scoring_format) &
+                    (player_value_history_table.c.snapshot_date <= on_or_before)
+                )
+            ).fetchone()
+        return row[0] if row and row[0] else None
+    except Exception as e:
+        print(f"[latest_value_snapshot_date] {scoring_format} failed: {e}")
+        return None
+
+
+def upsert_board_snapshots(rows: list[dict]) -> dict:
+    """league_board_history batch upsert (C5/C6). Same transaction-per-batch
+    shape as upsert_roster_snapshots; precedence is simpler because every
+    trigger reads the SAME local member_rankings rows — 'sync' and 'weekly'
+    carry identical content, so either may refresh the period. 'backfill'
+    is insert-only."""
+    stats = {"inserted": 0, "updated": 0, "skipped": 0}
+    if not rows:
+        return stats
+    t = league_board_history_table
+    with engine.begin() as conn:
+        for row in rows:
+            existing = conn.execute(
+                select(t.c.id).where(
+                    (t.c.user_id        == row["user_id"]) &
+                    (t.c.league_id      == row["league_id"]) &
+                    (t.c.scoring_format == row["scoring_format"]) &
+                    (t.c.period_key     == row["period_key"])
+                )
+            ).fetchone()
+            if existing is None:
+                conn.execute(insert(t).values(**row))
+                stats["inserted"] += 1
+            elif row.get("source") == "backfill":
+                stats["skipped"] += 1
+            else:
+                conn.execute(t.update().where(t.c.id == existing.id).values(**row))
+                stats["updated"] += 1
+    return stats
+
+
+def load_member_boards_for_league(league_id: str) -> list[dict]:
+    """Every member's full board for a league, grouped:
+    [{user_id, scoring_format, elos: {pid: elo}, board_updated_at}].
+    Legacy NULL scoring_format rows count as '1qb_ppr', mirroring
+    load_member_rankings."""
+    t = member_rankings_table
+    grouped: dict[tuple, dict] = {}
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(t.c.user_id, t.c.scoring_format, t.c.player_id,
+                       t.c.elo, t.c.updated_at)
+                .where(t.c.league_id == league_id)
+            ).fetchall()
+        for r in rows:
+            fmt = r.scoring_format or DEFAULT_SCORING
+            key = (str(r.user_id), fmt)
+            g = grouped.setdefault(key, {"user_id": str(r.user_id),
+                                         "scoring_format": fmt,
+                                         "elos": {},
+                                         "board_updated_at": None})
+            g["elos"][str(r.player_id)] = round(float(r.elo), 1)
+            if r.updated_at and (g["board_updated_at"] is None
+                                 or r.updated_at > g["board_updated_at"]):
+                g["board_updated_at"] = r.updated_at
+    except Exception as e:
+        print(f"[load_member_boards_for_league] {league_id} failed: {e}")
+    return list(grouped.values())
+
+
+def load_history_sweep_leagues(period_key: str) -> list[dict]:
+    """Sweep work-list for the weekly roster snapshot, STALEST-FIRST:
+    leagues with no 'weekly' row for the current period first (never swept
+    or missed), then by how recently they got one. Each entry carries what
+    the per-platform fetch adapters need."""
+    lt, ht = leagues_table, league_roster_history_table
+    try:
+        with engine.connect() as conn:
+            leagues = conn.execute(
+                select(lt.c.sleeper_league_id, lt.c.platform,
+                       lt.c.default_scoring, lt.c.user_id,
+                       lt.c.espn_auth, lt.c.espn_season, lt.c.espn_my_team_id,
+                       lt.c.platform_auth, lt.c.platform_season,
+                       lt.c.platform_host, lt.c.platform_my_team)
+            ).fetchall()
+            done = {
+                r.league_id for r in conn.execute(
+                    select(ht.c.league_id).distinct()
+                    .where((ht.c.period_key == period_key) &
+                           (ht.c.source == "weekly"))
+                ).fetchall()
+            }
+        out = []
+        for r in leagues:
+            m = dict(r._mapping)
+            m["league_id"] = m.pop("sleeper_league_id")
+            m["platform"] = m.get("platform") or "sleeper"
+            m["has_current_weekly"] = m["league_id"] in done
+            out.append(m)
+        out.sort(key=lambda m: m["has_current_weekly"])   # missing first
+        return out
+    except Exception as e:
+        print(f"[load_history_sweep_leagues] failed: {e}")
+        return []
+
 
 def record_value_snapshots(rows: list[dict]) -> int:
     """

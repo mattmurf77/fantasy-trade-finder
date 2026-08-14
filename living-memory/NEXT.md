@@ -9,12 +9,22 @@
 ---
 
 ## Table of Contents
+- [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
 - [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-14 — Year-in-Review capture follow-ons
+
+P0 capture is built on `feat/roster-history` (see [`HANDOFF.md`](HANDOFF.md)). In order:
+
+1. **Gate 0 — the scheduler oracle.** *(operator, ½ day)* Run the `player_value_history` density query (plans README) against prod. It changes cron-migration urgency, never the capture design. Then, **one week post-ship**, the `source`-column liveness read (runbook § roster-snapshot monitoring) + its retirement rule.
+2. **P1 — backfill audit + C3 hardening.** What did P0 miss before it landed? Sleeper transaction-log replay is the salvage tool (plan §2.3, a salvage not a plan). C5's cadence backstop is already covered by `league_board_history`.
+3. **P2 — end-of-season fetchers (F1–F8).** Verify ESPN/MFL transaction-log retention BEFORE the recap design leans on it; degrade trade P&L to Sleeper-only rather than blocking the recap.
+4. **P3 — recap compute + UI + the nine analytics events**, taxonomy addendum registered before any emitter, `wrapped_viewed` finally fires. Monetization call (free vs premium hook) is owed **before** P3 starts.
 
 ## 2026-08-13 — Notification inbox follow-ons
 
