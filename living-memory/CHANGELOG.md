@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 (#313 — 1QB QB values cap at "1 1st", SHIPPED + deploy-verified)
+
+- **Value-side re-pricing, not a label cap** ([D-054](DECISIONS.md)). The operator reported 1QB QBs reading "2 1sts"; the label derives client-side from the served Elo, so the fix compresses `1qb_ppr` QB **seed values** post-blend / pre-Elo-map — order-preserving monotone piecewise-linear, applied **last** in `_apply_consensus_blend` so KTC rank-normalisation can't lift a QB back over. Allen/Maye/Lamar drop `firsts_2` → `first_1`; order preserved across all 95 QBs, zero new ties; non-QB, sub-knee-QB, and `sf_tep` byte-identical. Tier bands and every client mirror untouched — no ladder fork.
+- **Knobs, not flags:** `qb_1qb_cap_elo=1785` / `qb_1qb_cap_knee_elo=1580` (`model_config`); either ≤0 is a deploy-free kill switch, proven byte-identical over the full 633-player × 2-format pool.
+- **Built by an Opus subagent, reviewed + shipped by the orchestrator across a session boundary** (prior session hit its usage limit the moment the agent finished). Review re-ran the full suite after rebasing onto a main that had moved 7 commits (no footprint overlap): **2827 passed / 1 skipped**. 16 new tests, 6/6 sabotage matrix RED, incl. a shape pin a hard clamp fails.
+- **Deploy verified by behaviour:** prod `/api/trade/values?scoring_format=1qb_ppr` serves the top three QBs at `first_1` (first post-merge poll). Squash [PR #128](https://github.com/mattmurf77/fantasy-trade-finder/pull/128) → `main` @ `34ebd84`. #313 marked fixed.
+- **Known one-time cosmetic:** top ~5 1QB QBs read as large fallers in the 30-day movers strip until the window rolls.
+- **Gates:** analytics + Maestro waived (no new surface/UI); **Tier 4 (CI only) recorded as an operator decision** in the scope block. See [TEST_LEDGER](TEST_LEDGER.md).
+
+---
+
 ## 2026-08-15 (trade-card narrative claimed positions the received player doesn't play)
 
 - **User-facing copy bug on the deck's primary surface, backend-only.** `build_narrative` took the position from the roster analysis (`match_context.user_needs` / `opponent_surplus`) and the player from the card (`_top_received_name` — highest dynasty value, **no position filter**) and printed them side by side. Nothing linked them, so a QB-thin manager receiving a tight end read "Adds Brock Bowers to address your thin QB group." Found by running the real engine against the operator's four Sleeper leagues: **23 of 32 cards**; both live paths call it, so it was on every card.

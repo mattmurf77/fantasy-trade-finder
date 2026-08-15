@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 — #313 1QB QB cap (SHIPPED, PR #128, deploy-verified)
+
+- **Change:** backend-only — `backend/data_loader.py` gains `_compress_qb_1qb_values` (order-preserving piecewise-linear compression of `1qb_ppr` QB seed values, applied last in `_apply_consensus_blend`) + `seed_value_for_elo` inverse; `backend/database.py` seeds `qb_1qb_cap_elo=1785` / `qb_1qb_cap_knee_elo=1580`. [D-054](DECISIONS.md), scope block [`docs/feedback/items/313-1qb-qb-cap/scope.md`](../docs/feedback/items/313-1qb-qb-cap/scope.md).
+- **Build agent's runs (worktree `build-313`, base `21df73f`):** baseline `2763 passed / 1 skipped` → final `2779 passed / 1 skipped` (+16 = exactly the new `test_qb_1qb_cap.py`). Sabotage matrix **6/6 RED** with tree-dirtied verification; kill-switch byte-identity proven over the full 633-player × 2-format pool (60,276 bytes). ⚠️ The agent's first two suite runs were issued from the main checkout, not the worktree — disclosed in `status-2026-08-14.md` §11; the wrong-cwd run masked a genuine `test_dp_format_mapping` failure until re-run in the worktree. **Anyone re-verifying must run pytest with the worktree as cwd.**
+- **Orchestrator's independent run (this ship):** rebased onto `origin/main` @ `2529bef` (7 commits moved, zero footprint overlap) → `pytest backend/tests -q` → **2827 passed / 1 skipped** (4m45s). CI green on PR #128 (backend-tests, mobile-typecheck, testid-lint).
+- **3 existing tests amended** (both `test_ktc_blend` kill-switch pins + `test_dp_format_mapping` raw-column pin now neutralise the #313 knobs) — the `ktc_blend_weight` byte-identity claim in config-reference was amended to match.
+- **Deploy verified by behaviour:** prod `GET /api/trade/values?scoring_format=1qb_ppr` → Allen/Maye/Lamar all `tier: first_1` on the first post-merge poll.
+- **Sim gate: Tier 4 (CI only) — operator decision**, recorded in the scope block §5 with the deviation rationale (change is user-visible but backend-only; the hermetic harness seeds its own values, so a sim run would exercise fixtures unaffected by this change). No `qa/sim-runs/last-sim-run.json` (no `mobile/src` in the push; the pre-push gate structurally does not fire).
+
+---
+
 ## 2026-08-15 — Trade-card narrative positional accuracy (shipped, PR #125)
 
 - **Change:** backend-only — `backend/trade_narrative.py` positional branches now resolve the player and the position from one source (`_top_received(card, players, positions)`); no received player at a needed position → neutral fairness sentence instead of an invented benefit. Decision [D-053](DECISIONS.md), scope block [`docs/plans/narrative-position-accuracy/scope.md`](../docs/plans/narrative-position-accuracy/scope.md).
