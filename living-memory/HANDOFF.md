@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Trade-card narrative said the wrong position; fixed on branch, NOT shipped](#2026-08-15--trade-card-narrative-said-the-wrong-position-fixed-on-branch-not-shipped)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -20,6 +21,44 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-15 — Trade-card narrative said the wrong position; fixed on branch, NOT shipped
+
+### Where I am right now
+
+Every trade card's rationale sentence could name a position the received player
+doesn't play — `build_narrative` took the position from the roster analysis
+(`match_context.user_needs`) and the player from the card
+(`_top_received_name`, highest dynasty value, no position filter) and pasted
+them together. A QB-thin manager receiving a TE read "Adds Brock Bowers to
+address your thin QB group." Reported rate across the operator's four real
+Sleeper leagues: **23 of 32 cards**; it ran on both live generation paths, so
+it was on every card.
+
+Fixed on branch `claude/peaceful-lumiere-e2a25b` (branched from `origin/main`
+@ `21df73f`), **committed, not pushed, no PR** — awaiting the operator's ship
+call because `main` auto-deploys.
+
+- `_top_received(card, players, positions)` returns the highest dynasty-value
+  received player *whose own position* is in the candidate set; each branch
+  prints that player's own position. Nothing fits → neutral fairness sentence
+  rather than an invented benefit. The `fit_premium` branch's `needs[0]`
+  fallback (same hazard) is gone. → [D-051](DECISIONS.md)
+- `backend/tests/test_trade_narrative.py` 5 → 12 tests; 5 of the 7 new ones
+  fail against the pre-fix module (verified by stashing the fix).
+- Full backend suite: 2769 passed, 1 skipped. Sim gate tier 4 (backend-only).
+- Gates: scope block at `docs/plans/narrative-position-accuracy/scope.md`
+  (Maestro delta waived — no mobile code, no testID, copy is data-derived);
+  `docs/architecture.md` row updated; TEST_LEDGER entry written.
+
+### Next step
+
+Operator ship call → PR + merge to `main`, then CHANGELOG entry. Not re-run
+against the four real leagues (needs live Sleeper data; local dev DB has no
+stored cards) — worth a post-ship spot check that the neutral fallback rate
+looks sane.
 
 ---
 

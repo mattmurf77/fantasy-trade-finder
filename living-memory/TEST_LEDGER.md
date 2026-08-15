@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 — Trade-card narrative positional accuracy (branch `claude/peaceful-lumiere-e2a25b`)
+
+- **Change:** backend-only — `backend/trade_narrative.py` positional branches now resolve the player and the position from one source (`_top_received(card, players, positions)`); no received player at a needed position → neutral fairness sentence instead of an invented benefit. Decision [D-051](DECISIONS.md), scope block [`docs/plans/narrative-position-accuracy/scope.md`](../docs/plans/narrative-position-accuracy/scope.md).
+- **Bug evidence (pre-fix, reported):** decks generated against the operator's four real Sleeper leagues → **23 of 32 cards** carried a position-inaccurate sentence (operator reads QB-thin in all four, so `needs[0]`=QB while the headline received asset was RB/WR/TE).
+- **Ran (branch @ tree with fix):** `pytest backend/tests -q` → **2769 passed, 1 skipped** (4m40s, local SQLite). `backend/tests/test_trade_narrative.py` 5 → 12 tests.
+- **Negative control:** the 7 new tests were re-run with the fix stashed (`git stash push backend/trade_narrative.py`) → **5 failed**, including the reported repro (TE-only return for a QB-thin user) and the invariant sweep over every needs × received-position combination. The other 2 cover cases the old code got right by coincidence.
+- **NOT re-run:** the four-real-league deck generation that surfaced the bug — needs the operator's live Sleeper leagues; the local dev DB has zero stored cards. The 23/32 figure is the reported pre-fix baseline, not a post-fix measurement.
+- **Sim gate:** tier 4 (backend-only; no route, schema, or mobile change) — no sim run, no `qa/sim-runs/last-sim-run.json`. Tier call recorded in the scope block §5.
+
+---
+
 ## 2026-08-14 — Deck-outcome impression-ownership validation (shipped, PR #119)
 
 - **Change:** backend-only — `_save_deck_outcome_safe` ownership/existence/recency validation + `deck_outcome_rejects` health counters; [PR #119](https://github.com/mattmurf77/fantasy-trade-finder/pull/119), branch `claude/charming-lalande-6dc6b6`.
