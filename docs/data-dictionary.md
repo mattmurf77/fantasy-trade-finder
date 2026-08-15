@@ -350,7 +350,7 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `deck_job_id` | str | generation job id (`_trade_jobs`) |
 | `card_index` | int | 0 = top card, final served order |
 | `trade_hash` | str | sha256[:16] of sorted give ids \| sorted receive ids \| partner |
-| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`); `deck_source` only on F10 cron-pre-generated decks; `taste_attrs` (F5, only while `deck.taste_vectors` is on) — the card's frozen taste-attribute keys consumed by `user_taste` updates; `wildcard: true` + `wildcard_pool_size` + `wildcard_provenance` (`taste_tercile`/`low_data_arm`/`uniform`/`audition`) only on the F7 exploration wildcard (flag `deck.exploration`); `first_deck: true` (F9, only while `deck.first_session` is on) on every card of a user's FIRST deck for the league — `first_session_like_position` = MIN(`card_index`) over like outcomes joined to these rows |
+| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`); `deck_source` only on F10 cron-pre-generated decks; `taste_attrs` (F5, only while `deck.taste_vectors` is on) — the card's frozen taste-attribute keys consumed by `user_taste` updates; `wildcard: true` + `wildcard_pool_size` + `wildcard_provenance` (`taste_tercile`/`low_data_arm`/`uniform`/`audition`) only on the F7 exploration wildcard (flag `deck.exploration`); `first_deck: true` (F9, only while `deck.first_session` is on) on every card of a user's FIRST deck for the league — `first_session_like_position` = MIN(`card_index`) over like outcomes joined to these rows. **B8 propensity freeze (LLD §3.6, HLD §2.3 corollary):** every row now carries `feature_set: "fs2"` (the predicate the nightly `drift_check` pass samples on), plus the ordering multipliers ACTUALLY applied to this card — `fatigue_mult`, `taste_mult`, `diversity_mult`, and `class_demotion` once P0-4 lands. A multiplier key is present iff its layer ran; **absent ⇒ neutral 1.0** for replay, and 0.0 in `value_model.extract_features` (whitelist-based, so these keys are inert to the feature vector). `base_key` appears only when the F6 model replaced the base ordering key — `base_score` is still the composite, so `base_key` is what the multipliers actually multiplied. Together these make `final_score = base × propensity × Π(multipliers)` reproducible from frozen values alone, which is exactly what `drift_check` asserts nightly |
 | `propensity` | float NOT NULL | the Thompson multiplier **actually applied** to this card's sort key (`0.5 + beta draw`, in (0.5, 1.5)); `1.0` when ordering was off (deterministic serve). **F7 exception:** on a wildcard row (features_json `wildcard: true`) this is instead `exploration_rate × 1/wildcard_pool_size` — the uniform-draw probability that REPLACES the Thompson multiplier (the wildcard never entered the ordering draw) |
 | `base_score` | float | `composite_score` before presentation multipliers |
 | `final_score` | float | ordering key after Thompson/diversity multipliers (= base when ordering off) |
@@ -467,11 +467,30 @@ Trade-relevance **P0-6 gate counters** ([lld](plans/trade-relevance-engine/lld.m
 
 Strictly observational: a diff that flips any gate boolean while adding counters fails review and T-29 (the sabotage test flips a gate on a fixture and requires the counter test to notice).
 
+**Gate names, and which engine emits them.** The counters are filled by a `gate_counters` out-param threaded from `_run_trade_job` → `generate_trades` → the pair generator. BOTH generators are instrumented with the same names, because `config/features.json` ships `trade_engine.v3: true` — the live deck comes from `trade_optimizer.generate_pair_trades_v3`, while `trade_service._consider` (the LLD's anchor) serves only when v3 is off:
+
+| Counter | Gate | v2 `_consider` | v3 optimizer |
+|---|---|---|---|
+| `gate_considered` | candidates evaluated (denominator) | ✓ | ✓ |
+| `gate_passed` | reached the offer/score step | ✓ | ✓ |
+| `gate_pinned_give` / `gate_pinned_receive` | #174 / FB-47 pinned filters | ✓ | ✓ |
+| `gate_shape` | \|give\| − \|receive\| > 1 | — (shapes enumerated, never rejected) | ✓ |
+| `gate_positional` | acquire/trade-away position filter | ✓ | ✓ |
+| `gate_elo_gap` | `trade_elo_gap_max` | ✓ | ✓ |
+| `gate_user_gain` | #108 raw-board gate (`fit_premium_1for1`) | ✓ | ✓ |
+| `gate_pick_swap` | #227 pick-for-pick 1-for-1 | ✓ | ✓ |
+| `gate_junk_filler` | #141 filler floors | ✓ | ✓ |
+| `gate_lineup_feasibility` | v3 §3.2 post-trade lineup legality | — (no such gate) | ✓ |
+| `gate_mutual_gain` | both sides clear `min_side_surplus` | ✓ | ✓ |
+| `gate_fairness` | consensus fairness band / range overlap | ✓ | ✓ |
+
+Invariant, asserted by T-29: `gate_considered == gate_passed + Σ gate_<name>` — every exit is counted, so a future gate added without a counter breaks the arithmetic. Counters accumulate across the #189 relaxed retry (a targeted job that comes up empty re-runs generation up to twice more), so the funnel is read as a ratio, not a raw per-job count. The v3 sweetener pass (§3.4) rescues near-misses after the cascade and is not counted.
+
 **`decided_by` has more than one writer, so it is written by MERGE, never by replace.** `database.merge_deck_job_counters()` folds a caller's keys into whatever the row already holds; an insert-or-replace would let whichever layer ran last silently erase the other's numbers. Current writers:
 
 | Writer | Keys | When |
 |---|---|---|
-| P0-6 gate counters (§4.2) | `{gate_name: cards_killed}` | one write per completed job |
+| P0-6 gate counters (§4.2) | `gate_considered`, `gate_passed`, and one `gate_<name>` per gate that killed a candidate | one write per completed non-demo job |
 | P0-5 dedup (§4.6, flag `deck.dedup`) | `deck_cards`, `near_dup_pairs`, `near_dup_cards`, `deduped_cards_per_job`, `dedup_restored`, `dedup_applied` | **every** non-demo job as the ordering pass finishes, flag on or off |
 
 The dedup counters are unconditional on purpose (PRD metric M4): drops happen pre-capture, so `deck_impressions` cannot reconstruct the near-dup rate — this row is the only record, and the baseline must accumulate before `deck.dedup` flips. `dedup_applied` is 1/0 so the series stays readable across the flip.

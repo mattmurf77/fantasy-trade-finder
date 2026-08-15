@@ -3275,6 +3275,28 @@ def _record_deck_dedup_stats(job_id: str, user_id: str, league_id: str,
         log.warning("deck dedup counters write failed (non-fatal): %s", e)
 
 
+def _record_deck_gate_counters(job_id: str, user_id: str, league_id: str,
+                               counters: dict | None) -> None:
+    """P0-6 (LLD §4.2, PRD R5) — persist the gate-kill funnel for one job.
+
+    The counters are the `gate_counters` out-param the pair generator filled
+    during generation — `trade_optimizer.generate_pair_trades_v3` on the live
+    path, `trade_service._consider` when `trade_engine.v3` is off; both emit
+    the same names: `gate_considered`, `gate_passed`, and one `gate_<name>`
+    per gate that killed a candidate. MERGED (not inserted)
+    into the same `deck_job_stats.decided_by` object the P0-5 dedup layer
+    writes — the two layers know only their own keys and neither may erase
+    the other. Observational and non-fatal, same contract as dedup above.
+    """
+    if not counters:
+        return
+    try:
+        merge_deck_job_counters(job_id, user_id=user_id, league_id=league_id,
+                                counters={k: int(v) for k, v in counters.items()})
+    except Exception as e:
+        log.warning("deck gate counters write failed (non-fatal): %s", e)
+
+
 # ── F2 (flag deck.thompson_v2) — Thompson v2 bandit hygiene ─────────────────
 # docs/plans/tiktok-discovery/prds/F2-thompson-v2.md. Upgrades WHAT feeds the
 # per-arm Beta draw; the draw's authority is unchanged (sort-key multiplier
@@ -3500,6 +3522,20 @@ def _order_deck(
     ordering key, for deck_impressions logging. Pure out-param: ordering math
     is untouched and callers that pass None see identical behavior.
 
+    B8 (LLD §4.13 / HLD §2.3 corollary) extends the capture with two more
+    out-keys, both frozen into `features_json` by the impression writer so
+    replay never has to reconstruct a nightly-mutating table's state at serve
+    time:
+      • "multipliers": {id(card): {"fatigue_mult": m, "taste_mult": m,
+        "diversity_mult": m, …}} — every presentation multiplier ACTUALLY
+        applied to this card's key. A key is present iff its layer ran, and
+        an absent key reads as the neutral 1.0 downstream.
+      • "base_key": {id(card): v} — present only for cards whose BASE key was
+        replaced by the F6 model score, so the drift check's identity
+        (final = base × propensity × Πmultipliers) still holds when
+        `deck.value_model` is on. Absent ⇒ the base is `composite_score`,
+        which is what `deck_impressions.base_score` already records.
+
     `fatigue_mult` (F3, deck.fatigue): {id(card): m ≤ 1.0} discounts folded
     into the ordering key AFTER the Thompson draw — fatigue reorders, never
     boosts, and the F1 final_key capture records it. None (the flag-off
@@ -3537,6 +3573,13 @@ def _order_deck(
 
     key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
 
+    # B8 — per-card record of the multipliers actually applied, and of a
+    # replaced base key. Handed to `capture` at the end (and dropped on the
+    # floor when there is no capture); every write below sits BESIDE the
+    # existing multiply, never in place of it.
+    mult_capture: dict[int, dict[str, float]] = {}
+    base_capture: dict[int, float] = {}
+
     # F6 (deck.value_model) — base-key swap. Applied FIRST, before any
     # presentation multiplier, because it replaces the base signal rather
     # than modulating it.
@@ -3545,6 +3588,7 @@ def _order_deck(
             v = value_scores.get(id(c))
             if v is not None:
                 key[id(c)] = float(v)
+                base_capture[id(c)] = float(v)
 
     # P0-5 (deck.dedup) — near-duplicate collapse on the BASE-KEYED list,
     # before the Thompson draw and before `capture` is populated, so a
@@ -3610,7 +3654,9 @@ def _order_deck(
     # final_key records the key ACTUALLY sorted on.
     if fatigue_mult:
         for c in cards:
-            key[id(c)] *= min(1.0, float(fatigue_mult.get(id(c), 1.0)))
+            m = min(1.0, float(fatigue_mult.get(id(c), 1.0)))
+            key[id(c)] *= m
+            mult_capture.setdefault(id(c), {})["fatigue_mult"] = m
 
     # F5 (deck.taste_vectors) — bounded taste multiplier on the ordering
     # key. Already clamped by taste_service; a card missing from the map
@@ -3618,7 +3664,9 @@ def _order_deck(
     # `cards` was settled upstream and is never changed here.
     if taste_mult:
         for c in cards:
-            key[id(c)] *= float(taste_mult.get(id(c), 1.0))
+            m = float(taste_mult.get(id(c), 1.0))
+            key[id(c)] *= m
+            mult_capture.setdefault(id(c), {})["taste_mult"] = m
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -3636,6 +3684,12 @@ def _order_deck(
                 pid = _top_receive_asset(c, seed_map)
                 if pid is not None and target_counts.get(pid, 0) >= user_cap:
                     key[id(c)] *= penalty
+                    mult_capture.setdefault(id(c), {})["diversity_mult"] = float(penalty)
+                else:
+                    # The layer ran and this card simply wasn't capped —
+                    # frozen as an explicit 1.0 so replay can tell "not
+                    # penalized" from "diversity never ran".
+                    mult_capture.setdefault(id(c), {})["diversity_mult"] = 1.0
 
     ordered = sorted(
         cards,
@@ -3645,6 +3699,11 @@ def _order_deck(
 
     if capture is not None:
         capture["final_key"] = dict(key)
+        # B8 — freeze what was applied, not what a table says tomorrow.
+        if mult_capture:
+            capture["multipliers"] = {k: dict(v) for k, v in mult_capture.items()}
+        if base_capture:
+            capture["base_key"] = dict(base_capture)
 
     if diversity:
         ordered = _cap_per_target(ordered, seed_map, int(_deck_cfg("deck_max_per_target", 3)))
@@ -3703,6 +3762,10 @@ def _log_deck_signal_impressions(
 
     prop_by_card  = (capture or {}).get("propensity") or {}
     final_by_card = (capture or {}).get("final_key") or {}
+    # B8 (LLD §3.6/§4.13) — the applied multipliers and any replaced base key,
+    # frozen per card below alongside `feature_set: "fs2"`.
+    mult_by_card  = (capture or {}).get("multipliers") or {}
+    base_by_card  = (capture or {}).get("base_key") or {}
 
     # Board-state-at-serve (PRD amendment 2026-07-26): one query; failure
     # degrades to the cold-board shape rather than aborting the spine.
@@ -3789,6 +3852,25 @@ def _log_deck_signal_impressions(
                 card, "wildcard_pool_size", None)
             features["wildcard_provenance"] = getattr(
                 card, "wildcard_provenance", None)
+        # B8 (LLD §3.6, HLD §2.3 corollary) — THE PROPENSITY FREEZE. Every
+        # multiplier that actually touched this card's ordering key is written
+        # here at serve time, so the nightly drift check (and any later
+        # replay) can reproduce `final_score` from frozen values alone and
+        # never has to reconstruct a nightly-mutating table's state. Keys
+        # appear only for layers that ran; an absent key means "layer off",
+        # which reads as the neutral 1.0. `class_demotion` (B6) lands here
+        # automatically the day _order_deck starts capturing it — this writer
+        # copies whatever the capture holds rather than naming the layers.
+        # `feature_set` marks the row as carrying the fs2 freeze; it is the
+        # predicate the drift check samples on, so it is stamped
+        # unconditionally, and it is inert to value_model.extract_features
+        # (whitelist-based, so a new key can never shift the feature vector).
+        features["feature_set"] = "fs2"
+        for _mult_key, _mult_val in sorted(
+                (mult_by_card.get(id(card)) or {}).items()):
+            features[_mult_key] = float(_mult_val)
+        if id(card) in base_by_card:
+            features["base_key"] = float(base_by_card[id(card)])
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
         imp_by_card[id(card)] = impression_id
@@ -5067,7 +5149,13 @@ def _run_trade_job(
                 gen_kwargs["max_per_opponent"] = (
                     _EXPLORATION_BASE_PER_OPP + _overgen)
 
+        # P0-6 (LLD §4.2) — pure out-param filled by the engine's gate
+        # cascade; folded into this job's deck_job_stats row below. Counting
+        # only: nothing here can change which cards the engine returns.
+        gate_counters: dict = {}
+
         final_cards = trade_service.generate_trades(
+            gate_counters        = gate_counters,
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
             user_roster          = g_user_roster,
@@ -5288,6 +5376,10 @@ def _run_trade_job(
             # can never reconstruct this rate; the counter row is the only
             # record, and it has to accumulate ≥7d before the flag flips.
             _record_deck_dedup_stats(job_id, g_user_id, league_id, dedup_stats)
+            # P0-6 — the gate-kill funnel for the same completed job, merged
+            # into the same `decided_by` object (never replacing it).
+            _record_deck_gate_counters(job_id, g_user_id, league_id,
+                                       gate_counters)
 
         # F7 (flag deck.exploration) — wildcard slot + archetype audition,
         # applied AFTER ordering (the slot is a fixed served position, not a
@@ -17594,6 +17686,22 @@ def _tick_pass_roster_snapshot(ctx) -> dict:
     return {"items": (roster_snapshot_stats or {}).get("leagues_queued")}
 
 
+def _tick_pass_drift_check(ctx) -> dict:
+    """B8 — the nightly propensity-drift check (LLD §4.13, HLD §2.3).
+
+    Delegates wholesale to `relevance.passes.drift_check.run`: it samples
+    yesterday's fs2 impressions and asserts `final_score = base × propensity ×
+    Π(frozen multipliers)`. Deliberately NOT wrapped in a try/except — unlike
+    every other pass here, a failure IS this pass's output. It raises on a
+    poisoned night so the ledger row goes `error` (and the pass has already
+    written the `untrusted-<date>` marker the D4 promotion counter reads).
+    `run_ledger` gives it its own try/except, so the raise cannot touch the
+    passes behind it.
+    """
+    from .relevance.passes import drift_check as _drift_check
+    return _drift_check.run(ctx)
+
+
 # ── The registry, in run order (LLD §4.1) ───────────────────────────────────
 # `season_start` sits ahead of `pushes` so that on Aug 25 the send sequence is
 # byte-for-byte what the inline loop produced (every signed-up user gets
@@ -17627,6 +17735,10 @@ DAILY_TICK_REGISTRY: list = [
         name="class_load", fn=_tick_pass_class_load, budget_s=60.0)),
     _relevance_registry.register(_relevance_registry.PassSpec(
         name="roster_snapshot", fn=_tick_pass_roster_snapshot, budget_s=60.0)),
+    # B8 — analysis, so it sits behind every user-facing pass: if the wall
+    # deadline starves something, starve the audit, not the pushes.
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="drift_check", fn=_tick_pass_drift_check, budget_s=60.0)),
 ]
 
 

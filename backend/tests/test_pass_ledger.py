@@ -393,6 +393,9 @@ def test_registry_order_matches_the_lld(eng):
     assert [s.name for s in server.DAILY_TICK_REGISTRY] == [
         "season_start", "pushes", "replenish", "eval", "refit",
         "players_guard", "class_load", "roster_snapshot",
+        # B8 — analysis last: a wall deadline must starve the audit, never
+        # the user-facing passes ahead of it.
+        "drift_check",
     ]
     by_name = {s.name: s for s in server.DAILY_TICK_REGISTRY}
     # Only the date-gated fan-out is exempt from the deadline skip.

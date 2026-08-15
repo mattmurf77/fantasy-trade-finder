@@ -2235,6 +2235,12 @@ class TradeService:
                                                 # "consolidate" | "tier_up" |
                                                 # "tier_down" | None — post-
                                                 # generation shape filter
+        gate_counters: dict | None = None,     # P0-6 (LLD §4.2): pure
+                                                # out-param, filled with
+                                                # {gate_<name>: candidates
+                                                # killed} for this job's
+                                                # deck_job_stats row. Never
+                                                # read by generation.
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -2291,6 +2297,7 @@ class TradeService:
                 untouchable_ids      = untouchable_ids,
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
+                gate_counters        = gate_counters,   # P0-6 out-param
             )
             cards = self._generate_trades_v2(**_v2_kwargs)
             # #189 — a targeted job (pinned players and/or acquire /
@@ -2884,6 +2891,7 @@ class TradeService:
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
+        gate_counters: dict | None = None,   # P0-6 out-param (LLD §4.2)
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -3046,6 +3054,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
+                        gate_counters        = gate_counters,   # P0-6
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -3071,6 +3080,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
+                        gate_counters        = gate_counters,   # P0-6
                     )
             else:
                 cards = self._generate_consensus_for_pair(
@@ -3265,6 +3275,7 @@ class TradeService:
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
         user_needs: set | None = None,
+        gate_counters: dict | None = None,   # P0-6 out-param (LLD §4.2)
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -3441,18 +3452,37 @@ class TradeService:
             elif composite > heap[0][0]:
                 heapq.heapreplace(heap, entry)
 
+        # ── P0-6 gate counters (LLD §4.2, PRD R5) ─────────────────────────
+        # `gate_counters` is a pure out-param in the house `capture` idiom:
+        # `_consider` bumps one key at each early return so the admin report
+        # can show WHERE candidates died on the way to a served deck. This is
+        # COUNTING ONLY — no gate's condition is read, reordered or altered
+        # here, and a diff that touches one fails review and T-29. Passing
+        # None keeps a private dict so the hot loop needs no None checks.
+        _gc = gate_counters if gate_counters is not None else {}
+
+        def _kill(gate: str) -> None:
+            k = "gate_" + gate
+            _gc[k] = _gc.get(k, 0) + 1
+
         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
+            _gc["gate_considered"] = _gc.get("gate_considered", 0) + 1
             if pinned_set:
                 if pinned_all:
                     if not pinned_set <= set(give_ids):
+                        _kill("pinned_give")
                         return
                 elif not (set(give_ids) & pinned_set):
+                    _kill("pinned_give")
                     return
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+                _kill("pinned_receive")
                 return
             if not _positions_ok(give_ids, recv_ids):
+                _kill("positional")
                 return
             if not _gap_ok(give_ids, recv_ids):
+                _kill("elo_gap")
                 return
             # #108 — never offer a 1-for-1 that sends a player the user
             # ranks above the received player on their own raw board (the
@@ -3463,16 +3493,19 @@ class TradeService:
             _allowed, _fit_paid = fit_premium_1for1(
                 give_ids, recv_ids, raw_user_elo, players, user_needs)
             if not _allowed:
+                _kill("user_gain")
                 return
             # #227 — a 1-for-1 pick-for-pick swap is pointless churn
             # (picks carry zero divergence by construction).
             if not pick_swap_ok(give_ids, recv_ids, players):
+                _kill("pick_swap")
                 return
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of
             # the two raw boards. Junk both sides value low never pads a
             # package; headliners are exempt (1-for-1 shapes untouched).
             if not filler_ok(give_ids, recv_ids, _uv, _vo):
+                _kill("junk_filler")
                 return
 
             # Package values in EACH side's own value space (Change 2).
@@ -3517,10 +3550,12 @@ class TradeService:
             opp_surplus  = give_val_opp - recv_val_opp
             # True mutual gain (Change 3): BOTH sides must clear the bar.
             if user_surplus < MIN_SIDE or opp_surplus < MIN_SIDE:
+                _kill("mutual_gain")
                 return
 
             fairness = _fairness(give_ids, recv_ids)
             if fairness is None:
+                _kill("fairness")
                 return
 
             hm = _harmonic_mean(user_surplus, opp_surplus)   # A1 ranking
@@ -3534,6 +3569,7 @@ class TradeService:
                 n_t = len(set(recv_ids) & target_ids)
                 if n_t:
                     composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+            _gc["gate_passed"] = _gc.get("gate_passed", 0) + 1
             _offer(composite, hm, fairness, give_ids, recv_ids, _fit_paid)
 
         # ------------------------------------------------------------------

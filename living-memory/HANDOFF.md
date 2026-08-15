@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-14 — Trade-relevance P0 built on `feat/trade-relevance-p0` (pushed, unmerged)](#2026-08-14--trade-relevance-p0-built-on-feattrade-relevance-p0-pushed-unmerged)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -22,6 +23,79 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 ---
+
+## 2026-08-14 — Trade-relevance P0 built on `feat/trade-relevance-p0` (pushed, unmerged)
+
+### Where I am right now
+
+Phase P0 of the trade-relevance initiative is **built and green on a pushed
+branch**, not merged. Planning docs (HLD/LLD/5 PRDs, dual-agent signed off) are
+already on `main` @ `0d3c5b4`; this is the code.
+
+**Branch:** `origin/feat/trade-relevance-p0`. Build worktrees are under this
+session's scratchpad (`p0-build`, `p0-join`, `p0-agg`) — **scratch, will be
+cleaned; the branch is the durable artifact.** Sweep the worktrees per the
+recovery-ledger convention once the branch is merged.
+
+**Two P0 items were delivered by other sessions today and are NOT in this
+branch:** P0-1 event registration (PR #116) and the impression-ownership
+validation (PR #119 / `9910ae6`, [D-050]) — the latter is exactly P0's R6, so
+the PRD's R4/R6 are done and the branch builds on them.
+
+| Build step | State |
+|---|---|
+| Schema spine (3 tables, 6 join columns, widened action enum, seeds) | built, green |
+| `backend/relevance/` (batch_write, D10 resolver + valve, T-28 lint) | built, green |
+| B7 P0-5 near-dup dedup | built, green, flag `deck.dedup` **dark** |
+| B1 pass ledger (daily-tick → registry) | built, green |
+| B5 P0-3 disposition join (the four D2 labels) | built, green |
+| B4 gate counters + B8 propensity freeze/drift check | **last agent verifying at session end — confirm state before building on it** |
+| B6 flag aggregation + admin relevance report | built on `feat/trade-relevance-p0-agg`, **not yet merged into the main branch** |
+
+### What's next, in order
+
+1. **Confirm the B4/B8 working tree** in `p0-build` (gate counters, propensity
+   freeze, `relevance/passes/drift_check.py`) — it was mid-verification when the
+   session ended. Run the full suite before trusting it.
+2. **Merge `feat/trade-relevance-p0-agg`** into `feat/trade-relevance-p0`. Both
+   branches create `backend/relevance/passes/` — expect a trivial conflict on
+   `passes/__init__.py` and on the registry's pass list; both additions are
+   wanted.
+3. **Open the PR.** Gates still owed: TEST_LEDGER entry, the tier-4 sim-gate
+   declaration (already argued in `docs/plans/trade-relevance-engine/scope.md`
+   §5 — no user-visible mobile surface, both flags dark), and `githooks/pre-push`
+   will want `FTF_SKIP_SIM_GATE=1` for that reason.
+4. **Do not flip either flag on merge.** The PRD's rollout order is: ledger
+   merges first and **soaks ≥3 days** (it refactors live push-sending code) →
+   dedup ON alone with a 7-day window → `flag_agg` runs dark ≥7 days → operator
+   reviews the demoted-class report → `deck.class_demotion` ON alone.
+
+### Blocking / operator decisions
+
+None block the merge. The queue that gates **later phases** is consolidated at
+the end of `docs/plans/trade-relevance-engine/reconciliation-log.md` — the two
+⛔ items (Sleeper OQ-1 public-read coverage, Postgres cutover timing) gate P2,
+not P0.
+
+### Watch items
+
+- **The spec was wrong five times and the code was right.** Corrections are
+  marked ⟨BUILD-AMENDED⟩ in the LLD: no retention endpoint exists (a pruner
+  ships instead); `save_deck_outcome` already raised rather than accepting any
+  string (kept the raise); the tick has 7 inline blocks not 6 (`roster_snapshot`
+  landed the same day); `TASTE_REWARDS` carried dead `accept`/`decline` keys
+  that no writer can produce (removed, invariant test added); the T-28 lint was
+  a text scan that flagged its own documentation (now AST-based). **Treat the
+  remaining phase docs as drafts to verify, not truth.**
+- **`test_rookie_scope.py` passes now** (34) and is byte-identical to `main` —
+  the "6 pre-existing py3.14 failures" noted in earlier entries no longer
+  reproduce. Full suite includes it.
+- The ledger **fails open** by design: a bookkeeping error lets the pass run
+  anyway, because silencing nightly pushes is the worse failure. What makes that
+  safe is the registration-time assert that every dispatched push kind carries a
+  frequency cap or dedup key — don't remove it.
+- A second same-day `daily-tick` POST now legitimately omits `replenish`
+  (ledger skip). Documented, but it will look like a regression if unexpected.
 
 ## 2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)
 

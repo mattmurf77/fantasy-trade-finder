@@ -212,6 +212,7 @@ def generate_pair_trades_v3(
     not_interested_ids: set | None = None,
     raw_user_elo: dict[str, float] | None = None,
     user_needs: set | None = None,
+    gate_counters: dict | None = None,   # P0-6 out-param (LLD §4.2)
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
 
@@ -456,21 +457,46 @@ def generate_pair_trades_v3(
     near_misses: list[tuple] = []   # (hm, ratio, give, recv) — 3.4 input
     order = 0
 
+    # ── P0-6 gate counters (LLD §4.2, PRD R5) ───────────────────────────────
+    # Same key names as `trade_service._consider`, because this is the SAME
+    # cascade — v3 just enumerates exactly instead of heuristically, and adds
+    # two gates v2 has no equivalent of (`shape`, `lineup_feasibility`). The
+    # admin funnel must read identically whichever engine served the deck.
+    # Pure out-param, counting only: a diff that touches a `continue` fails
+    # review and T-29.
+    _gc = gate_counters if gate_counters is not None else {}
+
+    def _kill(gate: str, n: int = 1) -> None:
+        k = "gate_" + gate
+        _gc[k] = _gc.get(k, 0) + n
+
     for give_ids in give_subsets:
         if pinned_set:
-            if pinned_all:
-                if not pinned_set <= set(give_ids):
-                    continue
-            elif not (set(give_ids) & pinned_set):
+            skip = (not pinned_set <= set(give_ids)) if pinned_all \
+                else (not (set(give_ids) & pinned_set))
+            if skip:
+                # The pinned-give filter sits on the OUTER loop, so it kills
+                # a whole row of the (give × receive) grid at once. Counted as
+                # the candidates it eliminated, not as one skip, so the
+                # conservation identity (considered == passed + Σkills) still
+                # holds against the full grid.
+                _gc["gate_considered"] = (_gc.get("gate_considered", 0)
+                                          + len(recv_subsets))
+                _kill("pinned_give", len(recv_subsets))
                 continue
         for recv_ids in recv_subsets:
+            _gc["gate_considered"] = _gc.get("gate_considered", 0) + 1
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+                _kill("pinned_receive")
                 continue
             if abs(len(give_ids) - len(recv_ids)) > 1:
+                _kill("shape")
                 continue
             if not _positions_ok(give_ids, recv_ids):
+                _kill("positional")
                 continue
             if not _gap_ok(give_ids, recv_ids):
+                _kill("elo_gap")
                 continue
             # #108 — never offer a 1-for-1 that sends a player the user
             # ranks above the received player on their own raw board
@@ -481,22 +507,27 @@ def generate_pair_trades_v3(
             _allowed, _fit_paid = fit_premium_1for1(
                 give_ids, recv_ids, raw_user_elo, players, user_needs)
             if not _allowed:
+                _kill("user_gain")
                 continue
             # #227 — a 1-for-1 pick-for-pick swap is pointless churn
             # (mirrors the v2 _consider gate; gated before the near-miss
             # collection below so the 3.4 sweetener pass can't rescue it).
             if not pick_swap_ok(give_ids, recv_ids, players):
+                _kill("pick_swap")
                 continue
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of
             # the two raw boards (mirrors the v2 _consider gate).
             if not filler_ok(give_ids, recv_ids, _uv, _vo):
+                _kill("junk_filler")
                 continue
             if not _both_feasible(give_ids, recv_ids):    # 3.2 hard gate
+                _kill("lineup_feasibility")
                 continue
 
             user_surplus, opp_surplus = _surpluses(give_ids, recv_ids)
             if user_surplus < MIN_SIDE or opp_surplus < MIN_SIDE:
+                _kill("mutual_gain")
                 continue
 
             fairness, ratio, _gv, _rv = _fairness_v3(
@@ -506,8 +537,10 @@ def generate_pair_trades_v3(
                 if fairness_threshold - SW_BAND <= ratio < fairness_threshold:
                     hm = _harmonic_mean(user_surplus, opp_surplus)
                     near_misses.append((hm, ratio, give_ids, recv_ids))
+                _kill("fairness")
                 continue
 
+            _gc["gate_passed"] = _gc.get("gate_passed", 0) + 1
             hm = _harmonic_mean(user_surplus, opp_surplus)
             order -= 1   # earlier combos win composite ties (desc sort)
             scored.append((_composite(hm, fairness, give_ids + recv_ids, recv_ids),
