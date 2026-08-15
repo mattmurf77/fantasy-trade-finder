@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-045 | A whole league-mate silently missing from the deck, not just their cards | Backend / trade engine / pool prune |
 | G-044 | A killed `sim-run.sh` leaves Flask on :5001; the next run aborts stale | Mobile / test harness / Flask |
 | G-043 | `sim-build.sh` fails at the JS bundle phase on a symlinked `node_modules` | Mobile / build / Metro resolver |
 | G-042 | The local Maestro sim gate cannot run at all: no `JAVA_HOME` | Mobile / test harness / Maestro |
@@ -376,3 +377,11 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Cause:** `sim-run.sh` starts a test-mode Flask on :5001 and stops it on exit. Kill the parent (Ctrl-C, `pkill` on a wrapper script) and the Flask child survives and keeps the port; the next run's whoami handshake correctly refuses to talk to someone else's server.
 - **Fix:** `lsof -ti:5001 | xargs kill -9` before re-running.
 - **Prevention:** the guard is working as designed — it is a rail, not a bug. Just know that "another instance holds the port" means *your own orphan*, not a second developer.
+
+### G-045 — a whole league-mate silently missing from the deck, not just their cards
+- **Symptom:** a boarded opponent produces **zero** trade cards at any per-opponent budget while obviously good trades exist against them — and raising the budget, loosening fairness, or checking the surplus gate all change nothing. Three of four boarded members in the operator's own league were in this state.
+- **Cause (two, stacked):** (1) `trade_optimizer`'s candidate-pool prune ranks by the RAW divergence `_vo - _uv`, and `elo_to_value` is **exponential** — so an opponent board pinned near the 1200 floor deflates a stud by thousands of value points and a bench body by tens. Every tradeable stud sorts BELOW the user's junk and the top-`v3_pool_size` pool fills with worthless assets. (2) `trade_service`'s boarded/unboarded branch was `if/else` with **no fall-through**, so the zero result got no consensus fallback either and the member disappeared from the deck entirely.
+- **How to recognise it fast:** compare the two boards' **medians**, not their maxima. The broken boards' maxima looked healthy (1800–1839); it was the median (1201 vs 1379) that gave it away. A board whose median sits at the floor is a "started ranking and stopped" board, and any engine step comparing two boards by a raw *value difference* is distorted by it.
+- **Prevention:** when an engine step compares two personal boards, ask whether its output is invariant to a board-wide scale offset — an offset carries **zero** information about who either side prefers, so if the answer is no, that step has this bug. Fixed behind `trade.pool_calibration` / `trade.divergence_fallback` (see [D-052](DECISIONS.md)); the paired flag-off tests in `backend/tests/test_compressed_board.py` pin both the defect and the fix.
+- **Not the lever it looks like:** `v3_pool_size` is a `model_config` knob and raising it to 30 does rescue these pairs — at **26–102 s per pair** against ~2 s at 12. Enumeration is cubic-ish in pool size on both sides; it is not a shippable mitigation.
+

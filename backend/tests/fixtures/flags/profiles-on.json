@@ -55,6 +55,8 @@
   "trade.picks_in_pool": true,
   "trade.asset_ideas": true,
   "trade.outlook_direction": true,
+  "trade.pool_calibration": true,
+  "trade.divergence_fallback": true,
   "outlook.odds": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,

@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-08-15 — Compressed-board pool prune + boarded-member fallback (FLAGS ON, unpushed)
+
+- **Change:** backend-only, two dark flags — `trade.pool_calibration` (`trade_optimizer` prune ranks on a board-scale-calibrated divergence) and `trade.divergence_fallback` (`trade_service` falls back to the consensus generator when a boarded member yields zero divergence cards). Scope block: [`docs/plans/compressed-board-pool/scope.md`](../docs/plans/compressed-board-pool/scope.md); [D-052](DECISIONS.md), [G-045](GOTCHAS.md), [Q-017](OPEN_QUESTIONS.md).
+- **Ran (worktree `loving-shtern-12e4b1`, branch `claude/loving-shtern-12e4b1` off `origin/main` @ `21df73f`):** `pytest backend/tests -q` → **2771 passed, 1 skipped** (6m48s, local SQLite, Python 3.14). Baseline for this tree was 2763/1, and this change adds exactly the 8 new tests in `test_compressed_board.py` — the arithmetic closes, no pre-existing test was deleted or skipped to get green. **Note `test_rookie_scope.py` passes on this interpreter** (it is the known local-3.14 flake in earlier entries; it did not fail here).
+- **New tests (8, all paired):** every fixed behaviour is asserted alongside a **flag-off test pinning today's defect**, so the suite proves the flag is what changed the outcome and that the kill switch restores the current engine byte-for-byte. Includes an offset-invariance property test (+200 Elo to every opponent rating ⇒ identical deck with the flag on, different deck with it off).
+- **One pre-existing pin found by the suite, as designed:** the flag-fixture mirrors. Adding two keys to `config/features.json` broke `test_seed_ui_test_db.py` three ways until `fixtures/flags/{release,onboarding-v2,profiles-on}.json` gained them; `all-on.json` is a 41-key overlay and correctly needs nothing.
+- **FIELD-VERIFIED read-only against PROD boards** (`DATABASE_URL=$DATABASE_URL_PROD`, SELECT-only via the replay script's existing loaders — nothing written). League FFV3 `1312140920132497408`, user mattmurf77, production `v3_pool_size=12`. Board shapes confirm the diagnosis: the three zero-yield boards have median Elo **1201** (max 1800–1839) against jonbonjourvi's **1379**. Deck regeneration, cards per boarded opponent:
+
+  | Config | jonbonjourvi | MangoPatti | Bcork | gdubs10 |
+  |---|---|---|---|---|
+  | today (both off) | 5 divergence | **0** | **0** | **0** |
+  | `pool_calibration` | 5 divergence | 0 | 0 | **5 divergence** |
+  | both flags | 5 divergence | **5 consensus** | **5 consensus** | 5 divergence |
+
+- **What this evidence does NOT establish:** (a) deck **quality** — card counts are not card quality, and nobody has eyeballed the rescued cards; (b) behaviour on any league other than FFV3, in particular a healthy-board league (the byte-identity claim there rests on the unit fixture, not on field data); (c) that consensus cards for MangoPatti/Bcork are the *right* product answer versus the divergence cards a larger pool finds ([Q-017](OPEN_QUESTIONS.md)).
+- **Latency, measured per pair on the real boards:** pool 12 ≈ 1.5–5.2 s regardless of the flag (no regression). Pool 30 — the "deploy-free mitigation" — costs **26 s (Bcork), 80 s (MangoPatti), 102 s (gdubs10)**; a full 11-opponent deck did not finish in 10 minutes. Raising `v3_pool_size` is not a shippable workaround.
+- **Sim gate:** tier 4 (backend-only, no mobile file, no route contract) — no sim run, so **no `qa/sim-runs/last-sim-run.json` was written**; the tier call is recorded in the scope block. Maestro delta waived for the same reason.
+- **Flags flipped ON** by operator instruction after the evidence above: `trade.pool_calibration` and `trade.divergence_fallback` are `true` in `config/features.json` and in the three fixture mirrors the mirror-tests police. **Nothing is in production** — no PR, nothing merged to `main` — so the flags are on in this branch's config, not yet in the deployment.
+- **Re-run after merging `origin/main` (PR #121) and flipping both flags:** `pytest backend/tests -q` → **2804 passed, 1 skipped** (4m25s). The +33 over the 2771 above is everything PR #121 brought with it, `test_co_owner_rosters.py` included. First suite run with these two flags live by default — the engine tests that pin flag-OFF behaviour set their own flags explicitly, so they are unaffected, and the three flag-fixture mirrors had to be flipped alongside `config/features.json` or `test_seed_ui_test_db` fails.
+
+---
+
 ## 2026-08-15 — Sleeper co-owned rosters (branch `claude/epic-hellman-6af20f`, commit `44c8bbf`, UNMERGED)
 
 - **SHIPPED 2026-08-15:** squash [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121) → `main` @ `6158e65`, all three CI checks green (backend-tests 7m36s, mobile-typecheck, maestro-testid-lint). Deploy verified live by probe: `/api/tier-config` 200 and prod `/js/app.js` contains the new `ownsRoster` predicate. **Sim gate overridden**, on the record: the marker says `result: "fail"` and the PR route bypasses `githooks/pre-push` (it only fires on a direct push to `main`); the operator said push live with that stated. **Mobile remains dark** until an EAS build — the client-side resolution is in the app binary, so the reported symptom persists on the current TestFlight build.

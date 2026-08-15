@@ -9,12 +9,26 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed](#2026-08-15--compressed-board-engine-fixes-flags-on-branch-unpushed)
 - [2026-08-15 — Co-owned roster follow-on](#2026-08-15--co-owned-roster-follow-on)
 - [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
 - [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed
+
+Built and field-verified on branch `claude/loving-shtern-12e4b1`; **both flags
+flipped ON by operator instruction 2026-08-15** and `origin/main` merged in, but
+the branch is **unpushed** (see [`HANDOFF.md`](HANDOFF.md), [D-052](DECISIONS.md)).
+
+1. **Push the branch / open the PR.** *(operator)* The flags are already `true` in this branch's `config/features.json`, so they go live the moment this merges and Render redeploys — there is no separate flip step left. Two consequences ride along, both accepted at flip time: boarded members can show `basis:"consensus"` cards, and the 30-card cap means rescued members displace unranked members' consensus cards.
+2. **Eyeball the rescued cards before or right after flipping.** *(S)* Card *counts* are verified; card *quality* is not. Nobody has looked at the five cards MangoPatti and Bcork now produce, and "the deck is no longer empty" is not the same claim as "the deck is good".
+3. **Re-run the field probe on a second league.** *(S)* Every field number is from FFV3. The no-regression claim for healthy boards rests on a unit fixture, not on data from a league that isn't the one the bug was found in.
+4. **[Q-017](OPEN_QUESTIONS.md) — quantile-matching the prune.** *(M, only if #2 says the consensus fallback isn't good enough)* A single scale factor can't undo a nonlinear compression, which is why MangoPatti and Bcork get consensus rather than divergence cards. Don't build it on speculation.
 
 ---
 
