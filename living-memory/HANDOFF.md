@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122-flags-live)
 - [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
@@ -22,6 +23,51 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)
+
+### Where I am right now
+
+Every trade card's rationale sentence could name a position the received player
+doesn't play — `build_narrative` took the position from the roster analysis
+(`match_context.user_needs`) and the player from the card
+(`_top_received_name`, highest dynasty value, no position filter) and pasted
+them together. A QB-thin manager receiving a TE read "Adds Brock Bowers to
+address your thin QB group." Reported rate across the operator's four real
+Sleeper leagues: **23 of 32 cards**; it ran on both live generation paths, so
+it was on every card.
+
+**SHIPPED** — operator said push live and deploy.
+[PR #125](https://github.com/mattmurf77/fantasy-trade-finder/pull/125) from
+branch `claude/peaceful-lumiere-e2a25b`, merged up to `origin/main` @ `19d4174`
+(PR #122, compressed boards) first: three living-memory conflicts, resolved
+keep-both, decision renumbered **D-053** because main claimed D-051/D-052. No
+code conflict — main's engine work touches neither `build_narrative`'s call
+sites nor `card.fit_premium`.
+
+- `_top_received(card, players, positions)` returns the highest dynasty-value
+  received player *whose own position* is in the candidate set; each branch
+  prints that player's own position. Nothing fits → neutral fairness sentence
+  rather than an invented benefit. The `fit_premium` branch's `needs[0]`
+  fallback (same hazard) is gone. → [D-053](DECISIONS.md)
+- `backend/tests/test_trade_narrative.py` 5 → 12 tests; 5 of the 7 new ones
+  fail against the pre-fix module (verified by stashing the fix).
+- Full backend suite on the merged tree: **2811 passed, 1 skipped** (main's
+  2804 + these 7). Sim gate tier 4 (backend-only).
+- Gates: scope block at `docs/plans/narrative-position-accuracy/scope.md`
+  (Maestro delta waived — no mobile code, no testID, copy is data-derived);
+  `docs/architecture.md` row updated; TEST_LEDGER entry written.
+
+### Next step
+
+Nothing blocking. Worth a post-deploy spot check on a real deck: the neutral
+"comes back in a balanced package" line should now appear on cards that used
+to claim a bogus position, and no card should name a position its incoming
+players don't play. Never re-run against the four real leagues that surfaced
+it (needs live Sleeper data; local dev DB has no stored cards), so the 23/32
+figure stays a pre-fix baseline.
 
 ---
 

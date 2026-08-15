@@ -67,6 +67,115 @@ def test_picks_highest_value_received_player_not_first():
     assert "Bench Guy" not in out
 
 
+# ───────────── positional honesty (2026-08-15 correctness fix) ─────────────
+# `user_needs` comes from the roster analysis and the received players come
+# from the card. A sentence may only pair a position with a player who
+# actually plays it.
+
+def test_te_only_return_never_claims_the_qb_need():
+    players = {"r1": _P("r1", "Brock Bowers", "TE", search_rank=8)}
+    card = _Card(give_player_ids=["g"], receive_player_ids=["r1"])
+    ctx = {
+        "user_needs":       ["QB", "RB"],
+        "opponent_surplus": ["TE"],
+        "league_settings":  {},
+    }
+    out = build_narrative(card, ctx, players)
+    assert "QB" not in out
+    assert "Brock Bowers" in out
+    assert "thin" not in out and "shore up" not in out   # neutral fallback
+
+
+def test_names_the_position_the_received_player_actually_plays():
+    # top need is QB; the only need-filling player received is the RB
+    players = {
+        "rb": _P("rb", "Bijan Robinson", "RB", search_rank=2),
+        "te": _P("te", "Bench TE",       "TE", search_rank=300),
+    }
+    card = _Card(give_player_ids=["g"], receive_player_ids=["rb", "te"])
+    ctx = {
+        "user_needs":       ["QB", "RB"],
+        "opponent_surplus": ["RB"],
+        "league_settings":  {},
+    }
+    out = build_narrative(card, ctx, players)
+    assert "shore up RB by acquiring Bijan Robinson" in out
+    assert "QB" not in out
+
+
+def test_overlap_position_matches_the_named_player():
+    # overlap[0] is QB but only the WR comes back
+    players = {"wr": _P("wr", "Puka Nacua", "WR", search_rank=5)}
+    card = _Card(give_player_ids=["g"], receive_player_ids=["wr"])
+    ctx = {
+        "user_needs":       ["QB", "WR"],
+        "opponent_surplus": ["QB", "WR"],
+        "league_settings":  {},
+    }
+    out = build_narrative(card, ctx, players)
+    assert "shore up WR by acquiring Puka Nacua" in out
+    assert "QB" not in out
+
+
+def test_picks_alone_do_not_fill_a_positional_need():
+    players = {"p1": _P("p1", "2026 1st", "PICK", pick_value=67.5)}
+    card = _Card(give_player_ids=["g"], receive_player_ids=["p1"])
+    ctx = {"user_needs": ["QB"], "opponent_surplus": ["QB"],
+           "league_settings": {"dynasty": True}}
+    out = build_narrative(card, ctx, players)
+    assert "QB" not in out
+    assert "2026 1st" in out
+
+
+def test_fit_premium_uses_the_premium_position():
+    players = {"r1": _P("r1", "Trey McBride", "TE", search_rank=15)}
+    card = _Card(give_player_ids=["g"], receive_player_ids=["r1"])
+    card.fit_premium = {"value_paid": 120.0, "position": "TE"}
+    ctx = {"user_needs": ["QB", "TE"], "opponent_surplus": ["TE"],
+           "league_settings": {}}
+    out = build_narrative(card, ctx, players)
+    assert "Fills your TE hole with Trey McBride" in out
+    assert "QB" not in out
+
+
+def test_fit_premium_without_a_position_does_not_borrow_the_top_need():
+    players = {"r1": _P("r1", "Trey McBride", "TE", search_rank=15)}
+    card = _Card(give_player_ids=["g"], receive_player_ids=["r1"])
+    card.fit_premium = {"value_paid": 120.0, "position": None}
+    ctx = {"user_needs": ["QB"], "opponent_surplus": ["QB"],
+           "league_settings": {}}
+    out = build_narrative(card, ctx, players)
+    assert "QB" not in out
+    assert "Trey McBride" in out
+
+
+def test_no_position_is_claimed_that_is_not_actually_received():
+    """Invariant over every needs × received-positions combination: a
+    position token in the narrative must belong to a received player."""
+    import itertools
+
+    POSITIONS = ["QB", "RB", "WR", "TE"]
+    for recv in itertools.chain(
+        itertools.combinations(POSITIONS, 1),
+        itertools.combinations(POSITIONS, 2),
+    ):
+        players = {p: _P(p, f"{p} Guy", p, search_rank=10) for p in recv}
+        card = _Card(give_player_ids=["g"], receive_player_ids=list(recv))
+        for r in range(1, len(POSITIONS) + 1):
+            for needs in itertools.permutations(POSITIONS, r):
+                for surplus in ([], list(needs), POSITIONS):
+                    ctx = {"user_needs": list(needs),
+                           "opponent_surplus": surplus,
+                           "league_settings": {}}
+                    out = build_narrative(card, ctx, players)
+                    claimed = [p for p in POSITIONS
+                               if f" {p} " in f" {out} "
+                               or f"{p} hole" in out
+                               or f"{p} group" in out]
+                    assert all(p in recv for p in claimed), (
+                        f"recv={recv} needs={needs} surplus={surplus} → {out}")
+
+
 def test_two_sentence_cap():
     players = {
         "r1": _P("r1", "RB1", "RB"),

@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-08-15 — Trade-card narrative positional accuracy (shipped, PR #125)
+
+- **Change:** backend-only — `backend/trade_narrative.py` positional branches now resolve the player and the position from one source (`_top_received(card, players, positions)`); no received player at a needed position → neutral fairness sentence instead of an invented benefit. Decision [D-053](DECISIONS.md), scope block [`docs/plans/narrative-position-accuracy/scope.md`](../docs/plans/narrative-position-accuracy/scope.md).
+- **Bug evidence (pre-fix, reported):** decks generated against the operator's four real Sleeper leagues → **23 of 32 cards** carried a position-inaccurate sentence (operator reads QB-thin in all four, so `needs[0]`=QB while the headline received asset was RB/WR/TE).
+- **Ran (branch @ tree with fix):** `pytest backend/tests -q` → **2769 passed, 1 skipped** (4m40s, local SQLite). `backend/tests/test_trade_narrative.py` 5 → 12 tests.
+- **Re-run after merging `origin/main` @ `19d4174`** (PR #121 co-owner rosters + PR #122 compressed boards, both engine flags ON): **2811 passed, 1 skipped** (4m18s). The +42 over 2769 is exactly what the two merged PRs brought plus nothing of mine changing count; main's own last recorded figure was 2804/1 and these 7 tests close the arithmetic.
+- **Note:** the fix commit message cites `D-051`; the decision was renumbered **D-053** in the merge after main claimed D-051/D-052. Docs are correct; the commit message is not.
+- **Negative control:** the 7 new tests were re-run with the fix stashed (`git stash push backend/trade_narrative.py`) → **5 failed**, including the reported repro (TE-only return for a QB-thin user) and the invariant sweep over every needs × received-position combination. The other 2 cover cases the old code got right by coincidence.
+- **NOT re-run:** the four-real-league deck generation that surfaced the bug — needs the operator's live Sleeper leagues; the local dev DB has zero stored cards. The 23/32 figure is the reported pre-fix baseline, not a post-fix measurement.
+- **Sim gate:** tier 4 (backend-only; no route, schema, or mobile change) — no sim run, no `qa/sim-runs/last-sim-run.json`. Tier call recorded in the scope block §5.
+
+---
+
 ## 2026-08-15 — Compressed-board pool prune + boarded-member fallback (SHIPPED, PR #122)
 
 - **Change:** backend-only, two dark flags — `trade.pool_calibration` (`trade_optimizer` prune ranks on a board-scale-calibrated divergence) and `trade.divergence_fallback` (`trade_service` falls back to the consensus generator when a boarded member yields zero divergence cards). Scope block: [`docs/plans/compressed-board-pool/scope.md`](../docs/plans/compressed-board-pool/scope.md); [D-052](DECISIONS.md), [G-045](GOTCHAS.md), [Q-017](OPEN_QUESTIONS.md).

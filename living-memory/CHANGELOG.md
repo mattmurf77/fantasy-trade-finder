@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-08-15 (trade-card narrative claimed positions the received player doesn't play)
+
+- **User-facing copy bug on the deck's primary surface, backend-only.** `build_narrative` took the position from the roster analysis (`match_context.user_needs` / `opponent_surplus`) and the player from the card (`_top_received_name` — highest dynasty value, **no position filter**) and printed them side by side. Nothing linked them, so a QB-thin manager receiving a tight end read "Adds Brock Bowers to address your thin QB group." Found by running the real engine against the operator's four Sleeper leagues: **23 of 32 cards**; both live paths call it, so it was on every card.
+- **Fix:** every positional branch resolves player and position **together** through `_top_received(card, players, positions)` — the highest dynasty-value received player whose *own* position is in the candidate set — and prints that player's own position. Nothing received fills a need → fall through to the neutral fairness sentence instead of inventing a benefit. The `fit_premium` branch's `needs[0]` fallback (same hazard) is deleted. [D-053](DECISIONS.md).
+- **Judgment call:** among qualifying players the highest-**value** one wins, not the highest-priority need — the sentence names the card's headline asset rather than a bench body that happens to fill the top gap. Both are true; this one matches what the card visibly is.
+- **Tests:** `test_trade_narrative.py` 5 → 12, including the reported repro and an invariant sweep over every needs × received-position combination. **Negative control:** 5 of the 7 new tests fail against the pre-fix module. Full suite **2811 passed, 1 skipped** on the merged tree (main's 2804 + 7).
+- **Not measured post-fix:** the four-real-league run needs live Sleeper data (local dev DB has no stored cards), so 23/32 is the pre-fix baseline only.
+- **Gates (full — no express declared):** scope block [`docs/plans/narrative-position-accuracy/scope.md`](../docs/plans/narrative-position-accuracy/scope.md); Maestro delta waived (no mobile code, no `testID`, data-derived copy a seeded flow can't judge); `docs/architecture.md` module row updated; sim tier 4 (backend-only), pytest is the gate — [TEST_LEDGER](TEST_LEDGER.md).
+- **SHIPPED:** operator said push live and deploy. [PR #125](https://github.com/mattmurf77/fantasy-trade-finder/pull/125) → `main`.
+
+---
+
 ## 2026-08-15 (compressed opponent boards produced empty decks — SHIPPED, PR #122, flags ON)
 
 - **Field bug, backend-only.** Running the real engine against the operator's league FFV3 with prod boards: three of four **boarded** opponents (MangoPatti, Bcork, gdubs10) yielded **zero** cards at any per-opponent budget; the fourth (jonbonjourvi) yielded five. Their boards are floor-pinned — median Elo 1201 vs jonbonjourvi's 1379 — the shape of "started ranking and stopped".

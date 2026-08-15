@@ -17,22 +17,37 @@ def _player_name(pid: str, players: dict) -> Optional[str]:
     return getattr(p, "name", None)
 
 
-def _top_received_name(card, players: dict) -> Optional[str]:
-    """Name of the highest-value received player (by dynasty value)."""
+def _top_received(card, players: dict,
+                  positions: Optional[set] = None) -> tuple[Optional[str],
+                                                            Optional[str]]:
+    """(name, position) of the highest-value received player (by dynasty
+    value). When `positions` is given, only players at one of those
+    positions are considered — so any sentence that names a position and a
+    player names that player's *own* position, never one asserted from a
+    separate source. (None, None) when nothing received qualifies.
+    """
     # Lazy import to avoid circular import at module load.
     from .trade_service import dynasty_value
 
-    best_name: Optional[str] = None
+    best: tuple[Optional[str], Optional[str]] = (None, None)
     best_value = -1.0
     for pid in card.receive_player_ids:
         player = players.get(pid)
         if player is None:
             continue
+        pos = getattr(player, "position", None)
+        if positions is not None and pos not in positions:
+            continue
         value = dynasty_value(player)
         if value > best_value:
             best_value = value
-            best_name = getattr(player, "name", None)
-    return best_name
+            best = (getattr(player, "name", None), pos)
+    return best
+
+
+def _top_received_name(card, players: dict) -> Optional[str]:
+    """Name of the highest-value received player (by dynasty value)."""
+    return _top_received(card, players)[0]
 
 
 def _fairness_label(score: float) -> str:
@@ -101,20 +116,33 @@ def build_narrative(card, match_context: Optional[dict], players: dict) -> str:
     overlap = [p for p in needs if p in surplus]
     target  = _top_received_name(card, players)
 
+    # Positional claims name a player who actually plays that position.
+    # `needs` / `overlap` come from the roster analysis and the received
+    # players come from the card — pairing the two blindly asserted things
+    # like "Adds Brock Bowers to address your thin QB group". Each branch
+    # below resolves the player and the position together, and falls
+    # through to the neutral fairness sentence when nothing received fills
+    # a need, rather than inventing a benefit.
     fit_prem = getattr(card, "fit_premium", None)
-    if fit_prem and target:
-        pos = fit_prem.get("position") or (needs[0] if needs else "a need")
+    fit_pos  = (fit_prem or {}).get("position")
+    fit_name = _top_received(card, players, {fit_pos})[0] if fit_pos else None
+    overlap_name, overlap_pos = (_top_received(card, players, set(overlap))
+                                 if overlap else (None, None))
+    needs_name, needs_pos = (_top_received(card, players, set(needs))
+                             if needs else (None, None))
+
+    if fit_name:
         sentences.append(
-            f"Fills your {pos} hole with {target} — you pay a little on "
+            f"Fills your {fit_pos} hole with {fit_name} — you pay a little on "
             f"your own board for the fit."
         )
-    elif overlap and target:
+    elif overlap_name:
         sentences.append(
-            f"You shore up {overlap[0]} by acquiring {target}."
+            f"You shore up {overlap_pos} by acquiring {overlap_name}."
         )
-    elif needs and target:
+    elif needs_name:
         sentences.append(
-            f"Adds {target} to address your thin {needs[0]} group."
+            f"Adds {needs_name} to address your thin {needs_pos} group."
         )
     elif target:
         fair = _fairness_label(card.fairness_score)
