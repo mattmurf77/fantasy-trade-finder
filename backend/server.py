@@ -3246,6 +3246,113 @@ def _apply_deck_dedup(cards: list, key: dict, *, seed_map: dict,
         return cards
 
 
+# ── P0-4 (flag deck.class_demotion) — bounded per-class demotion ────────────
+# docs/plans/trade-relevance-engine/lld.md §4.6 / hld.md D11. The nightly
+# `flag_aggregation` pass (backend/relevance/passes/flag_agg.py) writes one
+# `deck_class_stats` row per (archetype, shape_bucket, receive_value_band) per
+# UTC day; serving reads the LATEST stat_date and multiplies the ordering key.
+#
+# Four invariants this seam owes the design:
+#   * NEVER A GATE. The multiplier only reorders cards `_consider` already
+#     admitted. It is clamped to [class_demotion_floor, 1.0] at READ as well
+#     as at write, so even a hand-edited or corrupted row cannot drop a class
+#     out of the deck.
+#   * Missing class ⇒ 1.0. Absent/empty/unreadable table ⇒ every card 1.0 ⇒
+#     ordering byte-identical to flag-off (asserted by T-23).
+#   * FROZEN, not re-read. `deck_class_stats` mutates nightly, so HLD §2.3's
+#     corollary applies: the multiplier ACTUALLY applied is written into the
+#     serve-time `features_json` as `class_demotion`. Replay must never
+#     reconstruct table state at serve time (D8 calls that leakage).
+#   * Cheap. One whole-table read of the latest stat_date, cached in-process
+#     for 6h — the `_thompson_prior_cache` precedent. No per-card query.
+
+_CLASS_DEMOTION_CACHE_TTL_S = 6 * 3600
+_class_demotion_cache: dict = {"map": None, "at": 0.0, "stat_date": None}
+
+
+def _deck_class_demotion_enabled() -> bool:
+    return getattr(FLAGS, "deck_class_demotion", False)
+
+
+def _class_demotion_reset_cache() -> None:
+    """Drop the cached stats. Test hook + post-pass invalidation."""
+    _class_demotion_cache.update(map=None, at=0.0, stat_date=None)
+
+
+def _class_demotion_stats() -> dict:
+    """{(archetype, shape_bucket, value_band): demotion} at MAX(stat_date).
+
+    Empty dict on ANY failure (missing table, locked DB, no rows) — a stats
+    read must never cost a user their deck, and an empty map is exactly the
+    "no demotion anywhere" state. Values are clamped here as well as at write
+    and non-finite/NULL rows are dropped, so a corrupt row degrades to 1.0
+    rather than to an arbitrary multiplier."""
+    now = time.time()
+    cached = _class_demotion_cache["map"]
+    if cached is not None and now - _class_demotion_cache["at"] < _CLASS_DEMOTION_CACHE_TTL_S:
+        return cached
+
+    from .relevance.passes.flag_agg import DEFAULT_FLOOR
+    from .relevance.config import resolve as _resolve_knob
+    floor = min(1.0, max(0.0, _resolve_knob("class_demotion_floor", DEFAULT_FLOOR)))
+
+    out: dict[tuple[str, str, str], float] = {}
+    stat_date = None
+    try:
+        from sqlalchemy import func as _sa_func, select as _sa_select
+        # Resolved through the module object on every call (never bound at
+        # import) so tests patching `backend.database.engine` are honored.
+        from . import database as _db
+        _t = _db.deck_class_stats_table
+        with _db.engine.connect() as conn:
+            stat_date = conn.execute(
+                _sa_select(_sa_func.max(_t.c.stat_date))).scalar()
+            if stat_date:
+                for r in conn.execute(
+                    _sa_select(_t.c.archetype, _t.c.shape_bucket,
+                               _t.c.value_band, _t.c.demotion)
+                    .where(_t.c.stat_date == stat_date)
+                ):
+                    try:
+                        m = float(r.demotion)
+                    except (TypeError, ValueError):
+                        continue          # NULL / garbage ⇒ the class rides 1.0
+                    if m != m or m in (float("inf"), float("-inf")):
+                        continue          # NaN / inf ⇒ same
+                    out[(r.archetype, r.shape_bucket, r.value_band)] = \
+                        min(1.0, max(floor, m))
+    except Exception as e:
+        log.warning("class demotion (P0-4): stats read failed (%s); "
+                    "serving every card at 1.0", e)
+        out = {}
+
+    _class_demotion_cache.update(map=out, at=now, stat_date=stat_date)
+    return out
+
+
+def _deck_class_key(card) -> tuple[str, str, str]:
+    """A live card's class, derived EXACTLY the way the impression writer
+    derives the columns the pass groups on: `lane` → archetype,
+    `_card_shape` → shape_bucket, `_signal_value_band(receive_value)` →
+    value_band. A second derivation here would silently miss every class."""
+    from .relevance.passes.flag_agg import class_key
+    return class_key(
+        _card_archetype(card),
+        _card_shape(card),
+        _signal_value_band(getattr(card, "receive_value", None)),
+    )
+
+
+def _deck_class_demotion_multipliers(cards: list) -> dict:
+    """{id(card): multiplier} for every card. Missing class ⇒ 1.0."""
+    try:
+        stats = _class_demotion_stats()
+    except Exception as e:
+        log.warning("class demotion (P0-4) failed (non-fatal): %s", e)
+        return {id(c): 1.0 for c in cards}
+    return {id(c): float(stats.get(_deck_class_key(c), 1.0)) for c in cards}
+
+
 def _dedup_counters(stats: dict) -> dict:
     """The `_order_deck` out-param → the `deck_job_stats.decided_by` counters.
 
@@ -3499,6 +3606,9 @@ def _order_deck(
     the Thompson multiplier ACTUALLY applied per card and the post-multiplier
     ordering key, for deck_impressions logging. Pure out-param: ordering math
     is untouched and callers that pass None see identical behavior.
+    P0-4 adds {"class_demotion": {id(card): multiplier}} whenever
+    `deck.class_demotion` is on — including the all-1.0 case, because replay
+    must know 1.0 was applied rather than infer it (HLD §2.3 corollary).
 
     `fatigue_mult` (F3, deck.fatigue): {id(card): m ≤ 1.0} discounts folded
     into the ordering key AFTER the Thompson draw — fatigue reorders, never
@@ -3560,7 +3670,23 @@ def _order_deck(
         cards = deduped
         key = {id(c): key[id(c)] for c in cards}
 
-    if not (thompson or diversity or fatigue_mult or taste_mult or value_scores):
+    # P0-4 (deck.class_demotion) — bounded per-class demotion (D11). Computed
+    # here, on the post-dedup survivors, so the frozen stamp describes exactly
+    # the cards that will be served.
+    #
+    # `class_active` is deliberately narrower than "the flag is on": when every
+    # multiplier is 1.0 (empty/absent `deck_class_stats` — the state this ships
+    # in) NOTHING is multiplied and the early return below still fires, so
+    # ordering is byte-identical to flag-off. The capture is filled either way,
+    # because replay needs to know 1.0 was applied, not guess it.
+    class_mult = (_deck_class_demotion_multipliers(cards)
+                  if _deck_class_demotion_enabled() else None)
+    class_active = bool(class_mult) and any(m != 1.0 for m in class_mult.values())
+    if class_mult is not None and capture is not None:
+        capture["class_demotion"] = dict(class_mult)
+
+    if not (thompson or diversity or fatigue_mult or taste_mult or value_scores
+            or class_active):
         # No ordering layer is active. Return the (possibly thinned) candidate
         # list in its incoming order — dedup removes, it never reorders, and
         # falling through to the sort below would re-rank a deck that nothing
@@ -3619,6 +3745,14 @@ def _order_deck(
     if taste_mult:
         for c in cards:
             key[id(c)] *= float(taste_mult.get(id(c), 1.0))
+
+    # P0-4 (deck.class_demotion) — the multiplier resolved above. Multiplicative
+    # like fatigue/taste, so its position in this stack is immaterial; it is
+    # here (before the diversity penalty, before the sort) so the captured
+    # final_key records the key ACTUALLY sorted on.
+    if class_active:
+        for c in cards:
+            key[id(c)] *= float(class_mult.get(id(c), 1.0))
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -3703,6 +3837,12 @@ def _log_deck_signal_impressions(
 
     prop_by_card  = (capture or {}).get("propensity") or {}
     final_by_card = (capture or {}).get("final_key") or {}
+    # P0-4 (deck.class_demotion) — HLD §2.3 corollary. `deck_class_stats`
+    # mutates nightly, so the multiplier ACTUALLY applied is frozen here;
+    # replay reads it instead of reconstructing last night's table (D8 calls
+    # that leakage). Present only while the flag is on ⇒ flag-off
+    # features_json stays byte-identical.
+    class_dem_by_card = (capture or {}).get("class_demotion") or {}
 
     # Board-state-at-serve (PRD amendment 2026-07-26): one query; failure
     # degrades to the cold-board shape rather than aborting the spine.
@@ -3769,6 +3909,10 @@ def _log_deck_signal_impressions(
         # tables).
         if first_deck:
             features["first_deck"] = True
+        # P0-4 (deck.class_demotion) — the frozen applied multiplier.
+        _class_dem = class_dem_by_card.get(id(card))
+        if _class_dem is not None:
+            features["class_demotion"] = float(_class_dem)
         # F5 (deck.taste_vectors) — freeze the card's taste-attribute keys
         # at serve time so the outcome-write update reads them from the
         # impression instead of re-deriving (no training/serving skew).
@@ -7422,9 +7566,16 @@ def analytics_report_route(report):
     SQL in backend/analytics_queries.py, computed on the read-only engine).
 
     Operator-only (X-Cron-Secret). `report` ∈ waterfall|time|bottlenecks|churn|
-    releases|adoption|engagement|pfo|onepager|apihealth. `health` is a SEPARATE
-    static route above (Flask matches it before this dynamic rule), never in
-    this enum.
+    releases|adoption|engagement|pfo|onepager|apihealth|relevance. `health` is
+    a SEPARATE static route above (Flask matches it before this dynamic rule),
+    never in this enum.
+
+    `relevance` (P0-6 / R11, HLD §6) is the trade-relevance operator report:
+    the pass-ledger strip (`rows`, last 14 days, `skipped` split by cause),
+    plus `summary` = gate-kill funnel (`deck_job_stats.decided_by`), loop
+    health (impressions/day, outcomes/day by action, propose→disposition join
+    rate + fuzzy fraction), and the demoted-class list WITH each class's n.
+    Ledger + counter tables only; it fires no queries against user_events.
 
     Query params: start,end (ISO date; default trailing 28d, window ≤90d),
     format=json|csv, include_demo=0|1, segment=<dim>, service=<name>
@@ -17572,6 +17723,26 @@ def _tick_pass_class_load(ctx) -> dict:
     return {"items": 1}
 
 
+def _tick_pass_flag_aggregation(ctx) -> dict:
+    """P0-4 (B6) — flag aggregation → bounded class demotion (D11).
+
+    Body lives in `backend/relevance/passes/flag_agg.py` (Flask-free, D12);
+    this is registration glue only. Writes `deck_class_stats` rows for today
+    and prunes >30d. Adds NOTHING to the tick response payload — a class-stats
+    run is operator telemetry, read from the ledger and the relevance report.
+
+    The serving cache is invalidated after a successful run so the new
+    `stat_date` goes live in this worker immediately rather than up to 6h
+    later. Other workers pick it up on their own TTL expiry; a few hours of
+    a one-day-old multiplier is exactly what the fail-soft data layout is
+    designed to tolerate.
+    """
+    from .relevance.passes import flag_agg as _flag_agg
+    result = _flag_agg.run_pass(ctx)
+    _class_demotion_reset_cache()
+    return result
+
+
 def _tick_pass_roster_snapshot(ctx) -> dict:
     """ADR-011 Writer B — weekly roster-snapshot sweep kickoff.
 
@@ -17621,6 +17792,8 @@ DAILY_TICK_REGISTRY: list = [
         name="eval", fn=_tick_pass_eval, budget_s=180.0)),
     _relevance_registry.register(_relevance_registry.PassSpec(
         name="refit", fn=_tick_pass_refit, budget_s=180.0)),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="flag_aggregation", fn=_tick_pass_flag_aggregation, budget_s=60.0)),
     _relevance_registry.register(_relevance_registry.PassSpec(
         name="players_guard", fn=_tick_pass_players_guard, budget_s=60.0)),
     _relevance_registry.register(_relevance_registry.PassSpec(

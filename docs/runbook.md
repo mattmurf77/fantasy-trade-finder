@@ -24,6 +24,7 @@ Operational procedures. Add to this as you learn things.
 - [Common failure modes](#common-failure-modes)
 - [Cron schedule](#cron-schedule)
 - [Nightly pass ledger (B1, 2026-08-14)](#nightly-pass-ledger-b1-2026-08-14)
+- [Trade-relevance operator report + the class-demotion review ritual (P0-4/P0-6, 2026-08-14)](#trade-relevance-operator-report-the-class-demotion-review-ritual-p0-4p0-6-2026-08-14)
 - [Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)](#weekly-deck-replenishment-f10-flag-deckreplenishment-2026-07-26)
 - [Reset / wipe](#reset-wipe)
 - [HTTP compression / encoding (OBS-API-02)](#http-compression-encoding-obs-api-02)
@@ -315,7 +316,7 @@ Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate
 
 `POST /api/cron/daily-tick` no longer runs its work inline. It iterates a **pass registry** (`backend/relevance/registry.py`, wired in `backend/server.py` as `DAILY_TICK_REGISTRY`), and every pass gets one durable `cron_pass_runs` row per UTC day. Design: [lld.md §3.3/§4.1](plans/trade-relevance-engine/lld.md), [hld.md §2.1](plans/trade-relevance-engine/hld.md).
 
-**Run order** (time-sensitive first, so a slow night starves the least important work): `season_start` → `pushes` → `replenish` → `eval` → `refit` → `players_guard` → `class_load` → `roster_snapshot`.
+**Run order** (time-sensitive first, so a slow night starves the least important work): `season_start` → `pushes` → `replenish` → `eval` → `refit` → `flag_aggregation` → `players_guard` → `class_load` → `roster_snapshot`.
 
 ### Reading the ledger
 
@@ -360,6 +361,54 @@ The `uq_pass_run` INSERT-claim is the double-POST answer: a Render retry of a pa
 ### Retention
 
 `cron_pass_runs` is pruned to 90 days by `database.prune_cron_pass_runs()`, called from `server._cleanup_loop` (the 5-minute in-process sweep, beside the session and API-observability purges). There is no retention endpoint — the LLD assumed one that does not exist in this repo.
+
+---
+
+## Trade-relevance operator report + the class-demotion review ritual (P0-4/P0-6, 2026-08-14)
+
+One page answers "is the relevance loop alive, and is anything being punished by it":
+
+```
+GET /api/admin/analytics/relevance          # X-Cron-Secret, like every /api/admin/analytics/*
+GET /api/admin/analytics/relevance?start=2026-07-20&end=2026-08-14&format=csv
+```
+
+Read-only engine, ledger + counter tables only. Four sections:
+
+| Section | Where it lives | What a bad reading looks like |
+|---|---|---|
+| **Pass-ledger strip** | `rows` (last 14 days × passes) | Any `error`. Also: the same pass `skipped`/`deadline` several days running — chronically starved, and it must not be read as green (M1). `skip_cause` splits valve-off (healthy) from deadline (not) |
+| **Gate-kill funnel** | `summary.gate_kill_funnel` | One gate dominating the kills answers "why is this deck thin" without reading code |
+| **Loop health** | `summary.loop_health` | `disposition_join_rate` falling, or `fuzzy_fraction` climbing — the P0-3 spine is losing exact carriers. A `"caveat": "dark"` cell means **unmeasured**, never 0% |
+| **Demoted classes** | `summary.demoted_classes` | See the ritual below |
+
+### The demotion review ritual (monthly, or after any flag-rate spike)
+
+The nightly `flag_aggregation` pass demotes classes automatically **and that is all it is ever allowed to do** (HLD D11): the multiplier is clamped to [`class_demotion_floor`, 1.0] at write *and* at read, so a demoted class always still reaches decks — it just sorts lower. Turning a demoted class into a real, hard **gate** in `_consider` is an editorial human decision, made here and nowhere else. The ritual:
+
+1. Pull `summary.demoted_classes`. Each row is `{archetype, shape_bucket, value_band, exposures, flags, flag_rate_shrunk, demotion}`.
+2. **Read `exposures` before `demotion`.** A demotion is a hypothesis; n is how you judge it. The pass already refuses to demote below `class_demotion_min_views` (200), so anything on this list cleared that bar — but 210 exposures and 4,000 exposures are different claims.
+3. Watch a candidate across two or three reports before acting. `deck_class_stats` keeps 30 days of history, so a class that demoted once and recovered is visible as such.
+4. Only a persistent, high-n, high-rate class earns a written gate — and it lands as a hand-authored rule in `_consider` with its own rationale, never as a threshold tweak on this pass.
+5. `M6` is the honesty metric here: **the count of classes reaching n ≥ 200 is expected to be near zero at current volume.** That is a reported number, not a failure — P0's deliverable is the pipeline plus this report, not a demotion.
+
+### Turning it off
+
+- **Hard:** flag `deck.class_demotion` → false. No stats read, no multiplier, ordering byte-identical.
+- **Soft, no flag flip, no data repair:** set `class_demotion_floor` to `1.0` — every multiplier clamps to 1.0 within one deck-job cycle. Raising `class_demotion_min_views` is the narrower version.
+- **Stop the pass but keep serving:** valve `cron.pass_disabled.flag_aggregation` → 1. Yesterday's rows stay live (fail-soft by data layout); nothing recomputes.
+
+### Diagnosing "the flag is on and nothing changed"
+
+Almost always correct rather than broken — but check in this order:
+
+1. `summary.class_stats.stat_date` is null ⇒ the pass has never produced rows. Check the ledger strip for `flag_aggregation`.
+2. `summary.class_stats.demoted` is 0 ⇒ nothing cleared the 200-exposure bar, or the window has zero flags anywhere (`global_rate` 0 ⇒ every class rides 1.0 by design — without that guard the shrinkage divides by zero and pins the whole product at the floor).
+3. Serving caches the latest `stat_date` for **6 hours** per worker; the pass invalidates its own worker's cache on success, others expire on TTL. A few hours of a one-day-old multiplier is exactly what the fail-soft layout is designed to tolerate.
+
+### Why `bad_trade_flags` is not the numerator
+
+`bad_trade_flags` carries neither `impression_id` nor `trade_hash`, so it cannot be joined to an exposure. The numerator is the impression-keyed `not_interested` `deck_outcomes` row the flag route writes beside the flag — and that route is its **sole writer** (verified pre-build, and pinned by a test). If a second path ever needs to write `not_interested`, mint a **distinct action string** instead: sharing the action inflates the flag rate and demotes innocent classes.
 
 ---
 

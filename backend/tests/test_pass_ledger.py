@@ -392,7 +392,7 @@ def test_registry_order_matches_the_lld(eng):
     # mutually exclusive, so the declared order is asserted directly.
     assert [s.name for s in server.DAILY_TICK_REGISTRY] == [
         "season_start", "pushes", "replenish", "eval", "refit",
-        "players_guard", "class_load", "roster_snapshot",
+        "flag_aggregation", "players_guard", "class_load", "roster_snapshot",
     ]
     by_name = {s.name: s for s in server.DAILY_TICK_REGISTRY}
     # Only the date-gated fan-out is exempt from the deadline skip.
