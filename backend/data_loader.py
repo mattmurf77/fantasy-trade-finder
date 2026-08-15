@@ -42,6 +42,13 @@ by model_config `ktc_blend_weight` — and sf_tep TE values get the
 `tep_te_uplift` TE-premium multiplier. See the "KeepTradeCut consensus
 blend" section below; both knobs at neutral (0 / 1) reproduce the pure-DP
 pipeline byte-for-byte.
+
+Since 2026-08-14 (#313) 1QB QB seeds are additionally compressed so no
+quarterback prices above one first-round pick in a 1QB league — monotone
+piecewise-linear, order-preserving, knobs `qb_1qb_cap_elo` /
+`qb_1qb_cap_knee_elo` (either <= 0 disables). See the "#313 — 1QB QB
+consensus compression" section below. All four knobs neutral reproduces
+the pure-DP pipeline byte-for-byte.
 """
 
 import csv
@@ -106,6 +113,20 @@ def seed_elo_for_value(value: float) -> float:
         min(float(value), VALUE_MAX) / VALUE_MAX
     ) * (SEED_VALUE_CEIL - SEED_VALUE_FLOOR)
     return _SEED_VALUE_REF + math.log(v / _SEED_VALUE_BASE) / _SEED_VALUE_K
+
+
+def seed_value_for_elo(elo: float) -> float:
+    """Inverse of `seed_elo_for_value`: seed Elo → the DP-scale value that
+    seeds it.
+
+    Used by the #313 1QB QB compression to express its knee/cap knobs — which
+    are authored in *Elo* (tier-band space, where the operator reads them) —
+    as the DP-scale numbers the compression actually operates on. Exact
+    inverse over the affine map's range; values above VALUE_MAX are not
+    representable (seed_elo_for_value clamps there).
+    """
+    v = _SEED_VALUE_BASE * math.exp(_SEED_VALUE_K * (float(elo) - _SEED_VALUE_REF))
+    return (v - SEED_VALUE_FLOOR) / (SEED_VALUE_CEIL - SEED_VALUE_FLOOR) * VALUE_MAX
 
 # Positions we care about
 VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
@@ -207,6 +228,72 @@ def _blend_config() -> tuple[float, float]:
     except Exception:
         pass
     return max(0.0, min(1.0, w)), max(0.0, u)
+
+
+# ---------------------------------------------------------------------------
+# #313 — 1QB QB consensus compression (cap at "1 1st")
+# ---------------------------------------------------------------------------
+# In 1QB leagues the market does not pay two firsts for a quarterback, but the
+# DP → seed-Elo affine map (#117) put the top 1QB QBs inside the `firsts_2`
+# band (Josh Allen value_1qb 7025 → Elo 1858.9, live 2026-08-13). The tier
+# LABEL is derived client-side from the served Elo, so the defect is the
+# VALUE: the fix re-prices, it does not relabel. tier_config.json and every
+# client band mirror stay untouched.
+#
+# Shape: monotone piecewise-linear compression of 1QB QB values, applied
+# post-blend / pre-Elo-map. Identity at or below the knee; above it, the
+# stretch (knee, VALUE_MAX] is squeezed onto (knee, cap]. Because the map is
+# strictly increasing, the QB board's ORDER is preserved — a hard clamp would
+# tie Allen/Maye/Daniels at the cap, which a draft board cannot use.
+QB_1QB_CAP_ELO_DEFAULT = 1785.0        # top of `first_1` (firsts_2 starts 1788)
+QB_1QB_CAP_KNEE_ELO_DEFAULT = 1580.0   # `first_1` floor — below this, identity
+
+
+def _qb_cap_config() -> tuple[float, float]:
+    """(qb_1qb_cap_elo, qb_1qb_cap_knee_elo) from model_config, defaults on
+    any failure. Either knob <= 0 is the kill switch (see
+    `_compress_qb_1qb_values`)."""
+    cap, knee = QB_1QB_CAP_ELO_DEFAULT, QB_1QB_CAP_KNEE_ELO_DEFAULT
+    try:
+        from .database import get_config
+        cfg = get_config()
+        cap = float(cfg.get("qb_1qb_cap_elo", cap))
+        knee = float(cfg.get("qb_1qb_cap_knee_elo", knee))
+    except Exception:
+        pass
+    return cap, knee
+
+
+def _compress_qb_1qb_values(
+    value_map: dict[str, float],
+    pos_map: dict[str, str],
+) -> dict[str, float]:
+    """Compress QB values so no QB seeds above the cap Elo. 1QB only —
+    the caller applies the format guard.
+
+    Returns a NEW map; every non-QB and every at-or-below-knee QB carries
+    through byte-identical. Kill switch: either knob <= 0 (or a degenerate
+    knee/cap ordering) returns the input unchanged.
+    """
+    cap_elo, knee_elo = _qb_cap_config()
+    if cap_elo <= 0.0 or knee_elo <= 0.0:
+        return value_map
+    knee = seed_value_for_elo(knee_elo)
+    cap = seed_value_for_elo(cap_elo)
+    if not (0.0 <= knee < cap < VALUE_MAX):
+        # Degenerate config (knee above cap, cap at/above the pool ceiling,
+        # knee below the seed floor) — nothing sane to compress onto.
+        return value_map
+    # Slope < 1: (knee, VALUE_MAX] → (knee, cap].
+    slope = (cap - knee) / (VALUE_MAX - knee)
+    out = dict(value_map)
+    for k, raw in value_map.items():
+        if pos_map.get(k) != "QB":
+            continue
+        v = min(float(raw), VALUE_MAX)   # same ceiling seed_elo_for_value uses
+        if v > knee:
+            out[k] = knee + (v - knee) * slope
+    return out
 
 
 def parse_ktc_players(html: str) -> list[dict]:
@@ -356,7 +443,13 @@ def _apply_consensus_blend(
             for k, v in blended.items()
         }
 
-    if blended == value_map:                     # both knobs neutral / no-op
+    # #313: last, so KTC's rank-normalization (and its top-anchor rescale)
+    # cannot push a QB back over the cap. 1QB only — sf_tep QBs are supposed
+    # to price at multiple firsts.
+    if fmt == "1qb_ppr":
+        blended = _compress_qb_1qb_values(blended, pos_map)
+
+    if blended == value_map:                     # every knob neutral / no-op
         return elo_map, value_map
     blended = {k: round(v, 1) for k, v in blended.items()}
     for k, v in blended.items():

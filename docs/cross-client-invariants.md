@@ -37,6 +37,8 @@ The Elo ranges that map a player into a tier. Single source of truth is `backend
 
 Saved boards need no data migration when bands change: `users.tier_overrides` stores raw Elo per player, so overrides re-bucket through the new walk on read.
 
+Since #313, `1qb_ppr` QB **seed values** are compressed so no quarterback seeds above the `first_1` band (`qb_1qb_cap_elo`, default 1785). The **bands themselves are unchanged and remain position- and format-uniform** — the cap is applied in value space at pool build, so every client's tier walk (`mobile/src/utils/tierBands.ts`, the extension badge, `RankingService.tier_for_elo`) stays a single shared ladder with no per-position fork.
+
 **Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`ORDERED_TIERS` / `tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` (fallback `TIER_CONFIG` mirror), `web/js/app.js` (`_eloToTierLabel` floor mirror), `extension` badge (consumes the backend walk).
 
 ---
