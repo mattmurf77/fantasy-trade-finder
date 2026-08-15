@@ -1944,6 +1944,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_alpha_rebuilder",  0.25,  "2.2: now-value weight for rebuilder outlook"),
     ("outlook_alpha_jets",       0.1,   "2.2: now-value weight for jets (extreme rebuild) outlook"),
     ("fuzzy_match_tau",          0.8,   "2.3b: Jaccard threshold per side for fuzzy mirror matching"),
+    ("likes_you_min_user_delta", -500.0, "2.3a/D-047: min net consensus value (receive - give, summed player values) the VIEWER must clear for a leaguemate's liked trade to be injected into their deck; very negative disables the floor"),
     # ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────
     ("fit_consensus_weight",     0.5,   "FB-47: partner-fit blend weight on consensus-card composites"),
     ("fit_divergence_weight",    0.15,  "FB-47: partner-fit blend weight on divergence-card composites (tiebreak strength)"),

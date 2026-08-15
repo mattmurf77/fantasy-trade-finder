@@ -2826,6 +2826,34 @@ def _fuzzy_match_tau() -> float:
         return 0.8
 
 
+def _likes_you_min_user_delta() -> float:
+    """model_config key 'likes_you_min_user_delta' (default -500.0), read
+    through trade_service's live config dict — same pattern as
+    _fuzzy_match_tau. The user-gain floor on the likes-you injection
+    (D-047). Defensive: a missing key or import problem can never break
+    deck generation; it falls back to the ratified default."""
+    try:
+        from .trade_service import _cfg as _ts_cfg
+        return float(_ts_cfg.get("likes_you_min_user_delta", -500.0))
+    except Exception:
+        return -500.0
+
+
+def _likes_you_user_delta(give_ids: list, recv_ids: list,
+                          seed_map: dict) -> float:
+    """Net consensus value the VIEWER gains on a mirrored like: summed
+    receive value minus summed give value, in v2 value space.
+
+    Deliberately the SAME arithmetic scripts/deck_eval.py scores cards with
+    (`card_record`: per-player elo_to_value on this seed_map, then summed),
+    so the floor is expressed in the units of the deck-eval report's Δ.
+    Uses only what the injector already holds — no new lookups.
+    """
+    _e2v = _trade_service_mod.elo_to_value
+    return (sum(_e2v(seed_map.get(pid, 1500.0)) for pid in recv_ids)
+            - sum(_e2v(seed_map.get(pid, 1500.0)) for pid in give_ids))
+
+
 _LIKES_YOU_CAP = 3   # max likes-you injections per generated deck
 
 
@@ -2867,6 +2895,11 @@ def _inject_likes_you_cards_impl(
       already want this", not its score) and give it the same boost.
     - At most _LIKES_YOU_CAP injections; trades the user already swiped on
       (past_decision_keys) are skipped.
+    - D-047 user-gain floor: a like whose net consensus value for the
+      VIEWER (receive − give, summed player values) is below
+      model_config `likes_you_min_user_delta` (default -500) is not
+      injected at all — neither flagged/boosted nor synthesized — and does
+      not consume a cap slot.
 
     Returns the deck re-sorted by composite_score descending. Synthesized
     cards are registered in trade_service._trade_cards so /api/trades/swipe
@@ -2889,6 +2922,7 @@ def _inject_likes_you_cards_impl(
     injected  = 0
     seen_keys = set()
     new_cards = []
+    min_user_delta = _likes_you_min_user_delta()
     for like in likes:
         if injected >= _LIKES_YOU_CAP:
             break
@@ -2922,6 +2956,16 @@ def _inject_likes_you_cards_impl(
         seen_keys.add(key)
         # Don't resurface a trade the user already swiped on.
         if (key[0], key[1]) in trade_service._past_decision_keys:
+            continue
+        # D-047 — user-gain floor. The injection's pull is "they already
+        # want this", but a like the VIEWER loses badly on reads as an
+        # insult rather than an opportunity, and it lands at deck position
+        # 1-3. The 2026-08-15 Phase A gate found all 8 insulting first-deck
+        # cards were likes-you injections (docs/plans/open-access-phase-a-
+        # gates.md § Gate (a)). Below the floor: no flag, no boost, no
+        # synthesis — and no cap slot consumed, so a good like still gets
+        # the slot. Neutral/positive likes are untouched.
+        if _likes_you_user_delta(my_give, my_recv, seed_map) < min_user_delta:
             continue
 
         existing = existing_by_key.get(key)
