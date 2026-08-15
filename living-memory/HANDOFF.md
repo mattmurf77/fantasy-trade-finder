@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-15 — Sleeper co-owner support built on `claude/epic-hellman-6af20f`, unmerged](#2026-08-15--sleeper-co-owner-support-built-on-claudeepic-hellman-6af20f-unmerged)
+- [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -24,19 +24,21 @@
 
 ---
 
-## 2026-08-15 — Sleeper co-owner support: PR #121 open, CI green, awaiting merge
+## 2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build
 
 ### Where I am right now
 
-Built, fully tested, **pushed**, and [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
-is open with **all three CI checks green** (backend-tests, mobile-typecheck,
-maestro-testid-lint); `mergeable=MERGEABLE`, base `main` unmoved at `21df73f`
-so it is a clean squash. **The merge itself has NOT happened** — the agent's
-merge command was blocked by the permission classifier, so the squash-merge is
-the operator's action. Merging deploys: Render auto-deploys `main`.
+**SHIPPED.** Squash [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+→ `main` @ `6158e65` (2026-08-15T17:20:03Z), all three CI checks green.
+**Deploy confirmed live**: prod `/js/app.js` serves the new `ownsRoster`
+predicate, `/api/tier-config` 200, and the rosters proxy returns roster 3's
+`co_owners` intact.
 
-Branch `claude/epic-hellman-6af20f` (worktree `.claude/worktrees/epic-hellman-6af20f`),
-branched from `origin/main` @ `21df73f`; local commits `44c8bbf` + `4387182`.
+**⚠️ Only two thirds of the fix is actually live.** The backend and the WEB
+client ship with the Render deploy. The MOBILE fix lives in the app binary —
+the "which roster is mine" resolution is client-side — so **a co-owner on the
+current TestFlight build still sees the bug until the next EAS build ships**.
+That build is the remaining work on this item.
 
 FTF had never read Sleeper's `co_owners`, so the operator's own co-managed
 league (roster 3 of `1338231586314780672`) resolved to no team — and posted his
@@ -73,20 +75,28 @@ likely explains several sessions of not-run/waived gates), G-043 (symlinked
 
 ### Next action
 
-1. **Operator: squash-merge [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121).**
-   `gh pr merge 121 --squash` (or the GitHub button). CI is already green.
-   **Note the gate you are overriding:** `qa/sim-runs/last-sim-run.json` records
-   `result: "fail"` deliberately (2 of 4 flows failed on stale assertions — see
-   the Sim gate section above and [TEST_LEDGER](TEST_LEDGER.md)). The local
-   `githooks/pre-push` gate only fires on a direct push to `main`, so the PR
-   route goes around it — merging is a conscious override, not a pass.
-2. **Verify on the real league after deploy** — the whole point. Open Bush League
-   (`1338231586314780672`) in the app: roster 3's 19 players should be *your*
-   team, League rankings should show 12 teams with the "You" badge on Manager 3's
-   row, and the acquire pool must not contain your own players.
-3. **Then sweep this worktree** per [`../docs/recovery/CLAUDE.md`](../docs/recovery/CLAUDE.md):
-   verify the content on `origin/main` (this repo squash-merges, so ahead-counts
-   are not evidence), ledger the tip sha, `git worktree remove`, delete the branch.
+1. **EAS build → TestFlight.** Until then the mobile half is dark; the operator's
+   own co-managed league still looks broken *in the app* even though `main` has
+   the fix. This is the only thing standing between the merge and the reported
+   symptom going away.
+2. **Then verify on the real league** — the whole point. Open Bush League
+   (`1338231586314780672`): roster 3's 19 players should be *your* team, League
+   rankings should show 12 teams with the "You" badge on Manager 3's row, and the
+   acquire pool must not contain your own players.
+3. **Worktree removal.** The branch is ledgered
+   ([recovery](../docs/recovery/2026-08-15-co-owner-rosters-sweep.md), tip
+   `e060d59`) and content-verified against `origin/main` (empty diff — this repo
+   squash-merges, so ahead-counts are not evidence). `git worktree remove` is the
+   one step left; it could not run from inside the worktree itself.
+
+### The gate that was overridden, on the record
+
+`qa/sim-runs/last-sim-run.json` records `result: "fail"` — set deliberately
+because 2 of 4 sim flows failed. Both failures are stale assertions with
+screenshots showing a healthy app, but **neither was re-run against `main`**, so
+"pre-existing" is an inference, not a measurement. `githooks/pre-push` only fires
+on a direct push to `main`, so the PR route went around it. The operator said
+"push live" with that stated; recorded here so the override is not invisible.
 
 ### Watch items
 
