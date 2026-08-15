@@ -20,12 +20,15 @@ Design invariants (verified by the P2 design→adversarial-verify workflow):
     renders a "dark" cell ("—"), never a fabricated 0. Cohort <20 → "n_too_small"
     (counts kept, rate suppressed). is_dark() separates a real 0 from "—".
 
-Reality today (analytics.ingest=false): user_events holds only SERVER-fired
-rows (event_id NULL, real user_id, but session_id/platform/device_id/screen/
-client_ts all NULL). So all ALLOWED_CLIENT_EVENTS are dark, and session/
-platform/screen-scoped slices render "—" until the client SDK ships. The live
-surface is the signup-onward funnel, WAT, engagement/streaks, and adoption of
-server-fired ranking/trade/calc/feedback events.
+Reality today (analytics.ingest=true, analytics.client_events=true since
+2026-07-19): user_events carries BOTH server-fired rows (event_id NULL, real
+user_id, session/platform/device columns NULL) and client rows from the mobile
+SDK with the full envelope. Client-scoped slices are live from the ingest
+cutover forward — but they are NOT backfillable, so any series that spans
+2026-07-19 mixes a dark era with a lit one; is_dark() still separates a real 0
+from "—" per-cell. Two later seams matter for the same reason: the 27 events
+registered 2026-08-14 (PR #116) have no history before that date, and web has
+no analytics SDK at all, so nothing here is a product-wide rate.
 """
 
 from __future__ import annotations

@@ -322,6 +322,12 @@ trade_decisions_table = Table("trade_decisions", metadata,
     # dismissed offer must not resurface in the DISMISSER's own deck). A
     # later re-like writes a fresh row with NULL — that is the revive path.
     Column("retracted_at",       String),
+    # trade-relevance P0-3 (D2, LLD §3.2) — the deck impression this decision
+    # came from, carried through by the client on swipe. NULL = pre-P0-3 row,
+    # a web swipe before the impression_id echo lands, or a decision with no
+    # deck provenance at all. Never guessed: a NULL here means the
+    # disposition's side-A join is fuzzy-repaired or left unlabeled.
+    Column("impression_id",      String),
 )
 
 # All members (including the logged-in user) for every league session_init has seen.
@@ -422,6 +428,17 @@ trade_matches_table = Table("trade_matches", metadata,
     # list permanently (see dismiss_match + load_matches filter).
     Column("user_a_dismissed", Integer),
     Column("user_b_dismissed", Integer),
+    # ── trade-relevance P0-3 (D2 disposition join spine, LLD §3.2) ────────
+    # Per-side impression provenance, so a disposition can label the CARD
+    # each side actually saw. Side A is the triggering swiper — exact
+    # whenever their swipe carried an impression_id. Side B is recovered
+    # (the counterparty liked the mirror earlier, possibly from another
+    # deck), so it is EXACT when their trade_decisions row carried one and
+    # otherwise fuzzy-filled by the nightly join_repair on a unique
+    # trade-hash hit; ambiguous ⇒ both stay NULL. NULL is never guessed.
+    Column("impression_id_a",  String),
+    Column("impression_id_b",  String),
+    Column("join_quality_b",   String),   # 'exact' | 'fuzzy' | NULL
 )
 
 # Composite indexes on (user, league) — both single-league and the new
@@ -519,7 +536,8 @@ Index(
 # deck_outcomes: append-only labels joined to deck_impressions by
 # impression_id (soft reference — no FK constraint, matching this schema's
 # style; late/duplicate labels are legal and rows are NEVER mutated).
-# action ∈ viewed | like | pass | not_interested | propose | undo.
+# action ∈ DECK_OUTCOME_ACTIONS (declared below the table — the authoritative
+# enum; six swipe-time labels + the four D2 disposition labels).
 # `viewed` = card was front-of-deck ≥500ms client-side (served ≠ viewed);
 # `not_interested` rides the bad-trade flag; `undo` appends alongside (not
 # instead of) whatever the original outcome row was.
@@ -531,12 +549,41 @@ deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("detail_expanded", Integer),                  # 0|1|NULL — opened menu/swap/keep-side
     Column("calc_opened",     Integer),                  # 0|1|NULL — edit-in-calculator (#190)
     Column("acted_at",        String,  nullable=False),  # ISO UTC (server clock)
+    # ── trade-relevance P0-3 (D2 disposition join spine, LLD §3.2) ────────
+    # Set ONLY on the four disposition rows below; NULL on every swipe-time
+    # row. 'exact'  = the disposing side's own impression_id was carried
+    # through; 'fuzzy' = recovered by the nightly join_repair on a unique
+    # trade-hash hit (default-EXCLUDED from training reads).
+    Column("join_quality",    String),                   # 'exact'|'fuzzy'|NULL
+    # trade_matches.id the disposition came from — the idempotency /
+    # attribution key for (impression_id, action, source_match_id).
+    Column("source_match_id", Integer),
 )
 
 Index(
     "ix_deck_outcomes_impression",
     deck_outcomes_table.c.impression_id,
 )
+
+# ── trade-relevance P0-3 (LLD §3.1) — THE authoritative action enum ─────────
+# `deck_outcomes.action` is a bare String with no CHECK constraint, so the
+# "widening" that adds the four D2 disposition labels is app-level only: this
+# frozenset is the single source of truth and `save_deck_outcome` rejects
+# anything outside it. Adding a label here is the ONLY legal way to mint a new
+# action — and every reader whitelist (training, F9 history, Thompson,
+# fatigue, taste) must be revisited in the same diff, since a new label
+# arriving in an old reader's `IN (...)` list is a silent mislabel.
+#
+#   viewed | like | pass | not_interested | propose | undo
+#       — swipe-time labels (F1, pre-existing).
+#   accepted | declined | accepted_by_partner | declined_by_partner
+#       — D2 disposition labels, written per-perspective inside the
+#         disposition transaction (LLD §4.5). "_by_partner" is the label on
+#         the OTHER side's impression: the counterparty acted, not the owner.
+DECK_OUTCOME_ACTIONS: frozenset[str] = frozenset({
+    "viewed", "like", "pass", "not_interested", "propose", "undo",
+    "accepted", "declined", "accepted_by_partner", "declined_by_partner",
+})
 
 # ── TikTok-discovery F3 (flag deck.fatigue) — durable decline suppression ───
 # docs/plans/tiktok-discovery/prds/F3-fatigue-suppression.md. One row per
@@ -645,6 +692,53 @@ archetype_auditions_table = Table("archetype_auditions", metadata,
     Column("likes",              Integer, nullable=False),   # liked-and-viewed count since entered_at
     Column("entered_at",         String,  nullable=False),   # ISO UTC — current window start
     Column("retired_at",         String),                    # ISO UTC — set while status='retired'
+)
+
+
+# ── trade-relevance P0-4 (flag deck.class_demotion) — class flag stats ──────
+# docs/plans/trade-relevance-engine/lld.md §3.3/§4.6 (D11). One row per
+# (archetype, shape_bucket, value_band) per UTC stat_date: the nightly
+# flag-aggregation pass counts exposures and not_interested flags for the
+# class, shrinks the raw rate toward the global mean (empirical Bayes), and
+# turns it into `demotion` — a multiplier CLAMPED to [0.5, 1.0] that the deck
+# ordering applies and freezes into features_json.
+#
+# Two floors that must never be quietly dropped (T-23): a class with fewer
+# than `class_demotion_min_views` exposures gets EXACTLY 1.0 (no evidence, no
+# penalty), and the clamp floor `class_demotion_floor` keeps even the worst
+# class in the deck — this layer demotes, it never gates. A human reads the
+# operator report and decides if a class deserves a real gate.
+#
+# The LATEST stat_date is the live row; ~30 days of history are kept for that
+# report and older rows are pruned by the same pass.
+deck_class_stats_table = Table("deck_class_stats", metadata,
+    Column("id",               Integer, primary_key=True, autoincrement=True),
+    Column("archetype",        String,  nullable=False),
+    Column("shape_bucket",     String,  nullable=False),   # "1x1", "2x1", …
+    Column("value_band",       String,  nullable=False),   # receive-side 500-wide band
+    Column("exposures",        Integer, nullable=False),   # cards served in the class
+    Column("flags",            Integer, nullable=False),   # not_interested outcomes
+    Column("flag_rate_shrunk", Float),                     # EB-shrunk rate
+    Column("demotion",         Float),                     # multiplier, clamped [0.5, 1.0]
+    Column("computed_at",      String,  nullable=False),   # ISO UTC
+    Column("stat_date",        String,  nullable=False),   # UTC "YYYY-MM-DD"
+    UniqueConstraint("archetype", "shape_bucket", "value_band", "stat_date",
+                     name="uq_class_stat"),
+)
+
+
+# ── trade-relevance P0-6 — per-job gate counters ────────────────────────────
+# lld.md §4.2 (R5). ONE row per COMPLETED deck-generation job, counters only:
+# `decided_by` is a JSON object of {gate_name: cards_killed} recording where
+# candidates died on the way to a served deck (the gate-kill funnel on the
+# admin relevance report). Strictly observational — a diff that flips any
+# gate boolean while adding counters fails review and T-29.
+deck_job_stats_table = Table("deck_job_stats", metadata,
+    Column("deck_job_id", String, primary_key=True),   # _trade_jobs job_id
+    Column("user_id",     String),
+    Column("league_id",   String),
+    Column("decided_by",  Text),                       # JSON object {gate: count}
+    Column("created_at",  String),                     # ISO UTC
 )
 
 
@@ -1857,6 +1951,41 @@ mock_drafts_table = Table("mock_drafts", metadata,
     Index("ix_mock_drafts_user_league", "user_id", "league_id"),
 )
 
+# ── trade-relevance P0 (B1) — the nightly pass ledger ───────────────────────
+# docs/plans/trade-relevance-engine/lld.md §3.3/§4.1 (R1). ONE row per
+# (pass_name, run_date). Today a mid-tick death means everything after the
+# corpse silently doesn't run and nothing durable records it; this table is
+# the durable record, and `uq_pass_run` is the claim mechanism that makes it
+# safe under Render's retry semantics:
+#
+#   A pass starts by INSERT-claiming status='running'. IntegrityError ⇒ read
+#   the existing row:
+#     • 'ok'                             ⇒ skip (already done today)
+#     • 'running', younger than 2× the pass budget ⇒ skip (someone owns it)
+#     • 'running', older than that       ⇒ a stale corpse from a killed
+#                                          worker: UPDATE it to 'error' and
+#                                          re-claim with attempt+1.
+#   The stale-'running' branch is MANDATORY (T-3). Without it a single
+#   mid-pass OOM wedges that pass for the rest of the day — precisely the
+#   silent-skip failure this ledger exists to kill.
+#
+# `attempt` carries a Python-side default of 1 rather than a server_default
+# because every writer goes through the registry's claim helper; a raw-SQL
+# insert that omits it is a bug the ledger should surface, not paper over.
+# Retention: 90 days (see prune_cron_pass_runs below).
+cron_pass_runs_table = Table("cron_pass_runs", metadata,
+    Column("id",          Integer, primary_key=True, autoincrement=True),
+    Column("pass_name",   String,  nullable=False),
+    Column("run_date",    String,  nullable=False),   # UTC "YYYY-MM-DD"
+    Column("status",      String,  nullable=False),   # running|ok|error|skipped|timeout
+    Column("started_at",  String,  nullable=False),   # ISO UTC
+    Column("duration_ms", Integer),
+    Column("items",       Integer),                   # pass-defined work count
+    Column("error_text",  Text),
+    Column("attempt",     Integer, nullable=False, default=1),
+    UniqueConstraint("pass_name", "run_date", name="uq_pass_run"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -2033,6 +2162,16 @@ _MODEL_CONFIG_DEFAULTS = [
     # bye-week-multiplier-2026-08-09.md before ever reading these knobs live.
     ("outlook_bye_multiplier_enabled", 0.0, "#169: gate for the (evaluated, unshipped) per-week bye multiplier; 0=off (default) — pipeline.py does not read this yet"),
     ("outlook_bye_multiplier_scale",   1.0, "#169: linear scale from starting-lineup value-fraction-on-bye to mu multiplier haircut; FLAGGED heuristic, unshipped"),
+    # ── Trade-relevance engine P0 (docs/plans/trade-relevance-engine/lld.md
+    #    §2.4). model_config.value is Float-typed, so the two "count" knobs
+    #    are seeded as floats and read with int().
+    #    DELIBERATELY UNSEEDED: `cron.pass_disabled.<name>` — the pass kill
+    #    valves are inverted-polarity fail-safes (absent ⇒ the pass RUNS).
+    #    Seeding them at 0.0 would work today and become a silent trap the
+    #    first time someone "cleans up" a zero-valued row.
+    ("class_demotion_floor",      0.5,   "P0-4 (deck.class_demotion): lower clamp on the per-class demotion multiplier — this layer demotes, it never gates; 1.0 disables demotion entirely"),
+    ("class_demotion_min_views",  200.0, "P0-4 (deck.class_demotion): minimum class exposures before any demotion applies; below this the multiplier is EXACTLY 1.0 (no evidence, no penalty)"),
+    ("dedup_overlap_tau",         0.75,  "P0-5 (deck.dedup): Jaccard overlap above which two candidate cards are near-duplicates and the lower-scoring one is dropped at job creation; 1.0 = soft off (operator undo, no data repair)"),
 ]
 
 
@@ -2173,6 +2312,19 @@ def _migrate_db() -> None:
         # existing rows are all live, which is the correct backfill and
         # needs no separate pass (same shape as dismissed_at above).
         ("trade_decisions",    "retracted_at",          "VARCHAR"),
+        # ── trade-relevance P0-3 — D2 disposition join spine (LLD §3.2) ───
+        # All nullable, no defaults: SQLite forbids ADD COLUMN NOT NULL
+        # without a constant default, and every one of these is genuinely
+        # unknown for existing rows (NULL is the correct backfill, so there
+        # is no backfill pass). Each is paired with a Column(...) on the
+        # Table declaration above so a fresh create_all() DB matches a
+        # migrated one — test_p0_schema.py's T-25 enforces that.
+        ("trade_decisions",    "impression_id",         "VARCHAR"),
+        ("trade_matches",      "impression_id_a",       "VARCHAR"),
+        ("trade_matches",      "impression_id_b",       "VARCHAR"),
+        ("trade_matches",      "join_quality_b",        "VARCHAR"),
+        ("deck_outcomes",      "join_quality",          "VARCHAR"),
+        ("deck_outcomes",      "source_match_id",       "INTEGER"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -2364,6 +2516,23 @@ def _migrate_db() -> None:
         # full-scan a table projected at ~0.5M rows/yr. Free now.
         ("ix_pvh_format_date", "player_value_history",
          "scoring_format, snapshot_date"),
+        # ── trade-relevance P0-3 (LLD §3.2) ───────────────────────────────
+        # Both live HERE and NOT as Index(...) declarations on the tables:
+        # `deck_outcomes` and `trade_decisions` already exist in production,
+        # so create_all() would never add an index to them. This idempotent
+        # form covers fresh and existing DBs identically (it runs AFTER the
+        # migration_cols ALTERs above, so trade_decisions.impression_id
+        # exists by the time its index is built).
+        #   - deck_outcomes.(action, acted_at) → the flag-aggregation pass
+        #     (P0-4) and every disposition-label reader scan by action over
+        #     a trailing window; today the only index leads with
+        #     impression_id, which no such scan can use.
+        #   - trade_decisions.impression_id → the D2 side-A join and the
+        #     nightly join_repair both look decisions up BY impression.
+        ("ix_deck_outcomes_action", "deck_outcomes",
+         "action, acted_at"),
+        ("ix_trade_decisions_impression", "trade_decisions",
+         "impression_id"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
         try:
@@ -4822,6 +4991,50 @@ def save_deck_impressions(rows: list[dict]) -> None:
         conn.execute(insert(deck_impressions_table), rows)
 
 
+def merge_deck_job_counters(deck_job_id: str, *, user_id: str | None,
+                            league_id: str | None, counters: dict) -> None:
+    """Fold `counters` into one `deck_job_stats` row's `decided_by` JSON.
+
+    MERGE, not insert: `deck_job_stats` is a per-job counter row that several
+    observational layers write to (P0-5 dedup counters, P0-6 gate counters),
+    each knowing only its own keys. An insert-or-replace would let whichever
+    layer ran last silently erase the other's numbers — and these rows are the
+    only record some of those layers leave (dedup drops happen pre-capture, so
+    `deck_impressions` cannot reconstruct them).
+
+    Strictly observational. Callers wrap in try/except; nothing here may cost a
+    user their deck.
+    """
+    if not counters:
+        return
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(deck_job_stats_table.c.decided_by)
+            .where(deck_job_stats_table.c.deck_job_id == deck_job_id)
+        ).first()
+        if row is None:
+            conn.execute(insert(deck_job_stats_table).values(
+                deck_job_id = deck_job_id,
+                user_id     = user_id,
+                league_id   = league_id,
+                decided_by  = json.dumps(dict(counters)),
+                created_at  = _now(),
+            ))
+            return
+        try:
+            existing = json.loads(row[0]) if row[0] else {}
+            if not isinstance(existing, dict):
+                existing = {}
+        except (TypeError, ValueError):
+            existing = {}
+        existing.update(counters)
+        conn.execute(
+            deck_job_stats_table.update()
+            .where(deck_job_stats_table.c.deck_job_id == deck_job_id)
+            .values(decided_by=json.dumps(existing))
+        )
+
+
 def save_deck_outcome(
     impression_id: str,
     action: str,
@@ -4833,9 +5046,23 @@ def save_deck_outcome(
 
     Append-only by design: an undo appends alongside the original outcome,
     never mutates it; duplicate/late labels are legal. `action` is validated
-    here (closed enum) so a malformed client payload can't mint junk labels.
+    against DECK_OUTCOME_ACTIONS (the authoritative enum) so a malformed
+    client payload can't mint junk labels.
+
+    An out-of-enum action **raises**, deliberately. This is a low-level
+    writer, not a route: its only production caller is
+    `server._save_deck_outcome_safe`, which already wraps every call in
+    try/except + log, so a raise can never reach a client — the always-200
+    contract is held one layer up, where it belongs. Raising here keeps the
+    guard that catches a mistyped action string in dev and CI (P0-3 adds
+    four new labels; a silent drop would surface only as an inexplicably
+    low join rate weeks later). Client-supplied junk is filtered before it
+    ever gets here, by the impression-ownership validation in the caller.
+
+    P0-3 (D2): `join_quality` / `source_match_id` are set ONLY on the four
+    disposition labels; swipe-time rows leave them NULL.
     """
-    if action not in ("viewed", "like", "pass", "not_interested", "propose", "undo"):
+    if action not in DECK_OUTCOME_ACTIONS:
         raise ValueError(f"unknown deck outcome action: {action!r}")
     with engine.begin() as conn:
         conn.execute(insert(deck_outcomes_table).values(
@@ -11608,6 +11835,32 @@ def purge_stale_persisted_sessions(max_idle_days: int = 90) -> int:
     with engine.begin() as conn:
         res = conn.execute(
             delete(sessions_table).where(sessions_table.c.last_seen_at < cutoff)
+        )
+    return int(res.rowcount or 0)
+
+
+def prune_cron_pass_runs(max_age_days: int = 90) -> int:
+    """Trade-relevance P0 (B1) — 90-day retention for the pass ledger.
+
+    HLD §3.1 assigns `cron_pass_runs` "90 days (existing retention
+    endpoint)" and LLD §3.3 makes registering it there part of the B1 diff.
+    **There is no such endpoint in this repo** — the closest things are
+    `_cleanup_loop`'s in-process sweep (`server.py`, which calls this
+    function's sibling `purge_stale_persisted_sessions`) and
+    `api_observability.purge_observability_events`. Neither takes a table
+    list, so this is the pruner rather than a list entry, and B1 wires the
+    call in alongside the other two sweeps.
+
+    `run_date` is a UTC "YYYY-MM-DD" string, which compares
+    lexicographically against a computed cutoff — same idiom as the ISO
+    comparison above. Idempotent; returns rows deleted.
+    """
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
+    with engine.begin() as conn:
+        res = conn.execute(
+            delete(cron_pass_runs_table)
+            .where(cron_pass_runs_table.c.run_date < cutoff)
         )
     return int(res.rowcount or 0)
 

@@ -84,6 +84,8 @@ from .database import (
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_deck_impression,
     load_board_state,
+    # P0-5 (deck.dedup) — per-job counter row (deck_job_stats)
+    merge_deck_job_counters,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
     # frozen legacy seam, global prior base rate)
     load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
@@ -3149,6 +3151,116 @@ def _cap_per_target(ordered: list, seed_map: dict, max_per: int) -> list:
     return kept
 
 
+# ── P0-5 (flag deck.dedup) — near-duplicate collapse ────────────────────────
+# docs/plans/trade-relevance-engine/lld.md §4.6. The metric and the greedy pass
+# live in backend/relevance/dedup.py (pure, Flask-free); this seam does three
+# things and nothing else: derive the metric's inputs from live cards, resolve
+# tau through the D10 resolver, and hand the survivors back.
+#
+# Two properties this seam MUST preserve:
+#   * Placement — inside _order_deck, on the BASE-KEYED list, before the
+#     Thompson draw and before `capture` is filled. Dedup is deterministic
+#     given the candidate set (HLD §2.3 contract clause (a)), so it owes the
+#     logged propensity nothing; and because a dropped card never reaches the
+#     capture dict, it is never written as an impression. Offline replay only
+#     ever reorders logged cards, so the drops are invisible to it BY
+#     CONSTRUCTION — the same reason _cap_per_target is safe.
+#   * Always measure, conditionally drop (PRD M4) — the near-dup counts are
+#     computed on every job whatever the flag says, because drops are
+#     pre-capture and a counter is the only thing that can ever see them. The
+#     pre-ship baseline has to accumulate BEFORE the flag flips.
+
+def _deck_dedup_enabled() -> bool:
+    """P0-5 — gates the DROP only, never the measurement."""
+    return getattr(FLAGS, "deck_dedup", False)
+
+
+def _dedup_views(cards: list, key: dict, seed_map: dict) -> list:
+    """Live cards → the pure metric's inputs, sorted base-key descending.
+
+    Tie-break is `_deck_trade_hash`, not id(card): a memory address would make
+    the pass non-reproducible across processes and T-5's determinism claim a
+    lie. Centerpiece comes from `_fatigue_centerpiece` — the ONE definition
+    already used by the F3 fatigue layer and the impression writer; a second
+    one would silently drift."""
+    from .relevance.dedup import DedupCard
+    views = []
+    for c in cards:
+        give = [str(p) for p in (getattr(c, "give_player_ids", None) or [])]
+        recv = [str(p) for p in (getattr(c, "receive_player_ids", None) or [])]
+        target = getattr(c, "target_user_id", None)
+        views.append(DedupCard(
+            ident           = _deck_trade_hash(give, recv, target),
+            partner_user_id = target,
+            centerpiece     = _fatigue_centerpiece(give, recv, seed_map or {}),
+            assets          = frozenset(give) | frozenset(recv),
+            protected       = bool(getattr(c, "likes_you", False)),
+            ref             = c,
+        ))
+    views.sort(key=lambda v: (-key[id(v.ref)], v.ident))
+    return views
+
+
+def _apply_deck_dedup(cards: list, key: dict, *, seed_map: dict,
+                      user_id: str | None, stats: dict | None) -> list:
+    """Measure near-dups always; drop only when `deck.dedup` is on.
+
+    `stats` is a pure out-param (the `capture` idiom) filled with the counters
+    the M4 baseline reads. Non-fatal: any failure serves the candidate list
+    exactly as generated."""
+    try:
+        from .relevance import dedup as _dedup
+        from .relevance.config import resolve as _resolve_knob
+        tau = _resolve_knob("dedup_overlap_tau", _dedup.DEFAULT_TAU,
+                            user_id=user_id)
+        kept, s = _dedup.dedup_cards(
+            _dedup_views(cards, key, seed_map),
+            tau         = tau,
+            min_cards   = _DECK_MIN_CARDS,
+            apply_drops = _deck_dedup_enabled(),
+        )
+        if stats is not None:
+            stats.update(s)
+        if not s["dropped"]:
+            return cards
+        survivors = {id(v.ref) for v in kept}
+        # Rebuilt from `cards`, so survivors keep their incoming relative
+        # order — dedup removes, it never reorders.
+        return [c for c in cards if id(c) in survivors]
+    except Exception as e:
+        log.warning("deck dedup (P0-5) failed (non-fatal): %s", e)
+        return cards
+
+
+def _dedup_counters(stats: dict) -> dict:
+    """The `_order_deck` out-param → the `deck_job_stats.decided_by` counters.
+
+    `deduped_cards_per_job` is the name PRD M4 mandates; the rest are what the
+    baseline ratio needs (near-dup pairs / served cards) plus the flag state,
+    so the series is readable across the flip instead of ambiguous at it."""
+    return {
+        "deck_cards":            int(stats.get("cards", 0)),
+        "near_dup_pairs":        int(stats.get("pairs", 0)),
+        "near_dup_cards":        int(stats.get("cards_in_pairs", 0)),
+        "deduped_cards_per_job": int(stats.get("dropped", 0)),
+        "dedup_restored":        int(stats.get("restored", 0)),
+        "dedup_applied":         int(bool(stats.get("applied"))),
+    }
+
+
+def _record_deck_dedup_stats(job_id: str, user_id: str, league_id: str,
+                             stats: dict | None) -> None:
+    """Persist the P0-5 counters for one job. Observational and non-fatal —
+    a failed write must never cost a user their deck."""
+    if not stats:
+        return
+    try:
+        merge_deck_job_counters(job_id, user_id=user_id, league_id=league_id,
+                                counters=_dedup_counters(stats))
+    except Exception as e:
+        log.warning("deck dedup counters write failed (non-fatal): %s", e)
+
+
 # ── F2 (flag deck.thompson_v2) — Thompson v2 bandit hygiene ─────────────────
 # docs/plans/tiktok-discovery/prds/F2-thompson-v2.md. Upgrades WHAT feeds the
 # per-arm Beta draw; the draw's authority is unchanged (sort-key multiplier
@@ -3360,6 +3472,7 @@ def _order_deck(
     fatigue_mult: dict | None = None,
     taste_mult: dict | None = None,
     value_scores: dict | None = None,
+    dedup_stats: dict | None = None,
 ) -> list:
     """Apply A5 (Thompson ordering — v1, or the F2 v2 sampler when
     deck.thompson_v2 is on) and A6 (diversification) to a generated deck.
@@ -3395,12 +3508,17 @@ def _order_deck(
     authority only, over gate-passing candidates the engine already
     admitted. A card missing from the map keeps its composite. None (the
     flag-off / no-model / zero-history / error caller value) ⇒
-    byte-identical pre-F6 behavior."""
+    byte-identical pre-F6 behavior.
+
+    `dedup_stats` (P0-5, deck.dedup): pure out-param filled with the near-dup
+    counters for THIS candidate set — always, whatever the flag says (PRD M4:
+    drops are pre-capture, so only a counter can ever see them and the
+    pre-ship baseline must accumulate while the flag is still off). The flag
+    gates the removal alone. See `_apply_deck_dedup`."""
     thompson_v2 = _deck_thompson_v2_enabled()   # F2 — supersedes the v1 draw
     thompson  = _thompson_deck_enabled() or thompson_v2
     diversity = _deck_diversity_enabled()
-    if not cards or not (thompson or diversity or fatigue_mult or taste_mult
-                         or value_scores):
+    if not cards:
         return cards
 
     key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
@@ -3413,6 +3531,28 @@ def _order_deck(
             v = value_scores.get(id(c))
             if v is not None:
                 key[id(c)] = float(v)
+
+    # P0-5 (deck.dedup) — near-duplicate collapse on the BASE-KEYED list,
+    # before the Thompson draw and before `capture` is populated, so a
+    # dropped card can never be logged as an impression (LLD §4.6). Measured
+    # unconditionally; the flag gates only the drop. `key` is left alone —
+    # dropped cards simply stop being looked up.
+    deduped = _apply_deck_dedup(cards, key, seed_map=seed_map,
+                                user_id=user_id, stats=dedup_stats)
+    if len(deduped) != len(cards):
+        # Prune the key map to the survivors so `capture` — filled below —
+        # can only ever describe cards that will actually be served. A
+        # dropped card must not appear in the impression stream in any form.
+        cards = deduped
+        key = {id(c): key[id(c)] for c in cards}
+
+    if not (thompson or diversity or fatigue_mult or taste_mult or value_scores):
+        # No ordering layer is active. Return the (possibly thinned) candidate
+        # list in its incoming order — dedup removes, it never reorders, and
+        # falling through to the sort below would re-rank a deck that nothing
+        # asked to re-rank. With the flag off this is the pre-P0-5 early
+        # return, unchanged.
+        return cards
 
     if thompson:
         rng = random.Random(_deck_rng_seed(user_id, league_id, job_id))
@@ -5076,11 +5216,15 @@ def _run_trade_job(
         # seeded per job, so /status re-polls see a stable order. Non-fatal:
         # any failure serves the deck exactly as generated. F3: fatigue
         # multipliers ride the same call (None when the flag is off).
+        #
+        # P0-5: this block is now entered for EVERY non-demo job, not only
+        # when an ordering layer is active, because the near-dup metric has to
+        # be measured on every job whatever `deck.dedup` says (PRD M4 — the
+        # pre-ship baseline). With every layer off _order_deck still returns
+        # the input list untouched, so nothing else changes.
         signal_capture: dict | None = None
-        if league_id != "league_demo" and (
-                _thompson_deck_enabled() or _deck_thompson_v2_enabled()
-                or _deck_diversity_enabled() or fatigue_mults or taste_mults
-                or value_scores):
+        dedup_stats: dict = {}
+        if league_id != "league_demo":
             try:
                 # F1: capture the drawn Thompson multipliers + final ordering
                 # keys for deck_impressions. None when the flag is off — the
@@ -5097,6 +5241,7 @@ def _run_trade_job(
                     fatigue_mult = fatigue_mults,
                     taste_mult   = taste_mults,   # F5 — None when off/zero-history
                     value_scores = value_scores,  # F6 — None when off/no-model/cold
+                    dedup_stats  = dedup_stats,   # P0-5 — always measured, out-param
                 )
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
@@ -5112,6 +5257,11 @@ def _run_trade_job(
                             j["cards"] = snapshot
             except Exception as ord_err:
                 log.warning("deck ordering (A5/A6) failed (non-fatal): %s", ord_err)
+            # P0-5 / PRD M4 — persist the near-dup counters for THIS job,
+            # flag on or off. Drops happen pre-capture, so `deck_impressions`
+            # can never reconstruct this rate; the counter row is the only
+            # record, and it has to accumulate ≥7d before the flag flips.
+            _record_deck_dedup_stats(job_id, g_user_id, league_id, dedup_stats)
 
         # F7 (flag deck.exploration) — wildcard slot + archetype audition,
         # applied AFTER ordering (the slot is a fixed served position, not a

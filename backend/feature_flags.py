@@ -431,12 +431,14 @@ FLAG_KEYS: tuple[str, ...] = (
     "deck.signal_v2",
     "deck.thompson_v2",     # F2 — v2 deck sampler: pessimistic priors, decay, viewed-gated counts, lane×shape arms
     "deck.fatigue",         # F3 — per-user fatigue multipliers, 30d decline suppression + retest, deck refresh/undo
-    "deck.session_rerank",  # F4 — reserved (no consumer yet)
+    "deck.session_rerank",  # F4 — consumer is mobile/src/utils/sessionRerank.ts
     "deck.taste_vectors",   # F5 — taste vectors: per-user decayed attr prefs (short/long τ) + board prior, bounded re-rank
     "deck.exploration",     # F7 — wildcard slot (1/deck ≥8, positions 4–6, honest label) + archetype audition pools + exploration propensity logging
     "deck.value_model",     # F6 — learned P(like)/P(propose) heads × V-vector base ordering + nightly refit; DARK until an F8 replay win
     "deck.first_session",   # F9 — first-session win: confidence-weighted first-5 + size clamp on FIRST decks, board-refreshed deck header, adaptation moment
     "deck.replenishment",   # reserved (no consumer yet)
+    # Trade-relevance engine P0 (docs/plans/trade-relevance-engine/lld.md §2.4)
+    "deck.dedup",           # P0-5 — near-duplicate card collapse in _order_deck (pre-Thompson, pre-capture). Gates the DROP only: the near-dup metric is measured on every job either way (PRD M4 baseline).
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

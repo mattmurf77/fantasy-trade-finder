@@ -1,5 +1,14 @@
 # Find-a-Trade — Current-State Map (for TikTok-discovery gap analysis)
 
+> ⚠️ **SUPERSEDED 2026-08-14 — historical snapshot, not current truth.** This
+> map describes the pre-F1 world. Nine of the ten F-features it calls missing
+> shipped between 2026-07-26 and 2026-08-14 (impression↔outcome join, dwell,
+> taste vectors, fatigue/suppression, exploration slots, offline replay,
+> first-session shaping, replenishment; F6's learned value model is built but
+> dark). For the current map read
+> [`../trade-relevance-engine/ftf-current-state.md`](../trade-relevance-engine/ftf-current-state.md).
+> Kept as-is for the gap-analysis history it anchors.
+
 Mapped 2026-07-26 on branch `teardown-remediation` (HEAD 786f63d). All paths relative to repo root `/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder`. READ-ONLY survey; no code changed.
 
 ## Summary

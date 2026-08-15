@@ -687,7 +687,7 @@ Auth is best-effort. `X-Session-Token`, when present, attributes the row to the 
 
 Stores into `app_feedback` (see data-dictionary). The mobile client also retains a local AsyncStorage copy and re-POSTs unsynced items on app foreground.
 
-## Analytics events (flag `analytics.client_events`, ships dark)
+## Analytics events (flag `analytics.client_events` — LIVE since 2026-07-19)
 
 First-party client-event ingestion — [tracking plan v2 §S2](business/analytics/2026-07-17-tracking-plan-v2.md). 404 while the flag is off.
 

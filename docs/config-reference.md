@@ -22,6 +22,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))](#flags-monetization-platform-ships-dark-foundation-plan-index)
 - [Flags — App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)](#flags-app-teardown-remediation-2026-07-branch-teardown-remediation-all-dark)
 - [Flags — TikTok-discovery deck engine (2026-07-26)](#flags-tiktok-discovery-deck-engine-2026-07-26)
+- [Flags — Trade-relevance engine P0 (2026-08-14)](#flags-trade-relevance-engine-p0-2026-08-14)
 - [Flags — Rookie draft + Draft Room (2026-08-06)](#flags-rookie-draft-draft-room-2026-08-06)
 - [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
@@ -39,6 +40,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F7 — exploration slots & archetype audition (flag `deck.exploration`)](#f7-exploration-slots-archetype-audition-flag-deckexploration)
   - [F9 — first-session win engineering (flag `deck.first_session`)](#f9-first-session-win-engineering-flag-deckfirst_session)
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
+  - [Trade-relevance engine P0 ([lld](plans/trade-relevance-engine/lld.md) §2.4) — DB-seeded](#trade-relevance-engine-p0-lld-24-db-seeded)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -289,6 +291,18 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.first_session` | false | F9 first-session win: confidence-weighted top-5 + 8–10-card clamp on a user's FIRST deck per league, the honest mid-deck adaptation moment (client), the "Built from your updated board" header on every board-refreshed deck (2026-07-26 amendment; needs `deck.signal_v2` for the previous-deck timestamp), and the `first_session_*` activation events. Off ⇒ byte-identical payloads/ordering/UI. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
 
+## Flags — Trade-relevance engine P0 (2026-08-14)
+
+Registered in `FLAG_KEYS` (`backend/feature_flags.py`); design in
+[docs/plans/trade-relevance-engine/](plans/trade-relevance-engine/) (lld §2.4, §4.6). All default
+OFF and flip serially, one at a time, per the PRD rollout order. Their tuning knobs are the
+DB-seeded `model_config` rows in the [Trade-relevance engine P0](#trade-relevance-engine-p0-lld-24-db-seeded)
+section below.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `deck.dedup` | false | P0-5 near-duplicate card collapse (`backend/relevance/dedup.py`, applied in `server._order_deck`). Two candidate cards are near-duplicates when they share a `partner_user_id` AND a centerpiece (`_fatigue_centerpiece`, the same derivation the F3 fatigue layer and the impression writer use) AND their asset sets — `give ∪ receive` — overlap at Jaccard ≥ [`dedup_overlap_tau`](#trade-relevance-engine-p0-lld-24-db-seeded) (0.75). A greedy single pass over the base-keyed list keeps the highest-base-score card of each cluster. `likes_you` cards are never dropped (they still suppress their own duplicates), and the survivor count never falls below `_DECK_MIN_CARDS` (5) — the best-dropped cards are restored, the `_cap_per_target` idiom. **The flag gates the DROP only**: the near-dup counters are computed on every deck job either way and written to `deck_job_stats.decided_by` (`deduped_cards_per_job`, `near_dup_pairs`, `near_dup_cards`, `deck_cards`, `dedup_applied`), because drops happen pre-capture and a counter is the only thing that can ever see them — PRD metric M4 needs ≥7d of that baseline before the flip. Dedup runs on the base-keyed list **before the Thompson draw and before the `capture` out-param is filled**, so a dropped card is never logged as an impression and offline replay — which only reorders logged cards — is unaffected by construction. Off ⇒ zero cards dropped, ordering byte-identical; the counters still accrue. Soft off without a flag flip: set `dedup_overlap_tau` to `1.0` (only byte-identical asset sets then collapse). |
+
 ## Flags — Rookie draft + Draft Room (2026-08-06)
 
 Registered under the `_comment_rookie_draft` block in `config/features.json`; plan/HLD/LLD in
@@ -532,6 +546,18 @@ All read via `value_model._cfg` (same live-dict pattern as `taste_service._cfg` 
 | `value_model_l2_cat` | 0.5 | L2 on one-hot features — much stronger by design: at this data volume one-hots overfit label noise (validated on the F8 synthetic fixtures), while personalized categorical taste reaches the model through the F5 prefMatch numerics |
 
 Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignored `/data/`) — directory for the append-only `models.jsonl` model store (latest parseable record = the served model; nightly refit is idempotent per UTC `train_date`). Tests point it at a tmp dir, F8-`EVAL_RUNS_DIR`-style.
+
+### Trade-relevance engine P0 ([lld](plans/trade-relevance-engine/lld.md) §2.4) — DB-seeded
+
+Seeded by `_MODEL_CONFIG_DEFAULTS` in `backend/database.py` (INSERT OR IGNORE), so they are live-tunable via `PUT /api/admin/config/<key>`. `model_config.value` is Float-typed, so the count knob is stored as a float and read with `int()`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `class_demotion_floor` | 0.5 | P0-4 (flag `deck.class_demotion`): lower clamp on the per-class demotion multiplier written to `deck_class_stats.demotion`. This layer **demotes, it never gates** — the floor is what guarantees even the worst-performing class still reaches a deck. `1.0` disables demotion entirely (soft off, no data repair). |
+| `class_demotion_min_views` | 200 | P0-4: minimum class exposures before any demotion applies. Below this the multiplier is **exactly 1.0** — no evidence, no penalty. Raising it makes the layer more conservative; the empirical-Bayes shrink already handles thin classes, so this is the hard floor on top of it. |
+| `dedup_overlap_tau` | 0.75 | P0-5 (flag [`deck.dedup`](#flags-trade-relevance-engine-p0-2026-08-14)): Jaccard threshold on `give ∪ receive` asset sets at or above which two candidate cards — already required to share a `partner_user_id` and a centerpiece — count as near-duplicates, and the lower-base-score one is dropped. Comparison is `>=`, so `0.75` collapses "same trade plus one sweetener" (3 shared of 4 total) exactly. Dedup runs **at job creation, pre-Thompson and pre-capture** — dropped cards are never logged or served, so there is no "restored card" UX and replay is untouched by construction. Two things it will not do: drop a `likes_you` card, or thin the deck below `_DECK_MIN_CARDS` (5). Read through the D10 resolver (`relevance.config.resolve`), so a per-user or experiment override would apply if one were ever registered. `1.0` = soft off — only byte-identical asset sets collapse (the operator undo that needs no flag flip); both undos act within one job cycle. Note the near-dup **measurement** ignores this being a soft-off: counters are written every job either way. |
+
+> Deliberately **unseeded**: `cron.pass_disabled.<pass_name>` — the per-pass kill valves for the P0 pass ledger (`cron_pass_runs`). Their polarity is inverted on purpose: **absent means the pass runs.** Seeding them at `0.0` would behave identically today and become a silent trap the first time someone prunes a zero-valued row. To disable a pass, `PUT /api/admin/config/cron.pass_disabled.<name>` with `1.0`; to re-enable it, set `0.0` (or delete the row).
 
 ### Tier 3 (flag-gated, landing imminently)
 

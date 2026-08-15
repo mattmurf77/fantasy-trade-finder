@@ -277,7 +277,14 @@ per-column `ALTER TABLE ADD COLUMN` list, each statement in its own transaction
 - **Enum "widening" is app-level:** `deck_outcomes.action` is a bare String with
   no CHECK (`database.py:521`). The four D2 labels are added by (a) one
   authoritative constant `DECK_OUTCOME_ACTIONS` beside the table, (b)
-  `save_deck_outcome` rejecting actions outside it (today it accepts any string),
+  `save_deck_outcome` rejecting actions outside it ⟨BUILD-AMENDED 2026-08-14:
+  this said "today it accepts any string" — **wrong**, it already raised
+  `ValueError`. The guard STAYS a raise; the constant only widens the set. It is
+  a low-level writer whose sole production caller `_save_deck_outcome_safe`
+  already wraps every call in try/except + log, so the always-200 contract is
+  held one layer up and a raise never reaches a client — while a raise is what
+  catches a mistyped label in dev/CI, which matters because P0-3 adds four new
+  action strings⟩,
   (c) reader whitelists (§6.2). No DDL for the widening.
 
 ### 3.2 Column adds (append to `migration_cols`, `database.py:1877`)
@@ -328,9 +335,14 @@ cron_pass_runs = Table("cron_pass_runs", metadata,
 younger than 2× the pass budget ⇒ skip (someone owns it); `running` and older ⇒
 stale corpse from a killed worker — UPDATE to `error`, re-claim `attempt+1`.
 **Stale-`running` recovery is mandatory** — without it a mid-pass OOM wedges that
-pass for the day, the exact silent-skip failure D1 exists to kill. Retention 90d
-via the existing retention endpoint — **registering `cron_pass_runs` in that
-endpoint's table list is part of the B1 diff**, not an assumption.
+pass for the day, the exact silent-skip failure D1 exists to kill.
+⟨BUILD-AMENDED 2026-08-14⟩ Retention: this spec assumed "the existing retention
+endpoint" with a table list — **no such endpoint exists**. The repo has
+`server._cleanup_loop` and `api_observability.purge_observability_events`,
+neither of which takes a table list. Shipped instead:
+`database.prune_cron_pass_runs(max_age_days=90)`, sitting beside
+`purge_stale_persisted_sessions`; **wiring its call into `_cleanup_loop` is part
+of the B1 diff.**
 
 ```python
 deck_class_stats  ((archetype, shape_bucket, value_band, stat_date) unique;
