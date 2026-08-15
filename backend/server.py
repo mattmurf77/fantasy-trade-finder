@@ -108,7 +108,7 @@ from .database import (
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
     # trade_block_service.py)
     load_trade_block,
-    check_for_match, match_already_exists,
+    find_matching_like, match_already_exists,
     create_trade_match, load_matches,
     load_awaiting_trades,
     retract_awaiting_likes,
@@ -3839,7 +3839,7 @@ def _save_deck_outcome_safe(
     dwell_ms=None,
     detail_expanded=None,
     calc_opened=None,
-) -> None:
+) -> str | None:
     """Flag-gated, never-throwing deck_outcomes append. The single call
     idiom for every route that accepts an optional impression_id: absent id
     or flag off ⇒ exact pre-F1 behavior (no write, no error path).
@@ -3848,27 +3848,34 @@ def _save_deck_outcome_safe(
     The write only happens when the impression exists, is owned by the
     acting user, and was served within _DECK_OUTCOME_MAX_AGE_DAYS — anything
     else is counted-and-dropped, so a stale or foreign impression_id can
-    never label (or taste-poison) another user's history."""
+    never label (or taste-poison) another user's history.
+
+    Returns the VALIDATED impression id (truncated, exactly as written) on a
+    successful append, else None — P0-3 (D2, LLD §2.1/§4.3): the swipe route
+    threads THAT id into `save_trade_decision`, so a like row can only ever
+    carry an impression this validation already accepted. A caller that
+    ignores the return keeps its old behavior."""
     if not impression_id or not isinstance(impression_id, str):
-        return
+        return None
     if not _deck_signal_v2_enabled():
-        return
+        return None
+    validated_id: str | None = None
     try:
         if not acting_user_id:
             _deck_outcome_reject("no_user", impression_id)
-            return
+            return None
         imp = load_deck_impression(impression_id[:64])
         if imp is None:
             _deck_outcome_reject("unknown", impression_id)
-            return
+            return None
         if imp["user_id"] != acting_user_id:
             _deck_outcome_reject("foreign", impression_id)
-            return
+            return None
         age_days = _taste_service._age_days(
             imp.get("served_at"), datetime.now(timezone.utc))
         if age_days > _DECK_OUTCOME_MAX_AGE_DAYS:
             _deck_outcome_reject("stale", impression_id)
-            return
+            return None
         dw = int(dwell_ms) if isinstance(dwell_ms, (int, float)) and not isinstance(dwell_ms, bool) else None
         save_deck_outcome(
             impression_id   = impression_id[:64],
@@ -3877,6 +3884,9 @@ def _save_deck_outcome_safe(
             detail_expanded = bool(detail_expanded) if detail_expanded is not None else None,
             calc_opened     = bool(calc_opened) if calc_opened is not None else None,
         )
+        # Past this line the label IS written, so the id is validated — the
+        # taste hook below must not be able to retract that verdict.
+        validated_id = impression_id[:64]
         # F5 (deck.taste_vectors) — synchronous taste-vector update riding
         # the outcome write (PRD: minute-level sync at FTF QPS = a SQL
         # write). Flag-gated here AND never-throwing inside, so this
@@ -3885,9 +3895,11 @@ def _save_deck_outcome_safe(
         # exception path above) — no label, no learning.
         if _deck_taste_enabled():
             _taste_service.update_taste_from_outcome(
-                impression_id[:64], action, dwell_ms=dw)
+                validated_id, action, dwell_ms=dw)
+        return validated_id
     except Exception as out_err:
         log.warning("deck signal outcome write failed (non-fatal): %s", out_err)
+        return validated_id
 
 
 # ── F3 (flag deck.fatigue) — fatigue & durable suppression ──────────────────
@@ -10422,7 +10434,12 @@ def swipe_trade():
         # F1 (deck.signal_v2) — outcome join. Optional additive body fields
         # (impression_id, dwell_ms, detail_expanded, calc_opened); absent →
         # exact pre-F1 behavior (old clients unaffected). Never throws.
-        _save_deck_outcome_safe(
+        #
+        # P0-3 (D2, LLD §4.3): the return is the VALIDATED impression id —
+        # owned by this user, fresh, actually written. Everything downstream
+        # (the like row, then side A of a match) threads THAT id, never the
+        # raw body field, so a foreign or stale id can't reach the join spine.
+        validated_impression_id = _save_deck_outcome_safe(
             body.get("impression_id"),
             decision,   # 'like' | 'pass' (validated by record_decision above)
             acting_user_id  = g_user_id,
@@ -10441,6 +10458,7 @@ def swipe_trade():
                 give_player_ids    = card.give_player_ids,
                 receive_player_ids = card.receive_player_ids,
                 decision           = decision,
+                impression_id      = validated_impression_id,
             )
             save_trade_swipes(
                 user_id        = g_user_id,
@@ -10475,7 +10493,10 @@ def swipe_trade():
 
             # Mutual match detection — only on "like" decisions
             if decision == "like" and card.target_user_id and card.league_id != "league_demo":
-                is_mirror = check_for_match(
+                # P0-3 (D2, LLD §4.4) — same match/no-match verdict as the old
+                # `check_for_match` boolean, but the matched like row comes
+                # back with it so side B's provenance can ride into the match.
+                mirror = find_matching_like(
                     current_user_id    = g_user_id,
                     league_id          = card.league_id,
                     target_user_id     = card.target_user_id,
@@ -10486,7 +10507,7 @@ def swipe_trade():
                     fuzzy              = _fuzzy_match_enabled(),
                     fuzzy_tau          = _fuzzy_match_tau(),
                 )
-                if is_mirror:
+                if mirror is not None:
                     already = match_already_exists(
                         league_id          = card.league_id,
                         user_a_id          = g_user_id,
@@ -10495,12 +10516,23 @@ def swipe_trade():
                         receive_player_ids = card.receive_player_ids,
                     )
                     if not already:
+                        # Side A = this swiper (exact, id in hand); side B =
+                        # the earlier liker, recovered off their like row and
+                        # inheriting the match's own fuzziness (D2).
+                        _mirror_imp = mirror.get("impression_id")
                         match_data = create_trade_match(
                             league_id      = card.league_id,
                             user_a_id      = g_user_id,
                             user_b_id      = card.target_user_id,
                             user_a_give    = card.give_player_ids,
                             user_a_receive = card.receive_player_ids,
+                            impression_id_a = validated_impression_id,
+                            impression_id_b = _mirror_imp,
+                            join_quality_b  = (
+                                None if not _mirror_imp
+                                else "exact" if mirror.get("exact")
+                                else "fuzzy"
+                            ),
                         )
                         log.info(
                             "🎉 Trade match! league=%s  %s ↔ %s  give=%s receive=%s",
@@ -13473,6 +13505,11 @@ def disposition_trade_match(match_id):
             match_id = match_id,
             user_id  = g_user_id,
             decision = decision,
+            # P0-3 (D2, LLD §4.5) — the four per-perspective disposition
+            # labels are written INSIDE that function's transaction, so the
+            # decision and its training labels commit together. Flag off ⇒
+            # decision-only, exactly as before.
+            write_outcomes = _deck_signal_v2_enabled(),
         )
 
         if result["status"] == "not_found":
