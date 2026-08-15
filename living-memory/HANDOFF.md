@@ -60,6 +60,13 @@ sites nor `card.fit_premium`.
   (Maestro delta waived — no mobile code, no testID, copy is data-derived);
   `docs/architecture.md` row updated; TEST_LEDGER entry written.
 
+**Live on prod:** Render deploy `live` on `dc9a130` (2026-08-15T18:57:53Z);
+`/api/feature-flags` + `/api/tier-config` 200. Branch ledgered in
+[`docs/recovery/2026-08-15-narrative-position-accuracy-sweep.md`](../docs/recovery/2026-08-15-narrative-position-accuracy-sweep.md)
+(tip `98bc17d`) and the remote branch is deleted; the **worktree
+`.claude/worktrees/peaceful-lumiere-e2a25b` and its local branch still exist** —
+remove them from another checkout, no further ledger entry needed.
+
 ### Next step
 
 Nothing blocking. Worth a post-deploy spot check on a real deck: the neutral
