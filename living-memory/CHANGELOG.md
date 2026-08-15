@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 (compressed opponent boards produced empty decks — two engine fixes, both dark)
+
+- **Field bug, backend-only, NOT shipped.** Running the real engine against the operator's league FFV3 with prod boards: three of four **boarded** opponents (MangoPatti, Bcork, gdubs10) yielded **zero** cards at any per-opponent budget; the fourth (jonbonjourvi) yielded five. Their boards are floor-pinned — median Elo 1201 vs jonbonjourvi's 1379 — the shape of "started ranking and stopped".
+- **Defect 1 (`trade_optimizer.py`):** the v3 pool prune ranked by the raw divergence `_vo - _uv`. `elo_to_value` is exponential, so a uniformly-lower board deflates studs by thousands and bench bodies by tens — every tradeable stud sorted **below** the user's junk and the top-12 pool filled with worthless assets. The key was not invariant to a board-wide offset, which carries no preference information. Fix: rescale the opponent's value space by the geometric-mean ratio over the assets in play before differencing. **Prune ordering only** — surplus/fairness/composite keep each side's raw space. Flag `trade.pool_calibration`.
+- **Defect 2 (`trade_service.py`):** the boarded/unboarded branch was `if/else` with no fall-through, so a boarded member yielding zero divergence cards got no consensus fallback either and **vanished from the deck** — ranking a little made a leaguemate a worse partner than never ranking. Fix: fall back to `_generate_consensus_for_pair`, cards still labeled `basis:"consensus"`. Flag `trade.divergence_fallback`.
+- **Measured read-only on prod boards** (pool 12): calibration alone takes gdubs10 0→5 divergence; both flags take MangoPatti and Bcork 0→5 consensus; jonbonjourvi unchanged. Deck total stays at the 30 cap, so boarded members **displace** unranked members' consensus cards — intended priority order, but visible. Raising `v3_pool_size` to 30 rescues all three with divergence cards but costs **26–102 s per pair** vs ~2 s — not a shippable mitigation. Residual: calibration can't undo a *nonlinear* compression ([Q-017](OPEN_QUESTIONS.md)).
+- **Tests:** new `backend/tests/test_compressed_board.py` (8), every fix paired with a flag-off test pinning today's behaviour. Full suite **2771 passed, 1 skipped**. Scope block: [`docs/plans/compressed-board-pool/scope.md`](../docs/plans/compressed-board-pool/scope.md); [D-052](DECISIONS.md), [G-045](GOTCHAS.md), config-reference + glossary updated.
+- **Both flags default FALSE.** Agents don't self-select a ship state; flipping either is deploy-free and the operator's call.
+
+---
+
 ## 2026-08-14 (deck-outcome impression-ownership validation — taste-poisoning hole closed)
 
 - **Security/correctness fix, backend-only.** `_save_deck_outcome_safe` accepted any client-supplied `impression_id` and wrote `deck_outcomes` + (under `deck.taste_vectors`) the **impression owner's** taste vector — so a stale or foreign id let one session label and taste-poison another user's history. Found by the trade-relevance-engine dual-agent LLD review (docs landed same day, entry below); standalone subset of that initiative's P0 validation spec — when P0 builds, reconcile against this shipped fix rather than rebuilding (its PRD R6 specs the same check).

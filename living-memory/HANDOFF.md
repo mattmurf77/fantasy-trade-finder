@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Compressed-board engine fixes built + field-verified, both flags DARK](#2026-08-15--compressed-board-engine-fixes-built--field-verified-both-flags-dark)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -20,6 +21,81 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-15 — Compressed-board engine fixes built + field-verified, both flags DARK
+
+**Where things stand.** A field bug in trade generation is diagnosed, fixed,
+tested and measured against real prod boards — and **nothing is shipped**. The
+work is **uncommitted in the worktree** `.claude/worktrees/loving-shtern-12e4b1`
+on branch `claude/loving-shtern-12e4b1` (cut from `origin/main` @ `21df73f`).
+No commit, no PR, no merge, no deploy, both flags `false`. **Commit before
+removing this worktree** — it holds the only copy, and the recovery ledger
+cannot capture what was never committed.
+
+**The bug.** Three of four *boarded* opponents in the operator's league FFV3
+produced zero trade cards at any budget. Two stacked defects, one flag each:
+
+- `trade.pool_calibration` — `trade_optimizer`'s pool prune ranked by the raw
+  divergence `_vo - _uv`; `elo_to_value` is exponential, so a floor-pinned
+  opponent board (median Elo 1201 vs the healthy member's 1379) deflates studs by
+  thousands and bench bodies by tens, sorting every tradeable stud **below** the
+  user's junk. Fix rescales the opponent's value space by the geometric-mean
+  ratio over the assets in play. Prune ordering only.
+- `trade.divergence_fallback` — the boarded/unboarded branch was `if/else` with
+  no fall-through, so a zero-yield boarded member vanished from the deck. Fix
+  falls back to the consensus generator.
+
+**Field-verified read-only against prod** (`DATABASE_URL=$DATABASE_URL_PROD`,
+SELECT-only). At the production `v3_pool_size=12`: calibration alone takes
+gdubs10 0 → 5 divergence cards; both flags take MangoPatti and Bcork 0 → 5
+consensus; jonbonjourvi (healthy board) unchanged at 5.
+
+**The one thing to do next: decide whether to flip the flags.** Everything else
+is downstream of that. Two consequences to accept first — boarded members can now
+carry `basis:"consensus"` cards, and because the deck caps at 30 with boarded
+members visited first, rescuing them **displaces** consensus cards from unranked
+members. Composition improves; size doesn't change.
+
+**What is NOT established, and should not be claimed:**
+- **Card quality.** Counts are verified; nobody has looked at the rescued cards.
+- **Any league but FFV3.** The healthy-board no-regression claim rests on a unit
+  fixture, not field data.
+- Whether consensus cards are the right answer for MangoPatti/Bcork, or whether
+  the divergence cards a bigger pool finds are worth chasing ([Q-017](OPEN_QUESTIONS.md)).
+
+**Dead end worth remembering:** raising `v3_pool_size` to 30 — the obvious
+deploy-free mitigation — does rescue all three with divergence cards, but costs
+**26–102 s per pair** against ~2 s at 12. A full 11-opponent deck did not finish
+in 10 minutes. It is not a shippable workaround, and it leaves the ordering
+defect in place. See [G-045](GOTCHAS.md).
+
+**Commit was deferred by operator instruction until the Sleeper co-owned-rosters
+work deployed** — that landed as [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+(`main` @ `6158e65`, ADR-012) and the deploy was verified live before committing
+(prod `js/app.js` serves `co_owners`; `backend/sleeper_roster.py` present on
+`origin/main`). This work is now committed on `claude/loving-shtern-12e4b1`.
+
+**ID renumber already applied.** PR #121 claimed `D-051` and `G-042`/`G-043`/
+`G-044`, which this session had also used. Renumbered against what actually
+landed on `main`: this work is **`D-052`** and **`G-045`**, cross-references
+re-pointed in CHANGELOG, TEST_LEDGER, NEXT, OPEN_QUESTIONS and the scope block.
+`Q-017` never collided (PR #121 added no open questions). Same failure mode as
+the D-049→D-050 race on PR #119/#120 — check ID maxima against `origin/main`,
+not against your own branch.
+
+**Still owed on this branch:**
+- **`origin/main` has not been merged in.** The branch is still based on
+  `21df73f`; `main` is now at `1bf0645`. Expect insert-at-top conflicts in
+  CHANGELOG, DECISIONS, GOTCHAS, HANDOFF, NEXT and TEST_LEDGER — PR #121 touched
+  all six. `DECISIONS.md` will show a `D-051` gap until the merge fills it with
+  theirs; that is expected, not drift.
+- No PR opened, nothing merged, nothing deployed. Both flags remain `false`.
+- The worktree/branch sweep per the recovery ledger, once (and only once) the
+  content is verified on `origin/main`.
+
+Full suite in the worktree: **2771 passed, 1 skipped**.
 
 ---
 

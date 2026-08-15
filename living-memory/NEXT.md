@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Compressed-board engine fixes await an operator call](#2026-08-15--compressed-board-engine-fixes-await-an-operator-call)
 - [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
 - [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
@@ -16,6 +17,16 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-15 — Compressed-board engine fixes await an operator call
+
+Built and field-verified on branch `claude/loving-shtern-12e4b1`, both flags dark
+(see [`HANDOFF.md`](HANDOFF.md), [D-052](DECISIONS.md)). Nothing ships until #1.
+
+1. **Decide whether to flip `trade.pool_calibration` + `trade.divergence_fallback`.** *(operator, minutes)* This is the whole gate — the fix is done, tested and measured, but agents don't self-select a ship state on trade generation. Two consequences to accept before flipping: boarded members can now show `basis:"consensus"` cards, and because the deck is capped at 30 with boarded members visited first, rescued members **displace** consensus cards from unranked ones. Deck composition improves; deck size doesn't change.
+2. **Eyeball the rescued cards before or right after flipping.** *(S)* Card *counts* are verified; card *quality* is not. Nobody has looked at the five cards MangoPatti and Bcork now produce, and "the deck is no longer empty" is not the same claim as "the deck is good".
+3. **Re-run the field probe on a second league.** *(S)* Every field number is from FFV3. The no-regression claim for healthy boards rests on a unit fixture, not on data from a league that isn't the one the bug was found in.
+4. **[Q-017](OPEN_QUESTIONS.md) — quantile-matching the prune.** *(M, only if #2 says the consensus fallback isn't good enough)* A single scale factor can't undo a nonlinear compression, which is why MangoPatti and Bcork get consensus rather than divergence cards. Don't build it on speculation.
 
 ## 2026-08-14 — Year-in-Review capture follow-ons
 
