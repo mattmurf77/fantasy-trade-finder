@@ -143,13 +143,20 @@ Boarded opponents only; deck cap `global_target = max(30, max_per_opponent*6)` =
 
 Two honest caveats:
 
-1. **The deck total stays at 30.** Boarded members are visited first by design
-   (`_generate_trades_v2` sorts `has_rankings` ahead of the rest so divergence
-   cards are never crowded out). So rescuing three boarded members *displaces*
-   consensus cards from unranked members further down the queue. The deck does
-   not get bigger; its composition shifts toward real counterparties. That is the
-   intended priority order, but it is a visible change and the operator should
-   know it is coming.
+1. **Later opponents get cut off — and the deck can grow.** Boarded members are
+   visited first by design (`_generate_trades_v2` sorts `has_rankings` ahead of
+   the rest so divergence cards are never crowded out), and generation stops once
+   the deck reaches `global_target`. So rescuing three boarded members *displaces*
+   consensus cards from unranked members further down the queue — confirmed
+   post-deploy: bsharp3, JohnStanfield, dondags20 and KevinLake all returned 0.
+
+   **CORRECTION (post-deploy).** This section previously claimed "the deck total
+   stays at 30". That was wrong. `global_target` is a **stop-when-reached
+   threshold, not a truncation** — `if len(new_cards) >= global_target: break`
+   runs *after* an opponent's whole batch is appended, so the deck overshoots by
+   up to `max_per_opponent - 1`. The three pre-deploy reads all returned exactly
+   30 only because every batch was a full 5 and the running total hit 30 on the
+   nose. The post-deploy read returned **34**. Deck size is `>= 30`, not `== 30`.
 2. **Calibration alone does not rescue MangoPatti or Bcork.** A single
    multiplicative factor removes a board *offset*; it cannot undo a *nonlinear*
    compression (the opponent's board is closer to `value_u^a`, a<1, than to
