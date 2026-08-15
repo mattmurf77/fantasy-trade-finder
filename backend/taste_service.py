@@ -75,12 +75,19 @@ PRIOR_PREFIX = "prior:"
 # them today, so no server path emits them through this map yet (explicit
 # handoff in the F5 build report); they're declared so the wiring is a
 # one-liner when dispositions gain an impression join.
+# Every key MUST be a member of database.DECK_OUTCOME_ACTIONS — enforced by
+# test_taste_rewards_keys_are_legal_actions. This is not pedantry: the dict
+# previously carried "accept" and "decline", which are NOT legal actions (the
+# real labels are "accepted"/"declined") and which no writer could ever
+# produce, so those rewards were dead while looking authoritative. P0-3 added
+# the four disposition labels; they deliberately score 0.0 here because taste
+# rewards for them are a separate, later PR — but a future author who
+# hand-adds "accept" back would silently get nothing. The test makes that
+# mistake fail loudly instead.
 TASTE_REWARDS: dict[str, float] = {
     "like":            1.0,
-    "accept":          4.0,
     "propose":         6.0,
     "pass":           -0.5,
-    "decline":        -2.0,
     "not_interested": -4.0,
     "viewed":          0.0,   # participates only via the long-dwell bonus
     "undo":            0.0,   # appends alongside the original outcome; no taste signal

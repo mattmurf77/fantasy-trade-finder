@@ -4732,8 +4732,17 @@ def save_trade_decision(
     give_player_ids: list[str],
     receive_player_ids: list[str],
     decision: str,
+    impression_id: str | None = None,
 ) -> None:
-    """Persist a high-level trade card decision (like/pass)."""
+    """Persist a high-level trade card decision (like/pass).
+
+    P0-3 (D2, LLD §4.3): `impression_id` is the deck impression this decision
+    came from — and it must be the id the caller already VALIDATED (owned by
+    the acting user, fresh), never a raw body field. It is the exact-recovery
+    key for side B of a future match: when this like later mirrors someone
+    else's, `find_matching_like` reads it straight off this row. NULL is
+    legal and common (web swipes, pre-P0-3 clients) and is never guessed.
+    """
     with engine.begin() as conn:
         conn.execute(insert(trade_decisions_table).values(
             user_id            = user_id,
@@ -4743,6 +4752,9 @@ def save_trade_decision(
             receive_player_ids = json.dumps(receive_player_ids),
             decision           = decision,
             created_at         = _now(),
+            impression_id      = (impression_id[:64]
+                                  if isinstance(impression_id, str) and impression_id
+                                  else None),
         ))
 
 
@@ -6968,7 +6980,7 @@ def _all_low_value_players(player_ids: set, max_search_rank: int) -> bool:
     return True
 
 
-def check_for_match(
+def find_matching_like(
     current_user_id: str,
     league_id: str,
     target_user_id: str,
@@ -6977,9 +6989,9 @@ def check_for_match(
     fuzzy: bool = False,
     fuzzy_tau: float = 0.8,
     fuzzy_guard_rank: int = 120,
-) -> bool:
+) -> dict | None:
     """
-    Check whether target_user_id has already liked a mirrored trade.
+    Find target_user_id's already-liked mirror of this trade, if any.
 
     A mirror trade means: target_user gives what current_user receives,
     and target_user receives what current_user gives.
@@ -6998,7 +7010,18 @@ def check_for_match(
     model_config key "fuzzy_match_tau" (default 0.8), resolved by the caller
     so this module stays config-free.
 
-    Returns True if a matching "like" decision exists.
+    P0-3 (D2, LLD §4.4) — this replaced `check_for_match`'s boolean interior
+    so match creation can carry side B's provenance. Returns None when no
+    mirror exists, else:
+
+        {"decision_id":   int,          # trade_decisions.id of the matched like
+         "impression_id": str | None,   # NULL for web / pre-P0-3 likes
+         "exact":         bool}         # True = exact set-equality mirror
+
+    Newest mirror wins (ORDER BY created_at DESC) within each pass, and the
+    exact pass is still tried in full before the fuzzy pass — identical
+    match/no-match verdicts to the pre-P0-3 boolean, just with the row
+    identified. `check_for_match` below keeps the boolean contract.
     """
     give_set    = set(give_player_ids)
     receive_set = set(receive_player_ids)
@@ -7007,6 +7030,8 @@ def check_for_match(
     with engine.connect() as conn:
         rows = conn.execute(
             select(
+                trade_decisions_table.c.id,
+                trade_decisions_table.c.impression_id,
                 trade_decisions_table.c.give_player_ids,
                 trade_decisions_table.c.receive_player_ids,
             ).where(
@@ -7018,38 +7043,73 @@ def check_for_match(
                     # #318 — a retracted like can never mature into a match.
                     trade_decisions_table.c.retracted_at.is_(None),
                 )
+            ).order_by(
+                # Newest mirror wins — a manager who re-liked the same package
+                # from a fresher deck should have THAT impression labelled.
+                trade_decisions_table.c.created_at.desc(),
+                trade_decisions_table.c.id.desc(),
             )
         ).fetchall()
 
-    parsed: list[tuple[set, set]] = []
+    parsed: list[tuple[int, str | None, set, set]] = []
     for r in rows:
         try:
             their_give    = set(json.loads(r.give_player_ids))
             their_receive = set(json.loads(r.receive_player_ids))
         except (json.JSONDecodeError, TypeError):
             continue
-        parsed.append((their_give, their_receive))
+        parsed.append((r.id, r.impression_id, their_give, their_receive))
 
     # Exact set-equality mirror — always checked first, behavior unchanged.
-    for their_give, their_receive in parsed:
+    for decision_id, impression_id, their_give, their_receive in parsed:
         # Their give == what current user receives, their receive == what current user gives
         if their_give == receive_set and their_receive == give_set:
-            return True
+            return {"decision_id": decision_id,
+                    "impression_id": impression_id,
+                    "exact": True}
 
     if not fuzzy:
-        return False
+        return None
 
     # Fuzzy pass — near-mirrors that differ only by low-value pieces.
-    for their_give, their_receive in parsed:
+    for decision_id, impression_id, their_give, their_receive in parsed:
         if _jaccard(their_give, receive_set) < fuzzy_tau:
             continue
         if _jaccard(their_receive, give_set) < fuzzy_tau:
             continue
         differing = (their_give ^ receive_set) | (their_receive ^ give_set)
         if _all_low_value_players(differing, fuzzy_guard_rank):
-            return True
+            return {"decision_id": decision_id,
+                    "impression_id": impression_id,
+                    "exact": False}
 
-    return False
+    return None
+
+
+def check_for_match(
+    current_user_id: str,
+    league_id: str,
+    target_user_id: str,
+    give_player_ids: list[str],
+    receive_player_ids: list[str],
+    fuzzy: bool = False,
+    fuzzy_tau: float = 0.8,
+    fuzzy_guard_rank: int = 120,
+) -> bool:
+    """Boolean wrapper over `find_matching_like` — True iff target_user_id
+    has already liked a mirror of this trade. Kept for callers that only
+    need the verdict; the swipe route uses `find_matching_like` directly so
+    it can thread side B's impression into `create_trade_match` (D2)."""
+    return find_matching_like(
+        current_user_id    = current_user_id,
+        league_id          = league_id,
+        target_user_id     = target_user_id,
+        give_player_ids    = give_player_ids,
+        receive_player_ids = receive_player_ids,
+        fuzzy              = fuzzy,
+        fuzzy_tau          = fuzzy_tau,
+        fuzzy_guard_rank   = fuzzy_guard_rank,
+    ) is not None
 
 
 def match_already_exists(
@@ -7106,6 +7166,9 @@ def create_trade_match(
     user_b_id: str,
     user_a_give: list[str],
     user_a_receive: list[str],
+    impression_id_a: str | None = None,
+    impression_id_b: str | None = None,
+    join_quality_b: str | None = None,
 ) -> dict:
     """
     Persist a new trade match and return it as a dict.
@@ -7113,6 +7176,19 @@ def create_trade_match(
     user_a is the user whose swipe *triggered* the match detection
     (i.e. the current user who just swiped "like").
     user_b is the counterparty who had already swiped "like" earlier.
+
+    P0-3 (D2, LLD §4.4) — per-side impression provenance, bound to exactly
+    that asymmetry:
+      • `impression_id_a` is the TRIGGERING swiper's own validated
+        impression, in hand from the swipe body. Always an exact join when
+        present, so there is no `join_quality_a` column.
+      • `impression_id_b` is RECOVERED off the counterparty's earlier like
+        row (`find_matching_like`). `join_quality_b` records how: 'exact'
+        when the like mirrored set-for-set, 'fuzzy' when it only near-
+        mirrored (a `trade.fuzzy_match` mirror cannot share a trade_hash, so
+        that join is born fuzzy), NULL when the like carried no impression.
+    Either side may be NULL — never guessed. No deck_outcomes rows are
+    written here: a match is not a disposition.
     """
     now = _now()
     with engine.begin() as conn:
@@ -7125,6 +7201,15 @@ def create_trade_match(
                 user_a_receive = json.dumps(user_a_receive),
                 matched_at   = now,
                 status       = "pending",
+                impression_id_a = (impression_id_a[:64]
+                                   if isinstance(impression_id_a, str) and impression_id_a
+                                   else None),
+                impression_id_b = (impression_id_b[:64]
+                                   if isinstance(impression_id_b, str) and impression_id_b
+                                   else None),
+                join_quality_b  = (join_quality_b
+                                   if join_quality_b in ("exact", "fuzzy")
+                                   else None),
             )
         )
         match_id = result.inserted_primary_key[0]
@@ -7146,6 +7231,10 @@ def create_trade_match(
         "user_a_receive": user_a_receive,
         "matched_at":  now,
         "status":      "pending",
+        "impression_id_a": impression_id_a or None,
+        "impression_id_b": impression_id_b or None,
+        "join_quality_b":  (join_quality_b
+                            if join_quality_b in ("exact", "fuzzy") else None),
     }
 
 
@@ -7535,10 +7624,29 @@ def dismiss_match(match_id: int, user_id: str) -> dict:
         return {"status": "ok", "match_id": match_id}
 
 
+# ── trade-relevance P0-3 (D2, LLD §4.5) — THE disposition label map ─────────
+# Read this next to HLD D2: the side-binding is the whole point and swapping
+# the two dicts silently inverts every training label the accept head will
+# ever see (test_disposition_join.py T-6 is the tripwire).
+#
+#   SELF    — goes on the DISPOSING actor's own impression. First person:
+#             "I accepted / I declined the card I was shown."
+#   PARTNER — goes on the COUNTERPART's impression. Third person: "the card
+#             you were shown was accepted/declined BY YOUR PARTNER."
+#
+# One disposition event ⇒ at most two rows, on two DIFFERENT impressions
+# (one per user), so nothing is double-counted at training time.
+_DISPOSITION_SELF_LABEL = {"accept": "accepted", "decline": "declined"}
+_DISPOSITION_PARTNER_LABEL = {"accept": "accepted_by_partner",
+                              "decline": "declined_by_partner"}
+
+
 def record_match_disposition(
     match_id: int,
     user_id: str,
     decision: str,
+    *,
+    write_outcomes: bool = False,
 ) -> dict:
     """
     Record a user's accept/decline decision on a trade match.
@@ -7550,6 +7658,9 @@ def record_match_disposition(
         'both_decided':     bool,
         'outcome':          'accepted' | 'declined' | None,
         'partner_user_id':  str | None,   # the OTHER party (always set on 'ok')
+        'my_impression_id':      str | None,   # P0-3: the actor's own card
+        'partner_impression_id': str | None,   # P0-3: the counterpart's card
+        'outcome_rows_written':  int,          # P0-3: 0 unless a fresh 'ok'
         'elo_signals':      [    # only present when both_decided=True
             {
                 'user_id':       str,
@@ -7566,6 +7677,24 @@ def record_match_disposition(
     Both accept   → for each user: winner=receive, loser=give, K=20
     Any decline   → for each decliner: winner=give, loser=receive, K=20
                     (net effect ≈ −12 after the original +8 like nudge)
+
+    P0-3 disposition labels (D2, LLD §4.5)
+    ──────────────────────────────────────
+    With `write_outcomes=True` (caller passes `_deck_signal_v2_enabled()`),
+    the single `ok` transition also appends the per-perspective
+    `deck_outcomes` rows from `_DISPOSITION_SELF_LABEL` /
+    `_DISPOSITION_PARTNER_LABEL`, **inside this same transaction** — decision
+    and labels commit or roll back together, so a label-write failure can
+    never leave a decided match with no labels (or vice versa).
+
+    Idempotency is a pre-insert existence check on
+    `(impression_id, action, source_match_id)` in the same txn: `deck_outcomes`
+    legally duplicates rows for other actions, so there is no UNIQUE index to
+    lean on. The state machine already makes re-disposal unreachable; the
+    guard covers a replay racing the first commit.
+
+    A NULL impression on either side simply means that side is not labelled —
+    it is never guessed. ELO/K semantics are untouched by any of this.
     """
     now = _now()
 
@@ -7578,13 +7707,28 @@ def record_match_disposition(
 
         if row is None:
             return {"status": "not_found", "match_id": match_id,
-                    "both_decided": False, "outcome": None, "elo_signals": []}
+                    "both_decided": False, "outcome": None, "elo_signals": [],
+                    "my_impression_id": None, "partner_impression_id": None,
+                    "outcome_rows_written": 0}
 
         is_a = row.user_a_id == user_id
         is_b = row.user_b_id == user_id
         if not (is_a or is_b):
             return {"status": "not_found", "match_id": match_id,
-                    "both_decided": False, "outcome": None, "elo_signals": []}
+                    "both_decided": False, "outcome": None, "elo_signals": [],
+                    "my_impression_id": None, "partner_impression_id": None,
+                    "outcome_rows_written": 0}
+
+        # ── P0-3 (D2) side-binding, resolved once ────────────────────────
+        # `user_a` is the swiper whose like TRIGGERED the match, `user_b` the
+        # counterparty who liked earlier (see create_trade_match). So side A's
+        # impression came straight off the triggering swipe — exact by
+        # construction, which is why there is no join_quality_a column — while
+        # side B was recovered at match time and carries join_quality_b.
+        a_imp, a_quality = row.impression_id_a, ("exact" if row.impression_id_a else None)
+        b_imp, b_quality = row.impression_id_b, row.join_quality_b
+        my_imp,      my_quality      = (a_imp, a_quality) if is_a else (b_imp, b_quality)
+        partner_imp, partner_quality = (b_imp, b_quality) if is_a else (a_imp, a_quality)
 
         # Check already decided. Include the existing decision + the match's
         # current both_decided/outcome so the route can treat a repeat of the
@@ -7600,11 +7744,16 @@ def record_match_disposition(
                  else "declined")
                 if prior_both else None
             )
+            # No labels on this path: the state machine already ran, so the
+            # labels (if any) were written by the transition that took it.
             return {"status": "already_decided", "match_id": match_id,
                     "existing_decision": current_dec,
                     "league_id": row.league_id,
                     "both_decided": prior_both, "outcome": prior_outcome,
-                    "elo_signals": []}
+                    "elo_signals": [],
+                    "my_impression_id": my_imp,
+                    "partner_impression_id": partner_imp,
+                    "outcome_rows_written": 0}
 
         # Write the decision
         if is_a:
@@ -7627,6 +7776,7 @@ def record_match_disposition(
         both_decided = (a_dec is not None) and (b_dec is not None)
         outcome      = None
         elo_signals  = []
+        outcome_rows_written = 0
 
         if both_decided:
             outcome = "accepted" if (a_dec == "accept" and b_dec == "accept") else "declined"
@@ -7683,6 +7833,42 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
 
+        # ── P0-3 (D2, LLD §4.5) — per-perspective labels, same txn ────────
+        # Reached ONLY on this single `ok` transition (already_decided
+        # returned above), so a match can label at most once per side. NOT
+        # wrapped in try/except on purpose: an insert failure must roll the
+        # decision UPDATE back with it (T-7). Elo/K above is untouched.
+        if write_outcomes:
+            labelled: set[str] = set()
+            for target_imp, target_action, target_quality in (
+                (my_imp,      _DISPOSITION_SELF_LABEL.get(decision),    my_quality),
+                (partner_imp, _DISPOSITION_PARTNER_LABEL.get(decision), partner_quality),
+            ):
+                # NULL impression ⇒ that side is simply unlabelled (never
+                # guessed). D2 also requires the two labels to land on two
+                # DIFFERENT impressions — if provenance ever collapsed them,
+                # drop the second rather than double-count one card.
+                if not target_imp or not target_action or target_imp in labelled:
+                    continue
+                labelled.add(target_imp)
+                already_labelled = conn.execute(
+                    select(deck_outcomes_table.c.id).where(and_(
+                        deck_outcomes_table.c.impression_id   == target_imp,
+                        deck_outcomes_table.c.action          == target_action,
+                        deck_outcomes_table.c.source_match_id == match_id,
+                    )).limit(1)
+                ).fetchone()
+                if already_labelled is not None:
+                    continue
+                conn.execute(insert(deck_outcomes_table).values(
+                    impression_id   = target_imp,
+                    action          = target_action,
+                    acted_at        = now,
+                    join_quality    = target_quality,
+                    source_match_id = match_id,
+                ))
+                outcome_rows_written += 1
+
     # F3 (deck.fatigue) — additive context for the decline-suppression hook:
     # the package from the CALLER's perspective plus the partner's current
     # decision. Decoded defensively; failures degrade to empty lists.
@@ -7703,6 +7889,10 @@ def record_match_disposition(
         "user_give":        (_a_give if is_a else _a_receive),
         "user_receive":     (_a_receive if is_a else _a_give),
         "elo_signals":      elo_signals,
+        # P0-3 (D2) — join provenance + how many labels this event wrote.
+        "my_impression_id":      my_imp,
+        "partner_impression_id": partner_imp,
+        "outcome_rows_written":  outcome_rows_written,
     }
 
 
