@@ -93,7 +93,7 @@ import {
   setAssetPref,
   type Outlook,
 } from '../api/league';
-import { getLeagueRosters, getLeagueUsers } from '../api/sleeper';
+import { getLeagueRosters, getLeagueUsers, myOwnerId } from '../api/sleeper';
 import {
   getTradeValues,
   evaluateTradeInLeague,
@@ -2000,10 +2000,19 @@ export default function TradesScreen({ navigation, route }: any) {
       ((targetingEnabled && targetPickerOpen) || teamPickerOpen),
     staleTime: 5 * 60_000,
   });
+  // Which league member the caller IS: the primary owner of the roster they
+  // own or CO-own. Every "not me" filter and "my roster" lookup below keys off
+  // this, not the account id — a co-manager's own id owns no roster row, so
+  // `userId` left their own team in the team picker and their trade-away pool
+  // empty. Identical to `userId` for a sole owner (scope.md §0.1 A).
+  const myOwner = useMemo(
+    () => myOwnerId(rostersQuery.data, userId),
+    [rostersQuery.data, userId],
+  );
   // #156 finish — league-mates for the in-screen team picker.
   const teamPickerOpponents = useMemo(
-    () => (leagueUsersQuery.data ?? []).filter((u) => u.user_id !== userId),
-    [leagueUsersQuery.data, userId],
+    () => (leagueUsersQuery.data ?? []).filter((u) => u.user_id !== myOwner),
+    [leagueUsersQuery.data, myOwner],
   );
   const valueById = useMemo(() => {
     const m = new Map<string, CalcValueRow>();
@@ -2027,11 +2036,11 @@ export default function TradesScreen({ navigation, route }: any) {
   const ownerByPlayerId = useMemo(() => {
     const m = new Map<string, string>();
     for (const [ownerId, ids] of rosterByOwner) {
-      if (ownerId === userId) continue;
+      if (ownerId === myOwner) continue;
       for (const id of ids) m.set(id, ownerId);
     }
     return m;
-  }, [rosterByOwner, userId]);
+  }, [rosterByOwner, myOwner]);
   const usernameByOwner = useMemo(() => {
     const m = new Map<string, string>();
     for (const u of leagueUsersQuery.data ?? []) {
@@ -2046,7 +2055,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // and every other mode keeps the full leaguemate pool.
     const ids =
       targetDirection === 'trade_away'
-        ? rosterByOwner.get(userId) ?? []
+        ? rosterByOwner.get(myOwner) ?? []
         : scopedOpponent
           ? rosterByOwner.get(scopedOpponent) ?? []
           : [...ownerByPlayerId.keys()];
@@ -2061,7 +2070,7 @@ export default function TradesScreen({ navigation, route }: any) {
         age: r.age ?? 0,
         base: r.value,
       }));
-  }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, userId, scopedOpponent]);
+  }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, myOwner, scopedOpponent]);
 
   // Any target change invalidates the current deck — the next "Find a
   // Trade" tap regenerates through the normal job flow (pinned jobs bypass
@@ -3045,7 +3054,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // and anyone the consensus pool doesn't price (K/DST).
   const swapCandidates = useMemo<CalcValueRow[]>(() => {
     if (!swapTarget || !topCard) return [];
-    const ownerId = swapTarget.side === 'give' ? userId : topCard.opponent_user_id;
+    const ownerId = swapTarget.side === 'give' ? myOwner : topCard.opponent_user_id;
     const rosterIds = rosterByOwner.get(ownerId) ?? [];
     const inTrade = new Set([
       ...topCard.give_player_ids,
@@ -3055,7 +3064,7 @@ export default function TradesScreen({ navigation, route }: any) {
       .filter((id) => !inTrade.has(id))
       .map((id) => valueById.get(id))
       .filter((r): r is CalcValueRow => !!r);
-  }, [swapTarget, topCard, rosterByOwner, valueById, userId]);
+  }, [swapTarget, topCard, rosterByOwner, valueById, myOwner]);
 
   // Shared tail for every top-card package edit — swap (#86), swap-
   // suggestion pick (2026-07-27), asset removal (#194): overlay the edited

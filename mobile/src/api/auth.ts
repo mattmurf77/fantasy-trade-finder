@@ -1,7 +1,14 @@
 import { api, apiRequest, setSessionToken } from './client';
 import { getDeviceId } from './events';
 import { maybeReplaySleeperVerification } from './sendInSleeper';
-import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
+import {
+  findMyRoster,
+  getLeagueRosters,
+  getLeagueUsers,
+  warmPlayerCache,
+  resetWarmedFlag,
+} from './sleeper';
+import type { RosterRow } from './sleeper';
 import { isEspnLeague, buildEspnSessionInitBody } from './espn';
 import {
   isMflLeague,
@@ -196,6 +203,18 @@ export interface SessionInitBody {
   }>;
   invited_by?: string | null;
   active_format?: '1qb_ppr' | 'sf_tep';
+  /**
+   * The caller's LEAGUE identity — the `owner_id` of the roster they own or
+   * CO-own. Equals `user_id` for a sole owner, which is every league that
+   * existed before co-owner support, so omitting these is byte-identical to
+   * the old behavior. The backend keys `league_members` (a league-SHARED
+   * table) on this, so a co-owned roster lands on one row whichever
+   * co-manager syncs it. `league_display_name` is the primary owner's Sleeper
+   * name, since that row is what every OTHER member sees for the team.
+   * Sleeper-only — ESPN/MFL/Fleaflicker builders have no co-owner concept.
+   */
+  league_user_id?: string;
+  league_display_name?: string;
 }
 
 // Backend response shape from /api/session/init.
@@ -319,6 +338,42 @@ export async function sessionPing(): Promise<{ ok: true }> {
 // the combined `initLeagueSession` path (inline league switch must be
 // atomic — no backgrounding needed there).
 export interface LeagueLite { league_id: string; name: string }
+
+// ── Sleeper roster → session payload (co-owner aware) ──────────────────
+// ONE resolver, shared by both builders below, so the initial league pick
+// and the in-app league switch cannot resolve a roster differently.
+//
+// Two things it fixes for a co-owned roster (`co_owners` populated —
+// docs/plans/sleeper-co-owner-rosters/scope.md):
+//   1. `myPlayerIds` was empty, because the match was owner_id-only.
+//   2. Worse, the user's OWN roster passed the `owner_id !== user_id`
+//      opponent filter and was posted as a leaguemate — the engine would
+//      then generate trades between the user and themselves. The exclusion
+//      is by roster_id now, which is identity-independent.
+function buildSleeperRosterPayload(
+  rosters: RosterRow[] | null | undefined,
+  usernameMap: Record<string, string>,
+  userId: string,
+) {
+  const myRoster = findMyRoster(rosters, userId);
+  // League identity: the resolved roster's primary owner (=== userId when
+  // sole-owned, and when the user has no roster in this league at all).
+  const leagueUserId = myRoster?.owner_id || userId;
+  return {
+    myPlayerIds: (myRoster?.players || []).filter(Boolean),
+    leagueUserId,
+    leagueDisplayName: usernameMap[leagueUserId] || undefined,
+    opponentRosters: (rosters || [])
+      .filter((r) => r.owner_id && r.roster_id !== myRoster?.roster_id)
+      .map((r) => ({
+        user_id: r.owner_id,
+        username: usernameMap[r.owner_id] || `Team ${r.roster_id}`,
+        player_ids: (r.players || []).filter(Boolean),
+      }))
+      .filter((r) => r.player_ids.length > 0),
+  };
+}
+
 export async function initLeagueSession(
   user: SavedUser,
   lg: LeagueLite,
@@ -371,16 +426,8 @@ export async function initLeagueSession(
   for (const u of leagueUsers || []) {
     usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
   }
-  const myRoster = (rosters || []).find((r) => r.owner_id === user.user_id);
-  const myPlayerIds = (myRoster?.players || []).filter(Boolean);
-  const opponentRosters = (rosters || [])
-    .filter((r) => r.owner_id && r.owner_id !== user.user_id)
-    .map((r) => ({
-      user_id: r.owner_id,
-      username: usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-      player_ids: (r.players || []).filter(Boolean),
-    }))
-    .filter((r) => r.player_ids.length > 0);
+  const { myPlayerIds, opponentRosters, leagueUserId, leagueDisplayName } =
+    buildSleeperRosterPayload(rosters, usernameMap, user.user_id);
 
   // Pull (and clear) any in-memory referral attribution captured from a
   // deep link. Backend stores invited_by on the users row only on insert,
@@ -404,6 +451,8 @@ export async function initLeagueSession(
     user_player_ids:   myPlayerIds,
     opponent_rosters:  opponentRosters,
     invited_by:        invitedBy ?? undefined,
+    league_user_id:      leagueUserId,
+    league_display_name: leagueDisplayName,
   };
 
   try {
@@ -459,16 +508,8 @@ export async function buildSessionInitBody(
   for (const u of leagueUsers || []) {
     usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
   }
-  const myRoster = (rosters || []).find((r) => r.owner_id === user.user_id);
-  const myPlayerIds = (myRoster?.players || []).filter(Boolean);
-  const opponentRosters = (rosters || [])
-    .filter((r) => r.owner_id && r.owner_id !== user.user_id)
-    .map((r) => ({
-      user_id: r.owner_id,
-      username: usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-      player_ids: (r.players || []).filter(Boolean),
-    }))
-    .filter((r) => r.player_ids.length > 0);
+  const { myPlayerIds, opponentRosters, leagueUserId, leagueDisplayName } =
+    buildSleeperRosterPayload(rosters, usernameMap, user.user_id);
 
   let invitedBy: string | null = null;
   try {
@@ -488,6 +529,8 @@ export async function buildSessionInitBody(
     user_player_ids:  myPlayerIds,
     opponent_rosters: opponentRosters,
     invited_by:       invitedBy ?? undefined,
+    league_user_id:      leagueUserId,
+    league_display_name: leagueDisplayName,
   };
 }
 

@@ -798,41 +798,30 @@
         usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
       }
 
-      // 3. Find user's roster
-      logDrawer.info(`Looking for roster with owner_id=${user.user_id} among ${rosters?.length} rosters…`);
+      // 3. Find user's roster (owner OR co-owner)
+      logDrawer.info(`Looking for the roster owned or co-owned by ${user.user_id} among ${rosters?.length} rosters…`);
       const allOwnerIds = (rosters || []).map(r => r.owner_id).join(', ');
       logDrawer.info(`All owner_ids in league: ${allOwnerIds}`);
 
-      const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
-      if (!userRoster) {
-        logDrawer.error(`No roster found for owner_id=${user.user_id} — owner_ids present: ${allOwnerIds}`);
+      const rosterData = buildRosterData(rosters, usernameMap, user.user_id);
+      if (!rosterData) {
+        logDrawer.error(`No roster owned or co-owned by ${user.user_id} — owner_ids present: ${allOwnerIds}`);
         hideInitOverlay();
         showToast('Could not find your roster in this league');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
-
-      const userPlayerIds = (userRoster.players || []).filter(Boolean);
-      logDrawer.info(`User roster: ${userPlayerIds.length} players — ${userPlayerIds.slice(0,5).join(', ')}…`);
-
-      const opponentRosters = (rosters || [])
-        .filter(r => r.owner_id && r.owner_id !== user.user_id)
-        .map(r => ({
-          user_id:    r.owner_id,
-          username:   usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-          player_ids: (r.players || []).filter(Boolean),
-        }))
-        .filter(r => r.player_ids.length > 0);
-      logDrawer.info(`Opponent rosters: ${opponentRosters.length}`);
+      logDrawer.info(`User roster: ${rosterData.userPlayerIds.length} players — ${rosterData.userPlayerIds.slice(0,5).join(', ')}…`);
+      if (rosterData.leagueUserId !== user.user_id) {
+        logDrawer.info(`Co-owned roster — league identity is ${rosterData.leagueUserId}`);
+      }
+      logDrawer.info(`Opponent rosters: ${rosterData.opponentRosters.length}`);
 
       setInitLabel('Building your rankings…');
 
       // 4. Call session/init on the backend
-      const ok = await initSession(user, { league_id: leagueId, league_name: leagueName }, {
-        userPlayerIds,
-        opponentRosters,
-      });
+      const ok = await initSession(user, { league_id: leagueId, league_name: leagueName }, rosterData);
 
       hideInitOverlay();
 
@@ -877,6 +866,51 @@
       }
     }
 
+    // ── Sleeper roster → session payload (co-owner aware) ───────────
+    // ONE resolver for all three entry points (first login, page reload,
+    // league switch), so they cannot resolve a roster differently.
+    //
+    // THE predicate, mirrored in backend/sleeper_roster.py and
+    // mobile/src/api/sleeper.ts (docs/cross-client-invariants.md):
+    //
+    //     a roster is yours iff  user_id === owner_id  OR  user_id ∈ co_owners
+    //
+    // Sleeper's optional `co_owners` was never read. For a co-managed team
+    // that meant no roster at all AND — because the opponent filter was
+    // `owner_id !== user_id` — your own team posted as a leaguemate, so the
+    // engine would build trades between you and yourself. The opponent
+    // exclusion is by roster_id now, which is identity-independent.
+    // See docs/plans/sleeper-co-owner-rosters/scope.md.
+    function ownsRoster(r, userId) {
+      if (!r || !userId) return false;
+      if (r.owner_id === userId) return true;
+      return Array.isArray(r.co_owners)
+        && r.co_owners.some(c => String(c) === userId);
+    }
+
+    function buildRosterData(rosters, usernameMap, userId) {
+      const userRoster = (rosters || []).find(r => ownsRoster(r, userId));
+      if (!userRoster) return null;
+      // League identity: the resolved roster's PRIMARY owner. The backend
+      // keys `league_members` (a league-shared table) on it, so a co-managed
+      // roster lands on one row whoever syncs it. === userId when sole-owned.
+      const leagueUserId = userRoster.owner_id;
+      return {
+        userRoster,
+        userPlayerIds: (userRoster.players || []).filter(Boolean),
+        leagueUserId,
+        leagueDisplayName: usernameMap[leagueUserId] || undefined,
+        opponentRosters: (rosters || [])
+          .filter(r => r.owner_id && r.roster_id !== userRoster.roster_id)
+          .map(r => ({
+            user_id:    r.owner_id,
+            username:   usernameMap[r.owner_id] || `Team ${r.roster_id}`,
+            player_ids: (r.players || []).filter(Boolean),
+          }))
+          .filter(r => r.player_ids.length > 0),
+      };
+    }
+
     // ── Init Session ────────────────────────────────────────────────
     async function initSession(user, league, rosterData) {
       logDrawer.info(`initSession — league=${league.league_id}  haveRosterData=${!!rosterData}`);
@@ -903,23 +937,11 @@
           }
           logDrawer.info(`Reload fetch: ${rosters?.length} rosters, owner_ids: ${(rosters||[]).map(r=>r.owner_id).join(', ')}`);
 
-          const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
-          if (!userRoster) {
-            logDrawer.error(`No roster for owner_id=${user.user_id} on reload`);
+          rosterData = buildRosterData(rosters, usernameMap, user.user_id);
+          if (!rosterData) {
+            logDrawer.error(`No roster owned or co-owned by ${user.user_id} on reload`);
             return false;
           }
-
-          rosterData = {
-            userPlayerIds:   (userRoster.players || []).filter(Boolean),
-            opponentRosters: (rosters || [])
-              .filter(r => r.owner_id && r.owner_id !== user.user_id)
-              .map(r => ({
-                user_id:    r.owner_id,
-                username:   usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-                player_ids: (r.players || []).filter(Boolean),
-              }))
-              .filter(r => r.player_ids.length > 0),
-          };
           logDrawer.info(`rosterData built: ${rosterData.userPlayerIds.length} user players, ${rosterData.opponentRosters.length} opponents`);
         } catch (e) { logDrawer.error(`Roster reload error: ${e.message}`); return false; }
       }
@@ -938,6 +960,11 @@
         // first session_init for a given user (backend upsert_user ignores
         // it on UPDATE).
         invited_by:       localStorage.getItem('ftf_invited_by') || undefined,
+        // League identity (co-owner support) — the resolved roster's primary
+        // owner. Optional and === user_id for a sole owner, so omitting it
+        // (an older client) reproduces the previous behavior exactly.
+        league_user_id:      rosterData.leagueUserId,
+        league_display_name: rosterData.leagueDisplayName,
       };
       // Track current user globally so invite URLs can carry ?ref={username}
       window._currentUser = user;
@@ -2545,9 +2572,9 @@
         usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
       }
 
-      const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
-      if (!userRoster) {
-        logDrawer.error(`League switch — no roster found for owner_id=${user.user_id}`);
+      const rosterData = buildRosterData(rosters, usernameMap, user.user_id);
+      if (!rosterData) {
+        logDrawer.error(`League switch — no roster owned or co-owned by ${user.user_id}`);
         _setSwitcherStatus('No roster');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
@@ -2557,21 +2584,11 @@
         return;
       }
 
-      const userPlayerIds = (userRoster.players || []).filter(Boolean);
-      const opponentRosters = (rosters || [])
-        .filter(r => r.owner_id && r.owner_id !== user.user_id)
-        .map(r => ({
-          user_id:    r.owner_id,
-          username:   usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-          player_ids: (r.players || []).filter(Boolean),
-        }))
-        .filter(r => r.player_ids.length > 0);
-
       _setSwitcherStatus('Loading…');
       const ok = await initSession(
         user,
         { league_id: lg.league_id, league_name: lg.name },
-        { userPlayerIds, opponentRosters }
+        rosterData
       );
 
       _setSwitcherDisabled(false);
@@ -3078,7 +3095,9 @@
         for (const row of (values && values.players) || []) valueRow[row.id] = row;
         const pool = [];
         for (const r of (rosters || [])) {
-          if (!r.owner_id || r.owner_id === currentUserId) continue;
+          // Owner OR co-owner — otherwise a co-managed team's own players
+          // show up in the leaguemate pool as acquisition targets.
+          if (!r.owner_id || ownsRoster(r, currentUserId)) continue;
           for (const pid of (r.players || [])) {
             const v = valueRow[pid];
             if (!v) continue;               // unvalued (K/DST etc.) — skip

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
-import { getLeagueRosters } from '../api/sleeper';
+import { getLeagueRosters, myOwnerId } from '../api/sleeper';
 import { getLeagueCoverage, getLeaguePicks, getPowerRankings } from '../api/league';
 import {
   evaluateTradeInLeague,
@@ -268,9 +268,17 @@ export default function InLeagueCalculator({
     return m;
   }, [rostersQ.data]);
 
+  // `rosterByOwner` and the coverage member list are both keyed on each
+  // roster's PRIMARY owner_id, so every "which of these is mine?" comparison
+  // uses the league identity, not the account id. Identical to `userId` for a
+  // sole owner; for a co-manager, `userId` matched nothing — your side of the
+  // calculator came up empty and your own team showed up in the opponent
+  // dropdown. See docs/plans/sleeper-co-owner-rosters/scope.md.
+  const myOwner = useMemo(() => myOwnerId(rostersQ.data, userId), [rostersQ.data, userId]);
+
   const opponents = useMemo(
-    () => (coverageQ.data?.members ?? []).filter((mm) => mm.user_id !== userId),
-    [coverageQ.data, userId],
+    () => (coverageQ.data?.members ?? []).filter((mm) => mm.user_id !== myOwner),
+    [coverageQ.data, myOwner],
   );
 
   // Default to the first opponent once the list loads.
@@ -294,8 +302,8 @@ export default function InLeagueCalculator({
   // an unknown initialOpponentId falls back to the full picker.
   const collapsedPartner = partnerCollapsed && !!opponent;
   const myPoolPlayers = [
-    ...((rosterByOwner[userId] ?? []).map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]),
-    ...(picksByOwner[userId] ?? []),
+    ...((rosterByOwner[myOwner] ?? []).map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]),
+    ...(picksByOwner[myOwner] ?? []),
   ];
   const oppPoolPlayers = [
     ...((opponentId ? rosterByOwner[opponentId] ?? [] : [])
@@ -378,7 +386,7 @@ export default function InLeagueCalculator({
     if (!addTo) return null;
     const inTrade = new Set([...debGive, ...debReceive]);
     const roster =
-      addTo === 'receive' ? (opponentId ? rosterByOwner[opponentId] ?? [] : []) : rosterByOwner[userId] ?? [];
+      addTo === 'receive' ? (opponentId ? rosterByOwner[opponentId] ?? [] : []) : rosterByOwner[myOwner] ?? [];
     const pool = roster.filter((id) => !inTrade.has(id) && board[id] !== undefined);
     const cands: string[][] =
       ev.basis === 'divergence'
@@ -395,7 +403,7 @@ export default function InLeagueCalculator({
             board,
           ).map((c) => c.ids);
     return cands.length > 0 ? { addTo, cands, basis: ev.basis } : null;
-  }, [ev, debGive, debReceive, opponentId, userId, rosterByOwner, board]);
+  }, [ev, debGive, debReceive, opponentId, myOwner, rosterByOwner, board]);
 
   const balanceQ = useQuery({
     queryKey: [
