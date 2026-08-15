@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Sleeper co-owner support built on `claude/epic-hellman-6af20f`, unmerged](#2026-08-15--sleeper-co-owner-support-built-on-claudeepic-hellman-6af20f-unmerged)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -20,6 +21,84 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+---
+
+## 2026-08-15 — Sleeper co-owner support: PR #121 open, CI green, awaiting merge
+
+### Where I am right now
+
+Built, fully tested, **pushed**, and [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+is open with **all three CI checks green** (backend-tests, mobile-typecheck,
+maestro-testid-lint); `mergeable=MERGEABLE`, base `main` unmoved at `21df73f`
+so it is a clean squash. **The merge itself has NOT happened** — the agent's
+merge command was blocked by the permission classifier, so the squash-merge is
+the operator's action. Merging deploys: Render auto-deploys `main`.
+
+Branch `claude/epic-hellman-6af20f` (worktree `.claude/worktrees/epic-hellman-6af20f`),
+branched from `origin/main` @ `21df73f`; local commits `44c8bbf` + `4387182`.
+
+FTF had never read Sleeper's `co_owners`, so the operator's own co-managed
+league (roster 3 of `1338231586314780672`) resolved to no team — and posted his
+own roster back as a leaguemate for the engine to trade against. Fixed by making
+a co-owner an **alias** of the roster's primary `owner_id`, and giving every
+session two identities: ACCOUNT (`sess["user_id"]`) and LEAGUE
+(`_league_user_id()`). Identical for a sole owner. Full reasoning — including
+why the one-line client fix is *worse* than the bug — in
+[ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md) / [D-051](DECISIONS.md);
+scope block `docs/plans/sleeper-co-owner-rosters/scope.md`.
+
+### What's verified
+
+- Backend suite **2796 passed / 1 skipped**; `tsc --noEmit` clean; testid-lint OK;
+  all 24 mobile structural suites green. See [TEST_LEDGER.md](TEST_LEDGER.md).
+- `test_co_owner_rosters.py` (33 tests) is a **proven** regression test: narrowing
+  the predicate back to `owner_id` alone fails 7 of them.
+
+### Sim gate
+
+Tier 2 **was run** (build succeeded; `FTF-iOS18`): `01-signin` and
+`05-trades-render` pass; `02-league-pick` and `06-trades-deck` fail on **stale
+assertions**, with failure screenshots proving the app healthy in both (correct
+league + populated board; a real generated trade card vs `@qa_opp_ranked`).
+`qa/sim-runs/last-sim-run.json` records **`result: "fail"` deliberately**, so
+`githooks/pre-push` blocks and the push is a conscious operator decision.
+Neither failing flow was re-run against `origin/main` — see the ledger for the
+limits of the "pre-existing" claim.
+
+Three pre-existing harness defects found: [G-042](GOTCHAS.md) (maestro has no
+`JAVA_HOME` on this machine — **no local sim gate could run at all**, which
+likely explains several sessions of not-run/waived gates), G-043 (symlinked
+`node_modules` breaks the bundle phase), G-044 (orphaned Flask on :5001).
+
+### Next action
+
+1. **Operator: squash-merge [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121).**
+   `gh pr merge 121 --squash` (or the GitHub button). CI is already green.
+   **Note the gate you are overriding:** `qa/sim-runs/last-sim-run.json` records
+   `result: "fail"` deliberately (2 of 4 flows failed on stale assertions — see
+   the Sim gate section above and [TEST_LEDGER](TEST_LEDGER.md)). The local
+   `githooks/pre-push` gate only fires on a direct push to `main`, so the PR
+   route goes around it — merging is a conscious override, not a pass.
+2. **Verify on the real league after deploy** — the whole point. Open Bush League
+   (`1338231586314780672`) in the app: roster 3's 19 players should be *your*
+   team, League rankings should show 12 teams with the "You" badge on Manager 3's
+   row, and the acquire pool must not contain your own players.
+3. **Then sweep this worktree** per [`../docs/recovery/CLAUDE.md`](../docs/recovery/CLAUDE.md):
+   verify the content on `origin/main` (this repo squash-merges, so ahead-counts
+   are not evidence), ledger the tip sha, `git worktree remove`, delete the branch.
+
+### Watch items
+
+- **`member_rankings` is deliberately untouched** — a co-owned team's board still
+  reaches leaguemates only if the *primary* owner uses FTF. Logged in
+  [NEXT.md](NEXT.md); needs a product call, not a code change, first.
+- **Worktree hygiene:** to run the sim build this worktree gained a real
+  `mobile/node_modules` (`npm ci` — a symlink to the main checkout does NOT work,
+  [G-043](GOTCHAS.md)) plus **copied** `mobile/ios/Pods` and
+  `mobile/ios/build/generated` from the main checkout (lockfiles verified
+  identical first). All gitignored; they go away with the worktree — sweep it
+  per the recovery-ledger procedure once the branch is verified on `origin/main`.
 
 ---
 

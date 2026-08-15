@@ -68,6 +68,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
 from . import data_loader, draft_status
 from .feature_flags import is_enabled
+from .sleeper_roster import co_owner_ids
 
 log = logging.getLogger(__name__)
 
@@ -747,9 +748,34 @@ def _order_from(detail: dict, traded: list, rosters: list, users: list,
     settings = detail.get("settings") or {}
     rounds = _int_or_none(settings.get("rounds"))
     teams = _int_or_none(settings.get("teams")) or len(rosters) or None
-    roster_by_user = {str(r.get("owner_id")): _int_or_none(r.get("roster_id"))
-                      for r in rosters if isinstance(r, dict) and r.get("owner_id")}
-    user_by_roster = {v: k for k, v in roster_by_user.items() if v is not None}
+    # Two maps, deliberately NOT inverses of each other.
+    #
+    # `roster_by_user` is the lookup for `draft_order`'s keys, so it carries
+    # CO-OWNER ALIASES: a co-owned team keyed in draft_order by the co-owner
+    # rather than the primary owner would otherwise resolve to a null roster
+    # and hand that slot back as unowned. Aliases are `setdefault`-ed so a
+    # primary owner always wins a collision.
+    #
+    # `user_by_roster` stays owner-PRIMARY (built from owners only), because
+    # it fills `owner_user_id` / `original_user_id` on every entry — the one
+    # public id for a team, which must not vary with who happens to co-own it.
+    roster_by_user: dict[str, int | None] = {}
+    user_by_roster: dict[int, str] = {}
+    for r in rosters:
+        if not isinstance(r, dict):
+            continue
+        rid = _int_or_none(r.get("roster_id"))
+        owner = str(r.get("owner_id") or "")
+        if owner:
+            roster_by_user[owner] = rid
+            if rid is not None:
+                user_by_roster[rid] = owner
+    for r in rosters:
+        if not isinstance(r, dict):
+            continue
+        rid = _int_or_none(r.get("roster_id"))
+        for co in co_owner_ids(r):
+            roster_by_user.setdefault(co, rid)
     all_roster_ids = sorted(
         rid for rid in (_int_or_none(r.get("roster_id"))
                         for r in rosters if isinstance(r, dict))

@@ -1,0 +1,244 @@
+[
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "733459678624915456",
+  "players": [
+   "p1_1",
+   "p1_2",
+   "p1_3"
+  ],
+  "roster_id": 1,
+  "settings": {
+   "waiver_budget_used": 10,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p1_1",
+   "p1_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "735563381083344896",
+  "players": [
+   "p2_1",
+   "p2_2",
+   "p2_3"
+  ],
+  "roster_id": 2,
+  "settings": {
+   "waiver_budget_used": 20,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p2_1",
+   "p2_2"
+  ]
+ },
+ {
+  "co_owners": [
+   "313560442465169408"
+  ],
+  "league_id": "1338231586314780672",
+  "owner_id": "460238423161040896",
+  "players": [
+   "p3_1",
+   "p3_2",
+   "p3_3"
+  ],
+  "roster_id": 3,
+  "settings": {
+   "waiver_budget_used": 30,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p3_1",
+   "p3_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "664226215040712704",
+  "players": [
+   "p4_1",
+   "p4_2",
+   "p4_3"
+  ],
+  "roster_id": 4,
+  "settings": {
+   "waiver_budget_used": 40,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p4_1",
+   "p4_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "741401423111180288",
+  "players": [
+   "p5_1",
+   "p5_2",
+   "p5_3"
+  ],
+  "roster_id": 5,
+  "settings": {
+   "waiver_budget_used": 50,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p5_1",
+   "p5_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "741412170956480512",
+  "players": [
+   "p6_1",
+   "p6_2",
+   "p6_3"
+  ],
+  "roster_id": 6,
+  "settings": {
+   "waiver_budget_used": 60,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p6_1",
+   "p6_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "741431420060352512",
+  "players": [
+   "p7_1",
+   "p7_2",
+   "p7_3"
+  ],
+  "roster_id": 7,
+  "settings": {
+   "waiver_budget_used": 70,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p7_1",
+   "p7_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "441967691809419264",
+  "players": [
+   "p8_1",
+   "p8_2",
+   "p8_3"
+  ],
+  "roster_id": 8,
+  "settings": {
+   "waiver_budget_used": 80,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p8_1",
+   "p8_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "741446495659761664",
+  "players": [
+   "p9_1",
+   "p9_2",
+   "p9_3"
+  ],
+  "roster_id": 9,
+  "settings": {
+   "waiver_budget_used": 90,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p9_1",
+   "p9_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "741447127208751104",
+  "players": [
+   "p10_1",
+   "p10_2",
+   "p10_3"
+  ],
+  "roster_id": 10,
+  "settings": {
+   "waiver_budget_used": 100,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p10_1",
+   "p10_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "1122217051273224192",
+  "players": [
+   "p11_1",
+   "p11_2",
+   "p11_3"
+  ],
+  "roster_id": 11,
+  "settings": {
+   "waiver_budget_used": 110,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p11_1",
+   "p11_2"
+  ]
+ },
+ {
+  "co_owners": null,
+  "league_id": "1338231586314780672",
+  "owner_id": "733569654915747840",
+  "players": [
+   "p12_1",
+   "p12_2",
+   "p12_3"
+  ],
+  "roster_id": 12,
+  "settings": {
+   "waiver_budget_used": 120,
+   "wins": 0,
+   "losses": 0
+  },
+  "starters": [
+   "p12_1",
+   "p12_2"
+  ]
+ }
+]

@@ -38,7 +38,7 @@ import {
   type LeaguePreferences,
 } from '../api/league';
 import { getTradeValues } from '../api/calc';
-import { getLeagueRosters } from '../api/sleeper';
+import { findMyRoster, getLeagueRosters } from '../api/sleeper';
 import type { Player } from '../shared/types';
 
 // #246 — Trade DNA as a bottom sheet over the guided deck (approved mock
@@ -307,9 +307,9 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
   });
 
   const myRosterRows = useMemo(() => {
-    const ids =
-      (rostersQuery.data ?? []).find((r) => r.owner_id === userId)?.players ??
-      [];
+    // Owner OR co-owner: matching on owner_id alone left a co-manager with an
+    // empty untouchables picker in that league (scope.md §0.1 A).
+    const ids = findMyRoster(rostersQuery.data, userId)?.players ?? [];
     const byId = new Map(
       (untouchableNamesQuery.data?.players ?? []).map((p) => [p.id, p]),
     );

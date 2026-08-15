@@ -2330,6 +2330,23 @@ def _active_format(sess: dict) -> str:
     return sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
 
 
+def _league_user_id(sess: dict) -> str:
+    """The caller's LEAGUE identity — which team they are in the current league.
+
+    This is the `owner_id` of the roster they own or CO-OWN, which is the key
+    `league_members` rows carry and therefore the id every "is this my team?"
+    comparison must use. It equals `sess["user_id"]` for a sole owner (the
+    overwhelmingly common case) and for every session created before the key
+    existed, so callers can swap `sess["user_id"]` → `_league_user_id(sess)`
+    at a league-scoped comparison without changing sole-owner behavior.
+
+    Use `sess["user_id"]` — NOT this — for anything account-scoped: rankings,
+    swipes, tier overrides, entitlements, analytics, notifications, feedback.
+    Those belong to a person, not a team.
+    """
+    return str(sess.get("league_user_id") or sess.get("user_id") or "")
+
+
 # ---------------------------------------------------------------------------
 # Verified-session write gate — account-auth plan P1
 # (docs/plans/account-auth-plan-2026-07-11.md §3-P1)
@@ -11810,12 +11827,16 @@ def _mock_owner_ids(sess: dict) -> list[str]:
     call this and nothing else, so probe and create cannot count teams
     differently (G2). An empty session ``user_id`` is never appended — the
     refusal ladder then answers ``user_not_in_draft`` (T-295-09's
-    phantom-owner tripwire)."""
+    phantom-owner tripwire).
+
+    The caller is appended under their LEAGUE identity (`_league_user_id`) —
+    the same key `league.members` carry — so a co-owner joins the owner set
+    once, as the roster they co-own, instead of failing INV-6."""
     members = list(getattr(sess.get("league"), "members", []) or [])
     out: list[str] = []
     seen: set[str] = set()
     for uid in (*(str(m.user_id) for m in members),
-                str(sess.get("user_id") or "")):
+                _league_user_id(sess)):
         if uid and uid not in seen:
             seen.add(uid)
             out.append(uid)
@@ -11834,7 +11855,10 @@ def _mock_rosters(sess: dict) -> dict[str, list[str]]:
     members = list(getattr(sess.get("league"), "members", []) or [])
     rosters = {str(m.user_id): [str(p) for p in (m.roster or [])]
                for m in members}
-    uid = str(sess.get("user_id") or "")
+    # LEAGUE identity, matching `_mock_owner_ids` — the two dicts are keyed
+    # together, so both must use the same id or the caller's roster lands
+    # under a key no owner in the draft holds.
+    uid = _league_user_id(sess)
     if uid:
         rosters[uid] = [str(p) for p in (sess.get("user_roster") or [])]
     return rosters
@@ -11992,8 +12016,10 @@ def _mock_capability(sess: dict, league_id: str, season: int) -> dict:
         rookie_ids=frozenset(_rookie_player_ids(int(season))), player_rows={})
     # R4 — the probe counts the SAME owners the create will (G2), caller
     # included, and runs the identical four-rung ladder.
+    # League identity, matching `_mock_owner_ids` — G2 requires the probe and
+    # the create to answer from identical inputs.
     return mds.capability(ctx, _mock_owner_ids(sess),
-                          user_owner_id=str(sess.get("user_id") or ""))
+                          user_owner_id=_league_user_id(sess))
 
 
 def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
@@ -12159,7 +12185,14 @@ def mock_draft_route():
         payload, code = season
         return jsonify(payload), code
 
+    # ACCOUNT id — the mock-draft persistence key (one in-flight mock per
+    # person per league; two co-owners each get their own).
     user_id = str(sess.get("user_id") or "")
+    # LEAGUE id — which TEAM the user drafts for. `owners` comes from
+    # `_mock_owner_ids`, which is built from league_members-keyed rosters, so
+    # a co-owner passing their account id here failed INV-6's
+    # `user_owner_id in resolved_order` check with `user_not_in_draft`.
+    league_user_id = _league_user_id(sess)
 
     if request.method == "GET":
         basis = (request.args.get("basis") or dbs.BASIS_CONSENSUS).strip().lower()
@@ -12210,7 +12243,7 @@ def mock_draft_route():
     # The typed-empty body stays byte-identical to M2's — the `reason` IS the
     # information here, and a client that got this far already read the G2
     # probe. `capability` rides the GET only.
-    refusal = mds.start_refusal(ctx, owners, user_owner_id=user_id)
+    refusal = mds.start_refusal(ctx, owners, user_owner_id=league_user_id)
     if refusal is not None:
         return jsonify(mds.empty_payload(refusal))
 
@@ -12227,7 +12260,7 @@ def mock_draft_route():
     real = _mock_real_draft(sess, league_id, season)
     try:
         settings = mds.build_settings(
-            ctx, owners=owners, user_owner_id=user_id, rounds=rounds,
+            ctx, owners=owners, user_owner_id=league_user_id, rounds=rounds,
             draft_type=body.get("type") or real["type"],
             order=real["order"], order_source=real["order_source"],
             traded_slots=real["traded_slots"],
@@ -12544,17 +12577,24 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
 
 
 def _roster_id_for_owner(rosters, owner_id) -> int | None:
-    """Server-authoritative roster resolution: the roster_id owned by owner_id
-    (a Sleeper user_id). Clients never assert roster_ids directly."""
+    """Server-authoritative roster resolution: the roster_id owned — or
+    CO-owned — by owner_id (a Sleeper user_id). Clients never assert
+    roster_ids directly.
+
+    Co-owners count: Sleeper grants them full control of the roster, so a
+    co-owner proposing a trade proposes it as that roster. Matching on
+    `owner_id` alone left them unable to send at all.
+    """
     if not owner_id or not rosters:
         return None
-    for r in rosters:
-        if isinstance(r, dict) and str(r.get("owner_id")) == str(owner_id):
-            try:
-                return int(r.get("roster_id"))
-            except (TypeError, ValueError):
-                return None
-    return None
+    from .sleeper_roster import find_user_roster
+    hit = find_user_roster(rosters, owner_id)
+    if hit is None:
+        return None
+    try:
+        return int(hit.get("roster_id"))
+    except (TypeError, ValueError):
+        return None
 
 
 @app.route("/api/sleeper/link", methods=["GET", "POST", "DELETE"])
@@ -14810,7 +14850,13 @@ def session_init():
       "opponent_rosters": [
         { "user_id": "abc", "username": "SomeName", "player_ids": [...] },
         ...
-      ]
+      ],
+      # Optional, additive (co-owner support). The caller's LEAGUE identity:
+      # the owner_id of the roster they own OR co-own, plus that owner's
+      # Sleeper display name. Both default to the caller's own values, so a
+      # client that omits them behaves exactly as before.
+      "league_user_id":      "sleeper_user_id_of_the_roster_owner",
+      "league_display_name": "That owner's display name"
     }
     """
     body              = request.get_json(force=True) or {}
@@ -14835,9 +14881,26 @@ def session_init():
     # Referrer attribution (set only on user INSERT)
     invited_by        = body.get("invited_by") or None
 
+    # ── League identity vs account identity (co-owner support) ───────────
+    # `user_id` is WHO IS LOGGED IN (rankings, swipes, entitlements,
+    # analytics — all account-scoped). `league_user_id` is WHICH TEAM they
+    # are in THIS league: the owner_id of the roster they own or co-own.
+    # For a sole owner they are the same string, which is why every existing
+    # league is untouched. For a co-owner they differ, and keying league-
+    # scoped state on the roster's owner is what keeps the league-shared
+    # `league_members` table single-valued — see
+    # docs/plans/sleeper-co-owner-rosters/scope.md §0.2/§0.3 and
+    # backend/sleeper_roster.py.
+    league_user_id      = str(body.get("league_user_id") or user_id)
+    league_display_name = (body.get("league_display_name")
+                           or display_name or username or league_user_id)
+
     log.info("=== /api/session/init  user_id=%r  league=%r  "
              "user_players=%d  opponents=%d",
              user_id, league_id, len(user_player_ids), len(opponent_rosters))
+    if league_user_id != user_id:
+        log.info("  co-owned roster: league identity %r (account %r)",
+                 league_user_id, user_id)
 
     # ── Resolve existing session (league-switch reuses same token) ────────
     # _get_session reads through to the durable store (flag
@@ -14900,7 +14963,11 @@ def session_init():
     # Any member in the DB's league_members table who has a roster but
     # wasn't sent by the frontend (not a real Sleeper user) gets injected
     # so their member_rankings are used during trade generation.
-    existing_member_ids = {m.user_id for m in members} | {user_id}
+    # `league_user_id` is in the exclusion set alongside `user_id`: for a
+    # co-owner the league_members row for THEIR OWN roster is keyed on the
+    # primary owner's id, and re-injecting it here would hand the trade
+    # engine a phantom 13th team holding a copy of the caller's roster.
+    existing_member_ids = {m.user_id for m in members} | {user_id, league_user_id}
     try:
         db_members = load_league_members(league_id)
         for dbm in db_members:
@@ -15136,6 +15203,11 @@ def session_init():
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
         "user_id":       user_id,
+        # Co-owner support: the caller's team identity in THIS league (the
+        # resolved roster's owner_id). Equals `user_id` for a sole owner.
+        # Read via `_league_user_id(sess)`, never directly, so sessions
+        # created before this key existed keep working.
+        "league_user_id": league_user_id,
         "league":        new_league,
         "players":       ranking_pool,
         "user_roster":   new_user_roster,
@@ -15395,9 +15467,17 @@ def session_init():
             try:
                 all_members_for_db = [
                     {
-                        "user_id":      user_id,
-                        "username":     display_name or username or user_id,
-                        "display_name": display_name,
+                        # Keyed on the LEAGUE identity, not the account:
+                        # `league_members` is league-SHARED (every member's
+                        # session_init writes into it), so a co-owned roster
+                        # must land on the same row no matter which co-owner
+                        # syncs it. Identical to `user_id` for a sole owner.
+                        # The name is the roster owner's for the same reason —
+                        # this row is what every OTHER member sees for that
+                        # team; the caller's own team is marked by `is_you`.
+                        "user_id":      league_user_id,
+                        "username":     league_display_name,
+                        "display_name": league_display_name,
                         # #151 — store the RAW client-sent ids, matching the
                         # opponent rows below. `new_user_roster` is filtered
                         # to the default-format pool, which made the caller's
@@ -20411,10 +20491,14 @@ def _power_ranking_inputs(sess: dict, league_id: str):
             "display_name": m.username,
             "player_ids":   list(m.roster),
         } for m in g_league.members]
+        # League identity, so this synthetic row carries the same key the
+        # league_members snapshot will once the daemon writes it — otherwise
+        # a co-owner's `is_you` would flip depending on which source served.
+        _me = _league_user_id(sess)
         members.append({
-            "user_id":      sess["user_id"],
-            "username":     sess.get("display_name") or sess["user_id"],
-            "display_name": sess.get("display_name") or sess["user_id"],
+            "user_id":      _me,
+            "username":     sess.get("display_name") or _me,
+            "display_name": sess.get("display_name") or _me,
             "player_ids":   list(sess.get("user_roster") or []),
         })
     if not members:
@@ -20702,8 +20786,14 @@ def league_power_rankings_route():
             # band-walk over the raw board/seed Elo; never from `value`).
             tier_fn=(lambda elo, pos:
                      RankingService.tier_for_elo(elo, pos, fmt)))
+        # `is_you` compares LEAGUE identities: `teams` is built from
+        # league_members, whose rows are keyed on each roster's owner_id. A
+        # co-owner's account id appears on no row, so comparing the account
+        # id here left every team `is_you: false` — no "You" badge, no rank
+        # chip, and LeagueSummary's offer strip disabled for the whole league.
+        _me = _league_user_id(sess)
         for t in teams:
-            t["is_you"] = (t["user_id"] == g_user_id)
+            t["is_you"] = (t["user_id"] == _me)
         # #279 — aggregate_tier_labels experiment (operator-only rollout;
         # docs/feedback/items/279-aggregate-tier-labels/status.md, mirrors
         # the onboarding_v2_rollout precedent: an account-unit experiment
@@ -20800,7 +20890,6 @@ def league_rank_chip_route():
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
-    g_user_id = sess["user_id"]
     g_league  = sess.get("league")
     league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
     if not league_id:
@@ -20825,7 +20914,12 @@ def league_rank_chip_route():
             }
             _rank_chip_cache[league_id] = (time.monotonic(), entry)
 
-        rank = entry["ranks"].get(g_user_id)
+        # League identity, not account: `ranks` is keyed by league_members
+        # user_id (each roster's owner_id), so a co-owner looked up by their
+        # own id fell through to not_in_league and the home card lost its
+        # rank chip. The cache entry stays keyed by league_id — every member
+        # still shares one computation.
+        rank = entry["ranks"].get(_league_user_id(sess))
         if rank is None:
             return jsonify({"error": "not_in_league"}), 404
         return jsonify({
@@ -21358,6 +21452,12 @@ def league_free_agents_route():
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
+    # Two identities, both needed here: the ACCOUNT id matches raw Sleeper
+    # roster rows on the live read (owner or co-owner), the LEAGUE id matches
+    # league_members rows (keyed on each roster's owner_id). They are the same
+    # string for a sole owner. Mixing them up is what made a co-owner's
+    # my_roster_count/my_roster_ids null and killed the #179 claim sheet.
+    g_league_user_id = _league_user_id(sess)
     g_league  = sess.get("league")
     league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
     if not league_id:
@@ -21403,9 +21503,9 @@ def league_free_agents_route():
         else:
             rows = load_league_members(league_id)
             member_rosters = [r.get("player_ids") or [] for r in rows
-                              if r.get("user_id") != g_user_id]
+                              if r.get("user_id") != g_league_user_id]
             user_roster    = next((r.get("player_ids") or [] for r in rows
-                                   if r.get("user_id") == g_user_id), [])
+                                   if r.get("user_id") == g_league_user_id), [])
         rostered = {str(pid) for roster in member_rosters for pid in roster}
 
         my_roster_count: int | None = None
@@ -21419,7 +21519,7 @@ def league_free_agents_route():
             for r in load_league_members(league_id):
                 ids = [str(pid) for pid in (r.get("player_ids") or [])]
                 rostered.update(ids)
-                if r.get("user_id") == g_user_id and ids:
+                if r.get("user_id") == g_league_user_id and ids:
                     my_roster_count = len(ids)
                     my_roster_ids   = ids
         except Exception as e:
@@ -21440,10 +21540,14 @@ def league_free_agents_route():
                 live = _sleeper_get(
                     f"https://api.sleeper.app/v1/league/{league_id}/rosters"
                 ) or []
+                from .sleeper_roster import owns_roster as _owns
                 for r in live:
                     ids = [str(pid) for pid in (r.get("players") or [])]
                     rostered.update(ids)
-                    if str(r.get("owner_id") or "") == str(g_user_id):
+                    # Owner OR co-owner — this is a LIVE roster read, so the
+                    # match is against the raw Sleeper row, not a
+                    # league_members key.
+                    if _owns(r, g_user_id):
                         my_roster_count = len(ids)
                         my_roster_ids   = ids
                         my_waiver_used  = (r.get("settings") or {}).get(
