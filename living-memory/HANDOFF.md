@@ -24,12 +24,19 @@
 
 ---
 
-## 2026-08-15 — Sleeper co-owner support built on `claude/epic-hellman-6af20f`, unmerged
+## 2026-08-15 — Sleeper co-owner support: PR #121 open, CI green, awaiting merge
 
 ### Where I am right now
 
-Built, fully tested, **not pushed**. Branch `claude/epic-hellman-6af20f` (worktree
-`.claude/worktrees/epic-hellman-6af20f`), branched from `origin/main` @ `21df73f`.
+Built, fully tested, **pushed**, and [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+is open with **all three CI checks green** (backend-tests, mobile-typecheck,
+maestro-testid-lint); `mergeable=MERGEABLE`, base `main` unmoved at `21df73f`
+so it is a clean squash. **The merge itself has NOT happened** — the agent's
+merge command was blocked by the permission classifier, so the squash-merge is
+the operator's action. Merging deploys: Render auto-deploys `main`.
+
+Branch `claude/epic-hellman-6af20f` (worktree `.claude/worktrees/epic-hellman-6af20f`),
+branched from `origin/main` @ `21df73f`; local commits `44c8bbf` + `4387182`.
 
 FTF had never read Sleeper's `co_owners`, so the operator's own co-managed
 league (roster 3 of `1338231586314780672`) resolved to no team — and posted his
@@ -66,12 +73,20 @@ likely explains several sessions of not-run/waived gates), G-043 (symlinked
 
 ### Next action
 
-1. **Operator: review + push.** `git push -u origin claude/epic-hellman-6af20f`,
-   open the PR, let CI confirm.
+1. **Operator: squash-merge [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121).**
+   `gh pr merge 121 --squash` (or the GitHub button). CI is already green.
+   **Note the gate you are overriding:** `qa/sim-runs/last-sim-run.json` records
+   `result: "fail"` deliberately (2 of 4 flows failed on stale assertions — see
+   the Sim gate section above and [TEST_LEDGER](TEST_LEDGER.md)). The local
+   `githooks/pre-push` gate only fires on a direct push to `main`, so the PR
+   route goes around it — merging is a conscious override, not a pass.
 2. **Verify on the real league after deploy** — the whole point. Open Bush League
    (`1338231586314780672`) in the app: roster 3's 19 players should be *your*
    team, League rankings should show 12 teams with the "You" badge on Manager 3's
    row, and the acquire pool must not contain your own players.
+3. **Then sweep this worktree** per [`../docs/recovery/CLAUDE.md`](../docs/recovery/CLAUDE.md):
+   verify the content on `origin/main` (this repo squash-merges, so ahead-counts
+   are not evidence), ledger the tip sha, `git worktree remove`, delete the branch.
 
 ### Watch items
 
