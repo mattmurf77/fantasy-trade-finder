@@ -439,6 +439,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "deck.replenishment",   # reserved (no consumer yet)
     # Trade-relevance engine P0 (docs/plans/trade-relevance-engine/lld.md §2.4)
     "deck.dedup",           # P0-5 — near-duplicate card collapse in _order_deck (pre-Thompson, pre-capture). Gates the DROP only: the near-dup metric is measured on every job either way (PRD M4 baseline).
+    "deck.class_demotion",  # P0-4 — bounded per-class demotion multiplier from the nightly flag-aggregation pass (deck_class_stats). NEVER a gate (D11): clamped [class_demotion_floor, 1.0], classes under class_demotion_min_views ride exactly 1.0, and the applied multiplier is frozen into features_json. Off ⇒ no lookup, no multiplier, byte-identical ordering.
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

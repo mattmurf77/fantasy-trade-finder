@@ -255,7 +255,7 @@ FEATURE_VERTICALS = {
 VALID_REPORTS = ("overview", "waterfall", "time", "bottlenecks", "churn",
                  "releases", "adoption", "engagement", "pfo", "onepager",
                  "journeys", "retention", "segments", "rankquality",
-                 "apihealth")
+                 "apihealth", "relevance")
 WINDOW_MAX_DAYS = 90
 N_MIN = 20
 ROW_CAP_JSON = 5000
@@ -1635,8 +1635,216 @@ def report_apihealth(conn, start_day, end_day, include_demo, row_cap,
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# R11 — Trade-relevance operator report (P0-6; HLD §6)
+# ---------------------------------------------------------------------------
+# GET /api/admin/analytics/relevance. Reads LEDGER + COUNTER tables only
+# (cron_pass_runs, deck_job_stats, deck_class_stats, deck_impressions,
+# deck_outcomes) on the read-only engine — there is no write path here and no
+# user_events dependency, so none of the module's identity/attribution
+# machinery applies.
+#
+# The section this page exists for is `demoted_classes`. D11 keeps the
+# demotion bounded and NEVER a gate; the operator report is the other half of
+# that bargain — a human reads the demoted classes WITH their n and decides
+# whether any of them deserves a real, hand-authored gate in `_consider`.
+# Which is why the table carries `exposures` beside `demotion`: a demotion is
+# a hypothesis, and n is how you judge it.
+
+# `skipped` split by cause (registry.SKIP_*). M1's green-rate excludes skips
+# from the denominator but REQUIRES the split: valve-off/dark is healthy, a
+# chronically deadline-starved pass is not, and collapsing them lets a starved
+# pass read as 100% green.
+_SKIP_CAUSES = ("valve", "deadline", "claimed_elsewhere", "already_terminal")
+
+_DISPOSITION_ACTIONS = ("accepted", "declined",
+                        "accepted_by_partner", "declined_by_partner")
+
+_LEDGER_STRIP_DAYS = 14
+
+
+def _skip_cause(status, error_text):
+    """The `skipped` cause token the registry wrote into `error_text`."""
+    if status != "skipped":
+        return None
+    txt = (error_text or "").strip()
+    return txt if txt in _SKIP_CAUSES else "unknown"
+
+
+def report_relevance(conn, start_day, end_day, include_demo, row_cap, **_):
+    caveats = []
+
+    # ── Pass ledger strip: last 14 days × passes ───────────────────────────
+    strip_start = max(
+        start_day,
+        (date.fromisoformat(end_day) - timedelta(days=_LEDGER_STRIP_DAYS - 1)).isoformat())
+    ledger_rows = conn.execute(text("""
+        SELECT pass_name, run_date, status, duration_ms, items, attempt, error_text
+          FROM cron_pass_runs
+         WHERE run_date >= :s AND run_date <= :e
+         ORDER BY run_date DESC, pass_name ASC
+         LIMIT :cap
+    """), {"s": strip_start, "e": end_day, "cap": row_cap}).fetchall()
+
+    rows = []
+    status_counts = {}
+    skip_counts = {c: 0 for c in _SKIP_CAUSES}
+    skip_counts["unknown"] = 0
+    for r in ledger_rows:
+        cause = _skip_cause(r.status, r.error_text)
+        rows.append({
+            "pass_name":   r.pass_name,
+            "run_date":    r.run_date,
+            "status":      r.status,
+            "skip_cause":  cause,
+            "duration_ms": r.duration_ms,
+            "items":       r.items,
+            "attempt":     r.attempt,
+        })
+        status_counts[r.status] = status_counts.get(r.status, 0) + 1
+        if cause:
+            skip_counts[cause] = skip_counts.get(cause, 0) + 1
+    if not ledger_rows:
+        caveats.append(_dark_caveat(
+            "section:ledger",
+            f"no cron_pass_runs rows in {strip_start}..{end_day} — the tick has "
+            "not run in-window (or B1 predates it), not 'every pass is green'"))
+
+    # ── Gate-kill funnel: deck_job_stats.decided_by, summed over the window ─
+    funnel = {}
+    jobs = 0
+    for r in conn.execute(text("""
+        SELECT decided_by FROM deck_job_stats
+         WHERE substr(created_at, 1, 10) >= :s AND substr(created_at, 1, 10) <= :e
+         LIMIT :cap
+    """), {"s": start_day, "e": end_day, "cap": row_cap}):
+        jobs += 1
+        try:
+            counters = json.loads(r.decided_by or "{}")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(counters, dict):
+            continue
+        for gate, n in counters.items():
+            if isinstance(n, (int, float)):
+                funnel[gate] = funnel.get(gate, 0) + n
+    if not jobs:
+        caveats.append(_dark_caveat(
+            "section:gate_kill_funnel",
+            "no deck_job_stats rows in-window — no counters, not zero kills"))
+
+    # ── Loop health ────────────────────────────────────────────────────────
+    impressions_by_day = {
+        r.day: r.n for r in conn.execute(text("""
+            SELECT substr(served_at, 1, 10) AS day, COUNT(*) AS n
+              FROM deck_impressions
+             WHERE substr(served_at, 1, 10) >= :s AND substr(served_at, 1, 10) <= :e
+             GROUP BY substr(served_at, 1, 10)
+             ORDER BY day
+        """), {"s": start_day, "e": end_day})
+    }
+    outcomes_by_action = {}
+    outcomes_by_day = {}
+    for r in conn.execute(text("""
+        SELECT substr(acted_at, 1, 10) AS day, action, COUNT(*) AS n
+          FROM deck_outcomes
+         WHERE substr(acted_at, 1, 10) >= :s AND substr(acted_at, 1, 10) <= :e
+         GROUP BY substr(acted_at, 1, 10), action
+    """), {"s": start_day, "e": end_day}):
+        outcomes_by_action[r.action] = outcomes_by_action.get(r.action, 0) + r.n
+        outcomes_by_day[r.day] = outcomes_by_day.get(r.day, 0) + r.n
+
+    # propose → disposition join rate (P0-3's success metric). Denominator is
+    # the disposition rows the D2 spine WROTE; numerator is those that carry a
+    # join_quality (i.e. actually landed on an impression). A disposition row
+    # with NULL join_quality is a disposition the loop could not attribute.
+    disp = conn.execute(text("""
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN join_quality = 'exact' THEN 1 ELSE 0 END) AS exact_n,
+               SUM(CASE WHEN join_quality = 'fuzzy' THEN 1 ELSE 0 END) AS fuzzy_n
+          FROM deck_outcomes
+         WHERE substr(acted_at, 1, 10) >= :s AND substr(acted_at, 1, 10) <= :e
+           AND action IN ('accepted', 'declined',
+                          'accepted_by_partner', 'declined_by_partner')
+    """), {"s": start_day, "e": end_day}).first()
+    disp_total = int(disp.total or 0) if disp else 0
+    disp_exact = int(disp.exact_n or 0) if disp else 0
+    disp_fuzzy = int(disp.fuzzy_n or 0) if disp else 0
+    joined = disp_exact + disp_fuzzy
+    dark_disp = disp_total == 0
+    loop_health = {
+        "impressions_per_day": impressions_by_day,
+        "outcomes_per_day":    outcomes_by_day,
+        "outcomes_by_action":  outcomes_by_action,
+        "proposals":           outcomes_by_action.get("propose", 0),
+        "dispositions":        disp_total,
+        "disposition_join_rate": rate_cell(joined, disp_total, dark_disp),
+        "fuzzy_fraction":        rate_cell(disp_fuzzy, joined, dark_disp),
+        "disposition_exact":   disp_exact,
+        "disposition_fuzzy":   disp_fuzzy,
+    }
+    if dark_disp:
+        caveats.append(_dark_caveat(
+            "metric:disposition_join_rate",
+            "no disposition outcome rows in-window — the join rate is "
+            "unmeasured, not 0%"))
+
+    # ── Demoted classes (D11's editorial hand-off) ─────────────────────────
+    stat_date = conn.execute(
+        text("SELECT MAX(stat_date) FROM deck_class_stats")).scalar()
+    demoted = []
+    classes_total = 0
+    classes_eligible = 0
+    if stat_date:
+        for r in conn.execute(text("""
+            SELECT archetype, shape_bucket, value_band, exposures, flags,
+                   flag_rate_shrunk, demotion, computed_at
+              FROM deck_class_stats
+             WHERE stat_date = :d
+             ORDER BY demotion ASC, exposures DESC
+             LIMIT :cap
+        """), {"d": stat_date, "cap": row_cap}):
+            classes_total += 1
+            if (r.demotion or 1.0) < 1.0:
+                classes_eligible += 1
+                demoted.append({
+                    "archetype":    r.archetype,
+                    "shape_bucket": r.shape_bucket,
+                    "value_band":   r.value_band,
+                    "exposures":    r.exposures,
+                    "flags":        r.flags,
+                    "flag_rate_shrunk": r.flag_rate_shrunk,
+                    "demotion":     r.demotion,
+                })
+    else:
+        caveats.append(_dark_caveat(
+            "section:demoted_classes",
+            "deck_class_stats is empty — the flag-aggregation pass has not "
+            "produced a stat_date yet; every card serves at 1.0"))
+    caveats.append({
+        "code": "editorial", "scope": "section:demoted_classes",
+        "detail": "a demotion is a bounded reorder, never a gate (D11). Read "
+                  "`exposures` beside `demotion`: only a human authors a gate, "
+                  "and only against a class whose n makes the rate believable.",
+    })
+
+    summary = {
+        "ledger": {"window": {"start": strip_start, "end": end_day},
+                   "status_counts": status_counts,
+                   "skipped_by_cause": skip_counts},
+        "gate_kill_funnel": {"jobs": jobs, "kills_by_gate": funnel},
+        "loop_health": loop_health,
+        "class_stats": {"stat_date": stat_date,
+                        "classes": classes_total,
+                        "demoted": classes_eligible},
+        "demoted_classes": demoted,
+    }
+    return rows, caveats, summary
+
+
 _BUILDERS = {
     "overview": report_overview,
+    "relevance": report_relevance,
     "journeys": report_journeys,
     "retention": report_retention,
     "segments": report_segments,

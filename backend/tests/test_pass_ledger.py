@@ -392,7 +392,7 @@ def test_registry_order_matches_the_lld(eng):
     # mutually exclusive, so the declared order is asserted directly.
     assert [s.name for s in server.DAILY_TICK_REGISTRY] == [
         "season_start", "pushes", "replenish", "eval", "refit",
-        "players_guard", "class_load", "roster_snapshot",
+        "flag_aggregation", "players_guard", "class_load", "roster_snapshot",
         # B8 — analysis last: a wall deadline must starve the audit, never
         # the user-facing passes ahead of it.
         "drift_check",
