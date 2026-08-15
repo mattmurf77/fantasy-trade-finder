@@ -19,7 +19,7 @@
 - **Tests:** `test_trade_narrative.py` 5 → 12, including the reported repro and an invariant sweep over every needs × received-position combination. **Negative control:** 5 of the 7 new tests fail against the pre-fix module. Full suite **2811 passed, 1 skipped** on the merged tree (main's 2804 + 7).
 - **Not measured post-fix:** the four-real-league run needs live Sleeper data (local dev DB has no stored cards), so 23/32 is the pre-fix baseline only.
 - **Gates (full — no express declared):** scope block [`docs/plans/narrative-position-accuracy/scope.md`](../docs/plans/narrative-position-accuracy/scope.md); Maestro delta waived (no mobile code, no `testID`, data-derived copy a seeded flow can't judge); `docs/architecture.md` module row updated; sim tier 4 (backend-only), pytest is the gate — [TEST_LEDGER](TEST_LEDGER.md).
-- **SHIPPED:** operator said push live and deploy. [PR #125](https://github.com/mattmurf77/fantasy-trade-finder/pull/125) → `main`.
+- **SHIPPED AND LIVE:** operator said push live and deploy. Squash [PR #125](https://github.com/mattmurf77/fantasy-trade-finder/pull/125) → `main` @ `dc9a130`, all three CI checks green; Render deploy `live` on that commit at 2026-08-15T18:57:53Z, prod `/api/feature-flags` + `/api/tier-config` 200. **No probe fingerprints this change** — backend-only, no route/flag/client-asset surface — so the deploy record is the evidence, not a behavioural check. Branch ledgered ([recovery](../docs/recovery/2026-08-15-narrative-position-accuracy-sweep.md), tip `98bc17d`); worktree removal is the one step left.
 
 ---
 
