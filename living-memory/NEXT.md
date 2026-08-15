@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed](#2026-08-15--compressed-board-engine-fixes-flags-on-branch-unpushed)
+- [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122)
 - [2026-08-15 — Co-owned roster follow-on](#2026-08-15--co-owned-roster-follow-on)
 - [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
 - [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
@@ -19,16 +19,15 @@
 
 ---
 
-## 2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed
+## 2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)
 
-Built and field-verified on branch `claude/loving-shtern-12e4b1`; **both flags
-flipped ON by operator instruction 2026-08-15** and `origin/main` merged in, but
-the branch is **unpushed** (see [`HANDOFF.md`](HANDOFF.md), [D-052](DECISIONS.md)).
+Shipped via [PR #122](https://github.com/mattmurf77/fantasy-trade-finder/pull/122)
+(`main` @ `19d4174`), both flags live, deploy and post-deploy deck read verified
+(see [`HANDOFF.md`](HANDOFF.md), [D-052](DECISIONS.md)). What's left is watching it.
 
-1. **Push the branch / open the PR.** *(operator)* The flags are already `true` in this branch's `config/features.json`, so they go live the moment this merges and Render redeploys — there is no separate flip step left. Two consequences ride along, both accepted at flip time: boarded members can show `basis:"consensus"` cards, and the 30-card cap means rescued members displace unranked members' consensus cards.
-2. **Eyeball the rescued cards before or right after flipping.** *(S)* Card *counts* are verified; card *quality* is not. Nobody has looked at the five cards MangoPatti and Bcork now produce, and "the deck is no longer empty" is not the same claim as "the deck is good".
-3. **Re-run the field probe on a second league.** *(S)* Every field number is from FFV3. The no-regression claim for healthy boards rests on a unit fixture, not on data from a league that isn't the one the bug was found in.
-4. **[Q-017](OPEN_QUESTIONS.md) — quantile-matching the prune.** *(M, only if #2 says the consensus fallback isn't good enough)* A single scale factor can't undo a nonlinear compression, which is why MangoPatti and Bcork get consensus rather than divergence cards. Don't build it on speculation.
+1. **Eyeball the rescued cards in the app.** *(S — the real open item)* The zero-card cliff is gone in production and counts are verified, but **nobody has looked at a single rescued card**. MangoPatti and Bcork now show `basis:"consensus"` fair-value ideas; gdubs10 shows divergence cards. If any look silly, the kill switch is one `false` in `config/features.json`.
+2. **Re-run the field probe on a second league.** *(S)* Every field number is from FFV3. The no-regression claim for healthy boards rests on a unit fixture, not on data from a league that isn't the one the bug was found in.
+3. **[Q-017](OPEN_QUESTIONS.md) — quantile-matching the prune.** *(M, only if #1 says the consensus fallback isn't good enough)* A single scale factor can't undo a nonlinear compression, which is why MangoPatti and Bcork get consensus rather than divergence cards. Don't build it on speculation.
 
 ---
 

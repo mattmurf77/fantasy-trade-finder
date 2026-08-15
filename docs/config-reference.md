@@ -157,10 +157,18 @@ flag each. Full write-up + measured before/after: `docs/plans/compressed-board-p
 | `trade.pool_calibration` | **true** (flipped by operator 2026-08-15) | The v3 candidate-pool prune (`trade_optimizer.generate_pair_trades_v3`) ranks each side's assets by the raw divergence `_vo(p) - _uv(p)` and keeps the top `v3_pool_size` (12). Because `elo_to_value` is **exponential**, an opponent board sitting uniformly lower than the user's — a floor-pinned, barely-started board (the three broken boards had median Elo 1201 against the user's shrunk board) — deflates high-Elo players far more than low-Elo ones: a stud loses thousands of value points, a bench body loses tens. Every tradeable stud therefore sorts BELOW the user's worthless bench, the pool fills with junk, and the pair yields nothing. ON ⇒ the opponent's value space is rescaled by the **geometric-mean ratio over the assets in play** (the same players priced on both boards, so no roster-strength confound; equivalent to shifting the opponent's board onto the user board's mean Elo) before differencing, making the pool **order** exactly invariant to a board-wide offset — a difference that carries zero information about which player either side prefers. **Prune ordering ONLY**: every surplus, fairness and composite number still uses each side's own raw value space, untouched. Computed from the `_uv`/`_vo` accessors, so the #1 outlook blend is included automatically. Boards already on the same scale ⇒ factor ≈ 1 ⇒ deck unchanged. OFF ⇒ pool byte-identical to today. No new `model_config` key. **Note:** raising `v3_pool_size` is *not* an equivalent mitigation — at 30 it rescues the same pairs but costs 26–102 s per pair against ~2 s at 12 (enumeration is cubic-ish in pool size on both sides). |
 | `trade.divergence_fallback` | **true** (flipped by operator 2026-08-15) | `_generate_trades_v2`'s boarded/unboarded branch was `if member.has_rankings: <divergence> else: <consensus>` with **no fall-through**, so a boarded member whose divergence path returned zero cards got no consensus fallback either and vanished from the deck entirely — ranking a little made a leaguemate a *worse* trade partner than never ranking at all. ON ⇒ when the divergence path (v3 or v2) returns an empty list for a boarded member, the same `_generate_consensus_for_pair` the never-ranked path uses runs for that pair. Cards stay labeled `basis:"consensus"`, so `basis:"consensus"` on a `has_rankings=true` member is the new-but-already-instrumented combination to watch. Strictly additive: fires only on an empty result, so a member already producing cards is untouched. OFF ⇒ the zero-card cliff remains. |
 
-**Deck-size note (both flags):** the deck cap is `global_target = max(30, max_per_opponent * 6)`
-and boarded members are visited first by design, so rescuing boarded members
-**displaces** consensus cards from unranked members rather than growing the deck.
-Composition shifts toward real counterparties; total stays at the cap.
+**Deck-size note (both flags):** generation stops once the deck reaches
+`global_target = max(30, max_per_opponent * 6)`, and boarded members are visited
+**first** by design — so opponents after the break contribute nothing and
+rescuing boarded members **displaces** unranked members' consensus cards.
+Composition shifts toward real counterparties.
+
+The target is a **stop-when-reached threshold, not a truncation**: the check
+(`trade_service.py`, `if len(new_cards) >= global_target: break`) runs *after* an
+opponent's whole batch is appended, so the deck can overshoot by up to
+`max_per_opponent - 1`. The post-deploy FFV3 read returned **34** cards, not 30 —
+earlier pre-deploy reads landed on exactly 30 only because every batch was a full
+5 and the running total hit the threshold exactly.
 
 ## Flags — Send in Sleeper (flagged beta)
 
