@@ -208,24 +208,27 @@ Both are **zero-auth** public-read imports; no credentials table, no encryption 
 - MFL: `python3 -m backend.mfl_service <league_id_or_url> [year]` (host auto-resolves; e.g. `python3 -m backend.mfl_service 10005 2026` → 100% by id)
 - Fleaflicker: `python3 -m backend.fleaflicker_service <league_id>` (or an email to list leagues; e.g. `python3 -m backend.fleaflicker_service 312861` → 99.7% by id)
 
-## Flags — Onboarding & conversion redesign (ships dark; [plan](plans/onboarding-conversion/plan.md) v2.1)
+## Flags — Onboarding & conversion redesign ([plan](plans/onboarding-conversion/plan.md) v2.1)
 
 **Master/individual semantics:** every `onboarding.*` feature is live iff **`onboarding.v2` AND its own flag**. `onboarding.v2` false = whole redesign dark regardless of individual flags (kill switch). Individual flags allow feature-by-feature enablement/rollback. `analytics.client_events` is deliberately **outside** the master — it gates instrumentation only (tracking plan v2 §S2) and must run against the *current* flow first to capture the pre-redesign baseline.
 
-| Flag | Default | Gates |
-|---|---|---|
-| `analytics.client_events` | false (true in `features.json` — baseline capture) | `POST /api/events` ingestion (404 when off) + client event SDK emission (`mobile/src/api/events.ts`). Instrumentation only; no UX change. |
-| `onboarding.v2` | false | Master kill-switch for all `onboarding.*` features below. |
-| `onboarding.landing` | false | Item 5 — username-first landing on SignInScreen (primary username field, quiet Apple re-entry link, not-found copy, Sleeper-down demo escape). First consumer of `landing.try_before_sync`. |
-| `onboarding.trades_first` | false | Item 4 — trades-first hook: pregen at auth-return, skeleton/streamed first-run deck, first-run chrome collapse, provenance chip, identity-confirm strip. |
-| `onboarding.league_autoskip` | false | Item 6 — single-league LeaguePicker auto-skip + error fallback. |
-| `onboarding.quickset_prompt` | false | Item 7 — inline prompt card (first pass after swipe 2, else 3 swipes) + onboarding-mode QuickSet (suppress finish-prompt, return to Trades, force deck regen, diff banner). |
-| `onboarding.apple_save_moment` | false | Item 8 — save-moment Apple prompt (honest framing, decline policy, one auto-prompt per save-moment class), persisted-username silent re-init, session-2 non-modal banner. |
-| `onboarding.share_sheet` | false | Item 8 rider — native share sheet on liked trade card (user-initiated; appears only after the Apple prompt resolves). |
-| `onboarding.rank_routing` | false | Item 9 — RankHome chooser demoted to "More ways to rank", Rank tab defaults to QuickSet, deck-exhausted state → trio entry. |
-| `onboarding.demo_bridge` | false | Item 10 — persistent "See this for YOUR team →" bar in demo mode + redraft "Dynasty values shown" label/segment tag. |
-| `onboarding.guided_layer` | false | v2.1 guided layer — swipe-gesture hint (card 1), ≤4 coach marks, celebration beats (first like / first QuickSet save). |
-| `onboarding.keep_warm` | false | Item 3 — server-side keep-warm affordances for the Render cold-start cron ping. |
+**Open-access Phase A (2026-08-15).** The v2 flow is no longer dark. Per [business/product/2026-08-14-open-access-onboarding.md](business/product/2026-08-14-open-access-onboarding.md) §5 Phase A (operator-ratified O-1), five onboarding flags **plus** `landing.try_before_sync` flipped **true in `config/features.json`** in one release: the built flow stops being an experiment overlay and becomes the product. **The flags stay as the revert levers** — they gate client behavior, not server routes, so flipping any one back to false is a config-only rollback (`POST /api/feature-flags/reload`, no deploy). The remaining `onboarding.*` keys (`share_sheet`, `rank_routing`, `demo_bridge`, `guided_layer`, `keep_warm`) are **not** in Phase A scope and stay dark.
+
+| Flag | Default | `features.json` | Gates |
+|---|---|---|---|
+| `analytics.client_events` | false | **true** (baseline capture) | `POST /api/events` ingestion (404 when off) + client event SDK emission (`mobile/src/api/events.ts`). Instrumentation only; no UX change. |
+| `onboarding.v2` | false | **true** | Master kill-switch for all `onboarding.*` features below. |
+| `onboarding.landing` | false | **true** (Phase A) | Item 5 — username-first landing on SignInScreen (primary username field, quiet Apple re-entry link, not-found copy, Sleeper-down demo escape). First consumer of `landing.try_before_sync`, and the reason that flag flips with it (below). |
+| `onboarding.trades_first` | false | **true** (Phase A) | Item 4 — trades-first hook: pregen at auth-return, skeleton/streamed first-run deck, first-run chrome collapse, provenance chip, identity-confirm strip. |
+| `onboarding.league_autoskip` | false | **true** (Phase A) | Item 6 — single-league LeaguePicker auto-skip + error fallback. |
+| `onboarding.quickset_prompt` | false | **true** (Phase A) | Item 7 — inline prompt card (first pass after swipe 2, else 3 swipes) + onboarding-mode QuickSet (suppress finish-prompt, return to Trades, force deck regen, diff banner). |
+| `onboarding.apple_save_moment` | false | **true** (Phase A) | Item 8 — save-moment Apple prompt (honest framing, decline policy, one auto-prompt per save-moment class), persisted-username silent re-init, session-2 non-modal banner. |
+| `onboarding.share_sheet` | false | false | Item 8 rider — native share sheet on liked trade card (user-initiated; appears only after the Apple prompt resolves). **Not Phase A.** |
+| `onboarding.rank_routing` | false | false | Item 9 — RankHome chooser demoted to "More ways to rank", Rank tab defaults to QuickSet, deck-exhausted state → trio entry. **Not Phase A.** |
+| `onboarding.demo_bridge` | false | false | Item 10 — persistent "See this for YOUR team →" bar in demo mode + redraft "Dynasty values shown" label/segment tag. **Not Phase A.** |
+| `onboarding.guided_layer` | false | false | v2.1 guided layer — swipe-gesture hint (card 1), ≤4 coach marks, celebration beats (first like / first QuickSet save). **Not Phase A** — the open-access plan §6 records that the guided script was *designed* for trades-first and that Phase A makes it correct, but §5's flip list does not name this flag, so it stays dark pending an explicit call. |
+| `onboarding.keep_warm` | false | false | Item 3 — server-side keep-warm affordances for the Render cold-start cron ping. **Not Phase A** (named in the plan's §9 risk row for cold-start latency, not in the §5 flip list). |
+| `landing.try_before_sync` | false | **true** (Phase A) | Not an `onboarding.*` key and **outside** the `onboarding.v2` master, but the documented **launch pairing** for `onboarding.landing` (`config/features.json` `_comment_onboarding`): `POST /api/session/demo` checks it server-side and **404s when off** (`backend/server.py:18929`), so the v2 landing's Sleeper-down escape and demo link are dead ends without it. Flip and revert it together with `onboarding.landing`. |
 
 ## Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
 
