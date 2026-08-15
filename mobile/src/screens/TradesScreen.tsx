@@ -267,6 +267,29 @@ function jobErrorCopy(raw?: string | null): string {
   return raw === 'timeout' ? DECK_FAIL_TIMEOUT : DECK_FAIL_GENERIC;
 }
 
+// S-43 — identity of a trade as the USER experiences it: who it's with,
+// what leaves, what arrives. Used by the post-Quick-Set reveal to count
+// trades that are genuinely new.
+//
+// Why not `trade_id`: the backend mints a fresh uuid for every card on
+// every generation (trade_service.py:3644/:3815/:4314, server.py:2921 for
+// the likes-you injections) — it is never derived from the package. An
+// id-based diff therefore reports 33-of-33 "new" for two back-to-back
+// generations that produced the same 33 packages, so the celebrate beat
+// would fire (with a meaningless N) even after a Quick Set the user
+// skipped through. Content is the only honest basis.
+//
+// Both sides are sorted because within-side ordering is an engine
+// artifact, not something the user sees change; leaving it unsorted would
+// score a re-ordered but identical package as new.
+function tradePackageKey(c: TradeCard): string {
+  return [
+    c.opponent_user_id,
+    [...c.give_player_ids].sort().join(','),
+    [...c.receive_player_ids].sort().join(','),
+  ].join('|');
+}
+
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
@@ -315,8 +338,17 @@ export default function TradesScreen({ navigation, route }: any) {
   const [quicksetDiffBanner, setQuicksetDiffBanner] =
     useState<{ position: string; count: number } | null>(null);
   // Set when an onboarding-mode Quick Set completion posts a pending regen;
-  // holds the pre-regen deck ids so the banner can count NEW trades.
-  const pendingRegenRef = useRef<{ position: string; prevIds: Set<string> } | null>(null);
+  // holds the pre-regen deck's PACKAGE identities so the reveal can count
+  // trades the user has not already seen (S-43 fix — see tradePackageKey).
+  // `jobId` is stamped by the forced generate's own onSuccess: the reveal is
+  // late-bound to THAT job, so a stale already-'complete' job cannot resolve
+  // it early (the deck clear below re-runs the diff effect while the old job
+  // is still in state).
+  const pendingRegenRef = useRef<{
+    position: string;
+    jobId: string | null;
+    prevPackages: Set<string>;
+  } | null>(null);
   // Provenance chip flips CONSENSUS VALUES → YOUR BOARD once any position
   // has been Quick-Set (item 7 writes quicksetCompletedPositions).
   const quicksetPositions = useOnboardingState(
@@ -2748,10 +2780,31 @@ export default function TradesScreen({ navigation, route }: any) {
       flushPendingPassRef.current(); // regen rewinds the deck — commit first
       pendingRegenRef.current = {
         position: pos,
-        prevIds: new Set(deck.map((c) => c.trade_id)),
+        jobId: null,
+        prevPackages: new Set(deck.map(tradePackageKey)),
       };
+      // The regen REPLACES this deck, it doesn't extend it. The append
+      // effect de-dupes on trade_id and every regenerated card carries a
+      // fresh uuid, so without this clear the same packages land a second
+      // time and the index rewind below drops the user onto a doubled deck.
+      // Every other deck-invalidating path clears first (fairness toggle
+      // :832, league switch :1565, target change :2113) — this one didn't.
+      setDeck([]);
       setDeckIdx(0);
-      generateMutation.mutate({ force: true });
+      generateMutation.mutate(
+        { force: true },
+        {
+          // Late-bind the reveal to the job this handoff forced. Without
+          // it the deck clear above re-runs the diff effect on the commit
+          // where `job` is still the PREVIOUS (already 'complete') job,
+          // which would resolve the reveal against the wrong generation.
+          onSuccess: (snapshot) => {
+            if (pendingRegenRef.current) {
+              pendingRegenRef.current.jobId = snapshot.job_id;
+            }
+          },
+        },
+      );
       // Item 8: first-Quick-Set-save celebration beat, then the Apple ask
       // for this save-moment class (win-then-ask; the diff banner that
       // follows is a passive receipt, not an ask).
@@ -2769,13 +2822,29 @@ export default function TradesScreen({ navigation, route }: any) {
   );
 
   // Diff banner (F2 — the aha receipt): once the forced job completes,
-  // count cards that weren't in the pre-Quick-Set deck. Voice doc #9;
+  // count packages that weren't in the pre-Quick-Set deck. Voice doc #9;
   // suppressed when nothing changed.
+  //
+  // S-43 — this reads `job.cards`, NOT `deck`. `deck` is written only from
+  // inside the append effect above, so on the commit where the status flips
+  // to 'complete' this effect's `deck` closure is still the render's
+  // PRE-regeneration deck: the count came out 0 every time and the ref was
+  // nulled before the new cards ever landed, which is why s5.1 had never
+  // rendered. `job.cards` has no such lag — the worker publishes the final
+  // card snapshot BEFORE flipping the status (server.py:5285-5291), and the
+  // poll's shallow-equal guard always commits the status transition — so at
+  // this point it IS the whole regenerated deck. It is also the same list
+  // the append effect rebuilds `deck` from (cleared on the handoff), which
+  // makes the two agree no matter how the cards streamed in: progressive
+  // snapshots while 'running' are simply never read.
   useEffect(() => {
     const pending = pendingRegenRef.current;
-    if (!pending || job?.status !== 'complete') return;
+    if (!pending || !pending.jobId) return;
+    if (job?.job_id !== pending.jobId || job.status !== 'complete') return;
     pendingRegenRef.current = null;
-    const fresh = deck.filter((c) => !pending.prevIds.has(c.trade_id)).length;
+    const fresh = job.cards.filter(
+      (c) => !pending.prevPackages.has(tradePackageKey(c)),
+    ).length;
     track(
       'deck_regenerated',
       { position: pending.position, new_trades: fresh },
@@ -2798,8 +2867,10 @@ export default function TradesScreen({ navigation, route }: any) {
         track('coach_mark_shown', { mark: 'diff_banner' }, 'Trades');
       }
     }
+    // Deps are the job identity + its status: `deck` is no longer read, and
+    // keeping it here would re-run this on every streamed card for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job?.status, deck]);
+  }, [job?.job_id, job?.status]);
 
   // Banner auto-dismisses; it's a receipt, not a control.
   useEffect(() => {

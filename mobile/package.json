@@ -31,7 +31,8 @@
     "test:anchor-labels": "node tests/check-anchor-labels.js",
     "test:notif-glyphs": "node tests/check-notif-glyphs.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
-    "test:keychain-accessible": "node tests/check-keychain-accessible.js"
+    "test:keychain-accessible": "node tests/check-keychain-accessible.js",
+    "test:s51-regen-diff": "node tests/check-s51-regen-diff.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
