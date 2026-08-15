@@ -352,6 +352,60 @@ def test_counter_mapping_names_the_prd_key():
     assert counters["dedup_applied"] == 1
 
 
+@pytest.fixture()
+def mem_engine():
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    metadata.create_all(eng)
+    with patch.object(db_module, "engine", eng):
+        yield eng
+
+
+def _decided_by(eng, job_id):
+    with eng.connect() as conn:
+        row = conn.execute(
+            select(deck_job_stats_table.c.decided_by)
+            .where(deck_job_stats_table.c.deck_job_id == job_id)).first()
+    return json.loads(row[0])
+
+
+def test_deck_job_counters_merge_instead_of_clobbering(mem_engine):
+    """`decided_by` has two independent writers (P0-5 dedup, P0-6 gate
+    counters), each knowing only its own keys.
+
+    SABOTAGE: make the writer an insert-or-replace ⇒ whichever layer ran last
+    silently erases the other's numbers, and because dedup drops are
+    pre-capture there is nothing else in the schema to reconstruct them from.
+    """
+    db_module.merge_deck_job_counters(
+        "job-1", user_id=ME, league_id=LEAGUE,
+        counters={"deduped_cards_per_job": 2, "near_dup_pairs": 3})
+    db_module.merge_deck_job_counters(
+        "job-1", user_id=ME, league_id=LEAGUE,
+        counters={"gate_fairness": 11})
+    assert _decided_by(mem_engine, "job-1") == {
+        "deduped_cards_per_job": 2, "near_dup_pairs": 3, "gate_fairness": 11}
+
+
+def test_record_deck_dedup_stats_writes_the_row(mem_engine):
+    """The out-param → DB hop, end to end, with the flag OFF (the M4 baseline
+    case that must still land a row).
+
+    SABOTAGE: skip the write when nothing was dropped ⇒ the baseline has rows
+    only for jobs that dropped something, which with the flag off is none.
+    """
+    a = _mk_card(["STAR"], ["f1", "f2"], composite=9.0)
+    b = _mk_card(["STAR"], ["f1", "f2", "f3"], composite=8.0)
+    stats: dict = {}
+    with _dedup_env(on=False):
+        _order([a, b], stats=stats)
+    server._record_deck_dedup_stats("job-2", ME, LEAGUE, stats)
+    written = _decided_by(mem_engine, "job-2")
+    assert written["deduped_cards_per_job"] == 0
+    assert written["near_dup_pairs"] == 1
+    assert written["dedup_applied"] == 0
+
+
 # ---------------------------------------------------------------------------
 # T-5 — determinism, and the pre-capture placement
 # ---------------------------------------------------------------------------

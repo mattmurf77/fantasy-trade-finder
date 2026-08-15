@@ -576,6 +576,19 @@ player-id sets, J = Jaccard. Greedy keep-highest-base-key; `likes_you` cards
 never dropped; stop dropping when `len(kept) < _DECK_MIN_CARDS` (restore
 best-dropped — the `_cap_per_target` pattern). O(n²) over ≤40 cards.
 
+**M4 baseline sink (BUILT):** the metric runs on **every** non-demo job whatever
+the flag says — the flag gates the drop alone — and the counters land in
+`deck_job_stats.decided_by` as `deck_cards`, `near_dup_pairs`, `near_dup_cards`,
+`deduped_cards_per_job`, `dedup_restored`, `dedup_applied`. That row therefore
+has **two writers** (B7 here, B4's gate counters), so it is written through
+`database.merge_deck_job_counters()` — an insert-or-merge on the JSON, never a
+replace. **B4 must use the same helper**, not its own insert, or whichever pass
+runs second erases the other's numbers. The pure metric + greedy pass live in
+`backend/relevance/dedup.py` (`DedupCard`, `near_dup_pairs`, `dedup_cards`);
+`server._dedup_views` is the only place live cards are translated into it, and
+it is where `_fatigue_centerpiece` and the `_deck_trade_hash` tie-break are
+applied.
+
 ### 4.7 B9/B10 — F6 v2 multi-head (D5) + promotion (D4)
 
 **Feature extraction:** `extract_features` (`value_model.py:133-177`) stays the

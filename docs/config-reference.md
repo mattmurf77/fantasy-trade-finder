@@ -41,6 +41,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F9 — first-session win engineering (flag `deck.first_session`)](#f9-first-session-win-engineering-flag-deckfirst_session)
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Trade-relevance engine P0 ([lld](plans/trade-relevance-engine/lld.md) §2.4) — DB-seeded](#trade-relevance-engine-p0-lld-24-db-seeded)
+    - [Operational valves — the convention (HLD §2.1)](#operational-valves-the-convention-hld-21)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -558,6 +559,16 @@ Seeded by `_MODEL_CONFIG_DEFAULTS` in `backend/database.py` (INSERT OR IGNORE), 
 | `dedup_overlap_tau` | 0.75 | P0-5 (flag [`deck.dedup`](#flags-trade-relevance-engine-p0-2026-08-14)): Jaccard threshold on `give ∪ receive` asset sets at or above which two candidate cards — already required to share a `partner_user_id` and a centerpiece — count as near-duplicates, and the lower-base-score one is dropped. Comparison is `>=`, so `0.75` collapses "same trade plus one sweetener" (3 shared of 4 total) exactly. Dedup runs **at job creation, pre-Thompson and pre-capture** — dropped cards are never logged or served, so there is no "restored card" UX and replay is untouched by construction. Two things it will not do: drop a `likes_you` card, or thin the deck below `_DECK_MIN_CARDS` (5). Read through the D10 resolver (`relevance.config.resolve`), so a per-user or experiment override would apply if one were ever registered. `1.0` = soft off — only byte-identical asset sets collapse (the operator undo that needs no flag flip); both undos act within one job cycle. Note the near-dup **measurement** ignores this being a soft-off: counters are written every job either way. |
 
 > Deliberately **unseeded**: `cron.pass_disabled.<pass_name>` — the per-pass kill valves for the P0 pass ledger (`cron_pass_runs`). Their polarity is inverted on purpose: **absent means the pass runs.** Seeding them at `0.0` would behave identically today and become a silent trap the first time someone prunes a zero-valued row. To disable a pass, `PUT /api/admin/config/cron.pass_disabled.<name>` with `1.0`; to re-enable it, set `0.0` (or delete the row).
+
+#### Operational valves — the convention (HLD §2.1)
+
+`cron.pass_disabled.*` and `ingest.daily_budget` are **operational valves**, a distinct class from every other key on this page. Three rules, enforced in code by `backend/relevance/config.py` (`valve()` raises on a non-valve key; `resolve()` raises on a valve key) and linted by T-28:
+
+1. **Raw, uncached `model_config` read.** No per-user tier, no experiment variant overlay, no 5-second snapshot cache. An experiment can never resurrect a killed pass or raise the ingest budget, and an operator's kill bites on the next tick rather than after a TTL.
+2. **Inverted polarity, absent ⇒ safe-on.** A missing or fat-fingered key means the pass RUNS. A valve can fail to stop something; it can never silently stop it.
+3. **Not a feature flag.** `config/features.json` is baked into a deploy and `feature_flags.py` drops unregistered keys — the wrong store for a switch you need to throw during an incident. New *feature* surfaces still use ordinary flags; only operational kills live here.
+
+Live valve names as of B1 (2026-08-14), one per registered daily-tick pass: `cron.pass_disabled.season_start`, `.pushes`, `.replenish`, `.eval`, `.refit`, `.players_guard`, `.class_load`, `.roster_snapshot`. Triage table in [runbook § Nightly pass ledger](runbook.md#nightly-pass-ledger-b1-2026-08-14).
 
 ### Tier 3 (flag-gated, landing imminently)
 

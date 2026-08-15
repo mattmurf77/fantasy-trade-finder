@@ -207,6 +207,7 @@ from .database import (
     persist_session, load_persisted_session, touch_persisted_session,
     delete_persisted_session, delete_persisted_sessions_for_user,
     purge_stale_persisted_sessions,
+    prune_cron_pass_runs,          # B1 — nightly pass-ledger retention (LLD §3.3)
     # Share-landing packages (teardown S7 PRD-01, flag growth.share_landing)
     create_shared_package, load_shared_package, count_recent_shared_packages,
 )
@@ -219,6 +220,7 @@ from . import rankings_import as _rankings_import   # #232 follow-on (ranks.impo
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from .relevance import registry as _relevance_registry   # B1 — nightly pass ledger
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 
@@ -2526,6 +2528,18 @@ def _cleanup_loop() -> None:
                 log.info("Purged %d expired API-observability event row(s)", purged)
         except Exception as e:
             log.warning("api-observability purge failed: %s", e)
+
+        # Pass ledger (cron_pass_runs) — 90d retention (LLD §3.3). The LLD
+        # assumed "the existing retention endpoint"; no such endpoint exists,
+        # so B1 wires the pruner in here beside the other two sweeps. One
+        # cheap indexed DELETE every 5 min against a table that gains ~8 rows
+        # a day; idempotent, and never raises into the loop.
+        try:
+            purged = prune_cron_pass_runs()
+            if purged:
+                log.info("Purged %d expired cron_pass_runs row(s)", purged)
+        except Exception as e:
+            log.warning("cron_pass_runs purge failed: %s", e)
 
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
@@ -17272,42 +17286,86 @@ def cron_hourly_tick():
     return jsonify(body)
 
 
-@app.route("/api/cron/daily-tick", methods=["POST"])
-def cron_daily_tick():
-    """Once per day. Re-engagement pushes — winback variants, finish_ranking,
-    and season_start. Frequency caps in `_NOTIF_FREQ_CAPS` enforce per-window
-    limits (winback_matches: 1/7d, winback_dormant: 1/30d, finish_ranking:
-    1/30d, season_start: 1/365d). The cap check happens inside
-    _send_typed_push, so the loop here is the broad scan.
+# ---------------------------------------------------------------------------
+# Daily tick — the B1 pass ledger
+# ---------------------------------------------------------------------------
+# docs/plans/trade-relevance-engine/lld.md §4.1 / hld.md §2.1 (R1, R2).
+#
+# What used to be one long inline function is now a registry of named passes
+# driven by `relevance.registry.run_ledger`. Each body below is the PREVIOUS
+# inline block moved verbatim — same calls, same order, same counters — so the
+# tick's side effects and its response JSON (minus the new `passes` key) are
+# unchanged with every valve absent. `backend/tests/test_pass_ledger.py` T-1
+# pins that equivalence against a copy of the pre-refactor inline tick.
+#
+# What the registry buys: a durable `cron_pass_runs` row per pass per day, a
+# per-pass try/except so a dead pass can't eat the ones behind it, a
+# `cron.pass_disabled.<name>` kill valve, and a wall deadline checked between
+# passes. The one intentional behavior change is exactly that isolation: a pass
+# that used to 500 the whole tick now records `error` and the rest still run.
+
+def _tick_pass_season_start(ctx) -> dict:
+    """Aug-25 `season_start` fan-out — split out of the pushes scan as its own
+    `must_complete_today` pass (LLD §4.1).
+
+    Date-gated work cannot be deferred: a deadline skip would mean the fan-out
+    simply never happens this year. So it runs first, is exempt from the
+    deadline skip, and retries same-day on error.
+
+    THE SUPPRESSION: today's `continue` at the top of the push loop means an
+    Aug-25 recipient gets nothing else that day. Splitting the fan-out out
+    without preserving that would double-send. The suppression now lives as the
+    mirrored `is_aug25` early-return in `_tick_pass_pushes` below — this pass
+    owns every send on the fan-out date, and it returns before touching the
+    user loader on any other date so `load_all_signed_up_users()` is still
+    called exactly once per tick.
     """
-    _require_cron_auth()
-    now = datetime.now(timezone.utc)
+    now = ctx.now
+    if not (now.month == 8 and now.day == 25):
+        return {"items": 0, "gate": "not_aug25"}
+
+    for u in load_all_signed_up_users():
+        uid = u["sleeper_user_id"]
+        _send_typed_push(
+            uid, "season_start",
+            title = "Football is back",
+            body  = "Re-rank your players to find this year's trades.",
+            data  = {"season": now.year},
+        )
+        ctx.counters["season_start"] += 1
+    return {"items": ctx.counters["season_start"]}
+
+
+def _tick_pass_pushes(ctx) -> dict:
+    """Re-engagement pushes — winback variants and finish_ranking.
+
+    Frequency caps in `_NOTIF_FREQ_CAPS` enforce per-window limits
+    (winback_matches: 1/7d, winback_dormant: 1/30d, finish_ranking: 1/30d).
+    The cap check happens inside _send_typed_push, so the loop here is the
+    broad scan — and those caps are also what makes this pass safe to re-run
+    (HLD §2.1, asserted at registration).
+    """
+    now = ctx.now
+    counters = ctx.counters
+
+    # ── Aug-25 suppression, preserved from the inline tick ──
+    # It used to be a `continue` inside the loop; the fan-out lives in
+    # `_tick_pass_season_start` now, so the whole scan is suppressed on that
+    # date instead. Dropping this is a double-send.
+    if now.month == 8 and now.day == 25:
+        return {"items": 0, "gate": "season_start_fanout"}
+
     cutoff_7d  = (now - timedelta(days=7)).isoformat()
     cutoff_30d = (now - timedelta(days=30)).isoformat()
     cutoff_3d  = (now - timedelta(days=3)).isoformat()
 
-    counters: dict[str, int] = {
-        "winback_matches": 0, "winback_dormant": 0,
-        "finish_ranking":  0, "season_start":    0,
-    }
-    is_aug25 = (now.month == 8 and now.day == 25)
-
+    scanned = 0
     for u in load_all_signed_up_users():
+        scanned += 1
         uid = u["sleeper_user_id"]
         last_active = u.get("last_active_at")
         signup_at   = u.get("signup_at")
         unlocked    = u.get("unlocked_formats") or []
-
-        # ── season_start: Aug 25 fan-out, all signed-up users ──
-        if is_aug25:
-            _send_typed_push(
-                uid, "season_start",
-                title = "Football is back",
-                body  = "Re-rank your players to find this year's trades.",
-                data  = {"season": now.year},
-            )
-            counters["season_start"] += 1
-            continue   # don't double-stack a winback on top of season kickoff
 
         # ── finish_ranking: signed up >3d ago, no format unlocked ──
         if signup_at and signup_at < cutoff_3d and not unlocked:
@@ -17367,20 +17425,36 @@ def cron_daily_tick():
                     data  = {"unread_count": unread},
                 )
                 counters["winback_matches"] += 1
+    return {"items": scanned}
 
-    # ── F10 (flag deck.replenishment) — weekly deck pre-generation ──
-    # Flag off ⇒ this block is a no-op and the response stays byte-identical.
-    replenish_stats: dict | None = None
-    if _deck_replenishment_enabled():
-        try:
-            replenish_stats = _run_weekly_replenishment(now)
-        except Exception as e:
-            log.warning("daily-tick: replenishment pass failed: %s", e)
-            replenish_stats = {"error": str(e)}
 
-    # ── F8 — offline eval nightly (operator tooling, unflagged) ──
-    # Idempotent per (UTC day, scorer, window) via data/eval_runs/runs.jsonl,
-    # so daily-tick retries are free. Never fails the tick.
+def _tick_pass_replenish(ctx) -> dict:
+    """F10 (flag deck.replenishment) — weekly deck pre-generation.
+
+    Flag off ⇒ this block is a no-op and the response stays byte-identical.
+    """
+    now = ctx.now
+    if not _deck_replenishment_enabled():
+        return {"items": 0, "gate": "flag_off"}
+    try:
+        replenish_stats = _run_weekly_replenishment(now)
+    except Exception as e:
+        log.warning("daily-tick: replenishment pass failed: %s", e)
+        replenish_stats = {"error": str(e)}
+    # The inner try/except is deliberately kept: a replenishment failure has
+    # always produced an `{"error": ...}` payload and an `ok` tick, not a dead
+    # tick. Letting it raise into the ledger would change the response.
+    ctx.state["replenish_stats"] = replenish_stats
+    return {"items": (replenish_stats or {}).get("decks_generated")}
+
+
+def _tick_pass_eval(ctx) -> dict:
+    """F8 — offline eval nightly (operator tooling, unflagged).
+
+    Idempotent per (UTC day, scorer, window) via data/eval_runs/runs.jsonl,
+    so daily-tick retries are free. Never fails the tick.
+    """
+    counters = ctx.counters
     eval_summary: str | None = None
     try:
         from .eval.nightly import run_all as _eval_run_all
@@ -17395,13 +17469,20 @@ def cron_daily_tick():
         log.warning("daily-tick: offline-eval pass failed (non-fatal): %s", e)
     if eval_summary:
         log.info("daily-tick eval: %s", eval_summary)
+    return {"items": counters.get("eval_scorers_graded", 0)}
 
-    # ── F6 (flag deck.value_model — SHIPS DARK) — nightly refit ──
-    # Runs AFTER the F8 eval block so the eval pass grades yesterday's
-    # model before today's supersedes it. Flag-gated (training AND serving
-    # are both dark until the F8 replay win), idempotent per UTC date via
-    # data/value_model/models.jsonl, never fails the tick, and never
-    # changes the flag-off response payload.
+
+def _tick_pass_refit(ctx) -> dict:
+    """F6 (flag deck.value_model — SHIPS DARK) — nightly refit.
+
+    Runs AFTER the F8 eval pass so the eval pass grades yesterday's model
+    before today's supersedes it. Flag-gated (training AND serving are both
+    dark until the F8 replay win), idempotent per UTC date via
+    data/value_model/models.jsonl, never fails the tick, and never changes the
+    flag-off response payload.
+    """
+    now = ctx.now
+    counters = ctx.counters
     if _deck_value_model_enabled():
         try:
             vm_stats = _value_model.nightly_refit(now=now)
@@ -17410,7 +17491,11 @@ def cron_daily_tick():
                 counters["value_model_trained"] = 1
         except Exception as e:
             log.warning("daily-tick: value-model refit failed (non-fatal): %s", e)
+    return {"items": counters.get("value_model_trained", 0)}
 
+
+def _tick_pass_players_guard(ctx) -> dict:
+    """M0 — player-cache refresh fallback guard."""
     # ── M0 — player-cache refresh fallback guard ──
     # The dedicated POST /api/cron/players-refresh is the primary trigger, but
     # a missed day means a whole rookie class stays invisible. Mirrors the
@@ -17431,8 +17516,13 @@ def cron_daily_tick():
             players_refresh_started = _refresh_players_cache_async()
     except Exception as e:
         log.warning("daily-tick: players-refresh guard failed (continuing): %s", e)
+    if players_refresh_started is not None:
+        ctx.state["players_refresh_started"] = players_refresh_started
+    return {"items": 1 if players_refresh_started else 0}
 
-    # ── M0 — rookie class-load monitor ──
+
+def _tick_pass_class_load(ctx) -> dict:
+    """M0 — rookie class-load monitor."""
     # The NEXT season's class does not exist in Sleeper's dump until ~late
     # April. Its arrival is a one-shot, unobservable-in-advance event that the
     # Draft Room's pre-class-load state depends on, so log it loudly the first
@@ -17442,8 +17532,16 @@ def cron_daily_tick():
         _check_rookie_class_load(_CURRENT_SEASON + 1)
     except Exception as e:
         log.warning("daily-tick: class-load monitor failed (continuing): %s", e)
+    return {"items": 1}
 
-    # ── ADR-011 Writer B — weekly roster-snapshot sweep kickoff ──
+
+def _tick_pass_roster_snapshot(ctx) -> dict:
+    """ADR-011 Writer B — weekly roster-snapshot sweep kickoff.
+
+    Not in the LLD §4.1 registry list (which was written against an earlier
+    read of the tick); it is a seventh inline block that exists in the code and
+    therefore gets a ledger row like the rest.
+    """
     # Behind the >= weekday gate (FTF_ROSTER_SNAPSHOT_WEEKDAY, default 1),
     # on a daemon so the tick never blocks on N league fetches. The
     # response counter is operator telemetry; the real liveness read is
@@ -17451,23 +17549,95 @@ def cron_daily_tick():
     # (runbook § roster-snapshot monitoring).
     roster_snapshot_stats: dict | None = None
     try:
-        roster_snapshot_stats = _kickoff_roster_snapshot_sweep(now)
+        roster_snapshot_stats = _kickoff_roster_snapshot_sweep(ctx.now)
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
+    if roster_snapshot_stats is not None:
+        ctx.state["roster_snapshot_stats"] = roster_snapshot_stats
+    return {"items": (roster_snapshot_stats or {}).get("leagues_queued")}
+
+
+# ── The registry, in run order (LLD §4.1) ───────────────────────────────────
+# `season_start` sits ahead of `pushes` so that on Aug 25 the send sequence is
+# byte-for-byte what the inline loop produced (every signed-up user gets
+# season_start, in loader order, and nothing else).
+#
+# Budgets per LLD §4.1: pushes/replenish 120s, eval/refit 180s. The three M0
+# guards and the roster kickoff are sub-second daemon starts; 60s is the "new
+# pass" default and is generous for them.
+_relevance_registry.configure_push_kinds(
+    freq_capped=_NOTIF_FREQ_CAPS, dedup_keyed=_NOTIF_DEDUP_CAPS,
+)
+
+DAILY_TICK_REGISTRY: list = [
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="season_start", fn=_tick_pass_season_start, budget_s=120.0,
+        klass=_relevance_registry.KLASS_MUST_COMPLETE, max_same_day_retries=2,
+        push_kinds=("season_start",))),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="pushes", fn=_tick_pass_pushes, budget_s=120.0,
+        push_kinds=("finish_ranking", "winback_dormant", "winback_matches"))),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="replenish", fn=_tick_pass_replenish, budget_s=120.0,
+        push_kinds=("deck_replenished",))),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="eval", fn=_tick_pass_eval, budget_s=180.0)),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="refit", fn=_tick_pass_refit, budget_s=180.0)),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="players_guard", fn=_tick_pass_players_guard, budget_s=60.0)),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="class_load", fn=_tick_pass_class_load, budget_s=60.0)),
+    _relevance_registry.register(_relevance_registry.PassSpec(
+        name="roster_snapshot", fn=_tick_pass_roster_snapshot, budget_s=60.0)),
+]
+
+
+def _daily_tick_payload(now: datetime, *, wall_budget_s: float = 600.0) -> dict:
+    """Run the ledger and assemble the tick response body.
+
+    Split out of the route so T-1 can compare it, Flask-free, against a copy
+    of the pre-refactor inline tick.
+    """
+    counters: dict[str, int] = {
+        "winback_matches": 0, "winback_dormant": 0,
+        "finish_ranking":  0, "season_start":    0,
+    }
+    state: dict = {}
+    result = _relevance_registry.run_ledger(
+        now, wall_budget_s=wall_budget_s, registry=DAILY_TICK_REGISTRY,
+        counters=counters, state=state,
+    )
 
     log.info("daily-tick: %s", counters)
     extra: dict = {}
     # Serialized only when the flag is on — flag-off tick payloads stay
     # byte-identical (the _run_weekly_replenishment convention, and
     # test_deck_replenishment pins the equivalent for its key).
+    roster_snapshot_stats = state.get("roster_snapshot_stats")
     if roster_snapshot_stats is not None and not roster_snapshot_stats.get("disabled"):
         extra["roster_snapshot"] = roster_snapshot_stats
+    players_refresh_started = state.get("players_refresh_started")
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
+    replenish_stats = state.get("replenish_stats")
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
-        return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
-    return jsonify({"ok": True, **counters, **extra})
+        return {"ok": True, **counters, "replenish": replenish_stats, **extra,
+                "passes": result["statuses"]}
+    return {"ok": True, **counters, **extra, "passes": result["statuses"]}
+
+
+@app.route("/api/cron/daily-tick", methods=["POST"])
+def cron_daily_tick():
+    """Once per day. Iterates the B1 pass registry above — re-engagement
+    pushes, the Aug-25 season_start fan-out, deck replenishment, the F8 eval,
+    the F6 refit, and the M0 guards — each under its own ledger row, kill
+    valve, and try/except (LLD §4.1). Response adds `passes`: the per-pass
+    ledger status for this run.
+    """
+    _require_cron_auth()
+    return jsonify(_daily_tick_payload(datetime.now(timezone.utc)))
 
 
 @app.route("/api/cron/value-snapshot", methods=["POST"])

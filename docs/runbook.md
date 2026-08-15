@@ -23,6 +23,7 @@ Operational procedures. Add to this as you learn things.
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
 - [Cron schedule](#cron-schedule)
+- [Nightly pass ledger (B1, 2026-08-14)](#nightly-pass-ledger-b1-2026-08-14)
 - [Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)](#weekly-deck-replenishment-f10-flag-deckreplenishment-2026-07-26)
 - [Reset / wipe](#reset-wipe)
 - [HTTP compression / encoding (OBS-API-02)](#http-compression-encoding-obs-api-02)
@@ -310,12 +311,64 @@ Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate
 
 ---
 
+## Nightly pass ledger (B1, 2026-08-14)
+
+`POST /api/cron/daily-tick` no longer runs its work inline. It iterates a **pass registry** (`backend/relevance/registry.py`, wired in `backend/server.py` as `DAILY_TICK_REGISTRY`), and every pass gets one durable `cron_pass_runs` row per UTC day. Design: [lld.md §3.3/§4.1](plans/trade-relevance-engine/lld.md), [hld.md §2.1](plans/trade-relevance-engine/hld.md).
+
+**Run order** (time-sensitive first, so a slow night starves the least important work): `season_start` → `pushes` → `replenish` → `eval` → `refit` → `players_guard` → `class_load` → `roster_snapshot`.
+
+### Reading the ledger
+
+The tick response carries `passes: {name: status}`. The durable record:
+
+```sql
+SELECT pass_name, status, attempt, duration_ms, items, error_text
+FROM cron_pass_runs WHERE run_date = date('now') ORDER BY id;
+```
+
+| Status | Meaning | Action |
+|---|---|---|
+| `ok` | Ran, finished inside its budget | none |
+| `error` | The pass body raised; the rest of the tick still ran | **Page yourself.** `error_text` holds the exception. Resumable passes retry tomorrow; a `must_complete_today` pass (only `season_start` today) has already burned its 3 same-day attempts and logged `OPERATOR ALERT` — its date gate will not come back |
+| `timeout` | Completed, but overran `budget_s` | Not a kill — there is no preemption (LLD §2.1). Investigate the pass's cost; a chronic `timeout` on an early pass is what starves the later ones |
+| `skipped` + `error_text='valve'` | Killed by an operator valve | Expected while a pass is intentionally dark. **Excluded from the green-rate denominator** (M1) |
+| `skipped` + `error_text='deadline'` | The 600 s wall deadline passed before this pass started | Healthy once. **N consecutive deadline-skips of the same pass is an alarm** — that pass is chronically starved and must not read as green (M1). Fix the pass ahead of it, or move it earlier |
+| `skipped` + `error_text='claimed_elsewhere'` | Already `ok` today, or a live worker owns it | Normal on a retried/duplicated POST |
+| `running` still set hours later | A worker died mid-pass | Self-healing: the next tick sees the row older than 2× the pass budget, reclaims it with `attempt+1`, and re-runs. If you see `attempt` climbing day over day, the pass is dying reproducibly — read `error_text` |
+
+Green-rate (M1) is `ok / (ok + error + timeout)` over **enabled** passes. Any `error` is a page-the-operator line.
+
+### Kill lever — `cron.pass_disabled.<name>`
+
+Stopping one pass is a live `model_config` write; **no deploy, no flag flip, effective on the next tick**:
+
+```
+PUT /api/admin/config/cron.pass_disabled.pushes    {"value": 1}    # stop it
+PUT /api/admin/config/cron.pass_disabled.pushes    {"value": 0}    # resume
+```
+
+Three properties to keep straight:
+
+- **Inverted polarity.** Absent or `0` ⇒ the pass **runs**. A typo in the key name, or a missing row, can never silently stop the nightly pushes — it can only fail to stop them.
+- **Resolver-exempt.** Valves are read raw and uncached through `relevance.config.valve()`, never through `resolve()`. No experiment variant and no per-user setting can resurrect a killed pass, and the kill bites immediately rather than after a cache TTL.
+- **Not a feature flag.** `config/features.json` is baked into a deploy and drops unregistered keys; these are operational valves, same class as the ingest budget. New *feature* surfaces still use ordinary flags.
+
+### Duplicate / retried ticks
+
+The `uq_pass_run` INSERT-claim is the double-POST answer: a Render retry of a partially-failed tick re-runs only what did **not** finish. Consequence to expect in the response — a second same-day tick omits `replenish` (its pass was already `ok`), and its `passes` values read `skipped`. Push re-run safety on top of that comes from the frequency caps and dedup keys, which is why `register()` refuses a pass declaring a push kind with neither.
+
+### Retention
+
+`cron_pass_runs` is pruned to 90 days by `database.prune_cron_pass_runs()`, called from `server._cleanup_loop` (the 5-minute in-process sweep, beside the session and API-observability purges). There is no retention endpoint — the LLD assumed one that does not exist in this repo.
+
+---
+
 ## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)
 
 Runs **inside** `POST /api/cron/daily-tick` — no separate schedule. Dark by default; flag off is byte-identical (no work, no pushes, no `replenish` key in the tick response).
 
 - **Weekly gate:** the pass unlocks when `now.weekday() >= replenish_weekday` (`model_config`, default `2` = Wednesday, chosen post-waivers). The gate is `>=` on purpose: a missed Wednesday cron run self-heals Thu–Sun. **Tune the day** by setting the `replenish_weekday` model_config key (0 = Monday … 6 = Sunday); no deploy needed.
-- **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
+- **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. Since the B1 pass ledger (2026-08-14) there is a second, outer layer: a repeat tick on the same UTC day never enters the pass at all, so the response omits `replenish` entirely rather than reporting `skipped_done`. The weekly marker is still the real guard — the ledger row rolls over at UTC midnight, the marker does not. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
 - **Eligibility:** user-leagues with a trade disposition or deck generation in the trailing 30 days (`load_active_deck_user_leagues`). Everyone else is untouched — no zombie churn.
 - **Generation:** the existing job machinery, run synchronously per pair — a live session is reused when present, otherwise a headless session is rebuilt from `league_members` + replayed swipes. Decks land in the normal 30-min pre-gen cache (`_PREGEN_TTL_SECONDS`), so a push tapped hours later triggers a normal fresh generation rather than serving the cached one — acceptable; the push copy claims inventory, not a frozen deck.
 - **Push policy:** kind `deck_replenished`, **reengagement bucket** — with `notif.reengagement_default_off` on (the shipping default) users must have opted in. Empty decks write the marker but never push; the expired-card count appears in copy only when > 0.

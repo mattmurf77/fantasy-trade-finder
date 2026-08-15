@@ -124,8 +124,13 @@ def test_flag_off_no_replenish_work_no_push_no_payload_change(client):
         body = _tick(c)
 
     assert "replenish" not in body           # response payload unchanged
-    assert body == {"ok": True, "winback_matches": 0, "winback_dormant": 0,
-                    "finish_ranking": 0, "season_start": 0}
+    # `passes` is the B1 pass-ledger addition (LLD §4.1) and is present on
+    # every tick; the flag-off contract this test pins is that no `replenish`
+    # key appears and no other counter shifts.
+    assert {k: v for k, v in body.items() if k != "passes"} == {
+        "ok": True, "winback_matches": 0, "winback_dormant": 0,
+        "finish_ranking": 0, "season_start": 0}
+    assert body["passes"]["replenish"] == "ok"
     gen.assert_not_called()
     push.assert_not_called()
     assert _marker_rows(engine) == []
@@ -176,13 +181,23 @@ def test_repeat_tick_same_week_is_idempotent(client):
          patch.object(server, "_send_typed_push", MagicMock()) as push:
         _tick(c)
         body2 = _tick(c)
+        # The rerun is now idempotent TWICE OVER. Outer layer: the B1 pass
+        # ledger (LLD §3.3) sees an `ok` cron_pass_runs row for `replenish`
+        # on this UTC day and never enters the pass, so the second response
+        # carries no `replenish` key at all.
+        assert body2["passes"]["replenish"] == "skipped"
+        assert "replenish" not in body2
+        # Inner layer, unchanged and still the real guard (the ledger row
+        # rolls over at UTC midnight; the weekly marker does not). Called
+        # directly, bypassing the ledger, so this stays covered.
+        stats = server._run_weekly_replenishment(datetime.now(timezone.utc))
 
     gen.assert_called_once()                 # no regeneration on rerun
     push.assert_called_once()                # hard 1/week/league cap
     assert len(_marker_rows(engine)) == 1
-    assert body2["replenish"]["skipped_done"] == 1
-    assert body2["replenish"]["generated"] == 0
-    assert body2["replenish"]["pushed"] == 0
+    assert stats["skipped_done"] == 1
+    assert stats["generated"] == 0
+    assert stats["pushed"] == 0
 
 
 def test_inactive_user_leagues_are_skipped(client):

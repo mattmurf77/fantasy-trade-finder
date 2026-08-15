@@ -259,9 +259,13 @@ _RELEVANCE_DIR = pathlib.Path(__file__).resolve().parents[2] / "backend" / "rele
 # (resolve + the valve mechanism); nothing else gets to.
 _MODEL_CONFIG_WHITELIST = {"config.py"}
 
-# Modules allowed to CALL valve(). Empty at P0 — the pass registry (build step
-# B1) is the first legitimate caller and must be added here in the same PR.
-_VALVE_CALLER_WHITELIST: set[str] = set()
+# Modules allowed to CALL valve(). The pass registry (B1) is the first
+# legitimate caller: `cron.pass_disabled.<name>` is an operational kill switch,
+# and HLD §2.1 makes valves deliberately resolver-exempt so no experiment
+# overlay or per-user setting can resurrect a pass an operator killed. Adding a
+# name here is meant to be a visible, arguable diff — that is the whole point
+# of the lint, so extend it, never delete it.
+_VALVE_CALLER_WHITELIST: set[str] = {"registry.py"}
 
 _VALVE_CALL = re.compile(r"\bvalve\s*\(")
 
@@ -271,17 +275,81 @@ def _relevance_sources():
                   if "__pycache__" not in p.parts)
 
 
+def _references_model_config_in_code(path) -> bool:
+    """True iff the file references model_config in CODE, not in prose.
+
+    Deliberately AST-based rather than a substring scan. A raw
+    `"model_config" in source` also matches comments and docstrings, so a
+    module that merely *explains* why it routes through resolve() gets
+    flagged — a false positive that trains people to weaken the lint, which
+    is worse than not having it. Comments never reach the AST at all;
+    docstrings do, so they are subtracted explicitly.
+
+    Still catches every real bypass: imports (`from ..database import
+    model_config_table`), attribute access, and raw SQL/key strings.
+    """
+    import ast
+    tree = ast.parse(path.read_text(), filename=str(path))
+
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef,
+                             ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None) or []
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                docstrings.add(id(body[0].value))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and "model_config" in node.id:
+            return True
+        if isinstance(node, ast.Attribute) and "model_config" in node.attr:
+            return True
+        if isinstance(node, ast.alias):
+            if "model_config" in (node.name or "") or \
+               "model_config" in (node.asname or ""):
+                return True
+        if isinstance(node, ast.ImportFrom) and "model_config" in (node.module or ""):
+            return True
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docstrings
+                and "model_config" in node.value):
+            return True
+    return False
+
+
 def test_t28_no_model_config_reads_outside_config_py():
     # SABOTAGE: add `from ..database import model_config_table` to any other
     # module in backend/relevance/ (the R10 resolver bypass) ⇒ this fails and
-    # names the file.
+    # names the file. Also caught: attribute access and raw SQL strings.
     offenders = [str(p.relative_to(_RELEVANCE_DIR))
                  for p in _relevance_sources()
                  if p.name not in _MODEL_CONFIG_WHITELIST
-                 and "model_config" in p.read_text()]
+                 and _references_model_config_in_code(p)]
     assert offenders == [], (
         f"model_config read outside config.py: {offenders}. "
         "Relevance knobs go through resolve(); valves through valve().")
+
+
+def test_t28_model_config_lint_ignores_prose_but_catches_code(tmp_path):
+    # SABOTAGE: revert the lint to a substring scan ⇒ the prose case below
+    # trips it, and the lint starts crying wolf on documentation. The two
+    # code cases must stay caught, or the lint is decorative.
+    prose = tmp_path / "prose.py"
+    prose.write_text(
+        '"""Knobs route through resolve(); never read model_config here."""\n'
+        "# model_config is off-limits in this module\n"
+        "X = 1\n")
+    assert not _references_model_config_in_code(prose)
+
+    imported = tmp_path / "imported.py"
+    imported.write_text("from backend.database import model_config_table\n")
+    assert _references_model_config_in_code(imported)
+
+    sql = tmp_path / "sql.py"
+    sql.write_text('Q = "SELECT value FROM model_config WHERE key = ?"\n')
+    assert _references_model_config_in_code(sql)
 
 
 def test_t28_no_valve_callers_outside_the_whitelist():
