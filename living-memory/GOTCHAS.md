@@ -11,6 +11,8 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-047 | "no checks reported" on a PR reads as a pass to a naive poller | CI / gh / merge gating |
+| G-046 | A follow-up PR off a squash-merged branch is born CONFLICTING | Git / squash-merge / branch hygiene |
 | G-045 | A whole league-mate silently missing from the deck, not just their cards | Backend / trade engine / pool prune |
 | G-044 | A killed `sim-run.sh` leaves Flask on :5001; the next run aborts stale | Mobile / test harness / Flask |
 | G-043 | `sim-build.sh` fails at the JS bundle phase on a symlinked `node_modules` | Mobile / build / Metro resolver |
@@ -384,4 +386,16 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **How to recognise it fast:** compare the two boards' **medians**, not their maxima. The broken boards' maxima looked healthy (1800–1839); it was the median (1201 vs 1379) that gave it away. A board whose median sits at the floor is a "started ranking and stopped" board, and any engine step comparing two boards by a raw *value difference* is distorted by it.
 - **Prevention:** when an engine step compares two personal boards, ask whether its output is invariant to a board-wide scale offset — an offset carries **zero** information about who either side prefers, so if the answer is no, that step has this bug. Fixed behind `trade.pool_calibration` / `trade.divergence_fallback` (see [D-052](DECISIONS.md)); the paired flag-off tests in `backend/tests/test_compressed_board.py` pin both the defect and the fix.
 - **Not the lever it looks like:** `v3_pool_size` is a `model_config` knob and raising it to 30 does rescue these pairs — at **26–102 s per pair** against ~2 s at 12. Enumeration is cubic-ish in pool size on both sides; it is not a shippable mitigation.
+
+### G-046 — a follow-up PR from a branch whose PR was already squash-merged is born CONFLICTING
+- **Symptom:** you squash-merge PR A from a branch, commit one more thing to the SAME branch, open PR B — and GitHub says `mergeable: CONFLICTING`, `mergeStateStatus: DIRTY`, with conflicts across files you never touched in the follow-up.
+- **Cause:** the squash collapsed your branch's commits into ONE new commit on `main` with no ancestry link back to them. Your branch still carries the originals, so git sees two unrelated histories that both edited the same lines. Nothing is actually wrong with the content — it is the same work twice, described two different ways.
+- **Fix — do not try to merge `main` back in.** Cut a fresh branch off `origin/main` and `git cherry-pick` just the follow-up commit. It applies cleanly, because `main` already has everything the follow-up was built on. Then close the conflicted PR as superseded.
+- **Prevention:** after a squash-merge, treat the source branch as spent. The next commit starts from `origin/main`, not from it. This repo squash-merges everything, so this applies to every follow-up — and it is the same root cause as the ID-renumber races (D-049→D-050, then D-051→D-052): concurrent work reconciles against `origin/main`, never against your own branch.
+
+### G-047 — "no checks reported" on a PR reads as a pass to a naive poller
+- **Symptom:** a wait-for-CI loop shaped `until [ "$(gh pr view N --jq '[.statusCheckRollup[]? | select(.status != "COMPLETED")] | length')" = "0" ]` returns instantly and announces success, having verified nothing. `gh pr checks N` says `no checks reported on the '<branch>' branch`.
+- **Cause:** zero pending checks out of **zero total** satisfies the condition. An empty rollup and a fully-green rollup are the same value to that test. GitHub leaves the rollup empty when a PR is `DIRTY`/`CONFLICTING` (no merge commit to run against), and it is also empty in the seconds before workflows register.
+- **Fix:** require the rollup to be **non-empty** as a separate clause — `[ "$(… | length)" -ge 1 ] && [ "$(… pending … | length)" = "0" ]` — and assert the conclusions are `SUCCESS`, not merely that nothing is `IN_PROGRESS`.
+- **Prevention:** the general shape of this bug is trusting an absence as evidence of a pass. Same family as [G-036](GOTCHAS.md) (a prop key survives while its *value* is silently scrubbed) and the analytics `no_identity` false-pass. When a check reports "nothing wrong", confirm it actually looked.
 
