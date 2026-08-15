@@ -48,6 +48,22 @@ scope block `docs/plans/sleeper-co-owner-rosters/scope.md`.
 - `test_co_owner_rosters.py` (33 tests) is a **proven** regression test: narrowing
   the predicate back to `owner_id` alone fails 7 of them.
 
+### Sim gate
+
+Tier 2 **was run** (build succeeded; `FTF-iOS18`): `01-signin` and
+`05-trades-render` pass; `02-league-pick` and `06-trades-deck` fail on **stale
+assertions**, with failure screenshots proving the app healthy in both (correct
+league + populated board; a real generated trade card vs `@qa_opp_ranked`).
+`qa/sim-runs/last-sim-run.json` records **`result: "fail"` deliberately**, so
+`githooks/pre-push` blocks and the push is a conscious operator decision.
+Neither failing flow was re-run against `origin/main` — see the ledger for the
+limits of the "pre-existing" claim.
+
+Three pre-existing harness defects found: [G-042](GOTCHAS.md) (maestro has no
+`JAVA_HOME` on this machine — **no local sim gate could run at all**, which
+likely explains several sessions of not-run/waived gates), G-043 (symlinked
+`node_modules` breaks the bundle phase), G-044 (orphaned Flask on :5001).
+
 ### Next action
 
 1. **Operator: review + push.** `git push -u origin claude/epic-hellman-6af20f`,
@@ -62,10 +78,12 @@ scope block `docs/plans/sleeper-co-owner-rosters/scope.md`.
 - **`member_rankings` is deliberately untouched** — a co-owned team's board still
   reaches leaguemates only if the *primary* owner uses FTF. Logged in
   [NEXT.md](NEXT.md); needs a product call, not a code change, first.
-- **Worktree hygiene:** this worktree has a symlinked `mobile/node_modules` and a
-  **copied** `mobile/ios/Pods` + `mobile/ios/build/generated` (borrowed from the
-  main checkout — lockfiles verified identical) so the sim build could run. All
-  gitignored; delete with the worktree per the recovery-ledger procedure.
+- **Worktree hygiene:** to run the sim build this worktree gained a real
+  `mobile/node_modules` (`npm ci` — a symlink to the main checkout does NOT work,
+  [G-043](GOTCHAS.md)) plus **copied** `mobile/ios/Pods` and
+  `mobile/ios/build/generated` from the main checkout (lockfiles verified
+  identical first). All gitignored; they go away with the worktree — sweep it
+  per the recovery-ledger procedure once the branch is verified on `origin/main`.
 
 ---
 

@@ -11,6 +11,87 @@
 
 ---
 
+## 2026-08-15 — Sleeper co-owned rosters (branch `claude/epic-hellman-6af20f`, commit `44c8bbf`, UNMERGED)
+
+- **Change:** [ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md) — roster→user resolution now matches `owner_id` **or** `co_owners`; a co-owner is an alias of the roster's primary `owner_id`, which becomes the session's LEAGUE identity (`_league_user_id()`) alongside the ACCOUNT identity (`sess["user_id"]`). `POST /api/session/init` gains two optional additive fields. **FULL GATES** (API contract — the bright line; operator signed off the field and all three waivers, 2026-08-15). Scope block: `docs/plans/sleeper-co-owner-rosters/scope.md`.
+- **Backend:** `pytest backend/tests -q` → **2796 passed / 1 skipped** (7m55s, local SQLite, Python 3.14). New `test_co_owner_rosters.py`: **33 tests** covering the predicate (owner / co-owner / stranger / empty-id / `co_owners` null·absent·non-list·non-str), `_league_user_id`'s pre-existing-session fallback, `_roster_id_for_owner` (Send in Sleeper), the mock-draft owner set + roster map, `_order_from`'s co-owner draft-order aliasing with an owner-primary inverse, and five session_init end-to-end cases run with the bg-writes daemon inlined.
+- **The regression test is PROVEN, not assumed.** Narrowing `owns_roster` back to `uid == owner` and re-running: **7 failed / 25 passed** — `owns_roster` co-owner, `find_user_roster`, `canonical_owner_id`, `_roster_id_for_owner`, and all three co-owner session_init cases. Restored and re-verified green.
+- **The load-bearing assertion** is `test_session_init_co_owner_writes_one_row_per_roster`: **12** `league_members` rows for a 12-team league, roster 3 keyed on `460238423161040896` (the primary owner) and the caller's account id keying nothing. That is the case a client-only fix would fail — it would write 13 rows and the DB-member merge would hand the engine a phantom copy of the caller's own team.
+- **Sole-owner twins throughout**, including `test_session_init_without_league_user_id_defaults_to_the_caller` (an old client that omits both new fields), so "byte-identical for the 99% case" is asserted, not claimed.
+- **Fixture:** `backend/tests/fixtures/sleeper/co-owned-league/` — the REAL Bush League (`1338231586314780672`) league id, twelve `owner_id`s and the roster-3 co-ownership, verified live against Sleeper the same day; player lists synthetic and globally unique per roster so "whose roster resolved?" is answerable from ids alone.
+- **Mobile:** `tsc --noEmit` **clean**; `testid-lint.sh` **OK**; all **24** `check-*.js` structural suites exit 0. Both tsc and the suites re-run after a clean `npm ci` (see the harness note below).
+- **Web:** `node --check web/js/app.js` clean; no `owner_id === user.user_id` comparisons remain in the file.
+
+### Sim gate — tier 2, RUN on `FTF-iOS18` (89EEFD08) against `44c8bbf`. 2/4 pass; both failures are assertion staleness, changed path proven green
+
+Release sim build **SUCCEEDED**; four flows run (`smoke/01-signin`,
+`02-league-pick`, `05-trades-render`, `06-trades-deck`) — the subset that
+crosses `initLeagueSession` / session_init / the deck. Evidence:
+`qa/sim-runs/last-sim-run.json` (recorded **`result: "fail"`** on purpose, so
+the pre-push hook blocks and the operator decides).
+
+| Flow | Exit | Verdict |
+|---|---|---|
+| `smoke/01-signin` | 0 | **pass** |
+| `smoke/05-trades-render` | 0 | **pass** |
+| `smoke/02-league-pick` | 1 | fail — stale assertion |
+| `smoke/06-trades-deck` | 1 | fail — visibility/scroll |
+
+**The changed code path is proven green on-device.** Both flows that reached it
+logged `=== /api/session/init … user_players=26 opponents=11` → `✅ session/init
+done — 26 on roster, 11 opponents` → HTTP 200, and **no** `co-owned roster:
+league identity` line — correct, because `seed_ui_test_db.py` emits roster
+cassettes with no `co_owners` key at all, so every flow exercises the
+sole-owner branch. That is exactly the regression assertion tier 2 is for.
+`05-trades-render`'s screenshot shows *"Your roster reads as Rebuilder"* —
+roster-derived inference, which cannot render without a resolved roster.
+
+**Why neither failure is this change** (and the honest limit of that claim):
+
+- **`02-league-pick`** reached `tab.trades` (session established, Main entered)
+  and then failed asserting `rank-home.card.trio`. The failure screenshot shows
+  the app on **Quick Set Tiers** — which `mobile/src/screens/CLAUDE.md`
+  documents as the Rank tab's default launch route for no-pref users — with the
+  correct league, SF TEP, and a populated board. Flow-vs-app drift, same class
+  as the already-known-stale `smoke/09-league.yaml`.
+- **`06-trades-deck`** failed asserting `trades.find-btn` is visible. The deck
+  had **generated**: the screenshot shows a real card vs `@qa_opp_ranked`
+  (match strength 100) with a correct send/get owner split — you send your own
+  assets, you get theirs, which is precisely what the owner comparisons this
+  change touches would break if they were wrong. `trades.find-btn` exists
+  (`TradesScreen.tsx:4379,4565`); the view had scrolled past it (the outlook
+  Confirm/Change card is clipped at the top of the shot).
+- **Limit:** neither flow was re-run against `origin/main`, which would have
+  cost a second ~45-minute cold Release build. "Pre-existing" is an inference
+  from the evidence above, not a measurement. Stated so nobody reads it as one.
+
+**Three harness defects found, all pre-existing, none caused by this change:**
+
+1. **Maestro needs `JAVA_HOME` and this machine has none set.** Homebrew
+   `openjdk` 26.0.2 is installed but unlinked, so `/usr/libexec/java_home`
+   fails and maestro dies with *"Unable to locate a Java Runtime"* (surfacing
+   as a spurious flow failure, exit 1). Fix:
+   `export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home`.
+   **This alone means no local sim gate could have run on this machine** — which
+   fits the last several ledger entries recording the gate as not-run/waived.
+2. **`sim-build.sh` cannot bundle against a symlinked `mobile/node_modules`.**
+   Node resolves the symlink's realpath, so `@expo/cli` looks for
+   `metro-runtime` under the *other* checkout and dies with `Cannot find module
+   'metro-runtime/package.json'` — in the "Bundle React Native code and images"
+   phase, i.e. after ~30 min of Pods compilation. A real `npm ci` in the
+   worktree fixes it (`export:embed` then bundles 2273 modules in 5.7s).
+3. **A killed `sim-run.sh` leaves its Flask holding :5001**, and the next run
+   aborts `INFRA: STALE FLASK: whoami pid … != started pid …` (exit 2). Clear
+   with `lsof -ti:5001 | xargs kill -9`.
+
+**Not re-captured:** `screens/manifest.json` was already stale for 20 of 21
+screens before this change (sources changed 2026-08-10/11). Tier 2 asks for
+re-capture of *flagged* screens; this change alters no visuals, and clearing
+four days of unrelated capture debt is not this change's to pay. Flagged here
+so the debt stays visible.
+
+---
+
 ## 2026-08-14 — Deck-outcome impression-ownership validation (shipped, PR #119)
 
 - **Change:** backend-only — `_save_deck_outcome_safe` ownership/existence/recency validation + `deck_outcome_rejects` health counters; [PR #119](https://github.com/mattmurf77/fantasy-trade-finder/pull/119), branch `claude/charming-lalande-6dc6b6`.
