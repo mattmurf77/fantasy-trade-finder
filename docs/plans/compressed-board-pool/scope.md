@@ -104,7 +104,7 @@ trade partner than one who never ranked at all.
   (Gibbs ↔ A.J. Brown) — a stud-for-stud swap each side prefers on its own board,
   so both surpluses are strongly positive and only the prune stands in the way.
 
-- Full suite: **2771 passed, 1 skipped** (see `living-memory/TEST_LEDGER.md`).
+- Full suite: **2771 passed, 1 skipped** pre-merge; **2804 passed, 1 skipped** after merging `origin/main` (PR #121) and flipping both flags on (see `living-memory/TEST_LEDGER.md`).
 - Latency, measured per pair on real FFV3 boards (`v3_pool_size=12`):
   calibration on ≈ 1.9–2.6 s, off ≈ 1.5–5.2 s. No regression.
 
