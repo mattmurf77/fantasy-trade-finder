@@ -10,7 +10,7 @@
 
 ## Table of Contents
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
-- [2026-08-15 — Compressed-board engine fixes committed, flags ON, branch unpushed](#2026-08-15--compressed-board-engine-fixes-committed-flags-on-branch-unpushed)
+- [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122-flags-live)
 - [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
@@ -71,84 +71,62 @@ figure stays a pre-fix baseline.
 
 ---
 
-## 2026-08-15 — Compressed-board engine fixes committed, flags ON, branch unpushed
+## 2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live
 
-**Where things stand.** A field bug in trade generation is diagnosed, fixed,
-measured against real prod boards, committed, and **both flags are ON** — but the
-branch is **unpushed**, so none of it is in production yet. Branch
-`claude/loving-shtern-12e4b1` in worktree `.claude/worktrees/loving-shtern-12e4b1`,
-now merged up to `origin/main` (PR #121). **Push before removing this worktree** —
-it holds the only copy of the work.
+**SHIPPED AND LIVE.** Squash [PR #122](https://github.com/mattmurf77/fantasy-trade-finder/pull/122)
+→ `main` @ `19d4174`, all three CI checks green on Python 3.12 (the run that
+matters — local is 3.14). Deploy confirmed 2026-08-15T18:21:21Z: prod
+`GET /api/feature-flags` returns `trade.pool_calibration` and
+`trade.divergence_fallback` both `true`; pre-deploy they were **ABSENT** (new
+`FLAG_KEYS` entries), so absent→true is the deploy probe, not a value flip.
 
-**The bug.** Three of four *boarded* opponents in the operator's league FFV3
-produced zero trade cards at any budget. Two stacked defects, one flag each:
+**Post-deploy deck read against prod boards, real flag state — the cliff is gone:**
+jonbonjourvi 5 divergence, gdubs10 4 divergence, MangoPatti 5 consensus, Bcork 5
+consensus. Every boarded member produces cards. Four unranked members returned 0,
+which is the displacement working as designed (boarded members are visited first).
 
-- `trade.pool_calibration` — `trade_optimizer`'s pool prune ranked by the raw
-  divergence `_vo - _uv`; `elo_to_value` is exponential, so a floor-pinned
-  opponent board (median Elo 1201 vs the healthy member's 1379) deflates studs by
-  thousands and bench bodies by tens, sorting every tradeable stud **below** the
-  user's junk. Fix rescales the opponent's value space by the geometric-mean
-  ratio over the assets in play. Prune ordering only.
+**The bug, for anyone reading this cold.** Two stacked defects:
+- `trade.pool_calibration` — the v3 pool prune ranked by the raw divergence
+  `_vo - _uv`. `elo_to_value` is exponential, so a floor-pinned opponent board
+  (median Elo 1201 vs the healthy member's 1379) deflates studs by thousands and
+  bench bodies by tens, sorting every tradeable stud **below** the user's junk.
+  The key was not invariant to a board-wide offset — a difference carrying zero
+  information about who either side prefers. Fix rescales the opponent's value
+  space by the geometric-mean ratio over the assets in play. Prune ordering only.
 - `trade.divergence_fallback` — the boarded/unboarded branch was `if/else` with
   no fall-through, so a zero-yield boarded member vanished from the deck. Fix
   falls back to the consensus generator.
 
-**Field-verified read-only against prod** (`DATABASE_URL=$DATABASE_URL_PROD`,
-SELECT-only). At the production `v3_pool_size=12`: calibration alone takes
-gdubs10 0 → 5 divergence cards; both flags take MangoPatti and Bcork 0 → 5
-consensus; jonbonjourvi (healthy board) unchanged at 5.
+Full write-up: [`docs/plans/compressed-board-pool/scope.md`](../docs/plans/compressed-board-pool/scope.md),
+[D-052](DECISIONS.md), [G-045](GOTCHAS.md), [Q-017](OPEN_QUESTIONS.md).
 
-**The one thing to do next: decide whether to flip the flags.** Everything else
-is downstream of that. Two consequences to accept first — boarded members can now
-carry `basis:"consensus"` cards, and because the deck caps at 30 with boarded
-members visited first, rescuing them **displaces** consensus cards from unranked
-members. Composition improves; size doesn't change.
-
-**What is NOT established, and should not be claimed:**
-- **Card quality.** Counts are verified; nobody has looked at the rescued cards.
-- **Any league but FFV3.** The healthy-board no-regression claim rests on a unit
-  fixture, not field data.
-- Whether consensus cards are the right answer for MangoPatti/Bcork, or whether
-  the divergence cards a bigger pool finds are worth chasing ([Q-017](OPEN_QUESTIONS.md)).
+**A claim this ship falsified — carry the lesson.** Three pre-deploy reads all
+returned exactly 30 cards, and "the deck total stays at 30" went into four
+documents. It was a coincidence, not a law: `global_target` is a
+**stop-when-reached threshold** (`if len(new_cards) >= global_target: break`,
+checked *after* an opponent's whole batch is appended), so the deck overshoots by
+up to `max_per_opponent - 1`. The live read returned **34**. All four documents
+corrected. Generalise it: three consistent observations of a round number are not
+evidence of a cap — read the break condition.
 
 **Dead end worth remembering:** raising `v3_pool_size` to 30 — the obvious
-deploy-free mitigation — does rescue all three with divergence cards, but costs
-**26–102 s per pair** against ~2 s at 12. A full 11-opponent deck did not finish
-in 10 minutes. It is not a shippable workaround, and it leaves the ordering
-defect in place. See [G-045](GOTCHAS.md).
+deploy-free mitigation — does rescue the same pairs with divergence cards, but
+costs **26–102 s per pair** against ~2 s at 12; a full 11-opponent deck did not
+finish in 10 minutes. Not shippable, and it leaves the ordering defect in place.
+See [G-045](GOTCHAS.md).
 
-**Commit was deferred by operator instruction until the Sleeper co-owned-rosters
-work deployed** — that landed as [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
-(`main` @ `6158e65`, ADR-012) and the deploy was verified live before committing
-(prod `js/app.js` serves `co_owners`; `backend/sleeper_roster.py` present on
-`origin/main`). This work is now committed on `claude/loving-shtern-12e4b1`.
+**What is live but NOT established — do not claim otherwise:**
+- **Card quality.** Counts are verified in production; nobody has looked at a
+  single rescued card. This is the top open item.
+- **Any league but FFV3.** Every field number, before and after, is from one
+  league. The healthy-board no-regression claim rests on a unit fixture.
+- Whether consensus cards are the right answer for MangoPatti/Bcork, or whether
+  the divergence cards a larger pool finds are worth the complexity ([Q-017](OPEN_QUESTIONS.md)).
 
-**ID renumber already applied.** PR #121 claimed `D-051` and `G-042`/`G-043`/
-`G-044`, which this session had also used. Renumbered against what actually
-landed on `main`: this work is **`D-052`** and **`G-045`**, cross-references
-re-pointed in CHANGELOG, TEST_LEDGER, NEXT, OPEN_QUESTIONS and the scope block.
-`Q-017` never collided (PR #121 added no open questions). Same failure mode as
-the D-049→D-050 race on PR #119/#120 — check ID maxima against `origin/main`,
-not against your own branch.
+**Kill switch:** either flag back to `false` in `config/features.json` — deploy-free.
 
-**`origin/main` merged in** (PR #121, co-owned rosters) — the six living-memory
-conflicts were all insert-at-top and are resolved: this session's entries sit
-above #121's, `DECISIONS.md` runs D-050 → D-051 (theirs) → D-052 (mine), and the
-GOTCHAS index is newest-first while its entry bodies stay ascending.
-
-**FLAGS ARE ON** (operator instruction, 2026-08-15): `trade.pool_calibration` and
-`trade.divergence_fallback` are `true` in `config/features.json` **and** in the
-three fixture mirrors (`release`, `onboarding-v2`, `profiles-on`) that
-`test_seed_ui_test_db` polices — miss a mirror and the suite fails, which is how
-it should be. They go live the moment this branch merges and Render redeploys;
-there is no separate flip step left.
-
-**Still owed:**
-- **Push the branch / open the PR.** Nothing is in production until then.
-- Eyeball the rescued cards. Counts are verified, quality is not.
-- Re-run the field probe on a league that is not FFV3.
-- The worktree/branch sweep per the recovery ledger, once (and only once) the
-  content is verified on `origin/main`.
+**Still owed:** eyeball the rescued cards; run the field probe on a second league;
+sweep this worktree per the recovery ledger (content is now verified on `main`).
 
 ---
 
