@@ -278,6 +278,37 @@ Canonical set: `market` (retuned default — NULL/unknown stored values read as 
 
 ---
 
+## Sleeper roster ownership — the co-owner predicate
+
+Sleeper rosters carry an optional `co_owners` array beside `owner_id`. **One
+predicate, three implementations, and they must not drift:**
+
+```
+a roster belongs to a user  iff  user_id == owner_id  OR  user_id ∈ co_owners
+```
+
+**Locations to change together:** `backend/sleeper_roster.py` (`owns_roster` —
+the reference), `mobile/src/api/sleeper.ts` (`ownsRoster`), `web/js/app.js`
+(`ownsRoster`). The extension does no roster resolution.
+
+**Rules:**
+
+- **A co-owner is an alias, not a team.** The roster's primary `owner_id` is the
+  canonical **league identity** — the key `league_members` rows carry and the id
+  every "is this my team?" comparison uses. See
+  [glossary § League identity](glossary.md) and [ADR-012](adr/adr-012-co-owned-roster-identity.md).
+- **Exclude your own roster by `roster_id`, never by comparing owner ids.**
+  `owner_id !== user_id` is true for a roster you *co-own*, which is how a
+  co-manager's own team ended up in `opponent_rosters` as a trade partner.
+- **An empty/None user id never matches.** An ownerless roster (`owner_id: null`
+  after a manager leaves) must not resolve to a caller with no id.
+- **Co-owner ids are compared as strings**, like `owner_id` everywhere else.
+- **Sleeper only.** ESPN / MFL / Fleaflicker have no co-owner concept; their
+  session-init builders omit `league_user_id` entirely and the backend defaults
+  it to the caller.
+
+---
+
 ## Invite URL format — a two-client contract
 
 The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInviteUrl`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`deepLinks.ts`). Two forms are accepted:

@@ -33,9 +33,51 @@ export interface RosterRow {
   roster_id: number;
   players: string[] | null;
   starters?: string[] | null;
+  /**
+   * Sleeper co-managers. `null` for the (common) sole-owned roster. A
+   * co-owner has full control of the team — see `ownsRoster` below.
+   */
+  co_owners?: string[] | null;
 }
 export async function getLeagueRosters(leagueId: string) {
   return api.get<RosterRow[]>(`/api/sleeper/rosters/${leagueId}`);
+}
+
+// ── Roster → user resolution (co-owner aware) ─────────────────────────────
+// THE predicate, mirrored in backend/sleeper_roster.py and web/js/app.js and
+// listed in docs/cross-client-invariants.md so the three cannot drift:
+//
+//     a roster is yours iff  user_id === owner_id  OR  user_id ∈ co_owners
+//
+// Matching on owner_id alone left a co-owner with no team in that league AND
+// served their own roster back as an opponent. See
+// docs/plans/sleeper-co-owner-rosters/scope.md.
+
+export function ownsRoster(row: RosterRow | null | undefined, userId: string): boolean {
+  if (!row || !userId) return false;
+  if (row.owner_id === userId) return true;
+  return (row.co_owners ?? []).some((c) => String(c) === userId);
+}
+
+/** The roster this user owns or co-owns, or undefined. */
+export function findMyRoster(
+  rows: RosterRow[] | null | undefined,
+  userId: string,
+): RosterRow | undefined {
+  return (rows ?? []).find((r) => ownsRoster(r, userId));
+}
+
+/**
+ * The user's LEAGUE identity: the `owner_id` of the roster they own or
+ * co-own, falling back to their own id when they have no roster here.
+ *
+ * This — not the account id — is what every roster-owner comparison must use
+ * (`rosterByOwner[…]`, "exclude my own team", `league_members` keys), because
+ * a co-owned roster is keyed league-wide on its PRIMARY owner. Identical to
+ * `userId` for a sole owner.
+ */
+export function myOwnerId(rows: RosterRow[] | null | undefined, userId: string): string {
+  return findMyRoster(rows, userId)?.owner_id || userId;
 }
 
 // GET /api/sleeper/league_users/<league_id>

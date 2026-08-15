@@ -3,7 +3,7 @@
 **Date:** 2026-08-15
 **Entry point:** direct ask — field bug found running the real engine against the operator's league FFV3 (`league_id 1312140920132497408`)
 **Builder:** Claude Code session, worktree `loving-shtern-12e4b1`
-**Operator sign-off on waivers:** **needed** — §3 Maestro delta is waived (backend-only, no mobile surface); §5 declares Tier 4. Both flags ship **dark**; flipping them is the operator's call (see §6).
+**Operator sign-off on waivers:** **needed** — §3 Maestro delta is waived (backend-only, no mobile surface); §5 declares Tier 4. Both flags were built dark and **flipped ON by operator instruction on 2026-08-15** after the §6 field verification.
 
 ---
 
@@ -60,10 +60,14 @@ trade partner than one who never ranked at all.
   `backend/tests/fixtures/flags/{release,onboarding-v2,profiles-on}.json`, and
   `docs/config-reference.md`.
 
-  | Flag | Default | Graduation criterion |
+  | Flag | State | Graduation |
   |---|---|---|
-  | `trade.pool_calibration` | **false** | Operator confirms deck quality on FFV3 + one healthy-board league; no latency regression (measured: none — see §3). |
-  | `trade.divergence_fallback` | **false** | Operator accepts that a boarded member may now show `basis:"consensus"` cards. |
+  | `trade.pool_calibration` | **true** — flipped 2026-08-15 | Operator instruction after the §6 field verification. The stated criterion (deck quality confirmed on FFV3 **plus one healthy-board league**) was met only in part: latency is measured clean and FFV3 is verified, but no second league was checked and card *quality* was never reviewed. Graduated on the operator's call with that gap open. |
+  | `trade.divergence_fallback` | **true** — flipped 2026-08-15 | Operator accepted that a boarded member may now show `basis:"consensus"` cards. |
+
+  **Both flags were built dark and flipped ON by explicit operator instruction**,
+  not by agent self-selection. Each remains its own kill switch; setting either
+  back to `false` in `config/features.json` is deploy-free.
 
 - New env vars / `model_config` keys: **none**. Deliberate — see §6 on why
   `v3_pool_size` is *not* the rollback lever.

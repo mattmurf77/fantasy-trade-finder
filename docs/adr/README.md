@@ -43,3 +43,5 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-008 Teardown Remediation Wave (2026-07)](adr-008-teardown-remediation-wave.md)
 - [ADR-009 Rookie Scope as a Post-Elo View Filter (and the Merged-Band Save)](adr-009-rookie-scope-view-filter.md)
 - [ADR-010 User-Asserted Pick Ownership is League-Scoped Truth in `draft_picks`](adr-010-user-asserted-pick-ownership.md)
+- [ADR-011 League State Gets an Append-Only History](adr-011-league-state-history-is-append-only.md)
+- [ADR-012 A Co-Owned Sleeper Roster Has One League Identity: its Primary `owner_id`](adr-012-co-owned-roster-identity.md)
