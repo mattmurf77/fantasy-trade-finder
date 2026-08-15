@@ -9,6 +9,8 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed](#2026-08-15--compressed-board-engine-fixes-flags-on-branch-unpushed)
+- [2026-08-15 — Co-owned roster follow-on](#2026-08-15--co-owned-roster-follow-on)
 - [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
 - [2026-08-13 — Notification inbox follow-ons](#2026-08-13--notification-inbox-follow-ons)
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
@@ -16,6 +18,26 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-15 — Compressed-board engine fixes: flags ON, branch unpushed
+
+Built and field-verified on branch `claude/loving-shtern-12e4b1`; **both flags
+flipped ON by operator instruction 2026-08-15** and `origin/main` merged in, but
+the branch is **unpushed** (see [`HANDOFF.md`](HANDOFF.md), [D-052](DECISIONS.md)).
+
+1. **Push the branch / open the PR.** *(operator)* The flags are already `true` in this branch's `config/features.json`, so they go live the moment this merges and Render redeploys — there is no separate flip step left. Two consequences ride along, both accepted at flip time: boarded members can show `basis:"consensus"` cards, and the 30-card cap means rescued members displace unranked members' consensus cards.
+2. **Eyeball the rescued cards before or right after flipping.** *(S)* Card *counts* are verified; card *quality* is not. Nobody has looked at the five cards MangoPatti and Bcork now produce, and "the deck is no longer empty" is not the same claim as "the deck is good".
+3. **Re-run the field probe on a second league.** *(S)* Every field number is from FFV3. The no-regression claim for healthy boards rests on a unit fixture, not on data from a league that isn't the one the bug was found in.
+4. **[Q-017](OPEN_QUESTIONS.md) — quantile-matching the prune.** *(M, only if #2 says the consensus fallback isn't good enough)* A single scale factor can't undo a nonlinear compression, which is why MangoPatti and Bcork get consensus rather than divergence cards. Don't build it on speculation.
+
+---
+
+## 2026-08-15 — Co-owned roster follow-on
+
+Co-owner support shipped ([ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md)); one deliberate gap was left behind it.
+
+1. **A co-owned team's board and outlook are invisible to its leaguemates.** *(S–M, product call first)* Two tables are keyed `(league_id, ACCOUNT user_id)` while leaguemates read them by the roster's `owner_id`: `member_rankings` (the team's board) and `league_preferences` (its declared outlook, read at [`server.py`](../backend/server.py) `load_league_preference(user_id=m.user_id, …)` under `trade_outlook_infer`). So a co-managed team reads as "no rankings, no declared outlook" to everyone else unless the **primary** owner uses FTF — its suggestions stay pure-consensus and its outlook falls back to roster-shape inference.
+   Re-keying to the league identity is the obvious fix and is **wrong as stated for `member_rankings`**: the same table feeds cross-league Trends aggregation (`load_member_rankings(..., exclude_user_id="")`), so one person's board would be attributed to another person's Sleeper id in community data. `league_preferences` is a softer call but the same question. Decide whether a **team** board/outlook and an **account** board/outlook are the same object before any code moves. Today's behaviour is honest degradation, not corruption — which is why it shipped this way ([ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md)).
 
 ## 2026-08-14 — Year-in-Review capture follow-ons
 

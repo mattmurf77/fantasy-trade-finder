@@ -55,7 +55,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user) |
+| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user). Optional additive body fields `league_user_id` / `league_display_name` carry the caller's **league identity** for co-owned Sleeper rosters — see [League identity](#apisessioninit--league-identity-co-owned-rosters) below |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction. Also deletes the token's durable `sessions` row (W3B; unconditional, so rows from a flag-on period can't outlive a sign-out) |
@@ -103,6 +103,35 @@ Hard-verified regardless of grace: `POST /api/sleeper/link` (carries its own pro
 **Deliberately left open** (documented decisions, not omissions): `/api/trade/values` + `/api/trade/evaluate` Mode A (public calculator by design), `/api/tier-config` (global band table, no user data), `/api/leaderboard` (community content; `is_self` tagging only), `/api/trio` + `/api/skips` (onboarding surface — the trio/skip list doesn't expose the board's ordering), `/api/portfolio` (Sleeper-public roster exposure, no Elo), `/api/leagues`, `/api/league/summary` (counts of the caller's matches, no content), `/api/league/coverage|members|member-unlock-states|activity|contrarian|format-stats` (league-shared aggregates by design), `/api/league/rank-chip` (consensus-basis power rank only — league-shared consensus values, no personal/board data, same class as `/api/league/summary`), `/api/market/movers` (universal-pool consensus value trend — no user/board/league content, same class as `/api/tier-config`; flag `market.movers`), `/api/notifications/prefs` GET (settings toggles, not board content), `/api/session/init` + `/api/session/ping` + `/api/sleeper/link` GET (must work for unverified sessions — they drive the verify prompt itself), `/og/*`, `/s/*`, `/u/*`, `/api/profile/*` (public share surfaces by explicit product design).
 
 **Client contract:** the mobile API client (`mobile/src/api/client.ts`) treats any 403 `verification_required` as a central signal — it flips `useSession.verification` so the existing `VerifyAccountBanner` appears; gated screens' load-error states show "Verify your account to view your data." **Known limitation:** web + extension clients have no verification flow yet, so once an owner verifies on mobile, their own username-only web/extension sessions read-403 until those clients grow a capture path (same asymmetry the write gate already has).
+
+### `/api/session/init` — league identity (co-owned rosters)
+
+Two optional, additive body fields, both defaulting to the caller's own values.
+A client that omits them is byte-identical to pre-2026-08-15 behavior, so old
+binaries are unaffected.
+
+| Field | Meaning |
+|---|---|
+| `league_user_id` | The caller's **league identity**: the `owner_id` of the Sleeper roster they own **or co-own**. Equals `user_id` for a sole owner. |
+| `league_display_name` | That owner's Sleeper display name. |
+
+Sleeper rosters carry an optional `co_owners` array, and a co-owner is an
+**alias** of the roster's primary `owner_id` within that league — never a
+separate team. `league_members` is a league-**shared** table (every member's
+session_init writes into it), so keying the caller's row on `league_user_id` is
+what makes a co-owned roster land on exactly one row whichever co-manager syncs
+it. Keying it on the caller instead gives a 12-team league 13 rows with one
+roster duplicated, and the DB-member merge then hands the trade engine a
+phantom copy of the caller's own team.
+
+The caller's own `user_id` remains their **account identity** and still governs
+everything account-scoped: rankings, swipes, tier overrides, entitlements,
+analytics, notifications, feedback. Server-side the two are read via
+`server._league_user_id(sess)` and `sess["user_id"]` respectively; the
+predicate lives in `backend/sleeper_roster.py` and is mirrored in
+`mobile/src/api/sleeper.ts` + `web/js/app.js`. Sleeper only — ESPN / MFL /
+Fleaflicker have no co-owner concept and their builders omit both fields.
+Background: `docs/plans/sleeper-co-owner-rosters/scope.md`.
 
 `/api/session/init` response — additive field:
 

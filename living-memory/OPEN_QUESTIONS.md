@@ -7,11 +7,24 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
 - [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
 - [2026-06-07 — Open Items (perf-optimization)](#2026-06-07--open-items-perf-optimization)
 - [2026-05-21 — Open Items](#2026-05-21--open-items)
 - [Closed Questions (kept for cross-reference)](#closed-questions-kept-for-cross-reference)
 - [Conventions](#conventions)
+
+---
+
+## 2026-08-15 — Open Items (compressed-board pool prune)
+
+### Q-017 — Should the pool prune quantile-match the two boards instead of rescaling them?
+- **Why it matters:** `trade.pool_calibration` ([D-052](DECISIONS.md)) removes a board-wide *offset* with a single multiplicative factor. That is exactly right for the pathological case it was built for, and it is enough to rescue gdubs10 (0 → 5 divergence cards on real prod boards). It is **not** enough for MangoPatti or Bcork, which still yield zero divergence cards and are only covered by the consensus fallback. The reason is structural: a floor-pinned board is closer to `value_u^a` (a < 1) than to `c · value_u`, and no single factor undoes an exponent. Those two members therefore get generic fair-value ideas where a large-enough pool finds real divergence trades (`v3_pool_size = 30` produces 5 divergence cards for each — at 26–102 s per pair, which is why it isn't the fix).
+- **The candidate:** map each opponent Elo to its percentile on the opponent's own board, read the user board's Elo at that same percentile, and difference in the user's value space (histogram/quantile matching). Scale-invariant, order-sensitive, magnitude-preserving in one consistent space — strictly more general than the current factor, which it reduces to when the boards differ only by an offset.
+- **Why it isn't built:** materially more machinery in a hot path (per-pair sorts of both boards), and it would want its own golden-deck comparison on healthy leagues before anyone trusts it. Not worth building until the operator has run the shipped fix and decided whether "MangoPatti gets consensus cards" is actually a problem in the product.
+- **Needed to close:** an operator call on whether divergence cards for heavily-compressed boards are worth the complexity, ideally after `trade.pool_calibration` + `trade.divergence_fallback` have been live long enough to judge the consensus fallback in practice.
+- **Owner:** operator (product call), then a backend session.
+- **Status:** OPEN — not blocking; the shipped fix already removes the zero-card cliff.
 
 ---
 

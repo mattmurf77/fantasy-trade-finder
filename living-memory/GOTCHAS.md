@@ -11,6 +11,10 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-045 | A whole league-mate silently missing from the deck, not just their cards | Backend / trade engine / pool prune |
+| G-044 | A killed `sim-run.sh` leaves Flask on :5001; the next run aborts stale | Mobile / test harness / Flask |
+| G-043 | `sim-build.sh` fails at the JS bundle phase on a symlinked `node_modules` | Mobile / build / Metro resolver |
+| G-042 | The local Maestro sim gate cannot run at all: no `JAVA_HOME` | Mobile / test harness / Maestro |
 | G-041 | Catching IntegrityError by unique-index name never matches on SQLite | Backend / SQLAlchemy / dialects |
 | G-040 | begin_nested() on the main engine silently COMMITS on SQLite | Backend / SQLAlchemy / dialects |
 | G-039 | EAS build dies at Bundle JavaScript on a module that exists locally | Build / EAS / .easignore |
@@ -352,3 +356,32 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Scope:** `invite_shared`, `invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`, `outlook_strip_toggled` — every event carrying `league_id` as a string prop.
 - **Fix:** not applied. Narrowing the regex weakens a real PII guard, and the honest alternatives (hash the id, or exempt a named prop key) are a decision the operator has not been asked. Pinned as behaviour by `test_p1_t1_league_id_is_redacted_by_the_pii_scrubber` so it cannot be rediscovered as a mystery, and recorded in the tracking plan so nobody plans a per-league metric on top of it.
 - **Prevention:** a value-shape PII regex silently redacts any identifier that happens to share the shape. When registering a prop that carries a platform id, post a realistic value through `POST /api/events` and read it back out of `user_events` — asserting the *key* survived is not enough. This is G-031's lesson one layer deeper: name survival, prop survival, and **value** survival are three separate silent failures.
+
+
+### G-042 — the local Maestro sim gate cannot run at all on this machine: no `JAVA_HOME`
+- **Symptom:** every `sim-run.sh --flow …` returns **exit 1 (flow failure)** with `The operation couldn't be completed. Unable to locate a Java Runtime.` plus `/opt/homebrew/bin/maestro: line 251: [: : integer expression expected`. Exit 1 is the code for *a flow assertion failed*, so it reads as "the app is broken" when in fact **no flow ever ran**. Costs a full Release build (~45 min) before you see it.
+- **Cause:** maestro is a JVM app. Homebrew `openjdk` **is installed** (26.0.2, `/opt/homebrew/opt/openjdk`) but is **not linked** into `/usr/libexec/java_home`, and `JAVA_HOME` is unset, so `java` resolves to the macOS stub at `/usr/bin/java` that only prints the "install Java" dialog. `which java` succeeds, which makes this look fine on inspection.
+- **Fix:** `export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home` (and put `$JAVA_HOME/bin` first on `PATH`) before invoking `sim-run.sh` / `screen-capture.sh`. Verify with `java -version` printing `openjdk version "26…"`, **not** the install dialog.
+- **Prevention:** `sim-run.sh` should preflight `java -version` and exit **2 (infra)** rather than letting maestro's failure surface as **1 (flow failure)** — an infra fault wearing a flow fault's exit code is exactly the class of thing that gets misread as a product regression. Not applied here (out of scope for the change that found it).
+- **History:** found 2026-08-15 running the tier-2 gate for the co-owner fix ([TEST_LEDGER](TEST_LEDGER.md)). Fits the last several ledger entries recording the sim gate as not-run or waived — plausibly nobody could run it locally.
+
+### G-043 — `sim-build.sh` fails at the JS bundle phase when `mobile/node_modules` is a symlink
+- **Symptom:** after ~30 minutes of Pods compilation, `** BUILD FAILED **` in the `Bundle React Native code and images` phase with `Error: Cannot find module 'metro-runtime/package.json'`, and a require stack pointing at **another checkout's** `node_modules`.
+- **Cause:** borrowing a sibling checkout's install (`ln -s …/mobile/node_modules`) to skip an `npm ci`. Node resolves the symlink's **realpath**, so `@expo/cli` walks up from the *other* tree, where `metro-runtime` is only present as a nested dep and is never reachable from that position.
+- **Fix:** a real `npm ci` in the worktree. Verify before rebuilding: `node node_modules/expo/node_modules/@expo/cli/build/bin/cli export:embed --entry-file ./index.ts --platform ios --dev false --bundle-output /tmp/t.jsbundle --assets-dest /tmp/a` should bundle in seconds.
+- **Prevention:** never symlink `node_modules` into a worktree for a **build**. It is fine for `tsc --noEmit` and the `check-*.js` suites (both passed against the symlink). The failure is specific to Metro's resolver, and it surfaces at the very end of the build — the most expensive possible place.
+- **History:** found 2026-08-15 alongside [G-042](#g-042--the-local-maestro-sim-gate-cannot-run-at-all-on-this-machine-no-java_home).
+
+### G-044 — a killed `sim-run.sh` leaves Flask holding :5001 and the next run aborts
+- **Symptom:** `INFRA: whoami mismatch` / `AssertionError: STALE FLASK: whoami pid <a> != started pid <b> — another instance holds the port`, exit **2**.
+- **Cause:** `sim-run.sh` starts a test-mode Flask on :5001 and stops it on exit. Kill the parent (Ctrl-C, `pkill` on a wrapper script) and the Flask child survives and keeps the port; the next run's whoami handshake correctly refuses to talk to someone else's server.
+- **Fix:** `lsof -ti:5001 | xargs kill -9` before re-running.
+- **Prevention:** the guard is working as designed — it is a rail, not a bug. Just know that "another instance holds the port" means *your own orphan*, not a second developer.
+
+### G-045 — a whole league-mate silently missing from the deck, not just their cards
+- **Symptom:** a boarded opponent produces **zero** trade cards at any per-opponent budget while obviously good trades exist against them — and raising the budget, loosening fairness, or checking the surplus gate all change nothing. Three of four boarded members in the operator's own league were in this state.
+- **Cause (two, stacked):** (1) `trade_optimizer`'s candidate-pool prune ranks by the RAW divergence `_vo - _uv`, and `elo_to_value` is **exponential** — so an opponent board pinned near the 1200 floor deflates a stud by thousands of value points and a bench body by tens. Every tradeable stud sorts BELOW the user's junk and the top-`v3_pool_size` pool fills with worthless assets. (2) `trade_service`'s boarded/unboarded branch was `if/else` with **no fall-through**, so the zero result got no consensus fallback either and the member disappeared from the deck entirely.
+- **How to recognise it fast:** compare the two boards' **medians**, not their maxima. The broken boards' maxima looked healthy (1800–1839); it was the median (1201 vs 1379) that gave it away. A board whose median sits at the floor is a "started ranking and stopped" board, and any engine step comparing two boards by a raw *value difference* is distorted by it.
+- **Prevention:** when an engine step compares two personal boards, ask whether its output is invariant to a board-wide scale offset — an offset carries **zero** information about who either side prefers, so if the answer is no, that step has this bug. Fixed behind `trade.pool_calibration` / `trade.divergence_fallback` (see [D-052](DECISIONS.md)); the paired flag-off tests in `backend/tests/test_compressed_board.py` pin both the defect and the fix.
+- **Not the lever it looks like:** `v3_pool_size` is a `model_config` knob and raising it to 30 does rescue these pairs — at **26–102 s per pair** against ~2 s at 12. Enumeration is cubic-ish in pool size on both sides; it is not a shippable mitigation.
+

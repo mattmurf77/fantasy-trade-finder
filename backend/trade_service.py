@@ -3014,6 +3014,30 @@ class TradeService:
                     alpha_opp = outlook_alpha(resolved)
                 match_ctx["opponent_outlook"] = {"value": resolved, "source": source}
 
+            # Consensus-basis arguments, shared by the never-ranked path
+            # below and the zero-divergence fallback inside the boarded path.
+            _consensus_kw = dict(
+                user_id              = user_id,
+                opponent             = member,
+                league_id            = league_id,
+                seed_value           = _vs,
+                shrunk_user_elo      = shrunk_elo,
+                user_roster          = user_roster,
+                max_cards            = max_per_opponent,
+                fairness_threshold   = fairness_threshold,
+                user_profile         = user_profile,
+                opp_profile          = opp_profile,
+                acquire_positions    = acquire_positions or [],
+                trade_away_positions = trade_away_positions or [],
+                pinned_give_players  = pinned_give_players,
+                pinned_receive_players = pinned_receive_players,
+                pinned_give_mode     = pinned_give_mode,
+                untouchable_ids      = untouchable_ids,
+                target_ids           = target_ids,
+                not_interested_ids   = not_interested_ids,
+                raw_user_elo         = user_elo,
+            )
+
             if member.has_rankings and member.elo_ratings:
                 if FLAGS.trade_engine_v3:
                     # Tier 3 — exact top-K package construction within pruned
@@ -3072,28 +3096,20 @@ class TradeService:
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
                     )
+                # 2026-08-15 field bug (docs/plans/compressed-board-pool/) —
+                # a boarded member whose divergence path yields nothing used
+                # to fall off the deck entirely, because this branch was an
+                # if/else with no fall-through. That made a leaguemate who
+                # ranked a little a WORSE trade partner than one who never
+                # ranked at all. Fall back to the same consensus generator
+                # the never-ranked path uses; cards stay labeled
+                # basis="consensus" so the client can tell them apart. Only
+                # fires when the divergence path returned zero cards, so a
+                # member who already produces cards is untouched.
+                if not cards and FLAGS.trade_divergence_fallback:
+                    cards = self._generate_consensus_for_pair(**_consensus_kw)
             else:
-                cards = self._generate_consensus_for_pair(
-                    user_id              = user_id,
-                    opponent             = member,
-                    league_id            = league_id,
-                    seed_value           = _vs,
-                    shrunk_user_elo      = shrunk_elo,
-                    user_roster          = user_roster,
-                    max_cards            = max_per_opponent,
-                    fairness_threshold   = fairness_threshold,
-                    user_profile         = user_profile,
-                    opp_profile          = opp_profile,
-                    acquire_positions    = acquire_positions or [],
-                    trade_away_positions = trade_away_positions or [],
-                    pinned_give_players  = pinned_give_players,
-                    pinned_receive_players = pinned_receive_players,
-                    pinned_give_mode     = pinned_give_mode,
-                    untouchable_ids      = untouchable_ids,
-                    target_ids           = target_ids,
-                    not_interested_ids   = not_interested_ids,
-                    raw_user_elo         = user_elo,
-                )
+                cards = self._generate_consensus_for_pair(**_consensus_kw)
             # FB-47 — stamp partner fit and blend it into the composite:
             # strongly on consensus cards (no divergence signal there),
             # tiebreak-strength on divergence cards. Flag off / no targets

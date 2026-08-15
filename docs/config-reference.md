@@ -14,6 +14,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Trade engine flags (Tier 3, flag-gated — landing imminently, default **false**)](#flags-trade-engine-flags-tier-3-flag-gated-landing-imminently-default-false)
 - [Flags — Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)](#flags-owned-draft-picks-in-calculator-suggestions-158170171-ship-dark)
 - [Flags — Directional outlook weighting (feedback #175 — ships dark)](#flags-directional-outlook-weighting-feedback-175-ships-dark)
+- [Flags — Compressed-board trade generation (2026-08-15 field bug — LIVE)](#flags-compressed-board-trade-generation-2026-08-15-field-bug-live)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
 - [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
@@ -143,6 +144,23 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | Flag | Default | Gates |
 |---|---|---|
 | `trade.outlook_direction` | false | **#175** — steers the deck by the USER's resolved outlook (declared `team_outlook` → #8 seed → None), via `outlook_direction_mult` applied in `_generate_trades_v2` AFTER all gates to every v2-orchestrated card (divergence v2/v3 + consensus). Reuses the lane machinery: the card's value-weighted now-lean shift (received − given, `classify_lane`'s exact shift, on CONSENSUS values). Rebuild-side (`rebuilder`/`jets`): shift > 0 (acquiring win-now/older production) ⇒ composite `×= max(0.05, 1 − outlook_dir_penalty·shift)`; shift < 0 (acquiring future capital — younger players, picks) ⇒ `×= 1 + outlook_dir_boost·(−shift)`. Plus the **~1-year-gap rule**: primary (highest-consensus-value) give is a player and the primary return is an older player beyond `outlook_dir_age_tolerance` years, with no pick / tolerance-younger return component worth ≥ `outlook_dir_rescue_frac` of the primary give ⇒ `×= outlook_dir_age_gap_mult` (**near-exclusion by penalty, not a hard filter** — a genuinely lopsided-value win can still surface). Contend-side (`championship`/`contender`): ONLY the mild symmetric mirror `×= 1 + outlook_dir_contend_weight·shift`, no age-gap rule. `not_sure`/None ⇒ no effect. Cards carry the in-process `outlook_dir` multiplier (QA record, not serialized). Off ⇒ composites byte-identical. `model_config` keys: `outlook_dir_penalty` (3.0), `outlook_dir_boost` (1.0), `outlook_dir_contend_weight` (0.5), `outlook_dir_age_tolerance` (1.0), `outlook_dir_age_gap_mult` (0.15), `outlook_dir_rescue_frac` (0.5). |
+
+## Flags — Compressed-board trade generation (2026-08-15 field bug — LIVE)
+
+Both flags address one field report on the operator's real league FFV3: three of
+four **boarded** leaguemates produced zero trade cards at any per-opponent budget
+while mutually positive trades demonstrably existed. Two independent defects, one
+flag each. Full write-up + measured before/after: `docs/plans/compressed-board-pool/scope.md`.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.pool_calibration` | **true** (flipped by operator 2026-08-15) | The v3 candidate-pool prune (`trade_optimizer.generate_pair_trades_v3`) ranks each side's assets by the raw divergence `_vo(p) - _uv(p)` and keeps the top `v3_pool_size` (12). Because `elo_to_value` is **exponential**, an opponent board sitting uniformly lower than the user's — a floor-pinned, barely-started board (the three broken boards had median Elo 1201 against the user's shrunk board) — deflates high-Elo players far more than low-Elo ones: a stud loses thousands of value points, a bench body loses tens. Every tradeable stud therefore sorts BELOW the user's worthless bench, the pool fills with junk, and the pair yields nothing. ON ⇒ the opponent's value space is rescaled by the **geometric-mean ratio over the assets in play** (the same players priced on both boards, so no roster-strength confound; equivalent to shifting the opponent's board onto the user board's mean Elo) before differencing, making the pool **order** exactly invariant to a board-wide offset — a difference that carries zero information about which player either side prefers. **Prune ordering ONLY**: every surplus, fairness and composite number still uses each side's own raw value space, untouched. Computed from the `_uv`/`_vo` accessors, so the #1 outlook blend is included automatically. Boards already on the same scale ⇒ factor ≈ 1 ⇒ deck unchanged. OFF ⇒ pool byte-identical to today. No new `model_config` key. **Note:** raising `v3_pool_size` is *not* an equivalent mitigation — at 30 it rescues the same pairs but costs 26–102 s per pair against ~2 s at 12 (enumeration is cubic-ish in pool size on both sides). |
+| `trade.divergence_fallback` | **true** (flipped by operator 2026-08-15) | `_generate_trades_v2`'s boarded/unboarded branch was `if member.has_rankings: <divergence> else: <consensus>` with **no fall-through**, so a boarded member whose divergence path returned zero cards got no consensus fallback either and vanished from the deck entirely — ranking a little made a leaguemate a *worse* trade partner than never ranking at all. ON ⇒ when the divergence path (v3 or v2) returns an empty list for a boarded member, the same `_generate_consensus_for_pair` the never-ranked path uses runs for that pair. Cards stay labeled `basis:"consensus"`, so `basis:"consensus"` on a `has_rankings=true` member is the new-but-already-instrumented combination to watch. Strictly additive: fires only on an empty result, so a member already producing cards is untouched. OFF ⇒ the zero-card cliff remains. |
+
+**Deck-size note (both flags):** the deck cap is `global_target = max(30, max_per_opponent * 6)`
+and boarded members are visited first by design, so rescuing boarded members
+**displaces** consensus cards from unranked members rather than growing the deck.
+Composition shifts toward real counterparties; total stays at the cap.
 
 ## Flags — Send in Sleeper (flagged beta)
 

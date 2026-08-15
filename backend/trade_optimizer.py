@@ -15,7 +15,9 @@ v2 composite objective **within the pruned candidate pools** (top
 give players). Every give-subset (size 1-3) x receive-subset (size 1-3)
 with |give| - |receive| <= 1 inside those pools is evaluated — no time
 budget, no enumeration-order truncation. The only approximation left is
-the pool prune itself.
+the pool prune itself. Under flag ``trade.pool_calibration`` that prune
+ranks on a board-scale-calibrated divergence so a compressed opponent
+board cannot push the user's studs out of the pool (see the prune block).
 
 The objective is intentionally IDENTICAL to the v2 scorer
 (trade_service._generate_for_pair_v2): same value space, same marginal
@@ -40,6 +42,7 @@ nothing added to trade_service._DEFAULT_CFG):
 
 from __future__ import annotations
 
+import math
 import uuid
 from itertools import combinations
 
@@ -351,14 +354,49 @@ def generate_pair_trades_v3(
     known_opp = [p for p in opponent.roster
                  if p in shrunk_user_elo and p in opp_elo
                  and not (not_interested_ids and p in not_interested_ids)]
-    give_pool = sorted(known_user, key=lambda p: _vo(p) - _uv(p),
-                       reverse=True)[:POOL_P]
+    # Board-scale calibration for the prune ONLY (flag trade.pool_calibration
+    # — field bug 2026-08-15, docs/plans/compressed-board-pool/scope.md).
+    # The raw key ``_vo - _uv`` is not invariant to a board-wide scale
+    # difference: elo_to_value is exponential, so an opponent board sitting
+    # uniformly lower than the user's (a floor-pinned, barely-started board)
+    # deflates high-Elo players far more than low-Elo ones. Every tradeable
+    # stud then sorts BELOW the user's worthless bench, the top-POOL_P fills
+    # with junk, and the pair yields no cards at all. That deflation says
+    # nothing about WHICH player either side prefers, so remove it: rescale
+    # the opponent's value space by the geometric-mean ratio over the assets
+    # in play — the same players priced on both boards, so no roster-strength
+    # confound. Equivalent to shifting the opponent's board onto the user
+    # board's mean Elo. Ordering becomes exactly invariant to a board offset
+    # and is unchanged when the two boards already share a mean.
+    #
+    # Computed from the _uv/_vo accessors (not the raw Elo dicts) so it stays
+    # consistent with whatever those actually return, including the #1
+    # outlook blend baked into _vo. Prune ordering only: every surplus,
+    # fairness and composite number below still uses each side's own raw
+    # value space, untouched.
+    _pool_scale = 1.0
+    if FLAGS.trade_pool_calibration:
+        _logs = [(math.log(u), math.log(o)) for u, o in
+                 ((_uv(p), _vo(p)) for p in sorted(set(known_user) | set(known_opp)))
+                 if u > 0.0 and o > 0.0]
+        if _logs:
+            _pool_scale = math.exp(
+                (sum(lu for lu, _ in _logs) - sum(lo for _, lo in _logs))
+                / len(_logs))
+
+    def _div(pid: str) -> float:
+        """Give-side prune key: how much more the opponent values ``pid``
+        than the user does, on a calibrated board scale. Receive side is the
+        exact negation. Flag off ⇒ _pool_scale is 1.0 and this is the
+        historical ``_vo - _uv``."""
+        return _vo(pid) * _pool_scale - _uv(pid)
+
+    give_pool = sorted(known_user, key=_div, reverse=True)[:POOL_P]
     if pinned_set:
         for pid in user_roster:
             if pid in pinned_set and pid not in give_pool:
                 give_pool.append(pid)
-    recv_pool = sorted(known_opp, key=lambda p: _uv(p) - _vo(p),
-                       reverse=True)[:POOL_P]
+    recv_pool = sorted(known_opp, key=lambda p: -_div(p), reverse=True)[:POOL_P]
     # FB-47 — pinned acquire targets always survive the prune, mirroring
     # the pinned-give rule above.
     if pinned_recv_set:

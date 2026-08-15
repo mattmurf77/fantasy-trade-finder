@@ -10,6 +10,8 @@
 
 ## Table of Contents
 - [2026-08-15 — Trade-card narrative said the wrong position; fixed on branch, NOT shipped](#2026-08-15--trade-card-narrative-said-the-wrong-position-fixed-on-branch-not-shipped)
+- [2026-08-15 — Compressed-board engine fixes committed, flags ON, branch unpushed](#2026-08-15--compressed-board-engine-fixes-committed-flags-on-branch-unpushed)
+- [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)
 - [2026-08-14 — Deck-outcome ownership validation SHIPPED (PR #119)](#2026-08-14--deck-outcome-ownership-validation-shipped-pr-119)
 - [2026-08-14 — Year-in-Review P0 roster capture built on `feat/roster-history` (worktree)](#2026-08-14--year-in-review-p0-roster-capture-built-on-featroster-history-worktree) — SHIPPED (PR #120), capture live
 - [2026-08-14 — Dropped-emitter backlog SHIPPED (PR #116); G-031 backlog zeroed](#2026-08-14--dropped-emitter-backlog-shipped-pr-116-g-031-backlog-zeroed)
@@ -45,7 +47,7 @@ call because `main` auto-deploys.
   received player *whose own position* is in the candidate set; each branch
   prints that player's own position. Nothing fits → neutral fairness sentence
   rather than an invented benefit. The `fit_premium` branch's `needs[0]`
-  fallback (same hazard) is gone. → [D-051](DECISIONS.md)
+  fallback (same hazard) is gone. → [D-053](DECISIONS.md)
 - `backend/tests/test_trade_narrative.py` 5 → 12 tests; 5 of the 7 new ones
   fail against the pre-fix module (verified by stashing the fix).
 - Full backend suite: 2769 passed, 1 skipped. Sim gate tier 4 (backend-only).
@@ -59,6 +61,175 @@ Operator ship call → PR + merge to `main`, then CHANGELOG entry. Not re-run
 against the four real leagues (needs live Sleeper data; local dev DB has no
 stored cards) — worth a post-ship spot check that the neutral fallback rate
 looks sane.
+
+---
+
+## 2026-08-15 — Compressed-board engine fixes committed, flags ON, branch unpushed
+
+**Where things stand.** A field bug in trade generation is diagnosed, fixed,
+measured against real prod boards, committed, and **both flags are ON** — but the
+branch is **unpushed**, so none of it is in production yet. Branch
+`claude/loving-shtern-12e4b1` in worktree `.claude/worktrees/loving-shtern-12e4b1`,
+now merged up to `origin/main` (PR #121). **Push before removing this worktree** —
+it holds the only copy of the work.
+
+**The bug.** Three of four *boarded* opponents in the operator's league FFV3
+produced zero trade cards at any budget. Two stacked defects, one flag each:
+
+- `trade.pool_calibration` — `trade_optimizer`'s pool prune ranked by the raw
+  divergence `_vo - _uv`; `elo_to_value` is exponential, so a floor-pinned
+  opponent board (median Elo 1201 vs the healthy member's 1379) deflates studs by
+  thousands and bench bodies by tens, sorting every tradeable stud **below** the
+  user's junk. Fix rescales the opponent's value space by the geometric-mean
+  ratio over the assets in play. Prune ordering only.
+- `trade.divergence_fallback` — the boarded/unboarded branch was `if/else` with
+  no fall-through, so a zero-yield boarded member vanished from the deck. Fix
+  falls back to the consensus generator.
+
+**Field-verified read-only against prod** (`DATABASE_URL=$DATABASE_URL_PROD`,
+SELECT-only). At the production `v3_pool_size=12`: calibration alone takes
+gdubs10 0 → 5 divergence cards; both flags take MangoPatti and Bcork 0 → 5
+consensus; jonbonjourvi (healthy board) unchanged at 5.
+
+**The one thing to do next: decide whether to flip the flags.** Everything else
+is downstream of that. Two consequences to accept first — boarded members can now
+carry `basis:"consensus"` cards, and because the deck caps at 30 with boarded
+members visited first, rescuing them **displaces** consensus cards from unranked
+members. Composition improves; size doesn't change.
+
+**What is NOT established, and should not be claimed:**
+- **Card quality.** Counts are verified; nobody has looked at the rescued cards.
+- **Any league but FFV3.** The healthy-board no-regression claim rests on a unit
+  fixture, not field data.
+- Whether consensus cards are the right answer for MangoPatti/Bcork, or whether
+  the divergence cards a bigger pool finds are worth chasing ([Q-017](OPEN_QUESTIONS.md)).
+
+**Dead end worth remembering:** raising `v3_pool_size` to 30 — the obvious
+deploy-free mitigation — does rescue all three with divergence cards, but costs
+**26–102 s per pair** against ~2 s at 12. A full 11-opponent deck did not finish
+in 10 minutes. It is not a shippable workaround, and it leaves the ordering
+defect in place. See [G-045](GOTCHAS.md).
+
+**Commit was deferred by operator instruction until the Sleeper co-owned-rosters
+work deployed** — that landed as [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+(`main` @ `6158e65`, ADR-012) and the deploy was verified live before committing
+(prod `js/app.js` serves `co_owners`; `backend/sleeper_roster.py` present on
+`origin/main`). This work is now committed on `claude/loving-shtern-12e4b1`.
+
+**ID renumber already applied.** PR #121 claimed `D-051` and `G-042`/`G-043`/
+`G-044`, which this session had also used. Renumbered against what actually
+landed on `main`: this work is **`D-052`** and **`G-045`**, cross-references
+re-pointed in CHANGELOG, TEST_LEDGER, NEXT, OPEN_QUESTIONS and the scope block.
+`Q-017` never collided (PR #121 added no open questions). Same failure mode as
+the D-049→D-050 race on PR #119/#120 — check ID maxima against `origin/main`,
+not against your own branch.
+
+**`origin/main` merged in** (PR #121, co-owned rosters) — the six living-memory
+conflicts were all insert-at-top and are resolved: this session's entries sit
+above #121's, `DECISIONS.md` runs D-050 → D-051 (theirs) → D-052 (mine), and the
+GOTCHAS index is newest-first while its entry bodies stay ascending.
+
+**FLAGS ARE ON** (operator instruction, 2026-08-15): `trade.pool_calibration` and
+`trade.divergence_fallback` are `true` in `config/features.json` **and** in the
+three fixture mirrors (`release`, `onboarding-v2`, `profiles-on`) that
+`test_seed_ui_test_db` polices — miss a mirror and the suite fails, which is how
+it should be. They go live the moment this branch merges and Render redeploys;
+there is no separate flip step left.
+
+**Still owed:**
+- **Push the branch / open the PR.** Nothing is in production until then.
+- Eyeball the rescued cards. Counts are verified, quality is not.
+- Re-run the field probe on a league that is not FFV3.
+- The worktree/branch sweep per the recovery ledger, once (and only once) the
+  content is verified on `origin/main`.
+
+---
+
+## 2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build
+
+### Where I am right now
+
+**SHIPPED.** Squash [PR #121](https://github.com/mattmurf77/fantasy-trade-finder/pull/121)
+→ `main` @ `6158e65` (2026-08-15T17:20:03Z), all three CI checks green.
+**Deploy confirmed live**: prod `/js/app.js` serves the new `ownsRoster`
+predicate, `/api/tier-config` 200, and the rosters proxy returns roster 3's
+`co_owners` intact.
+
+**⚠️ Only two thirds of the fix is actually live.** The backend and the WEB
+client ship with the Render deploy. The MOBILE fix lives in the app binary —
+the "which roster is mine" resolution is client-side — so **a co-owner on the
+current TestFlight build still sees the bug until the next EAS build ships**.
+That build is the remaining work on this item.
+
+FTF had never read Sleeper's `co_owners`, so the operator's own co-managed
+league (roster 3 of `1338231586314780672`) resolved to no team — and posted his
+own roster back as a leaguemate for the engine to trade against. Fixed by making
+a co-owner an **alias** of the roster's primary `owner_id`, and giving every
+session two identities: ACCOUNT (`sess["user_id"]`) and LEAGUE
+(`_league_user_id()`). Identical for a sole owner. Full reasoning — including
+why the one-line client fix is *worse* than the bug — in
+[ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md) / [D-051](DECISIONS.md);
+scope block `docs/plans/sleeper-co-owner-rosters/scope.md`.
+
+### What's verified
+
+- Backend suite **2796 passed / 1 skipped**; `tsc --noEmit` clean; testid-lint OK;
+  all 24 mobile structural suites green. See [TEST_LEDGER.md](TEST_LEDGER.md).
+- `test_co_owner_rosters.py` (33 tests) is a **proven** regression test: narrowing
+  the predicate back to `owner_id` alone fails 7 of them.
+
+### Sim gate
+
+Tier 2 **was run** (build succeeded; `FTF-iOS18`): `01-signin` and
+`05-trades-render` pass; `02-league-pick` and `06-trades-deck` fail on **stale
+assertions**, with failure screenshots proving the app healthy in both (correct
+league + populated board; a real generated trade card vs `@qa_opp_ranked`).
+`qa/sim-runs/last-sim-run.json` records **`result: "fail"` deliberately**, so
+`githooks/pre-push` blocks and the push is a conscious operator decision.
+Neither failing flow was re-run against `origin/main` — see the ledger for the
+limits of the "pre-existing" claim.
+
+Three pre-existing harness defects found: [G-042](GOTCHAS.md) (maestro has no
+`JAVA_HOME` on this machine — **no local sim gate could run at all**, which
+likely explains several sessions of not-run/waived gates), G-043 (symlinked
+`node_modules` breaks the bundle phase), G-044 (orphaned Flask on :5001).
+
+### Next action
+
+1. **EAS build → TestFlight.** Until then the mobile half is dark; the operator's
+   own co-managed league still looks broken *in the app* even though `main` has
+   the fix. This is the only thing standing between the merge and the reported
+   symptom going away.
+2. **Then verify on the real league** — the whole point. Open Bush League
+   (`1338231586314780672`): roster 3's 19 players should be *your* team, League
+   rankings should show 12 teams with the "You" badge on Manager 3's row, and the
+   acquire pool must not contain your own players.
+3. **Worktree removal.** The branch is ledgered
+   ([recovery](../docs/recovery/2026-08-15-co-owner-rosters-sweep.md), tip
+   `e060d59`) and content-verified against `origin/main` (empty diff — this repo
+   squash-merges, so ahead-counts are not evidence). `git worktree remove` is the
+   one step left; it could not run from inside the worktree itself.
+
+### The gate that was overridden, on the record
+
+`qa/sim-runs/last-sim-run.json` records `result: "fail"` — set deliberately
+because 2 of 4 sim flows failed. Both failures are stale assertions with
+screenshots showing a healthy app, but **neither was re-run against `main`**, so
+"pre-existing" is an inference, not a measurement. `githooks/pre-push` only fires
+on a direct push to `main`, so the PR route went around it. The operator said
+"push live" with that stated; recorded here so the override is not invisible.
+
+### Watch items
+
+- **`member_rankings` is deliberately untouched** — a co-owned team's board still
+  reaches leaguemates only if the *primary* owner uses FTF. Logged in
+  [NEXT.md](NEXT.md); needs a product call, not a code change, first.
+- **Worktree hygiene:** to run the sim build this worktree gained a real
+  `mobile/node_modules` (`npm ci` — a symlink to the main checkout does NOT work,
+  [G-043](GOTCHAS.md)) plus **copied** `mobile/ios/Pods` and
+  `mobile/ios/build/generated` from the main checkout (lockfiles verified
+  identical first). All gitignored; they go away with the worktree — sweep it
+  per the recovery-ledger procedure once the branch is verified on `origin/main`.
 
 ---
 

@@ -678,6 +678,33 @@ FLAG_KEYS: tuple[str, ...] = (
     # writes, zero overhead beyond the flag check, byte-identical responses
     # (the hooks/wrappers no-op before doing any work).
     "obs.api_events",
+    # ── Compressed-board trade generation (field bug, 2026-08-15) ─────────
+    # docs/plans/compressed-board-pool/scope.md. Both keys address the same
+    # field report: three of four boarded leaguemates in the operator's real
+    # league (FFV3) produced ZERO trade cards at any budget while mutually
+    # positive trades demonstrably existed.
+    #
+    # trade.pool_calibration — trade_optimizer's candidate-pool prune ranks
+    # assets by the raw divergence `_vo - _uv`. elo_to_value is exponential,
+    # so an opponent board that sits uniformly LOWER than the user's (a
+    # floor-pinned, barely-started board: those three had median Elo ~1220
+    # against the consensus 1347) deflates high-Elo players far more than
+    # low-Elo ones, and every tradeable stud sorts to the BOTTOM of the key.
+    # ON = the opponent's board is shifted onto the user board's mean before
+    # differencing, making the pool ORDER invariant to a board-wide scale
+    # offset that carries no preference information. Pool ordering only —
+    # surplus/fairness math keeps each side's own raw value space. OFF
+    # (default) = the pool is byte-identical to today.
+    "trade.pool_calibration",
+    # trade.divergence_fallback — a member WITH rankings whose divergence
+    # path yields zero cards currently gets no consensus fallback either
+    # (the branch is if/else, not fall-through), so they vanish from the
+    # deck entirely: ranking a little makes you a WORSE trade partner than
+    # never ranking at all. ON = the consensus generator runs for a boarded
+    # member when the divergence path returns nothing, so no counterparty is
+    # ever silently dropped. Cards stay labeled basis="consensus". OFF
+    # (default) = boarded members keep the zero-card cliff.
+    "trade.divergence_fallback",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
