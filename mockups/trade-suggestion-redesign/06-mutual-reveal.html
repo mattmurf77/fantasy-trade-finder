@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 · Mutual-Interest Reveal — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --rb:#22C55E; --wr:#3B82F6;
+  --tier-second:#38bdf8; --tier-third:#f472b6;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --shadow-sheet:0 12px 32px rgba(0,0,0,.55);
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.heading{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden;position:relative}
+.screen{padding:14px 14px 24px;min-height:692px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.btn{height:40px;padding:0 16px;border-radius:var(--r-sm);font:600 14px var(--f-ui);cursor:pointer;background:transparent;color:var(--chalk);border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-primary{background:var(--ice);color:var(--on-ice);border:0}
+.btn-ghost{color:var(--chalk-dim)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.pill-likes{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--flare);color:var(--flare);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+
+/* reveal sheet rides over a dimmed thread list */
+.scrim{position:absolute;inset:0;background:rgba(7,9,12,.78)}
+.under{opacity:.9;filter:none}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink2);border:1px solid var(--line);border-bottom:0;border-radius:var(--r-md) var(--r-md) 0 0;box-shadow:var(--shadow-sheet);padding:10px 16px 22px}
+.grabber{width:32px;height:4px;background:var(--line-strong);margin:0 auto 14px}
+.sheet .hero{text-align:left;display:flex;flex-direction:column;gap:6px}
+.mut-row{display:flex;align-items:center;gap:8px}
+
+/* compact deal summary */
+.deal{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;margin-top:12px}
+.deal .line{display:flex;align-items:center;gap:8px;padding:5px 0}
+.deal .line + .line{border-top:1px solid var(--line)}
+.deal .who{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;color:var(--chalk-dim);width:74px;flex:none}
+.deal .what{font:600 13px/17px var(--f-ui)}
+.deal .what .m{font:400 12px/16px var(--f-ui);color:var(--chalk-dim)}
+
+/* composer */
+.composer{margin-top:12px}
+.composer .box{background:var(--ink1);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:10px 12px;font:400 13px/19px var(--f-ui);color:var(--chalk)}
+.composer .hint{display:flex;justify-content:space-between;margin-top:5px}
+.actions{display:flex;gap:10px;margin-top:14px}
+.actions .btn-primary{flex:1}
+
+/* dimmed underlying rows */
+.threads{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.t-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.t-row:last-child{border-bottom:0}
+.t-who{font:600 13px/17px var(--f-ui)}
+.t-what{font:400 12px/16px var(--f-ui);color:var(--chalk-dim)}
+.t-right{margin-left:auto}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">06 &middot; Mutual-interest reveal</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="05-turn-states.html">&lsaquo; Prev</a>
+  <a class="crumb" href="07-honest-empty.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <!-- underlying screen, dimmed -->
+    <div class="screen under">
+      <div class="tick-label label" style="color:var(--chalk)">Trade threads</div>
+      <div class="threads">
+        <div class="t-row"><div><div class="t-who">Brett</div><div class="t-what">Offer sent Tue</div></div><span class="t-right badge" style="color:var(--chalk-dim)">Their move</span></div>
+        <div class="t-row"><div><div class="t-who">Mike</div><div class="t-what">Expires tonight</div></div><span class="t-right badge" style="border-color:var(--neg);color:var(--neg)">Expires 9:00p</span></div>
+        <div class="t-row"><div><div class="t-who">Dario</div><div class="t-what">No reply since Saturday</div></div><span class="t-right badge" style="border-color:var(--warn);color:var(--warn)">Stalled &middot; 3d</span></div>
+      </div>
+    </div>
+
+    <div class="scrim"></div>
+
+    <!-- the reveal sheet -->
+    <div class="sheet">
+      <div class="grabber"></div>
+      <div class="hero">
+        <div class="mut-row">
+          <span class="pill-likes">
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2.2"/></svg>
+            Mutual interest
+          </span>
+        </div>
+        <div class="heading">It's a fit</div>
+        <div class="body-sm dim">FTF found a fit between your boards. You and Sarah both flagged this idea — independently. Neither of you made a request; the app did.</div>
+      </div>
+
+      <div class="deal">
+        <div class="line">
+          <span class="who">You send</span>
+          <span class="what">Austin Ekeler <span class="m">RB &middot; WAS</span> + 2027 3rd</span>
+        </div>
+        <div class="line">
+          <span class="who">You get</span>
+          <span class="what">Rome Odunze <span class="m">WR &middot; CHI &middot; 24</span></span>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="label">Opening message &mdash; prewritten, yours to edit</div>
+        <div class="box" style="margin-top:6px">Hey — the app flagged an Ekeler-for-Odunze framework between us and we both liked it. Happy to do it as listed, or tweak the pick. Thoughts?</div>
+        <div class="hint">
+          <span class="body-sm faint">Sends in-app; nothing goes out until you tap.</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary">Open negotiation</button>
+        <button class="btn btn-ghost">Edit first</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>Double opt-in reveal (round-2 T1): interest is only surfaced after BOTH sides independently engage, and provenance is framed symmetrically — "FTF found a fit between your boards," never "Sarah wants your player," which would be an on-record request she never made. The prewritten opener bridges reveal &rarr; negotiation (the "got busy and forgot" gap) while crediting the app as the indirection layer — plausible deniability survives the handoff to a human conversation.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="05-turn-states.html">&lsaquo; 05 &middot; Turn states</a>
+    <a class="crumb" href="07-honest-empty.html">07 &middot; Honest empty &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

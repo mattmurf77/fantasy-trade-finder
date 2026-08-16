@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 · Push-Notification Copy — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --shadow-sheet:0 12px 32px rgba(0,0,0,.55);
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.badge.b-ice{border-color:var(--ice);color:var(--ice)}
+.badge.b-neg{border-color:var(--neg);color:var(--neg)}
+.badge.b-pos{border-color:var(--pos);color:var(--pos)}
+.badge.b-dim{color:var(--chalk-dim)}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+
+/* notification cards */
+.notif{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-sheet);overflow:hidden}
+.notif .rail-wrap{display:flex}
+.notif .rail{width:3px;flex:none}
+.notif .n-body{padding:10px 14px 12px;flex:1;min-width:0}
+.n-app{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.n-app .name{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.n-app .when{font:500 11px/14px var(--f-mono);color:var(--chalk-faint);margin-left:auto}
+.n-copy{font:600 14px/19px var(--f-ui)}
+.n-sub{font:400 12px/16px var(--f-ui);color:var(--chalk-dim);margin-top:2px}
+.n-tags{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.tick-sq{width:8px;height:8px;background:var(--ice);flex:none}
+
+/* budget panel */
+.budget{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px}
+.budget .row{display:flex;gap:8px;align-items:flex-start;padding:5px 0}
+.budget .row + .row{border-top:1px solid var(--line)}
+.budget .k{font:600 11px/16px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;color:var(--chalk-dim);width:110px;flex:none}
+.budget .v{font:400 13px/16px var(--f-ui)}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">08 &middot; Push-notification copy</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="07-honest-empty.html">&lsaquo; Prev</a>
+  <a class="crumb" href="09-browse-all.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Push copy &mdash; three archetypes</div>
+      </div>
+
+      <!-- 1. weekly digest, gain-framed -->
+      <div class="notif">
+        <div class="rail-wrap">
+          <div class="rail" style="background:var(--ice)"></div>
+          <div class="n-body">
+            <div class="n-app">
+              <span class="tick-sq"></span>
+              <span class="name">Fleeced</span>
+              <span class="when">Tue 9:00a</span>
+            </div>
+            <div class="n-copy">Your Tuesday trade is ready: Brett fits.</div>
+            <div class="n-sub">Gridiron Syndicate &middot; tap to see the deal</div>
+            <div class="n-tags">
+              <span class="badge b-ice">Digest</span>
+              <span class="badge b-dim">Gain-framed</span>
+              <span class="badge b-dim">7 words</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. expiry warning, loss-framed -->
+      <div class="notif">
+        <div class="rail-wrap">
+          <div class="rail" style="background:var(--neg)"></div>
+          <div class="n-body">
+            <div class="n-app">
+              <span class="tick-sq"></span>
+              <span class="name">Fleeced</span>
+              <span class="when">3:12p</span>
+            </div>
+            <div class="n-copy">Offer to Mike expires tonight.</div>
+            <div class="n-sub">One free extend left this week</div>
+            <div class="n-tags">
+              <span class="badge b-neg">Expiry</span>
+              <span class="badge b-dim">Loss-framed</span>
+              <span class="badge b-dim">5 words</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. two-party state change, real-time -->
+      <div class="notif">
+        <div class="rail-wrap">
+          <div class="rail" style="background:var(--pos)"></div>
+          <div class="n-body">
+            <div class="n-app">
+              <span class="tick-sq"></span>
+              <span class="name">Fleeced</span>
+              <span class="when">now</span>
+            </div>
+            <div class="n-copy">Sarah answered your trade offer.</div>
+            <div class="n-sub">Your move &middot; opens the thread</div>
+            <div class="n-tags">
+              <span class="badge b-pos">State change</span>
+              <span class="badge b-dim">Real-time</span>
+              <span class="badge b-dim">5 words</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="budget">
+        <div class="tick-label label" style="color:var(--chalk);margin-bottom:6px">Channel discipline</div>
+        <div class="row">
+          <span class="k">Budget</span>
+          <span class="v">&le;3 pushes/week/user, hard-capped &mdash; autothrottled</span>
+        </div>
+        <div class="row">
+          <span class="k">Timing</span>
+          <span class="v">Digest lands at the user's median historical open hour</span>
+        </div>
+        <div class="row">
+          <span class="k">Real-time</span>
+          <span class="v">Only two-party state changes: offer received, answered, expiring</span>
+        </div>
+        <div class="row">
+          <span class="k">Everything else</span>
+          <span class="v">Batches into the Tuesday digest &mdash; no stream</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>&le;10 words &asymp; 2&times; the CTR of 11&ndash;20 (Localytics); personalization with names &asymp; 4&times; reaction rate (Airship). Loss-frame the expiry ("expires tonight"), gain-frame the digest ("is ready"). Frequency is the channel-survival lever: 46% opt out at 2&ndash;5 pushes/week, so FTF hard-caps at 3 and batches the rest (Fitz 2019: scheduled batches beat streams; hourly &asymp; no benefit). Per-user send timing beats any fixed hour by ~23&ndash;25%.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="07-honest-empty.html">&lsaquo; 07 &middot; Honest empty</a>
+    <a class="crumb" href="09-browse-all.html">09 &middot; Browse all &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

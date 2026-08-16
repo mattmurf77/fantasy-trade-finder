@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 · Turn-State Chips + Thread List — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.btn{height:40px;padding:0 16px;border-radius:var(--r-sm);font:600 14px var(--f-ui);cursor:pointer;background:transparent;color:var(--chalk);border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-sm{height:32px;padding:0 10px;font:600 12px var(--f-ui)}
+.btn-secondary{border-color:var(--line-strong)}
+.btn-ghost{color:var(--chalk-dim)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk);flex:none}
+.badge.b-ice{border-color:var(--ice);color:var(--ice)}
+.badge.b-warn{border-color:var(--warn);color:var(--warn)}
+.badge.b-neg{border-color:var(--neg);color:var(--neg)}
+.badge.b-dim{color:var(--chalk-dim)}
+.badge.b-ghost{border-color:var(--line);color:var(--chalk-faint)}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+
+/* thread list */
+.threads{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.t-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:relative}
+.t-row:last-child{border-bottom:0}
+.t-row.mine{background:var(--ink2)}
+.t-row.expiring{box-shadow:inset 3px 0 0 var(--neg)}
+.t-body{min-width:0;flex:1}
+.t-who{font:600 13px/17px var(--f-ui)}
+.t-what{font:400 12px/16px var(--f-ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-what b{color:var(--chalk);font-weight:600}
+.t-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+.t-time{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+/* expiring sub-row */
+.exp-actions{display:flex;gap:8px;align-items:center;padding:0 14px 12px;background:transparent;border-bottom:1px solid var(--line);margin-top:-4px}
+.t-row.expiring{border-bottom:0}
+.exp-actions{box-shadow:inset 3px 0 0 var(--neg)}
+
+/* withdraw affordance */
+.withdraw{background:var(--ink2);border-bottom:1px solid var(--line);padding:10px 14px}
+.withdraw .msg{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;font:400 13px/18px var(--f-ui);color:var(--chalk-dim);font-style:italic}
+.withdraw .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+.cap-line{display:flex;align-items:center;gap:8px}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">05 &middot; Turn states + threads</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="04-confidence.html">&lsaquo; Prev</a>
+  <a class="crumb" href="06-mutual-reveal.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Trade threads</div>
+        <span class="data-sm faint">3 of 5 open slots</span>
+      </div>
+
+      <div class="threads">
+        <!-- your-move rows sort to top -->
+        <div class="t-row mine">
+          <div class="t-body">
+            <div class="t-who">Sarah</div>
+            <div class="t-what"><b>Countered:</b> wants the 2028 2nd instead of Davis</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-ice">Your move</span>
+            <span class="t-time">2h</span>
+          </div>
+        </div>
+
+        <div class="t-row mine">
+          <div class="t-body">
+            <div class="t-who">Kelsey</div>
+            <div class="t-what"><b>Chose the picks shape</b> — confirm to send</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-ice">Your move</span>
+            <span class="t-time">1d</span>
+          </div>
+        </div>
+
+        <!-- expiring: warning state with rescue, never a silent drop -->
+        <div class="t-row expiring">
+          <div class="t-body">
+            <div class="t-who">Mike</div>
+            <div class="t-what"><b>Offer to Mike expires tonight</b> &middot; sent Wed</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-neg">Expires 9:00p</span>
+            <span class="t-time">6h left</span>
+          </div>
+        </div>
+        <div class="exp-actions">
+          <button class="btn btn-sm btn-secondary" style="white-space:nowrap">Extend 24h</button>
+          <span class="body-sm faint">1 free this week &mdash; then it expires into "revive"</span>
+        </div>
+
+        <div class="t-row">
+          <div class="t-body">
+            <div class="t-who">Brett</div>
+            <div class="t-what">Offer sent Tue &middot; they haven't opened it</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-dim">Their move</span>
+            <span class="t-time">2d</span>
+          </div>
+        </div>
+
+        <!-- stalled: one-tap polite withdraw beats ghosting -->
+        <div class="t-row" style="border-bottom:0">
+          <div class="t-body">
+            <div class="t-who">Dario</div>
+            <div class="t-what">No reply since Saturday</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-warn">Stalled &middot; 3d</span>
+            <span class="t-time">3d</span>
+          </div>
+        </div>
+        <div class="withdraw">
+          <div class="label" style="margin-bottom:6px">Withdraw politely &mdash; prewritten, one tap</div>
+          <div class="msg">"No sweat if this one's not for you — pulling it back for now. Good luck this week."</div>
+          <div class="row">
+            <button class="btn btn-sm btn-secondary">
+              <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>
+              Withdraw
+            </button>
+            <button class="btn btn-sm btn-ghost">Keep waiting</button>
+          </div>
+        </div>
+
+        <div class="t-row">
+          <div class="t-body">
+            <div class="t-who">Tom</div>
+            <div class="t-what">You ended this one &middot; no message needed</div>
+          </div>
+          <div class="t-right">
+            <span class="badge b-ghost">Ended</span>
+            <span class="t-time">1w</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cap-line">
+        <svg class="ic" width="14" height="14" viewBox="0 0 20 20" style="color:var(--chalk-faint)"><circle cx="10" cy="10" r="7"/><path d="M10 6.5v4M10 13.5v.1"/></svg>
+        <span class="body-sm faint">Open proposals cap at 5 — answer or end one to start another.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>Hinge's three-generation playbook: whose-move labels cut dead matches &minus;25%; your-move-first sorting raised responsiveness; a cap on open loops (+~20% responsiveness at cap 8 — FTF starts at 5). 23% of ghosting is "got busy and forgot" — a visibility problem. Expiry follows the full shipped grammar: deadline &rarr; warning state &rarr; one free extend &rarr; expire into revive, never a silent drop. Prewritten polite withdrawal makes ending cheaper than ghosting.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="04-confidence.html">&lsaquo; 04 &middot; Confidence</a>
+    <a class="crumb" href="06-mutual-reveal.html">06 &middot; Mutual reveal &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

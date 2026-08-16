@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · Today's Trade — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.btn{height:40px;padding:0 16px;border-radius:var(--r-sm);font:600 14px var(--f-ui);cursor:pointer;background:transparent;color:var(--chalk);border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-like{border-color:var(--pos);color:var(--pos);flex:1}
+.btn-pass{border-color:var(--neg);color:var(--neg);flex:1}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.badge.b-flare{border-color:var(--flare);color:var(--flare)}
+.badge.b-pos{border-color:var(--pos);color:var(--pos)}
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+
+/* page header row inside screen */
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+.refresh{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+/* trade card internals */
+.endorse-row{display:flex;gap:8px;align-items:center}
+.trade-cols{display:grid;grid-template-columns:1fr 1px 1fr;gap:0 12px;margin-top:10px}
+.divider{background:var(--line)}
+.asset{display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.asset:last-child{border-bottom:0}
+.rail{width:3px;align-self:stretch;flex:none}
+.rail.rb{background:var(--rb)}.rail.wr{background:var(--wr)}
+.rail.p2{background:var(--tier-second)}.rail.p3{background:var(--tier-third)}
+.a-body{min-width:0;flex:1}
+.a-name{font:600 13px/17px var(--f-ui)}
+.a-meta{font:600 11px/14px var(--f-ui);color:var(--chalk-dim);letter-spacing:.03em}
+.a-meta .prb{color:var(--rb)}.a-meta .pwr{color:var(--wr)}
+.a-val{font:500 11px/17px var(--f-mono);color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+
+/* fairness band — range, not verdict */
+.band{margin-top:12px}
+.band-track{position:relative;height:6px;background:var(--ink3);margin-top:4px}
+.band-zone{position:absolute;left:26%;width:48%;top:0;bottom:0;background:var(--pos);opacity:.22}
+.band-edge{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--pos)}
+.band-marker{position:absolute;top:-3px;bottom:-3px;width:4px;background:var(--chalk)}
+.band-note{display:flex;align-items:center;gap:6px;margin-top:7px}
+
+/* explanation block */
+.explain{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.explain ul{list-style:none;margin-top:6px}
+.explain li{display:flex;gap:8px;padding:3px 0;font:400 13px/18px var(--f-ui)}
+.explain li::before{content:"";width:5px;height:5px;background:var(--ice);margin-top:6px;flex:none}
+.their{margin-top:10px;padding:8px 10px;background:var(--ink2);border:1px solid var(--line);border-radius:var(--r-sm);font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.actions{display:flex;gap:10px;margin-top:14px}
+.privacy-note{display:flex;align-items:center;gap:6px;justify-content:center;margin-top:8px;font:400 11px/14px var(--f-ui);color:var(--chalk-dim)}
+
+/* collapsed bench teaser */
+.bench-teaser{display:flex;align-items:center;gap:8px;padding:12px 14px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);color:var(--chalk-dim);cursor:pointer}
+.bench-teaser .n{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">01 &middot; Today's Trade (hero)</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="09-browse-all.html">&lsaquo; Prev</a>
+  <a class="crumb" href="02-meso-variants.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <span class="refresh">refreshes Tue 9:00a</span>
+      </div>
+
+      <div class="endorse-row">
+        <span class="badge b-flare">Today's Trade</span>
+        <span class="badge b-pos">Strong fit</span>
+      </div>
+
+      <div class="card">
+        <div>
+          <div class="title">Trade idea with Brett</div>
+          <div class="body-sm dim">Found between your board and league-wide activity</div>
+        </div>
+
+        <div class="trade-cols">
+          <div>
+            <div class="tick-label label" style="margin-bottom:2px">You send</div>
+            <div class="asset">
+              <span class="rail wr"></span>
+              <div class="a-body">
+                <div class="a-name">DeVonta Smith</div>
+                <div class="a-meta"><span class="pwr">WR</span> &middot; PHI &middot; 27</div>
+              </div>
+              <span class="a-val">3,240</span>
+            </div>
+            <div class="asset">
+              <span class="rail p2"></span>
+              <div class="a-body">
+                <div class="a-name">2027 2nd (own)</div>
+                <div class="a-meta">Pick &middot; 2nd</div>
+              </div>
+              <span class="a-val">610</span>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div>
+            <div class="tick-label label" style="margin-bottom:2px">You get</div>
+            <div class="asset">
+              <span class="rail rb"></span>
+              <div class="a-body">
+                <div class="a-name">James Cook</div>
+                <div class="a-meta"><span class="prb">RB</span> &middot; BUF &middot; 26</div>
+              </div>
+              <span class="a-val">3,510</span>
+            </div>
+            <div class="asset">
+              <span class="rail p3"></span>
+              <div class="a-body">
+                <div class="a-name">2027 3rd (BUF)</div>
+                <div class="a-meta">Pick &middot; 3rd</div>
+              </div>
+              <span class="a-val">380</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- fairness = a range band, never a winner needle -->
+        <div class="band">
+          <div class="band-track">
+            <div class="band-zone"></div>
+            <div class="band-edge" style="left:26%"></div>
+            <div class="band-edge" style="left:74%"></div>
+            <div class="band-marker" style="left:47%"></div>
+          </div>
+          <div class="band-note">
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20" style="color:var(--pos)"><polyline points="4 11 8 15 16 5"/></svg>
+            <span class="label" style="color:var(--pos)">Within league-normal range</span>
+            <span class="data-sm faint" style="margin-left:auto">vs. league consensus</span>
+          </div>
+        </div>
+
+        <div class="explain">
+          <div class="label">Why it works for you</div>
+          <ul>
+            <li>You get a locked-in RB2 for your playoff push — your RB room ranks 10th of 12.</li>
+            <li>Smith is your WR6; he cracked your starting lineup twice last season.</li>
+            <li>Your 2027 1st stays put — only the 2nd moves.</li>
+          </ul>
+          <div class="their">Based on their roster needs and recent activity, Brett is likely to be interested in this deal.</div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-like">
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg>
+            I'm interested
+          </button>
+          <button class="btn btn-pass">
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>
+            Pass
+          </button>
+        </div>
+        <div class="privacy-note">Passing is private — Brett never sees it.</div>
+      </div>
+
+      <div class="bench-teaser">
+        <span class="label" style="color:var(--chalk-dim)">Featured</span>
+        <span class="n">5 &middot; all 27</span>
+        <span style="margin-left:auto"><svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>One scarce, endorsed hero replaces the scrollable list (Hinge Most Compatible: 8&times; phone-number exchange). Reciprocal explanation on the costly action: +17pp acceptance, 53% vs 36% — Kleinerman RecSys 2018. Asymmetric format: your side gets &le;3 concrete features, their side gets only a confidence statement — their board is never exposed. Fairness is a league-normal <em>range</em>, never a winner meter (round-2 T7): no needle to weaponize in league chat.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="index.html">Index</a>
+    <a class="crumb" href="02-meso-variants.html">02 &middot; MESO variants &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

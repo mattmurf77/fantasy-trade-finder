@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 · Confidence States — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.btn{height:40px;padding:0 16px;border-radius:var(--r-sm);font:600 14px var(--f-ui);cursor:pointer;background:transparent;color:var(--chalk);border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-secondary{border-color:var(--line-strong)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.badge.b-flare{border-color:var(--flare);color:var(--flare)}
+.badge.b-pos{border-color:var(--pos);color:var(--pos)}
+.badge.b-dim{color:var(--chalk-dim)}
+.badge.b-ghost{border-color:var(--line);color:var(--chalk-faint)}
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+
+/* band legend rows */
+.legend{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.lg-row{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.lg-row:last-child{border-bottom:0}
+.lg-row .badge{flex:none;margin-top:2px}
+.lg-desc{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+
+/* capped hero card */
+.cap-note{display:flex;align-items:flex-start;gap:8px;background:var(--ink2);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 10px;margin-top:10px}
+.cap-note .t{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.cap-note .t b{color:var(--chalk);font-weight:600}
+
+/* coverage bar */
+.cov{margin-top:12px}
+.cov-track{height:4px;background:var(--ink3);position:relative;margin-top:6px}
+.cov-fill{position:absolute;inset:0 auto 0 0;width:56%;background:var(--ice)}
+.cov-row{display:flex;justify-content:space-between;margin-top:6px}
+.mini-cols{display:grid;grid-template-columns:1fr 1px 1fr;gap:0 12px;margin-top:10px}
+.divider{background:var(--line)}
+.mini-line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font:400 13px/18px var(--f-ui)}
+.mini-line:last-child{border-bottom:0}
+.mini-line .v{font:500 11px/18px var(--f-mono);color:var(--chalk-dim)}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">04 &middot; Confidence states</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="03-bench.html">&lsaquo; Prev</a>
+  <a class="crumb" href="05-turn-states.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Fit confidence &mdash; three bands, no percentages</div>
+      </div>
+
+      <div class="legend">
+        <div class="lg-row">
+          <span class="badge b-pos">Strong fit</span>
+          <div class="lg-desc">Both boards well-fed, clear mutual gain. The only band that earns the hero slot at full endorsement.</div>
+        </div>
+        <div class="lg-row">
+          <span class="badge b-dim">Moderate fit</span>
+          <div class="lg-desc">Real signal, thinner data on one side. Language degrades before numbers do — "worth a look," never "94%."</div>
+        </div>
+        <div class="lg-row">
+          <span class="badge b-ghost">Early signal</span>
+          <div class="lg-desc">Pattern spotted, not enough ranked players to stand behind it. Bench only — never pushed.</div>
+        </div>
+      </div>
+
+      <div class="page-row" style="margin-top:4px">
+        <div class="tick-label label" style="color:var(--chalk)">Capped by data volume</div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge b-dim">Moderate fit</span>
+          <span class="data-sm faint" style="margin-left:auto">ceiling: capped</span>
+        </div>
+
+        <div class="mini-cols">
+          <div>
+            <div class="tick-label label" style="margin-bottom:2px">You send</div>
+            <div class="mini-line"><span>Trey McBride</span><span class="v">2,890</span></div>
+          </div>
+          <div class="divider"></div>
+          <div>
+            <div class="tick-label label" style="margin-bottom:2px">You get</div>
+            <div class="mini-line"><span>Breece Hall</span><span class="v">2,760</span></div>
+          </div>
+        </div>
+
+        <div class="cap-note">
+          <svg class="ic" width="16" height="16" viewBox="0 0 20 20" style="color:var(--chalk-dim);flex:none;margin-top:1px"><circle cx="10" cy="10" r="7"/><path d="M10 6.5v4M10 13.5v.1"/></svg>
+          <div class="t"><b>Moderate fit — rank 10 more players to sharpen this.</b> You've ranked 34 of the 60 players this deal touches, so we cap what we claim.</div>
+        </div>
+
+        <div class="cov">
+          <div class="label">Your ranking coverage &middot; RB + TE</div>
+          <div class="cov-track"><div class="cov-fill"></div></div>
+          <div class="cov-row">
+            <span class="body-sm dim">34 of 60 ranked</span>
+            <span class="data-sm dim">56%</span>
+          </div>
+        </div>
+
+        <button class="btn btn-secondary" style="width:100%;margin-top:12px">Rank 10 players &mdash; 2 min</button>
+      </div>
+
+      <div class="body-sm faint" style="text-align:center;padding:0 12px">We never show a confidence we can't defend. Thin data caps the band, not the honesty.</div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>OkCupid rule: displayed confidence is the lower bound given data volume — two shared questions can never show "94%." Three labeled bands, no percentages, at FTF's N (round-2 §5.3). The cap doubles as the data-collection incentive: "rank 10 more players" raises the ceiling. Miscalibration research (Li 2024, FAccT 2025): confidently-wrong kills trust hardest in a repeated-game league — degrade language before numbers.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="03-bench.html">&lsaquo; 03 &middot; The bench</a>
+    <a class="crumb" href="05-turn-states.html">05 &middot; Turn states &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

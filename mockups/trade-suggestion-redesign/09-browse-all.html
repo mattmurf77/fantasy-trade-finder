@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09 · Browse All Trades (Uncapped) — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;display:flex;flex-direction:column;gap:10px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk);flex:none}
+.badge.b-flare{border-color:var(--flare);color:var(--flare)}
+.badge.b-pos{border-color:var(--pos);color:var(--pos)}
+.badge.b-dim{color:var(--chalk-dim)}
+.badge.b-ghost{border-color:var(--line);color:var(--chalk-faint)}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+
+/* ranked list */
+.signal-line{font:400 12px/16px var(--f-ui);color:var(--chalk-faint)}
+.list{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.sep{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--ink2);border-bottom:1px solid var(--line)}
+.sep .n{font:500 11px/14px var(--f-mono);color:var(--chalk-faint);margin-left:auto}
+.row{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.rk{font:500 12px/16px var(--f-mono);color:var(--chalk-faint);width:20px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.r-body{min-width:0;flex:1}
+.r-who{font:600 13px/17px var(--f-ui)}
+.r-what{font:400 12px/16px var(--f-ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r-fit{flex:none}
+.dismiss{width:28px;height:28px;border-radius:var(--r-xs);border:1px solid var(--line-strong);background:transparent;color:var(--chalk-dim);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.dismiss:hover{background:var(--ink3)}
+
+/* hero pinned row */
+.row.hero{background:var(--ink2)}
+.row.hero .rk{color:var(--ice)}
+
+/* dismissed state */
+.row.dismissed .r-who,.row.dismissed .r-what{color:var(--chalk-faint)}
+.row.dismissed{background:var(--ink0)}
+.undo-line{display:flex;align-items:center;gap:8px;padding:6px 14px 10px 44px;border-bottom:1px solid var(--line);background:var(--ink0)}
+.undo-line .t{font:400 12px/16px var(--f-ui);color:var(--chalk-faint)}
+.undo-line a{font:600 12px/16px var(--f-ui)}
+
+/* infinite-scroll skeleton */
+.skel{display:flex;align-items:center;gap:10px;padding:12px 14px}
+.skel .bar{height:8px;background:var(--ink3);flex:1}
+.skel .bar.short{flex:0 0 60px}
+.more-note{text-align:center;font:500 11px/14px var(--f-mono);color:var(--chalk-faint);padding:2px 0 0}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">09 &middot; Browse all trades</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="08-push-copy.html">&lsaquo; Prev</a>
+  <a class="crumb" href="01-todays-trade.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">All trades</div>
+        <span class="data-sm faint">27 ideas</span>
+      </div>
+      <div class="signal-line">Ranked by mutual fit &mdash; viewing and dismissing sharpens your board.</div>
+
+      <div class="list">
+        <!-- pinned hero -->
+        <div class="row hero">
+          <span class="rk">1</span>
+          <div class="r-body">
+            <div class="r-who">Brett</div>
+            <div class="r-what">Smith + 2nd &harr; Cook + 3rd</div>
+          </div>
+          <span class="badge b-flare r-fit">Today's Trade</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <!-- featured tier -->
+        <div class="sep">
+          <span class="badge b-flare">Featured</span>
+          <span class="n">2&ndash;5</span>
+        </div>
+
+        <div class="row">
+          <span class="rk">2</span>
+          <div class="r-body">
+            <div class="r-who">Mike</div>
+            <div class="r-what">Consolidate two WRs into Trey McBride</div>
+          </div>
+          <span class="badge b-dim r-fit">Moderate</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">3</span>
+          <div class="r-body">
+            <div class="r-who">Sarah</div>
+            <div class="r-what">Youth swap: your vet RB for Odunze + a 3rd</div>
+          </div>
+          <span class="badge b-dim r-fit">Moderate</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">4</span>
+          <div class="r-body">
+            <div class="r-who">Kelsey</div>
+            <div class="r-what">Buy-low window on Jaylen Waddle</div>
+          </div>
+          <span class="badge b-dim r-fit">Moderate</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">5</span>
+          <div class="r-body">
+            <div class="r-who">Tom</div>
+            <div class="r-what">Pick swap: your 2027 1st for a 2nd + 2028 1st</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <!-- everything else, uncapped -->
+        <div class="sep">
+          <span class="badge b-dim">All trades</span>
+          <span class="body-sm faint">ranked by fit</span>
+          <span class="n">6&ndash;27</span>
+        </div>
+
+        <div class="row">
+          <span class="rk">6</span>
+          <div class="r-body">
+            <div class="r-who">Dario</div>
+            <div class="r-what">Your TE surplus for a 2027 2nd (NYJ)</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">7</span>
+          <div class="r-body">
+            <div class="r-who">Priya</div>
+            <div class="r-what">Your 2027 1st for Marvin Harrison Jr.</div>
+          </div>
+          <span class="badge b-dim r-fit">Moderate</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <!-- dismissed-after-view: the negative signal we log -->
+        <div class="row dismissed">
+          <span class="rk">8</span>
+          <div class="r-body">
+            <div class="r-who">Mike</div>
+            <div class="r-what">Waddle + a 4th for Jaxon Smith-Njigba</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Undo dismiss" style="border-color:var(--line);color:var(--chalk-faint)"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></button>
+        </div>
+        <div class="undo-line">
+          <span class="t">Dismissed &mdash; we'll rank ideas like this lower.</span>
+          <a href="#">Undo</a>
+        </div>
+
+        <div class="row">
+          <span class="rk">9</span>
+          <div class="r-body">
+            <div class="r-who">Jess</div>
+            <div class="r-what">Jordan Love + a 3rd for Caleb Williams</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">10</span>
+          <div class="r-body">
+            <div class="r-who">Tom</div>
+            <div class="r-what">Tyler Warren for your 2028 2nd</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">11</span>
+          <div class="r-body">
+            <div class="r-who">Kelsey</div>
+            <div class="r-what">D'Andre Swift for a 2028 2nd</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <div class="row">
+          <span class="rk">12</span>
+          <div class="r-body">
+            <div class="r-who">Sarah</div>
+            <div class="r-what">Two bench WRs for Tucker Kraft</div>
+          </div>
+          <span class="badge b-ghost r-fit">Early</span>
+          <button class="dismiss" aria-label="Dismiss"><svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+        </div>
+
+        <!-- infinite scroll: next page loading -->
+        <div class="skel">
+          <span class="rk">13</span>
+          <span class="bar short"></span>
+          <span class="bar"></span>
+        </div>
+      </div>
+
+      <div class="more-note">loading 13&ndash;27 &middot; scroll to continue</div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>The pyramid: 1 endorsed hero &rarr; a small Featured tier &rarr; an <em>uncapped</em> ranked browse list. Scarcity powers the endorsement (Hinge, Tinder), but discovery stays open because every view and every dismiss-after-view is ranking-training signal (the PoF reply-rate patent's P(response) loop applied to trades; IBM/ESPN's 76.9&rarr;97.3% jump came from mining declines). The dismiss control is on every row, and the response is acknowledged in-product — "we'll rank ideas like this lower" — so the model's learning is visible (round-2 &sect;5.9).</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="08-push-copy.html">&lsaquo; 08 &middot; Push copy</a>
+    <a class="crumb" href="index.html">Index</a>
+  </div>
+</div>
+
+</body>
+</html>

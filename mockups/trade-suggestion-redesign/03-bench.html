@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 · Featured (The Bench) — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.badge.b-flare{border-color:var(--flare);color:var(--flare)}
+.badge.b-pos{border-color:var(--pos);color:var(--pos)}
+.badge.b-dim{color:var(--chalk-dim)}
+.badge.b-ghost{border-color:var(--line);color:var(--chalk-faint)}
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+.refresh{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+/* hero, collapsed to a summary row while the bench is open */
+.hero-mini{display:flex;align-items:center;gap:10px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px}
+.hero-mini .t{min-width:0;flex:1}
+.hm-name{font:600 13px/17px var(--f-ui)}
+.hm-sub{font:400 12px/16px var(--f-ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* bench section */
+.bench{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.bench-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.bench-head .n{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+.b-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.b-row:last-of-type{border-bottom:0}
+.b-body{min-width:0;flex:1}
+.b-who{font:600 13px/17px var(--f-ui)}
+.b-what{font:400 12px/16px var(--f-ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-right{display:flex;align-items:center;gap:8px;flex:none;color:var(--chalk-faint)}
+.bench-foot{padding:10px 14px;border-top:1px solid var(--line);font:400 12px/16px var(--f-ui);color:var(--chalk-faint);text-align:center}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">03 &middot; Featured (the bench)</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="02-meso-variants.html">&lsaquo; Prev</a>
+  <a class="crumb" href="04-confidence.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <span class="refresh">refreshes Tue 9:00a</span>
+      </div>
+
+      <div class="hero-mini">
+        <span class="badge b-flare">Today's Trade</span>
+        <div class="t">
+          <div class="hm-name">Brett &middot; Smith + 2nd &harr; Cook + 3rd</div>
+          <div class="hm-sub">Strong fit &middot; within league-normal range</div>
+        </div>
+        <svg class="ic" width="16" height="16" viewBox="0 0 20 20" style="color:var(--chalk-faint)"><polyline points="8 6 12 10 8 14"/></svg>
+      </div>
+
+      <div class="bench">
+        <div class="bench-head">
+          <span class="tick-label label" style="color:var(--chalk)">Featured</span>
+          <span class="n">5</span>
+          <span style="margin-left:auto;color:var(--chalk-dim)"><svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="14 12 10 8 6 12"/></svg></span>
+        </div>
+
+        <div class="b-row">
+          <div class="b-body">
+            <div class="b-who">Mike</div>
+            <div class="b-what">Consolidate two WRs into Trey McBride</div>
+          </div>
+          <div class="b-right">
+            <span class="badge b-dim">Moderate fit</span>
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="8 6 12 10 8 14"/></svg>
+          </div>
+        </div>
+
+        <div class="b-row">
+          <div class="b-body">
+            <div class="b-who">Sarah</div>
+            <div class="b-what">Youth swap: your vet RB for Odunze + a 3rd</div>
+          </div>
+          <div class="b-right">
+            <span class="badge b-dim">Moderate fit</span>
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="8 6 12 10 8 14"/></svg>
+          </div>
+        </div>
+
+        <div class="b-row">
+          <div class="b-body">
+            <div class="b-who">Dario</div>
+            <div class="b-what">Your TE surplus for a 2027 2nd (NYJ)</div>
+          </div>
+          <div class="b-right">
+            <span class="badge b-ghost">Early signal</span>
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="8 6 12 10 8 14"/></svg>
+          </div>
+        </div>
+
+        <div class="b-row">
+          <div class="b-body">
+            <div class="b-who">Kelsey</div>
+            <div class="b-what">Buy-low window on Jaylen Waddle</div>
+          </div>
+          <div class="b-right">
+            <span class="badge b-dim">Moderate fit</span>
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="8 6 12 10 8 14"/></svg>
+          </div>
+        </div>
+
+        <div class="b-row">
+          <div class="b-body">
+            <div class="b-who">Tom</div>
+            <div class="b-what">Pick swap: your 2027 1st for a 2nd + 2028 1st</div>
+          </div>
+          <div class="b-right">
+            <span class="badge b-ghost">Early signal</span>
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><polyline points="8 6 12 10 8 14"/></svg>
+          </div>
+        </div>
+
+        <div class="bench-foot"><a href="09-browse-all.html">Browse all 27 trades &rsaquo;</a> <span style="display:block;margin-top:2px">ranked by mutual fit &mdash; viewing and dismissing sharpens your board</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>The middle tier of the pyramid: hero &rarr; Featured &rarr; uncapped browse. Featured stays small — five compact rows, each a different partner and package shape (IBM/ESPN enforced 100% trade uniqueness — no five perturbations of one deal) — because choice overload at the TOP of the funnel produces a rejection mind-set (Pronk &amp; Denissen 2020). Scarcity applies to endorsement, not discovery: the footer opens the full ranked list (state 09), where every view and dismiss is training signal.</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="02-meso-variants.html">&lsaquo; 02 &middot; MESO variants</a>
+    <a class="crumb" href="04-confidence.html">04 &middot; Confidence states &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>

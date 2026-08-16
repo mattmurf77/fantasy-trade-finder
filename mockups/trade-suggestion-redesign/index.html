@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Suggestion Redesign — Presentation Rebuild (Build Item 3)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:40px 20px 100px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:960px;margin:0 auto}
+.display{font:700 32px/34px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.heading{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:16px;background:var(--ice);flex:none}
+.section{margin-top:44px}
+.intro{max-width:720px;margin-top:12px;color:var(--chalk-dim)}
+.intro b{color:var(--chalk);font-weight:600}
+.meta-row{display:flex;gap:16px;margin-top:10px;flex-wrap:wrap}
+
+/* state grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-top:16px}
+.state{display:block;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px;transition:border-color 120ms ease-out}
+.state:hover{border-color:var(--line-strong);text-decoration:none}
+.state .num{font:600 22px/26px var(--f-mono);color:var(--ice)}
+.state .t{font:600 16px/22px var(--f-ui);color:var(--chalk);margin-top:4px}
+.state .d{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-top:4px}
+.state .r{font:400 11px/15px var(--f-ui);color:var(--chalk-faint);margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+
+/* before pane */
+.before-row{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px}
+.before{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:12px;width:280px}
+.before img{width:100%;display:block;border:1px solid var(--line);border-radius:var(--r-sm)}
+.before .cap{margin-top:8px}
+
+/* principles */
+.principles{margin-top:16px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.pr{display:flex;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+.pr:last-child{border-bottom:0}
+.pr .n{font:600 13px/19px var(--f-mono);color:var(--flare);flex:none;width:22px}
+.pr .t{font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+.pr .t b{color:var(--chalk);font-weight:600}
+
+/* sources strip */
+.src{margin-top:14px;font:400 12px/18px var(--f-ui);color:var(--chalk-faint);max-width:820px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="label">Mockup lab &middot; 2026-08-16 &middot; mockups/trade-suggestion-redesign/</div>
+  <h1 class="display" style="margin-top:8px">Trade suggestion redesign</h1>
+  <p class="intro">The presentation rebuild (build item 3): replaces the flat scrollable list with a <b>pyramid — one endorsed hero &rarr; a small Featured tier &rarr; an uncapped, ranked "All trades" browse list</b> (views and dismissals are ranking-training signal), adds <b>reciprocal (two-sided) explanations</b> on the costly action, <b>MESO shape variants</b>, <b>banded confidence capped by data volume</b>, a <b>turn-state machine</b> for trade threads, a <b>double-opt-in mutual reveal</b>, an <b>honest empty state with price feedback</b>, and a <b>disciplined push channel</b>. Chalkline tokens throughout; every screen is a 390px phone frame with a one-line research caption.</p>
+  <div class="meta-row">
+    <span class="data-sm dim">Spec: docs/research/matchmaking/round-2/05 &sect;5 transfer notes 1&ndash;7</span>
+    <span class="data-sm dim">+ 02 &sect;best-practice 6&ndash;7 &middot; 04 T1/T2/T7</span>
+  </div>
+
+  <div class="section">
+    <div class="tick-label heading">The nine states</div>
+    <div class="grid">
+      <a class="state" href="01-todays-trade.html">
+        <div class="num">01</div>
+        <div class="t">Today's Trade (hero)</div>
+        <div class="d">One endorsed suggestion: binary badge, asymmetric two-sided explanation, fairness as a league-normal range band.</div>
+        <div class="r">Kleinerman 2018: reciprocal explanation +17pp acceptance &middot; Hinge 8&times;</div>
+      </a>
+      <a class="state" href="02-meso-variants.html">
+        <div class="num">02</div>
+        <div class="t">MESO variant picker</div>
+        <div class="d">Same centerpiece, three equivalent-value return shapes: youth / picks / consolidation. The pick is preference elicitation.</div>
+        <div class="r">Ames &amp; Mason 2015: higher acceptance, satisfaction, anchoring &middot; cap 3</div>
+      </a>
+      <a class="state" href="03-bench.html">
+        <div class="num">03</div>
+        <div class="t">Featured (the bench)</div>
+        <div class="d">Small Featured tier — 5 compact rows, each a distinct partner and shape — with "Browse all N trades" into the full list.</div>
+        <div class="r">Choice overload &rarr; rejection mind-set (Pronk 2020) &middot; small at the top of the funnel</div>
+      </a>
+      <a class="state" href="04-confidence.html">
+        <div class="num">04</div>
+        <div class="t">Confidence states</div>
+        <div class="d">Three labeled bands, no percentages; ceiling capped by data volume with a "rank 10 more players" pivot.</div>
+        <div class="r">OkCupid lower-bound rule &middot; miscalibration kills trust (Li 2024)</div>
+      </a>
+      <a class="state" href="05-turn-states.html">
+        <div class="num">05</div>
+        <div class="t">Turn states + threads</div>
+        <div class="d">your_move / their_move / stalled(3d) / expiring / ended chips; your-move sorts top; expiry warning + extend; one-tap polite withdraw.</div>
+        <div class="r">Hinge Your Turn: &minus;25% dead matches &middot; cap open loops</div>
+      </a>
+      <a class="state" href="06-mutual-reveal.html">
+        <div class="num">06</div>
+        <div class="t">Mutual-interest reveal</div>
+        <div class="d">Double opt-in sheet: "FTF found a fit between your boards," prefilled opening message into negotiation.</div>
+        <div class="r">T1: symmetric provenance protects plausible deniability</div>
+      </a>
+      <a class="state" href="07-honest-empty.html">
+        <div class="num">07</div>
+        <div class="t">Honest empty state</div>
+        <div class="d">No viable trades &rarr; price-feedback pivot: your ask vs. league consensus, adjust or hold. No degraded filler.</div>
+        <div class="r">Confidently-wrong is the worst error class in a repeated game</div>
+      </a>
+      <a class="state" href="08-push-copy.html">
+        <div class="num">08</div>
+        <div class="t">Push-notification copy</div>
+        <div class="d">Three archetypes &le;10 words with names: gain-framed digest, loss-framed expiry, real-time state change; &le;3/week budget.</div>
+        <div class="r">&le;10 words &asymp; 2&times; CTR &middot; personalization &asymp; 4&times; reaction</div>
+      </a>
+      <a class="state" href="09-browse-all.html">
+        <div class="num">09</div>
+        <div class="t">Browse all (uncapped)</div>
+        <div class="d">Ranked, infinite "All trades" list under the Featured tier — per-row dismiss, dismissed-state acknowledgment, scroll-to-load.</div>
+        <div class="r">Every view/dismiss is ranking-training signal &middot; mine declines (IBM/ESPN 76.9&rarr;97.3%)</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="tick-label heading">Current state (before)</div>
+    <p class="body-sm dim" style="margin-top:8px">Real captures of the shipped screens this rebuild replaces (per mockups/CLAUDE.md — no redrawn approximations).</p>
+    <div class="before-row">
+      <div class="before">
+        <img src="../../screens/mobile/trades/populated.png" alt="Current Trades screen — scrollable suggestion list">
+        <div class="cap label">Trades &middot; populated (scrollable list)</div>
+      </div>
+      <div class="before">
+        <img src="../../screens/mobile/matches/populated--mutual.png" alt="Current Matches screen — mutual matches list">
+        <div class="cap label">Matches &middot; mutual</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="tick-label heading">Design principles carried through every state</div>
+    <div class="principles">
+      <div class="pr"><span class="n">P1</span><div class="t"><b>Scarcity is the endorsement — not the catalog.</b> One hero per league per cycle, binary badge, a small Featured tier — no endorsement ladders. Below that, the full ranked list stays uncapped and browsable, because every viewed and dismissed card is ranking-training signal.</div></div>
+      <div class="pr"><span class="n">P2</span><div class="t"><b>Asymmetric two-sided explanation.</b> Your side: &le;3 concrete feature bullets. Their side: a confidence statement only — the other manager's board is never exposed, in any state.</div></div>
+      <div class="pr"><span class="n">P3</span><div class="t"><b>No winner needle, anywhere.</b> Fairness renders as "within league-normal range" bands vs. public consensus. A winner meter becomes a league-chat weapon and trains users to demand a calc-win on every deal.</div></div>
+      <div class="pr"><span class="n">P4</span><div class="t"><b>Plausible deniability end-to-end.</b> Passes are invisible, interest is revealed only after double opt-in, and provenance is always the app's ("FTF found a fit"), never a manager's request.</div></div>
+      <div class="pr"><span class="n">P5</span><div class="t"><b>Honesty compounds.</b> Confidence is banded and capped by data volume; empty states name the blocking price instead of padding; expiry always warns and offers rescue before dropping.</div></div>
+    </div>
+    <p class="src">Sources: docs/research/matchmaking/round-2/05-presentation-and-conversion-engineering.md (&sect;1, &sect;5), 02-bundle-construction-and-offer-design.md (&sect;2 bp 6&ndash;7), 04-closed-communities-and-fantasy-analogs.md (T1/T2/T7). Tokens: docs/design/design-system.md + web/style-guide.html (line-strong at the 2026-07-19 a11y value #59647A).</p>
+  </div>
+
+</div>
+</body>
+</html>

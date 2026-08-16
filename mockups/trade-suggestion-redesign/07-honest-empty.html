@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07 · Honest Empty State — Trade Suggestion Redesign</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --rb:#22C55E;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 80px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.pagehead{max-width:840px;margin:0 auto 26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.heading{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.data-sm{font:500 11px/14px var(--f-mono);font-variant-numeric:tabular-nums}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.phone{width:390px;flex:none;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 24px;min-height:640px;display:flex;flex-direction:column;gap:12px}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.btn{height:40px;padding:0 16px;border-radius:var(--r-sm);font:600 14px var(--f-ui);cursor:pointer;background:transparent;color:var(--chalk);border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-secondary{border-color:var(--line-strong)}
+.btn-ghost{color:var(--chalk-dim)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk)}
+.badge.b-flare{border-color:var(--flare);color:var(--flare)}
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.caption{width:390px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:10px 14px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.pagelinks{width:390px;display:flex;justify-content:space-between}
+.page-row{display:flex;align-items:baseline;justify-content:space-between}
+.refresh{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+/* empty hero */
+.empty{padding:28px 16px 8px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+.empty .heading{color:var(--chalk)}
+.empty p{font:400 13px/19px var(--f-ui);color:var(--chalk-dim);max-width:300px}
+
+/* price-feedback pivot */
+.pivot .why{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pivot p{font:400 13px/19px var(--f-ui);color:var(--chalk)}
+.compare{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
+.cmp-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--ink2)}
+.cmp-row + .cmp-row{border-top:1px solid var(--line)}
+.cmp-k{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;color:var(--chalk-dim);width:140px;flex:none}
+.cmp-v{font:500 13px/18px var(--f-mono);font-variant-numeric:tabular-nums}
+.cmp-v .rk{color:var(--rb);font-weight:600}
+.pivot .row{display:flex;gap:10px;margin-top:12px}
+.pivot .row .btn{flex:1}
+.wait-note{display:flex;align-items:center;gap:8px;justify-content:center}
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">07 &middot; Honest empty state</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="06-mutual-reveal.html">&lsaquo; Prev</a>
+  <a class="crumb" href="08-push-copy.html">Next &rsaquo;</a>
+</div>
+
+<div class="stage">
+  <div class="phone">
+    <div class="appbar">
+      <div class="lg-cluster">
+        <span class="lg-tick"></span>
+        <div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate
+            <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2.3M10 15.2v2.3M2.5 10h2.3M15.2 10h2.3M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M15.3 4.7l-1.6 1.6M6.3 13.7l-1.6 1.6"/></svg></div>
+    </div>
+
+    <div class="screen">
+      <div class="page-row">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <span class="refresh">checked 9:00a today</span>
+      </div>
+
+      <div class="empty">
+        <svg class="ic" width="28" height="28" viewBox="0 0 20 20" style="color:var(--chalk-faint)"><path d="M4 7h12M13 4l3 3-3 3M16 13H4M7 10l-3 3 3 3"/></svg>
+        <div class="heading">No trade today</div>
+        <p>We checked all 11 rosters against your board. Nothing clears the bar for both sides right now &mdash; we'd rather show nothing than pad the list.</p>
+      </div>
+
+      <div class="card pivot">
+        <div class="why">
+          <span class="badge b-flare">Why</span>
+          <span class="label">One thing is blocking real matches</span>
+        </div>
+        <p>Your ask on <b>Jahmyr Gibbs</b> is above league consensus. Every package that meets your price fails on the other manager's board.</p>
+        <div class="compare">
+          <div class="cmp-row">
+            <span class="cmp-k">Your board</span>
+            <span class="cmp-v"><span class="rk">RB2</span> &middot; 8,900</span>
+          </div>
+          <div class="cmp-row">
+            <span class="cmp-k">League consensus</span>
+            <span class="cmp-v"><span class="rk">RB5</span> &middot; 7,400</span>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn-secondary" style="white-space:nowrap">Review RB board</button>
+          <button class="btn btn-ghost">Keep my price</button>
+        </div>
+      </div>
+
+      <div class="wait-note">
+        <svg class="ic" width="14" height="14" viewBox="0 0 20 20" style="color:var(--chalk-faint)"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg>
+        <span class="body-sm faint">Keeping your price is fine &mdash; we'll ping you when a real fit appears.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="label">Rationale</div>
+    <p>Never degrade the endorsement: filler suggestions get audited by leaguemates all season, and confidently-wrong is the most trust-destructive error class (FAccT 2025). The empty state converts no-supply into a price-feedback loop — name the blocking ask, show your board vs. league consensus, offer the adjustment. "Keep my price" is a first-class choice: the app is a mediator, not a nag (round-2 T2: fairness anchored to a public consensus the user can see).</p>
+  </div>
+
+  <div class="pagelinks">
+    <a class="crumb" href="06-mutual-reveal.html">&lsaquo; 06 &middot; Mutual reveal</a>
+    <a class="crumb" href="08-push-copy.html">08 &middot; Push copy &rsaquo;</a>
+  </div>
+</div>
+
+</body>
+</html>
