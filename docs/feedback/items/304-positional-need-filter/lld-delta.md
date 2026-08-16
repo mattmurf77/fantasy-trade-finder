@@ -13,6 +13,18 @@
 set, and the tripwire. OFF ⇒ every path byte-identical to today (R-8 in the
 PRD; enforced by a byte-identity test).
 
+**Generator-scope sentence (amendment 2026-08-16, per the matchmaking-engine
+session's validation):** the presentment rules apply to the **v1 construction
+path** only. `trade_gen.v2` (dark; separate module; checked before the v1
+branch in `_generate_trades_impl`) carries its own gate stack and does NOT
+implicitly inherit these hooks; reconciliation (incl. porting #341's net rule
+into gen-v2 hygiene) is deferred to gen-v2's lighting checklist. Exception by
+construction: the R4 windowless exclusion set rides the shared
+`past_decision_keys` kwarg, so gen-v2 benefits from the #336 fix
+automatically — and R4's scope stays matched/awaiting ONLY, never `declined`
+(Q-G6-2; declines must remain re-approachable with a modified package, per
+`docs/research/matchmaking/round-3/01`).
+
 Registration (three touch points, all backend — this flag has **no client
 surface**, so `mobile/src/state/useFeatureFlags.ts` `LAUNCHED_FLAG_DEFAULTS`
 is *not* touched):
@@ -302,6 +314,17 @@ thinned by fairness — false alarms that train everyone to ignore the
 tripwire. `served + rule_kills > 15` fires only when the rules' own kills
 explain the gap between a thin deck and a healthy one. Grep-able prefix
 `presentment-tripwire` goes in `docs/runbook.md` at build.
+
+**Ghost-withholding interaction (amendment 2026-08-16, per the
+matchmaking-engine session's validation):** `served = len(final_cards)` is the
+**post-ghost** count. When `suggestion.telemetry` lights, ~1-in-10 organic
+guided-deck cards are withheld at serve (`server.py:3629`; likes-you /
+wildcard / retest / pinned exempt). Ghost-withheld cards are neither served
+nor rule-killed — they feed **neither** term of the tripwire, which therefore
+keeps firing only on rule-explained thinness. The D-055-corpus empty-deck
+bound (4.6%) was measured without ghosts; a ghost-withheld card is withheld
+*after* passing the rules, so it cannot push a deck under the bar via the
+rules — no band change needed.
 
 ## 6. API / payload change: NONE (guarantee for G4)
 

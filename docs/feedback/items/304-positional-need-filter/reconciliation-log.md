@@ -54,3 +54,23 @@ two-part architecture, the flag/knob scheme, the measured baselines
 (re-interpretation note in prd §2 only), or the G4 no-payload-change
 contract. Remaining operator decisions: Q-G6-1, Q-G6-2, Q-G6-3 (scope §
 waivers + prd §6).
+
+## Post-sign-off amendments (2026-08-16, orchestrator-directed)
+
+Source: the matchmaking-engine session's G6 validation verdict
+(`docs/plans/matchmaking-engine/2026-08-16-g6-validation.md`), which found no
+conflicts and requested two clarifying sentences before build merge:
+
+1. **lld §5 tripwire:** `served` is the post-ghost count; ghost-withheld cards
+   (suggestion.telemetry, `server.py:3629`) feed neither tripwire term; no
+   band change (ghosts withhold after rules pass).
+2. **lld §1 generator scope:** rules apply to the v1 construction path only;
+   `trade_gen.v2` carries its own gates, no implicit inheritance; R4 rides the
+   shared `past_decision_keys` kwarg (gen-v2 benefits automatically) and stays
+   scoped matched/awaiting, never declined (Q-G6-2 + round-3 research
+   cross-ref).
+
+Documentation-only clarifications of existing behavior; no requirement, knob,
+or contract change. Build note: main moved to `d6de017` + two matchmaking
+squash merges — build agent must rebase (expect adjacent-insertion conflicts
+in `_DEFAULT_CFG` tail + keep-both in 3 flag-parity fixtures).
