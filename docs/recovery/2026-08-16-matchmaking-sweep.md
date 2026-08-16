@@ -24,3 +24,5 @@ Worktree removals: none needed `--force`; no uncommitted files discarded (wt-shi
 fully committed and pushed before removal).
 
 Recovery: `git branch feat/suggestion-telemetry deb965c` · `git branch feat/trade-gen-v2 c940a86` · `git branch ship/matchmaking-engine ca44aa4`
+
+2026-08-16 (later): detached worktree `wt-flag` (scratchpad, session 5451272b) used for the suggestion.telemetry flag flip; removed after push — tip 85768e7 == origin/main, zero unique content.

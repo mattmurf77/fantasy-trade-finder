@@ -24,6 +24,7 @@
 - **`suggestion.telemetry` (dark):** counterfactual logging on the deck spine (candidate sets, policy version, rank), deterministic 1-in-10 ghost holdout, `suggestion_trade_links` (`was_recommended` + ghost incrementality), admin ratio route. Zero mobile diff.
 - **`trade_gen.v2` (dark):** staged divergence-driven pipeline — dual-board ε on consolidation-discounted packages, ±15% consensus band, joint-gain ranking, EB acceptance prior, MESO variants, two-sided rationale, exposure shaping as head-ordering; **no engine truncation** — full survivor set with endorsed/featured/browse tiers (operator decision).
 - Both squash-merged from branches (tips `deb965c`, `c940a86`; fork `0b2dcee`); scope blocks in `docs/plans/matchmaking-engine/`. Operator waivers: Maestro (backend-only dark flags), telemetry analytics waiver, sim gate Tier 4. Merged-state suite result in TEST_LEDGER. Next: wire acceptance stats into the prior, mobile pyramid UI (needs real Maestro flows), lighting checklist per flag.
+- **2026-08-16 (later): `suggestion.telemetry` LIT by operator** — collection + ghost holdout live; `trade_gen.v2` stays dark pending G6 merge, endorsed-ghost-exemption patch, and a logged v1 baseline (sequencing rationale in the session log + `docs/plans/matchmaking-engine/2026-08-16-g6-validation.md`).
 
 ## 2026-08-15 (Fit-congruence signal weighting — SHIPPED, PR #134)
 
