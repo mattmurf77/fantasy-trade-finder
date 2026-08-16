@@ -2119,6 +2119,16 @@ _MODEL_CONFIG_DEFAULTS = [
     # bye-week-multiplier-2026-08-09.md before ever reading these knobs live.
     ("outlook_bye_multiplier_enabled", 0.0, "#169: gate for the (evaluated, unshipped) per-week bye multiplier; 0=off (default) — pipeline.py does not read this yet"),
     ("outlook_bye_multiplier_scale",   1.0, "#169: linear scale from starting-lineup value-fraction-on-bye to mu multiplier haircut; FLAGGED heuristic, unshipped"),
+    # ── G6 trade presentment rules (flag trade.presentment_rules) ─────────
+    # docs/feedback/items/304-positional-need-filter/lld-delta.md §2. Each
+    # knob is that rule's deploy-free kill switch via PUT /api/admin/config.
+    ("max_overpay_frac",         0.25,  "G6 R1 #340: kill when raw consensus gap >= max_overpay_min_value AND gap/max(side) >= this, BOTH sides, independent of fairness_threshold; <=0 disables R1"),
+    ("max_overpay_min_value",   500.0,  "G6 R1 #340: absolute gap floor (D-055 materiality) below which R1 never fires"),
+    ("pos_net_cap",               1.0,  "G6 R2 #341: max |count(recv at P) - count(give at P)| per position over QB/RB/WR/TE (picks uncounted); 0 disables"),
+    ("pick_gap_frac",             0.8,  "G6 R3 #339: two-sided band — kill when a heavier-side pick sits in [frac*gap, gap/frac]; 0 disables. UNMEASURED default (no pick cards in the D-055 corpus) — the R-12 pick-league replay is the tuning task"),
+    ("pick_gap_min_value",      300.0,  "G6 R3 #339: consensus gap floor below which R3 never fires"),
+    ("need_gate_min_value",     500.0,  "G6 R5 #304: min consensus value of the primary received player before the need gate applies (untargeted decks only); <=0 disables the whole gate"),
+    ("need_gate_upgrade_margin",  0.0,  "G6 R5 #304: primary must beat the post-give incumbent by this fraction to count as a starter upgrade; 0 = any strict upgrade passes"),
 ]
 
 
@@ -7268,6 +7278,51 @@ def load_matches(user_id: str, league_id: str | None = None) -> list[dict]:
             "their_decided_at": their_revealed_at,
         })
 
+    return result
+
+
+def load_matches_for_exclusion(user_id: str, league_id: str) -> list[dict]:
+    """G6 R4 #336 — narrow read feeding the trade-generation exclusion set.
+
+    Returns the user's `pending`/`accepted` trade_matches rows in ONE
+    league, keyed from the USER's orientation (user_a_give/receive,
+    mirrored when the user is user_b): [{"my_give": [...],
+    "my_receive": [...]}]. `declined` rows deliberately do NOT block
+    (Q-G6-2: a market-rejected trade regenerating later is defensible —
+    "blocked" means currently live in the match pipeline). Windowless by
+    design — the #336 bug was the 7-day window on generation dedup. Hits
+    the ix_trade_matches_user_{a,b}_league composite indexes.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_matches_table.c.user_a_id,
+                trade_matches_table.c.user_a_give,
+                trade_matches_table.c.user_a_receive,
+            ).where(
+                and_(
+                    or_(
+                        trade_matches_table.c.user_a_id == user_id,
+                        trade_matches_table.c.user_b_id == user_id,
+                    ),
+                    trade_matches_table.c.league_id == league_id,
+                    trade_matches_table.c.status.in_(("pending", "accepted")),
+                )
+            )
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        try:
+            a_give    = json.loads(r.user_a_give)
+            a_receive = json.loads(r.user_a_receive)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.user_a_id == user_id:
+            my_give, my_receive = a_give, a_receive
+        else:
+            my_give, my_receive = a_receive, a_give
+        result.append({"my_give": my_give, "my_receive": my_receive})
     return result
 
 

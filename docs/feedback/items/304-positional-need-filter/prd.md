@@ -83,9 +83,12 @@ test in the file's docstring.
   = 0.5` (toggle OFF) still kills. Sabotage: replace `max(g,r)` with
   `min(g,r)`.
 - **U-R1-6:** fit-premium card at exactly 300 raw loss survives.
-- **U-R2-1..4:** 2RB→2WR killed; 2RB→1RB+1WR passes; pick+RB→2WR passes on
-  the pick side (picks uncounted); `pos_net_cap = 0` disables. Sabotage:
-  count `PICK` as a position.
+- **U-R2-1..4:** 2RB→2WR killed; 2RB→1RB+1WR passes; **2 picks + RB → 1 WR
+  passes** (picks uncounted — corrected 2026-08-16 by the orchestrator: the
+  earlier "pick+RB→2WR passes" gloss contradicted the R-2 formula, which
+  kills that shape on net WR +2; the formula binds, and pick+RB→2WR KILLS,
+  pinned as an explicit test); `pos_net_cap = 0` disables. Sabotage: count
+  `PICK` as a position (net_PICK = −2 on the two-pick shape → RED).
 - **U-R2-5 / U-R6-2:** a sweetener that creates a ±2 net is caught by the
   re-validation. Sabotage: drop `presentment_ok_fn` from `_try_sweeten`.
 - **U-R3-1..6:** pick inside the band on the heavier side killed (gap 3,000,

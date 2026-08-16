@@ -215,6 +215,9 @@ def generate_pair_trades_v3(
     not_interested_ids: set | None = None,
     raw_user_elo: dict[str, float] | None = None,
     user_needs: set | None = None,
+    presentment_ok_fn=None,     # G6 rules R1/R2/R3/R5 (trade.presentment_rules)
+                                # — bound predicate from _generate_trades_v2;
+                                # None = flag off, byte-identical path.
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
 
@@ -530,6 +533,13 @@ def generate_pair_trades_v3(
             # the two raw boards (mirrors the v2 _consider gate).
             if not filler_ok(give_ids, recv_ids, _uv, _vo):
                 continue
+            # G6 presentment rules (R1 #340 / R2 #341 / R3 #339 / R5 #304)
+            # — BEFORE _both_feasible/surplus/fairness so a killed shape can
+            # never reach the near-miss collection below and be
+            # sweetener-rescued (mirrors the #227 placement note above).
+            if presentment_ok_fn is not None \
+                    and not presentment_ok_fn(give_ids, recv_ids):
+                continue
             if not _both_feasible(give_ids, recv_ids):    # 3.2 hard gate
                 continue
 
@@ -624,7 +634,8 @@ def generate_pair_trades_v3(
                 untouchable_ids=untouchable_ids,
                 not_interested_ids=not_interested_ids,               # #163
                 filler_ok_fn=lambda g, r: filler_ok(g, r, _uv, _vo),  # #141
-            )
+                presentment_ok_fn=presentment_ok_fn,   # G6 — re-validate the
+            )                                          # SWEETENED combo (R-6)
             if sweet is None:
                 continue
             s_pid, side, new_give, new_recv, user_s, opp_s, ratio = sweet
@@ -645,7 +656,8 @@ def generate_pair_trades_v3(
 def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                  fairness_threshold, min_side, surpluses, gap_ok,
                  both_feasible, players, untouchable_ids=None,
-                 not_interested_ids=None, filler_ok_fn=None):
+                 not_interested_ids=None, filler_ok_fn=None,
+                 presentment_ok_fn=None):
     """3.4 — close a near-miss by adding ONE cheap player from the
     under-paying side's roster.
 
@@ -682,6 +694,11 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
             new_give, new_recv = give_ids, recv_ids + [s_pid]
         if filler_ok_fn is not None and not filler_ok_fn(new_give, new_recv):
             continue                                     # #141 junk sweetener
+        # G6 — a sweetener changes both net_P and the gap, so the SWEETENED
+        # combo must re-clear the presentment rules (R-6; prd U-R2-5).
+        if presentment_ok_fn is not None \
+                and not presentment_ok_fn(new_give, new_recv):
+            continue
         n_gv, n_rv = _consensus_packages(new_give, new_recv, seed_value)
         if n_gv <= 0 or n_rv <= 0:
             continue

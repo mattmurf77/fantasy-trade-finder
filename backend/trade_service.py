@@ -540,6 +540,44 @@ _DEFAULT_CFG: dict[str, float] = {
     # pick that rank inside this count are "featured"; the rest of the
     # full ranked survivor set is "browse".
     "gen2_featured_count":        4.0,
+
+    # ------------------------------------------------------------------
+    # trade.presentment_rules — G6 2026-08-16 feedback wave
+    # (#304 #336 #339 #340 #341; docs/feedback/items/304-positional-need-
+    # filter/). Construction rules R1/R2/R3 + need gate R5 run inside the
+    # v1 generators (v3 loop, v2 _consider, consensus _emit, sweetener
+    # re-validation); R4 (windowless awaiting/matched exclusion) has no
+    # knob — the flag is its revert. Each rule dies live via its knob's
+    # disable value (PUT /api/admin/config/<key>), the whole group via the
+    # flag. Units: raw summed consensus value (seed_value per side) — the
+    # D-055 Δ currency.
+    # ------------------------------------------------------------------
+    # R1 #340 — absolute overpay ceiling, BOTH sides, independent of
+    # fairness_threshold (the client fairness toggle can never relax it).
+    # KILL when gap >= max_overpay_min_value AND gap/max(g,r) >=
+    # max_overpay_frac. frac <= 0 disables; the floor is D-055 materiality.
+    "max_overpay_frac":           0.25,
+    "max_overpay_min_value":    500.0,
+    # R2 #341 — per-position signed net cap over {QB,RB,WR,TE}:
+    # |count(recv at P) − count(give at P)| <= cap. Picks uncounted (a
+    # pick is not a positional body). 0 disables (filler_min_frac
+    # convention).
+    "pos_net_cap":                1.0,
+    # R3 #339 — "the pick IS the gap": for gap >= pick_gap_min_value, kill
+    # when a pick on the heavier side sits inside the two-sided band
+    # [frac × gap, gap / frac]. A pick far larger than the gap (stud-scaled
+    # centerpiece consolidation) passes. frac 0 disables; DEFAULTS ARE
+    # UNMEASURED (0 pick cards in the D-055 corpus) — tuning is the R-12
+    # build-phase replay task, this knob is the named lever.
+    "pick_gap_frac":              0.8,
+    "pick_gap_min_value":       300.0,
+    # R5 #304 — window-scaled need gate on the primary received player of
+    # UNTARGETED discovery decks (targeted jobs bypass, R-5b). Sub-floor
+    # receives always pass; need_gate_min_value <= 0 disables the gate.
+    # upgrade_margin 0 = any strict upgrade over the post-give incumbent
+    # passes.
+    "need_gate_min_value":      500.0,
+    "need_gate_upgrade_margin":   0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1100,6 +1138,167 @@ def pick_swap_ok(give_ids: list[str], recv_ids: list[str],
         return True
     return not (is_pick_asset(players.get(give_ids[0]))
                 and is_pick_asset(players.get(recv_ids[0])))
+
+
+# ---------------------------------------------------------------------------
+# Presentment rules (flag trade.presentment_rules) — G6 #340/#341/#339/#304
+# docs/feedback/items/304-positional-need-filter/lld-delta.md §3.
+# One module-level predicate per rule, alongside filler_ok/pick_swap_ok so
+# trade_optimizer can consume them the same way. All values are raw summed
+# consensus (`seed_value` per side) — the D-055 Δ currency. Each returns
+# True = the package may be presented, False = KILL.
+# ---------------------------------------------------------------------------
+
+# Positions the R2 net cap and the R5 need gate count. K/DEF/IDP (exotic
+# leagues) and PICK pseudo-assets are uncounted by design.
+_PRESENTMENT_POSITIONS = ("QB", "RB", "WR", "TE")
+
+
+def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
+    """R1 #340 — absolute overpay ceiling, BOTH sides.
+
+    KILL when gap >= max_overpay_min_value AND gap / max(g, r) >=
+    max_overpay_frac, where g/r are raw consensus sums (players AND picks).
+    Deliberately NEVER reads fairness_threshold — the mobile fairness
+    toggle cannot relax it; this is the operative absolute bound on both
+    settings. A *small* relative gap is simply fair — no upper-bound
+    counterpart exists (round-1 B1 re-audit). frac <= 0 disables.
+    """
+    frac = _c("max_overpay_frac")
+    if frac <= 0:
+        return True
+    g = sum(seed_value(p) for p in give_ids)
+    r = sum(seed_value(p) for p in recv_ids)
+    big = max(g, r)
+    if big <= 0:
+        return True
+    gap = abs(g - r)
+    return not (gap >= _c("max_overpay_min_value") and gap / big >= frac)
+
+
+def pos_net_ok(give_ids, recv_ids, players) -> bool:
+    """R2 #341 — per-position signed net cap.
+
+    For each P in {QB, RB, WR, TE}: net_P = count(recv at P) − count(give
+    at P) — ONE signed quantity per position, not a per-side count, so
+    2RB→2RB is net 0 and passes. KILL when any |net_P| > pos_net_cap.
+    Players only: pick assets are excluded (a pick is not a positional
+    body; picks are R3's domain). Positions outside the four are uncounted
+    by design. cap <= 0 disables (filler_min_frac convention).
+    """
+    cap = _c("pos_net_cap")
+    if cap <= 0:
+        return True
+    net: dict[str, int] = {}
+    for ids, sign in ((recv_ids, 1), (give_ids, -1)):
+        for pid in ids:
+            p = players.get(pid)
+            if p is None or is_pick_asset(p):
+                continue
+            pos = getattr(p, "position", None)
+            if pos in _PRESENTMENT_POSITIONS:
+                net[pos] = net.get(pos, 0) + sign
+    return all(abs(n) <= cap for n in net.values())
+
+
+def pick_gap_ok(give_ids, recv_ids, seed_value, players) -> bool:
+    """R3 #339 — "the pick IS the gap" (two-sided band).
+
+    Only evaluated when the package contains >= 1 pick. H = heavier side
+    by raw consensus sum. KILL when gap >= pick_gap_min_value AND some
+    pick p in H has pick_gap_frac × gap <= seed_value(p) <= gap /
+    pick_gap_frac — the overpaying side is shipping a pick that
+    single-handedly explains its excess. Two-sided on purpose (round-1
+    B1): a pick far LARGER than the gap is a stud-scaled centerpiece
+    consolidation and passes; the enumerators generate the pick-less
+    sibling shape independently, so the kill loses nothing. frac 0
+    disables; same knob mirrored forms the upper bound (no second key).
+    """
+    frac = _c("pick_gap_frac")
+    if frac <= 0:
+        return True
+    if not any(is_pick_asset(players.get(p))
+               for p in list(give_ids) + list(recv_ids)):
+        return True
+    g = sum(seed_value(p) for p in give_ids)
+    r = sum(seed_value(p) for p in recv_ids)
+    gap = abs(g - r)
+    if gap < _c("pick_gap_min_value"):
+        return True
+    heavy = give_ids if g >= r else recv_ids
+    lo, hi = frac * gap, gap / frac
+    for pid in heavy:
+        if is_pick_asset(players.get(pid)):
+            v = seed_value(pid)
+            if lo <= v <= hi:
+                return False
+    return True
+
+
+def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
+                 outlook, position_needs, position_surplus,
+                 scoring_format) -> bool:
+    """R5 #304 — window-scaled need gate, UNTARGETED discovery decks only
+    (the caller skips this predicate entirely when the job is targeted —
+    R-5b bypass, derived server-side in _run_trade_job).
+
+    Judged on the PRIMARY received asset only (highest consensus value,
+    players only; pick-primary cards exempt — secondary pieces are #141's
+    domain), on the CONSENSUS board (recorded decision — the user-board
+    variant is a named follow-up). user_pos_values maps position →
+    [(pid, consensus value)] over the user's FULL pre-trade roster; the
+    incumbent is computed on the post-give roster (roster − give_ids,
+    round-1 B2) so a tier-down that sends the very starter away survives.
+
+        PASS  v < need_gate_min_value                    (sub-floor churn)
+        PASS  P fills a starting hole (post-give bodies at P < S)
+        PASS  v > incumbent × (1 + need_gate_upgrade_margin)
+        else, by resolved window:
+          championship | contender      → KILL
+          not_sure                      → KILL only if P in surplus
+          rebuilder | jets | unresolved → PASS (gate off — deliberate
+                                          fail-open, recorded decision)
+    """
+    floor = _c("need_gate_min_value")
+    if floor <= 0:
+        return True
+    if outlook in ("rebuilder", "jets") or not outlook:
+        return True                       # window exempt / unresolved
+    primary_pos, primary_val = None, -1.0
+    for pid in recv_ids:
+        p = players.get(pid)
+        if p is None or is_pick_asset(p):
+            continue
+        v = seed_value(pid)
+        if v > primary_val:
+            primary_val = v
+            primary_pos = getattr(p, "position", None)
+    if primary_pos not in _PRESENTMENT_POSITIONS:
+        return True                       # pick-primary / unknown — exempt
+    if primary_val < floor:
+        return True                       # sub-floor churn
+    # NOTE: position_needs is threaded alongside position_surplus (the
+    # resolved analyze_roster_strengths outputs — no second resolution
+    # path, D-060), but the hole check below is deliberately the POST-GIVE
+    # consensus body count vs starter slots (lld §3 pseudo), not the
+    # value-tiered needs profile — the two disagree exactly when the
+    # roster holds sub-starter bodies at P, and the incumbent/upgrade
+    # branch already prices that case.
+    _ = position_needs
+    give_set = set(give_ids)
+    vals = sorted((v for pid, v in user_pos_values.get(primary_pos, ())
+                   if pid not in give_set), reverse=True)
+    starters = _starters_at(primary_pos, scoring_format)
+    if len(vals) < starters:
+        return True                       # fills a starting hole
+    incumbent = vals[starters - 1]
+    if primary_val > incumbent * (1.0 + _c("need_gate_upgrade_margin")):
+        return True                       # strict starter upgrade
+    if outlook in ("championship", "contender"):
+        return False
+    if outlook == "not_sure":
+        return primary_pos not in (position_surplus or ())
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -2367,6 +2566,19 @@ class TradeService:
         self._trade_cards: dict[str, TradeCard] = {}    # trade_id → TradeCard
         self._leagues:     dict[str, League]    = {}    # league_id → League
         self._past_decision_keys = past_decision_keys or set()
+        # G6 presentment rules (flag trade.presentment_rules) — per-job
+        # state, reset by every _generate_trades_impl call:
+        #   _exclusion_keys — R4 #336 windowless awaiting/matched exclusion
+        #     set, OVERWRITTEN per call (league-scoped per job; the service
+        #     serves multiple leagues, so carry-over would false-exclude
+        #     identical asset sets cross-league — round-1 N3).
+        #   _presentment_kills — per-rule candidate-kill counters (R-9).
+        #   _r4_excluded_keys — distinct keys R4 actually filtered (dedup
+        #     across streaming-snapshot re-filters + the likes-you injector).
+        self._exclusion_keys: set = set()
+        self._presentment_kills: dict[str, int] = {
+            "R1": 0, "R2": 0, "R3": 0, "R5": 0}
+        self._r4_excluded_keys: set = set()
 
     # ------------------------------------------------------------------
     # League management
@@ -2428,6 +2640,19 @@ class TradeService:
                                                 # "consolidate" | "tier_up" |
                                                 # "tier_down" | None — post-
                                                 # generation shape filter
+        bypass_need_gate: bool = False,        # G6 R-5b: True on TARGETED jobs
+                                               # (pinned give/receive, opponent
+                                               # scope, explicit acquire) —
+                                               # derived SERVER-SIDE in
+                                               # _run_trade_job, never from the
+                                               # request body. Skips R5 only;
+                                               # R1/R2/R3/R4 always apply.
+        exclusion_keys: set | None = None,     # G6 R4 #336: windowless
+                                               # awaiting/matched (frozenset
+                                               # give, frozenset receive) keys
+                                               # for THIS league. Overwrites the
+                                               # stored set every call; None ⇒
+                                               # empty set, never keep-previous.
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -2450,6 +2675,13 @@ class TradeService:
         league = self._leagues.get(league_id)
         if not league:
             raise ValueError(f"Unknown league: {league_id!r}")
+
+        # G6 R4 — overwrite-per-call semantics (round-1 N3): the kwarg
+        # REPLACES the stored set on every call; None ⇒ empty set, never
+        # "keep previous". Kill counters reset per job alongside it.
+        self._exclusion_keys = set(exclusion_keys) if exclusion_keys else set()
+        self._presentment_kills = {"R1": 0, "R2": 0, "R3": 0, "R5": 0}
+        self._r4_excluded_keys = set()
 
         # #172 — resolve the flag once so both paths below share one check;
         # off ⇒ trade_intent is never read, so flag-off responses stay
@@ -2487,7 +2719,12 @@ class TradeService:
                 opponent_user_id=opponent_user_id,
                 opponent_outlooks=opponent_outlooks,
                 opponent_pick_shares=opponent_pick_shares,
-                past_decision_keys=self._past_decision_keys,
+                # G6 R4 rides the shared past_decision_keys kwarg (lld §1
+                # generator-scope amendment): gen-v2 gets the windowless
+                # #336 exclusion automatically; the R1/R2/R3/R5 hooks are
+                # v1-path only — gen-v2 carries its own gate stack.
+                past_decision_keys=(self._past_decision_keys
+                                    | self._exclusion_keys),
                 on_opponent_done=on_opponent_done,
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
@@ -2524,6 +2761,7 @@ class TradeService:
                 untouchable_ids      = untouchable_ids,
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
+                bypass_need_gate     = bypass_need_gate,
             )
             cards = self._generate_trades_v2(**_v2_kwargs)
             # #189 — a targeted job (pinned players and/or acquire /
@@ -2627,16 +2865,36 @@ class TradeService:
 
     def _dedup_and_sort(self, cards: list[TradeCard]) -> list[TradeCard]:
         """Apply past-decision filter (skip trades the user already swiped on)
-        and return cards sorted by composite_score descending. Pulled out of
-        the main loop so it can be called both incrementally (snapshot for
-        progress callback) and at the end of generation."""
-        if self._past_decision_keys:
-            cards = [
-                c for c in cards
-                if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
-                   not in self._past_decision_keys
-            ]
+        and the G6 R4 #336 windowless awaiting/matched exclusion, then return
+        cards sorted by composite_score descending. Pulled out of the main
+        loop so it can be called both incrementally (snapshot for progress
+        callback — which is what makes R4 bind on streaming snapshots too)
+        and at the end of generation."""
+        if self._past_decision_keys or self._exclusion_keys:
+            kept: list[TradeCard] = []
+            for c in cards:
+                key = (frozenset(c.give_player_ids),
+                       frozenset(c.receive_player_ids))
+                if key in self._past_decision_keys:
+                    continue
+                if key in self._exclusion_keys:
+                    # Distinct-key accounting: snapshots re-filter the same
+                    # accumulating list, so a set (not a counter) keeps the
+                    # R4 kill count honest.
+                    self._r4_excluded_keys.add(key)
+                    continue
+                kept.append(c)
+            cards = kept
         return sorted(cards, key=lambda c: c.composite_score, reverse=True)
+
+    def presentment_kill_counts(self) -> dict[str, int]:
+        """G6 R-9 — per-rule kill counters for the current/most recent job.
+        R1/R2/R3/R5 count candidate kills at the construction hooks; R4 is
+        the count of DISTINCT excluded keys actually filtered (dedup sites
+        + the likes-you injector, which appends to _r4_excluded_keys)."""
+        counts = dict(self._presentment_kills)
+        counts["R4"] = len(self._r4_excluded_keys)
+        return counts
 
     # ------------------------------------------------------------------
     # #189 — relaxed fallback for empty targeted sweeps
@@ -2656,9 +2914,14 @@ class TradeService:
              non-negative on both boards).
 
         NEVER relaxed: the #108 user-board gates (user_gain_epsilon,
-        fit_premium_1for1 / user_gain_ok_1for1) and untouchable_ids — those
-        are safety properties, not taste. Past-decision dedup also still
-        applies, so already-swiped trades never resurface as "relaxed".
+        fit_premium_1for1 / user_gain_ok_1for1), untouchable_ids, and the
+        G6 presentment rules — construction rules R1 #340 / R2 #341 /
+        R3 #339 AND the R5 #304 need gate — those are safety properties,
+        not taste (a "relaxed" horrid trade is still horrid; targeted jobs
+        bypass R5 upstream via R-5b, so R5 is a no-op here anyway). The R4
+        #336 awaiting/matched exclusion and past-decision dedup also still
+        apply, so already-swiped/liked/matched trades never resurface as
+        "relaxed".
 
         Overrides ride the thread-local _cfg overlay (_cfg_override), so
         concurrent normal jobs on other threads are untouched. The relaxed
@@ -3117,6 +3380,7 @@ class TradeService:
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
+        bypass_need_gate: bool = False,
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -3229,6 +3493,58 @@ class TradeService:
         _user_needs = (set(user_profile.get("position_needs", []))
                        if FLAGS.trade_fit_premium else None)
 
+        # ------------------------------------------------------------------
+        # G6 presentment rules (flag trade.presentment_rules) — construction
+        # rules R1 #340 / R2 #341 / R3 #339 + the R5 #304 need gate, run
+        # INSIDE every generator at construction time (R-6) so killed
+        # candidates refill from the enumeration. One bound predicate is
+        # threaded to all three generators + the v3 sweetener re-validation.
+        # R5's inputs are computed here from user_profile whenever the
+        # presentment flag is on — deliberately NOT coupled to
+        # trade.fit_premium's _user_needs above (U-R5-9). Targeted jobs
+        # bypass R5 only (R-5b, bypass_need_gate derived server-side).
+        # Flag OFF ⇒ _presentment_ok stays None and every generator runs
+        # byte-identically (R-8).
+        # ------------------------------------------------------------------
+        _presentment_ok = None
+        if FLAGS.trade_presentment_rules:
+            _r5_active = not bypass_need_gate
+            _r5_needs = list(user_profile.get("position_needs", []))
+            _r5_surplus = list(user_profile.get("position_surplus", []))
+            _user_pos_values: dict[str, list] = {}
+            if _r5_active:
+                for _pid in user_roster:
+                    _p = self._players.get(_pid)
+                    if _p is None or is_pick_asset(_p):
+                        continue
+                    _pos = getattr(_p, "position", None)
+                    if _pos in _PRESENTMENT_POSITIONS:
+                        _user_pos_values.setdefault(_pos, []).append(
+                            (_pid, _vs(_pid)))
+            _kills = self._presentment_kills
+            _players_map = self._players
+
+            def _presentment_ok(give_ids, recv_ids):
+                if not overpay_ok(give_ids, recv_ids, _vs):
+                    _kills["R1"] += 1
+                    return False
+                if not pos_net_ok(give_ids, recv_ids, _players_map):
+                    _kills["R2"] += 1
+                    return False
+                if not pick_gap_ok(give_ids, recv_ids, _vs, _players_map):
+                    _kills["R3"] += 1
+                    return False
+                if _r5_active and not need_gate_ok(
+                        give_ids, recv_ids,
+                        seed_value=_vs, players=_players_map,
+                        user_pos_values=_user_pos_values, outlook=outlook,
+                        position_needs=_r5_needs,
+                        position_surplus=_r5_surplus,
+                        scoring_format=scoring_format):
+                    _kills["R5"] += 1
+                    return False
+                return True
+
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
@@ -3269,6 +3585,7 @@ class TradeService:
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
                 raw_user_elo         = user_elo,
+                presentment_ok_fn    = _presentment_ok,
             )
 
             if member.has_rankings and member.elo_ratings:
@@ -3303,6 +3620,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
+                        presentment_ok_fn    = _presentment_ok,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -3328,6 +3646,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
+                        presentment_ok_fn    = _presentment_ok,
                     )
                 # 2026-08-15 field bug (docs/plans/compressed-board-pool/) —
                 # a boarded member whose divergence path yields nothing used
@@ -3525,6 +3844,7 @@ class TradeService:
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
         user_needs: set | None = None,
+        presentment_ok_fn=None,              # G6 rules R1/R2/R3/R5; None = off
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -3733,6 +4053,13 @@ class TradeService:
             # the two raw boards. Junk both sides value low never pads a
             # package; headliners are exempt (1-for-1 shapes untouched).
             if not filler_ok(give_ids, recv_ids, _uv, _vo):
+                return
+            # G6 presentment rules (R1 #340 / R2 #341 / R3 #339 / R5 #304)
+            # — construction-time kill so the heap refills with sane
+            # candidates. Same slot as v3 (after filler_ok, before the
+            # surplus/fairness math). None ⇒ flag off, byte-identical.
+            if presentment_ok_fn is not None \
+                    and not presentment_ok_fn(give_ids, recv_ids):
                 return
 
             # Package values in EACH side's own value space (Change 2).
@@ -3946,6 +4273,7 @@ class TradeService:
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
+        presentment_ok_fn=None,              # G6 rules R1/R2/R3/R5; None = off
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -4060,6 +4388,11 @@ class TradeService:
             # must clear filler_min_frac of the side's headliner on
             # max(user raw board, consensus).
             if not filler_ok(give_ids, recv_ids, _uval_raw, seed_value):
+                return
+            # G6 presentment rules — same construction-time slot as the
+            # divergence paths (with the #108/#227/#141 gate block).
+            if presentment_ok_fn is not None \
+                    and not presentment_ok_fn(give_ids, recv_ids):
                 return
             fairness = min(gv, rv) / max(gv, rv)
             if fairness < fairness_threshold:
