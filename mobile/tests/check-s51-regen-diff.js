@@ -154,6 +154,8 @@ assert(
   `found ${keyFns.length}`,
 );
 
+let packageKeyFn = null; // the REAL helper, transpiled and callable (set below)
+
 if (keyFns.length === 1) {
   const src = stripComments(keyFns[0].getText(host));
   assert(
@@ -180,6 +182,7 @@ if (keyFns.length === 1) {
   const shim = { exports: {} };
   new Function('module', 'exports', js)(shim, shim.exports);
   const key = shim.exports;
+  packageKeyFn = key;
 
   const card = (opp, give, recv) => ({
     opponent_user_id: opp,
@@ -244,8 +247,27 @@ if (diffEffects.length === 1) {
   // 3 — late binding to the forced job.
   assert(
     /pending\.jobId/.test(body) && /job\?\.job_id !== pending\.jobId/.test(body),
-    '3 — the reveal resolves only for the job the handoff forced',
+    '3a — the reveal resolves only for the job the handoff forced',
     'without the id match the deck clear resolves it against the previous job',
+  );
+  // The heart of defect 1: the ref must survive every commit on which the
+  // reveal is NOT resolvable. Both guards return before the null assignment,
+  // so a commit that fails either one leaves the pending reveal armed.
+  const nullAt = body.indexOf('pendingRegenRef.current = null');
+  const jobGuardAt = body.indexOf('job?.job_id !== pending.jobId');
+  const armGuardAt = body.indexOf('!pending.jobId');
+  assert(
+    nullAt !== -1 && jobGuardAt !== -1 && armGuardAt !== -1 &&
+      armGuardAt < nullAt && jobGuardAt < nullAt,
+    '3b — the pending ref is cleared only AFTER both guards',
+    'clearing before a guard is defect 1 verbatim: the reveal disarms on a ' +
+      'commit that could not yet see the regenerated cards',
+  );
+  const guardReturns = (body.match(/\breturn;/g) || []).length;
+  assert(
+    guardReturns >= 2,
+    '3c — both guards bail with an early return (ref untouched)',
+    `found ${guardReturns} early returns`,
   );
 
   // 5 — honest zero.
@@ -309,6 +331,106 @@ if (handoffs.length === 1) {
     '4f — the pre-Quick-Set snapshot stores package identities',
     'snapshotting trade_ids is defect 2',
   );
+}
+
+// ═══ 6 — the two outcomes, run end-to-end on the SHIPPED expressions ═══════
+//
+// Executes the real snapshot expression and the real `fresh` expression,
+// lifted verbatim out of TradesScreen, against synthetic decks. This is the
+// assertion that would have caught defect 2 on its own: every regenerated
+// card carries a brand-new uuid in BOTH cases, exactly as the backend mints
+// them, so an id-based diff scores case A as a full deck of new trades.
+
+if (diffEffects.length === 1 && packageKeyFn) {
+  const body = stripComments(diffEffects[0].arguments[0].getText(host));
+  const snapSrc = handoffs.length === 1
+    ? stripComments(handoffs[0].getText(host)).match(
+        /prevPackages: (new Set\(deck\.map\(tradePackageKey\)\))/,
+      )
+    : null;
+  const freshStmt = body.match(/const fresh =[\s\S]*?\.length;/);
+
+  assert(!!freshStmt, '6a — the `fresh` statement is extractable for execution');
+  assert(!!snapSrc, '6b — the pre-Quick-Set snapshot expression is extractable');
+
+  if (freshStmt && snapSrc) {
+    const snapshot = new Function(
+      'deck',
+      'tradePackageKey',
+      `return ${snapSrc[1]};`,
+    );
+    const computeFresh = new Function(
+      'job',
+      'pending',
+      'tradePackageKey',
+      `${freshStmt[0]}\nreturn fresh;`,
+    );
+
+    let uuid = 0;
+    const pkg = (opp, give, recv) => ({
+      trade_id: `uuid-${(uuid += 1)}`, // fresh id per generation, as the server mints them
+      opponent_user_id: opp,
+      give_player_ids: give,
+      receive_player_ids: recv,
+    });
+    const preDeck = [
+      pkg('u1', ['p1'], ['p9']),
+      pkg('u1', ['p2'], ['p8']),
+      pkg('u2', ['p3'], ['p7']),
+      pkg('u2', ['p4'], ['p6']),
+      pkg('u3', ['p5'], ['p5b']),
+    ];
+    const pending = { prevPackages: snapshot(preDeck, packageKeyFn) };
+
+    // Case A — all-skip walk: the board never moved, so the engine re-prices
+    // to the same five packages. Only the ids differ (side order too, which
+    // the engine does not hold stable).
+    const allSkip = [
+      pkg('u1', ['p1'], ['p9']),
+      pkg('u1', ['p2'], ['p8']),
+      pkg('u2', ['p3'], ['p7']),
+      pkg('u2', ['p4'], ['p6']),
+      pkg('u3', ['p5'], ['p5b']),
+    ];
+    assert(
+      computeFresh({ cards: allSkip }, pending, packageKeyFn) === 0,
+      '6c — all-skip walk (identical packages, all-new ids) ⇒ fresh === 0 ⇒ s5.0',
+      'the honest null is broken — this walk would celebrate a deck the user already saw',
+    );
+
+    // Case B — the board moved: two packages are genuinely different.
+    const moved = [
+      pkg('u1', ['p1'], ['p9']),
+      pkg('u1', ['p2'], ['p8']),
+      pkg('u2', ['p3'], ['p7']),
+      pkg('u2', ['p4'], ['p6', 'p11']), // extra asset ⇒ new package
+      pkg('u4', ['p5'], ['p5b']), // new counterparty ⇒ new package
+    ];
+    assert(
+      computeFresh({ cards: moved }, pending, packageKeyFn) === 2,
+      '6d — moved board ⇒ fresh counts exactly the changed packages ⇒ s5.1 with N',
+    );
+
+    // The count is a subset of the regenerated deck, never a sum of both —
+    // the doubled-deck symptom, expressed as arithmetic.
+    assert(
+      computeFresh({ cards: moved }, pending, packageKeyFn) <= moved.length,
+      '6e — N can never exceed the regenerated deck size (N < D on any real return)',
+    );
+
+    // Same-order-different-side: a package whose give side comes back
+    // re-ordered is NOT new.
+    const reordered = [pkg('u9', ['a', 'b'], ['x', 'y'])];
+    const reorderedPending = { prevPackages: snapshot(reordered, packageKeyFn) };
+    assert(
+      computeFresh(
+        { cards: [pkg('u9', ['b', 'a'], ['y', 'x'])] },
+        reorderedPending,
+        packageKeyFn,
+      ) === 0,
+      '6f — a re-ordered but identical package is not counted as new',
+    );
+  }
 }
 
 console.log(
