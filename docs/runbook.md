@@ -54,6 +54,7 @@ Operational procedures. Add to this as you learn things.
 - [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
+- [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 
 ---
 
@@ -789,3 +790,33 @@ To rebuild a league's grid from scratch, replay those rows in `occurred_at` orde
 - **Kill the v2 layer only:** `onboarding.guide_v2 → false` (hot-reload via `POST /api/feature-flags/reload`, cron-secret gated). Restores the v1 tour graph: v1 beats (incl. `s6.1` toast + `s2.3`), no eligibility layer, no new beats. Copy trims persist (they ship in the binary, unconditionally).
 - **Kill the whole tour:** `onboarding.guided_avatar → false`. **Reality check (PRD FR-E11):** the documented "falls back to the passive layer" claim is FALSE while `onboarding.guided_layer` is `false` — turning the avatar off today falls back to NOTHING. If a passive fallback is wanted, flip `onboarding.guided_layer → true` in the same change.
 - **Guide flag preconditions** (beats fail closed when their owning feature flag is off — pulling one of these mid-season silently suppresses the beat, by design): `trade.outlook_direction` + `trades.edit_full_sheet` + `trades.finder_hub` → N2 · `deck.replenishment` + `trade.finder_targeting` + `trades.finder_hub` → N4 · `ranks.import` → N8 · `league.pos_candidates` (+ `league.player_trade_handoff` for the pin clause) → N5 · `trade.send_in_sleeper` → the send-teaching beats (N6.2/N3, Phase 2).
+
+## ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)
+
+The identity-binding release (feedback #321) verifies WHOSE ESPN account a
+captured cookie pair belongs to, not just that it works. Two support-visible
+effects:
+
+**1. Every ESPN-connected user is signed out of ESPN exactly once.** The
+deploy runs a one-time migration (`_evict_prerelease_espn_verified_stamps`,
+`backend/database.py`) that nulls every `espn_credentials.verified_at` stamp
+minted before the release cutoff — **any vintage, including sign-ins that
+were done correctly after the 2026-08-12 fixes** — because no pre-release
+stamp proves *identity* (the pre-release oracles accepted any valid ESPN
+session). Expected, deliberate, and resolved by one re-sign-in through
+Settings / the send flow, which now verifies identity before storing. The
+encrypted pair is kept (row not deleted); status simply reads *not
+connected* until re-proven. The migration is idempotent (date-bounded +
+NULL-fails-`<`), so re-deploys never re-sign anyone out.
+
+**2. A new rejection users may ask about: "it says my account doesn't own
+this team."** The wrong-account 403 copy is: *"That ESPN account can't open
+your linked league, so nothing was saved. Sign in with the ESPN account
+that owns your team."* It means the ESPN sign-in WORKED but belongs to a
+different human than the linked league's bound team (the #321 bleed shape:
+someone else signed in to ESPN on that device), or the user picked the
+wrong team at import. Fix: sign in with the owning ESPN account — or
+re-link the league and pick the right team. Wire code is still
+`espn_bad_credentials`; the additive `reason: "wrong_account"` field is
+what drives the dedicated mobile copy. Diagnosis from logs: grep
+`identity mismatch` (store / team-binding / re-sync variants all log it).
