@@ -1,0 +1,826 @@
+# worktree: /Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/agent-ac919199823a00f48
+# branch: worktree-agent-ac919199823a00f48
+# tip: d44200f2
+# captured: 2026-08-16 (pre-removal)
+# untracked files:
+
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 2f61528..259fc6c 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -17,7 +17,63 @@
+       "Bash(python3 -c ' *)",
+       "Bash(git add *)",
+       "Bash(git commit --quiet -m 'feedback: hide closed notes from the user inbox; verify per-user scoping *)",
+-      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)"
++      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)",
++      "Bash(git commit -m 'mobile: bump version to 1.5.1 \\(tier palette de-collision\\) *)",
++      "Bash(git push *)",
++      "Bash(git fetch *)",
++      "Bash(git merge origin/main -m 'Merge origin/main \\(web League tiles → FB-91 buckets\\) *)",
++      "Bash(npx eas-cli *)",
++      "Bash(git log *)",
++      "Bash(sqlite3 data/trade_finder.db \"SELECT scoring_format, COUNT\\(*\\), MIN\\(snapshot_date\\), MAX\\(snapshot_date\\), COUNT\\(DISTINCT snapshot_date\\) FROM player_value_history GROUP BY scoring_format;\")",
++      "Bash(npx tsc *)",
++      "Bash(sqlite3 data/trade_finder.db \"SELECT sleeper_league_id, name FROM leagues WHERE name LIKE '%akeview%';\" \"SELECT league_id, COUNT\\(*\\) FROM league_members GROUP BY league_id;\")",
++      "Bash(curl -s --max-time 10 \"https://fantasy-trade-finder.onrender.com/positional-tiers.html\")",
++      "Bash(grep -n \"GET | \\\\`/api/rankings\\\\`\\\\|/api/rankings\" docs/api-reference.md)",
++      "Bash(curl -s \"https://api.sleeper.app/v1/league/1312076055586050048\")",
++      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['name'], 'total_rosters=', d['total_rosters']\\)\")",
++      "Bash(curl -s \"https://api.sleeper.app/v1/league/1312076055586050048/rosters\")",
++      "Bash(python3 -c \"import json,sys; rs=json.load\\(sys.stdin\\); print\\('rosters:', len\\(rs\\), 'with owner:', sum\\(1 for r in rs if r.get\\('owner_id'\\)\\)\\)\")",
++      "Bash(grep -c \"DATABASE_URL_PROD=.\" secrets.local.env)",
++      "Bash(grep -o \"^[A-Z_]*=\" secrets.local.env)",
++      "Bash(python3 -m pytest backend/tests/test_consensus_pos_rank.py -q)",
++      "Bash(python3 -m pytest backend/tests/ -q)",
++      "Bash(grep -n \"| GET | \\\\`/api/rankings\\\\` |\" docs/api-reference.md)",
++      "Bash(python3 -m pytest backend/tests/test_league_total_teams.py backend/tests/test_league_summary_buckets.py -q)",
++      "Bash(cp data/trade_finder.db __TRACKED_VAR__/tf_copy.db)",
++      "Bash(DATABASE_URL=sqlite:///__TRACKED_VAR__/tf_copy.db python3 -)",
++      "Bash(git commit -m ' *)",
++      "Bash(git pull *)",
++      "Bash(curl -s -m 20 -X POST \"https://fantasy-trade-finder.onrender.com/api/trade/evaluate\" -H \"Content-Type: application/json\" -d '{\"give_player_ids\":[\"probe\"],\"receive_player_ids\":[]}' -o /dev/null -w \"evaluate: %{http_code}\\\\n\")",
++      "Bash(curl -s -m 20 -X POST \"https://fantasy-trade-finder.onrender.com/api/ranking-method\" -H \"Content-Type: application/json\" -d '{\"method\":\"anchor\"}' -o /dev/null -w \"ranking-method \\(no session\\): %{http_code}\\\\n\")",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/**)",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/backend/**)",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/**)",
++      "Bash(.venv/bin/pip install *)",
++      "Bash(.venv/bin/python -)",
++      "Bash(node --check web/js/app.js)",
++      "Bash(node --check \"/Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/review.js\")",
++      "Bash(node --check \"/Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/pipeline.js\")",
++      "Bash(cp __TRACKED_VAR__/css/style.css /private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/e6bf9ba6-f15d-4e40-b720-c6ad60dda1e9/scratchpad/jobpilot-mock/css/)",
++      "Bash(cp __TRACKED_VAR__/js/app.js __TRACKED_VAR__/js/review.js __TRACKED_VAR__/js/pipeline.js /private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/e6bf9ba6-f15d-4e40-b720-c6ad60dda1e9/scratchpad/jobpilot-mock/js/)",
++      "Bash(node --check ../web/js/app.js)",
++      "Bash(.venv/bin/python -m py_compile backend/evaluation.py backend/review_checks.py backend/interview_prep.py backend/routes_review.py backend/docgen.py backend/routes_tailor.py backend/db.py backend/app.py)",
++      "Bash(.venv/bin/python -c ' *)",
++      "Bash(.venv/bin/python -m py_compile backend/*.py)",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_trio_repeat.py\")",
++      "Bash(python3 -m pytest backend/tests/test_tile_trade_scores.py backend/tests/test_trends_rank_deltas.py backend/tests/test_consensus_pos_rank.py -q)",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_mature.py\")",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_sessions.py\")",
++      "Bash(python3 -m pytest backend/tests/test_trio_boundary.py backend/tests/test_trio_variety.py -q)",
++      "Bash(python3 -m pytest backend/tests/test_trio_variety.py backend/tests/test_trio_boundary.py -q)",
++      "Bash(xcodebuild -version)",
++      "Bash(awk '{print $4\" free\"}')",
++      "Bash(pkill -f \"^sleep 600$\")",
++      "Bash(git mv *)",
++      "Bash(mkdir -p ~/.claude/skills/brand-lab/references && echo ok)",
++      "Bash(grep -n \"^#\\\\{2,3\\\\} \" docs/api-reference.md)",
++      "Bash(grep -rn --include=\"*.md\" --include=\"*.json\" --include=\"*.txt\" --include=\"*.html\" -E \"feedback-backend-sync\\\\.md|mobile-feature-parity\\\\.md|mobile-feature-parity-architecture\\\\.md\" docs/ living-memory/ context.md README.md .claude/)",
++      "Bash(echo \"---exit $?\")",
++      "Bash(python3 -m backend.espn_service 11896)"
+     ]
+   }
+ }
+diff --git a/backend/server.py b/backend/server.py
+index d8e539c..c962416 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -1779,16 +1779,19 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value) ->
+     return True
+ 
+ 
+-def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value):
++def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set,
++                      outlook_value, verdict_fmt: str | None = None):
+     """Build a callback that snapshots cards into _trade_jobs[job_id] as
+     each opponent finishes. Pre-binds the players_dict + outlook so the
+-    closure can run inside the worker thread without re-reading session state."""
++    closure can run inside the worker thread without re-reading session state.
++    `verdict_fmt` (FB-156 item 3) is the scoring format used to stamp each
++    finder card's pick-denominated value-bar verdict (flag-gated)."""
+     def _cb(opponents_done: int, opponents_total: int, sorted_cards):
+         # Convert internal TradeCard objects → public dicts (same shape as
+         # /api/trades/matches enrichment uses).
+         snapshot = []
+         for c in sorted_cards:
+-            d = trade_card_to_dict(c, players_dict)
++            d = trade_card_to_dict(c, players_dict, verdict_fmt=verdict_fmt)
+             d["real_opponent"] = c.target_user_id in real_user_ids
+             d["outlook"]       = outlook_value
+             snapshot.append(d)
+@@ -2151,6 +2154,7 @@ def _run_trade_job(
+     pinned_give: list,
+     pinned_receive: list | None = None,
+     opponent_user_id: str | None = None,
++    pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+ ):
+     """Daemon-thread entry point. Resolves the session itself (rather than
+     capturing closures over per-request state) so the request that kicked
+@@ -2276,7 +2280,8 @@ def _run_trade_job(
+                 log.warning("trade-job: asset prefs load failed: %s", ap_err)
+ 
+         players_dict = {p.id: p for p in g_players}
+-        progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids, outlook_value)
++        progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids,
++                                         outlook_value, verdict_fmt=active_format)
+ 
+         # Per-player comparison counts for the requesting user — feeds the
+         # v2 confidence-shrinkage step (Tier 1, Change 4). None when the
+@@ -2295,6 +2300,7 @@ def _run_trade_job(
+             acquire_positions    = acquire_positions,
+             trade_away_positions = trade_away_positions,
+             pinned_give_players  = pinned_give or None,
++            pinned_give_mode     = pinned_give_mode,
+             pinned_receive_players = pinned_receive or None,
+             opponent_user_id     = opponent_user_id,
+             scoring_format       = active_format,
+@@ -2326,7 +2332,7 @@ def _run_trade_job(
+                 )
+                 snapshot = []
+                 for c in final_cards:
+-                    d = trade_card_to_dict(c, players_dict)
++                    d = trade_card_to_dict(c, players_dict, verdict_fmt=active_format)
+                     d["real_opponent"] = c.target_user_id in real_user_ids
+                     d["outlook"]       = outlook_value
+                     snapshot.append(d)
+@@ -2356,7 +2362,7 @@ def _run_trade_job(
+                     final_cards = ordered
+                     snapshot = []
+                     for c in final_cards:
+-                        d = trade_card_to_dict(c, players_dict)
++                        d = trade_card_to_dict(c, players_dict, verdict_fmt=active_format)
+                         d["real_opponent"] = c.target_user_id in real_user_ids
+                         d["outlook"]       = outlook_value
+                         snapshot.append(d)
+@@ -2459,6 +2465,7 @@ def _kickoff_trade_job(
+     scoring_format: str,
+     fairness_threshold: float = 0.75,
+     pinned_give: list | None = None,
++    pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+     pinned_receive: list | None = None,
+     opponent_user_id: str | None = None,
+     opponents_total: int | None = None,
+@@ -2494,7 +2501,8 @@ def _kickoff_trade_job(
+     threading.Thread(
+         target=_run_trade_job,
+         args=(job_id, sess_token, league_id, fairness_threshold,
+-              pinned_give or [], pinned_receive or [], opponent_user_id),
++              pinned_give or [], pinned_receive or [], opponent_user_id,
++              pinned_give_mode),
+         daemon=True,
+     ).start()
+     return job_id
+@@ -5022,7 +5030,52 @@ def _invalidate_trade_block_cache(league_id: str) -> None:
+         _trade_block_cache.pop(league_id, None)
+ 
+ 
+-def trade_card_to_dict(card, players: dict) -> dict:
++def _finder_card_verdict(give_ids, recv_ids, scoring_format: str) -> dict | None:
++    """FB-156 item 3 — the pick-denominated who-wins verdict for a finder
++    card, computed with the SAME consensus helpers as POST /api/trade/evaluate
++    (Mode A) so the deck's value bar reads identically to the calculator's.
++    Returns the {give_value, receive_value, favors, gap} shape TradeValueBar
++    consumes, or None when either side can't be priced on consensus.
++
++    Presentation only — reuses _consensus_packages / _fairness_v3 /
++    _pick_gap_equivalent verbatim; invents no math and never touches engine
++    scoring."""
++    from .trade_optimizer import _consensus_packages, _fairness_v3
++    _players, seed = _get_universal_pool(scoring_format)
++    e2v = _trade_service_mod.elo_to_value
++
++    def seed_value(pid: str) -> float:
++        return e2v(seed.get(pid, 1500.0))
++
++    give = [p for p in (give_ids or []) if p in seed]
++    recv = [p for p in (recv_ids or []) if p in seed]
++    if not (give and recv):
++        return None
++    gv, rv = _consensus_packages(give, recv, seed_value)
++    give_value, receive_value = round(gv, 1), round(rv, 1)
++    # point_ratio is threshold-independent; 0.75 just satisfies the signature.
++    _fairness, point_ratio, _gv, _rv = _fairness_v3(give, recv, seed_value, None, 0.75)
++    if point_ratio is not None and point_ratio >= 0.95:
++        favors = "even"
++    else:
++        favors = "receive" if receive_value > give_value else "give"
++    gap_val = abs(receive_value - give_value)
++    gap = {
++        "value":  round(gap_val, 1),
++        "add_to": (None if gap_val == 0
++                   else "give" if give_value < receive_value
++                   else "receive"),
++        **_pick_gap_equivalent(gap_val),
++    }
++    return {
++        "give_value":    give_value,
++        "receive_value": receive_value,
++        "favors":        favors,
++        "gap":           gap,
++    }
++
++
++def trade_card_to_dict(card, players: dict, verdict_fmt: str | None = None) -> dict:
+     def p(pid):
+         pl = players.get(pid)
+         return player_to_dict(pl) if pl else {"id": pid, "name": "Unknown",
+@@ -5106,6 +5159,18 @@ def trade_card_to_dict(card, players: dict) -> dict:
+             for _row in out["give"] + out["receive"]:
+                 if str(_row.get("id")) in _blk:
+                     _row["on_block"] = True
++    # FB-156 item 3 — pick-denominated who-wins verdict for the finder deck's
++    # value bar. Only computed when a format is threaded in (the finder deck
++    # snapshot passes it) AND the hub flag is on, so every other serialization
++    # path (matches, awaiting, reconstruct) stays byte-identical.
++    if verdict_fmt and is_enabled("trades.finder_hub"):
++        try:
++            verdict = _finder_card_verdict(
++                card.give_player_ids, card.receive_player_ids, verdict_fmt)
++            if verdict is not None:
++                out["verdict"] = verdict
++        except Exception as _v_err:   # never let a verdict break the deck
++            log.warning("finder-card verdict failed (non-fatal): %s", _v_err)
+     return out
+ 
+ 
+@@ -5143,6 +5208,11 @@ def generate_trades():
+     body               = request.get_json(force=True) or {}
+     league_id          = body.get("league_id") or g_league.league_id
+     pinned_give        = body.get("pinned_give_players") or []
++    # FB-174 — pinned-give package constraint. 'all' = the whole pinned-give
++    # set must appear together on every suggestion's give side; 'any' (default)
++    # keeps the shipped ≥1 filter. Any value other than 'all' falls back to
++    # 'any', so an absent/unknown field is byte-identical to before.
++    pinned_give_mode   = "all" if body.get("pinned_give_mode") == "all" else "any"
+     # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
+     # is on so flag-off behavior stays byte-identical for any early client.
+     pinned_receive     = (body.get("pinned_receive_players") or []
+@@ -5216,6 +5286,7 @@ def generate_trades():
+         scoring_format     = fmt,
+         fairness_threshold = fairness_threshold,
+         pinned_give        = pinned_give or None,
++        pinned_give_mode   = pinned_give_mode,
+         pinned_receive     = pinned_receive or None,
+         opponent_user_id   = opponent_user_id,
+         opponents_total    = opponents_total,
+diff --git a/backend/tests/test_trade_optimizer.py b/backend/tests/test_trade_optimizer.py
+index 6750890..f374f22 100644
+--- a/backend/tests/test_trade_optimizer.py
++++ b/backend/tests/test_trade_optimizer.py
+@@ -499,6 +499,126 @@ def test_pinned_player_in_give_pool_despite_low_divergence():
+             "pinned filter: every card must trade away uP")
+ 
+ 
++# ---------------------------------------------------------------------------
++# FB-174 — pinned-give package constraint ('all' vs 'any')
++# ---------------------------------------------------------------------------
++
++def _package_fixture():
++    """User rosters two mid WRs (uP1, uP2) the opponent covets, plus a
++    lineup-feasible base; the opponent holds a stud WR (oBig) the user
++    covets and a mid (oSmall). Eased waiver/surplus gates so BOTH single
++    1-for-1s (one pinned player) and 2-for-1 packages (both pinned) survive,
++    which is exactly what makes 'any' and 'all' diverge."""
++    ts._cfg["waiver_slot_cost"] = 0.0
++    ts._cfg["min_side_surplus"] = 20.0
++    pos = {**_bodies("u"), **_bodies("o"),
++           "uP1": "WR", "uP2": "WR", "oBig": "WR", "oSmall": "WR"}
++    players = _players_of(pos)
++    user_roster = list(_bodies("u")) + ["uP1", "uP2"]
++    opp_roster = list(_bodies("o")) + ["oBig", "oSmall"]
++
++    user_elo = {pid: 1500.0 for pid in pos}
++    opp_elo = {pid: 1500.0 for pid in pos}
++    for pid in _bodies("u"):
++        opp_elo[pid] = 1490.0
++    for pid in _bodies("o"):
++        user_elo[pid] = 1490.0
++    opp_elo.update({"uP1": 1600.0, "uP2": 1600.0})
++    user_elo.update({"oBig": 1660.0, "oSmall": 1560.0})
++    seed_elo = {pid: 1500.0 for pid in pos}
++    seed_elo.update({"uP1": 1540.0, "uP2": 1540.0,
++                     "oBig": 1600.0, "oSmall": 1545.0})
++    opponent = _member("opp", opp_roster, opp_elo)
++    return players, user_roster, opponent, user_elo, seed_elo
++
++
++def test_pinned_give_mode_all_requires_full_package():
++    """'all' — every suggestion's give side must contain the FULL pinned set;
++    single-pinned shapes that 'any' would surface are filtered out."""
++    players, user_roster, opponent, user_elo, seed_elo = _package_fixture()
++    cards = _v3(user_elo=user_elo, user_roster=user_roster, opponent=opponent,
++                seed_elo=seed_elo, players=players, fairness_threshold=0.5,
++                pinned_give_players=["uP1", "uP2"], pinned_give_mode="all")
++    assert cards, "'all' mode must still surface package cards"
++    for c in cards:
++        assert {"uP1", "uP2"} <= set(c.give_player_ids), (
++            "'all' mode: both pinned players must appear together on the give "
++            f"side, got {c.give_player_ids}")
++
++
++def test_pinned_give_mode_any_is_the_default_and_looser():
++    """'any' (default) keeps the shipped ≥1 semantics: at least one single-
++    pinned card exists that 'all' would reject, proving the modes diverge and
++    that omitting the mode is byte-identical to passing 'any'."""
++    players, user_roster, opponent, user_elo, seed_elo = _package_fixture()
++    default = _v3(user_elo=user_elo, user_roster=user_roster, opponent=opponent,
++                  seed_elo=seed_elo, players=players, fairness_threshold=0.5,
++                  pinned_give_players=["uP1", "uP2"])           # mode omitted
++    explicit_any = _v3(user_elo=user_elo, user_roster=user_roster,
++                       opponent=opponent, seed_elo=seed_elo, players=players,
++                       fairness_threshold=0.5,
++                       pinned_give_players=["uP1", "uP2"],
++                       pinned_give_mode="any")
++    key = lambda cs: sorted((frozenset(c.give_player_ids),
++                             frozenset(c.receive_player_ids)) for c in cs)
++    assert key(default) == key(explicit_any), (
++        "omitting pinned_give_mode must be identical to 'any'")
++    # Every pinned card includes ≥1 pin; at least one includes only ONE pin.
++    assert all(({"uP1", "uP2"} & set(c.give_player_ids)) for c in default)
++    assert any(not ({"uP1", "uP2"} <= set(c.give_player_ids)) for c in default), (
++        "'any' should surface at least one single-pinned card that 'all' drops")
++
++
++def test_pinned_give_mode_all_no_pins_is_parity():
++    """Guard: pinned_give_mode='all' with NO pins must be byte-identical to
++    unpinned generation — the mode only bites when pins are present."""
++    players, user_roster, opponent, user_elo, seed_elo = _package_fixture()
++    base = _v3(user_elo=user_elo, user_roster=user_roster, opponent=opponent,
++               seed_elo=seed_elo, players=players, fairness_threshold=0.5)
++    all_nopin = _v3(user_elo=user_elo, user_roster=user_roster,
++                    opponent=opponent, seed_elo=seed_elo, players=players,
++                    fairness_threshold=0.5, pinned_give_mode="all")
++    key = lambda cs: sorted((c.composite_score, frozenset(c.give_player_ids),
++                             frozenset(c.receive_player_ids)) for c in cs)
++    assert key(base) == key(all_nopin)
++
++
++def test_give_side_satisfies_pins_helper():
++    """The pure candidate-filter predicate FB-174 threads everywhere."""
++    from backend.trade_service import give_side_satisfies_pins as ok
++    pins = {"a", "b"}
++    # No pins ⇒ always True (unpinned generation unchanged).
++    assert ok(["x"], None, "all") is True
++    assert ok(["x"], set(), "any") is True
++    # 'any' ⇒ at least one pinned present.
++    assert ok(["a", "x"], pins, "any") is True
++    assert ok(["x", "y"], pins, "any") is False
++    # 'all' ⇒ the whole pinned set must be present (superset).
++    assert ok(["a", "b", "x"], pins, "all") is True
++    assert ok(["a", "x"], pins, "all") is False
++    # Unknown mode falls back to 'any'.
++    assert ok(["a", "x"], pins, "bogus") is True
++
++
++def test_pinned_give_mode_threads_through_generate_trades():
++    """End-to-end: pinned_give_mode='all' passed to the public generate_trades
++    orchestrator (trade_engine.v2 + v3) reaches the per-pair optimizer and
++    constrains every card to the full pinned package."""
++    _set_flags("trade_engine.v2", "trade_engine.v3", "trade.finder_targeting")
++    players, user_roster, opponent, user_elo, seed_elo = _package_fixture()
++    svc = TradeService(players=players)
++    svc.add_league(League(league_id="L1", name="T", platform="demo",
++                          members=[opponent]))
++
++    cards = svc.generate_trades(
++        user_id="user", user_elo=user_elo, user_roster=user_roster,
++        league_id="L1", seed_elo=seed_elo, fairness_threshold=0.5,
++        pinned_give_players=["uP1", "uP2"], pinned_give_mode="all")
++    assert cards, "orchestrator 'all' mode should still surface package cards"
++    for c in cards:
++        assert {"uP1", "uP2"} <= set(c.give_player_ids)
++
++
+ # ---------------------------------------------------------------------------
+ # Engine selection: trade_engine.v3 routes ranked opponents through the
+ # optimizer; flag off falls back to _generate_for_pair_v2.
+diff --git a/backend/trade_optimizer.py b/backend/trade_optimizer.py
+index 9e1de19..4e93c7a 100644
+--- a/backend/trade_optimizer.py
++++ b/backend/trade_optimizer.py
+@@ -56,6 +56,7 @@ from .trade_service import (
+     elo_to_value,
+     filler_ok,
+     fit_premium_1for1,
++    give_side_satisfies_pins,
+     marginal_value,
+     outlook_blend_mult,
+     package_value_v2,
+@@ -198,6 +199,7 @@ def generate_pair_trades_v3(
+     acquire_positions: list[str] | None = None,
+     trade_away_positions: list[str] | None = None,
+     pinned_give_players: list[str] | None = None,
++    pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+     pinned_receive_players: list[str] | None = None,
+     players: dict,
+     alpha_opp: float | None = None,
+@@ -440,7 +442,7 @@ def generate_pair_trades_v3(
+     order = 0
+ 
+     for give_ids in give_subsets:
+-        if pinned_set and not (set(give_ids) & pinned_set):
++        if not give_side_satisfies_pins(give_ids, pinned_set, pinned_give_mode):
+             continue
+         for recv_ids in recv_subsets:
+             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+diff --git a/backend/trade_service.py b/backend/trade_service.py
+index 8b6caf6..70d2237 100644
+--- a/backend/trade_service.py
++++ b/backend/trade_service.py
+@@ -650,6 +650,27 @@ def analyze_roster_strengths(
+ # ---------------------------------------------------------------------------
+ 
+ 
++def give_side_satisfies_pins(give_ids, pinned_set, mode: str = "any") -> bool:
++    """FB-174 — pinned-give package constraint (candidate filtering only).
++
++    ``mode='any'`` (default, shipped behavior) keeps the ≥1 semantics: a
++    suggestion qualifies as long as its give side includes AT LEAST ONE
++    pinned player. ``mode='all'`` implements the feedback-#174 ask — "trade
++    this PACKAGE away" — requiring EVERY pinned give player to appear
++    together on the give side of the suggestion. No pins ⇒ always True, so
++    unpinned generation is byte-identical.
++
++    This is purely a filter over already-enumerated candidates; it never
++    touches scoring or weighting.
++    """
++    if not pinned_set:
++        return True
++    gset = set(give_ids)
++    if mode == "all":
++        return pinned_set <= gset
++    return bool(gset & pinned_set)
++
++
+ def _position_strength(profile: dict, pos: str) -> float:
+     """0..1 — how loaded a roster is at `pos`, from an
+     analyze_roster_strengths profile. 1.0 = at/above the surplus threshold,
+@@ -1558,6 +1579,9 @@ class TradeService:
+         acquire_positions: list[str] | None = None,    # positions user wants to receive
+         trade_away_positions: list[str] | None = None, # positions user wants to give
+         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
++        pinned_give_mode: str = "any",       # FB-174 — 'any' (≥1 pinned give,
++                                             # default) | 'all' (whole pinned
++                                             # package must appear together)
+         pinned_receive_players: list[str] | None = None,  # specific players user wants to acquire
+                                                           # (FB-47; v2-only, legacy ignores it)
+         opponent_user_id: str | None = None,  # #156 Specific Team: scope the
+@@ -1591,6 +1615,11 @@ class TradeService:
+           give side includes at least one of these player IDs.  This lets
+           users say "I want to trade away X" and see what comes back.
+ 
++        pinned_give_mode: FB-174. 'any' (default) keeps the ≥1-pinned filter;
++          'all' requires the FULL pinned-give set on the give side of every
++          suggestion ("trade this package away, what can I get?"). Filtering
++          only — scoring is unchanged.
++
+         Returns new cards (not already in trade_cards).
+         """
+         league = self._leagues.get(league_id)
+@@ -1612,6 +1641,7 @@ class TradeService:
+                 acquire_positions    = acquire_positions,
+                 trade_away_positions = trade_away_positions,
+                 pinned_give_players  = pinned_give_players,
++                pinned_give_mode     = pinned_give_mode,
+                 pinned_receive_players = pinned_receive_players,
+                 opponent_user_id     = opponent_user_id,
+                 scoring_format       = scoring_format,
+@@ -1670,6 +1700,7 @@ class TradeService:
+                 acquire_positions    = acquire_positions or [],
+                 trade_away_positions = trade_away_positions or [],
+                 pinned_give_players  = pinned_give_players,
++                pinned_give_mode     = pinned_give_mode,
+             )
+             for c in cards:
+                 c.match_context = match_ctx
+@@ -1760,6 +1791,7 @@ class TradeService:
+         acquire_positions: list[str] | None,
+         trade_away_positions: list[str] | None,
+         pinned_give_players: list[str] | None,
++        pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+         pinned_receive_players: list[str] | None = None,
+         opponent_user_id: str | None = None,
+         scoring_format: str = "1qb_ppr",
+@@ -1922,6 +1954,7 @@ class TradeService:
+                         acquire_positions    = acquire_positions or [],
+                         trade_away_positions = trade_away_positions or [],
+                         pinned_give_players  = pinned_give_players,
++                        pinned_give_mode     = pinned_give_mode,
+                         pinned_receive_players = pinned_receive_players,
+                         players              = self._players,
+                         alpha_opp            = alpha_opp,
+@@ -1944,6 +1977,7 @@ class TradeService:
+                         acquire_positions    = acquire_positions or [],
+                         trade_away_positions = trade_away_positions or [],
+                         pinned_give_players  = pinned_give_players,
++                        pinned_give_mode     = pinned_give_mode,
+                         pinned_receive_players = pinned_receive_players,
+                         confidence           = confidence,
+                         scoring_format       = scoring_format,
+@@ -1968,6 +2002,7 @@ class TradeService:
+                     acquire_positions    = acquire_positions or [],
+                     trade_away_positions = trade_away_positions or [],
+                     pinned_give_players  = pinned_give_players,
++                    pinned_give_mode     = pinned_give_mode,
+                     pinned_receive_players = pinned_receive_players,
+                     untouchable_ids      = untouchable_ids,
+                     target_ids           = target_ids,
+@@ -2109,6 +2144,7 @@ class TradeService:
+         acquire_positions: list[str],
+         trade_away_positions: list[str],
+         pinned_give_players: list[str] | None,
++        pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+         pinned_receive_players: list[str] | None = None,
+         confidence: dict[str, int] | None = None,
+         scoring_format: str = "1qb_ppr",
+@@ -2289,7 +2325,7 @@ class TradeService:
+                 heapq.heapreplace(heap, entry)
+ 
+         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
+-            if pinned_set and not (set(give_ids) & pinned_set):
++            if not give_side_satisfies_pins(give_ids, pinned_set, pinned_give_mode):
+                 return
+             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+                 return
+@@ -2401,6 +2437,14 @@ class TradeService:
+             for pid in _known_opp:
+                 if pid in target_ids and pid not in recv_candidates:
+                     recv_candidates.append(pid)
++        # FB-174 — 'all' package mode: every pinned give player must be able to
++        # co-occur on the give side, so force them past the divergence prune
++        # (mirrors the optimizer's always-keep-pinned-give rule). Gated on
++        # 'all' so the default 'any' path's candidate pool is byte-identical.
++        if pinned_set and pinned_give_mode == "all":
++            for pid in _known_user:
++                if pid in pinned_set and pid not in give_candidates:
++                    give_candidates.append(pid)
+         give_candidates.sort(key=lambda p: _vo(p) - user_value[p], reverse=True)
+         recv_candidates.sort(key=lambda p: user_value[p] - _vo(p), reverse=True)
+ 
+@@ -2494,6 +2538,7 @@ class TradeService:
+         acquire_positions: list[str],
+         trade_away_positions: list[str],
+         pinned_give_players: list[str] | None,
++        pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+         pinned_receive_players: list[str] | None = None,
+         untouchable_ids: set | None = None,
+         target_ids: set | None = None,
+@@ -2560,6 +2605,13 @@ class TradeService:
+         seen: set[tuple] = set()
+ 
+         def _emit(give_ids: list[str], recv_ids: list[str]) -> None:
++            # FB-174 — 'all' package mode: give_pool is already pinned-only, so
++            # 'any' is satisfied by construction; enforce the full-set (subset)
++            # requirement here so single-pinned 1-for-1 shapes drop out when the
++            # user pinned a multi-player package. Gated so 'any' is unchanged.
++            if pinned_give_mode == "all" and not give_side_satisfies_pins(
++                    give_ids, pinned_set, "all"):
++                return
+             key = (frozenset(give_ids), frozenset(recv_ids))
+             if key in seen:
+                 return
+@@ -2682,6 +2734,7 @@ class TradeService:
+         acquire_positions: list[str] | None = None,
+         trade_away_positions: list[str] | None = None,
+         pinned_give_players: list[str] | None = None,
++        pinned_give_mode: str = "any",       # FB-174 — 'any' | 'all'
+         prune_candidates: bool = True,
+     ) -> list[TradeCard]:
+ 
+@@ -2824,8 +2877,10 @@ class TradeService:
+         for give_id in give_candidates:
+             if give_id not in user_elo or give_id not in opp_elo:
+                 continue
+-            # When pinned players specified, only consider those as give candidates
+-            if pinned_set and give_id not in pinned_set:
++            # When pinned players specified, only consider those as give
++            # candidates. FB-174 'all' mode: a 1-for-1 give side can hold the
++            # whole package only when exactly one player was pinned.
++            if not give_side_satisfies_pins([give_id], pinned_set, pinned_give_mode):
+                 continue
+             for recv_id in recv_candidates:
+                 if recv_id not in user_elo or recv_id not in opp_elo:
+@@ -2873,8 +2928,9 @@ class TradeService:
+                         break
+                     if give_id_1 not in user_elo or give_id_2 not in user_elo:
+                         continue
+-                    # At least one of the give players must be pinned
+-                    if pinned_set and not ({give_id_1, give_id_2} & pinned_set):
++                    # Pinned give-side filter (FB-174: 'any' ≥1, 'all' full set)
++                    if not give_side_satisfies_pins(
++                            [give_id_1, give_id_2], pinned_set, pinned_give_mode):
+                         continue
+ 
+                     # Quick KTC pre-filter before expensive ELO math
+@@ -2919,7 +2975,7 @@ class TradeService:
+                     break
+                 if give_id not in user_elo or give_id not in opp_elo:
+                     continue
+-                if pinned_set and give_id not in pinned_set:
++                if not give_side_satisfies_pins([give_id], pinned_set, pinned_give_mode):
+                     continue
+ 
+                 for recv_id_1, recv_id_2 in combinations(recv_candidates, 2):
+@@ -2984,8 +3040,10 @@ class TradeService:
+                     if (give_id_1 not in user_elo or give_id_2 not in user_elo
+                             or give_id_3 not in user_elo):
+                         continue
+-                    # At least one give player must be pinned
+-                    if pinned_set and not ({give_id_1, give_id_2, give_id_3} & pinned_set):
++                    # Pinned give-side filter (FB-174: 'any' ≥1, 'all' full set)
++                    if not give_side_satisfies_pins(
++                            [give_id_1, give_id_2, give_id_3], pinned_set,
++                            pinned_give_mode):
+                         continue
+ 
+                     # Quick KTC pre-filter (cheap — avoids ELO math on bad pairs)
+diff --git a/mobile/src/api/trades.ts b/mobile/src/api/trades.ts
+index d764bce..f171906 100644
+--- a/mobile/src/api/trades.ts
++++ b/mobile/src/api/trades.ts
+@@ -5,6 +5,11 @@ export interface GenerateBody {
+   league_id: string;
+   fairness_threshold?: number;      // 0.5 – 1.0
+   pinned_give_players?: string[];
++  // FB-174 — pinned-give package constraint. 'all' = the whole pinned-give
++  // set must appear together on every suggestion's give side; omit / 'any' =
++  // the shipped ≥1 filter (byte-identical). Only meaningful with
++  // pinned_give_players set.
++  pinned_give_mode?: 'any' | 'all';
+   // FB-47 finder targeting: specific players the user wants to ACQUIRE.
+   // Honored by the backend only when flag trade.finder_targeting is on;
+   // every returned card's receive side then includes at least one of them.
+@@ -120,6 +125,42 @@ function normalizeTradeCard(raw: any): TradeCard {
+   // Phase-2 aggression variant — opaque string, passed through as-is.
+   const aggressionVariant =
+     typeof raw?.aggression_variant === 'string' ? raw.aggression_variant : undefined;
++  // FB-156 item 3 — finder-deck value-bar verdict. Backend serializes it only
++  // on finder snapshots when `trades.finder_hub` is on; strictly validated so
++  // a partial/legacy payload degrades to "no bar" rather than rendering NaN.
++  const rawVerdict = raw?.verdict;
++  const rawGap = rawVerdict?.gap;
++  const verdict =
++    rawVerdict
++    && typeof rawVerdict.give_value === 'number'
++    && typeof rawVerdict.receive_value === 'number'
++      ? {
++          give_value: rawVerdict.give_value,
++          receive_value: rawVerdict.receive_value,
++          favors:
++            rawVerdict.favors === 'give'
++            || rawVerdict.favors === 'receive'
++            || rawVerdict.favors === 'even'
++              ? rawVerdict.favors
++              : null,
++          gap:
++            rawGap && typeof rawGap.value === 'number' && typeof rawGap.firsts === 'number'
++              ? {
++                  value: rawGap.value,
++                  add_to:
++                    rawGap.add_to === 'give' || rawGap.add_to === 'receive'
++                      ? rawGap.add_to
++                      : null,
++                  firsts: rawGap.firsts,
++                  pick_equivalent:
++                    rawGap.pick_equivalent
++                    && typeof rawGap.pick_equivalent.label === 'string'
++                      ? rawGap.pick_equivalent
++                      : null,
++                }
++              : null,
++        }
++      : undefined;
+ 
+   return {
+     trade_id:           String(raw?.trade_id ?? ''),
+@@ -152,6 +193,7 @@ function normalizeTradeCard(raw: any): TradeCard {
+     lane,
+     fitPremium,
+     aggressionVariant,
++    verdict,
+   };
+ }
+ 
+diff --git a/mobile/src/components/TradeCard.tsx b/mobile/src/components/TradeCard.tsx
+index b19b6f0..7f4662b 100644
+--- a/mobile/src/components/TradeCard.tsx
++++ b/mobile/src/components/TradeCard.tsx
+@@ -11,6 +11,7 @@ import { ink, chalk, flare, ice, semantic, space, radii, type } from '../theme/c
+ import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalkline';
+ import PlayerCard from './PlayerCard';
+ import StrengthBar from './StrengthBar';
++import TradeValueBar from './TradeValueBar';
+ import SendInSleeperButton from './SendInSleeperButton';
+ import { LockGlyph } from './PlayerContextMenu';
+ import { useFlag } from '../state/useFeatureFlags';
+@@ -51,6 +52,12 @@ interface Props {
+   // partner-fit line's copy ("They're deep at WR"); the line itself
+   // renders whenever the card carries `partner_fit`.
+   fitTargetPositions?: string[];
++  // FB-156 item 3 (flag trades.finder_hub): render the pick-denominated
++  // who-wins value bar (shared TradeValueBar — same component + rendering as
++  // the calculator's verdict). Only the finder deck passes it, and only when
++  // the backend stamped `data.verdict`; every other TradeCard usage leaves it
++  // false and renders exactly as before.
++  showVerdict?: boolean;
+ }
+ 
+ // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
+@@ -90,8 +97,12 @@ function TradeCardComp({
+   repricing = false,
+   onPlayerMenu,
+   fitTargetPositions,
++  showVerdict = false,
+ }: Props) {
+   const matchPct = Math.round(data.match_score || 0);
++  // FB-156 item 3 — finder-deck value bar. Hidden on edited cards (a player
++  // swap invalidates the engine's numbers, exactly like the fairness meter).
++  const verdict = showVerdict && !data.edited ? data.verdict : undefined;
+   // `fairness` is always serialized by the v2 backend (fairness_score),
+   // so the meter renders on every fresh card. Keep the guard so legacy /
+   // adapter-shaped cards without it hide the row instead of showing a
+@@ -380,6 +391,19 @@ function TradeCardComp({
+         </View>
+       </View>
+ 
++      {/* FB-156 item 3 — pick-denominated who-wins verdict. Same component +
++          rendering as the calculator's ConsensusVerdictCard, so a suggested
++          trade and a hand-built one read identically. Renders only when the
++          backend stamped a two-sided verdict (gap present). */}
++      {verdict?.gap && (
++        <TradeValueBar
++          giveValue={verdict.give_value}
++          receiveValue={verdict.receive_value}
++          favors={verdict.favors}
++          gap={verdict.gap}
++        />
++      )}
++
+       {hasFairness && (
+         <Meter
+           value={data.fairness as number}
+diff --git a/mobile/src/screens/TradesScreen.tsx b/mobile/src/screens/TradesScreen.tsx
+index 703577e..489aa99 100644
+--- a/mobile/src/screens/TradesScreen.tsx
++++ b/mobile/src/screens/TradesScreen.tsx
+@@ -2597,6 +2597,7 @@ export default function TradesScreen({ navigation, route }: any) {
+                     data={nextCard}
+                     untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
+                     fitTargetPositions={fitTargetPositions}
++                    showVerdict={finderHubOn}
+                   />
+                 </View>
+               )}
+@@ -2628,6 +2629,7 @@ export default function TradesScreen({ navigation, route }: any) {
+                 }
+                 repricing={topCard.edited === true && repriceMutation.isPending}
+                 fitTargetPositions={fitTargetPositions}
++                showVerdict={finderHubOn}
+               />
+               {/* Queue action — Pass / Interested are driven by swipe
+                   gestures on the top card; Queue is a third option that
+@@ -3064,6 +3066,8 @@ interface SwipableProps {
+   repricing?: boolean;
+   // FB-47 — pass-through to TradeCard's partner-fit line copy.
+   fitTargetPositions?: string[];
++  // FB-156 item 3 — pass-through: render the pick-denominated value bar.
++  showVerdict?: boolean;
+   // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
+   // true the card runs a subtle translateX nudge (twice, then rests);
+   // the first touch anywhere on the card calls `onFirstTouch` — the
+@@ -3084,6 +3088,7 @@ function SwipableTopCard({
+   onPlayerMenu,
+   repricing,
+   fitTargetPositions,
++  showVerdict,
+   nudge,
+   onFirstTouch,
+ }: SwipableProps) {
+@@ -3170,6 +3175,7 @@ function SwipableTopCard({
+           onPlayerMenu={onPlayerMenu}
+           repricing={repricing}
+           fitTargetPositions={fitTargetPositions}
++          showVerdict={showVerdict}
+         />
+       </Animated.View>
+     </GestureDetector>
+diff --git a/mobile/src/shared/types.ts b/mobile/src/shared/types.ts
+index 09fa8fb..de6dc14 100644
+--- a/mobile/src/shared/types.ts
++++ b/mobile/src/shared/types.ts
+@@ -162,6 +162,23 @@ export interface TradeCard {
+   fitPremium?: { value_paid: number; position?: string };
+   /** Phase-2: which engine aggression variant built this card. */
+   aggressionVariant?: string;
++  /** FB-156 item 3 — pick-denominated who-wins verdict for the finder deck's
++   *  value bar. Serialized by the backend only on finder-deck snapshots when
++   *  `trades.finder_hub` is on (absent everywhere else), computed with the
++   *  same consensus helpers as POST /api/trade/evaluate so the deck verdict
++   *  reads identically to the calculator. Structurally the value-bar inputs:
++   *  `gap` matches api/calc#CalcGap. */
++  verdict?: {
++    give_value: number;
++    receive_value: number;
++    favors: 'give' | 'receive' | 'even' | null;
++    gap: {
++      value: number;
++      add_to: 'give' | 'receive' | null;
++      firsts: number;
++      pick_equivalent: { pick_id: string; label: string; value: number } | null;
++    } | null;
++  };
+ }
+ 
+ export interface TradeMatch {

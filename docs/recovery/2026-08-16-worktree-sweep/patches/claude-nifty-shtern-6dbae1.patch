@@ -1,0 +1,84 @@
+# worktree: /Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/nifty-shtern-6dbae1
+# branch: claude/nifty-shtern-6dbae1
+# tip: a40eee89
+# captured: 2026-08-16 (pre-removal)
+# untracked files:
+
+diff --git a/docs/feedback/items/243-scroll-audit/rank-surfaces.md b/docs/feedback/items/243-scroll-audit/rank-surfaces.md
+index 4d3b3e7..926d901 100644
+--- a/docs/feedback/items/243-scroll-audit/rank-surfaces.md
++++ b/docs/feedback/items/243-scroll-audit/rank-surfaces.md
+@@ -2,6 +2,27 @@
+ 
+ **Status: read-only audit, 2026-08-02. No code changed.**
+ 
++> **Follow-up, 2026-08-02:**
++> - **Top-10 #1 (RankMenu sheet) — FIXED.** `styles.sheet` gained
++>   `maxHeight: '85%'` and the method rows now sit in a
++>   `ScrollView style={{flexGrow: 0, flexShrink: 1}}` (the #242 team-picker
++>   pattern), with handle/heading/sub and Cancel outside the scroll region.
++> - **Top-10 #2 (QuickSetTiers/QuickRank grid `FlatList`) — REFUTED, no fix
++>   needed.** The "default `flexGrow: 0`" premise below applies to plain
++>   `View`s, not ScrollView-derived components: RN's `ScrollView` base style
++>   (`baseVertical` in
++>   `react-native/Libraries/Components/ScrollView/ScrollView.js`) is
++>   `{flexGrow: 1, flexShrink: 1, overflow: 'scroll'}`, and a `style` prop
++>   merges *on top* of it. Both grids are direct children of a
++>   `flex: 1` chain (`SafeAreaView styles.safe` → `KeyboardAvoidingView
++>   styles.kav`), so a style-less `FlatList` is already bounded and scrolls
++>   internally at high chip counts. Verified against the RN source shipped in
++>   `mobile/node_modules` rather than the simulator — the base-style proof is
++>   stronger than an eyeball check. Same reasoning softens the
++>   RankImportSheet review-step concern: its explicit `{flexGrow: 0}` still
++>   inherits `flexShrink: 1` from the base style, so the list compresses into
++>   the capped sheet and scrolls rather than clipping.
++
+ Scope: `QuickSetTiersScreen`, `QuickRankScreen`, `RankHomeScreen`, `TiersScreen`,
+ `ManualRanksScreen`, `RankScreen` (Trios), `PickAnchorScreen`,
+ `RankImportSheet`, and the `RankMenu` sheet (`TabNav.tsx`). Method follows the
+diff --git a/mobile/src/navigation/TabNav.tsx b/mobile/src/navigation/TabNav.tsx
+index 15a9dbf..1c1360c 100644
+--- a/mobile/src/navigation/TabNav.tsx
++++ b/mobile/src/navigation/TabNav.tsx
+@@ -1,5 +1,5 @@
+ import React, { useEffect, useState } from 'react';
+-import { Text, Pressable, View, StyleSheet, Modal } from 'react-native';
++import { Text, Pressable, View, StyleSheet, Modal, ScrollView } from 'react-native';
+ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+ import { createNativeStackNavigator } from '@react-navigation/native-stack';
+ import { NavigationContainerRefContext, CommonActions, StackActions } from '@react-navigation/native';
+@@ -704,6 +704,10 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void
+         <View style={styles.handle} />
+         <Text style={type.heading} accessibilityRole="header">Rank</Text>
+         <Text style={styles.sheetSub}>Pick how you want to rank players.</Text>
++        {/* #243 — the expanded disclosure can push content past the top of
++            the screen (sheet is bottom-anchored); cap + scroll per the #242
++            team-picker pattern so rows scroll instead of growing off-screen. */}
++        <ScrollView style={styles.sheetScroll} contentContainerStyle={{ gap: space.sm }}>
+         {PRIMARY_METHODS.map((it) => (
+           <Pressable
+             key={it.key}
+@@ -773,6 +777,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void
+               </Pressable>
+             ))
+           : null}
++        </ScrollView>
+         <Button label="Cancel" variant="ghost" onPress={closeSheet} style={styles.cancel} />
+       </View>
+     </Modal>
+@@ -820,11 +825,15 @@ const styles = StyleSheet.create({
+     borderTopRightRadius: radii.md,
+     borderWidth: 1,
+     borderColor: ink.line,
++    maxHeight: '85%',
+     padding: space.lg,
+     paddingBottom: space.xxl,
+     gap: space.sm,
+     ...shadowSheet,
+   },
++  // #243 — bounded scroll region for the method rows (#242 pattern): the
++  // sheet stays content-sized until maxHeight, then the rows scroll.
++  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+   handle: {
+     alignSelf: 'center',
+     width: 32,

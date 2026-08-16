@@ -1,0 +1,572 @@
+# worktree: /Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/agent-a064c586eb5fd3310
+# branch: worktree-agent-a064c586eb5fd3310
+# tip: 1580064c
+# captured: 2026-08-16 (pre-removal)
+# untracked files:
+#   backend/test_templates.py
+#   backend/tests/test_test_templates.py
+
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 2f61528..259fc6c 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -17,7 +17,63 @@
+       "Bash(python3 -c ' *)",
+       "Bash(git add *)",
+       "Bash(git commit --quiet -m 'feedback: hide closed notes from the user inbox; verify per-user scoping *)",
+-      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)"
++      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)",
++      "Bash(git commit -m 'mobile: bump version to 1.5.1 \\(tier palette de-collision\\) *)",
++      "Bash(git push *)",
++      "Bash(git fetch *)",
++      "Bash(git merge origin/main -m 'Merge origin/main \\(web League tiles → FB-91 buckets\\) *)",
++      "Bash(npx eas-cli *)",
++      "Bash(git log *)",
++      "Bash(sqlite3 data/trade_finder.db \"SELECT scoring_format, COUNT\\(*\\), MIN\\(snapshot_date\\), MAX\\(snapshot_date\\), COUNT\\(DISTINCT snapshot_date\\) FROM player_value_history GROUP BY scoring_format;\")",
++      "Bash(npx tsc *)",
++      "Bash(sqlite3 data/trade_finder.db \"SELECT sleeper_league_id, name FROM leagues WHERE name LIKE '%akeview%';\" \"SELECT league_id, COUNT\\(*\\) FROM league_members GROUP BY league_id;\")",
++      "Bash(curl -s --max-time 10 \"https://fantasy-trade-finder.onrender.com/positional-tiers.html\")",
++      "Bash(grep -n \"GET | \\\\`/api/rankings\\\\`\\\\|/api/rankings\" docs/api-reference.md)",
++      "Bash(curl -s \"https://api.sleeper.app/v1/league/1312076055586050048\")",
++      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['name'], 'total_rosters=', d['total_rosters']\\)\")",
++      "Bash(curl -s \"https://api.sleeper.app/v1/league/1312076055586050048/rosters\")",
++      "Bash(python3 -c \"import json,sys; rs=json.load\\(sys.stdin\\); print\\('rosters:', len\\(rs\\), 'with owner:', sum\\(1 for r in rs if r.get\\('owner_id'\\)\\)\\)\")",
++      "Bash(grep -c \"DATABASE_URL_PROD=.\" secrets.local.env)",
++      "Bash(grep -o \"^[A-Z_]*=\" secrets.local.env)",
++      "Bash(python3 -m pytest backend/tests/test_consensus_pos_rank.py -q)",
++      "Bash(python3 -m pytest backend/tests/ -q)",
++      "Bash(grep -n \"| GET | \\\\`/api/rankings\\\\` |\" docs/api-reference.md)",
++      "Bash(python3 -m pytest backend/tests/test_league_total_teams.py backend/tests/test_league_summary_buckets.py -q)",
++      "Bash(cp data/trade_finder.db __TRACKED_VAR__/tf_copy.db)",
++      "Bash(DATABASE_URL=sqlite:///__TRACKED_VAR__/tf_copy.db python3 -)",
++      "Bash(git commit -m ' *)",
++      "Bash(git pull *)",
++      "Bash(curl -s -m 20 -X POST \"https://fantasy-trade-finder.onrender.com/api/trade/evaluate\" -H \"Content-Type: application/json\" -d '{\"give_player_ids\":[\"probe\"],\"receive_player_ids\":[]}' -o /dev/null -w \"evaluate: %{http_code}\\\\n\")",
++      "Bash(curl -s -m 20 -X POST \"https://fantasy-trade-finder.onrender.com/api/ranking-method\" -H \"Content-Type: application/json\" -d '{\"method\":\"anchor\"}' -o /dev/null -w \"ranking-method \\(no session\\): %{http_code}\\\\n\")",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/**)",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/backend/**)",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/**)",
++      "Bash(.venv/bin/pip install *)",
++      "Bash(.venv/bin/python -)",
++      "Bash(node --check web/js/app.js)",
++      "Bash(node --check \"/Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/review.js\")",
++      "Bash(node --check \"/Users/teresadickens/Documents/Claude/Projects/JobPilot/web/js/pipeline.js\")",
++      "Bash(cp __TRACKED_VAR__/css/style.css /private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/e6bf9ba6-f15d-4e40-b720-c6ad60dda1e9/scratchpad/jobpilot-mock/css/)",
++      "Bash(cp __TRACKED_VAR__/js/app.js __TRACKED_VAR__/js/review.js __TRACKED_VAR__/js/pipeline.js /private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/e6bf9ba6-f15d-4e40-b720-c6ad60dda1e9/scratchpad/jobpilot-mock/js/)",
++      "Bash(node --check ../web/js/app.js)",
++      "Bash(.venv/bin/python -m py_compile backend/evaluation.py backend/review_checks.py backend/interview_prep.py backend/routes_review.py backend/docgen.py backend/routes_tailor.py backend/db.py backend/app.py)",
++      "Bash(.venv/bin/python -c ' *)",
++      "Bash(.venv/bin/python -m py_compile backend/*.py)",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_trio_repeat.py\")",
++      "Bash(python3 -m pytest backend/tests/test_tile_trade_scores.py backend/tests/test_trends_rank_deltas.py backend/tests/test_consensus_pos_rank.py -q)",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_mature.py\")",
++      "Bash(python3 \"/private/tmp/claude-501/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/adb905d6-87de-4ba6-b0eb-e9533edcf540/scratchpad/sim_sessions.py\")",
++      "Bash(python3 -m pytest backend/tests/test_trio_boundary.py backend/tests/test_trio_variety.py -q)",
++      "Bash(python3 -m pytest backend/tests/test_trio_variety.py backend/tests/test_trio_boundary.py -q)",
++      "Bash(xcodebuild -version)",
++      "Bash(awk '{print $4\" free\"}')",
++      "Bash(pkill -f \"^sleep 600$\")",
++      "Bash(git mv *)",
++      "Bash(mkdir -p ~/.claude/skills/brand-lab/references && echo ok)",
++      "Bash(grep -n \"^#\\\\{2,3\\\\} \" docs/api-reference.md)",
++      "Bash(grep -rn --include=\"*.md\" --include=\"*.json\" --include=\"*.txt\" --include=\"*.html\" -E \"feedback-backend-sync\\\\.md|mobile-feature-parity\\\\.md|mobile-feature-parity-architecture\\\\.md\" docs/ living-memory/ context.md README.md .claude/)",
++      "Bash(echo \"---exit $?\")",
++      "Bash(python3 -m backend.espn_service 11896)"
+     ]
+   }
+ }
+diff --git a/backend/analytics_queries.py b/backend/analytics_queries.py
+index 0e4e841..972a400 100644
+--- a/backend/analytics_queries.py
++++ b/backend/analytics_queries.py
+@@ -142,6 +142,11 @@ def device_exclusion(alias="ue", id_col=None, include_demo=False,
+         parts.append(f"{idc} NOT LIKE 'test\\_user\\_fp\\_%' ESCAPE '\\'")
+         # Synthetic QA stage-users (backend/test_users.py) — never cohort data.
+         parts.append(f"{idc} NOT LIKE 'qa\\_%' ESCAPE '\\'")
++        # Cloned-league test templates (backend/test_templates.py): the qatest_
++        # league-id namespace + its synthetic qaopp_ opponents. Defensive — these
++        # ids don't emit user_events today, but they must never reach a cohort.
++        parts.append(f"{idc} NOT LIKE 'qatest\\_%' ESCAPE '\\'")
++        parts.append(f"{idc} NOT LIKE 'qaopp\\_%' ESCAPE '\\'")
+         # NULL-safe windowed demo-session exclusion (server rows have NULL
+         # session_id → NOT EXISTS is true for them, correctly kept).
+         parts.append(
+@@ -306,6 +311,7 @@ def report_engagement(conn, start_day, end_day, include_demo, row_cap, **_):
+         "SELECT current_streak AS s, COUNT(*) AS n FROM users "
+         "WHERE current_streak IS NOT NULL AND current_streak > 0 "
+         "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
++        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
+         "GROUP BY current_streak ORDER BY current_streak LIMIT :cap"
+     ), {"cap": row_cap}).mappings().all()
+     streak_dist = {int(r["s"]): int(r["n"]) for r in streak_rows}
+@@ -536,11 +542,13 @@ def report_churn(conn, start_day, end_day, include_demo, row_cap, **_):
+         "AND substr(last_active_at,1,10) < :cutoff "
+         "AND sleeper_user_id NOT LIKE 'device:%' "
+         "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
++        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
+         "ORDER BY last_active_at DESC LIMIT :cap"
+     ), {"cutoff": cutoff, "cap": row_cap}).mappings().all()
+     active_total = conn.execute(text(
+         "SELECT COUNT(*) FROM users WHERE last_active_at IS NOT NULL "
+-        "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\'"
++        "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
++        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\'"
+     )).scalar() or 0
+     rows = [{"user_id": r["uid"], "last_active_at": r["last_active_at"],
+              "last_rank_at": r["last_rank_at"],
+@@ -569,6 +577,7 @@ def report_releases(conn, start_day, end_day, include_demo, row_cap, **_):
+         "WHERE app_version IS NOT NULL AND event_type NOT IN :non_intent "
+         "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
+         "AND user_id NOT LIKE 'device:%' AND user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
++        "AND user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
+         "LIMIT :cap"
+     ).bindparams(bindparam("non_intent", expanding=True)),
+         {"non_intent": sorted(NON_INTENT_EVENTS), "s": start_day, "e": end_day,
+diff --git a/backend/server.py b/backend/server.py
+index d8e539c..bb8d31f 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -10704,6 +10704,7 @@ def session_demo():
+ # them as normal signed-in sessions. Logic lives in backend/test_users.py.
+ 
+ from . import test_users as _test_users
++from . import test_templates as _test_templates
+ from .experiments import load_tester_allowlist as _load_tester_allowlist
+ 
+ 
+@@ -10727,12 +10728,58 @@ def _test_users_denied():
+     return jsonify({"error": "not_found"}), 404
+ 
+ 
++def _clone_league_from_template(tpl: dict, players_dict: dict,
++                                seed_ratings: dict, opponents_ranked: bool):
++    """Build a (League, user_roster, seeded_opponent_ids) tuple for one cloned
++    template against the REAL universal pool. Opponent LeagueMembers carry the
++    consensus seed for their roster; `opponents_ranked` flips has_rankings True
++    on the first couple so mutual-match / likes-you flows are exercisable."""
++    members: list[LeagueMember] = []
++    seeded_ids: list[str] = []
++    seed_targets = set()
++    if opponents_ranked:
++        seed_targets = {o["user_id"] for o in tpl["opponents"][:2]}
++    for opp in tpl["opponents"]:
++        opp_ids = [str(x) for x in opp.get("player_ids", []) if str(x) in players_dict]
++        if not opp_ids:
++            continue
++        ranked = opp["user_id"] in seed_targets
++        members.append(LeagueMember(
++            user_id     = opp["user_id"],
++            username    = opp.get("username") or opp["user_id"],
++            roster      = opp_ids,
++            elo_ratings = {pid: seed_ratings.get(pid, 1500) for pid in opp_ids},
++            has_rankings= ranked,
++        ))
++        if ranked:
++            seeded_ids.append(opp["user_id"])
++    league = League(
++        league_id = tpl["template_id"],
++        name      = tpl["name"],
++        platform  = "sleeper",
++        members   = members,
++    )
++    user_roster = [pid for pid in tpl["operator_roster"] if pid in players_dict]
++    return league, user_roster, seeded_ids
++
++
+ @app.route("/api/test-users", methods=["POST"])
+ def spawn_test_user():
+-    """POST /api/test-users {"stage": "fresh"|"activated"|"board_owner"|
+-    "converted"|"power"} — mint a synthetic qa_* user pre-seeded to that
+-    adoption stage, with a live demo-league session. Returns the session
+-    token + the ftf_onboarding_state the client should adopt."""
++    """POST /api/test-users — mint a synthetic qa_* user pre-seeded to an
++    adoption stage. Body (all but `stage` optional; omitting the extras
++    preserves today's demo-fixture behavior byte-for-byte):
++
++        stage             "fresh"|"activated"|"board_owner"|"converted"|"power"
++        template_id       clone this captured real-league snapshot instead of
++                          the demo fixture (real player universe backs trades)
++        format            scoring override (validated against SCORING_FORMATS);
++                          default = the template's real format (or DEFAULT for demo)
++        leagues           1 or 2 (default 1) — with a template, clone that many
++                          captured templates so the mobile S1 picker is exercised
++        opponents_ranked  bool (default false) — seed a couple of opponents with
++                          consensus member_rankings (mutual-match testable)
++
++    Returns the session token + the ftf_onboarding_state the client adopts."""
+     denied = _test_users_denied()
+     if denied is not None:
+         return denied
+@@ -10741,56 +10788,151 @@ def spawn_test_user():
+     if stage not in _test_users.STAGES:
+         return jsonify({"error": f"Invalid stage: {stage!r}",
+                         "stages": list(_test_users.STAGES)}), 400
++
++    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
++    template_id      = body.get("template_id")
++    opponents_ranked = bool(body.get("opponents_ranked", False))
++    try:
++        n_leagues = int(body.get("leagues", 1))
++    except (TypeError, ValueError):
++        n_leagues = 1
++    n_leagues = 2 if n_leagues >= 2 else 1
++
++    # Resolve the primary template (if cloning) + format default.
++    primary_tpl = None
++    if template_id is not None:
++        primary_tpl = _test_templates.load_template(template_id)
++        if primary_tpl is None:
++            return jsonify({"error": f"Unknown template_id: {template_id!r}"}), 404
++        default_format = primary_tpl["format"]
++    else:
++        default_format = DEFAULT_SCORING
++
++    active_format = body.get("format") or default_format
++    if active_format not in DB_SCORING_FORMATS:
++        return jsonify({"error": f"Invalid format: {active_format!r}",
++                        "formats": list(DB_SCORING_FORMATS)}), 400
++
+     try:
+         user_id = "qa_" + uuid.uuid4().hex[:8]
+         username = f"qa_{stage}_{secrets.token_hex(2)}"
+         upsert_user(sleeper_user_id=user_id, username=username,
+                     display_name=username)
+ 
+-        # Demo-league session build — same path as /api/session/demo, keyed
+-        # to the synthetic user. Unlike demo: the users row persists, boards
+-        # replay, and there is no is_demo key on the session.
+-        from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+         new_services: dict = {}
+         new_trade_svcs: dict = {}
+-        final_league = None
+-        for fmt in DB_SCORING_FORMATS:
+-            svc = RankingService(
+-                players=list(DEMO_PLAYERS),
+-                matchup_generator=matchup_gen,
+-                seed_ratings=seed,
+-            )
+-            svc._user_id = user_id
+-            svc._scoring_format = fmt
+-            new_services[fmt] = svc
+-
+-            tsvc = TradeService(players={p.id: p for p in DEMO_PLAYERS})
+-            dl, _dr = _build_demo_league(DEMO_PLAYERS, seed)
+-            tsvc.add_league(dl)
+-            new_trade_svcs[fmt] = tsvc
+-            final_league = dl
++        leagues_summary: list[dict] = []
++
++        if primary_tpl is not None:
++            # ── Template clone: REAL universal pool backs every format ──────
++            _ensure_universal_pools()
++            # Gather the templates to clone (primary first, then others up to n).
++            clone_tpls = [primary_tpl]
++            if n_leagues >= 2:
++                for t in _test_templates.list_templates():
++                    if t["template_id"] == template_id:
++                        continue
++                    extra = _test_templates.load_template(t["template_id"])
++                    if extra is not None:
++                        clone_tpls.append(extra)
++                        break
++
++            # Per-format services on the universal pool; primary league added
++            # to each format's trade service (the active session league).
++            pool_by_fmt = {fmt: _get_universal_pool(fmt) for fmt in DB_SCORING_FORMATS}
++            for fmt in DB_SCORING_FORMATS:
++                fmt_pool, fmt_seed = pool_by_fmt[fmt]
++                svc = RankingService(players=fmt_pool,
++                                     matchup_generator=matchup_gen,
++                                     seed_ratings=fmt_seed)
++                svc._user_id = user_id
++                svc._scoring_format = fmt
++                new_services[fmt] = svc
++                new_trade_svcs[fmt] = TradeService(
++                    players={p.id: p for p in fmt_pool})
++
++            active_pool, active_seed = pool_by_fmt[active_format]
++            active_dict = {p.id: p for p in active_pool}
++
++            primary_league = None
++            primary_roster: list[str] = []
++            for idx, ct in enumerate(clone_tpls):
++                league, roster, seeded_ids = _clone_league_from_template(
++                    ct, active_dict, active_seed, opponents_ranked)
++                # Bind the qa_ user as a member of the cloned league (durable
++                # binding for template delete + correct membership).
++                _test_templates.bind_qa_user(ct["template_id"], user_id, roster,
++                                             username=username)
++                if opponents_ranked:
++                    _test_templates.seed_opponent_rankings(
++                        ct["template_id"], ct["opponents"], active_seed,
++                        active_dict, scoring_format=active_format)
++                leagues_summary.append({
++                    "league_id":   ct["template_id"],
++                    "league_name": ct["name"],
++                    "format":      ct["format"],
++                    "team_count":  ct["team_count"],
++                    "is_dynasty":  ct["is_dynasty"],
++                })
++                if idx == 0:
++                    primary_league = league
++                    primary_roster = roster
++                    for fmt in DB_SCORING_FORMATS:
++                        new_trade_svcs[fmt].add_league(league)
++
++            final_league = primary_league
++            session_players = active_pool
++            session_roster = primary_roster
++            # Stage boards seed from the REAL pool for the active format.
++            notes = _test_users.seed_stage(
++                user_id, stage, service=new_services[active_format],
++                players=active_pool, seed_ratings=active_seed,
++                scoring_format=active_format)
++            notes.append(
++                f"cloned {len(clone_tpls)} template(s) from real league(s); "
++                f"real universal pool backs trades ({active_format})")
++        else:
++            # ── Demo-fixture path (unchanged behavior) ──────────────────────
++            final_league = None
++            for fmt in DB_SCORING_FORMATS:
++                svc = RankingService(players=list(DEMO_PLAYERS),
++                                     matchup_generator=matchup_gen,
++                                     seed_ratings=seed)
++                svc._user_id = user_id
++                svc._scoring_format = fmt
++                new_services[fmt] = svc
+ 
+-        # Stage seeding — boards go onto the live default-format service AND
+-        # into users.tier_overrides/tiers_saved (the /api/tiers/save storage).
+-        notes = _test_users.seed_stage(
+-            user_id, stage,
+-            service=new_services[DEFAULT_SCORING],
+-            players=list(DEMO_PLAYERS),
+-            seed_ratings=seed,
+-            scoring_format=DEFAULT_SCORING,
+-        )
++                tsvc = TradeService(players={p.id: p for p in DEMO_PLAYERS})
++                dl, _dr = _build_demo_league(DEMO_PLAYERS, seed)
++                tsvc.add_league(dl)
++                new_trade_svcs[fmt] = tsvc
++                final_league = dl
++
++            session_players = list(DEMO_PLAYERS)
++            session_roster = list(DEMO_USER_ROSTER)
++            notes = _test_users.seed_stage(
++                user_id, stage, service=new_services[active_format],
++                players=list(DEMO_PLAYERS), seed_ratings=seed,
++                scoring_format=active_format)
++            leagues_summary.append({
++                "league_id":   final_league.league_id,
++                "league_name": final_league.name,
++                "format":      active_format,
++                "team_count":  len(final_league.members) + 1,
++                "is_dynasty":  True,
++            })
+ 
+         token = secrets.token_urlsafe(32)
+         payload = {   # mirrors session_init's payload shape — NO is_demo key
+             "user_id":       user_id,
+             "league":        final_league,
+-            "players":       list(DEMO_PLAYERS),
+-            "user_roster":   list(DEMO_USER_ROSTER),
++            "players":       session_players,
++            "user_roster":   session_roster,
+             "services":      new_services,
+-            "service":       new_services[DEFAULT_SCORING],
++            "service":       new_services[active_format],
+             "trade_svcs":    new_trade_svcs,
+-            "trade_svc":     new_trade_svcs[DEFAULT_SCORING],
+-            "active_format": DEFAULT_SCORING,
++            "trade_svc":     new_trade_svcs[active_format],
++            "active_format": active_format,
+             "display_name":  username,
+             "last_active":   time.time(),
+         }
+@@ -10803,17 +10945,22 @@ def spawn_test_user():
+         with _sessions_lock:
+             _sessions[token] = payload
+ 
+-        log.info("test-users: spawned %s (%s) stage=%s", user_id, username, stage)
++        log.info("test-users: spawned %s (%s) stage=%s template=%s",
++                 user_id, username, stage, template_id)
+         return jsonify({
+-            "session_token": token,
+-            "user_id":       user_id,
+-            "username":      username,
+-            "display_name":  username,
+-            "league_id":     final_league.league_id,
+-            "league_name":   final_league.name,
+-            "stage":         stage,
+-            "client_state":  _test_users.client_state_for(stage),
+-            "notes":         notes,
++            "session_token":    token,
++            "user_id":          user_id,
++            "username":         username,
++            "display_name":     username,
++            "league_id":        final_league.league_id,
++            "league_name":      final_league.name,
++            "stage":            stage,
++            "format":           active_format,
++            "template_id":      template_id,
++            "leagues":          leagues_summary,
++            "opponents_ranked": opponents_ranked,
++            "client_state":     _test_users.client_state_for(stage),
++            "notes":            notes,
+         })
+     except Exception as e:
+         log.error("test-users spawn failed: %s\n%s", e, traceback.format_exc())
+@@ -10850,6 +10997,85 @@ def delete_test_user_route(user_id: str):
+         return jsonify({"error": "internal_error"}), 500
+ 
+ 
++# ─── Test-template capture (cloned real-league snapshots) ──────────────────
++# Same ALLOWLIST-ONLY gate as /api/test-users. Snapshots the CALLER'S real
++# league(s) into the isolated qatest_ namespace so qa_* spawns can clone a
++# realistic player pool + opponents. Logic in backend/test_templates.py.
++
++@app.route("/api/test-users/templates", methods=["POST"])
++def capture_test_templates():
++    """POST /api/test-users/templates — snapshot the caller's real leagues into
++    isolated qatest_ templates. The caller's real Sleeper user_id is resolved
++    from the session token; their leagues are read from the DB (populated by
++    their normal session_init syncs — no live Sleeper re-hit). Real rows are
++    READ-ONLY. Returns the list of captured templates."""
++    denied = _test_users_denied()
++    if denied is not None:
++        return denied
++    with _sessions_lock:
++        sess = _sessions.get(request.headers.get("X-Session-Token", ""))
++    user_id = sess.get("user_id") if sess else None
++    if not user_id:
++        return jsonify({"error": "no_session_user",
++                        "message": "Capture needs a session whose user_id is a "
++                                   "real Sleeper user with synced leagues."}), 400
++    try:
++        templates = _test_templates.capture_templates(user_id)
++        log.info("test-templates: captured %d for %s", len(templates), user_id)
++        return jsonify({"templates": templates, "captured": len(templates)})
++    except Exception as e:
++        log.error("test-templates capture failed: %s\n%s", e, traceback.format_exc())
++        return jsonify({"error": "internal_error"}), 500
++
++
++@app.route("/api/test-users/templates", methods=["GET"])
++def list_test_templates():
++    """GET /api/test-users/templates — list captured templates + qa_users_bound."""
++    denied = _test_users_denied()
++    if denied is not None:
++        return denied
++    try:
++        return jsonify({"templates": _test_templates.list_templates()})
++    except Exception as e:
++        log.error("test-templates list failed: %s\n%s", e, traceback.format_exc())
++        return jsonify({"error": "internal_error"}), 500
++
++
++@app.route("/api/test-users/templates/<template_id>", methods=["DELETE"])
++def delete_test_template_route(template_id: str):
++    """DELETE /api/test-users/templates/<id> — remove a template + every qa_*
++    user bound to it (their full row set) and evict their live sessions. Refuses
++    anything without the qatest_ prefix (never deletes a real league)."""
++    denied = _test_users_denied()
++    if denied is not None:
++        return denied
++    if not template_id.startswith(_test_templates.TEMPLATE_PREFIX):
++        return jsonify({"error": "not_a_template",
++                        "message": "Only qatest_* templates can be deleted here."}), 400
++    try:
++        counts = _test_templates.delete_template(template_id)
++        removed_users = counts.pop("_qa_user_ids", [])
++        # Evict live sessions for the template league or its bound qa_ users.
++        with _sessions_lock:
++            stale = [t for t, s in _sessions.items()
++                     if s.get("user_id") in removed_users
++                     or (s.get("league") is not None
++                         and getattr(s["league"], "league_id", None) == template_id)]
++            for t in stale:
++                _sessions.pop(t, None)
++        for uid in removed_users:
++            try:
++                delete_persisted_sessions_for_user(uid)
++            except Exception:
++                pass
++        counts["sessions_evicted"] = len(stale)
++        log.info("test-templates: deleted %s — %s", template_id, counts)
++        return jsonify({"ok": True, "template_id": template_id, "deleted": counts})
++    except Exception as e:
++        log.error("test-templates delete failed: %s\n%s", e, traceback.format_exc())
++        return jsonify({"error": "internal_error"}), 500
++
++
+ # ─── Account auth — Apple/Google identity anchors + in-app deletion ────────
+ # Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md §3-P2).
+ # Thin wrappers over backend/accounts.py. The sign-in surface is gated on
+diff --git a/backend/test_users.py b/backend/test_users.py
+index a075e84..d3d5223 100644
+--- a/backend/test_users.py
++++ b/backend/test_users.py
+@@ -168,8 +168,10 @@ def seed_stage(user_id: str, stage: str, service, players: list,
+ 
+ def delete_test_user(user_id: str) -> dict[str, int]:
+     """Delete every persisted row for a qa_* user (users + swipe_decisions +
+-    member_rankings — the tables the spawn/session paths write). The caller
+-    (route) enforces the qa_ prefix and evicts live sessions."""
++    member_rankings + league_members — the tables the spawn/session paths
++    write). A qa_ user is only ever a member of an isolated qatest_ league, so
++    deleting their league_members rows by user_id never touches a real league.
++    The caller (route) enforces the qa_ prefix and evicts live sessions."""
+     counts: dict[str, int] = {}
+     with db.engine.begin() as conn:
+         for name, tbl, col in (
+@@ -177,6 +179,8 @@ def delete_test_user(user_id: str) -> dict[str, int]:
+              db.swipe_decisions_table.c.user_id),
+             ("member_rankings", db.member_rankings_table,
+              db.member_rankings_table.c.user_id),
++            ("league_members", db.league_members_table,
++             db.league_members_table.c.user_id),
+             ("users", db.users_table, db.users_table.c.sleeper_user_id),
+         ):
+             res = conn.execute(_sa_delete(tbl).where(col == user_id))
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index cef699e..bd1eb47 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -504,5 +504,15 @@ Synthetic stage-user spawner for onboarding QA (`backend/test_users.py`; plan: `
+ 
+ | Method | Path | Purpose |
+ |---|---|---|
+-| POST | `/api/test-users` | `{stage: "fresh"\|"activated"\|"board_owner"\|"converted"\|"power"}` → mint user `qa_<uuid8>` / username `qa_<stage>_<4hex>` with a live demo-league session (NOT `is_demo` — the client treats it as a normal signed-in session). Server-side seeding: `board_owner`+ persists a WR QuickSet board via the exact `/api/tiers/save` storage (`users.tier_overrides` + `tiers_saved` + `ranking_method='quickset'`); `converted`+ stamps `users.verified_at`/`verified_via='apple'` (verification only — **no accounts row**; deep account flows aren't simulated) and the session is marked verified; `power` seeds boards for all four positions. Returns `{session_token, user_id, username, display_name, league_id, league_name, stage, client_state, notes}` where `client_state` is the `ftf_onboarding_state` dict the client adopts verbatim for that stage |
+-| DELETE | `/api/test-users/<user_id>` | Same gates. 400 unless `user_id` starts with `qa_`. Deletes the `users` row + `swipe_decisions` + `member_rankings` rows and evicts any live session. Returns `{ok, user_id, deleted: {users, swipe_decisions, member_rankings, sessions_evicted}}` |
++| POST | `/api/test-users` | Mint user `qa_<uuid8>` / username `qa_<stage>_<4hex>` with a live session (NOT `is_demo` — the client treats it as a normal signed-in session). Body (all but `stage` optional; omitting the extras preserves today's demo-fixture behavior byte-for-byte): `{stage: "fresh"\|"activated"\|"board_owner"\|"converted"\|"power", template_id?, format?, leagues?, opponents_ranked?}`. **`template_id`** — clone a captured real-league snapshot (see below) instead of the demo fixture: the qa user inherits the OPERATOR's snapshotted roster, opponents get their snapshotted rosters, and the REAL universal player pool backs the RankingService/TradeService (realistic trades); `league_id` is the isolated `qatest_` id. Absent → demo fixture path, unchanged. **`format`** — scoring override, validated against `SCORING_FORMATS` (`1qb_ppr`\|`sf_tep`); default = the template's real format (or `DEFAULT_SCORING` for demo). **`leagues`** — `1` (default) or `2`: with a template, clone that many captured templates into the response `leagues` list so the mobile S1 league-picker path is exercised vs the single-league auto-skip (session initializes on the primary). **`opponents_ranked`** — bool (default `false`): when true, seed the first ~2 opponents with consensus-derived `member_rankings` (`has_rankings=True`) so mutual-match / likes-you flows are testable; default false = realistic cold-start (opponents at consensus). Server-side stage seeding is unchanged except boards now seed from the chosen pool (real universal pool for a clone, demo pool otherwise): `board_owner`+ persists a WR QuickSet board via the exact `/api/tiers/save` storage; `converted`+ stamps `users.verified_at`/`verified_via='apple'` (verification only — **no accounts row**) and marks the session verified; `power` seeds all four positions. Returns `{session_token, user_id, username, display_name, league_id, league_name, stage, format, template_id, leagues: [{league_id, league_name, format, team_count, is_dynasty}], opponents_ranked, client_state, notes}` where `client_state` is the `ftf_onboarding_state` dict the client adopts verbatim |
++| DELETE | `/api/test-users/<user_id>` | Same gates. 400 unless `user_id` starts with `qa_`. Deletes the `users` row + `swipe_decisions` + `member_rankings` + `league_members` rows and evicts any live session. Returns `{ok, user_id, deleted: {users, swipe_decisions, member_rankings, league_members, sessions_evicted}}` |
++
++### Cloned real-league test templates (`backend/test_templates.py`)
++
++Same ALLOWLIST-ONLY gate as `/api/test-users`. Lets an allowlisted operator snapshot their OWN real league(s) into an isolated namespace so `qa_*` spawns can clone a realistic player pool + opponents instead of the 10-player demo fixture. **Isolation namespace:** every snapshot is stored under a `qatest_<realleagueid>_<4hex>` league id in the same `leagues` + `league_members` tables real leagues use (safe because those tables are only ever read by PK/league_id); opponent member ids are rewritten to `qaopp_<n>` so nothing under a `qatest_` league carries a real routable Sleeper id. **Read-only on real data:** capture only INSERTs new `qatest_` rows — it never mutates the operator's real `leagues`/`league_members`/`member_rankings`. **Analytics exclusion:** `qa_*`, `qatest_*`, and `qaopp_*` ids are stripped from cohort reports at `analytics_queries.device_exclusion` (and the inline `demo_` predicates were extended to also drop `qa_`).
++
++| Method | Path | Purpose |
++|---|---|---|
++| POST | `/api/test-users/templates` | Snapshot the caller's real leagues (their Sleeper `user_id` is resolved from the `X-Session-Token` session; leagues are read from the DB populated by their normal `session_init` syncs — no live Sleeper re-hit) into `qatest_` templates. 400 if no session user. Returns `{templates: [{template_id, source_league_id, source_league_name, format, superflex, is_dynasty, team_count, roster_size, opponent_count}], captured}` |
++| GET | `/api/test-users/templates` | List captured templates. Returns `{templates: [ …same shape + qa_users_bound ]}` |
++| DELETE | `/api/test-users/templates/<template_id>` | 400 unless `template_id` starts with `qatest_` (never deletes a real league). Removes the `qatest_` `leagues` + `league_members` + `member_rankings` rows AND every `qa_*` user bound to it (their full row set), evicting their live sessions. Returns `{ok, template_id, deleted: {member_rankings, league_members, leagues, qa_users, sessions_evicted}}` |
+diff --git a/docs/data-dictionary.md b/docs/data-dictionary.md
+index baea3b2..eed78de 100644
+--- a/docs/data-dictionary.md
++++ b/docs/data-dictionary.md
+@@ -46,6 +46,15 @@ INSERTs the owner's row; every later member of that league only refreshes
+ are **not** stored here — see `league_members` for the authoritative
+ per-`(league, user)` roster.
+ 
++**QA test-template namespace** (`backend/test_templates.py`): rows whose PK
++starts with `qatest_<realleagueid>_<4hex>` are isolated snapshots of an
++operator's real league for onboarding QA. Unlike real rows, these DO store the
++operator's roster in `roster_data` and snapshotted opponents (rewritten to
++`qaopp_<n>` ids) in `opponent_data` — the clone-spawn reads them back.
++`platform='qatest'`. Safe to co-locate here because every read of this table is
++by PK/league_id (no broad scans). Deleted wholesale by
++`DELETE /api/test-users/templates/<id>`; excluded from analytics.
++
+ | Column | Type | Notes |
+ |---|---|---|
+ | `sleeper_league_id` | str PK | |

@@ -1,0 +1,249 @@
+# worktree: /Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/clever-euler-49a334
+# branch: claude/keen-varahamihira-8986d4
+# tip: 16a9b51d
+# captured: 2026-08-16 (pre-removal)
+# untracked files:
+
+diff --git a/backend/database.py b/backend/database.py
+index c5c83e3..68c9e9c 100644
+--- a/backend/database.py
++++ b/backend/database.py
+@@ -5233,11 +5233,13 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
+     Returns a list (newest first) of:
+         {
+             "ts":            ISO timestamp string,
+-            "emoji":         str,
+             "message":       str,
+             "actor_user_id": str | None,
+             "event_type":    str,
+         }
++
++    Chalkline (ADR-004): messages are plain fact-first text — no emoji.
++    Clients derive row icons from `event_type`.
+     """
+     from datetime import datetime, timezone
+     # Analytics P0 cutover (LLD §6.4): the feed reads the UNION of the frozen
+@@ -5371,46 +5373,39 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
+         actor = _handle_name(r["user_id"])
+         ago = _ago(r["ts"])
+         et = r["event_type"]
+-        emoji = "•"
+         message = ""
+         # user_events trade rows carry partner_id (trade_match) rather than
+         # other_user_id — alias so both eras render the counterparty.
+         other_uid = payload.get("other_user_id") or payload.get("partner_id")
+ 
+         if et == "trade_accepted":
+-            emoji = "✅"
+             other = _handle_name(other_uid)
+-            message = f"✅ @{actor} accepted a trade with @{other} ({ago})"
++            message = f"@{actor} accepted a trade with @{other} ({ago})"
+         elif et == "trade_declined":
+-            emoji = "✖️"
+             other = _handle_name(other_uid)
+-            message = f"✖️ @{actor} declined a trade with @{other} ({ago})"
++            message = f"@{actor} declined a trade with @{other} ({ago})"
+         elif et == "trade_match":
+-            emoji = "🤝"
+             other = _handle_name(other_uid)
+-            message = f"🤝 @{actor} matched a trade with @{other} ({ago})"
++            message = f"@{actor} matched a trade with @{other} ({ago})"
+         elif et == "tier_save":
+-            emoji = "📋"
+             pos = (payload.get("position") or "").upper()
+             fmt_key = payload.get("scoring_format") or payload.get("format") or ""
+             fmt_lbl = FMT_LABELS.get(fmt_key, "")
+             if pos and fmt_lbl:
+-                message = f"📋 @{actor} saved their {pos} tiers ({fmt_lbl}) ({ago})"
++                message = f"@{actor} saved their {pos} tiers ({fmt_lbl}) ({ago})"
+             elif pos:
+-                message = f"📋 @{actor} saved their {pos} tiers ({ago})"
++                message = f"@{actor} saved their {pos} tiers ({ago})"
+             else:
+-                message = f"📋 @{actor} saved their tiers ({ago})"
++                message = f"@{actor} saved their tiers ({ago})"
+         elif et == "league_sync":
+             u = user_map.get(r["user_id"] or "", {})
+             inviter = u.get("invited_by") if u else ""
+             if inviter:
+-                emoji = "🤝"
+-                message = f"🤝 @{actor} joined via @{inviter}'s invite ({ago})"
++                message = f"@{actor} joined via @{inviter}'s invite ({ago})"
+             else:
+-                emoji = "🔄"
+-                message = f"🔄 @{actor} synced the league ({ago})"
++                message = f"@{actor} synced the league ({ago})"
+         else:
+-            message = f"• @{actor} — {et} ({ago})"
++            message = f"@{actor} — {et} ({ago})"
+ 
+         # If a tier_save also flipped the format to unlocked, surface a
+         # separate unlock milestone entry.
+@@ -5419,15 +5414,13 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
+             fmt_lbl = FMT_LABELS.get(fmt_key, fmt_key)
+             out.append({
+                 "ts":            r["ts"],
+-                "emoji":         "🎯",
+-                "message":       f"🎯 @{actor} unlocked trades in {fmt_lbl} ({ago})",
++                "message":       f"@{actor} unlocked trades in {fmt_lbl} ({ago})",
+                 "actor_user_id": r["user_id"],
+                 "event_type":    "unlock",
+             })
+ 
+         out.append({
+             "ts":            r["ts"],
+-            "emoji":         emoji,
+             "message":       message,
+             "actor_user_id": r["user_id"],
+             "event_type":    et,
+diff --git a/backend/server.py b/backend/server.py
+index 26b773e..fba961c 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -10187,7 +10187,7 @@ def league_activity_route():
+     Response:
+         {
+           "events": [
+-            {"ts": ISO, "emoji": str, "message": str,
++            {"ts": ISO, "message": str,
+              "actor_user_id": str, "event_type": str}, ...
+           ]
+         }
+@@ -13639,10 +13639,10 @@ def extension_rankings():
+ # to know the exact list to render a progress bar; single source of truth
+ # lives in the /api/invite/impact response.
+ _INVITE_MILESTONES: tuple[tuple[int, str], ...] = (
+-    (1,  "🌱 First Recruit"),
+-    (3,  "🤝 League Builder"),
+-    (5,  "🔥 Five-Spot"),
+-    (10, "👑 Ambassador"),
++    (1,  "First Recruit"),
++    (3,  "League Builder"),
++    (5,  "Five-Spot"),
++    (10, "Ambassador"),
+ )
+ 
+ 
+diff --git a/docs/feedback/items/225-notifications-dechalk/status.md b/docs/feedback/items/225-notifications-dechalk/status.md
+index 107bf4b..15395cf 100644
+--- a/docs/feedback/items/225-notifications-dechalk/status.md
++++ b/docs/feedback/items/225-notifications-dechalk/status.md
+@@ -50,8 +50,8 @@ The glyphs reuse the shared `chalkline/Icon.tsx` set (match/check/x/bell already
+ 
+ ## Out of scope (flagged for follow-up)
+ 
+-- League activity feed messages (`backend/database.py` `load_league_activity`) still embed ✅ ✖️ 🤝 📋 🎯 🔄 in `message`/`summary` strings. Mobile `ActivityFeed` ignores the `emoji` field but renders `summary` verbatim — leading emoji likely visible there and on web. Separate surface, separate item.
+-- Invite milestone badge names (`_INVITE_MILESTONES` in `backend/server.py`: 🌱 🤝 🔥 👑) — flag-gated invite dashboard payload, not a notification surface.
++- ~~League activity feed messages (`backend/database.py` `load_league_activity`) still embed ✅ ✖️ 🤝 📋 🎯 🔄 in `message`/`summary` strings.~~ **Done (2026-08-01 follow-up):** messages are plain fact-first text; the now-dead `emoji` response field was removed (no client rendered it — mobile/web types cleaned up); both renderers strip leading legacy emoji defensively (messages are formatted at read time, so this is old-server insurance, not a data migration).
++- ~~Invite milestone badge names (`_INVITE_MILESTONES` in `backend/server.py`: 🌱 🤝 🔥 👑)~~ **Done (same follow-up):** text-only names (First Recruit / League Builder / Five-Spot / Ambassador); web normalises the localStorage seen-badges list so renamed badges don't re-fire the celebration toast.
+ - Startup/log emoji (log.info/print) intentionally untouched.
+ 
+ ## Verification
+diff --git a/mobile/src/api/league.ts b/mobile/src/api/league.ts
+index f0f6979..a91da70 100644
+--- a/mobile/src/api/league.ts
++++ b/mobile/src/api/league.ts
+@@ -288,13 +288,12 @@ export async function getLeagueMemberUnlockStates(leagueId: string) {
+ // ── Activity feed (B7 — flag `league.activity_feed`) ───────────────
+ // Backend: GET /api/league/activity?league_id=...&limit=20
+ // Response shape (per backend/database.py:load_league_activity):
+-//   { events: [{ts, emoji, message, actor_user_id, event_type}, ...] }
++//   { events: [{ts, message, actor_user_id, event_type}, ...] }
+ // When the flag is off the backend returns {events: [], flag_off: true}.
+ // We normalise to ActivityEvent on the client so screen code sees a stable
+ // shape regardless of which backend key naming wins.
+ interface RawActivityRow {
+   ts: string;
+-  emoji?: string;
+   message: string;
+   actor_user_id: string | null;
+   event_type: string;
+@@ -322,7 +321,6 @@ export async function getActivityFeed(
+       username:    match ? match[1] : '',
+       event_type:  r.event_type,
+       summary:     r.message,
+-      emoji:       r.emoji,
+     };
+   });
+   return { events };
+diff --git a/mobile/src/components/ActivityFeed.tsx b/mobile/src/components/ActivityFeed.tsx
+index 8c7c059..daa20eb 100644
+--- a/mobile/src/components/ActivityFeed.tsx
++++ b/mobile/src/components/ActivityFeed.tsx
+@@ -15,8 +15,10 @@ import type { ActivityEvent } from '../shared/types';
+ // (Nm ago)". We strip the trailing "(… ago)" because it grows stale and we
+ // render our own relative timestamp on the right side of the row.
+ //
+-// Chalkline: the backend's `emoji` field is intentionally ignored — rows lead
+-// with a Chalkline icon derived from event_type (status color on check/x).
++// Chalkline: rows lead with a Chalkline icon derived from event_type (status
++// color on check/x). The backend stopped embedding emoji in summaries
++// (#225 follow-up), but strip leading legacy emoji defensively — mirrors
++// TopBar's stored-notification strip — in case an old server is answering.
+ 
+ interface Props {
+   events: ActivityEvent[];
+@@ -24,6 +26,7 @@ interface Props {
+ }
+ 
+ const TRAILING_AGO_RE = /\s*\([^)]*ago\)\s*$/;
++const LEADING_LEGACY_EMOJI_RE = /^\s*(?:✅|✖️|🤝|📋|🎯|🔄|•)\s*/u;
+ 
+ const EVENT_ICONS: Record<string, { name: IconName; color: string }> = {
+   trade_match:    { name: 'match', color: chalk.dim },
+@@ -64,7 +67,9 @@ export default function ActivityFeed({ events, limit = 10 }: Props) {
+               <Icon name={icon.name} size={16} color={icon.color} />
+             </View>
+             <Text style={styles.summary} numberOfLines={2}>
+-              {e.summary.replace(TRAILING_AGO_RE, '')}
++              {e.summary
++                .replace(LEADING_LEGACY_EMOJI_RE, '')
++                .replace(TRAILING_AGO_RE, '')}
+             </Text>
+             <Text style={styles.time}>{relativeTime(e.occurred_at)}</Text>
+           </View>
+diff --git a/mobile/src/shared/types.ts b/mobile/src/shared/types.ts
+index 6c2ded6..9755355 100644
+--- a/mobile/src/shared/types.ts
++++ b/mobile/src/shared/types.ts
+@@ -370,7 +370,6 @@ export interface ActivityEvent {
+     | 'unlock'
+     | string;                 // permissive — backend may add new types
+   summary: string;            // backend-formatted human-readable message
+-  emoji?: string;
+ }
+ 
+ // Aggregated per-user divergence score across the 4 positions returned by
+diff --git a/web/js/app.js b/web/js/app.js
+index e2ec4bf..6d31011 100644
+--- a/web/js/app.js
++++ b/web/js/app.js
+@@ -5210,8 +5210,13 @@
+           list.innerHTML = '<div class="activity-feed-empty">No recent activity yet.</div>';
+           return;
+         }
++        // Chalkline (#225 follow-up): the backend stopped embedding emoji in
++        // activity messages; strip leading legacy emoji defensively in case
++        // an old server is answering.
++        const stripActivityEmoji = (s) => (s || '').replace(
++          /^\s*(?:\u2705|\u2716\uFE0F?|\u{1F91D}|\u{1F4CB}|\u{1F3AF}|\u{1F504}|\u2022)\s*/u, '');
+         list.innerHTML = events.map(ev =>
+-          `<div class="activity-feed-item">${_escapeHtml(ev.message || '')}</div>`
++          `<div class="activity-feed-item">${_escapeHtml(stripActivityEmoji(ev.message))}</div>`
+         ).join('');
+       } catch (e) {
+         if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueActivityFeed failed: ' + e.message);
+@@ -5331,7 +5336,12 @@
+       try {
+         const raw = localStorage.getItem(INVITE_BADGE_SEEN_KEY) || '[]';
+         const arr = JSON.parse(raw);
+-        return Array.isArray(arr) ? arr : [];
++        if (!Array.isArray(arr)) return [];
++        // Chalkline (#225 follow-up): badge names lost their emoji prefix
++        // (e.g. "🌱 First Recruit" → "First Recruit"). Normalise stored
++        // entries so already-earned badges don't re-fire the celebration.
++        return arr.map(b => String(b)
++          .replace(/^\s*(?:\u{1F331}|\u{1F91D}|\u{1F525}|\u{1F451})\s*/u, ''));
+       } catch (e) { return []; }
+     }
+     function _markInviteBadgeSeen(badge) {
