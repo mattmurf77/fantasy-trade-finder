@@ -388,6 +388,25 @@ function TradeCardComp({
         </View>
       )}
 
+      {/* #189 relaxed-fallback disclosure — same honest-labeling class (and
+          exact chip construction) as the wildcard above: this targeted deck
+          had zero cards under the normal gates, so the engine widened the
+          fairness band (stage 2 also floors surplus minimums) rather than
+          return nothing. Wording reuses AssetIdeasPanel's stretch line.
+          Serialized only when true — ordinary cards render exactly as
+          before. Wildcard and relaxed never co-occur (the exploration draw
+          skips pinned/opponent-scoped jobs; only those jobs can relax). */}
+      {data.relaxed === true && (
+        <View
+          style={styles.wildcardChip}
+          accessibilityLabel="Stretch — outside your fairness band"
+          testID="trade-card.relaxed-chip"
+        >
+          <View style={styles.wildcardTick} />
+          <Text style={styles.wildcardLabel}>STRETCH — OUTSIDE YOUR FAIRNESS BAND</Text>
+        </View>
+      )}
+
       <View style={styles.header}>
         <View>
           <Text style={type.label}>Trade with</Text>
