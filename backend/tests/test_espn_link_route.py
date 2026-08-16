@@ -209,12 +209,26 @@ def test_link_maps_espn_auth_error_to_403(client):
 
 
 def test_link_private_league_stores_encrypted_cookies(client):
+    # #321 (2026-08-16): the pasted SWID must OWN the chosen team (R3
+    # identity assertion), and the league must actually be auth-gated for
+    # the import fetch to count as credential proof (R4) — so this mock
+    # refuses anonymous reads (private league) and the SWID is team 1's
+    # owner from the fixture.
     c, token, engine = client
     s2 = "AEB%2FvS0me%2Bencoded%3Dvalue"
-    swid = "{ABCD-1234}"
-    r = _link(c, token, team_id=1, espn_s2=s2, swid=swid)
+    swid = "{A1111111-1111-1111-1111-111111111111}"
+    payload = _fixture_payload()
+
+    def _gated(lid, season, espn_s2=None, swid=None, **kw):
+        if not (espn_s2 and swid):
+            raise es.EspnAuthError()
+        return copy.deepcopy(payload)
+
+    with patch.object(es, "fetch_league", _gated):
+        r = _link(c, token, team_id=1, espn_s2=s2, swid=swid)
     assert r.status_code == 200
     assert r.get_json()["auth"] == "cookie"
+    assert r.get_json()["credential_stored"] is True
     with engine.connect() as conn:
         row = conn.execute(select(db_module.espn_credentials_table)).fetchone()._mapping
     assert row["user_id"] == USER

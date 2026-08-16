@@ -17039,12 +17039,25 @@ def _espn_reconnect_nudge(lg: dict, *, reason: str) -> None:
         key = f"{lid}:{episode}"
         if notification_exists_with_meta(uid, "espn_reconnect", "nudge_key", key):
             return
+        # #321 R9 — honest diagnosis for a wrong-account credential. SAME
+        # notification type (`espn_reconnect` — the web client allowlists
+        # inbox types, web/js/app.js, so a new type string would be silently
+        # dropped there); only the copy and meta.reason differ.
+        if reason == "wrong_account":
+            title = "Reconnect ESPN — wrong account signed in"
+            body = ("The ESPN sign-in saved here belongs to a different "
+                    "ESPN account than the one that owns your team in this "
+                    "league. Sign in with the ESPN account that owns your "
+                    "team to fix it.")
+        else:
+            title = "Reconnect ESPN to keep your league history"
+            body = ("Your saved ESPN sign-in stopped working, so weekly "
+                    "roster snapshots for this league are paused. Reconnect "
+                    "to resume them.")
         _write_inbox_row(
             uid, "espn_reconnect",
-            title="Reconnect ESPN to keep your league history",
-            body=("Your saved ESPN sign-in stopped working, so weekly "
-                  "roster snapshots for this league are paused. Reconnect "
-                  "to resume them."),
+            title=title,
+            body=body,
             meta={"league_id": lid, "nudge_key": key, "reason": reason},
         )
     except Exception as e:
@@ -17106,6 +17119,18 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             return None, "espn_fetch_failed"
         my_tid = lg.get("espn_my_team_id")
         my_uid = str(lg.get("user_id") or "")
+        # #321 R9 — the sweep is identity-aware: a stored SWID that
+        # conclusively doesn't own the bound team gets the honest
+        # wrong-account nudge (same `espn_reconnect` type, deduped per
+        # credential episode) instead of a later mislabeled "stopped
+        # working". The sync itself CONTINUES — league rosters are league
+        # truth regardless of whose credential read them.
+        if swid and my_tid is not None:
+            _bound = next((t for t in league["teams"] if t.team_id == my_tid), None)
+            if _bound and (_bound.owner_swid or "").strip() and \
+                    _espn.canonical_swid(_bound.owner_swid).upper() != \
+                    _espn.canonical_swid(swid).upper():
+                _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
             mid = my_uid if (my_uid and t.team_id == my_tid) \
@@ -20193,7 +20218,19 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
-def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
+# #321 identity binding (2026-08-16): the one wrong-account recovery copy,
+# shared by every surface that rejects a pair for OWNING THE WRONG ACCOUNT
+# (verify-time membership assertion, the league-link team-binding step, and
+# the re-sync assertion). Names the real fix — "sign in again" is the wrong
+# recovery for a pair that authenticates fine as the wrong human.
+_ESPN_WRONG_ACCOUNT_MSG = (
+    "That ESPN account can't open your linked league, so nothing was "
+    "saved. Sign in with the ESPN account that owns your team."
+)
+
+
+def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
+                            skip_league_id: str | None = None):
     """Prove an ESPN cookie pair against ESPN BEFORE it is stored.
 
     Returns `(verdict, oracle, detail)`:
@@ -20202,8 +20239,27 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
       "bad"         — ESPN answered and the pair proved nothing (a rejection,
                       or a read that returned no account-specific data).
                       Credential verdict → 403 espn_bad_credentials.
+      "wrong_account" — the pair IS a live ESPN session, but its SWID does
+                      not own the bound team of one of the caller's linked
+                      leagues (#321 identity binding, 2026-08-16). Verdict on
+                      the ACCOUNT, not the session → 403 espn_bad_credentials
+                      + additive `reason: "wrong_account"`.
       "unavailable" — transport failure / 5xx / a 200 that didn't parse. NOT
                       a verdict on the cookies → 502 espn_unavailable.
+
+    IDENTITY BINDING (#321): a passing oracle proves only "this pair is a
+    valid ESPN session for SOME account" — the 2026-08-12 incident stored a
+    different human's working session as the caller's. So after the auth
+    verdict, a MEMBERSHIP assertion runs regardless of oracle strength: the
+    pair's SWID must own the caller's bound team (`espn_my_team_id`) in
+    their linked ESPN leagues. Set semantics over EVERY bound league row —
+    one ESPN human owns one SWID, so a conclusive mismatch against ANY bound
+    league means the wrong account (or a mis-picked binding; either way the
+    re-link/re-sign-in recovery is right). Precedence: mismatch > accept >
+    unavailable. `skip_league_id` exempts a league whose binding is being
+    REWRITTEN by the caller right now (the import path already asserted the
+    pair against the newly chosen team, and holding the pair to the league's
+    OLD binding would deadlock the re-link that fixes a wrong binding).
 
     ORACLE CHOICE (verification-oracle fix, 2026-08-12). Two probes, in
     strength order:
@@ -20233,17 +20289,28 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
     from . import espn_service as _espn
     from .database import load_espn_leagues_for_user
 
+    # Linked-league inventory — drives BOTH the strong-oracle choice and the
+    # #321 membership assertion below.
+    linked: list[dict] = []
+    try:
+        linked = load_espn_leagues_for_user(user_id)
+    except Exception:
+        log.exception("espn verify: linked-league lookup failed for %s", user_id)
+
     # 1. Strong oracle: an already-linked league ESPN only serves to a
     #    signed-in member. PUBLIC links are skipped on purpose.
     gated = None
-    try:
-        for lg in load_espn_leagues_for_user(user_id):
-            if (lg.get("espn_auth") or "") == "cookie" and \
-                    str(lg.get("league_id") or "").isdigit():
-                gated = lg
-                break
-    except Exception:
-        log.exception("espn verify: linked-league lookup failed for %s", user_id)
+    for lg in linked:
+        if (lg.get("espn_auth") or "") == "cookie" and \
+                str(lg.get("league_id") or "").isdigit():
+            gated = lg
+            break
+
+    # Teams parsed during THIS verify, keyed by league id, so the membership
+    # phase never re-reads a league the oracle already fetched. None marks a
+    # league proven unreadable-but-inconclusive (purged) — don't retry it.
+    fetched_teams: dict[str, list | None] = {}
+    auth = None   # (verdict, oracle, detail) once the AUTH phase passes
 
     if gated:
         lid = str(gated["league_id"])
@@ -20262,6 +20329,7 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
             # nothing about the cookies. Fall through to the fan probe
             # rather than falsely rejecting a good sign-in.
             log.info("espn verify: linked league %s purged — falling back", lid)
+            fetched_teams[lid] = None
         except OSError as e:
             log.warning("espn verify: league oracle transport failure: %s", e)
             return "unavailable", "league_read", "transport"
@@ -20274,28 +20342,102 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
             except Exception:
                 teams = []
             if teams:
-                return "ok", "league_read", lid
-            log.warning("espn verify: league oracle 200 didn't parse (league=%s)",
-                        lid)
-            return "unavailable", "league_read", "unrecognized_payload"
+                fetched_teams[lid] = teams
+                auth = ("ok", "league_read", lid)
+            else:
+                log.warning("espn verify: league oracle 200 didn't parse (league=%s)",
+                            lid)
+                return "unavailable", "league_read", "unrecognized_payload"
 
-    # 2. Weak fallback: the fan profile. Result is BOUND and asserted — an
-    #    empty/unrecognised payload is NOT a pass (that was the bug).
-    try:
-        probe = _espn.probe_fan_profile(espn_s2, swid)
-    except _espn.EspnAuthError:
-        return "bad", "fan_profile", "rejected"
-    except (_espn.EspnError, OSError) as e:
-        log.warning("espn verify: fan probe unavailable [%s]: %s",
-                    getattr(e, "kind", "transport"), e)
-        return "unavailable", "fan_profile", getattr(e, "kind", "transport")
+    if auth is None:
+        # 2. Weak fallback: the fan profile. Result is BOUND and asserted —
+        #    an empty/unrecognised payload is NOT a pass (that was the bug).
+        try:
+            probe = _espn.probe_fan_profile(espn_s2, swid)
+        except _espn.EspnAuthError:
+            return "bad", "fan_profile", "rejected"
+        except (_espn.EspnError, OSError) as e:
+            log.warning("espn verify: fan probe unavailable [%s]: %s",
+                        getattr(e, "kind", "transport"), e)
+            return "unavailable", "fan_profile", getattr(e, "kind", "transport")
 
-    if probe.get("football_leagues"):
-        return "ok", "fan_profile", f"{len(probe['football_leagues'])} ffl"
-    if probe.get("fantasy_entries"):
-        # Real account, no FOOTBALL leagues — legitimate, not a rejection.
-        return "ok", "fan_profile", "no_football_leagues"
-    return "bad", "fan_profile", "no_account_data"
+        if probe.get("football_leagues"):
+            auth = ("ok", "fan_profile", f"{len(probe['football_leagues'])} ffl")
+        elif probe.get("fantasy_entries"):
+            # Real account, no FOOTBALL leagues — legitimate, not a rejection.
+            auth = ("ok", "fan_profile", "no_football_leagues")
+        else:
+            return "bad", "fan_profile", "no_account_data"
+
+    # ── 3. #321 membership assertion (identity binding) ──────────────────
+    # The auth phase proved a live session for SOME account; this asserts
+    # WHOSE. Every linked league with a team binding is evaluated (set
+    # semantics — deliberately not "first" or "newest"). At most ONE live
+    # read per league, store time only; cookies ride along (public leagues
+    # ignore them, cookie-gated ones need them). ZERO FALSE REJECTS:
+    # ownerless / co-owned / missing owner_swid, purged leagues, and
+    # vanished teams are all INCONCLUSIVE-ACCEPT — and deliberately WITHOUT
+    # plan §F1's "is any team's owner" fallback (dropped in review round 1;
+    # do not restore it). No bound league at all → vacuous; the auth
+    # verdict stands.
+    target = _espn.canonical_swid(swid or "").upper()
+    mismatch_detail = None
+    unavailable_detail = None
+    for lg in linked:
+        lid = str(lg.get("league_id") or "")
+        if lg.get("my_team_id") is None or not lid.isdigit():
+            continue
+        if skip_league_id and lid == str(skip_league_id):
+            continue   # binding being rewritten by the caller — see docstring
+        if lid in fetched_teams:
+            teams = fetched_teams[lid]
+            if not teams:
+                continue   # purged during the oracle phase — inconclusive
+        else:
+            try:
+                season = int(lg.get("season") or _ESPN_DEFAULT_SEASON)
+            except (TypeError, ValueError):
+                season = _ESPN_DEFAULT_SEASON
+            try:
+                raw = _espn.fetch_league(lid, season, espn_s2=espn_s2, swid=swid)
+            except _espn.EspnAuthError:
+                # The pair IS a live session (auth phase passed), yet this
+                # linked league refuses it — a non-member. Conclusive.
+                mismatch_detail = f"league {lid} refused this account"
+                break
+            except _espn.EspnError as e:
+                if getattr(e, "kind", "") == "not_found":
+                    continue   # purged — inconclusive, never a reject
+                unavailable_detail = getattr(e, "kind", "http")
+                continue       # keep scanning — a later mismatch outranks this
+            except OSError:
+                unavailable_detail = "transport"
+                continue
+            try:
+                teams = _espn.parse_league(raw)["teams"] if isinstance(raw, dict) else []
+            except Exception:
+                teams = []
+            if not teams:
+                unavailable_detail = "unrecognized_payload"
+                continue
+            fetched_teams[lid] = teams
+        bound = next((t for t in teams
+                      if t.team_id == lg.get("my_team_id")), None)
+        if bound is None or not (bound.owner_swid or "").strip():
+            continue   # team vanished / ownerless — inconclusive-accept
+        if target and _espn.canonical_swid(bound.owner_swid).upper() != target:
+            mismatch_detail = f"league {lid} bound-team owner mismatch"
+            break      # nothing outranks a conclusive mismatch
+
+    if mismatch_detail:
+        return "wrong_account", auth[1], mismatch_detail
+    if unavailable_detail:
+        # R6 fail-open: a membership read failed and nothing conclusively
+        # mismatched — NOT a verdict on the account. 502, nothing stored; a
+        # user with a good sign-in is never told it's bad because ESPN was
+        # down.
+        return "unavailable", "membership", unavailable_detail
+    return auth
 
 
 @app.route("/api/espn/link", methods=["GET", "POST", "DELETE"])
@@ -20356,6 +20498,7 @@ def espn_link():
     from . import espn_service as _espn
     from .database import (get_espn_credential, upsert_espn_credential,
                            delete_espn_credential,
+                           clear_espn_credential_verification,
                            upsert_espn_league, replace_espn_league_members)
 
     sess = _require_session()
@@ -20422,6 +20565,17 @@ def espn_link():
         # reported {connected:true}, and only surfaced as a 409 at the next
         # trade send. MFL/Sleeper never had this gap.
         verdict, oracle, detail = _espn_verify_credential(user_id, espn_s2, swid)
+        if verdict == "wrong_account":
+            # #321 identity binding: the pair authenticates, but its SWID
+            # does not own the caller's bound team. Wire code UNCHANGED
+            # (espn_bad_credentials — old builds keep matching and show the
+            # generic rejected copy); the additive `reason` field names the
+            # real failure for builds that read it. Nothing is stored.
+            log.info("espn_link: credential identity mismatch user=%s "
+                     "oracle=%s detail=%s", user_id, oracle, detail)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
         if verdict == "bad":
             # ESPN answered and the pair proved nothing — a credential
             # verdict, not an outage. Nothing is stored; the client re-runs
@@ -20439,9 +20593,7 @@ def espn_link():
                 # someone else's account). Storing it would only defer the
                 # failure to the send, which is the bug being fixed, so it
                 # is refused — with copy that names the actual recovery.
-                msg = ("That ESPN account can't open your linked league, so "
-                       "nothing was saved. Sign in with the ESPN account "
-                       "that owns your team.")
+                msg = _ESPN_WRONG_ACCOUNT_MSG
             else:
                 msg = ("ESPN didn't accept that sign-in — nothing was saved. "
                        "Sign in to ESPN again.")
@@ -20534,25 +20686,116 @@ def espn_link():
         return jsonify({"error": "espn_bad_team_id",
                         "message": "That team isn't in this league."}), 400
 
+    # ── #321 R3 — identity assertion at the team-binding step, regardless
+    # of cookie provenance (pasted, captured, or the stored-credential
+    # fallback). The team list with owner_swids is already in hand from the
+    # import fetch — comparison only, no extra ESPN read. Zero false
+    # rejects: an ownerless / co-owned / owner_swid-less chosen team is
+    # INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
+    # stored under a vacuous accept (no league yet) is re-checked the
+    # moment a league gets a team binding.
+    if espn_s2 and swid:
+        chosen = next((t for t in league["teams"] if t.team_id == team_id), None)
+        chosen_owner = _espn.canonical_swid(chosen.owner_swid).upper() \
+            if chosen and (chosen.owner_swid or "").strip() else None
+        pair_swid = _espn.canonical_swid(swid).upper()
+        if chosen_owner and pair_swid and chosen_owner != pair_swid:
+            # When the mismatching SWID is the STORED credential's (the
+            # stored-cookie fallback, or a paste equal to the stored pair),
+            # null that row's verified_at so GET status stops lying — row
+            # kept, no delete (forensics posture). A mismatching paste that
+            # DIFFERS from the stored pair says nothing about the stored
+            # row and leaves it untouched.
+            stored = get_espn_credential(user_id)
+            if stored and _espn.canonical_swid(
+                    stored.get("swid") or "").upper() == pair_swid:
+                clear_espn_credential_verification(user_id)
+                log.info("espn_link: stored credential un-verified after "
+                         "binding mismatch user=%s league=%s", user_id, league_id)
+            log.info("espn_link: team-binding identity mismatch user=%s "
+                     "league=%s team=%s pasted=%s",
+                     user_id, league_id, team_id, pasted_cookie)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
+
     # Persist cookies first (so a later re-import can reuse them), then the
     # league + membership snapshot.
     auth_mode = "cookie" if (espn_s2 and swid) else "public"
+    # #321 R4 — additive response facts about the pair's fate (present only
+    # when a pair accompanied the import; absent otherwise).
+    credential_stored: bool | None = None
+    credential_reason: str | None = None
+    if espn_s2 and swid and not pasted_cookie:
+        # Stored-credential fallback: the pair is already at rest — its fate
+        # was decided at its own store time, and R3 above just re-checked
+        # identity against the chosen team. Nothing to (re)store.
+        credential_stored = True
     if pasted_cookie:
         if not _sleeper_write.token_encryption_available():
             return jsonify({"error": "espn_unconfigured",
                             "message": "Credential encryption key missing."}), 503
+        # #321 R4 — the import fetch above is a genuine AUTHENTICATED proof
+        # only when the league actually requires auth. One anonymous read
+        # settles gatedness: refused → auth-gated → the cookie fetch WAS
+        # real proof (existing stamp semantics, unchanged). Served
+        # anonymously → PUBLIC → the fetch proved nothing (the pre-fix
+        # "Known residual"): _espn_verify_credential decides the pair's
+        # fate, and a failing/unjudgeable pair never fails a working
+        # public-league import — the pair is simply NOT stored and the
+        # response says so. Identity failures still always block (above and
+        # via the verify's own membership assertion).
+        proof: bool | None = None
         try:
-            # verified_at: the league fetch above already succeeded WITH this
-            # pair attached — and the in-app flow only collects cookies after
-            # an anonymous read 403s (private league), so that fetch was a
-            # genuine authenticated proof. No second probe (don't double-hit
-            # ESPN or slow the import).
-            upsert_espn_credential(
-                user_id, swid, _sleeper_write.encrypt_token(espn_s2),
-                verified_at=datetime.now(timezone.utc).isoformat())
-        except Exception:
-            log.exception("espn_link: credential store failed")
-            return jsonify({"error": "store_failed"}), 500
+            _espn.fetch_league(league_id, season)   # anonymous — no cookies
+            proof = False                           # public league
+        except _espn.EspnAuthError:
+            proof = True                            # auth-gated: fetch was proof
+        except (_espn.EspnError, OSError):
+            proof = None                            # couldn't tell — no stamp
+        if proof is False:
+            # skip_league_id: THIS league's binding is being rewritten right
+            # now — R3 already asserted the pair against the new team, and
+            # holding it to the old binding would deadlock the fixing re-link.
+            verdict, v_oracle, v_detail = _espn_verify_credential(
+                user_id, espn_s2, swid, skip_league_id=league_id)
+            if verdict == "wrong_account":
+                log.info("espn_link: import-path verify identity mismatch "
+                         "user=%s league=%s detail=%s",
+                         user_id, league_id, v_detail)
+                return jsonify({"error": "espn_bad_credentials",
+                                "reason": "wrong_account",
+                                "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
+            if verdict == "ok":
+                proof = True
+            else:
+                credential_reason = ("unverified" if verdict == "bad"
+                                     else "unavailable")
+                log.info("espn_link: public-league import pair not stored "
+                         "user=%s league=%s verdict=%s oracle=%s detail=%s",
+                         user_id, league_id, verdict, v_oracle, v_detail)
+        elif proof is None:
+            credential_reason = "unavailable"
+            log.info("espn_link: gatedness probe inconclusive — pair not "
+                     "stored user=%s league=%s", user_id, league_id)
+        if proof:
+            try:
+                upsert_espn_credential(
+                    user_id, swid, _sleeper_write.encrypt_token(espn_s2),
+                    verified_at=datetime.now(timezone.utc).isoformat())
+            except Exception:
+                log.exception("espn_link: credential store failed")
+                return jsonify({"error": "store_failed"}), 500
+            credential_stored = True
+        else:
+            # An unproven pair must not reach the DB (existing principle).
+            credential_stored = False
+            if proof is False:
+                # The league is PUBLIC (the anonymous probe read it) and no
+                # pair was persisted — label the link honestly so re-sync
+                # keeps working anonymously instead of demanding cookies a
+                # public league doesn't need.
+                auth_mode = "public"
 
     members = []
     for t in league["teams"]:
@@ -20591,7 +20834,7 @@ def espn_link():
              "match_rate=%.1f%% unmatched=%d",
              user_id, league_id, season, len(members), auth_mode,
              r["match_rate"] * 100, len(r["unmatched"]))
-    return jsonify({
+    resp = {
         "ok": True,
         "league_id":      league_id,
         "name":           league["name"],
@@ -20603,7 +20846,15 @@ def espn_link():
         "my_team_id":     team_id,
         "my_roster":      mapped["rosters"].get(team_id, []),
         "report":         _espn_report_json(r),
-    })
+    }
+    # #321 R4 additive fields — present only when a pair accompanied the
+    # import; states the pair's fate instead of implying it. Clients must
+    # tolerate absence and unknown values.
+    if credential_stored is not None:
+        resp["credential_stored"] = credential_stored
+        if not credential_stored and credential_reason:
+            resp["credential_reason"] = credential_reason
+    return jsonify(resp)
 
 
 @app.route("/api/espn/leagues")
@@ -20707,6 +20958,7 @@ def espn_import():
         return jsonify({"error": "feature_disabled"}), 404
     from . import espn_service as _espn
     from .database import (get_espn_league, get_espn_credential,
+                           clear_espn_credential_verification,
                            replace_espn_league_members, upsert_espn_league)
 
     sess = _require_session()
@@ -20745,6 +20997,25 @@ def espn_import():
         return jsonify({"error": "espn_team_missing",
                         "message": "Your team is no longer in this ESPN "
                                    "league — re-link to pick a team."}), 409
+
+    # ── #321 R3b — re-sync identity assertion. The stored SWID, the row's
+    # team binding, and the fetched teams (with owner_swids) are all in
+    # hand — comparison only, no extra ESPN read. Catches wrong-identity
+    # rows bound BEFORE identity binding shipped, which the R10 migration
+    # alone cannot identify. Only asserted for the linker's own binding
+    # (zero false rejects if another user ever re-syncs), and an ownerless
+    # / owner_swid-less bound team is inconclusive-accept.
+    if swid and str(row.get("user_id") or "") == str(user_id):
+        bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
+        pair_swid = _espn.canonical_swid(swid).upper()
+        if bound and (bound.owner_swid or "").strip() and pair_swid and \
+                _espn.canonical_swid(bound.owner_swid).upper() != pair_swid:
+            clear_espn_credential_verification(user_id)
+            log.info("espn_import: re-sync identity mismatch — stamp nulled "
+                     "user=%s league=%s team=%s", user_id, league_id, my_team_id)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
 
     members = []
     for t in league["teams"]:

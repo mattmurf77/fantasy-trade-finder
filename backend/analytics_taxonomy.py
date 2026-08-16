@@ -96,6 +96,12 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # WebView, and they go to POST /api/espn/link, not analytics.
     "espn_connect_opened", "espn_connect_otp_step",
     "espn_connect_captured", "espn_connect_abandoned",
+    # #321 (2026-08-16): the connect flow's first FAILURE event — fired when
+    # the server refuses (or can't judge) a captured pair at store time.
+    # `reason` distinguishes wrong_account / bad_credentials / unavailable,
+    # so the identity-binding rejection is measurable and the R10
+    # migration's re-sign-in wave has a signal.
+    "espn_connect_store_rejected",
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
     # Plans: docs/plans/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
     # Tracking-plan addendum (the precondition this module's docstring
@@ -663,6 +669,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),
     "espn_connect_abandoned": frozenset({"saw_otp"}),
+    # #321 — `reason` ∈ wrong_account | bad_credentials | unavailable
+    # (derived from the store response: 403 + reason:"wrong_account" →
+    # wrong_account; other 403 espn_bad_credentials → bad_credentials;
+    # anything else → unavailable); `source`/`saw_otp` mirror the events
+    # above. No cookie/credential prop exists or may be added.
+    "espn_connect_store_rejected": frozenset({"reason", "source", "saw_otp"}),
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
     # NOTE `platform` on league_view is the LEAGUE platform (sleeper /
     # espn / mfl / fleaflicker), matching league_selected's precedent
