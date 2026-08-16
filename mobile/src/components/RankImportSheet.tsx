@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,6 +17,7 @@ import {
   importApplyRankings,
   importMatchRankings,
   type ImportMatchRow,
+  type ImportRowHint,
 } from '../api/rankings';
 import {
   chalk,
@@ -54,6 +55,18 @@ interface Props {
   onClose: () => void;
   /** Called after a successful apply; parent owns toast + navigation. */
   onApplied: (importedCount: number) => void;
+  // ── Preset intake (Premium Rankings Import v1, [D-058]) ───────────────
+  // Both props are OPTIONAL and both default to today's exact behavior, so
+  // the "Paste rankings" row still opens this sheet unchanged.
+  /** Ordered rows from a confirmed premium preset. When present the sheet
+   *  skips the paste step entirely and runs the SAME match → review → apply
+   *  path, so there is exactly one apply implementation. Order-only by
+   *  contract: `ImportRowHint` has no value/trend/points field. */
+  presetRows?: ImportRowHint[] | null;
+  /** Raw text for the generic fallback path — an unrecognized file's rows
+   *  land in the paste box for the user to check, rather than being guessed
+   *  at (addendum §3.2: unknown signature → generic mapping, never a guess). */
+  initialText?: string | null;
 }
 
 // Display-only row estimate for the paste step ("N rows detected"). The
@@ -85,7 +98,13 @@ function rankRowLines(text: string): string[] {
 
 type Resolution = string | 'skip'; // player_id or explicit skip
 
-export default function RankImportSheet({ visible, onClose, onApplied }: Props) {
+export default function RankImportSheet({
+  visible,
+  onClose,
+  onApplied,
+  presetRows,
+  initialText,
+}: Props) {
   const [step, setStep] = useState<'paste' | 'review'>('paste');
   const [text, setText] = useState('');
   const [matching, setMatching] = useState(false);
@@ -111,20 +130,51 @@ export default function RankImportSheet({ visible, onClose, onApplied }: Props) 
     onClose();
   }, [reset, onClose]);
 
-  const onMatch = useCallback(async () => {
-    setMatching(true);
-    setError(null);
-    try {
-      const res = await importMatchRankings(rankRowLines(text));
-      setRows(res.rows);
-      setResolutions({});
-      setStep('review');
-    } catch (e: any) {
-      setError(e?.message || 'Could not match your rankings. Try again.');
-    } finally {
-      setMatching(false);
+  // ONE match implementation for every intake. `hints` is the preset path's
+  // ordered [{name, team, pos}] — api/rankings.ts sends it as the optional
+  // `rows` field and falls back to the plain text path on a 400 from a
+  // backend that predates it.
+  const runMatch = useCallback(
+    async (lines: string[], hints?: ImportRowHint[] | null) => {
+      setMatching(true);
+      setError(null);
+      try {
+        const res = await importMatchRankings(lines, hints ?? null);
+        setRows(res.rows);
+        setResolutions({});
+        setStep('review');
+      } catch (e: any) {
+        setError(e?.message || 'Could not match your rankings. Try again.');
+      } finally {
+        setMatching(false);
+      }
+    },
+    [],
+  );
+
+  const onMatch = useCallback(
+    () => runMatch(rankRowLines(text)),
+    [runMatch, text],
+  );
+
+  // Preset intake: a confirmed premium CSV opens this sheet straight into
+  // the review step. Guarded by a ref so a re-render can't re-POST the same
+  // batch; cleared when the sheet closes.
+  const adopted = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      adopted.current = false;
+      return;
     }
-  }, [text]);
+    if (adopted.current) return;
+    if (presetRows && presetRows.length) {
+      adopted.current = true;
+      void runMatch(presetRows.map((r) => r.name), presetRows);
+    } else if (initialText) {
+      adopted.current = true;
+      setText(initialText);
+    }
+  }, [visible, presetRows, initialText, runMatch]);
 
   // Ordered resolved player ids, and how many ambiguous rows still need a
   // tap. Unmatched rows are skipped (there is nothing to resolve them to);

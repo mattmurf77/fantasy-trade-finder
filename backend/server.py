@@ -8235,15 +8235,26 @@ _IMPORT_MAX_ROWS = 500
 
 @app.route("/api/rankings/import-match", methods=["POST"])
 def rankings_import_match():
-    """POST /api/rankings/import-match {names: [...], scoring_format?}
+    """POST /api/rankings/import-match {names|text|rows, scoring_format?}
 
     ``names`` is the pasted table's lines (the client may pre-filter blank
     lines; each entry is still run through the tolerant per-line extractor,
     so raw "12. Josh Allen QB BUF" rows work). A raw ``text`` blob is also
-    accepted and split on newlines. Matches against the UNIVERSAL pool for
-    the scoring format (body ``scoring_format`` > X-Scoring-Format header >
-    session active format). Read-only — no board writes. 404 while
-    `ranks.import` is off.
+    accepted and split on newlines.
+
+    ``rows`` — ``[{"name": str, "team": str|null, "pos": str|null}, ...]``
+    in rank order — is the STRUCTURED alternative for clients that already
+    parsed a table and know which column is which (premium CSV presets,
+    [D-058]). When present it takes precedence over ``names``/``text``:
+    names are read from the column instead of extracted, and team/pos are
+    HINTS ONLY — they pick between 2+ same-name pool players and can never
+    reject or invent a match, so a stale team code degrades to the
+    name-only result. No other column is read (the pipeline is order-only;
+    a premium CSV's Value/Trend/PPG never enter FTF).
+
+    Matches against the UNIVERSAL pool for the scoring format (body
+    ``scoring_format`` > X-Scoring-Format header > session active format).
+    Read-only — no board writes. 404 while `ranks.import` is off.
     """
     if not is_enabled("ranks.import"):
         return jsonify({"error": "not found"}), 404
@@ -8251,15 +8262,27 @@ def rankings_import_match():
     sess["last_active"] = time.time()
     body = request.get_json(force=True) or {}
 
-    names = body.get("names")
-    if not isinstance(names, list):
-        text = body.get("text")
-        names = text.splitlines() if isinstance(text, str) else []
-    names = [str(n) for n in names if isinstance(n, (str, int, float))]
-    if not names:
-        return jsonify({"error": "names (or text) required"}), 400
-    if len(names) > _IMPORT_MAX_ROWS:
-        return jsonify({"error": "too_many_rows", "max": _IMPORT_MAX_ROWS}), 400
+    submitted_rows = body.get("rows")
+    structured = isinstance(submitted_rows, list)
+    names: list[str] = []
+    if structured:
+        if len(submitted_rows) > _IMPORT_MAX_ROWS:
+            return jsonify({"error": "too_many_rows", "max": _IMPORT_MAX_ROWS}), 400
+        submitted_rows = [r for r in submitted_rows
+                          if isinstance(r, dict)
+                          and isinstance(r.get("name"), str) and r["name"].strip()]
+        if not submitted_rows:
+            return jsonify({"error": "rows[].name required"}), 400
+    else:
+        names = body.get("names")
+        if not isinstance(names, list):
+            text = body.get("text")
+            names = text.splitlines() if isinstance(text, str) else []
+        names = [str(n) for n in names if isinstance(n, (str, int, float))]
+        if not names:
+            return jsonify({"error": "names (or text) required"}), 400
+        if len(names) > _IMPORT_MAX_ROWS:
+            return jsonify({"error": "too_many_rows", "max": _IMPORT_MAX_ROWS}), 400
 
     from .database import SCORING_FORMATS as DB_SCORING_FORMATS
     fmt = body.get("scoring_format") or _active_format(sess)
@@ -8267,7 +8290,9 @@ def rankings_import_match():
         return jsonify({"error": f"unknown scoring_format {fmt!r}"}), 400
 
     players, seed = _get_universal_pool(fmt)
-    rows = _rankings_import.match_rank_list(names, players, seed)
+    rows = _rankings_import.match_rank_list(
+        names, players, seed,
+        rows=submitted_rows if structured else None)
     counts = {"matched": 0, "ambiguous": 0, "unmatched": 0}
     for r in rows:
         counts[r["status"]] += 1

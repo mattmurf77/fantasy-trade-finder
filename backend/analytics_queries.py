@@ -220,6 +220,25 @@ NON_INTENT_EVENTS = frozenset({
     "guide_step_suppressed",
     "awaiting_segment_viewed",
     "rating_prompt_requested",
+    # ── Premium rankings import v1, 2026-08-15 ([D-058]) — added in the
+    # SAME commit that registered them in ALLOWED_CLIENT_EVENTS, for the
+    # reason stated at the top of this block. Scope:
+    # docs/plans/connected-rankings/build-v1-premium-import/scope.md §1.
+    #
+    #   rankings_preset_detected — a PIPELINE OUTCOME mid-flow: a header
+    #     signature matched and a confirmation step cleared. The user's
+    #     decision is the apply that follows (`rankings_import_applied`,
+    #     server-fired and INTENT), and a detection that the user abandons
+    #     is precisely a non-conversion — admitting it to INTENT would
+    #     credit a user-day to a flow nobody finished.
+    #
+    #   rankings_preset_fallback — the same, on the miss branch: a file
+    #     shape we could not recognize. Nothing was chosen.
+    #
+    # Neither can add a user-day that the file-intake gesture ahead of it
+    # (and the apply behind it) does not already account for.
+    "rankings_preset_detected",
+    "rankings_preset_fallback",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

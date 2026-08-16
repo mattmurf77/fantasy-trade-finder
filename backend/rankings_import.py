@@ -23,6 +23,16 @@ Match tiers (import-match response ``status`` per row):
 Normalization strips case, punctuation, and generational suffixes
 (Jr/Sr/II–V), so "Kenneth Walker" auto-matches "Kenneth Walker III" —
 auto-accepted but surfaced in the review screen for audit (mock B3).
+
+Structured rows (premium rankings import v1, [D-058]; addendum §3.2):
+``match_rank_list`` also accepts ``rows`` — ``[{"name", "team"?, "pos"?}]``
+in rank order — instead of raw pasted lines, for clients that parsed a CSV
+and know which column is which. ``team``/``pos`` are HINTS ONLY: they narrow
+a list of 2+ same-name candidates and can never reject a name-only match or
+introduce one, so a stale team code degrades to today's behaviour instead of
+losing the player. Only the name/team/pos columns are ever read — a premium
+CSV's Value/Trend/PPG columns have no path into this module (the import
+pipeline is order-only).
 """
 
 from __future__ import annotations
@@ -148,9 +158,67 @@ def _player_payload(p) -> dict:
     }
 
 
+def _norm_code(value) -> Optional[str]:
+    """Team/position hint → bare uppercase code ("bUf." → "BUF"), or None."""
+    if not isinstance(value, str):
+        return None
+    code = re.sub(r"[^A-Za-z0-9]", "", value).upper()
+    return code or None
+
+
+def _hint_narrow(candidates: list, team_hint: Optional[str],
+                 pos_hint: Optional[str]) -> tuple[Optional[object], list]:
+    """Disambiguate 2+ same-name candidates with team/position hints.
+
+    Returns ``(winner|None, candidates_to_show)``. Hints only ever NARROW:
+    if nothing satisfies them the original list comes back untouched, so a
+    stale team code (post-trade CSV) or a missing column can never turn a
+    name match into a miss. Tried strictest-first — both hints, then
+    position alone, then team alone — because position is the stable half
+    of a premium export and team is the half that goes stale.
+    """
+    tests = []
+    if team_hint and pos_hint:
+        tests.append(lambda p: (_norm_code(getattr(p, "position", None)) == pos_hint
+                                and _norm_code(getattr(p, "team", None)) == team_hint))
+    if pos_hint:
+        tests.append(lambda p: _norm_code(getattr(p, "position", None)) == pos_hint)
+    if team_hint:
+        tests.append(lambda p: _norm_code(getattr(p, "team", None)) == team_hint)
+
+    narrowed = candidates
+    for test in tests:
+        subset = [p for p in candidates if test(p)]
+        if len(subset) == 1:
+            return subset[0], subset
+        if len(subset) > 1 and narrowed is candidates:
+            narrowed = subset
+    return None, narrowed
+
+
+def _entries_from_rows(rows: list) -> list[tuple]:
+    """[(input, name, team_hint, pos_hint)] from structured client rows.
+
+    Rows without a usable ``name`` are dropped, mirroring how the paste path
+    drops header/blank lines. Nothing but name/team/pos is read.
+    """
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("name")
+        name = raw.strip() if isinstance(raw, str) else ""
+        if not name or not normalise_name(name):
+            continue
+        out.append((name, name, _norm_code(row.get("team")),
+                    _norm_code(row.get("pos"))))
+    return out
+
+
 def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None,
-                    max_candidates: int = 3) -> list[dict]:
-    """Match pasted lines against the universal pool.
+                    max_candidates: int = 3,
+                    rows: Optional[list[dict]] = None) -> list[dict]:
+    """Match pasted lines (or structured rows) against the universal pool.
 
     Returns one row per parsed line (headers/numbers-only lines are dropped):
         {input, name, status: matched|ambiguous|unmatched,
@@ -158,6 +226,11 @@ def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None
 
     ``seed`` (pid → consensus Elo) orders candidate lists best-first so the
     chips the user sees lead with the likeliest player.
+
+    ``rows`` (``[{"name", "team"?, "pos"?}]``, rank-ordered) replaces
+    ``lines`` when given: the name is taken from the column rather than
+    extracted, and team/pos disambiguate multi-candidate names only (see
+    ``_hint_narrow``). ``rows=None`` is the paste path, unchanged.
     """
     ordered = sorted(
         players,
@@ -170,8 +243,14 @@ def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None
         norm_index.setdefault(norm, []).append(p)
         normed.append((p, norm, norm.split()))
 
-    rows = []
-    for line, name in parse_rank_lines(lines):
+    if rows is None:
+        entries = [(line, name, None, None)
+                   for line, name in parse_rank_lines(lines)]
+    else:
+        entries = _entries_from_rows(rows)
+
+    out = []
+    for line, name, team_hint, pos_hint in entries:
         query = normalize_player_name(name)
         row = {"input": line.strip(), "name": name, "status": "unmatched",
                "player": None, "candidates": []}
@@ -179,31 +258,38 @@ def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None
         if len(exact) == 1:
             row["status"] = "matched"
             row["player"] = _player_payload(exact[0])
-            rows.append(row)
+            out.append(row)
             continue
         if len(exact) > 1:
-            row["status"] = "ambiguous"
-            row["candidates"] = [_player_payload(p) for p in exact[:max_candidates]]
-            rows.append(row)
-            continue
-
-        # Fuzzy tier: prefix match either way, or "K. Walker" initial form.
-        q_tokens = query.split()
-        fuzzy = []
-        for p, norm, p_tokens in normed:
-            if norm.startswith(query + " ") or query.startswith(norm + " "):
-                fuzzy.append(p)
+            candidates = exact
+        else:
+            # Fuzzy tier: prefix match either way, or "K. Walker" initial form.
+            q_tokens = query.split()
+            fuzzy = []
+            for p, norm, p_tokens in normed:
+                if norm.startswith(query + " ") or query.startswith(norm + " "):
+                    fuzzy.append(p)
+                    continue
+                if (len(q_tokens) >= 2 and len(q_tokens[0]) == 1
+                        and p_tokens
+                        and p_tokens[0].startswith(q_tokens[0])
+                        and p_tokens[1:] == q_tokens[1:]):
+                    fuzzy.append(p)
+            if len(fuzzy) == 1:
+                row["status"] = "matched"
+                row["player"] = _player_payload(fuzzy[0])
+                out.append(row)
                 continue
-            if (len(q_tokens) >= 2 and len(q_tokens[0]) == 1
-                    and p_tokens
-                    and p_tokens[0].startswith(q_tokens[0])
-                    and p_tokens[1:] == q_tokens[1:]):
-                fuzzy.append(p)
-        if len(fuzzy) == 1:
-            row["status"] = "matched"
-            row["player"] = _player_payload(fuzzy[0])
-        elif fuzzy:
-            row["status"] = "ambiguous"
-            row["candidates"] = [_player_payload(p) for p in fuzzy[:max_candidates]]
-        rows.append(row)
-    return rows
+            candidates = fuzzy
+
+        if candidates:
+            winner, shown = _hint_narrow(candidates, team_hint, pos_hint)
+            if winner is not None:
+                row["status"] = "matched"
+                row["player"] = _player_payload(winner)
+            else:
+                row["status"] = "ambiguous"
+                row["candidates"] = [_player_payload(p)
+                                     for p in shown[:max_candidates]]
+        out.append(row)
+    return out

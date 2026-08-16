@@ -25,6 +25,13 @@
 - **Automated evidence:** `tsc --noEmit` 0 · `mobile/tests/check-guide-script.js` NEW, 228 assertions, sabotage-verified 4 ways (un-trimmed copy / plural fix removed / s7.1 revived / retirement dropped → all RED) · `check-s51-regen-diff.js` 32/32 after TradesScreen edits · all `mobile/tests/check-*.js` now run in CI · `testid-lint.sh` OK · backend pytest **2838 passed / 1 skipped** (taxonomy round-trips for 5 new events + spotlight prop; flag fixture mirrors ×5).
 - **Code-walk proofs (in PRD/commit messages):** N6.1 gate evaluated in `swipeMutation.onSuccess` (like-time prefetch would race the POST); s6.2+Apple chain behind N6.1 completion with consume-only-on-successful-show; regen bus source guard (trios/import returns can't burn the `quickset_save` Apple class or mislabel `deck_regenerated.position`).
 - **OWED (blocking graduation, not merge):** operator TestFlight checklist — 16 walks incl. both N8 arms, flag-off regression, v1-upgrader, `guideDismissed` zero-bubbles (`docs/plans/guided-onboarding-v2/testflight-checklist.md`).
+## 2026-08-15 — Premium Rankings Import v1 (feat/premium-import-v1, dark)
+
+- **Merged-state full backend suite: 2855 passed / 1 skipped (265s)** on `feat/premium-import-v1` (merge of `feat/premium-import-backend` `627dcd0` + `feat/premium-import-mobile` `52e4807`, base `d3fe3ac`). `test_rankings_import.py` 25 → 47.
+- **Paste-path regression golden**: `rankings_paste_golden.json` captured from the pre-change implementation; sabotage #2 (backend) proved it detects drift.
+- **Sabotage: 13/13 caught.** Backend 3 (hint-narrow winner, fallback-empty, rows-precedence). Mobile 10 (flag default flip, filter removal, contender override default, contender guard ×2, Value-column leak ×2, rows-unsupported, non-400 rethrow, FeedbackFAB unmount). All restored, trees verified clean.
+- Mobile: `npx tsc --noEmit` clean; `testid-lint.sh` OK; **36/36 `check-*.js` suites** incl. new `check-premium-import.js` (27 checks) + `check-rank-presets.js` (42 parser cases).
+- Maestro/sim: n/a per [D-056]. **Owed:** operator on-device DN export pass (`docs/plans/connected-rankings/build-v1-premium-import/testflight-checklist.md`) before `ranks.source.dynasty_nerds` flips; requires a **full EAS build** (new native dep `expo-document-picker`).
 
 ## 2026-08-15 — Open-access Phase A: gates run, fixes built, ALL SHIPPED (PRs #131, #132, #129)
 

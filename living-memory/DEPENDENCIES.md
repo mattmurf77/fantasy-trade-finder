@@ -10,12 +10,19 @@
 ---
 
 ## Table of Contents
+- [2026-08-15](#2026-08-15)
 - [2026-08-08](#2026-08-08)
 - [2026-05-21](#2026-05-21)
 - [Local Conventions That Become Dependencies If Violated](#local-conventions-that-become-dependencies-if-violated)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-08-15
+
+| Package | Version | Added | Why |
+|---|---|---|---|
+| `expo-document-picker` | `~14.0.8` | branch `feat/premium-import-mobile` | System file picker for the "Upload CSV file" import row (`getDocumentAsync` → `expo-file-system/legacy` `readAsStringAsync`), feeding the premium-import preset pipeline with `via=file`. Used only in `mobile/src/components/ImportRankingsSheet.tsx`. **Native code — the first build after this lands must be a full EAS build, not an OTA update.** |
 
 ## 2026-08-08
 

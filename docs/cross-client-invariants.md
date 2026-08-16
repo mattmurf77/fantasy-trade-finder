@@ -672,3 +672,14 @@ on clients (`(string & {})` + `default:` arm).
 | `declined` | Not planned | **no — closed** |
 
 NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkline re-skin (ADR-004). Closed statuses (2026-07-04) are defined in `backend/database.py:FEEDBACK_CLOSED_STATUSES` and mirrored in `mobile/src/api/feedback.ts:CLOSED_FEEDBACK_STATUSES` — `/api/feedback/mine` excludes them server-side AND the mobile inbox hides locally-persisted notes whose merged status is closed (or that no longer come back from `/mine` for the signed-in account). If you add or reclassify a status, update both constants and this table.
+
+## Premium rankings import (D-058, 2026-08-15)
+
+| Invariant | Value | Where |
+|---|---|---|
+| `source` enum (preset imports) | `dynasty_nerds`, `dlf` | mobile `rankPresets.ts`, analytics props, backend taxonomy |
+| `via` enum | `browser`, `file` | mobile emitters, backend `CLIENT_EVENT_PROPS` |
+| Source flags | `ranks.source.dynasty_nerds`, `ranks.source.dlf` — default **false**, client compiled-default **false** (never fail-open) | `config/features.json`, `FLAG_KEYS`, `useFeatureFlags.ts` |
+| DN scoring → FTF board map | `PPR→1qb_ppr`, `SFLEXTEP→sf_tep` (exact); `SFLEX→sf_tep`, `STD→1qb_ppr` (nearest — labeled confirmation only) | `rankPresets.ts`, import confirmation UI |
+| Contender rule | `contender_` files never apply to a dynasty board without explicit user override | `ImportRankingsSheet.tsx`, `check-premium-import.js` |
+| Order-only rule | premium CSV `Value`/`Trend`/`PPG` columns are never sent to or persisted by FTF | `rankPresets.ts`, `rankings_import.py`, both check suites |

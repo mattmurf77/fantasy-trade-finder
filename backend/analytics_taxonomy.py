@@ -329,6 +329,43 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Rating prompt REQUEST (growth.rating_prompt) — the OS decides whether
     # a dialog actually appears; we can only instrument the request:
     "rating_prompt_requested",
+    # ── Premium rankings import v1, 2026-08-15 ([D-058]) ─────────────────
+    # Scope block (the addendum this module's docstring demands):
+    # docs/plans/connected-rankings/build-v1-premium-import/scope.md §1.
+    #
+    # REGISTERED BEFORE ANY EMITTER SHIPS — this registry is default-deny
+    # behind a 200 (analytics_ingest.py counts + drops), so a name that
+    # arrives after its track() call is silent, unrecoverable data loss
+    # with a success-shaped response. Both names are MOBILE-fired; the
+    # backend fires neither (the server never sees the file — presets are
+    # parsed client-side and arrive as the `rows` payload of
+    # POST /api/rankings/import-match).
+    #
+    # BOTH are NON-INTENT and both land in
+    # analytics_queries.NON_INTENT_EVENTS in this SAME commit — INTENT is
+    # derived by SUBTRACTION, so a passive name registered here and
+    # nowhere else step-changes DAU/WAU on the day its emitter ships. They
+    # describe pipeline mechanics mid-flow; the INTENT event for this
+    # funnel is the apply (`rankings_import_applied`, server-fired below).
+    #
+    #   rankings_preset_detected — a premium CSV's header signature matched
+    #     a known source and the user cleared the confirmation step.
+    #     `source` ∈ {dynasty_nerds, dlf} (the flag-name enum, mirrored in
+    #     docs/cross-client-invariants.md); `via` ∈ {browser, file} (in-app
+    #     browser capture vs file picker / "Open in FTF"); `set_confirmed`
+    #     is TRUE when the user CHANGED the inferred value system/format —
+    #     the addendum's `rankings_preset_confirm_changed` folded into one
+    #     event rather than split across two names.
+    #
+    #   rankings_preset_fallback — a file arrived with no matching
+    #     signature, so the generic column-mapping UI took over. `via` only:
+    #     with no recognized signature there is no honest `source` to send,
+    #     and guessing one would poison the enum.
+    #
+    # NOT registered: any event carrying a player value. Premium imports are
+    # order-only; Value/Trend/PPG columns never enter FTF, analytics least
+    # of all.
+    "rankings_preset_detected", "rankings_preset_fallback",
     # ── Guided Onboarding v2 addendum, 2026-08-15 ───────────────────────
     # Plan: docs/plans/guided-onboarding-v2/{PRD.md,scope.md} §1;
     # event-state verdicts in DELTA-2026-08-15.md §E.
@@ -370,6 +407,22 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     "trio_swipe", "tier_save", "ranking_complete_first_time",
     "ranking_method_changed", "ranking_reorder", "anchor_answered",
     "quickset_completed", "quickrank_completed", "swipe",
+    # rankings_import_applied (REGISTRATION ONLY, 2026-08-15) — fired by
+    # POST /api/rankings/import-apply since #232's follow-on shipped
+    # (2026-08-02) while absent from this registry, i.e. written to
+    # user_events but invisible to every taxonomy-driven read. Server-fired
+    # because only the route knows how many submitted rows actually landed
+    # on the board (`imported_count` vs `submitted_count`), and it must
+    # never be client-forgeable — it is a board WRITE. INTENT by default
+    # (deliberately NOT in analytics_queries.NON_INTENT_EVENTS): applying
+    # an import is a deliberate ranking action, the peer of ranking_reorder
+    # and tier_save. NOTE: registration is retroactive — historical rows
+    # already in user_events start counting toward INTENT/DAU from this
+    # commit, backwards as well as forwards. Volume is small (the flag
+    # gates a rarely-used path) and every applier is already counted that
+    # day by the tier_save / ranking_reorder side effects of the same
+    # session, so no DAU seam is expected.
+    "rankings_import_applied",
     # Trades
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
     "trade_accepted", "trade_declined", "trade_ratified", "counter_sent",
@@ -930,6 +983,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `version` is the app version the request fired under (StoreReview
     # once-per-version backoff key).
     "rating_prompt_requested":      frozenset({"trigger", "version"}),
+    # Premium rankings import v1 ([D-058]) — see the block in
+    # ALLOWED_CLIENT_EVENTS. Closed enums only; no filename, no column
+    # names, no player values.
+    "rankings_preset_detected":     frozenset({"source", "via",
+                                               "set_confirmed"}),
+    "rankings_preset_fallback":     frozenset({"via"}),
     # ── Guided Onboarding v2 addendum, 2026-08-15 ───────────────────────
     # `step` is the script id the guide asked for (same vocabulary as
     # guide_step_shown.step); `blocked_by` is the refusal reason — the
