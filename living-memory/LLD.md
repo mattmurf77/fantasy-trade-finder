@@ -20,6 +20,7 @@
 - [Tooling & Constraints](#tooling--constraints)
 - [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
+- [Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)](#finder-preselection-contract-now-carries-opponent--auto-run-intent-2026-08-16-330)
 
 ---
 
@@ -217,3 +218,7 @@ New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader 
 - **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
 
 Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.
+
+## Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)
+
+The finder preselection contract (store `useFinderTargets`, never route params — #300) now also carries the scoped opponent and a one-shot auto-run intent: `handoff: {opponent {userId,name}, autoRun, seq} | null`, seq store-stamped monotonic (a same-team repeat handoff must still re-fire TradesScreen's choke-point effect, whose deps gain the consumed `autoRunSeq`). Consumed on focus, exactly once; `clear()`/league-switch GC it. Pinned by `mobile/tests/check-offer-prefill-330.js` + `-unit.js`.
