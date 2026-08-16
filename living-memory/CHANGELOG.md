@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-16 (App identity — Fleeced name + ram icon SHIPPED to TestFlight)
+
+- **The app is `Fleeced` on the home screen, `Fleeced: Dynasty Trade Finder` in the store** — the implementation of [D-057](DECISIONS.md), recorded 2026-08-09 but never built. Exactly the two keys that decision names: `expo.name` (`mobile/app.json`) + `CFBundleDisplayName` (`Info.plist`) — app.json alone does nothing in this bare workflow.
+- **App icon replaced** with the ram mark (pigskin football head, cyan horns, pink eyes): 1024x1024, sRGB, **no alpha**, square and unmasked per App Store rules. Picked from a 50-variant facial-expression round; masters in `docs/design/icon-explorations/2026-08-08/imgen-r5-rams/`.
+- **Home-screen name is `Fleeced` alone, deliberately** — measured 36.5pt against the ~70pt iOS label budget (`GarageBand`, the longest Apple ships, is 57.9pt); `Fleeced Dynasty` at 76.8pt truncates. Confirmed on an iOS 18 simulator.
+- **Shipped as EAS `1.13.4 (113)`** (`242a399`), production/STORE, auto-submitted; operator confirmed name + icon on device. **Gates not run** — see TEST_LEDGER. Reserving the store name in App Store Connect remains an operator step.
+
 ## 2026-08-16 (Matchmaking engine phase 1 — telemetry + trade-gen v2 SHIPPED dark; research corpus + mockup)
 
 - **Operating thesis landed: FTF is matchmaking for trade partners** (Tinder/Hinge model — suggest a trade both managers will accept). 3 research rounds (11 memos, ~400 sources) in `docs/research/matchmaking/`; presentation mockup (9 Chalkline states, operator-approved pyramid: endorsed hero → featured → **uncapped** browse) in `mockups/trade-suggestion-redesign/`.

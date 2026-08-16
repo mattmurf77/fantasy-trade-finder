@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
+
+- **Change:** `242a399` — `expo.name` + `CFBundleDisplayName` -> `Fleeced`; `AppIcon.appiconset/App-Icon-1024x1024@1x.png` replaced with the ram mark. 4 files = 2 text lines + 2 PNGs. No schema, API, feature-flag or analytics surface; no user flow altered.
+- **Evidence:** EAS build **1.13.4 (113)** status FINISHED, profile `production`, distribution STORE, `error: null`. EAS-reported `gitCommitHash` matched the locally verified commit exactly, so binary contents are confirmed rather than assumed. Icon asserted 1024x1024, mode RGB (**alpha absent** — an alpha channel is an App Store rejection), sRGB profile embedded, `plutil -lint` OK on the plist. Label fit measured (36.5pt vs ~70pt budget) and rendered on an iOS 18 simulator home screen. **Operator confirmed name + icon on device** from the TestFlight build.
+- **NOT run:** no Maestro tier, no `qa/sim-runs/last-sim-run.json`, no backend suite (nothing backend changed). The build and TestFlight submission **preceded any gate**. This was not an operator express declaration — recorded here as a deviation, not a waiver.
+- **Unverified:** Apple's acceptance of submission `b900ad79` was never machine-confirmed; `eas-cli` 19.0.5 has no `submit:list` and `build:view` returns `submissions: null`. Confirmation is the operator's on-device sighting only.
+
 ## 2026-08-16 — Matchmaking engine phase 1 SHIPPED dark (telemetry + trade-gen v2)
 
 - **Change:** two squash merges to `main` (operator directive: "waive Maestro, merge and ship"): `suggestion.telemetry` (branch tip `deb965c`) and `trade_gen.v2` (branch tip `c940a86`), both flags **OFF**, backend-only, zero mobile diff; plus research corpus + presentation mockup. Scope blocks + waivers: `docs/plans/matchmaking-engine/`.
