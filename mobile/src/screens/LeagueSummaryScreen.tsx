@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import {
@@ -45,6 +45,14 @@ import { useOutlookStripExpanded } from '../state/outlookStrip';
 import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
 import { registerScrollToTop } from '../navigation/scrollToTop';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  advanceGuideIfActive,
+  guideV2Active,
+  recordGuideReceipt,
+  requestGuideStep,
+} from '../state/useGuide';
+import { S as GUIDE, GUIDE_RECEIPTS } from '../components/analystScript';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -923,6 +931,76 @@ export default function LeagueSummaryScreen() {
     }, route.name);
   }, [candidatePos, medianAtPos, cutAfter, query.isFetched, route.name]);
 
+  // ══ Guided Onboarding v2 — beat `N5` (flag onboarding.guide_v2) ═══════
+  // Everything below is gated on `guideV2Active()`; with the flag off this
+  // screen is byte-identical to today, and the `league_pos_candidates_viewed`
+  // emitter above is untouched in both worlds (one interaction, one event —
+  // the beat adds a RECEIPT, never a second row).
+  //
+  // The spotlight target: the chart card's position-pill row. Registered by
+  // ref, per-testID, like every other guide target (`guideTargets.ts`), and
+  // unconditionally — the registry is an inert Map until a step names the
+  // id, and an unflagged registration cannot race a late flag load. The
+  // drill-in's mirrored pill row is deliberately NOT registered: the
+  // registry is last-mount-wins per id, and with a team focused the beat's
+  // own precondition (an unfocused list) no longer holds.
+  const posPillsRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('league-summary.pos-pills', posPillsRef);
+    return () => unregisterGuideTarget('league-summary.pos-pills');
+  }, []);
+
+  // Reactive read of the owning flag. `guideV2Active()` stays the gate (it
+  // also carries the `onboarding.v2` master switch); this exists so the
+  // effects below re-run if the flag payload lands after the screen mounts.
+  const guideV2Flag = useFlag('onboarding.guide_v2');
+
+  // Content gates (PRD §5.3-A: the O-7 first-visit floor fires at the
+  // planned trigger OR the first visit, whichever comes first — but the
+  // CONTENT gates still fail closed; a first visit that fails them shows
+  // nothing and leaves the beat armed for a later visit that passes).
+  //
+  //   · ≥3 ranked members — `ranked` is this screen's coverage: the power-
+  //     rankings payload carries exactly the members it could value, so its
+  //     length IS "members with rankings coverage". Below three there are no
+  //     buyers and sellers to split.
+  //   · `league.pos_candidates` on — `posCandidatesOn`, the flag that owns
+  //     the taught surface (the median divider). Fail-closed per §5.0.
+  //   · a median for ≥1 core position — the `no_median` state the exposure
+  //     event above reports. With no median anywhere in the payload the
+  //     promised split cannot draw for ANY pill, and the line would be a
+  //     false promise. `no_split` is per-position and unknowable before a
+  //     pill is tapped, so it is not a gate here.
+  const n5ContentGatesPass =
+    posCandidatesOn &&
+    query.isFetched &&
+    ranked.length >= 3 &&
+    CORE_POSITIONS.some((p) => query.data?.medians?.[p] != null);
+
+  // Trigger: League-tab focus. Requested on every qualifying focus; the
+  // engine's `once` + `maxDisplayCount` refuse the repeats, and a focus
+  // whose gates fail simply never asks.
+  useFocusEffect(
+    useCallback(() => {
+      if (!guideV2Active()) return;
+      if (!isTabRoot) return;      // the root-stack registration is not the tab
+      if (selected) return;        // the pill row is not the live control while drilled in
+      if (!n5ContentGatesPass) return;
+      requestGuideStep(GUIDE.n5());
+    }, [isTabRoot, selected, n5ContentGatesPass, guideV2Flag]),
+  );
+
+  // The beat's action: a single-position filter actually applied.
+  // `candidatePos` is that state, read — never re-derived (the same rule the
+  // exposure emitter above states at length). Entering it advances the
+  // bubble and writes the client receipt N5 retires on.
+  useEffect(() => {
+    if (!guideV2Active()) return;
+    if (!candidatePos) return;
+    recordGuideReceipt(GUIDE_RECEIPTS.leagueFilterApplied);
+    advanceGuideIfActive('n5', 'action');
+  }, [candidatePos, guideV2Flag]);
+
   // Operator decision 8 — the bottom `round(count * 0.33)` teams are Buyers,
   // the top the same count Sellers, the middle unlabelled. Resolved sizes:
   // 8 → 3/2/3 · 10 → 3/4/3 · 12 → 4/4/4 · 14 → 5/4/5.
@@ -1560,6 +1638,8 @@ export default function LeagueSummaryScreen() {
               filter={posFilter}
               onToggle={togglePos(setPosFilter)}
               showPicks={showPicksKey}
+              containerRef={posPillsRef}
+              testID="league-summary.pos-pills"
             />
           ) : (
             /* #243 slim strip — passive caption of the active filter in place
@@ -2214,16 +2294,22 @@ function SubsetControl({ idPrefix, subset, onSwitch, source }: {
 // explicit opt-in/opt-out of pick value, and nothing else may set it (operator,
 // 2026-08-12); see `togglePos` for the history and the qualified pill
 // invariant. Multi-select, plain toggle.
-function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
+//
+// Guided Onboarding v2: the chart card's instance carries `containerRef` +
+// `testID` so The Analyst can point at the row as a whole (`N5`). Both are
+// optional and unset on the drill-in mirror, which renders exactly as before.
+function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks, containerRef, testID }: {
   idPrefix: string;
   filter: Set<FilterKey>;
   onToggle: (pos: FilterKey | 'ALL') => void;
   style?: any;
   showPicks?: boolean;
+  containerRef?: React.RefObject<View | null>;
+  testID?: string;
 }) {
   const allOn = filter.size === 0;
   return (
-    <View style={[styles.posFilter, style]}>
+    <View ref={containerRef} testID={testID} style={[styles.posFilter, style]}>
       <Pressable
         testID={`${idPrefix}.all`}
         onPress={() => onToggle('ALL')}

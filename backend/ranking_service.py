@@ -336,6 +336,7 @@ class RankingService:
         winner_ids: list[str],
         loser_ids: list[str],
         decision: str = "like",
+        fit_mult: float = 1.0,
     ) -> None:
         """
         Apply a soft ELO update from a trade decision.
@@ -348,10 +349,22 @@ class RankingService:
                           loser_ids=receive. Weaker signal, uses TRADE_K_PASS
                           (~12% of a ranking swipe).
 
+        fit_mult: fit-congruence weight (D-060) on the looked-up K — how
+                  surprising this swipe is given the user's window, computed
+                  by the caller via trade_service.fit_congruence_mult(). A
+                  rebuilder passing a fairly-priced vet is making a WINDOW
+                  statement, not a value one, so that pass is discounted;
+                  the same rebuilder LIKING the vet is weighted at full K.
+                  Default 1.0 = the pre-D-060 behavior exactly. Callers that
+                  also persist the swipe (save_trade_swipes) must apply the
+                  same multiplier to the stored k_factor, or the DB replay
+                  in _compute_elo will disagree with this in-memory state.
+
         For multi-player sides (e.g. 2-for-1 trades) every winner is paired
         against every loser, same as the ranking engine's pairwise decomposition.
         """
         k = _c("trade_k_like") if decision == "like" else _c("trade_k_pass")
+        k *= fit_mult
         for wid in winner_ids:
             for lid in loser_ids:
                 if wid == lid:

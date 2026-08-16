@@ -47,6 +47,30 @@ export interface OnboardingPersisted {
   guideSeen: Record<string, boolean>;      // once-ever steps by script id
   guideTourCompleted: boolean;             // S8 reached → reactive-only mode
 
+  // Guided Onboarding v2 eligibility layer (flag onboarding.guide_v2;
+  // PRD §5.0/§5.1 FR-E2/E3/E9/E10). Every field below is written ONLY by
+  // useGuide with `onboarding.guide_v2` on, so with the flag off they stay
+  // at their defaults and the engine behaves exactly as v1.
+  /** Lifetime display count per step id — enforces `maxDisplayCount`. */
+  guideDisplayCounts: Record<string, number>;
+  /** Client-observable receipt counts (`recordGuideReceipt`) — the input to
+   *  `retireAfter` / `invalidateOn`. Server-fired events can never land here
+   *  (delta §E: a retirement wired to an unobservable event is worse than
+   *  none), so screens record their own receipts. */
+  guideReceipts: Record<string, number>;
+  /** Steps killed behaviorally (retired, invalidated, or consumed by a
+   *  call site via `markGuideStepConsumed`). Re-enabling the tour replays
+   *  everything EXCEPT these. */
+  guideRetired: Record<string, boolean>;
+  /** 0 = pre-v2 install. Set to 2 on the first launch with guide_v2 on;
+   *  no seen-state is ever cleared by the bump (FR-E9). */
+  guideScriptVersion: number;
+  /** Captured at the version bump: this device had completed the v1 tour,
+   *  so it gets at most one v2 beat per release. */
+  guideV1Upgrader: boolean;
+  /** App version whose single v2 beat has already been spent (v1 upgraders). */
+  guideV2BeatShownVersion: string | null;
+
   // Push-primer backoff (teardown S4 PRD-04, flag ux.prompt_arbiter):
   // "Maybe later" declines are persisted so the primer re-arms only after
   // 3+ sessions or a want-it moment — never every session.
@@ -75,6 +99,12 @@ const DEFAULTS: OnboardingPersisted = {
   guideDismissed: false,
   guideSeen: {},
   guideTourCompleted: false,
+  guideDisplayCounts: {},
+  guideReceipts: {},
+  guideRetired: {},
+  guideScriptVersion: 0,
+  guideV1Upgrader: false,
+  guideV2BeatShownVersion: null,
   pushPrimerDeclines: 0,
   pushPrimerLastDeclineSession: 0,
   ratingPromptShownVersion: null,
@@ -100,6 +130,9 @@ function mergeState(
     coachMarksShown: { ...base.coachMarksShown, ...patch.coachMarksShown },
     celebrationsShown: { ...base.celebrationsShown, ...patch.celebrationsShown },
     guideSeen: { ...base.guideSeen, ...patch.guideSeen },
+    guideDisplayCounts: { ...base.guideDisplayCounts, ...patch.guideDisplayCounts },
+    guideReceipts: { ...base.guideReceipts, ...patch.guideReceipts },
+    guideRetired: { ...base.guideRetired, ...patch.guideRetired },
   };
 }
 
@@ -151,6 +184,43 @@ export function resetGuideProgress(): void {
     guideDismissed: false,
     guideSeen: {},
     guideTourCompleted: false,
+  };
+  useOnboardingState.setState({ ob: next });
+  AsyncStorage.setItem(OB_KEY, JSON.stringify(next)).catch(() => {
+    /* non-fatal — worst case the re-enable lasts only this session */
+  });
+}
+
+/** FR-E10 — v2 re-enable ("replays only beats whose trigger can still fire",
+ *  to the extent the engine can know it). Differences from the v1 wipe above:
+ *
+ *   • steps in `guideRetired` (behaviorally dead — retired, invalidated, or
+ *     consumed) keep their `guideSeen` mark AND their display count, so a
+ *     re-enable cannot re-teach something the user has already outgrown;
+ *   • every other step is cleared on both, so the toggle visibly does
+ *     something (the #187 "looks broken" failure mode);
+ *   • `guideReceipts` is NEVER cleared — receipts are behavioral history,
+ *     not tour progress. A step whose retirement receipt already fired but
+ *     which was never re-requested (so never marked retired) is therefore
+ *     still refused by `requestStep` on replay.
+ *
+ *  Called by `useGuide.enableTour()` when `onboarding.guide_v2` is on; the
+ *  v1 `resetGuideProgress()` stays the behavior with the flag off. */
+export function resetGuideProgressV2(): void {
+  const cur = useOnboardingState.getState().ob;
+  const keptSeen: Record<string, boolean> = {};
+  const keptCounts: Record<string, number> = {};
+  for (const id of Object.keys(cur.guideRetired)) {
+    if (!cur.guideRetired[id]) continue;
+    if (cur.guideSeen[id]) keptSeen[id] = true;
+    if (cur.guideDisplayCounts[id] != null) keptCounts[id] = cur.guideDisplayCounts[id];
+  }
+  const next: OnboardingPersisted = {
+    ...cur,
+    guideDismissed: false,
+    guideTourCompleted: false,
+    guideSeen: keptSeen,
+    guideDisplayCounts: keptCounts,
   };
   useOnboardingState.setState({ ob: next });
   AsyncStorage.setItem(OB_KEY, JSON.stringify(next)).catch(() => {

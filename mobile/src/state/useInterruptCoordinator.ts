@@ -10,20 +10,31 @@ import { track } from '../api/events';
 // re-try when the slot frees (their trigger state persists, so they show at
 // the next free moment — "defer to the next mount" per the PRD).
 //
-// Priority (highest first): quickset prompt > coach mark > apple banner >
-// outlook banner. There is NO preemption — a visible surface is never
-// yanked mid-display; priority is realized by claim order (call
+// Priority (highest first): guide step > quickset prompt > coach mark >
+// apple banner > outlook banner. There is NO preemption — a visible surface
+// is never yanked mid-display; priority is realized by claim order (call
 // `useInterruptSlot` in priority order within a screen) plus the ordering
 // below for documentation and analytics.
 //
+// `guide_step` is the one surface that does NOT go through
+// `useInterruptSlot` (guided-onboarding-v2 PRD FR-E4, mechanism (a)):
+// `useGuide.requestStep` claims it IMPERATIVELY and synchronously, which is
+// what puts it ahead of every screen-level effect, and releases it on the
+// step's terminal transition. It is therefore also the one surface whose
+// claim does not depend on `ux.prompt_arbiter` — it is gated on
+// `onboarding.guide_v2` instead, and with that flag off the guide never
+// claims and this file behaves exactly as before.
+//
 // Root modals (PushPrimingModal, AppleSaveMomentSheet) are not surfaces —
 // they self-defer while ANY surface holds the slot (read `activeSurface`
-// directly), so a modal never presents over an open banner/prompt.
+// directly), so a modal never presents over an open banner/prompt — and,
+// via the guide's claim, never over an open guide bubble either.
 //
 // Flag off: `useInterruptSlot` is a passthrough (returns `wants`, never
 // claims, never tracks) — byte-identical behavior.
 
 export type InterruptSurface =
+  | 'guide_step'
   | 'quickset_prompt'
   | 'coach_mark'
   | 'apple_banner'
@@ -31,10 +42,11 @@ export type InterruptSurface =
 
 /** Lower number = higher priority. Exported for documentation/tests. */
 export const SURFACE_PRIORITY: Record<InterruptSurface, number> = {
-  quickset_prompt: 0,
-  coach_mark: 1,
-  apple_banner: 2,
-  outlook_banner: 3,
+  guide_step: 0,
+  quickset_prompt: 1,
+  coach_mark: 2,
+  apple_banner: 3,
+  outlook_banner: 4,
 };
 
 interface CoordinatorState {

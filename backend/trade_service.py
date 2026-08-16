@@ -451,6 +451,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "outlook_dir_age_tolerance":  1.0,
     "outlook_dir_age_gap_mult":   0.15,
     "outlook_dir_rescue_frac":    0.5,
+    # ------------------------------------------------------------------
+    # Fit-congruence signal weighting (the fit-congruence decision, D-060
+    # — see fit_congruence_mult). Deck swipes feed Elo through
+    # RankingService.record_trade_signal at trade_k_like / trade_k_pass;
+    # these scale that K by how surprising the action is given the user's
+    # window, using the SAME signed lane shift (signed_lane_shift, threshold
+    # lane_shift_frac) the deck already computes at generation.
+    # ------------------------------------------------------------------
+    # Fit-EXPLAINED — the window already predicted the action (like on a
+    # window-congruent card, pass on an anti-window one). Discounted: it is
+    # a weaker valuation statement than it looks.
+    "fit_k_explained_mult":       0.4,
+    # Fit-DEFYING — the action contradicts the window (pass on a
+    # window-congruent card, like on an anti-window one). Full K; NOT
+    # boosted above baseline without data to justify it.
+    "fit_k_defying_mult":         1.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1428,19 +1444,22 @@ def _now_lean(pos: str | None, age) -> float:
     return age_now_mult(pos, age) - age_future_mult(pos, age)
 
 
-def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
-                  outlook: str | None, value_of) -> str | None:
-    """Label a card "window" or "value" for the two-lane deck.
+def signed_lane_shift(give_ids: list[str], recv_ids: list[str], players: dict,
+                      outlook: str | None, value_of) -> float | None:
+    """The SIGNED lane shift: the value-weighted mean now-lean of what
+    changes hands (received counts +, given counts −), signed by the user's
+    window direction (contending: acquiring now-value = toward their window;
+    rebuilding: acquiring future capital = toward their window).
 
-    The lane shift is the value-weighted mean now-lean of what changes
-    hands (received counts +, given counts −), signed by the user's window
-    direction (contending: acquiring now-value = window move; rebuilding:
-    acquiring future capital = window move). Clears lane_shift_frac →
-    "window"; otherwise "value". No declared/inferred window (None or
-    not_sure) → None: the deck has no lanes to show.
+    Positive = the card moves the roster TOWARD the user's window;
+    negative = AWAY from it (the vet a rebuilder would be buying). The
+    magnitude is comparable to lane_shift_frac in both directions.
 
-    value_of: pid → CONSENSUS value — lanes describe the trade's shape,
-    not either member's private board.
+    None when the shift is undefined: no declared/inferred window (None or
+    not_sure), or no value on the table (nothing to take a mean over).
+
+    value_of: pid → CONSENSUS value — the trade's shape, not either
+    member's private board.
     """
     sign = _LANE_SIGN.get(outlook or "")
     if sign is None:
@@ -1456,9 +1475,67 @@ def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
                 getattr(p, "position", None) if p else None,
                 getattr(p, "age", None) if p else None)
     if total <= 0:
+        return None
+    return sign * shift / total
+
+
+def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
+                  outlook: str | None, value_of) -> str | None:
+    """Label a card "window" or "value" for the two-lane deck.
+
+    The lane shift is signed_lane_shift() above — the value-weighted mean now-lean
+    of what changes hands, signed by the user's window direction. Clears
+    lane_shift_frac → "window"; otherwise "value". No declared/inferred
+    window (None or not_sure) → None: the deck has no lanes to show.
+
+    Note the collapse this label makes, which fit-congruence weighting
+    deliberately does NOT: "value" covers both window-NEUTRAL cards and
+    strongly ANTI-window ones. Consumers that need that distinction read
+    signed_lane_shift() directly (stamped as TradeCard.lane_shift).
+
+    value_of: pid → CONSENSUS value — lanes describe the trade's shape,
+    not either member's private board.
+    """
+    if _LANE_SIGN.get(outlook or "") is None:
+        return None
+    shift = signed_lane_shift(give_ids, recv_ids, players, outlook, value_of)
+    if shift is None:               # no value on the table → nothing leaning
         return "value"
-    return "window" if sign * shift / total >= _c("lane_shift_frac") \
-        else "value"
+    return "window" if shift >= _c("lane_shift_frac") else "value"
+
+
+def fit_congruence_mult(shift: float | None, decision: str) -> float:
+    """K-factor multiplier for a deck swipe, weighted by how SURPRISING the
+    action is given the user's window (the fit-congruence decision, D-060).
+
+    A pass is not only a valuation statement. A rebuilder passing a
+    fairly-priced vet is passing for a WINDOW reason, and the flat
+    trade_k_pass discount is today's only acknowledgment that "don't want"
+    ≠ "don't value". So: discount the action the window already explains,
+    and keep full K on the action that defies it.
+
+      shift ≥ +lane_shift_frac (card moves toward the user's window):
+          like → fit-explained (they wanted their window) → explained mult
+          pass → fit-DEFYING  (rejected a window-congruent card, so it is
+                               a genuine value statement) → defying mult
+      shift ≤ −lane_shift_frac (card moves away — the anti-window card):
+          pass → fit-explained (the window predicted the pass) → explained
+          like → fit-DEFYING  (the rebuilder who wants the vet ANYWAY —
+                               the strongest board signal we get) → defying
+      |shift| below the threshold, or shift is None (no window / not_sure
+      / no value on the table) → exactly 1.0, byte-identical to pre-D-060.
+
+    Kill switch: fit_k_explained_mult = 1.0 (with defying at its 1.0
+    default) restores the old behavior exactly, deploy-free, via
+    PUT /api/admin/config. There is no feature flag.
+    """
+    if shift is None:
+        return 1.0
+    if abs(shift) < _c("lane_shift_frac"):
+        return 1.0
+    congruent = shift > 0
+    explained = (decision == "like") if congruent else (decision == "pass")
+    return _c("fit_k_explained_mult") if explained else _c("fit_k_defying_mult")
 
 
 # ---------------------------------------------------------------------------
@@ -2050,6 +2127,18 @@ class TradeCard:
     # which deck lane the card belongs to, from the user's resolved
     # window (declared or seeded). None = user has no window → no lanes.
     lane: Optional[str] = None
+    # Fit-congruence (D-060) — the SIGNED lane shift (signed_lane_shift()) from the
+    # user's resolved window: + = toward their window, − = away from it.
+    # Stamped at construction, unconditionally (no flag), because the swipe
+    # site cannot recompute it: it has no resolved outlook and no consensus
+    # value fn. `lane` cannot stand in — its "value" bucket collapses
+    # window-NEUTRAL and strongly ANTI-window cards, and the anti-window
+    # swipe is exactly the signal fit-congruence weights hardest.
+    # In-process/QA record only, never serialized to clients. None when the
+    # user has no window direction (not_sure/None), no value was on the
+    # table, or the card was rebuilt from client echo (FB-46) — all of
+    # which weight at exactly 1.0.
+    lane_shift: Optional[float] = None
     # Interview phase 2 (flag trade.fit_premium) — set on a 1-for-1 that
     # fills a positional need at a small raw-board value loss:
     # {"value_paid": float, "position": str}. Honest flag, never silent.
@@ -3186,6 +3275,17 @@ class TradeService:
                     if _m != 1.0:
                         c.outlook_dir = round(_m, 4)
                         c.composite_score = round(c.composite_score * _m, 3)
+            # Fit-congruence (D-060) — stamp the SIGNED lane shift on every
+            # card so the swipe route can weight its Elo K by how surprising
+            # the swipe is given the user's window. Unconditional (the
+            # feature has no flag — its kill switch is fit_k_explained_mult
+            # = 1.0) and computed here because this is the only place that
+            # holds both the resolved outlook and the consensus value fn.
+            # Pure stamp on consensus values; never touches gates/scores.
+            for c in cards:
+                c.lane_shift = signed_lane_shift(
+                    c.give_player_ids, c.receive_player_ids,
+                    self._players, outlook, _vs)
             # Interview phase 2 — two-lane labels (flag trade.lanes): stamp
             # each card "window" / "value" from the user's resolved window.
             # Pure label on consensus values; never touches gates/scores.

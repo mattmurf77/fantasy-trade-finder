@@ -79,6 +79,7 @@
   "onboarding.guided_layer": false,
   "onboarding.guided_avatar": true,
   "onboarding.keep_warm": false,
+  "onboarding.guide_v2": false,
   "monetize.entitlements": false,
   "monetize.paywall": false,
   "monetize.pro": false,

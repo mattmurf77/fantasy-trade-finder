@@ -44,8 +44,13 @@ import { useScoringFormat } from '../hooks/useScoringFormat';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
 import { setPendingQuicksetRegen } from '../state/onboardingBus';
 import { track } from '../api/events';
-import { requestGuideStep, guidedAvatarActive } from '../state/useGuide';
-import { S as GUIDE } from '../components/analystScript';
+import {
+  requestGuideStep,
+  guidedAvatarActive,
+  guideV2Active,
+  recordGuideReceipt,
+} from '../state/useGuide';
+import { S as GUIDE, GUIDE_RECEIPTS } from '../components/analystScript';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -113,6 +118,35 @@ export default function QuickSetTiersScreen() {
     if (onboardingReturn && guidedAvatarActive()) {
       requestGuideStep(GUIDE.s4_1());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Guided Onboarding v2 — `quickset_started {position, source}`: the
+  // client-observable INTENT half of the Quick Set funnel, and `N1`'s
+  // declared adoption event. Its completion twin (`quickset_completed`) is
+  // SERVER-fired per position and can never be observed here, so the client
+  // receipt written at the end of the walk stands in for it.
+  //
+  // `source` is the guided hand-off vs. an organic entry. `onboardingReturn`
+  // is that hand-off's marker today (TradesScreen's `acceptQuicksetPrompt`
+  // and the s5.5 next-position CTA both set it); `guidedArrival` is read
+  // alongside it so a guided route that carries the chain marker instead
+  // (PRD §5.3-A moves s3.2's CTA to RankHome) is still attributed.
+  //
+  // Fires once per MOUNT, on the position the walk OPENED on — a mid-walk
+  // position switch restarts the walk in place and is not a second start.
+  React.useEffect(() => {
+    if (!guideV2Active()) return;
+    const source =
+      onboardingReturn || typeof route.params?.guidedArrival === 'string'
+        ? 'guide'
+        : 'organic';
+    // Event only, no receipt: `quickset_started` is not in S1's
+    // `GUIDE_RECEIPTS` vocabulary and no step retires on it (`n1` declares
+    // it as its `adoptionEvent`, which is analysis-side and never read by
+    // the engine). The receipt that matters is `quickset_completed_local`,
+    // written at the end of the walk below.
+    track('quickset_started', { position, source }, 'QuickSetTiers');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [tierIdx, setTierIdx] = useState(0);
@@ -334,6 +368,14 @@ export default function QuickSetTiersScreen() {
           // it shipped. Removed rather than renamed — the server row is the
           // authoritative completion; its lost `onboarding` prop is recorded
           // as accepted loss in the 2026-08-13 tracking-plan addendum.
+          //
+          // Guided Onboarding v2 (FR-E3) — the CLIENT receipt that stands in
+          // for that server-fired name, so `N1`/`s3.2` can actually retire.
+          // Same guard as the completion record above by construction: a
+          // rookie-scoped walk has not completed the position, so it writes
+          // no receipt either. No analytics row — this is engine
+          // bookkeeping; `quickset_started` is the client's event.
+          recordGuideReceipt(GUIDE_RECEIPTS.quicksetCompletedLocal);
         }
         if (onboardingReturn) {
           // Item 7 exit: no Quick Rank offer (suppressed by ruling F2), post

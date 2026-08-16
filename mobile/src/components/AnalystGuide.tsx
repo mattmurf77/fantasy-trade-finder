@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   View,
   Text,
   Pressable,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { ink, chalk, ice, space, radii, fonts, type } from '../theme/chalkline';
 import { useGuide } from '../state/useGuide';
+import { useOnboardingFeature } from '../state/useFeatureFlags';
 import { measureGuideTarget, type TargetFrame } from '../state/guideTargets';
 import { AnalystAvatar } from './analyst';
 
@@ -32,29 +34,52 @@ export default function AnalystGuide() {
   const advance = useGuide((s) => s.advance);
   const skipStep = useGuide((s) => s.skipStep);
   const dismissTour = useGuide((s) => s.dismissTour);
+  const dismissActiveStep = useGuide((s) => s.dismissActiveStep);
+  // guide_v2: the ENGINE owns the measurement (it needs the outcome for
+  // `guide_step_shown.spotlight` and the degrade contract), so the overlay
+  // reads the resolved frame instead of measuring a second time. With the
+  // flag off the local measure below is the only path — unchanged.
+  const guideV2 = useOnboardingFeature('onboarding.guide_v2');
+  const spotlight = useGuide((s) => s.spotlight);
+  const engineFrame = useGuide((s) => s.spotlightFrame);
   const { width: winW, height: winH } = useWindowDimensions();
 
-  const [frame, setFrame] = useState<TargetFrame | null>(null);
+  const [localFrame, setLocalFrame] = useState<TargetFrame | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const slide = useRef(new Animated.Value(0)).current;
+
+  // NFR-2 — honor the OS "Reduce Motion" setting for the entry spring.
+  useEffect(() => {
+    let cancelled = false;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => { if (!cancelled) setReduceMotion(v); })
+      .catch(() => { /* non-fatal — default to animating */ });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => { cancelled = true; sub?.remove?.(); };
+  }, []);
 
   // Measure the spotlight target when a step activates; degrade to
   // bubble-only on any failure (never a blank cutout).
   useEffect(() => {
     let cancelled = false;
-    setFrame(null);
-    if (active?.target) {
+    setLocalFrame(null);
+    if (!guideV2 && active?.target) {
       measureGuideTarget(active.target).then((f) => {
-        if (!cancelled) setFrame(f);
+        if (!cancelled) setLocalFrame(f);
       });
     }
     if (active) {
-      slide.setValue(0);
-      Animated.spring(slide, {
-        toValue: 1,
-        useNativeDriver: true,
-        speed: 16,
-        bounciness: 7,
-      }).start();
+      if (guideV2 && reduceMotion) {
+        slide.setValue(1);
+      } else {
+        slide.setValue(0);
+        Animated.spring(slide, {
+          toValue: 1,
+          useNativeDriver: true,
+          speed: 16,
+          bounciness: 7,
+        }).start();
+      }
     }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,7 +93,38 @@ export default function AnalystGuide() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
 
+  // v2 — `lifetimeMs`: a cta step that is never answered expires instead of
+  // sitting on screen forever. Expiry is a terminal transition (`timeout`),
+  // not an auto-advance, so it marks the step seen and fires `onComplete`.
+  useEffect(() => {
+    if (!guideV2 || !active?.lifetimeMs) return;
+    const t = setTimeout(() => dismissActiveStep('timeout'), active.lifetimeMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, guideV2]);
+
+  const spotlightPending = guideV2 && spotlight === 'pending';
+  const degraded = guideV2 && spotlight === 'degraded';
+  const displayLine = degraded ? (active?.degradeLine ?? active?.line ?? '') : (active?.line ?? '');
+
+  // Announce the line to screen readers once its final form is known
+  // (a degraded step swaps in `degradeLine`, so announcing on activation
+  // would read copy the user never sees).
+  useEffect(() => {
+    if (!guideV2 || !active || spotlightPending) return;
+    AccessibilityInfo.announceForAccessibility(displayLine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, spotlightPending, guideV2]);
+
   if (!active) return null;
+  // A targeted step whose spotlight has not resolved yet: hold the bubble
+  // back (≤400 ms) rather than render copy that may swap to `degradeLine`
+  // mid-display — the round-6 rule is that copy never changes after render,
+  // and this also keeps the visible bubble in sync with the deferred
+  // `guide_step_shown` emit. Suppress-class steps may be retracted entirely.
+  if (spotlightPending) return null;
+
+  const frame = guideV2 ? engineFrame : localFrame;
 
   // ── Placement solver (simplified per spec) ────────────────────────────
   const targetInBottomBand = !!frame && frame.y + frame.height > winH * 0.6;
@@ -155,7 +211,7 @@ export default function AnalystGuide() {
                 <Text style={styles.x}>✕</Text>
               </Pressable>
             </View>
-            <Text style={styles.line}>{active.line}</Text>
+            <Text style={styles.line}>{displayLine}</Text>
             {active.ctas?.length ? (
               <View style={styles.ctaCol}>
                 {active.ctas.map((c) => (

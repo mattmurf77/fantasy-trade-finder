@@ -28,6 +28,9 @@ import { posColor } from '../theme/colors';
 import { Icon, Button } from './chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { guideV2Active, recordGuideReceipt } from '../state/useGuide';
+import { GUIDE_RECEIPTS } from './analystScript';
+import { track } from '../api/events';
 import { haptics } from '../utils/haptics';
 import {
   getLeaguePreferences,
@@ -209,9 +212,15 @@ interface Props {
   onClose: () => void;
   /** #257 — present only under `trades.edit_full_sheet`; see file header. */
   full?: TradeDnaSheetFullProps;
+  /** Guided Onboarding v2 — who opened this sheet, for the `source` prop on
+   *  `outlook_saved`. `'guide'` when `N2`'s CTA opened it (the opener
+   *  passes it; TradesScreen owns that path), `'strip'` for the
+   *  prefs-changed strip, default `'sheet'` for every ordinary entry point.
+   *  Inert unless `onboarding.guide_v2` is on. */
+  openSource?: 'guide' | 'sheet' | 'strip';
 }
 
-export default function TradeDnaSheet({ visible, onClose, full }: Props) {
+export default function TradeDnaSheet({ visible, onClose, full, openSource }: Props) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -352,10 +361,17 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
     setDraftShopping(prefs?.trade_away_positions ?? []);
   }, [prefs, visible]);
 
+  // Guided Onboarding v2 — `outlook_saved` fires on the FIRST preference
+  // write of a sheet SESSION, not per tap: #236 autosave POSTs on every
+  // tap, so a per-tap emit would count keystrokes rather than the decision
+  // `N2` retires on. Reset with the rest of the per-open state below.
+  const outlookSavedFiredRef = useRef(false);
+
   // Reset per-open state when the sheet opens.
   useEffect(() => {
     if (visible) {
       dnaTouched.current = false;
+      outlookSavedFiredRef.current = false;
       setDnaError(null);
       setUntouchablesOpen(false);
       setRosterPickOpen(false);
@@ -425,6 +441,19 @@ export default function TradeDnaSheet({ visible, onClose, full }: Props) {
     acquire: string[];
     shed: string[];
   }) => {
+    // The single choke point for every outlook / Chasing / Shopping write,
+    // so "first preference write of this sheet session" is one guard and
+    // cannot drift between the editor controls. Emitted at QUEUE time, not
+    // on the POST's success: the user made the choice, and the autosave
+    // path already reverts the drafts and surfaces an error line if the
+    // write fails. The retirement receipt is deliberately tolerant of that
+    // failure — re-teaching a user who has already stated their outlook is
+    // the help-abuse case whether or not the server took it.
+    if (guideV2Active() && !outlookSavedFiredRef.current) {
+      outlookSavedFiredRef.current = true;
+      track('outlook_saved', { source: openSource ?? 'sheet' }, 'Trades');
+      recordGuideReceipt(GUIDE_RECEIPTS.outlookSaved);
+    }
     dnaDesired.current = payload;
     void flushDnaSave();
   };

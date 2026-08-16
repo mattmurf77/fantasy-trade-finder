@@ -213,6 +213,12 @@ NON_INTENT_EVENTS = frozenset({
     "push_primer_dismissed",
     "deck_summary_viewed",
     "trio_session_started",
+    #   guide_step_suppressed — a SYSTEM refusal (guided-onboarding-v2
+    #   FR-E5): the engine declined to show a beat. No user intent at all.
+    #   awaiting_segment_viewed — a segment-focus IMPRESSION, same class as
+    #   deck_summary_viewed; the intent event is the send attempt.
+    "guide_step_suppressed",
+    "awaiting_segment_viewed",
     "rating_prompt_requested",
     # ── Premium rankings import v1, 2026-08-15 ([D-058]) — added in the
     # SAME commit that registered them in ALLOWED_CLIENT_EVENTS, for the

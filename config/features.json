@@ -87,6 +87,8 @@
   "onboarding.guided_layer": false,
   "onboarding.guided_avatar": true,
   "onboarding.keep_warm": false,
+  "_comment_guide_v2": "Guided Onboarding v2 (docs/plans/guided-onboarding-v2/scope.md §2). onboarding.guide_v2 gates EVERY v2 addition to The Analyst tour: the declarative eligibility layer, the guide's membership in the interrupt arbiter, all new beats (N1, N2, N4, N5, N6.1, N8, N9) and the copy changes riding the new script fields. It sits UNDER the onboarding.v2 master like its siblings, and it is the rollback lever: false = byte-identical to pre-v2-build behavior, config-only (POST /api/feature-flags/reload, no deploy). Ships FALSE. Graduation to default-true: the operator TestFlight checklist passes AND first-cohort diagnostics M1-M8 are clean. Note this is NOT onboarding.guided_layer (the v2.1 coach-mark surface, still dark) or onboarding.guided_avatar (the v1 tour, already true).",
+  "onboarding.guide_v2": false,
   "_comment_monetization": "Monetization platform (docs/plans/monetization/00-platform-foundation.md). One flag per strategy, ALL dark until operator green-light. Rollout order: monetize.entitlements first (observe mode - logs, never blocks), then monetize.founder + monetize.paywall for the TestFlight window, monetize.pro + monetize.season_pass at launch, growth.* after, ads last. Rankings marketplace flags (ranks.*, marketplace.*) follow their plan's season-aligned phases.",
   "monetize.entitlements": false,
   "monetize.paywall": false,

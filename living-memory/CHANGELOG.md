@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 (Fit-congruence signal weighting — SHIPPED, PR #134)
+
+- Swipe ingestion now weights Elo K by **surprise vs the user's window** ([D-060](DECISIONS.md)): fit-explained swipes (rebuilder passes the vet) ×0.4, fit-defying swipes (rebuilder likes the vet anyway) full K, no-window/sub-threshold exactly 1.0. Reuses the lanes machinery (`signed_lane_shift`); applied to in-memory signal AND persisted `k_factor` (DB replay agreement). Knob-only kill switch (`fit_k_explained_mult` = 1.0). Lands **before** Phase B's grading lane starts counting these signals toward "your board" — plan §B-2 now notes flags/declines get the same rule at build time; sends stay full-K. `main` @ `6f293f4`.
+
+## 2026-08-15 (Guided Onboarding v2 Phase 0+1 — built dark behind `onboarding.guide_v2`)
+
+- **The Analyst tour gains a machine-enforced eligibility layer + 8 new beats**, built from the 7-round dual-agent PRD (`docs/plans/guided-onboarding-v2/`) + the operator's O-1…O-7 decisions, by 6 Opus build agents across 2 waves, orchestrator-reviewed line-by-line. Ships **dark** (`onboarding.guide_v2: false` = v1 behavior graph); graduation = operator TestFlight checklist (`docs/plans/guided-onboarding-v2/testflight-checklist.md`) + first-cohort diagnostics.
+- **Engine (FR-E2…E10):** GuideStep carries retireAfter/maxDisplayCount/invalidateOn/adoptionEvent/degrade contract, CI-linted (`check-guide-script.js`, 228 asserts); guide claims the interrupt slot; suppression + spotlight-degrade instrumented; v1-upgrader release cap; client-receipt rule (server-fired events never drive retirement — D-059).
+- **Beats:** N1 calibration reframe · N2 two-form outlook re-aim · N4 pin-targets on the summary card · N6.1 first-like router ("they haven't seen it yet" — honest copy) · **N8 import question** (O-6: upload/DLF-DN entry vs Trios) · N9 Matches first-visit · N5 league divider · s3.2→RankHome re-route; s7.1 cut (fired pointing at an unmountable target in prod); full copy pass incl. the softened s2.1 claim + s5.1 plural fix.
+- **Coupling note:** N8 routes to RankHome's import *entry* — becomes the premium chooser automatically when `feat/premium-import-v1` (D-057/D-058, unmerged) lands. D-numbering: this session used **D-059**, skipping the import branch's claimed 057/058.
+- **Verified:** tsc 0 · all `check-*.js` green (now CI-wired) · testid-lint OK · backend 2838/1. **Owed:** operator TestFlight walk; Phase 2 (N6.2, N3, N5 spotlights, N7 trios rung, MFL/ESPN attempt events) waits on Phase-1 gates.
 ## 2026-08-15 (Premium Rankings Import v1 — built on `feat/premium-import-v1`, dark, unmerged)
 
 - **Import your paid DLF / Dynasty Nerds rankings, or any CSV.** Built per [D-058] + `docs/plans/connected-rankings/build-v1-premium-import/scope.md` by two opus agents (backend `627dcd0`, mobile `52e4807`+`8660b8c`), merged clean on `feat/premium-import-v1` (zero file overlap). Placement per operator: imports are **the user's rankings** via the existing import pipeline; consensus untouched; schema-free.

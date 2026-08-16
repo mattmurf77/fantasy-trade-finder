@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { startSpan } from '../observability/sentry';
@@ -53,6 +53,9 @@ import {
 import type { Position, ScoringFormat, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
+import { guideV2Active, recordGuideReceipt } from '../state/useGuide';
+import { getOnboardingState } from '../state/useOnboardingState';
+import { setPendingGuidedRegen } from '../state/onboardingBus';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -91,6 +94,37 @@ export default function RankScreen() {
   useEffect(() => {
     track('trio_session_started', undefined, 'Trios');
   }, []);
+
+  // ── Guided Trios arm (guided-onboarding-v2 PRD §5.3-A, N8) ──────────────
+  // A *guided* session is one entered from N8's "No — start simple" CTA
+  // (`guidedEntry === 'n8'`), or the user's first-ever trio under guide_v2 —
+  // the O-7 case where they found Trios on their own. Completing ≥1 vote in
+  // such a session posts the same forced-regen handoff Quick Set posts, so
+  // the s5.x reveal fires method-agnostically on the next Trades focus.
+  // Everything here is inert with `onboarding.guide_v2` off.
+  const route = useRoute();
+  const guidedEntry = (route.params as { guidedEntry?: string } | undefined)?.guidedEntry;
+  const guidedTrioRef = useRef(false);
+  const trioVotesRef = useRef(0);
+  useEffect(() => {
+    guidedTrioRef.current =
+      guideV2Active() &&
+      (guidedEntry === 'n8' ||
+        (getOnboardingState().guideReceipts['trio_started'] ?? 0) === 0);
+  }, [guidedEntry]);
+
+  // Post the handoff when the user LEAVES a guided session with a vote in it
+  // (blur, not unmount — the Rank stack stays mounted across a tab switch).
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        if (guideV2Active() && guidedTrioRef.current && trioVotesRef.current > 0) {
+          setPendingGuidedRegen('trios');
+        }
+      },
+      [],
+    ),
+  );
   const toggleSpeedMode = useCallback(() => {
     setSpeedMode((prev) => {
       const next = !prev;
@@ -159,6 +193,14 @@ export default function RankScreen() {
         submitTrioRanking(rankedIds),
       ),
     onSuccess: (resp) => {
+      // FR-E3 client receipt for the trio method. `trio_swipe` is server-
+      // fired (client-invisible) and `trio_session_started` fires on MOUNT —
+      // arriving is not voting — so the honest receipt is the first vote that
+      // actually lands. Retires N8 and feeds the ranking ladder.
+      if (guideV2Active()) {
+        trioVotesRef.current += 1;
+        if (trioVotesRef.current === 1) recordGuideReceipt('trio_started');
+      }
       // Local-merge the progress cache instead of invalidating — every
       // trio submit otherwise eats a ~250 ms /api/rankings/progress
       // refetch (API #A3 + Backend #B5). The /api/rank3 response
