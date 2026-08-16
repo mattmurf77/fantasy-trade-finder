@@ -2,6 +2,16 @@
 
 **Status:** built-dark · 2026-08-09 · branch `worktree-agent-a1e9ac18717f11781`, experiment `aggregate_tier_labels`
 
+> **GRADUATED 2026-08-16 (#306, D-306-1 — operator).** The experiment is decided:
+> `/api/league/power-rankings` now emits `total_value_label` + positional
+> `value_label` (and the new `picks.value_label`, D-306-2) **ungated for every
+> caller** — the `variant_for` guard is gone from the route. Everything below
+> describes the original operator-only rollout as built; the launch runbook's
+> remaining step is the admin `transition` → `decide` pair to retire the
+> experiment record in prod. See
+> `docs/feedback/items/303-calc-send-placement/status.md` (the #303/#306/#320
+> group that shipped the graduation).
+
 ## What this is
 
 Builds the **E1 frame** from `mockups/polish-lab-2026-08/trades-home-inline.html`
