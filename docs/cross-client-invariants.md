@@ -658,6 +658,24 @@ produced by the `build_settings` `UserNotInDraft` raise, mapped to the
 byte-identical typed-empty at the create route. The reason enum stays OPEN
 on clients (`(string & {})` + `default:` arm).
 
+## Mock-draft ownership source (#328)
+
+**`settings_echo.ownership_source` is a CLOSED four-member vocabulary
+server-side:** `platform` | `user` | `partial` | `none` — constants
+`OWNERSHIP_SOURCE_*` in `backend/mock_draft_service.py`, coerced in
+`build_settings` (the `mode` idiom). Client type `MockOwnershipSource`
+(`mobile/src/api/mockDraft.ts`) is **OPEN + nullable** (`(string & {})`,
+`| null`): the server may grow the set, and `null` ⇔ the mock row was
+persisted before the label existed — clients treat absent/`null` as
+*unknown*, **never** as `"none"`. `partial` = ownership data applied but not
+covering every `(round, slot)` of the mock; uncovered slots draft at slot
+order. The mobile caption copy is pinned in
+`MockDraftScreen.ownershipCaption` (one helper, two mounts —
+`mock-draft.ownership-caption`, `mock-draft.recap.ownership-caption`) and by
+`mobile/tests/check-mock-ownership-caption.js`; an unknown value renders
+nothing. `mock_started` carries the resolved value as its seventh prop
+(`backend/analytics_taxonomy.py`).
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):

@@ -11,6 +11,23 @@
 
 ---
 
+## 2026-08-16 — #328 mock-draft pick assignment (G3): sabotage matrix proven, suites green (branch, not yet shipped)
+
+- **Change:** branch `feat/fb328-picks` (base specs commit `56856f7` = origin/main `96f6945` + Phase-1 specs) — per-platform mock-draft ownership resolution + `ownership_source` label + mobile caption + `mock_started` prop. QA regime **D-056** (no Maestro/sim); spec `docs/feedback/items/328-mock-draft-pick-assignment/`.
+- **New suite:** `backend/tests/test_mock_pick_ownership.py` — 16 tests (T-1..T-12 per prd §6.1), in-memory SQLite, hermetic (egress tripwires on `_sleeper_get`/`_mfl_draft_opener`).
+- **Sabotage matrix (apply → RED → revert → green), executed 2026-08-16:**
+  - SAB-A (1.13.4 early return re-added) → T-1 RED, T-2 RED; T-3 deliberately GREEN (proves the MFL block lives in the create route, out of SAB-A's reach)
+  - SAB-B (identity guard skipped) → T-4 RED
+  - SAB-C (label hardcoded `platform`) → T-5 RED, T-6 RED
+  - SAB-D (franchise-ordinal anchoring) → T-3 RED (OBJ-4 seed-collision precondition asserted in-fixture and held)
+  - SAB-E (echo key removed) → T-8 RED (key-presence assertion)
+  - SAB-F (label hardcoded `none`) → T-1, T-3, T-7, T-9-ESPN, T-9-MFL all RED
+  - SAB-G (both coverage checks skipped) → T-12(a)(b)(c) RED; T-12(d) deliberately GREEN (matrix note honored)
+  - SAB-H (partial-slot-map rule deleted) → T-12(d) RED via the order-build KeyError, exactly the PRD-named failure mode
+- **Green runs (sabotages reverted):** targeted backend suite `test_mock_pick_ownership + test_mock_draft + test_pick_assignment(+_tradeable) + test_owned_picks + test_draft_board + test_analytics_p0` = **327 passed / 0 failed**. Mobile: `npx tsc --noEmit` clean; `check-mock-ownership-caption.js` (new, 24 PASS) + `check-mock-draft-modes.js` (extended pin) green; `testid-lint.sh` OK. `python -c "import backend.server"` OK.
+- **Existing-test deltas (deliberate, minimal):** MFL honest-empty pin gains the `ownership_source: "none"` key; `test_295_17` taxonomy pin grows to seven `mock_started` props; `_mock_owned_pick_overlay` added to the sanctioned `load_draft_picks` `source=` caller set (the designed decide-don't-drift mechanism).
+- **Not run here:** full 2900-test backend suite (group branch merge owes it); operator TestFlight checklist prd §6.3 (post-ship runtime net).
+
 ## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
 
 - **Change:** `242a399` — `expo.name` + `CFBundleDisplayName` -> `Fleeced`; `AppIcon.appiconset/App-Icon-1024x1024@1x.png` replaced with the ram mark. 4 files = 2 text lines + 2 PNGs. No schema, API, feature-flag or analytics surface; no user flow altered.
