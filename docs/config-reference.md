@@ -28,6 +28,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
+- [Analytics events — Guided Onboarding v2 addendum (2026-08-15)](#analytics-events-guided-onboarding-v2-addendum-2026-08-15)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
   - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
@@ -228,6 +229,7 @@ Both are **zero-auth** public-read imports; no credentials table, no encryption 
 | `onboarding.demo_bridge` | false | false | Item 10 — persistent "See this for YOUR team →" bar in demo mode + redraft "Dynasty values shown" label/segment tag. **Not Phase A.** |
 | `onboarding.guided_layer` | false | false | v2.1 guided layer — swipe-gesture hint (card 1), ≤4 coach marks, celebration beats (first like / first QuickSet save). **Not Phase A** — the open-access plan §6 records that the guided script was *designed* for trades-first and that Phase A makes it correct, but §5's flip list does not name this flag, so it stays dark pending an explicit call. |
 | `onboarding.keep_warm` | false | false | Item 3 — server-side keep-warm affordances for the Render cold-start cron ping. **Not Phase A** (named in the plan's §9 risk row for cold-start latency, not in the §5 flip list). |
+| `onboarding.guide_v2` | false | false | **Guided Onboarding v2** ([scope](plans/guided-onboarding-v2/scope.md) §2) — gates every v2 addition to The Analyst tour: the declarative eligibility layer on `GuideStep`, the guide's membership in the interrupt arbiter, all new beats (N1, N2, N4, N5, N6.1, N8, N9) and the copy changes riding the new script fields. Under the `onboarding.v2` master like its siblings. **False = byte-identical to pre-build behavior**, which makes it the rollback lever: config-only (`POST /api/feature-flags/reload`, no deploy). **Graduation to true** is an operator decision — the TestFlight checklist passes *and* first-cohort diagnostics M1–M8 are clean. Distinct from `onboarding.guided_layer` (the v2.1 coach-mark surface, still dark) and `onboarding.guided_avatar` (the shipped v1 tour, already true). |
 | `landing.try_before_sync` | false | **true** (Phase A) | Not an `onboarding.*` key and **outside** the `onboarding.v2` master, but the documented **launch pairing** for `onboarding.landing` (`config/features.json` `_comment_onboarding`): `POST /api/session/demo` checks it server-side and **404s when off** (`backend/server.py:18929`), so the v2 landing's Sleeper-down escape and demo link are dead ends without it. Flip and revert it together with `onboarding.landing`. |
 
 ## Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
@@ -375,6 +377,28 @@ Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recor
 | `growth.invite_join_link` | **false** | **Emitter only.** ON: `mobile/src/utils/deepLinks.ts` `buildInviteUrl` emits `/app/league/join/<league_id>?ref=<username>`. OFF (default): today's `/?league=<id>&ref=<username>`. **It never gates the reader, the route, or the claim** — the `?league=` parser, the `LeagueJoin` mobile route, the server 302 at `GET /app/league/join/<id>` and the AASA `/app/league/join/*` claim are all **unflagged** and ship ahead of it. **Why the ordering is inverted from the usual pattern:** Apple caches `/.well-known/apple-app-site-association` on its own CDN for up to ~24 h, so a build that emitted the new URL before the claim propagated would open every invite in Safari — strictly worse than the legacy URL. Parsers-first also means links shared *before* this build keep working forever. **Graduation criteria (all three):** (1) the live AASA validates externally and lists `/app/league/join/*`, (2) ≥24 h of CDN propagation has elapsed since that deploy, (3) a TestFlight build installed *after* that deploy demonstrably opens the app on a tapped `/app/league/join/…` link. Procedure: [runbook § Universal Links AASA](runbook.md#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02). **Rollback = flip back to false**; the legacy URL is parsed forever by both clients, so nothing already in the wild breaks. `buildInviteUrl` reads the flag **imperatively** (`useFeatureFlags.getState()`) so multiple call sites cannot drift. |
 
 **No other P0 finding added a flag.** P0-1, P0-2, P0-5, P0-6, P0-7 and P0-8/9 ship unflagged by design — for P0-1 and P0-2 a flag's OFF position would be the known bug, which is not a rollback lever worth shipping. Rollback for those is `git revert` of the named commit; the levers are enumerated per finding in each PRD's *Rollback* section.
+
+---
+
+## Analytics events — Guided Onboarding v2 addendum (2026-08-15)
+
+Registered in `backend/analytics_taxonomy.py` ([scope](plans/guided-onboarding-v2/scope.md) §1; event-state verdicts in [DELTA-2026-08-15.md](plans/guided-onboarding-v2/DELTA-2026-08-15.md) §E). **Rows ship before emitters** (FR-E8): `ALLOWED_CLIENT_EVENTS` is default-deny *behind a 200* — an unregistered name is counted-and-dropped, and a registered name carrying an unregistered prop lands hollowed out. Both failures are silent, and both have happened here before (`invite_shared`, `deck_regenerated`, the NULL-`platform` incident).
+
+Props are a **key allowlist** — the registry does not validate values, so the value unions below are the contract for emitter authors, not something the server enforces. All six are **mobile-only**; the guide is not a web or extension surface. Round-tripped by `backend/tests/test_events_api.py::test_guided_onboarding_v2_*`.
+
+| Event | Props | Fires when |
+|---|---|---|
+| `guide_step_suppressed` | `step`, `blocked_by ∈ slot_busy \| ineligible \| matched \| already_seen` | `requestStep` refuses — once per deferral episode, not per retry. FR-E5: the drop is silent today (`useGuide.ts:94`), so suppression is currently unmeasurable. |
+| `guide_step_shown` *(existing — allowlist **extended**)* | `step`, `pose`, `screen`, **`spotlight ∈ measured \| degraded \| none`** | Unchanged emit site. FR-E6: `AnalystGuide` renders the same line whether the cutout resolved or not, so without `spotlight` a deictic beat pointing at nothing looks identical to one that landed (`s7.1` is the live exhibit). |
+| `outlook_saved` | `source ∈ guide \| sheet \| strip` | First preference write in a `TradeDnaSheet` session. |
+| `finder_target_pinned` | `side ∈ give \| receive`, `source` | Targeting-board pin recorded. |
+| `quickset_started` | `position ∈ QB \| RB \| WR \| TE`, `source` | `QuickSetTiers` mounted with intent (guide hand-off vs. organic). The client-observable **intent** half — `quickset_completed` is server-fired and can never be a client receipt. |
+| `awaiting_segment_viewed` | `source ∈ guide \| tab \| push` | Matches "Awaiting them" segment focused. |
+| `trio_session_started` *(already registered)* | *(none)* | Already landed in the 2026-08-13 dropped-emitter sweep. Its emitter (`mobile/src/screens/RankScreen.tsx:92`) sends **no props**, so the empty allowlist is the correct shape — do not "fill it in". |
+
+**Deliberate absences.** `trade_sent` and the MFL/ESPN send-attempt rows are PRD **Phase 2** and are not registered — a name registered ahead of its emitter makes an unfired row read as a measured zero. A client `quickset_completed` must **never** be added: the server-fired name already exists, and a collision trips the import-time disjointness assert in `analytics_taxonomy.py`, taking the app down at boot.
+
+**Intent classification (open).** `guide_step_suppressed` (a system suppression, no user action) and `awaiting_segment_viewed` (an impression) are non-intent class and belong in `analytics_queries.NON_INTENT_EVENTS` **before their emitters ship** — `INTENT_EVENTS` is derived by subtraction, so taxonomy growth is intent-by-default and admitting them would step-change DAU/WAU permanently at the emitter's ship date. The other three are real user decisions and stay intent.
 
 ---
 

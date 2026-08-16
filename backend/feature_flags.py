@@ -226,6 +226,14 @@ FLAG_KEYS: tuple[str, ...] = (
     "onboarding.guided_layer",     # v2.1 — swipe hint, coach marks (≤4), celebration beats
     "onboarding.guided_avatar",    # The Analyst guided tour (guided-avatar-script.md) — supersedes guided_layer surfaces when on
     "onboarding.keep_warm",        # item 3 — server-side keep-warm affordances (cron ping target)
+    # Guided Onboarding v2 (docs/plans/guided-onboarding-v2/scope.md §2) —
+    # gates every v2 addition to The Analyst tour: the declarative
+    # eligibility layer, arbiter membership, the new beats, and the copy
+    # riding the new script fields. Under the `onboarding.v2` master like
+    # its siblings. FALSE = byte-identical to pre-build behavior, so it is
+    # the config-only rollback lever. NOT `guided_layer` (v2.1 coach marks,
+    # still dark) and NOT `guided_avatar` (the v1 tour, already true).
+    "onboarding.guide_v2",
     # ── Monetization platform (docs/plans/monetization/00-platform-foundation.md §1) ──
     # One flag per monetization strategy; everything ships dark. Rollout
     # order per foundation §1: monetize.entitlements ON in observe mode

@@ -329,6 +329,34 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Rating prompt REQUEST (growth.rating_prompt) — the OS decides whether
     # a dialog actually appears; we can only instrument the request:
     "rating_prompt_requested",
+    # ── Guided Onboarding v2 addendum, 2026-08-15 ───────────────────────
+    # Plan: docs/plans/guided-onboarding-v2/{PRD.md,scope.md} §1;
+    # event-state verdicts in DELTA-2026-08-15.md §E.
+    #
+    # REGISTERED BEFORE ANY EMITTER SHIPS (FR-E8 / G-031 / G-036) — the
+    # registry is default-deny behind a 200, so a name that lands after
+    # its track() call is silent data loss with a success-shaped response.
+    # All five are mobile-only; the guide is not a web/extension surface.
+    #
+    # `guide_step_suppressed` is the FR-E5 measurement: `requestStep` drops
+    # silently today (useGuide.ts:94), so every deferral is invisible.
+    # `quickset_started` is the client-observable INTENT half of the
+    # QuickSet walk — `quickset_completed` is SERVER-fired (see the
+    # DELIBERATELY ABSENT note above) and can never be a client receipt.
+    # `outlook_saved` / `finder_target_pinned` / `awaiting_segment_viewed`
+    # are the adoption receipts the v2 beats retire against.
+    #
+    # NOT here, on purpose: `trade_sent` and the MFL/ESPN send-attempt rows
+    # (PRD Phase 2, not built), and any client `quickset_completed`.
+    #
+    # `guide_step_suppressed` and `awaiting_segment_viewed` are
+    # suppression / impression class and belong in
+    # analytics_queries.NON_INTENT_EVENTS before their emitters ship —
+    # INTENT is a deny-list, so taxonomy growth is intent-by-default and
+    # admitting them would step-change DAU at the emitter's ship date.
+    "guide_step_suppressed",
+    "outlook_saved", "finder_target_pinned", "quickset_started",
+    "awaiting_segment_viewed",
 })
 
 # ---------------------------------------------------------------------------
@@ -550,7 +578,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "deck_exhausted_viewed": frozenset({"lane", "cards_seen", "deck_size"}),
     # Guided avatar tour — `step` is the script id (s0.1 … s8.1), `via` is the
     # advance mechanism (tap | cta | action | auto | timeout).
-    "guide_step_shown":      frozenset({"step", "pose", "screen"}),
+    # `spotlight` (guided-onboarding-v2, FR-E6) ∈ measured | degraded | none —
+    # whether the beat's cutout resolved, fell back, or was never deictic.
+    # AnalystGuide renders the same line either way today, so without this
+    # prop a deictic beat pointing at nothing is indistinguishable from one
+    # that landed (s7.1 is the live exhibit).
+    "guide_step_shown":      frozenset({"step", "pose", "screen",
+                                        "spotlight"}),
     "guide_step_advanced":   frozenset({"step", "via"}),
     "guide_step_skipped":    frozenset({"step"}),
     "guide_tour_dismissed":  frozenset({"at_step"}),
@@ -896,6 +930,26 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `version` is the app version the request fired under (StoreReview
     # once-per-version backoff key).
     "rating_prompt_requested":      frozenset({"trigger", "version"}),
+    # ── Guided Onboarding v2 addendum, 2026-08-15 ───────────────────────
+    # `step` is the script id the guide asked for (same vocabulary as
+    # guide_step_shown.step); `blocked_by` is the refusal reason — the
+    # authoritative low-cardinality union is the client's `GuideBlockedBy`
+    # type (mobile/src/state/useGuide.ts): guide_active | slot_busy | seen |
+    # display_cap | invalidated | retired | degrade | v1_release_cap |
+    # matched. One row per deferral episode, not per retry.
+    "guide_step_suppressed":   frozenset({"step", "blocked_by"}),
+    # `source` on all three is the entry point that produced the receipt
+    # (guide hand-off vs. organic), so adoption can be attributed without
+    # a session join: outlook_saved ∈ guide | sheet | strip;
+    # awaiting_segment_viewed ∈ guide | tab | push.
+    "outlook_saved":           frozenset({"source"}),
+    # `side` ∈ give | receive — the targeting board half the pin landed on
+    # (the same vocabulary as player_menu_opened.side).
+    "finder_target_pinned":    frozenset({"side", "source"}),
+    # `position` is a CORE POSITION (QB|RB|WR|TE) — the QuickSet walk being
+    # started, NOT a device platform (the NULL-`platform` incident).
+    "quickset_started":        frozenset({"position", "source"}),
+    "awaiting_segment_viewed": frozenset({"source"}),
 }
 
 

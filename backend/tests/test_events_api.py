@@ -974,3 +974,121 @@ def test_p1_t1_registers_exactly_the_agreed_names():
                  "sleeper_connect_captured", "sleeper_connect_abandoned"):
         assert name not in tax.ALLOWED_CLIENT_EVENTS, (
             f"{name} landed without AN-1 being answered")
+
+
+# --- Guided Onboarding v2 addendum (2026-08-15) -----------------------------
+# Plan: docs/plans/guided-onboarding-v2/{PRD.md,scope.md} §1; event-state
+# verdicts in DELTA-2026-08-15.md §E.
+#
+# Registered BEFORE any emitter ships (FR-E8). The two silent failure modes
+# this block exists for are the same ones that hollowed out invite_shared and
+# deck_regenerated: an unregistered NAME is counted-and-dropped behind a 200,
+# and a registered name with an unregistered PROP lands stripped.
+
+def test_guided_onboarding_v2_new_events_land_with_every_prop(harness):
+    """All five new v2 names register AND every specced prop survives."""
+    client, engine = harness
+    specs = [
+        ("guide_step_suppressed",   {"step": "n6.1",
+                                     "blocked_by": "slot_busy"}),
+        ("outlook_saved",           {"source": "guide"}),
+        ("finder_target_pinned",    {"side": "receive", "source": "guide"}),
+        ("quickset_started",        {"position": "WR", "source": "guide"}),
+        ("awaiting_segment_viewed", {"source": "tab"}),
+    ]
+    body = _post(client, [
+        _envelope(i, event_type=name, screen="Trades", props=props)
+        for i, (name, props) in enumerate(specs)
+    ]).get_json()
+    _assert_invariant(body, len(specs))
+    # dropped == 0 proves NAME survival; an unknown type still counts in
+    # `accepted`, so `accepted` alone proves nothing.
+    assert body["accepted"] == len(specs) and body["dropped"] == 0
+
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    assert set(by_type) == {name for name, _ in specs}
+
+    # PROP survival — read back out of user_events.props, not asserted on the
+    # request. `seq` / `ts_suspect` are stamped AFTER the strip and never pass
+    # through CLIENT_EVENT_PROPS (analytics_taxonomy.py's own note).
+    for name, props in specs:
+        landed = {k: v for k, v in json.loads(by_type[name]["props"]).items()
+                  if k not in {"seq", "ts_suspect"}}
+        assert landed == props, name
+
+
+def test_guided_onboarding_v2_spotlight_survives_on_guide_step_shown(harness):
+    """FR-E6. `AnalystGuide` renders the same line whether the cutout resolved
+    or not, so without `spotlight` a deictic beat pointing at nothing is
+    indistinguishable from one that landed (s7.1 is the live exhibit). All
+    three values must arrive, and the three shipped props must not be lost."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(i, event_type="guide_step_shown",
+                  props={"step": "n4.1", "pose": "pointing",
+                         "screen": "Trades", "spotlight": s})
+        for i, s in enumerate(("measured", "degraded", "none"))
+    ]).get_json()
+    assert body["accepted"] == 3 and body["dropped"] == 0
+    landed = [json.loads(r._mapping["props"]) for r in _rows(engine)]
+    assert {p["spotlight"] for p in landed} == {"measured", "degraded", "none"}
+    # The pre-existing allowlist was EXTENDED, not replaced.
+    assert all({"step", "pose", "screen"} <= set(p) for p in landed)
+
+
+def test_guided_onboarding_v2_unregistered_props_are_stripped(harness):
+    """Default-deny on props, in code. `quickset_started.position` is a CORE
+    POSITION (QB|RB|WR|TE) — a device-platform prop is a server-derived
+    COLUMN (the NULL-`platform` incident) and must never ride along."""
+    client, engine = harness
+    _post(client, [
+        _envelope(0, event_type="quickset_started",
+                  props={"position": "TE", "source": "guide",
+                         "platform": "ios", "step": "s3.2"}),
+    ])
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["position"] == "TE" and props["source"] == "guide"
+    assert "platform" not in props        # device prop stripped
+    assert "step" not in props            # not on THIS event's allowlist
+
+
+def test_guided_onboarding_v2_registers_exactly_the_agreed_names():
+    """v2's taxonomy scope, pinned. Three groups are absent ON PURPOSE and a
+    future reader must not 'fix' that by adding them."""
+    from backend import analytics_taxonomy as tax
+    assert {"guide_step_suppressed", "outlook_saved", "finder_target_pinned",
+            "quickset_started",
+            "awaiting_segment_viewed"} <= tax.ALLOWED_CLIENT_EVENTS
+
+    # `trio_session_started` was already registered by the 2026-08-13
+    # dropped-emitter sweep. Its emitter (RankScreen.tsx:92) fires
+    # `track('trio_session_started', undefined, 'Trios')` — NO props — so the
+    # empty allowlist is the correct shape, not an oversight to be filled.
+    assert tax.CLIENT_EVENT_PROPS["trio_session_started"] == frozenset()
+
+    # `quickset_completed` is SERVER-fired and its client emitter was
+    # deliberately removed; re-adding it here would trip the import-time
+    # disjointness assert and take the app down at boot.
+    assert "quickset_completed" in tax.SERVER_FIRED_EVENTS
+    assert "quickset_completed" not in tax.ALLOWED_CLIENT_EVENTS
+
+    # PRD Phase 2, not built now — registering a name ahead of its phase
+    # would make an unfired row look like a measured zero.
+    for name in ("trade_sent", "mfl_send_attempted", "mfl_send_failed",
+                 "espn_send_attempted", "espn_send_failed"):
+        assert name not in tax.ALLOWED_CLIENT_EVENTS, f"{name} is Phase 2"
+
+
+def test_guided_onboarding_v2_flag_is_registered_and_ships_dark():
+    """The 3-touch mirror: FLAG_KEYS, config/features.json, release.json.
+    Off = byte-identical to pre-build behavior, so `false` is the contract,
+    not a placeholder — graduation is an operator decision (scope.md §2)."""
+    from pathlib import Path
+    from backend.feature_flags import FLAG_KEYS
+    repo = Path(__file__).resolve().parents[2]
+    features = json.loads((repo / "config/features.json").read_text())
+    release = json.loads(
+        (repo / "backend/tests/fixtures/flags/release.json").read_text())
+    assert "onboarding.guide_v2" in FLAG_KEYS
+    assert features["onboarding.guide_v2"] is False
+    assert release["onboarding.guide_v2"] == features["onboarding.guide_v2"]
