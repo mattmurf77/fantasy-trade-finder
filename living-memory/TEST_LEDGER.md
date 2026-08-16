@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-15 — Fit-congruence signal weighting SHIPPED (PR #134)
+
+- **Change:** `6f293f4` — swipe-signal K scaled by fit-congruence ([D-060](DECISIONS.md)): `signed_lane_shift` extracted from `classify_lane` (byte-identical, pinned incl. the `total <= 0` corner), `TradeCard.lane_shift` stamped unconditionally, `fit_congruence_mult` applied at the swipe route to BOTH the in-memory signal and the **persisted `k_factor`** — the build agent caught that `_compute_elo` replays `swipe_decisions` rows, so an in-memory-only mult would have reverted boards to flat K on every deploy. Reviewer verified the replay claim and the serializer allow-list (no client leak).
+- **Tests:** new `backend/tests/test_fit_congruence.py` **26 passed** (re-run independently by reviewer). Full suite on branch **2859 passed / 1 skipped**; measured clean-main baseline same worktree = 2833/1 (branch adds exactly +26). Matrix: rebuild pass-on-win-now ×0.4; rebuild LIKE-on-win-now full K; contend mirror; not_sure/sub-threshold/reconstruction neutral; knobs-at-1.0 → byte-identical (`==`) Elo trajectory vs control + non-vacuousness assertion. CI green all three checks.
+- **Neutral-by-design cases on record:** FB-46 client-echo reconstructions and `_likes_you` synthesized cards carry no `lane_shift` → 1.0.
+
+---
+
 ## 2026-08-15 — Guided Onboarding v2 Phase 0+1 (built dark, merged; TestFlight walk OWED)
 
 - **Context:** full gates (scope block `docs/plans/guided-onboarding-v2/scope.md`; Maestro n/a per D-056). Built dark behind `onboarding.guide_v2: false` — flag-off asserted as the v1 behavior graph (s6.1 toast + s2.3 restored on the flag-off arm by orchestrator review; copy trims + s7.1/s3.1 cuts ship unconditionally, documented in D-059).

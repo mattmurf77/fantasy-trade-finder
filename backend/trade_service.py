@@ -452,7 +452,7 @@ _DEFAULT_CFG: dict[str, float] = {
     "outlook_dir_age_gap_mult":   0.15,
     "outlook_dir_rescue_frac":    0.5,
     # ------------------------------------------------------------------
-    # Fit-congruence signal weighting (the fit-congruence decision, D-TBD
+    # Fit-congruence signal weighting (the fit-congruence decision, D-060
     # — see fit_congruence_mult). Deck swipes feed Elo through
     # RankingService.record_trade_signal at trade_k_like / trade_k_pass;
     # these scale that K by how surprising the action is given the user's
@@ -1506,7 +1506,7 @@ def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
 
 def fit_congruence_mult(shift: float | None, decision: str) -> float:
     """K-factor multiplier for a deck swipe, weighted by how SURPRISING the
-    action is given the user's window (the fit-congruence decision, D-TBD).
+    action is given the user's window (the fit-congruence decision, D-060).
 
     A pass is not only a valuation statement. A rebuilder passing a
     fairly-priced vet is passing for a WINDOW reason, and the flat
@@ -1523,7 +1523,7 @@ def fit_congruence_mult(shift: float | None, decision: str) -> float:
           like → fit-DEFYING  (the rebuilder who wants the vet ANYWAY —
                                the strongest board signal we get) → defying
       |shift| below the threshold, or shift is None (no window / not_sure
-      / no value on the table) → exactly 1.0, byte-identical to pre-D-TBD.
+      / no value on the table) → exactly 1.0, byte-identical to pre-D-060.
 
     Kill switch: fit_k_explained_mult = 1.0 (with defying at its 1.0
     default) restores the old behavior exactly, deploy-free, via
@@ -2127,7 +2127,7 @@ class TradeCard:
     # which deck lane the card belongs to, from the user's resolved
     # window (declared or seeded). None = user has no window → no lanes.
     lane: Optional[str] = None
-    # Fit-congruence (D-TBD) — the SIGNED lane shift (signed_lane_shift()) from the
+    # Fit-congruence (D-060) — the SIGNED lane shift (signed_lane_shift()) from the
     # user's resolved window: + = toward their window, − = away from it.
     # Stamped at construction, unconditionally (no flag), because the swipe
     # site cannot recompute it: it has no resolved outlook and no consensus
@@ -3275,7 +3275,7 @@ class TradeService:
                     if _m != 1.0:
                         c.outlook_dir = round(_m, 4)
                         c.composite_score = round(c.composite_score * _m, 3)
-            # Fit-congruence (D-TBD) — stamp the SIGNED lane shift on every
+            # Fit-congruence (D-060) — stamp the SIGNED lane shift on every
             # card so the swipe route can weight its Elo K by how surprising
             # the swipe is given the user's window. Unconditional (the
             # feature has no flag — its kill switch is fit_k_explained_mult

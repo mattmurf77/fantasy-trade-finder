@@ -496,6 +496,7 @@
 | D-055 | Deck-Quality Bars Ratified; likes_you Gets a User-Gain Floor; s5.1 Fix Gates the Phase A Flip | 2026-08-15 |
 | D-056 | Maestro / Simulator Retired Entirely, Not Just as a Gate | 2026-08-15 |
 | D-059 | Guide v2: Declarative Eligibility Layer; FR-E1 Reachability Rewiring Descoped | 2026-08-15 |
+| D-060 | Trade-Signal Ingestion Is Fit-Congruence-Weighted (Surprise-Weighted K) | 2026-08-15 |
 
 ---
 
@@ -602,4 +603,12 @@ For substantial decisions (large refactors, vendor changes, API surface changes)
 **Decision:** No Maestro flow authoring, extension, or execution, and no simulator captures — for any change, in any pipeline. Automated evidence = structural `check-*.js` suites + unit tests; behavior that would have gotten a sim capture gets a written code-walk proof (file:line-cited commit-sequence trace); runtime proof, when it matters, is a concrete manual TestFlight checklist for the operator. `testid-lint` stays in CI. Existing `mobile/.maestro/` flows are historical artifacts — kept, never run. `FTF_SKIP_SIM_GATE=1` is the standing posture for the pre-push hook.
 **Alternatives considered:** Keeping Maestro for occasional high-stakes proofs (rejected by the operator — the S-43 run worked but cost a fresh sim build and a large token spend); deleting `mobile/.maestro/` (unnecessary; flows document intended behavior even unrun).
 **Consequences:** CLAUDE.md §Conventions feature-gates rewritten (items 2 and 4); `docs/runbook.md` § Pre-ship simulator gate banner-marked historical. Runtime regressions on mobile are now caught only by the operator's TestFlight passes — checklists must be specific enough to actually catch them. Plans/PRDs should stop budgeting Maestro work.
+**Status:** Active.
+
+## D-060 — Trade-Signal Ingestion Is Fit-Congruence-Weighted (Surprise-Weighted K)
+**Date:** 2026-08-15 (operator: "ensure we've folded the team needs logic in"; build ratified same day)
+**Context:** Generation was already outlook-aware (lanes, directional weighting, fit premium — `trade.lanes`/`trade.outlook_direction`/`trade.outlook_infer` all ON), but `record_trade_signal` was outlook-blind: a rebuilder passing a fairly-priced vet wrote "values give over receive" into their board at flat K. The flat `trade_k_pass` half-discount was the only acknowledgment that "don't want ≠ don't value". Phase B's grading lane is about to make these actions the primary board-building signal.
+**Decision:** Weight swipe-signal K by **surprise relative to the fit prior**. The signed lane shift (extracted verbatim from `classify_lane` as `signed_lane_shift`, stamped unconditionally on cards as `TradeCard.lane_shift`) classifies each swipe: fit-explained (like on a window-congruent card / pass on an anti-window card) → K × `fit_k_explained_mult` (0.4); fit-defying (the rebuilder who likes the vet ANYWAY) → `fit_k_defying_mult` (1.0, full K); no window / sub-threshold / reconstructed cards → exactly 1.0. Applied to **both** the in-memory signal and the persisted `swipe_decisions.k_factor` (the DB replay in `_compute_elo` must agree). Kill switch is knob-only: explained-mult = 1.0 restores prior behavior deploy-free.
+**Alternatives considered:** Reusing the binary `lane` field (rejected — its "value" bucket collapses window-neutral with strongly anti-window cards, and the anti-window like is the strongest signal); recomputing shift at swipe time (rejected — the swipe site has no resolved outlook or value fn; a second resolution path can drift); leaving the flat pass discount (the confound bakes into Phase B boards).
+**Consequences:** Defying stays at 1.0 pending data — no boost above baseline. `outlook_direction_mult` (#175) still duplicates the shift arithmetic; fold into `signed_lane_shift` on next #175 touch. Match accept/decline, bad-trade flags, and sends are explicitly out of scope here — Phase B's B-2 build applies the same congruence rule to flags and declines (plan §B-2 note), sends stay full-K. Shipped PR #134 (`6f293f4`).
 **Status:** Active.

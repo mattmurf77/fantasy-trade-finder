@@ -1,4 +1,4 @@
-"""Fit-congruence signal weighting (D-TBD) — swipe Elo weighted by surprise.
+"""Fit-congruence signal weighting (D-060) — swipe Elo weighted by surprise.
 
 A deck pass is not purely a valuation statement. A rebuilder who passes a
 fairly-priced vet is stating a WINDOW preference, and the flat trade_k_pass
@@ -10,7 +10,7 @@ This weights the swipe's K by how surprising it is given the user's window:
   fit-DEFYING   (pass on a window-congruent card, like on an anti-window
                  one)  → K *= fit_k_defying_mult (1.0, full baseline)
   neutral       (no window / not_sure, |shift| < lane_shift_frac, or a card
-                 with no stamped shift) → 1.0, byte-identical to pre-D-TBD.
+                 with no stamped shift) → 1.0, byte-identical to pre-D-060.
 
 Covers: signed_lane_shift() — the signed quantity the machinery rests on — the congruence
 matrix itself, the record_trade_signal fit_mult (including multi-player
@@ -235,7 +235,7 @@ def test_multi_player_sides_still_decompose_pairwise_with_the_mult():
 
 def test_defying_swipe_keeps_full_k():
     """The rebuilder who LIKES the win-now vet moves Elo exactly as much as
-    the pre-D-TBD engine did — the defying lane is not boosted either."""
+    the pre-D-060 engine did — the defying lane is not boosted either."""
     shift = signed_lane_shift(*_TO_NOW, _LANE_PLAYERS, "rebuilder", _EQUAL)
     control = _svc(["a", "b"])
     control.record_trade_signal(winner_ids=["a"], loser_ids=["b"],

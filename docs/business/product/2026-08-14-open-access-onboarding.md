@@ -301,6 +301,16 @@ statement, and the plumbing already exists — `swipe_trade` feeds
 | **Sent trade** (any platform) | Strongest revealed preference in the product | strongest | ✓ `sleeper_send_succeeded` / `trade_sent`; not yet an Elo input |
 | **Explicit grade** (optional, O-8) | A deliberate "I win / fair / I lose" on a card | strong, per-side | ✗ new affordance |
 
+**Fit-congruence (v1.3, 2026-08-15, D-060 — shipped for swipes, binding on this ladder):**
+every implicit signal above is weighted by **surprise relative to the user's window** before
+it touches the board. Deck likes/passes already ship this way (PR #134): a fit-explained
+action (rebuilder passes the win-now vet) carries `fit_k_explained_mult` (0.4); a
+fit-defying action (the rebuilder who likes the vet anyway) carries full K — it is the
+strongest pure-value statement the deck produces. When B-2 wires the flag, accept/decline
+inputs, they get the same congruence rule via the card's `lane_shift`; **sends stay
+full-K** (a real send is deliberate enough to carry both meanings). Grading-lane
+*appearance counts* (B-3) are unaffected — congruence weights the Elo, not the coverage bar.
+
 Grading joins the D-P1-10 ladder as a **sixth method lane** — and D-P1-10's own rule binds
 it: *every ranking method must unlock, and its evidence rule must be designed, not assumed.*
 The deliberate methods (Quick Set, trios, anchors…) remain the fast lane — a 2-minute Quick

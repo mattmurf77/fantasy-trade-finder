@@ -10311,7 +10311,7 @@ def swipe_trade():
             log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
             card = trade_service.record_decision(trade_id=trade_id, decision=decision)
 
-        # Fit-congruence weighting (D-TBD): scale the swipe's Elo K by how
+        # Fit-congruence weighting (D-060): scale the swipe's Elo K by how
         # surprising it is given the user's window. The card carries the
         # signed lane shift stamped at generation (card.lane_shift) — a
         # rebuilder passing a fairly-priced vet is stating a WINDOW

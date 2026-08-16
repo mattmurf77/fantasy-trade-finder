@@ -349,13 +349,13 @@ class RankingService:
                           loser_ids=receive. Weaker signal, uses TRADE_K_PASS
                           (~12% of a ranking swipe).
 
-        fit_mult: fit-congruence weight (D-TBD) on the looked-up K — how
+        fit_mult: fit-congruence weight (D-060) on the looked-up K — how
                   surprising this swipe is given the user's window, computed
                   by the caller via trade_service.fit_congruence_mult(). A
                   rebuilder passing a fairly-priced vet is making a WINDOW
                   statement, not a value one, so that pass is discounted;
                   the same rebuilder LIKING the vet is weighted at full K.
-                  Default 1.0 = the pre-D-TBD behavior exactly. Callers that
+                  Default 1.0 = the pre-D-060 behavior exactly. Callers that
                   also persist the swipe (save_trade_swipes) must apply the
                   same multiplier to the stored k_factor, or the DB replay
                   in _compute_elo will disagree with this in-memory state.

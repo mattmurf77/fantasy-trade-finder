@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-08-15 (Fit-congruence signal weighting — SHIPPED, PR #134)
+
+- Swipe ingestion now weights Elo K by **surprise vs the user's window** ([D-060](DECISIONS.md)): fit-explained swipes (rebuilder passes the vet) ×0.4, fit-defying swipes (rebuilder likes the vet anyway) full K, no-window/sub-threshold exactly 1.0. Reuses the lanes machinery (`signed_lane_shift`); applied to in-memory signal AND persisted `k_factor` (DB replay agreement). Knob-only kill switch (`fit_k_explained_mult` = 1.0). Lands **before** Phase B's grading lane starts counting these signals toward "your board" — plan §B-2 now notes flags/declines get the same rule at build time; sends stay full-K. `main` @ `6f293f4`.
+
 ## 2026-08-15 (Guided Onboarding v2 Phase 0+1 — built dark behind `onboarding.guide_v2`)
 
 - **The Analyst tour gains a machine-enforced eligibility layer + 8 new beats**, built from the 7-round dual-agent PRD (`docs/plans/guided-onboarding-v2/`) + the operator's O-1…O-7 decisions, by 6 Opus build agents across 2 waves, orchestrator-reviewed line-by-line. Ships **dark** (`onboarding.guide_v2: false` = v1 behavior graph); graduation = operator TestFlight checklist (`docs/plans/guided-onboarding-v2/testflight-checklist.md`) + first-cohort diagnostics.
