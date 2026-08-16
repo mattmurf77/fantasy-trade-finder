@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, TickLabel } from '../components/chalkline';
 import RankImportSheet from '../components/RankImportSheet';
+import ImportRankingsSheet, {
+  type PresetMeta,
+} from '../components/ImportRankingsSheet';
 import Toast from '../components/Toast';
-import { setRankingMethod } from '../api/rankings';
+import { setRankingMethod, type ImportRowHint } from '../api/rankings';
+import { onRankCsvCaptured, type CapturedCsv } from '../state/rankImportBus';
+import { usePremiumImport } from '../state/premiumImport';
+import type { PremiumSource } from '../utils/rankPresets';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { chalk, flare, ice, ink, radii, space, type, fonts } from '../theme/chalkline';
@@ -31,9 +37,17 @@ import { CONSOLIDATED_VIEW, useRookieScope } from '../state/rookieScope';
 //
 // Import entry (flag `ranks.import`, v3 Variant A): a quiet text link right
 // of the heading — chalk-dim question, ice underline + upload glyph — that
-// opens the "Bring your rankings" paste-first sheet. It shares the heading's
-// line; when they can't fit, the intact link wraps under, right-aligned
-// (never truncate the link, never shrink the heading).
+// opens the "Bring your rankings" sheet. It shares the heading's line; when
+// they can't fit, the intact link wraps under, right-aligned (never truncate
+// the link, never shrink the heading).
+//
+// Premium Rankings Import v1 ([D-058]) turned that one sheet into two: the
+// link now opens the INTAKE CHOOSER (`ImportRankingsSheet` — Dynasty Nerds /
+// DLF behind `ranks.source.*`, CSV upload, paste), and every one of its
+// routes ends in the SAME `RankImportSheet` match → review → apply step.
+// This screen owns both sheets because only one RN Modal can be up at a time
+// on iOS, and because the in-app-browser handoff (`rankImportBus`) lands
+// here after the pushed WebView pops.
 //
 // Picking a method saves the preference (useSession.rankingMethodPref) so
 // subsequent launches route straight to that flow; the Settings steer
@@ -51,8 +65,48 @@ export default function RankHomeScreen({ navigation }: any) {
   // control are two doors into ONE state.
   const rookieScope = useRookieScope();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // ── Import intake ([D-058], Premium Rankings Import v1) ───────────────
+  // `importOpen` is the CHOOSER (ImportRankingsSheet). `pasteOpen` is the
+  // existing paste/review sheet, which every route ends in — preset rows,
+  // an unrecognized file's raw text, or a plain paste. Exactly one is up at
+  // a time: iOS will not stack sibling RN Modals.
+  const [importOpen, setImportOpen] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [presetRows, setPresetRows] = useState<ImportRowHint[] | null>(null);
+  const [fallbackText, setFallbackText] = useState<string | null>(null);
+  const [presetSource, setPresetSource] = useState<PremiumSource | null>(null);
+  const [incoming, setIncoming] = useState<CapturedCsv | null>(null);
+  const markImported = usePremiumImport((s) => s.markImported);
+
+  // A CSV captured by the in-app browser arrives here after the push pops.
+  useEffect(
+    () =>
+      onRankCsvCaptured((csv) => {
+        setIncoming(csv);
+        setPasteOpen(false);
+        setImportOpen(true);
+      }),
+    [],
+  );
+
+  const openBrowser = (source: PremiumSource) => {
+    setImportOpen(false);
+    navigation.navigate('PremiumRankingsBrowser', { source });
+  };
+
+  const openPaste = (rows: ImportRowHint[] | null, text: string | null) => {
+    setImportOpen(false);
+    setPresetRows(rows);
+    setFallbackText(text);
+    setPasteOpen(true);
+  };
+
+  const onPresetConfirmed = (rows: ImportRowHint[], meta: PresetMeta) => {
+    setPresetSource(meta.source);
+    openPaste(rows, null);
+  };
 
   const choose = (m: ChooserMethod) => {
     haptics.selection();
@@ -72,7 +126,15 @@ export default function RankHomeScreen({ navigation }: any) {
   };
 
   const onImportApplied = (count: number) => {
-    setImportOpen(false);
+    setPasteOpen(false);
+    // The staleness stamp is written on APPLY, not on preview — "imported N
+    // weeks ago" must describe a board that actually changed.
+    if (presetSource) {
+      void markImported(presetSource);
+      setPresetSource(null);
+    }
+    setPresetRows(null);
+    setFallbackText(null);
     setToast(`Imported ${count} rank${count === 1 ? '' : 's'} onto your board`);
     // Land on the Overall board so the imported order is immediately
     // visible (every method writes to the same board).
@@ -242,10 +304,28 @@ export default function RankHomeScreen({ navigation }: any) {
         </Text>
       </ScrollView>
 
-      <RankImportSheet
+      <ImportRankingsSheet
         visible={importOpen}
         onClose={() => setImportOpen(false)}
+        onPaste={() => openPaste(null, null)}
+        onOpenSource={openBrowser}
+        onConfirmed={onPresetConfirmed}
+        onFallback={(text) => openPaste(null, text)}
+        incoming={incoming}
+        onIncomingConsumed={() => setIncoming(null)}
+      />
+
+      <RankImportSheet
+        visible={pasteOpen}
+        onClose={() => {
+          setPasteOpen(false);
+          setPresetRows(null);
+          setFallbackText(null);
+          setPresetSource(null);
+        }}
         onApplied={onImportApplied}
+        presetRows={presetRows}
+        initialText={fallbackText}
       />
     </SafeAreaView>
   );

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from './client';
+import { api, ApiError } from './client';
 import type {
   Trio,
   RankingProgress,
@@ -239,13 +239,54 @@ export interface ImportMatchResponse {
   scoring_format: string;
 }
 
+/** Optional structured rows for the preset intake (Connected Rankings
+ *  addendum §3.2). EXACTLY three fields by contract — a premium CSV's
+ *  Value/Trend/PPG columns are never read, so they can never land here
+ *  (risk R14: values never enter FTF; the import is order-only). */
+export interface ImportRowHint {
+  name: string;
+  team: string | null;
+  pos: string | null;
+}
+
+/** A 400 from the rows-bearing request means this backend predates the
+ *  optional `rows` field (the two halves of this feature ship from separate
+ *  worktrees). Anything else — auth, 5xx, timeout — is a real failure and
+ *  must surface, not be silently retried into a lossier path. */
+function isRowsUnsupported(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 400;
+}
+
 // POST /api/rankings/import-match — resolve pasted lines against the pool.
 // Read-only (no board writes). Header scopes the format like reorder.
-export async function importMatchRankings(names: string[]) {
+//
+// `rows` (optional) is the preset path's ordered [{name, team, pos}] list;
+// the backend takes it in precedence over `names` and uses the team/position
+// hints to disambiguate same-name players. `names` is sent alongside as the
+// same order in plain text, so a backend that ignores `rows` still parses an
+// identical order — and a backend that REJECTS the field (400) is retried
+// once on the pure text path below.
+export async function importMatchRankings(
+  names: string[],
+  rows?: ImportRowHint[] | null,
+) {
+  const headers = await formatHeader();
+  if (rows && rows.length) {
+    try {
+      return await api.post<ImportMatchResponse>(
+        '/api/rankings/import-match',
+        { names, rows },
+        { headers },
+      );
+    } catch (e) {
+      if (!isRowsUnsupported(e)) throw e;
+      // fall through to the text-only path
+    }
+  }
   return api.post<ImportMatchResponse>(
     '/api/rankings/import-match',
     { names },
-    { headers: await formatHeader() },
+    { headers },
   );
 }
 

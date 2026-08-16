@@ -20,6 +20,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import EspnConnectScreen from '../screens/EspnConnectScreen';
+import PremiumRankingsBrowserScreen from '../screens/PremiumRankingsBrowserScreen';
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
@@ -91,6 +92,14 @@ type AuthStack = {
   // captured pair server-side itself (credential-only POST /api/espn/link)
   // instead of delivering to the sheet's bus.
   EspnConnect: { reason?: 'send' } | undefined;
+  // Premium Rankings Import v1, lane 2a ([D-058]) — in-app browser where the
+  // user logs into their OWN Dynasty Nerds / DLF account and taps the site's
+  // own Export CSV button. FTF never sees a credential; the captured file
+  // goes back to the import chooser through `rankImportBus`. Registered
+  // UNCONDITIONALLY: `ranks.source.*` gates the entry ROWS in the sheet, not
+  // the route (same rule as the draft-surface pushes), so a stale entry
+  // lands on an honest page rather than a 404.
+  PremiumRankingsBrowser: { source: 'dynasty_nerds' | 'dlf' };
   // #142/#144 — League rankings (power rankings) + FA finder, entered from
   // the League tab's Explore rows.
   LeagueSummary: undefined;
@@ -801,6 +810,39 @@ export default function RootNav({ booted }: { booted: boolean }) {
               />
             ),
           })}
+        />
+        {/* Premium rankings in-app browser ([D-058], lane 2a). Pushed (NOT
+            modal) from ImportRankingsSheet, which the host closes first —
+            a modal presentation would land behind that sheet's RN Modal,
+            exactly as documented on EspnConnect above. */}
+        <Stack.Screen
+          name="PremiumRankingsBrowser"
+          component={PremiumRankingsBrowserScreen}
+          options={({ navigation, route }) => {
+            const label =
+              (route.params as { source?: string } | undefined)?.source === 'dlf'
+                ? 'DLF'
+                : 'Dynasty Nerds';
+            return {
+              headerShown: true,
+              title: label,
+              headerTitle: () => <HeaderTitle>{label}</HeaderTitle>,
+              headerStyle: { backgroundColor: ink.ink0 },
+              headerTintColor: chalk.base,
+              // #151 pattern — see EspnConnect above (RNS#3294).
+              headerBackVisible: false,
+              headerLeft: () => (
+                <HeaderBack
+                  testID="premium-browser.back-btn"
+                  onPress={() =>
+                    navigation.canGoBack()
+                      ? navigation.goBack()
+                      : navigation.navigate('Main')
+                  }
+                />
+              ),
+            };
+          }}
         />
       </Stack.Navigator>
       {/* The Analyst — guided-tour overlay (onboarding.guided_avatar).
