@@ -504,6 +504,35 @@ def test_r5_engine_window_and_fit_premium_decoupling():
                  ["WR_X"], ["TE_LOVE"]) is None
 
 
+def test_r5_engine_not_sure_surplus_kill():
+    """U-R5-3/4 through the live path: the engine threads the RESOLVED
+    analyze_roster_strengths outputs — a not_sure user stacked 4-deep at
+    WR (surplus) is not served another bench WR; unresolved window serves
+    it. Catches the call-site needs/surplus swap sabotage (with only WRs
+    rostered, needs = [QB, RB, TE], so swapped inputs stop the kill)."""
+    _set_flags(**{"trade_engine.v2": True, "trade.presentment_rules": True})
+    players = {p: _Player(p, "WR") for p in ("W1", "W2", "W3", "W4", "WN")}
+    for p in ("W1", "W2", "W3", "W4"):
+        players[p].search_rank = 20      # dynasty_value ⇒ startable ⇒ surplus
+
+    def run(outlook):
+        opp = LeagueMember(user_id="opp", username="opp", roster=["WN"],
+                           elo_ratings={"W4": 1700, "WN": 1500},
+                           has_rankings=True)
+        svc = TradeService(players=players)
+        svc.add_league(League(league_id="L1", name="T", platform="demo",
+                              members=[opp]))
+        return svc.generate_trades(
+            user_id="user", user_elo={"W4": 1500, "WN": 1700},
+            user_roster=["W1", "W2", "W3", "W4"], league_id="L1",
+            seed_elo={"W1": _elo(3000.0), "W2": _elo(2900.0),
+                      "W3": _elo(2800.0), "W4": 1500.0, "WN": _elo(1200.0)},
+            fairness_threshold=0.75, max_per_opponent=5, outlook=outlook)
+
+    assert _find(run("not_sure"), ["W4"], ["WN"]) is None
+    assert _find(run(None), ["W4"], ["WN"]) is not None
+
+
 def test_r5_engine_bypass_serves_targeted_jobs():
     """U-R5-B (engine half) — bypass_need_gate=True serves the identical
     R5-failing card; trade_away_positions alone (WITHOUT the bypass —
