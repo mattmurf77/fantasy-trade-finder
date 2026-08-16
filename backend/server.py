@@ -10311,23 +10311,38 @@ def swipe_trade():
             log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
             card = trade_service.record_decision(trade_id=trade_id, decision=decision)
 
+        # Fit-congruence weighting (D-TBD): scale the swipe's Elo K by how
+        # surprising it is given the user's window. The card carries the
+        # signed lane shift stamped at generation (card.lane_shift) — a
+        # rebuilder passing a fairly-priced vet is stating a WINDOW
+        # preference, not a valuation, and gets discounted; the same
+        # rebuilder LIKING that vet keeps full K. Cards with no shift (no
+        # window, sub-threshold, or FB-46 client-echo reconstructions)
+        # weight at exactly 1.0. Applied to BOTH the in-memory signal and
+        # the persisted k_factor below — _compute_elo replays the DB rows,
+        # so the two must carry the same K. Knob-only kill switch
+        # (fit_k_explained_mult = 1.0); no feature flag.
+        fit_mult = _trade_service_mod.fit_congruence_mult(
+            getattr(card, "lane_shift", None), decision)
         if decision == "like":
             service.record_trade_signal(
                 winner_ids = card.receive_player_ids,
                 loser_ids  = card.give_player_ids,
                 decision   = "like",
+                fit_mult   = fit_mult,
             )
             from .ranking_service import _c as _rs_c
-            k_factor = _rs_c("trade_k_like")
+            k_factor = _rs_c("trade_k_like") * fit_mult
             win_ids, lose_ids = card.receive_player_ids, card.give_player_ids
         else:  # "pass"
             service.record_trade_signal(
                 winner_ids = card.give_player_ids,
                 loser_ids  = card.receive_player_ids,
                 decision   = "pass",
+                fit_mult   = fit_mult,
             )
             from .ranking_service import _c as _rs_c
-            k_factor = _rs_c("trade_k_pass")
+            k_factor = _rs_c("trade_k_pass") * fit_mult
             win_ids, lose_ids = card.give_player_ids, card.receive_player_ids
 
         # F1 (deck.signal_v2) — outcome join. Optional additive body fields

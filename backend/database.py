@@ -2016,6 +2016,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_dir_age_tolerance", 1.0,  "#175: years an older primary return may exceed the primary give before the age-gap rule fires"),
     ("outlook_dir_age_gap_mult", 0.15,  "#175: near-exclusion composite multiplier for unrescued older-primary returns (rebuild-side only)"),
     ("outlook_dir_rescue_frac",  0.5,   "#175: min fraction of the primary give's consensus value a pick/younger return component needs to rescue the age-gap rule"),
+    # ── Fit-congruence signal weighting (D-TBD, no feature flag) ─────────
+    ("fit_k_explained_mult",     0.4,   "fit-congruence: K multiplier when the user's window already explains the swipe (like on a window-congruent card, pass on an anti-window one); 1.0 = kill switch, restores pre-D-TBD flat-K behavior"),
+    ("fit_k_defying_mult",       1.0,   "fit-congruence: K multiplier when the swipe defies the window (pass on a window-congruent card, like on an anti-window one); 1.0 = full baseline K, deliberately not boosted above it"),
     # ── Analytics platform P1 (docs/plans/analytics-platform/lld.md §3.4) ─
     ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
     ("obs_success_sample_n",     10.0,  "API observability (obs.api_events): record 1-in-N SUCCESSFUL api_call/api_request events (errors always recorded); 1 = record every call; cached 60s in api_observability"),
