@@ -7,7 +7,11 @@ import { Icon } from '../components/chalkline';
 import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { allowEspnNavigation } from '../utils/espnNavPolicy';
 import { deliverEspnCookies } from '../state/espnConnectBus';
-import { espnCredentialsRejected, storeEspnCredentials } from '../api/espn';
+import {
+  espnCredentialsRejected,
+  espnRejectionReason,
+  storeEspnCredentials,
+} from '../api/espn';
 import { track } from '../api/events';
 
 // ESPN Connect WebView — Phase 1b of ESPN league linking
@@ -130,15 +134,24 @@ export default function EspnConnectScreen() {
   const route = useRoute<any>();
   const sendMode: boolean = route.params?.reason === 'send';
   const [otpHint, setOtpHint] = useState(false);
-  // Send-mode store failure (credential-honesty fix, 2026-08-12): the
-  // backend now VERIFIES the captured pair against ESPN before storing, so
-  // a store can fail two distinguishable ways and neither may dead-end:
-  //   'rejected'    — ESPN refused the pair (403 espn_bad_credentials);
-  //                   nothing was saved. Retry = fresh sign-in in place.
-  //   'unreachable' — ESPN couldn't be reached to confirm (502 / network);
-  //                   nothing was saved, the pair may be fine. Retry =
-  //                   re-send the SAME captured pair.
-  const [storeFail, setStoreFail] = useState<null | 'rejected' | 'unreachable'>(null);
+  // Send-mode store failure (credential-honesty fix, 2026-08-12; identity
+  // binding #321, 2026-08-16): the backend VERIFIES the captured pair
+  // against ESPN before storing, so a store can fail three distinguishable
+  // ways and none may dead-end:
+  //   'rejected'      — ESPN refused the pair (403 espn_bad_credentials);
+  //                     nothing was saved. Retry = fresh sign-in in place.
+  //   'wrong_account' — the pair works but belongs to a DIFFERENT ESPN
+  //                     account than the one that owns this user's team
+  //                     (403 + reason:'wrong_account', #321). Nothing was
+  //                     saved. Retry = fresh sign-in, but the copy must
+  //                     name the real fix — "sign in again" alone would
+  //                     just re-capture the same wrong account.
+  //   'unreachable'   — ESPN couldn't be reached to confirm (502 /
+  //                     network); nothing was saved, the pair may be fine.
+  //                     Retry = re-send the SAME captured pair.
+  const [storeFail, setStoreFail] = useState<
+    null | 'rejected' | 'wrong_account' | 'unreachable'
+  >(null);
   // The last captured pair, kept for the 'unreachable' retry.
   const pairRef = useRef<{ espnS2: string; swid: string } | null>(null);
   // Wedge-detection hint (field report, build 95) — shown when a load
@@ -220,19 +233,44 @@ export default function EspnConnectScreen() {
       try {
         await storeEspnCredentials(pair.espnS2, pair.swid);
       } catch (err) {
+        // #321 R11 — the connect flow's failure signal (before this event
+        // a refused store was analytically invisible). Fired regardless of
+        // unmount: the server DID refuse. Never any cookie/credential prop.
+        const rejected = espnCredentialsRejected(err);
+        const reason = !rejected
+          ? 'unavailable'
+          : espnRejectionReason(err) === 'wrong_account'
+            ? 'wrong_account'
+            : 'bad_credentials';
+        track(
+          'espn_connect_store_rejected',
+          {
+            reason,
+            source: sendMode ? 'send_button' : 'link_sheet',
+            saw_otp: sawOtpRef.current,
+          },
+          'EspnConnect',
+        );
         if (unmountedRef.current) return;
-        setStoreFail(espnCredentialsRejected(err) ? 'rejected' : 'unreachable');
+        setStoreFail(
+          reason === 'unavailable'
+            ? 'unreachable'
+            : reason === 'wrong_account'
+              ? 'wrong_account'
+              : 'rejected',
+        );
         return;
       }
       if (!unmountedRef.current) navigation.goBack();
     },
-    [navigation],
+    [navigation, sendMode],
   );
 
-  // Retry for the banner. 'rejected' means the captured pair itself is bad:
-  // reset to a genuinely fresh sign-in (clear cookies, re-arm capture,
-  // reload — the same cold-start guarantees as mount). 'unreachable' means
-  // the pair was never judged: just re-send it.
+  // Retry for the banner. 'rejected' and 'wrong_account' (#321) both mean
+  // the captured pair itself must not be re-sent: reset to a genuinely
+  // fresh sign-in (clear cookies, re-arm capture, reload — the same
+  // cold-start guarantees as mount). 'unreachable' means the pair was
+  // never judged: just re-send it.
   const retryStore = useCallback(async () => {
     const mode = storeFail;
     setStoreFail(null);
@@ -395,7 +433,30 @@ export default function EspnConnectScreen() {
             </Text>
           </View>
         ) : null}
-        {storeFail ? (
+        {storeFail === 'wrong_account' ? (
+          /* #321 — distinct wrong-account state: the sign-in WORKED, but as
+             the wrong ESPN account, so the recovery copy must name the real
+             fix (the generic "sign in again" would just re-capture the same
+             wrong account). */
+          <View testID="espn-connect.wrong-account" style={styles.otpHint}>
+            <Text style={[type.bodySm, styles.otpHintText]}>
+              That ESPN account doesn’t own your team in your linked league,
+              so nothing was saved. Sign in with the ESPN account that owns
+              your team.
+            </Text>
+            <Pressable
+              testID="espn-connect.store-retry"
+              onPress={() => void retryStore()}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in with a different ESPN account"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={[type.bodySm, styles.retryLink]}>
+                Sign in with the right account
+              </Text>
+            </Pressable>
+          </View>
+        ) : storeFail ? (
           <View testID="espn-connect.store-error" style={styles.otpHint}>
             <Text style={[type.bodySm, styles.otpHintText]}>
               {storeFail === 'rejected'
