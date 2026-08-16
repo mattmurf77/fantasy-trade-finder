@@ -493,6 +493,8 @@
 | D-052 | Compressed Boards Are Fixed by Rescaling the Prune, Not by Rank-Normalising It or Disowning the Board | 2026-08-15 |
 | D-053 | A Narrative Sentence Names a Position and a Player From One Source, or Says Neither | 2026-08-15 |
 | D-054 | 1QB QB Cap Is a Value-Side Re-Pricing, Not a Label Cap | 2026-08-15 |
+| D-055 | Deck-Quality Bars Ratified; likes_you Gets a User-Gain Floor; s5.1 Fix Gates the Phase A Flip | 2026-08-15 |
+| D-056 | Maestro / Simulator Retired Entirely, Not Just as a Gate | 2026-08-15 |
 
 ---
 
@@ -574,4 +576,20 @@ For substantial decisions (large refactors, vendor changes, API surface changes)
 **Decision:** Compress the seed values. `1qb_ppr` QB values are re-priced post-blend / pre-Elo-map by an **order-preserving monotone piecewise-linear compression** (`data_loader._compress_qb_1qb_values`): identity at or below the knee, and above it the stretch up to the DP ceiling is squeezed onto the cap. Applied **last** in `_apply_consensus_blend` so KTC's rank-normalisation cannot lift a QB back over the cap. Knobs `qb_1qb_cap_elo` (default 1785, top of `first_1`) / `qb_1qb_cap_knee_elo` (default 1580, the `first_1` floor); either ≤ 0 restores the pre-#313 pipeline byte-for-byte without a deploy.
 **Alternatives considered:** *Collapse the `1qb_ppr.QB` tier bands so everything ≥ 1788 reads `first_1`* — rejected: elite QBs would keep *trading* like two firsts everywhere values are summed (fairness, eveners, deck composition) while only the badge changed, so the complaint would survive; and it forks a bright-line shared surface — `tierBands.ts` is one format/position-agnostic ladder, so a per-position band means a mobile mirror redesign, an invariants-doc change, and Quick Set losing reachable QB tiers. *Hard clamp `min(v, C)`* — rejected: it ties Allen/Maye/Daniels at the cap, and a draft board needs an order.
 **Consequences:** Top 1QB QBs drop from `firsts_2` to `first_1` (Allen 7025 → Elo ≈ 1734); ordering preserved across all 95 QBs, zero new ties; non-QB, sub-knee-QB, and `sf_tep` values byte-identical. One-time cosmetic effect: on the first post-ship pool build the top ~5 1QB QBs register as large fallers (≈ −48% for Allen) in the 30-day movers strip, then self-heal as the window rolls. The `ktc_blend_weight` byte-identity claim in `docs/config-reference.md` now also requires the #313 knobs off. Pinned by `backend/tests/test_qb_1qb_cap.py` (16 tests, incl. a shape pin a clamp fails and an entry-point pin through `_fetch_dynasty_process`).
+**Status:** Active.
+
+## D-055 — Deck-Quality Bars Ratified; likes_you Gets a User-Gain Floor; s5.1 Fix Gates the Phase A Flip
+**Date:** 2026-08-15 (operator, on the Phase A pre-flip gate results)
+**Context:** The open-access plan's Phase A gates ran for the first time (`docs/plans/open-access-phase-a-gates.md`). The deck-quality bars had only ever been "proposed" (`docs/plans/onboarding-conversion/plan.md` item 2) and the scoring half had never executed; the run also proved `s5.1` structurally unrenderable and found every insulting first-deck card is an ungated `likes_you` injection.
+**Decision:** (1) The deck-quality bars are **ratified as standing**: insult rate <3%, empty-deck <5%, insult scored with the **|Δ| ≥ 500 materiality floor** (the 2026-08-15 report's rule statement is the reference). (2) `_inject_likes_you_cards_impl` gains a **user-gain floor** (`likes_you_min_user_delta`, default −500) rather than turning `trade.likes_you` off — keep the engagement surface, kill the insults. (3) The `s5.1`/regen-diff fix (stale-deck read, UUID-based diff, deck doubling) is a **pre-flip condition** for Phase A — not waived.
+**Alternatives considered:** Flag `trade.likes_you` off for launch (coarse, removes the surface for existing users); shipping Phase A with the gate waived (launches with the aha-moment beat dead and its metric reading 0); no materiality floor (same data reads 3.70% and the gate flips to fail on trades users would shrug at).
+**Consequences:** Future deck evals are comparable to a fixed rule. The floor value itself is tuning (knob, not architecture). Phase A merge order became: fixes (PR #131, #132) → flag flip (PR #129) → operator TestFlight pass. All three merged 2026-08-15.
+**Status:** Active.
+
+## D-056 — Maestro / Simulator Retired Entirely, Not Just as a Gate
+**Date:** 2026-08-15 (operator, mid-Phase-A)
+**Context:** D-P1-08 retired the simulator *gate* (TestFlight became primary QA) but flows were still authored and occasionally run for evidence — the S-43 gate proof ran one that day. The operator's ruling, verbatim in substance: *"We don't need to do anything with maestro for this or going forward. It's unreliable and a waste of tokens."*
+**Decision:** No Maestro flow authoring, extension, or execution, and no simulator captures — for any change, in any pipeline. Automated evidence = structural `check-*.js` suites + unit tests; behavior that would have gotten a sim capture gets a written code-walk proof (file:line-cited commit-sequence trace); runtime proof, when it matters, is a concrete manual TestFlight checklist for the operator. `testid-lint` stays in CI. Existing `mobile/.maestro/` flows are historical artifacts — kept, never run. `FTF_SKIP_SIM_GATE=1` is the standing posture for the pre-push hook.
+**Alternatives considered:** Keeping Maestro for occasional high-stakes proofs (rejected by the operator — the S-43 run worked but cost a fresh sim build and a large token spend); deleting `mobile/.maestro/` (unnecessary; flows document intended behavior even unrun).
+**Consequences:** CLAUDE.md §Conventions feature-gates rewritten (items 2 and 4); `docs/runbook.md` § Pre-ship simulator gate banner-marked historical. Runtime regressions on mobile are now caught only by the operator's TestFlight passes — checklists must be specific enough to actually catch them. Plans/PRDs should stop budgeting Maestro work.
 **Status:** Active.

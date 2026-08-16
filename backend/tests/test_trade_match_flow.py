@@ -312,7 +312,7 @@ def test_inject_likes_you_skips_untouchable_give(mem_engine):
 
 
 # ---------------------------------------------------------------------------
-# (b2) D-047 — user-gain floor on the likes-you injection
+# (b2) D-055 — user-gain floor on the likes-you injection
 # ---------------------------------------------------------------------------
 # The 2026-08-15 Phase A deck-quality gate found that ALL eight insulting
 # first-deck cards were likes-you injections at deck position 1-3
@@ -363,7 +363,7 @@ def _inject_floor_deck(cards=None):
 
 
 def test_likes_you_floor_default_is_the_ratified_materiality_floor():
-    """D-047 ships the floor at -500 — the deck-eval materiality floor."""
+    """D-055 ships the floor at -500 — the deck-eval materiality floor."""
     assert ts_module._DEFAULT_CFG[_FLOOR_KEY] == -500.0
     assert server._likes_you_min_user_delta() == -500.0
 
@@ -410,14 +410,14 @@ def test_likes_you_floor_default_applies_when_knob_unset(mem_engine, monkeypatch
 
 def test_likes_you_floor_knob_override_respected(mem_engine, monkeypatch):
     """The threshold is tuning, not architecture: a very negative value
-    restores pre-D-047 behavior, and 0.0 rejects any negative-Δ like."""
+    restores pre-D-055 behavior, and 0.0 rejects any negative-Δ like."""
     with mem_engine.begin() as conn:
         _insert_bad_like(conn)
         _insert_mild_like(conn)
 
     monkeypatch.setitem(ts_module._cfg, _FLOOR_KEY, -1e9)
     deck = _inject_floor_deck()
-    assert len(deck) == 2, "floor off → both likes injected as before D-047"
+    assert len(deck) == 2, "floor off → both likes injected as before D-055"
 
     monkeypatch.setitem(ts_module._cfg, _FLOOR_KEY, 0.0)
     deck = _inject_floor_deck()

@@ -2830,7 +2830,7 @@ def _likes_you_min_user_delta() -> float:
     """model_config key 'likes_you_min_user_delta' (default -500.0), read
     through trade_service's live config dict — same pattern as
     _fuzzy_match_tau. The user-gain floor on the likes-you injection
-    (D-047). Defensive: a missing key or import problem can never break
+    (D-055). Defensive: a missing key or import problem can never break
     deck generation; it falls back to the ratified default."""
     try:
         from .trade_service import _cfg as _ts_cfg
@@ -2895,7 +2895,7 @@ def _inject_likes_you_cards_impl(
       already want this", not its score) and give it the same boost.
     - At most _LIKES_YOU_CAP injections; trades the user already swiped on
       (past_decision_keys) are skipped.
-    - D-047 user-gain floor: a like whose net consensus value for the
+    - D-055 user-gain floor: a like whose net consensus value for the
       VIEWER (receive − give, summed player values) is below
       model_config `likes_you_min_user_delta` (default -500) is not
       injected at all — neither flagged/boosted nor synthesized — and does
@@ -2957,7 +2957,7 @@ def _inject_likes_you_cards_impl(
         # Don't resurface a trade the user already swiped on.
         if (key[0], key[1]) in trade_service._past_decision_keys:
             continue
-        # D-047 — user-gain floor. The injection's pull is "they already
+        # D-055 — user-gain floor. The injection's pull is "they already
         # want this", but a like the VIEWER loses badly on reads as an
         # insult rather than an opportunity, and it lands at deck position
         # 1-3. The 2026-08-15 Phase A gate found all 8 insulting first-deck

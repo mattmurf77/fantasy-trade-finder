@@ -88,6 +88,11 @@ Port conflicts: macOS AirPlay Receiver uses :5000. Free it: `lsof -ti:5000 | xar
 
 ## Pre-ship simulator gate (2026-08-08)
 
+> **RETIRED (2026-08-15, D-056 — extending D-P1-08).** Maestro/simulator work is retired
+> **entirely**: no flow authoring, no runs, no captures, for any change. TestFlight is
+> primary QA; automated evidence is `check-*.js` suites + unit tests; `FTF_SKIP_SIM_GATE=1`
+> is the standing posture for the pre-push hook. Everything below is historical.
+
 `main` auto-deploys (Render) and feeds EAS → TestFlight, so the Maestro/simulator check
 sits **before merge/push to `main`**. CI cannot run the iOS simulator (no free macOS
 runner), so the run is local and the enforceable artifact is the **evidence**, not the

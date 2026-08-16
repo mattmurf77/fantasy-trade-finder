@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-15 (Open-access Phase A — SHIPPED: v2 onboarding is the default; likes_you floor; s5.1 fixed)
+
+- **Operator ratified the open-access plan** (`docs/business/product/2026-08-14-open-access-onboarding.md`, O-1…O-9 + D-055/D-056) and the whole train merged same-day: [#131](https://github.com/mattmurf77/fantasy-trade-finder/pull/131) `likes_you_min_user_delta` floor (all 8 insulting first-deck cards gone, measured 1.48%→0.37% w/ control) → [#132](https://github.com/mattmurf77/fantasy-trade-finder/pull/132) S-43 fix: content-based late-bound regen diff + deck clear (**`s5.1` renders for the first time in repo history**; doubled-deck bug fixed) → [#129](https://github.com/mattmurf77/fantasy-trade-finder/pull/129) six flags true; v2 flow is the product, not an experiment overlay. `main` @ `0d8d7bb`.
+- **Pre-flip gates ran for the first time** (`docs/plans/open-access-phase-a-gates.md`): deck-eval scoring half had never executed; S-43 proven FAIL then fixed. Deck-quality bars ratified as standing (D-055).
+- **Maestro/simulator retired entirely** (D-056; CLAUDE.md + runbook updated). TestFlight is the only runtime proof path.
+- **Owed:** operator TestFlight pass (5-step check) + runtime retirement of `onboarding_v2_rollout` (runbook procedure). P1-9 gained the counterparty-basis clause G10 (PRD §11) for Phase B.
+- **Ledger note:** this session's first D-numbering used a stale checkout (D-047/D-048) and collided with device-auth's; renumbered to D-055/D-056 in the same docs commit (G-048).
+
 ## 2026-08-15 (#313 — 1QB QB values cap at "1 1st", SHIPPED + deploy-verified)
 
 - **Value-side re-pricing, not a label cap** ([D-054](DECISIONS.md)). The operator reported 1QB QBs reading "2 1sts"; the label derives client-side from the served Elo, so the fix compresses `1qb_ppr` QB **seed values** post-blend / pre-Elo-map — order-preserving monotone piecewise-linear, applied **last** in `_apply_consensus_blend` so KTC rank-normalisation can't lift a QB back over. Allen/Maye/Lamar drop `firsts_2` → `first_1`; order preserved across all 95 QBs, zero new ties; non-QB, sub-knee-QB, and `sf_tep` byte-identical. Tier bands and every client mirror untouched — no ladder fork.

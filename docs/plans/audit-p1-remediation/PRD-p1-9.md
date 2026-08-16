@@ -380,3 +380,44 @@ in the CHANGELOG regardless.
 | **B5** | **[P-2](#7-operator-parameter-gates), [P-3](#7-operator-parameter-gates), [P-4](#7-operator-parameter-gates), [P-5](#7-operator-parameter-gates), [P-6](#7-operator-parameter-gates) answered.** All build-blocking. | Open |
 | **B6** | **Extraction parity (AC-23) proven clean**, or the documented fallback taken and recorded. | Open — build-time judgement |
 | **B7** | **Two shared-code changes need reviewer assent**, both P1-9-owned but cross-cutting: `_freq_cap_blocks` non-exclusivity (LLD C1) and `_send_typed_push`'s return status (LLD C4). Both are inert for existing kinds and both are asserted (AC-24, AC-25). | Open — engineering, not operator |
+
+---
+
+## 11. Amendment (2026-08-15) — the counterparty-basis clause
+
+**Origin:** the open-access onboarding plan
+([`docs/business/product/2026-08-14-open-access-onboarding.md`](../../business/product/2026-08-14-open-access-onboarding.md)
+§B-4), whose decisions **O-1…O-9 the operator ratified 2026-08-15**. O-7 directs this
+clause into P1-9 **at build time** — one predicate now versus a migration later.
+
+**What changes:** the gate gains a **tenth conjunctive clause**, same shape as the nine in
+[`LLD-p1-9.md` §3](LLD-p1-9.md#3-the-nine-gate-clauses-as-evaluable-predicates):
+
+> **G10 — counterparty basis.** The liking leaguemate has passed the basis milestone for
+> the league's scoring format — today, their ranking state is `unlocked`. (After the
+> open-access plan's Phase B, "unlocked" is relabeled "the board is theirs"; the threshold
+> machinery and this predicate are unchanged.)
+
+**Why it must land in the initial build, not after:** today the clause is **vacuously
+true** — a user cannot like a trade without having passed the ranking wall, so G10 changes
+zero behaviour and costs one predicate. When Phase B un-gates access (O-2, ratified),
+consensus-basis users can like from minute one, and a `trade_found` push triggered by a
+consensus-basis like is exactly the diluted "revealed intent" this gate exists to exclude.
+Retrofit would mean re-deriving basis for historical likes; building it now means the seam
+already exists when it starts binding.
+
+**Mechanics, matching the PRD's own patterns:**
+
+- A **ninth `model_config` knob**: `trade_found_require_counterparty_basis`, default **1**
+  (`PUT /api/admin/config`-changeable, no deploy — same as the eight in LLD §8.1).
+- A dry-run/tick-response counter `blocked_counterparty_basis`, beside the existing
+  `blocked_*` counters, so the dry-run window measures the clause's bite before it ever
+  suppresses a real push.
+- **No schema change, no taxonomy change** — the basis read is the existing per-format
+  unlock state; the counter lives in the pass response, not in an analytics event.
+- One pytest AC in the §6 style: flag ON, dry run off, one otherwise-qualifying candidate
+  whose liker is *not* past the milestone → 0 pushes, `blocked_counterparty_basis == 1`;
+  knob set to 0 → the same candidate pushes.
+
+**Explicitly out of P1-9's scope** (Phase B, eng-backend): basis-*weighted* like ranking in
+mutual matching, and the grading-lane evidence ladder. G10 is the only P1-9 obligation.

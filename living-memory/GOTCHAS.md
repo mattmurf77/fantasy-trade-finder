@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-048 | Next living-memory ID computed from a stale checkout collides on main | Living-memory / concurrent sessions |
 | G-047 | "no checks reported" on a PR reads as a pass to a naive poller | CI / gh / merge gating |
 | G-046 | A follow-up PR off a squash-merged branch is born CONFLICTING | Git / squash-merge / branch hygiene |
 | G-045 | A whole league-mate silently missing from the deck, not just their cards | Backend / trade engine / pool prune |
@@ -399,3 +400,8 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Fix:** require the rollup to be **non-empty** as a separate clause — `[ "$(… | length)" -ge 1 ] && [ "$(… pending … | length)" = "0" ]` — and assert the conclusions are `SUCCESS`, not merely that nothing is `IN_PROGRESS`.
 - **Prevention:** the general shape of this bug is trusting an absence as evidence of a pass. Same family as [G-036](GOTCHAS.md) (a prop key survives while its *value* is silently scrubbed) and the analytics `no_identity` false-pass. When a check reports "nothing wrong", confirm it actually looked.
 
+### G-048 — next living-memory ID computed from a stale checkout collides on main
+- **Symptom:** two different decisions both called D-047 — one on `origin/main` (device-auth defaults, 2026-08-13), one minted in a session whose checkout branch's DECISIONS.md topped out at D-046. The collision shipped: merged PR code comments and a `model_config` seed description cited the wrong decision, and had to be renumbered post-merge (D-055/D-056, 2026-08-15).
+- **Cause:** "next ID = max existing + 1 — grep first" was run against the checked-out branch's copy of the file. This repo runs many concurrent sessions; the checkout is routinely days stale, and living-memory files advance on `main` between sessions.
+- **Fix:** compute IDs against **`origin/main` after a fetch** — `git fetch origin && git show origin/main:living-memory/DECISIONS.md | grep -oE '^## D-[0-9]+' | sort -V | tail -1` — never against the working tree or checkout branch.
+- **Prevention:** same discipline for every ID'd file (D-/G-/M-/Q-). If the working tree's copy of an ID'd file differs from `origin/main`'s, the working tree is not evidence of anything.

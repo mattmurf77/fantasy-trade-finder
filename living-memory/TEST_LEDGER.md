@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-15 — Open-access Phase A: gates run, fixes built, ALL SHIPPED (PRs #131, #132, #129)
+
+- **Context:** operator ratified O-1…O-9 of `docs/business/product/2026-08-14-open-access-onboarding.md`, then D-055/D-056. Merge order: likes_you floor (#131) → s5.1 fix (#132) → flag flip (#129), all squash-merged to `main` 2026-08-15 (tip `0d8d7bb`). Full gate report: `docs/plans/open-access-phase-a-gates.md`. Still owed by the operator: the 5-step TestFlight check (gate report § Manual TestFlight check) and the deploy-day experiment retirement (`docs/runbook.md` § Retiring the onboarding experiment overlay).
+- **Gate (a) — deck-quality eval: PASS** (first-ever execution of the scoring half — the 2026-07-17 report's insult columns were never filled). 9 prod Sleeper leagues, 108 first-run sims, prod Postgres read-only. Empty-deck 0.0% (<5%), insult 1.48% (<3%, |Δ|≥500 floor — bars ratified as standing, D-055). All 8 insulting cards were ungated `likes_you` injections → fixed by #131.
+- **Gate (b) — S-43 `s5.1`: FAIL, then fixed.** Maestro walk (run pre-D-056) captured `s5-0` despite real tier saves + completed regen; root cause code-verified and independently re-read: the diff effect nulled `pendingRegenRef` on the status-flip commit while reading the pre-regen `deck` — `fresh` structurally 0, `s5.1` never rendered in repo history. Adjacent: per-generation UUID `trade_id` (naive fix would count identical packages as new) and the post-Quick-Set doubled deck.
+- **#131 (likes_you floor):** suite 2817 passed / 1 skipped; CI green; eval re-run on preserved prod mirror **with floor-off control**: all 8 insults gone, 1.48% → 0.37% (residual 2 organic, present in control — Thompson-sampling noise); worst surviving injection Δ −486. Knob `likes_you_min_user_delta` (−500), seeded in `_MODEL_CONFIG_DEFAULTS`.
+- **#132 (s5.1 fix):** content-based `tradePackageKey` diff over `job.cards`, late-bound to the forced job id; deck cleared on regen (kills doubling). `tsc` 0; `check-s51-regen-diff.js` **32/32** (re-run by reviewer; sabotage-verified 3 ways); CI green. **`s5.1` rendered for the first time** — sim runs completed before D-056 landed captured it on both chip-walk ("6 new trades…") and all-skip; evidence `qa/sim-runs/2026-08-15-s51-fix/` (gitignored, per-machine). **Standing caveat:** engine stochasticity means an all-skip walk can honestly celebrate small N (measured: 1 of 31 packages differed with zero saves) — the operator's all-skip check may legitimately see `new_trades: 1`. Copy nit at N=1 ("1 new trades") flagged, unshipped.
+- **#129 (flip):** six flags true (five `onboarding.*` + `landing.try_before_sync`); fixture mirrors + rewritten pin test (reviewer re-ran 76/76); suite 2811/1 on branch; retirement of `onboarding_v2_rollout` is a **runtime operator action post-deploy** — procedure + stale-overlay hazard analysis in the runbook section above.
+
+---
+
 ## 2026-08-15 — #313 1QB QB cap (SHIPPED, PR #128, deploy-verified)
 
 - **Change:** backend-only — `backend/data_loader.py` gains `_compress_qb_1qb_values` (order-preserving piecewise-linear compression of `1qb_ppr` QB seed values, applied last in `_apply_consensus_blend`) + `seed_value_for_elo` inverse; `backend/database.py` seeds `qb_1qb_cap_elo=1785` / `qb_1qb_cap_knee_elo=1580`. [D-054](DECISIONS.md), scope block [`docs/feedback/items/313-1qb-qb-cap/scope.md`](../docs/feedback/items/313-1qb-qb-cap/scope.md).

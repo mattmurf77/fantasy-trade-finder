@@ -2,7 +2,7 @@
 // S-43 — the post-Quick-Set reveal (`s5.1` celebrate / `s5.0` honest null).
 //
 // Pins the three defects proved in docs/plans/open-access-phase-a-gates.md
-// § Gate (b) and ratified for fix by living-memory/DECISIONS.md D-047:
+// § Gate (b) and ratified for fix by living-memory/DECISIONS.md D-055:
 //
 //   1  STALE-DECK READ. The diff effect used to count against `deck`, which
 //      on the commit where job.status flips to 'complete' is still the

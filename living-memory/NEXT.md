@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Open-access Phase A SHIPPED; B/C queued](#2026-08-15--open-access-phase-a-shipped-bc-queued)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122)
 - [2026-08-15 — Co-owned roster follow-on](#2026-08-15--co-owned-roster-follow-on)
 - [2026-08-14 — Year-in-Review capture follow-ons](#2026-08-14--year-in-review-capture-follow-ons)
@@ -18,6 +19,15 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-15 — Open-access Phase A SHIPPED; B/C queued
+
+Operator ratified **O-1…O-9** of [`../docs/business/product/2026-08-14-open-access-onboarding.md`](../docs/business/product/2026-08-14-open-access-onboarding.md); Phase A merged to `main` 2026-08-15 (PRs #131 → #132 → #129, tip `0d8d7bb`). Maestro retired entirely (D-056).
+
+1. **Operator: TestFlight pass on the flipped first-run** *(next EAS build)* — the 5-step `s5.1` check in [`../docs/plans/open-access-phase-a-gates.md`](../docs/plans/open-access-phase-a-gates.md) § Manual TestFlight check; note an all-skip walk may honestly celebrate small N (engine stochasticity, see TEST_LEDGER).
+2. **Operator: retire `onboarding_v2_rollout`** post-deploy — runbook § Retiring the onboarding experiment overlay (discover → snapshot → stop → decide → verify).
+3. **Phase B build** (grading lane, new Elo inputs, `member_rankings` publish gate; coordinates the counterparty-basis clause G10 already appended to [`../docs/plans/audit-p1-remediation/PRD-p1-9.md`](../docs/plans/audit-p1-remediation/PRD-p1-9.md) §11) → eng-backend per plan §11. **Phase C** (platform door) after the notification batch.
+4. Copy nit: `analystScript.ts` `s5_1` reads "1 new trades" at N=1 — newly reachable, one-line fix, fold into any mobile batch.
 
 ## 2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)
 
