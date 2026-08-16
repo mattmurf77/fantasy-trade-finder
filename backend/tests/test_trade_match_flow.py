@@ -34,6 +34,7 @@ from sqlalchemy import create_engine, select, text
 
 import backend.database as db_module
 import backend.server as server
+import backend.trade_service as ts_module
 from backend.database import (
     check_for_match,
     log_trade_impressions,
@@ -308,6 +309,135 @@ def test_inject_likes_you_skips_untouchable_give(mem_engine):
 
     assert len(deck) == 1
     assert deck[0].give_player_ids == ["g2"]
+
+
+# ---------------------------------------------------------------------------
+# (b2) D-047 — user-gain floor on the likes-you injection
+# ---------------------------------------------------------------------------
+# The 2026-08-15 Phase A deck-quality gate found that ALL eight insulting
+# first-deck cards were likes-you injections at deck position 1-3
+# (docs/plans/open-access-phase-a-gates.md § Gate (a)). The floor blocks a
+# like whose net consensus value for the VIEWER (receive - give, summed
+# player values — the deck eval's own arithmetic) is below model_config
+# `likes_you_min_user_delta` (default -500).
+#
+# Seed Elos below map through trade_service.elo_to_value
+# (1000 * exp(0.005 * (elo - 1500))) to:
+#   STAR  1900 -> ~7389    MID   1500 -> 1000
+#   SCRAP 1300 ->  ~368    NEAR  1450 ->  ~779
+# so give=[STAR]/receive=[SCRAP] is Δ ≈ -7021 (blocked at the default) and
+# give=[MID]/receive=[NEAR] is Δ ≈ -221 (negative but immaterial, passes).
+
+_FLOOR_KEY = "likes_you_min_user_delta"
+
+STAR_ELO, SCRAP_ELO, MID_ELO, NEAR_ELO = 1900.0, 1300.0, 1500.0, 1450.0
+
+# The user gives g*, receives r*. "bad" = star out, scrap back.
+_BAD_SEED  = {"g_star": STAR_ELO, "r_scrap": SCRAP_ELO}
+_MILD_SEED = {"g_mid": MID_ELO,   "r_near": NEAR_ELO}
+_FLOOR_SEED = {**_BAD_SEED, **_MILD_SEED}
+_FLOOR_IDS  = list(_FLOOR_SEED)
+_MY_ROSTER  = ["g_star", "g_mid"]
+_OPP_ROSTER = ["r_scrap", "r_near"]
+
+
+def _insert_bad_like(conn):
+    """OPP liked: they give r_scrap, they receive g_star. Mirrored, the user
+    gives their star and gets scraps back — Δ ≈ -7021."""
+    _insert_like(conn, OPP, LEAGUE, give_ids=["r_scrap"], recv_ids=["g_star"])
+
+
+def _insert_mild_like(conn):
+    """Mirrored Δ ≈ -221 — negative, but below the materiality floor, so the
+    floor must leave it alone."""
+    _insert_like(conn, OPP, LEAGUE, give_ids=["r_near"], recv_ids=["g_mid"])
+
+
+def _inject_floor_deck(cards=None):
+    return server._inject_likes_you_cards(
+        cards=list(cards or []), trade_service=_mk_trade_service(_FLOOR_IDS),
+        user_id=ME, league_id=LEAGUE,
+        league=_mk_league(my_roster=_MY_ROSTER, opp_roster=_OPP_ROSTER),
+        user_roster=_MY_ROSTER, seed_map=dict(_FLOOR_SEED),
+    )
+
+
+def test_likes_you_floor_default_is_the_ratified_materiality_floor():
+    """D-047 ships the floor at -500 — the deck-eval materiality floor."""
+    assert ts_module._DEFAULT_CFG[_FLOOR_KEY] == -500.0
+    assert server._likes_you_min_user_delta() == -500.0
+
+
+def test_likes_you_floor_blocks_below_threshold_injection(mem_engine):
+    """A like the viewer loses ~7021 consensus value on is not injected at
+    all — no synthesized card, and no cap slot consumed, so the mild like
+    still takes the slot."""
+    with mem_engine.begin() as conn:
+        _insert_bad_like(conn)
+        _insert_mild_like(conn)
+
+    deck = _inject_floor_deck()
+
+    assert len(deck) == 1, "only the above-floor like may be injected"
+    assert deck[0].give_player_ids == ["g_mid"]
+    assert deck[0].likes_you is True
+
+
+def test_likes_you_floor_passes_above_threshold_injection(mem_engine):
+    """The floor removes bad-for-viewer injections, not merely-negative
+    ones: Δ ≈ -221 is above the -500 floor and still surfaces."""
+    with mem_engine.begin() as conn:
+        _insert_mild_like(conn)
+
+    deck = _inject_floor_deck()
+
+    assert len(deck) == 1
+    assert deck[0].likes_you is True
+    assert deck[0].give_player_ids == ["g_mid"]
+    assert deck[0].receive_player_ids == ["r_near"]
+
+
+def test_likes_you_floor_default_applies_when_knob_unset(mem_engine, monkeypatch):
+    """With no model_config row at all the inline -500 default still gates —
+    a missing key can never silently reopen the insult path."""
+    monkeypatch.delitem(ts_module._cfg, _FLOOR_KEY, raising=False)
+    with mem_engine.begin() as conn:
+        _insert_bad_like(conn)
+
+    assert server._likes_you_min_user_delta() == -500.0
+    assert _inject_floor_deck() == []
+
+
+def test_likes_you_floor_knob_override_respected(mem_engine, monkeypatch):
+    """The threshold is tuning, not architecture: a very negative value
+    restores pre-D-047 behavior, and 0.0 rejects any negative-Δ like."""
+    with mem_engine.begin() as conn:
+        _insert_bad_like(conn)
+        _insert_mild_like(conn)
+
+    monkeypatch.setitem(ts_module._cfg, _FLOOR_KEY, -1e9)
+    deck = _inject_floor_deck()
+    assert len(deck) == 2, "floor off → both likes injected as before D-047"
+
+    monkeypatch.setitem(ts_module._cfg, _FLOOR_KEY, 0.0)
+    deck = _inject_floor_deck()
+    assert deck == [], "floor at 0 → every net-negative like blocked"
+
+
+def test_likes_you_floor_leaves_existing_card_unboosted(mem_engine):
+    """When the mirrored package is already in the generated deck, a
+    below-floor like must not flag or boost it — the card keeps its organic
+    score and position instead of being pinned to the top."""
+    with mem_engine.begin() as conn:
+        _insert_bad_like(conn)
+
+    equivalent = _mk_card(give=["g_star"], recv=["r_scrap"], composite=2.0)
+    better     = _mk_card(give=["g_mid"],  recv=["r_near"],  composite=9.0)
+    deck = _inject_floor_deck(cards=[better, equivalent])
+
+    assert deck == [better, equivalent], "deck returned untouched"
+    assert getattr(equivalent, "likes_you", False) is False
+    assert equivalent.composite_score == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------

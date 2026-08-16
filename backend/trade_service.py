@@ -382,6 +382,14 @@ _DEFAULT_CFG: dict[str, float] = {
     "cycle_max_results":          3.0,   # max 3-team cycles returned per league
     # Tier 2 (2.3b) — fuzzy mirror matching tolerance (consumed by server)
     "fuzzy_match_tau":            0.8,   # Jaccard threshold per side
+    # Tier 2 (2.3a) — likes-you user-gain floor (D-047, consumed by server).
+    # Minimum net consensus value (receive − give, summed player values in
+    # v2 value space) the VIEWER must clear for a leaguemate's liked trade
+    # to be mirrored into their deck. -500 = the ratified deck-eval
+    # materiality floor: a like the viewer loses more than 500 of consensus
+    # value on is an insult, not an opportunity. Set very negative to
+    # restore pre-D-047 behavior (no floor).
+    "likes_you_min_user_delta": -500.0,
     # Deck composition (verified against real data 2026-06-09)
     "v3_diversity_max_overlap":   0.4,   # max asset Jaccard between two cards of one pair
     "consensus_score_scale":      0.3,   # consensus fallback cards rank below divergence finds
