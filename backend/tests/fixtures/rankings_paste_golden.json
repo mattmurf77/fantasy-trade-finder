@@ -1,0 +1,158 @@
+{
+  "_comment": "Golden output of backend.rankings_import.match_rank_list on the paste corpus, captured from the pre-hint-extension implementation (2026-08-15). The text/paste path must stay byte-identical.",
+  "corpus": [
+    "Rank,Player,Pos,Team",
+    "1. Josh Allen",
+    "2) Ja'Marr Chase",
+    "3\tKenneth Walker III\tRB\tSEA",
+    "4,CeeDee Lamb,WR,DAL",
+    "5 Marvin Harrison Jr. WR ARI",
+    "",
+    "6. C.J. Stroud",
+    "7 K. Walker RB",
+    "Lamar Jackson",
+    "   ",
+    "9,Nobody Realname,WR,FA",
+    "10\tCEEDEE LAMB\tWR",
+    "123",
+    "Player\tPos\tTeam",
+    "11. Ja'Marr Chase WR CIN"
+  ],
+  "golden": [
+    {
+      "candidates": [],
+      "input": "1. Josh Allen",
+      "name": "Josh Allen",
+      "player": {
+        "id": "p_allen",
+        "name": "Josh Allen",
+        "position": "QB",
+        "team": "BUF"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "2) Ja'Marr Chase",
+      "name": "Ja'Marr Chase",
+      "player": {
+        "id": "p_chase",
+        "name": "Ja'Marr Chase",
+        "position": "WR",
+        "team": "CIN"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "3\tKenneth Walker III\tRB\tSEA",
+      "name": "Kenneth Walker",
+      "player": {
+        "id": "p_walker",
+        "name": "Kenneth Walker III",
+        "position": "RB",
+        "team": "SEA"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "4,CeeDee Lamb,WR,DAL",
+      "name": "CeeDee Lamb",
+      "player": {
+        "id": "p_lamb",
+        "name": "CeeDee Lamb",
+        "position": "WR",
+        "team": "DAL"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "5 Marvin Harrison Jr. WR ARI",
+      "name": "Marvin Harrison Jr.",
+      "player": {
+        "id": "p_mhj",
+        "name": "Marvin Harrison Jr.",
+        "position": "WR",
+        "team": "ARI"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "6. C.J. Stroud",
+      "name": "C.J. Stroud",
+      "player": {
+        "id": "p_stroud",
+        "name": "C.J. Stroud",
+        "position": "QB",
+        "team": "HOU"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "7 K. Walker RB",
+      "name": "K. Walker",
+      "player": {
+        "id": "p_walker",
+        "name": "Kenneth Walker III",
+        "position": "RB",
+        "team": "SEA"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [
+        {
+          "id": "p_lj_qb",
+          "name": "Lamar Jackson",
+          "position": "QB",
+          "team": "BAL"
+        },
+        {
+          "id": "p_lj_wr",
+          "name": "Lamar Jackson",
+          "position": "WR",
+          "team": "FA"
+        }
+      ],
+      "input": "Lamar Jackson",
+      "name": "Lamar Jackson",
+      "player": null,
+      "status": "ambiguous"
+    },
+    {
+      "candidates": [],
+      "input": "9,Nobody Realname,WR,FA",
+      "name": "Nobody Realname",
+      "player": null,
+      "status": "unmatched"
+    },
+    {
+      "candidates": [],
+      "input": "10\tCEEDEE LAMB\tWR",
+      "name": "CEEDEE LAMB",
+      "player": {
+        "id": "p_lamb",
+        "name": "CeeDee Lamb",
+        "position": "WR",
+        "team": "DAL"
+      },
+      "status": "matched"
+    },
+    {
+      "candidates": [],
+      "input": "11. Ja'Marr Chase WR CIN",
+      "name": "Ja'Marr Chase",
+      "player": {
+        "id": "p_chase",
+        "name": "Ja'Marr Chase",
+        "position": "WR",
+        "team": "CIN"
+      },
+      "status": "matched"
+    }
+  ]
+}
