@@ -72,7 +72,8 @@ _bh = _BufferHandler()
 _bh.setFormatter(logging.Formatter("%(levelname)s  %(message)s"))
 log.addHandler(_bh)
 from .ranking_service import RankingService, Player, TIER_CONFIG, ORDERED_TIERS
-from .data_loader import load_consensus_maps, seed_elo_for_players, normalise_name
+from .data_loader import (load_consensus_maps, seed_elo_for_players,
+                          seed_elo_for_value, normalise_name)
 from .database import (
     init_db,
     upsert_user, upsert_league,
@@ -9459,7 +9460,27 @@ def get_league_picks():
         supported = has_assigned_picks(league_id)
     try:
         raw = load_draft_picks(league_id=league_id, source=_pick_read_source())
+        # #320 (D-320-1, supersedes #263's "picks stay numeric") — additive
+        # `tier` per pick row: the pick-value ladder rung its DISCOUNTED
+        # `pool_value` sits in TODAY, so calculator surfaces can badge picks
+        # the same way they badge players. `seed_elo_for_value` inverts the
+        # value map back onto the tier bands' Elo scale before the canonical
+        # `tier_for_elo` band walk — never `pool_value` passed straight in
+        # (elo_to_value scale ≠ tier-band Elo scale, the exact #263 bug).
+        # Position None takes the bands' documented general-pool fallback;
+        # pick value is position-uniform by design (tier_config.json). A
+        # consequence the operator accepted (D-320-2): a far-out pick's
+        # badge reflects its discounted price — a 2028 2nd may badge 3rd.
+        # NULL pool_value → null tier; clients fall back to the numeric.
+        fmt = sess.get("active_format") or DEFAULT_SCORING
+        def _pick_tier(p: dict):
+            v = p.get("pool_value")
+            if v is None:
+                return None
+            return RankingService.tier_for_elo(
+                seed_elo_for_value(float(v)), None, fmt)
         all_picks = [{**p, "label": _owned_pick_label(p),
+                      "tier": _pick_tier(p),
                       **_pick_wire_source(p, tradeable)} for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
         return jsonify({
@@ -21007,12 +21028,14 @@ def _position_medians(teams: list[dict]) -> dict[str, dict]:
        property the design leans on for odd counts: an odd league leaves
        exactly one team sitting ON the median, an even one leaves none.
        Rounded to 1dp like every other value on this wire.
-    3. **`value_label` is UNGATED.** The per-team `value_label` under `#279`
-       rides the operator-only `aggregate_tier_labels` experiment, but
-       `_aggregate_pick_label` is a pure function of the value with no
-       experiment dependency — it is read directly here. A divider that
-       rendered a label for the operator and a blank for everyone else would
-       be worse than no divider.
+    3. **`value_label` is UNGATED.** When this shipped, the per-team
+       `value_label` under `#279` rode the operator-only
+       `aggregate_tier_labels` experiment, but `_aggregate_pick_label` is a
+       pure function of the value with no experiment dependency — it is read
+       directly here. A divider that rendered a label for the operator and a
+       blank for everyone else would be worse than no divider. (That gate is
+       gone: #306/D-306-1 graduated the experiment on 2026-08-16, so the
+       per-team labels are now ungated too — this field led the way.)
 
     SUBSET SCOPE — the All subset ONLY. `teams[].positions[P].value` is the
     whole-roster positional subtotal; the client's Starters/Bench subsets are
@@ -21119,43 +21142,48 @@ def league_power_rankings_route():
         _me = _league_user_id(sess)
         for t in teams:
             t["is_you"] = (t["user_id"] == _me)
-        # #279 — aggregate_tier_labels experiment (operator-only rollout;
-        # docs/feedback/items/279-aggregate-tier-labels/status.md, mirrors
-        # the onboarding_v2_rollout precedent: an account-unit experiment
-        # targeted via `is_tester_allowlist`, weighted 0/10000 so a captured
-        # unit is always `treatment`). Only the RESOLVING caller's own
-        # assignment matters here — this is per-request labeling of a
-        # league-shared aggregate, not a per-league toggle. When targeted,
-        # each team additionally carries `total_value_label` and a
+        # #279 → GRADUATED #306 (D-306-1, operator 2026-08-16) — the
+        # aggregate pick-equivalent labels shipped behind the operator-only
+        # `aggregate_tier_labels` experiment now emit UNCONDITIONALLY for
+        # every caller: each team carries `total_value_label` and a
         # `value_label` per core position (the SAME value→pick-equivalent
         # formula already live as "a Late 2nd" on trade cards, applied to a
-        # raw aggregate instead of a gap — see _aggregate_pick_label).
-        # Non-targeted callers (everyone but the allowlisted operator today)
-        # get no new keys at all — byte-identical to pre-#279.
+        # raw aggregate instead of a gap — see _aggregate_pick_label). The
+        # experiment ran since #279 with #285 and #300-D6 both pushing the
+        # same direction; #306 was a tester bug FILED AGAINST the control
+        # arm (raw numerics on the calculator's partner chips), and the #300
+        # medians divider already ships the identical label ungated on the
+        # same screen — the control arm had become the defect. The
+        # experiment record itself is retired via the admin lifecycle
+        # (stop → decide, docs/feedback/items/279-aggregate-tier-labels/
+        # status.md §runbook); this code simply no longer consults it.
         #
-        # #285 (docs/feedback/items/285-pick-sums/status.md) — the operator's
-        # bug against this same experiment: `total_value_label` now folds in
-        # each team's owned picks via a literal count (1st = 1.0 firsts,
-        # 2nd = 1/3.5 firsts, 3rd+ = 0), NOT their dollar-priced pool_value.
-        # The base is `positions_value` (players only), never `total_value`
-        # (which already includes picks' dollar value) — adding the literal
-        # count on top of that would double-count draft capital. `total_value`
-        # itself is UNCHANGED: it drives `teams.sort` inside
-        # compute_power_rankings (rank order), the drill-in's raw-number
-        # fallback, and every non-experiment consumer, so touching it would
-        # both leak the experiment to non-treatment callers and reshuffle
-        # rank for the treatment caller too. Positional `value_label`s stay
-        # position-scoped and never receive a pick contribution — picks
-        # aren't tied to a position.
-        from . import experiments as _experiments_mod
-        if _experiments_mod.variant_for(g_user_id, "aggregate_tier_labels") == "treatment":
-            for t in teams:
-                pick_firsts = _pick_firsts_equivalent(
-                    picks_by_owner.get(t["user_id"]) or [])
-                t["total_value_label"] = _aggregate_pick_label(
-                    t["positions_value"], pick_firsts)
-                for _pv in t["positions"].values():
-                    _pv["value_label"] = _aggregate_pick_label(_pv["value"])
+        # #285 (docs/feedback/items/285-pick-sums/status.md) —
+        # `total_value_label` folds in each team's owned picks via a literal
+        # count (1st = 1.0 firsts, 2nd = 1/3.5 firsts, 3rd+ = 0), NOT their
+        # dollar-priced pool_value. The base is `positions_value` (players
+        # only), never `total_value` (which already includes picks' dollar
+        # value) — adding the literal count on top of that would double-count
+        # draft capital. `total_value` itself is UNCHANGED: it drives
+        # `teams.sort` inside compute_power_rankings (rank order), the
+        # drill-in's raw-number fallback, and every other consumer.
+        # Positional `value_label`s stay position-scoped and never receive a
+        # pick contribution — picks aren't tied to a position.
+        #
+        # #306 (D-306-2) — `picks.value_label`: the draft-capital group's own
+        # label, the SAME #285 literal count expressed alone (value base 0.0)
+        # — NEVER a conversion of the dollar-priced `picks.value` (that is
+        # precisely the #285 bug re-introduced one key over). A team whose
+        # picks are all 3rd+ round honestly labels "≈0 firsts"; the client
+        # keeps its own count>0 gate for whether the segment renders at all.
+        for t in teams:
+            pick_firsts = _pick_firsts_equivalent(
+                picks_by_owner.get(t["user_id"]) or [])
+            t["total_value_label"] = _aggregate_pick_label(
+                t["positions_value"], pick_firsts)
+            for _pv in t["positions"].values():
+                _pv["value_label"] = _aggregate_pick_label(_pv["value"])
+            t["picks"]["value_label"] = _aggregate_pick_label(0.0, pick_firsts)
         # League Analyzer replication (2026-07-26): per-team `starters` is
         # the DERIVED value-optimal lineup (optimal_starters over the
         # league's slot template — no per-week lineup data). The client's

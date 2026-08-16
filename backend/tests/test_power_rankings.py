@@ -701,14 +701,16 @@ def test_rank_chip_espn_league_no_picks(client):
     assert chip["rank"] in (1, 2)
 
     # ESPN leagues carry no draft_picks rows — full payload shows the empty
-    # picks group rather than erroring.
+    # picks group rather than erroring. #306/D-306-2: the group's
+    # `value_label` is an honest "≈0 firsts", never a missing key.
     with patch.object(server, "load_league_members",
                       lambda lid: espn_members if lid == espn_league else []):
         code2, full = _get(client,
                            f"/api/league/power-rankings?league_id={espn_league}")
     assert code2 == 200
     for t in full["teams"]:
-        assert t["picks"] == {"count": 0, "value": 0.0, "items": []}
+        assert t["picks"] == {"count": 0, "value": 0.0, "items": [],
+                              "value_label": "≈0 firsts"}
 
 
 # ── #277/#278 — additive per-player `tier` on roster rows ───────────────────
@@ -752,16 +754,17 @@ def test_route_roster_rows_carry_canonical_tier(client):
 
 
 # ---------------------------------------------------------------------------
-# #279 — aggregate_tier_labels experiment: operator-only pick-equivalent
-# labels on TEAM/POSITIONAL aggregates (docs/feedback/items/
-# 279-aggregate-tier-labels/status.md). Mirrors the onboarding_v2_rollout
-# precedent — an account-unit experiment targeted via `is_tester_allowlist`,
-# weighted 0/10000 control/treatment so a captured unit is always
-# `treatment`. DB isolation for the experiment row mirrors
-# test_analytics_p3.py's in-memory-sqlite pattern; this file's own `client`
-# fixture deliberately does NOT patch db.engine, because the route's
-# experiments call is fail-open by design and untargeted/no-experiment reads
-# must never touch the real db.
+# #279 → #306 — aggregate pick-equivalent labels on TEAM/POSITIONAL
+# aggregates. Shipped 2026-08-09 behind the operator-only
+# `aggregate_tier_labels` experiment (docs/feedback/items/
+# 279-aggregate-tier-labels/status.md); GRADUATED 2026-08-16 (#306,
+# D-306-1): the route no longer consults the experiment and every caller
+# gets the labels. The experiment-engine test below is kept as an ENGINE
+# test (targeting semantics of an is_tester_allowlist 0/10000 experiment —
+# the row may still exist in prod until the operator runs stop → decide);
+# the ROUTE tests pin the graduated, ungated contract, including under a
+# still-running experiment with a non-targeted caller — the exact state
+# that used to withhold the keys (re-gate sabotage trap).
 # ---------------------------------------------------------------------------
 
 def _mk_aggregate_experiment(engine):
@@ -808,37 +811,46 @@ def test_aggregate_labels_assignment_is_operator_only(exp_engine, monkeypatch):
     assert ex.variant_for("someone_else", "aggregate_tier_labels") is None
 
 
-def test_route_labels_present_for_allowlisted_caller_only(client, exp_engine, monkeypatch):
-    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")
+def test_positional_value_labels_ungated(client, exp_engine, monkeypatch):
+    """#306 graduation (D-306-1), re-gate sabotage trap: a caller who is NOT
+    on the tester allowlist, reading while the `aggregate_tier_labels`
+    experiment is still RUNNING — the exact state in which #279 withheld the
+    keys — gets `value_label` on every team's every core position, plus
+    `total_value_label`, all in the `≈N firsts` format. Wrapping the
+    emission back in a `variant_for(...) == "treatment"` check fails this
+    on the missing keys."""
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")   # u_b is NOT listed
     _mk_aggregate_experiment(exp_engine)
     ex.invalidate_cache()
-    _install_sess(_mk_sess(user_id="u_a"))
+    _install_sess(_mk_sess(user_id="u_b"))
     code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
     assert code == 200
     a = next(t for t in body["teams"] if t["user_id"] == "u_a")
     b = next(t for t in body["teams"] if t["user_id"] == "u_b")
 
-    # Allowlisted caller's OWN request carries labels on every team in the
-    # payload (per-request labeling of a league-shared aggregate, not a
-    # per-team toggle) — conversion correctness vs the reused formula.
-    # #285: the team TOTAL label is positions_value's firsts PLUS the
-    # operator's literal pick count (u_a owns a 2026 1st + a 2027 2nd →
-    # 1.0 + 1/3.5 firsts; u_b owns only a 2026 3rd → 0 firsts), never
-    # `total_value` (which prices those same picks in dollar space).
+    # #285 math carried through graduation unchanged: the team TOTAL label
+    # is positions_value's firsts PLUS the literal pick count (u_a owns a
+    # 2026 1st + a 2027 2nd → 1.0 + 1/3.5 firsts; u_b owns only a 2026 3rd
+    # → 0 firsts), never `total_value` (dollar-priced picks, double count).
     assert a["total_value_label"] == _aggregate_pick_label(
         a["positions_value"], 1.0 + 1 / 3.5)
     assert b["total_value_label"] == _aggregate_pick_label(
         b["positions_value"], 0.0)
-    for team in (a, b):
-        # Positional subtotals stay position-scoped — no pick contribution.
+    for team in body["teams"]:
         for pos, pv in team["positions"].items():
+            # Positional subtotals stay position-scoped — no pick
+            # contribution — and every label is a real `≈N firsts` string.
             assert pv["value_label"] == _aggregate_pick_label(pv["value"])
+            assert pv["value_label"].startswith("≈")
+            assert pv["value_label"].endswith(" firsts")
 
 
-def test_route_byte_identical_for_non_allowlisted_caller(client, exp_engine, monkeypatch):
-    """A non-allowlisted caller reading under a RUNNING experiment gets a
-    response byte-identical (same JSON, no new keys anywhere) to the same
-    request with no experiment running at all — the #279 binding guarantee."""
+def test_route_labels_identical_with_and_without_experiment(client, exp_engine, monkeypatch):
+    """Graduated code consults the experiment NOWHERE: the payload for a
+    non-targeted caller under a running experiment is byte-identical —
+    labels INCLUDED — to the same request with no experiment row at all.
+    (Pre-graduation this test asserted byte-identical absence; the invariant
+    survived the flip, only the shared contract changed.)"""
     monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")   # u_b is NOT listed
     _mk_aggregate_experiment(exp_engine)
     ex.invalidate_cache()
@@ -846,9 +858,7 @@ def test_route_byte_identical_for_non_allowlisted_caller(client, exp_engine, mon
     code_running, body_running = _get(
         client, f"/api/league/power-rankings?league_id={LEAGUE}")
     assert code_running == 200
-    assert all("total_value_label" not in t for t in body_running["teams"])
-    assert all("value_label" not in pv
-               for t in body_running["teams"] for pv in t["positions"].values())
+    assert all("total_value_label" in t for t in body_running["teams"])
 
     # Baseline: identical request, fresh empty experiments DB (no row at
     # all) — proves the payload is byte-identical either way.
@@ -863,11 +873,75 @@ def test_route_byte_identical_for_non_allowlisted_caller(client, exp_engine, mon
             client, f"/api/league/power-rankings?league_id={LEAGUE}")
     ex.invalidate_cache()
     assert code_base == 200
-    # `updated_at` is a fresh compute timestamp each call (unrelated to
-    # #279) — compare everything else byte-for-byte.
+    # `updated_at` is a fresh compute timestamp each call — compare
+    # everything else byte-for-byte.
     body_running.pop("updated_at", None)
     body_base.pop("updated_at", None)
     assert body_running == body_base
+
+
+# #306 D-306-2 — `picks.value_label` fixture where the literal-count label
+# and a (wrong) dollar-space conversion of `picks.value` provably DIFFER:
+# two current-season 2nds → literal 2/3.5 firsts → "≈0.5 firsts", while
+# their summed dollar pool_value converts to "≈1 firsts". (The module-level
+# PICK_ROWS fixture collides on this distinction — 1st+2nd lands on
+# "≈1.5 firsts" both ways — so it cannot catch the dollar-space sabotage.)
+_PICKS_306 = [
+    {"pick_id": f"{LEAGUE}_2026_2_1", "league_id": LEAGUE, "season": 2026,
+     "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
+     "is_traded": 0, "original_username": "alice",
+     "pool_value": pick_pool_value(2, 0)},
+    {"pick_id": f"{LEAGUE}_2026_2_2", "league_id": LEAGUE, "season": 2026,
+     "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
+     "is_traded": 1, "original_username": "bob",
+     "pool_value": pick_pool_value(2, 0)},
+    {"pick_id": f"{LEAGUE}_2026_3_2", "league_id": LEAGUE, "season": 2026,
+     "round": 3, "owner_user_id": "u_b", "owner_username": "bob",
+     "is_traded": 0, "original_username": "bob",
+     "pool_value": pick_pool_value(3, 0)},
+]
+
+
+def test_picks_value_label_literal_count(client):
+    """#306 D-306-2: each team's `picks.value_label` is the #285 literal
+    pick count expressed alone (1st = 1.0, 2nd = 1/3.5, 3rd+ = 0; value
+    base 0.0) — never a conversion of the dollar-priced `picks.value`.
+    Dollar-space sabotage trap: computing the label from `picks.value`
+    yields "≈1 firsts" for u_a here, not the literal "≈0.5 firsts"."""
+    with patch.object(server, "load_draft_picks",
+                      lambda league_id=None, **kw:
+                      [dict(p) for p in _PICKS_306]
+                      if league_id == LEAGUE else []):
+        _install_sess(_mk_sess())
+        code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    b = next(t for t in body["teams"] if t["user_id"] == "u_b")
+
+    assert a["picks"]["value_label"] == "≈0.5 firsts"          # 2/3.5 → 0.57
+    assert a["picks"]["value_label"] == _aggregate_pick_label(0.0, 2 / 3.5)
+    # The trap has teeth: the dollar-space conversion provably disagrees.
+    assert _aggregate_pick_label(a["picks"]["value"]) == "≈1 firsts"
+    assert a["picks"]["value_label"] != _aggregate_pick_label(a["picks"]["value"])
+
+    # A 3rd-round-only holding honestly labels zero (never a missing key —
+    # the client's count>0 gate decides whether the segment renders).
+    assert b["picks"]["value_label"] == "≈0 firsts"
+
+    # And the dollar-priced `picks.value` itself is untouched.
+    assert a["picks"]["value"] == round(2 * pick_pool_value(2, 0), 1)
+
+
+def test_picks_value_label_present_with_default_fixture(client):
+    """The module fixture path too (u_a: 1st + 2nd → 1.0 + 1/3.5 → ≈1.5;
+    u_b: a lone 3rd → ≈0) — no experiment, plain client, ungated."""
+    _install_sess(_mk_sess())
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    b = next(t for t in body["teams"] if t["user_id"] == "u_b")
+    assert a["picks"]["value_label"] == _aggregate_pick_label(0.0, 1.0 + 1 / 3.5)
+    assert b["picks"]["value_label"] == "≈0 firsts"
 
 
 def test_aggregate_pick_label_reuses_pick_gap_equivalent_firsts():
@@ -1049,25 +1123,26 @@ def test_route_serves_medians_unflagged_with_correct_labels(client):
                          else (vals[mid - 1] + vals[mid]) / 2.0, 1)
         assert body["medians"][pos]["value"] == expected
         assert body["medians"][pos]["value_label"] == _label_of(expected)
-    # ...while the #279 per-team labels stay experiment-gated and absent.
-    assert all("value_label" not in pv
+    # ...and post-graduation (#306/D-306-1) the per-team labels ride along
+    # ungated too — medians led, the team keys followed.
+    assert all("value_label" in pv
                for t in body["teams"] for pv in t["positions"].values())
 
 
 def test_route_medians_label_ungated_for_non_allowlisted_caller(
         client, exp_engine, monkeypatch):
     """De-gating proof, part 2: with the `aggregate_tier_labels` experiment
-    RUNNING and the caller NOT targeted — the exact state in which #279's
-    per-team `value_label` is withheld — `medians[P].value_label` is still a
-    real label. A divider that renders a label for the operator and a blank
-    for everyone else is worse than no divider."""
+    RUNNING and the caller NOT targeted, `medians[P].value_label` is a real
+    label. Historically this pinned the divider's deliberate gate bypass;
+    post-graduation (#306/D-306-1) the per-team labels are ungated too, so
+    both assertions now point the same direction."""
     monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "u_a")   # u_b is NOT listed
     _mk_aggregate_experiment(exp_engine)
     ex.invalidate_cache()
     _install_sess(_mk_sess(user_id="u_b"))
     code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
     assert code == 200
-    assert all("value_label" not in pv
+    assert all("value_label" in pv
                for t in body["teams"] for pv in t["positions"].values())
     for pos in ("QB", "RB", "WR", "TE"):
         vals = sorted(t["positions"][pos]["value"] for t in body["teams"])
