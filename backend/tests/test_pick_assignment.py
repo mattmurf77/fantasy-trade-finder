@@ -211,6 +211,10 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     "_assignment_slots",         # server.py  — the assignment screen's payload
     "_assignment_grid",          # server.py  — the ESPN board's grid
     "pick_assignment_put_route", # server.py  — the prior-owner read for audit
+    # #328 — the MFL mock-draft ownership overlay. A LITERAL platform read on
+    # purpose: MFL sync rows are platform truth and must never follow the
+    # `picks.assign_tradeable` flag (user-asserted rows are ESPN's path).
+    "_mock_owned_pick_overlay",  # server.py  — MFL mock traded-pick overlay
 })
 
 #: Everything allowed to name `source=` at all: the seven engine read sites

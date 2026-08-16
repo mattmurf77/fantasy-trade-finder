@@ -1223,15 +1223,18 @@ def test_w2_20_g1_the_real_order_and_traded_picks_come_off_the_lakeview_corpus(
 
 def test_w2_20_g1_a_non_sleeper_league_stays_randomized_rather_than_guessing(
         flag_on, session, monkeypatch):
-    """MFL's grid states the CURRENT owner and never the original, so it cannot
-    tell a slot order from an ownership overlay. Reading it would produce an
-    "order" that is really a trade log — so the mock stays randomized and says
-    so, which is KD-6 applied to a second platform."""
+    """MFL states ownership but no slot SEQUENCE, so `_mock_real_draft`'s
+    order half stays the honest empty — randomized-and-labelled, KD-6 applied
+    to a second platform. (#328 moved MFL's OWNERSHIP overlay to the create
+    route's `_mock_owned_pick_overlay` step and added the `ownership_source`
+    disclosure — `backend/tests/test_mock_pick_ownership.py` owns that
+    surface.)"""
     monkeypatch.setattr(server, "get_league_draft_context",
                         lambda lid: {"platform": "mfl", "season": 2026})
     real = server._mock_real_draft(session, "mfl-league", 2026)
     assert real == {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
-                    "traded_slots": {}, "type": None}
+                    "traded_slots": {}, "type": None,
+                    "ownership_source": mds.OWNERSHIP_SOURCE_NONE}
 
 
 def test_w2_20_g1_traded_slots_become_pick_ownership_and_move_the_clock():
@@ -3081,7 +3084,8 @@ def test_295_17_the_event_family_is_registered_with_its_intent_class():
     assert not ({"mock_started", "mock_pick_made", "mock_abandoned"}
                 & NON_INTENT_EVENTS)
     assert CLIENT_EVENT_PROPS["mock_started"] == frozenset(
-        {"platform", "teams", "rounds", "type", "order_source", "mode"})
+        {"platform", "teams", "rounds", "type", "order_source", "mode",
+         "ownership_source"})     # #328 — resolved overlay provenance (T-10)
     assert CLIENT_EVENT_PROPS["mock_pick_made"] == frozenset(
         {"platform", "mode", "round", "pick_no", "for_own_team"})
     assert CLIENT_EVENT_PROPS["mock_completed"] == frozenset(
