@@ -525,24 +525,41 @@ def test_t6_unknown_platform_stays_none(
 # W2d/G1 suite in test_mock_draft.py)
 # ---------------------------------------------------------------------------
 
+#: The recorded Lakeview league + the operator id its assigned order names —
+#: same constants the W2d/G1 suite uses.
+LAKEVIEW = "1312076055586050048"
+OPERATOR = "313560442465169408"
+
+
 def test_t7_sleeper_full_coverage_board_labels_platform(
-        flags_on, mem_db, monkeypatch, tmp_path):
-    """T-7 (R-9), label half. Sabotage: SAB-F."""
+        client, flags_on, mem_db, monkeypatch, tmp_path):
+    """T-7 (R-9), label half — the regression half is the unchanged W2d/G1
+    suite. Sabotage: SAB-F (the route-level echo assertion is what reaches
+    build_settings' returned dict)."""
     from backend.tests.support.draft_replay import DraftReplay
     sess = _install_session(monkeypatch, tmp_path, platform="sleeper",
-                            league_id="1312076055586050048",
+                            league_id=LAKEVIEW,
                             members=["a", "b", "c", "d", "e"])
+    sess["user_id"] = OPERATOR      # slot 6 of the recorded assigned order
+    sess["display_name"] = "Operator"
     dbs.reset_cache()
     DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
     try:
-        real = server._mock_real_draft(sess, "1312076055586050048", 2026, 4)
+        real = server._mock_real_draft(sess, LAKEVIEW, 2026, 4)
         assert real["order_source"] == mds.ORDER_SOURCE_ASSIGNED
         assert real["order"] and len(real["order"]) == 12
         # 12 teams x 4 rounds, a row per slot ⇒ full coverage ⇒ "platform".
         assert real["ownership_source"] == mds.OWNERSHIP_SOURCE_PLATFORM
         # A mock DEEPER than the board's 4 recorded rounds is honest too.
-        deeper = server._mock_real_draft(sess, "1312076055586050048", 2026, 6)
+        deeper = server._mock_real_draft(sess, LAKEVIEW, 2026, 6)
         assert deeper["ownership_source"] == mds.OWNERSHIP_SOURCE_PARTIAL
+        # …and the label survives build_settings into the echo (SAB-F's red).
+        _abandon(OPERATOR, LAKEVIEW)
+        body = _post(client, league_id=LAKEVIEW, rounds=4,
+                     rng_seed=7).get_json()
+        assert not body.get("empty"), body
+        assert body["settings_echo"]["ownership_source"] == "platform"
+        _abandon(OPERATOR, LAKEVIEW)
     finally:
         dbs.reset_cache()
         with server._sessions_lock:
