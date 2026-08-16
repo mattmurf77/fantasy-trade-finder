@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-16 — #189 deck relaxed-disclosure chip: PR #135 green, awaiting operator merge](#2026-08-16--189-deck-relaxed-disclosure-chip-pr-135-green-awaiting-operator-merge)
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122-flags-live)
 - [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)
@@ -25,6 +26,38 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 ---
+
+## 2026-08-16 — #189 deck relaxed-disclosure chip: PR #135 green, awaiting operator merge
+
+### Where I am right now
+
+Deck trade cards silently dropped the #189 `relaxed`/`relaxed_reason` fields
+(normalizer discarded them; only `AssetIdeasPanel` disclosed). Built the full
+chain — `TradeCard` type + `normalizeTradeCard` pass-through + "STRETCH —
+OUTSIDE YOUR FAIRNESS BAND" chip (wildcard-chip construction, testID
+`trade-card.relaxed-chip`) — on branch `claude/peaceful-keller-de2832`
+(worktree `peaceful-keller-de2832`), deliberately touching neither
+`TradesScreen.tsx` (G4/330-offer-prefill owns it this wave) nor
+`AssetIdeasPanel.tsx`.
+
+**[PR #135](https://github.com/mattmurf77/fantasy-trade-finder/pull/135) is
+open with all 3 CI checks green** (backend-tests, mobile-typecheck,
+testid-lint). The merge itself was blocked by this session's permission
+classifier — **operator: squash-merge #135**. Ship record already written
+(CHANGELOG + TEST_LEDGER 2026-08-16 entries rode the PR).
+
+### What's next after merge
+
+1. Recovery-ledger sweep of branch `claude/peaceful-keller-de2832` (tip
+   `566cdc2`): verify by content vs `origin/main` per `docs/recovery/CLAUDE.md`,
+   ledger, then delete branch + remove the worktree.
+2. Operator TestFlight spot-check (next build): pin an unrealistic targeted
+   ask → deck falls back relaxed → every card shows the STRETCH chip.
+   Checklist in `docs/feedback/items/189-always-offer-fallback/scope-deck-disclosure.md`.
+
+### Blocking
+
+Nothing besides the merge click.
 
 ## 2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)
 
