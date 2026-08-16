@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-15 (Guided Onboarding v2 Phase 0+1 — built dark behind `onboarding.guide_v2`)
+
+- **The Analyst tour gains a machine-enforced eligibility layer + 8 new beats**, built from the 7-round dual-agent PRD (`docs/plans/guided-onboarding-v2/`) + the operator's O-1…O-7 decisions, by 6 Opus build agents across 2 waves, orchestrator-reviewed line-by-line. Ships **dark** (`onboarding.guide_v2: false` = v1 behavior graph); graduation = operator TestFlight checklist (`docs/plans/guided-onboarding-v2/testflight-checklist.md`) + first-cohort diagnostics.
+- **Engine (FR-E2…E10):** GuideStep carries retireAfter/maxDisplayCount/invalidateOn/adoptionEvent/degrade contract, CI-linted (`check-guide-script.js`, 228 asserts); guide claims the interrupt slot; suppression + spotlight-degrade instrumented; v1-upgrader release cap; client-receipt rule (server-fired events never drive retirement — D-059).
+- **Beats:** N1 calibration reframe · N2 two-form outlook re-aim · N4 pin-targets on the summary card · N6.1 first-like router ("they haven't seen it yet" — honest copy) · **N8 import question** (O-6: upload/DLF-DN entry vs Trios) · N9 Matches first-visit · N5 league divider · s3.2→RankHome re-route; s7.1 cut (fired pointing at an unmountable target in prod); full copy pass incl. the softened s2.1 claim + s5.1 plural fix.
+- **Coupling note:** N8 routes to RankHome's import *entry* — becomes the premium chooser automatically when `feat/premium-import-v1` (D-057/D-058, unmerged) lands. D-numbering: this session used **D-059**, skipping the import branch's claimed 057/058.
+- **Verified:** tsc 0 · all `check-*.js` green (now CI-wired) · testid-lint OK · backend 2838/1. **Owed:** operator TestFlight walk; Phase 2 (N6.2, N3, N5 spotlights, N7 trios rung, MFL/ESPN attempt events) waits on Phase-1 gates.
+
 ## 2026-08-15 (Open-access Phase A — SHIPPED: v2 onboarding is the default; likes_you floor; s5.1 fixed)
 
 - **Operator ratified the open-access plan** (`docs/business/product/2026-08-14-open-access-onboarding.md`, O-1…O-9 + D-055/D-056) and the whole train merged same-day: [#131](https://github.com/mattmurf77/fantasy-trade-finder/pull/131) `likes_you_min_user_delta` floor (all 8 insulting first-deck cards gone, measured 1.48%→0.37% w/ control) → [#132](https://github.com/mattmurf77/fantasy-trade-finder/pull/132) S-43 fix: content-based late-bound regen diff + deck clear (**`s5.1` renders for the first time in repo history**; doubled-deck bug fixed) → [#129](https://github.com/mattmurf77/fantasy-trade-finder/pull/129) six flags true; v2 flow is the product, not an experiment overlay. `main` @ `0d8d7bb`.

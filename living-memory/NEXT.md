@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-15 — Guided Onboarding v2 built dark; graduation + Phase 2 queued](#2026-08-15--guided-onboarding-v2-built-dark-graduation--phase-2-queued)
 - [2026-08-15 — Open-access Phase A SHIPPED; B/C queued](#2026-08-15--open-access-phase-a-shipped-bc-queued)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122)
 - [2026-08-15 — Co-owned roster follow-on](#2026-08-15--co-owned-roster-follow-on)
@@ -19,6 +20,15 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-15 — Guided Onboarding v2 built dark; graduation + Phase 2 queued
+
+Phase 0+1 merged dark behind `onboarding.guide_v2: false` (see CHANGELOG + `docs/plans/guided-onboarding-v2/`).
+
+1. **Operator: TestFlight checklist for guide-v2** *(next EAS build, flag on for your device)* — [`../docs/plans/guided-onboarding-v2/testflight-checklist.md`](../docs/plans/guided-onboarding-v2/testflight-checklist.md); graduation to default-true hangs on it.
+2. **Phase 2 build after graduation:** N6.2 awaiting-send spotlight, N3 mutual-match walkthrough, N5/N7 spotlights, `trades.send-control.guide` per-instance registration, MFL/ESPN send-attempt events (retirement fails closed on those platforms until then).
+3. **When `feat/premium-import-v1` merges:** N8's Upload arm becomes the premium chooser automatically; flip nothing, but re-run checklist walk A-4.
+4. Item 4 below (s5.1 "1 new trades" copy nit) — **DONE in this build** (plural fix shipped in the script pass); drop it at next hygiene pass.
 
 ## 2026-08-15 — Open-access Phase A SHIPPED; B/C queued
 

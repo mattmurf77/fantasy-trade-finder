@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-15 — Guided Onboarding v2 Phase 0+1 (built dark, merged; TestFlight walk OWED)
+
+- **Context:** full gates (scope block `docs/plans/guided-onboarding-v2/scope.md`; Maestro n/a per D-056). Built dark behind `onboarding.guide_v2: false` — flag-off asserted as the v1 behavior graph (s6.1 toast + s2.3 restored on the flag-off arm by orchestrator review; copy trims + s7.1/s3.1 cuts ship unconditionally, documented in D-059).
+- **Automated evidence:** `tsc --noEmit` 0 · `mobile/tests/check-guide-script.js` NEW, 228 assertions, sabotage-verified 4 ways (un-trimmed copy / plural fix removed / s7.1 revived / retirement dropped → all RED) · `check-s51-regen-diff.js` 32/32 after TradesScreen edits · all `mobile/tests/check-*.js` now run in CI · `testid-lint.sh` OK · backend pytest **2838 passed / 1 skipped** (taxonomy round-trips for 5 new events + spotlight prop; flag fixture mirrors ×5).
+- **Code-walk proofs (in PRD/commit messages):** N6.1 gate evaluated in `swipeMutation.onSuccess` (like-time prefetch would race the POST); s6.2+Apple chain behind N6.1 completion with consume-only-on-successful-show; regen bus source guard (trios/import returns can't burn the `quickset_save` Apple class or mislabel `deck_regenerated.position`).
+- **OWED (blocking graduation, not merge):** operator TestFlight checklist — 16 walks incl. both N8 arms, flag-off regression, v1-upgrader, `guideDismissed` zero-bubbles (`docs/plans/guided-onboarding-v2/testflight-checklist.md`).
+
 ## 2026-08-15 — Open-access Phase A: gates run, fixes built, ALL SHIPPED (PRs #131, #132, #129)
 
 - **Context:** operator ratified O-1…O-9 of `docs/business/product/2026-08-14-open-access-onboarding.md`, then D-055/D-056. Merge order: likes_you floor (#131) → s5.1 fix (#132) → flag flip (#129), all squash-merged to `main` 2026-08-15 (tip `0d8d7bb`). Full gate report: `docs/plans/open-access-phase-a-gates.md`. Still owed by the operator: the 5-step TestFlight check (gate report § Manual TestFlight check) and the deploy-day experiment retirement (`docs/runbook.md` § Retiring the onboarding experiment overlay).
