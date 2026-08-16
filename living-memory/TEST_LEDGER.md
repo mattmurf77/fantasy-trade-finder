@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-16 — #189 deck relaxed-disclosure chip (PR #135)
+
+- **Change:** mobile-only — `TradeCard` type + `normalizeTradeCard` pass-through of `relaxed`/`relaxed_reason` + STRETCH disclosure chip on deck cards (`trade-card.relaxed-chip`). No backend change (field shipped + tested in `test_relaxed_fallback.py` since #189).
+- **Automated evidence:** new `mobile/tests/check-relaxed-disclosure.js` **14/14** (`npm run test:relaxed-disclosure`, CI-wired via the check-suite glob) — types/normalizer/chip/wording/single-owner chain; the normalizer cases are *executed* unit tests (trades.ts transpiled with a stubbed `./client`): relaxed+reason survive, absent stays absent, `relaxed:'yes'` and non-string reason degrade. `testid-lint.sh` OK. `tsc --noEmit`: only the pre-existing `expo-document-picker` resolution miss (#133 dep; local main-checkout `node_modules` stale — not this diff; CI installs fresh).
+- **Maestro/sim:** n/a per [D-056]. Code-walk proof: chip reuses `styles.wildcardChip` verbatim (already shipped + visually verified); only the guard (`data.relaxed === true`) and label differ.
+- **Owed:** operator TestFlight spot-check (scope block § Test scope): pin an unrealistic targeted ask so the deck falls back relaxed → every card shows the STRETCH chip; ordinary decks unchanged.
+
 ## 2026-08-15 — Fit-congruence signal weighting SHIPPED (PR #134)
 
 - **Change:** `6f293f4` — swipe-signal K scaled by fit-congruence ([D-060](DECISIONS.md)): `signed_lane_shift` extracted from `classify_lane` (byte-identical, pinned incl. the `total <= 0` corner), `TradeCard.lane_shift` stamped unconditionally, `fit_congruence_mult` applied at the swipe route to BOTH the in-memory signal and the **persisted `k_factor`** — the build agent caught that `_compute_elo` replays `swipe_decisions` rows, so an in-memory-only mult would have reverted boards to flat K on every deploy. Reviewer verified the replay claim and the serializer allow-list (no client leak).
