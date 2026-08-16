@@ -2,6 +2,18 @@
 
 *Role: an-experiment · 2026-07-18 · Status: validated locally end-to-end; awaiting prod deploy + launch*
 
+> **RETIRED (2026-08-15) — superseded by open-access Phase A.** The operator ratified
+> [`../product/2026-08-14-open-access-onboarding.md`](../product/2026-08-14-open-access-onboarding.md)
+> O-1: the v2 flow ships as the **product default**, not an experiment arm, because the
+> A/B this doc designs can never be powered at a 3–5 user base (plan §4, T5). The five
+> onboarding flags plus `landing.try_before_sync` are now `true` in `config/features.json`
+> and are themselves the revert lever. **The Graduation section below is therefore dead —
+> there is no v2 powered test.** The runtime retirement procedure (stop → decide → verify,
+> and why a stale running overlay is a real hazard even when its flag values match) is
+> [`../../runbook.md` § Retiring the onboarding experiment overlay](../../runbook.md#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15).
+> The measurement seam replacing the A/B is the plan's §8 pre/post directional read.
+> **Everything below is preserved as the historical record of the rollout.**
+
 ## Hypothesis & primary metric
 
 Value-first onboarding (username-first landing → trades-first hook → contextual Quick Set → save-moment Apple ask; docs/plans/onboarding-conversion/plan.md v2.1) raises **activation_rate** (first swipe in session 1) versus the current sign-in-first flow.

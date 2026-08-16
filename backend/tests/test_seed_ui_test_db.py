@@ -790,33 +790,40 @@ def _flags(name: str) -> dict:
 
 def test_onboarding_v2_flags_are_release_plus_the_onboarding_surface():
     """capture-matrix-signoff.md's operator directive: the Analyst onboarding
-    experience IS captured, under a dedicated flag fixture. A diff of the two
-    files must therefore BE the onboarding surface and nothing else."""
+    experience IS captured, under a dedicated flag fixture.
+
+    **Open-access Phase A (2026-08-15, docs/business/product/
+    2026-08-14-open-access-onboarding.md §5) inverted this fixture's job.**
+    The five onboarding-surface flags it used to force ON are now the RELEASE
+    default, so the diff is no longer "release + the onboarding surface" — the
+    only value this fixture still overrides is `onboarding.league_autoskip`,
+    held OFF so onboarding capture scene S1.1 stays reachable. The assertion
+    is kept (rather than deleted with the fixture) because it is what would
+    catch a future revert of the Phase A flip silently un-capturing the flow."""
     release, onboarding = _flags("release"), _flags("onboarding-v2")
     assert set(release) == set(onboarding)
     differing = {k for k in release if release[k] != onboarding[k]}
-    # Verified against the flow source — NOT "every onboarding.* key". Pinned
-    # exactly, because two of the values below are counter-intuitive.
-    assert differing == {
-        "onboarding.landing",
-        "landing.try_before_sync",
-        "onboarding.trades_first",
-        "onboarding.quickset_prompt",
-        "onboarding.apple_save_moment",
-    }
-    assert all(onboarding[k] is True for k in differing)
-    # Already true in release, and load-bearing: onboarding.v2 is the master
-    # kill-switch — a sub-feature is live iff BOTH it and its own flag are on.
+    # The ONLY deliberate divergence post-Phase-A. FALSE on purpose: the
+    # `fresh` profile has ONE league, and autoskip would jump the picker —
+    # making onboarding scene S1.1 unreachable.
+    assert differing == {"onboarding.league_autoskip"}
+    assert onboarding["onboarding.league_autoskip"] is False
+    assert release["onboarding.league_autoskip"] is True
+    # Phase A: the onboarding surface is now on in BOTH files. Asserted on
+    # `release` too, so a revert of the flip fails here loudly instead of
+    # quietly reverting what this fixture captures.
+    for k in ("onboarding.landing", "onboarding.trades_first",
+              "onboarding.quickset_prompt", "onboarding.apple_save_moment"):
+        assert release[k] is True and onboarding[k] is True, k
+    # onboarding.v2 is the master kill-switch — a sub-feature is live iff BOTH
+    # it and its own flag are on.
     assert onboarding["onboarding.v2"] is True
     assert onboarding["onboarding.guided_avatar"] is True
     # THE LAUNCH PAIRING (config/features.json _comment_onboarding): without
     # landing.try_before_sync the backend's /api/session/demo 404s and the
-    # landing's demo link is a dead end.
+    # landing's demo link is a dead end. True in release as of Phase A.
+    assert release["landing.try_before_sync"] is True
     assert onboarding["landing.try_before_sync"] is True
-    assert onboarding["onboarding.landing"] is True
-    # FALSE on purpose: the `fresh` profile has ONE league, and autoskip would
-    # jump the picker — making onboarding scene S1.1 unreachable.
-    assert onboarding["onboarding.league_autoskip"] is False
 
 
 # ---------------------------------------------------------------------------

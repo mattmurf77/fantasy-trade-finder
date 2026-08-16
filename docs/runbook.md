@@ -53,6 +53,7 @@ Operational procedures. Add to this as you learn things.
 - [Quick Set unlock backfill (P0-1, 2026-08-11)](#quick-set-unlock-backfill-p0-1-2026-08-11)
 - [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
+- [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 
 ---
 
@@ -497,6 +498,94 @@ A `ftf-test-apple:` token hitting a production server is rejected as a malformed
 - **Device ids rotate.** `config/tester_allowlist.json` carries them (entries use the `device:` prefix; the header does not). The device pseudo-id is minted client-side into SecureStore, so a reinstall that clears the keychain rotates it. The file exists because Render does not apply `render.yaml` `envVars` to a dashboard-created service (observed 2026-07-19).
 - **`reseed-layers` refuses once any experiment has assigned a unit** — run it *before* launching, never after.
 - **Rollback is one call:** transition the experiment to `stopped`. No flag default changes, no deploy.
+
+## Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)
+
+**Context.** [`business/product/2026-08-14-open-access-onboarding.md`](business/product/2026-08-14-open-access-onboarding.md) §5 Phase A (operator-ratified, O-1): the built v2 onboarding flow ships as the **default**, so `onboarding.landing`, `onboarding.trades_first`, `onboarding.league_autoskip`, `onboarding.quickset_prompt`, `onboarding.apple_save_moment` and `landing.try_before_sync` are now **true in `config/features.json`**. Item 2 of that phase: *"the flow stops being an experiment overlay and becomes the product. The flags stay as revert levers."*
+
+**Nothing in this section is a code change.** Experiments live in the DB (`experiments` table, created via the CRON-gated admin routes), so retirement is a **runtime operator action** performed against prod *after* the Phase A deploy.
+
+### First, the correctness question: what does a stale running experiment do once the flags are globally true?
+
+Short answer: **for `onboarding_v2_rollout` v1 as specified it is a value-level no-op, but it is NOT inert** — it keeps polluting analytics, and the overlay mechanism is fully capable of overriding a `true` flag back to `false`. Retire it rather than leave it running. Mechanics, cited:
+
+1. **The server never mixes experiments into the flag map.** `GET /api/feature-flags` returns `{"flags": flags_dict(), "experiments": …, "configs": …}` (`backend/server.py:18510-18514`). `flags_dict()` is the global map; the per-unit variant data rides alongside it, untouched.
+2. **The client merge is an unconditional overwrite, not an OR.** `mobile/src/api/flags.ts:56-60`:
+   ```ts
+   let merged = base;
+   for (const key of Object.keys(configs)) {
+     const overlay = configs[key]?.flags;
+     if (overlay && typeof overlay === 'object' && !Array.isArray(overlay)) {
+       merged = { ...merged, ...overlay };
+   ```
+   There is no "overlay may only turn flags **on**" semantic — `{...merged, ...overlay}` lets an overlay value of `false` win over a global `true`. **A running onboarding-layer experiment can therefore un-ship Phase A for the units it captures.**
+3. **…but `onboarding_v2_rollout` v1 cannot, as currently specified.** Its treatment `client_config.flags` sets the ten `onboarding.*` keys **true** and its weights are `control 0bp / treatment 10000bp`, so a captured unit is *always* treatment ([`business/analytics/2026-07-18-onboarding-v2-rollout-experiment.md`](business/analytics/2026-07-18-onboarding-v2-rollout-experiment.md) Spec table). True-over-true is a no-op. Non-allowlisted units are excluded before any overlay exists: targeting is `{"is_tester_allowlist": true}`, and `_targeting_match` treats a missing/false attribute as **exclusion, never default-into-control** (`backend/experiments.py:219-238`, resolution at `:248`). So no unit's flag values change either way.
+4. **The danger is a `revise`, not the current row.** `POST /api/admin/experiments/<key>/revise` mints a new version (`backend/experiments.py:585-589`) with arbitrary variants. Any future onboarding-layer experiment that gives **control** a `client_config.flags` block — the natural shape for a "hold back the new flow" arm — silently re-locks those users, and by (2) the client will obey it over the global `true`. Leaving a live overlay pointed at the flags Phase A just shipped is the hazard; the row itself is not.
+5. **It is not analytics-inert.** Even as a value no-op, while `status='running'`: `_persist_assignment` keeps writing `experiment_assignments` rows (`backend/experiments.py:274-289`); `stamp_for_event` keeps stamping every funnel event with `{onboarding_v2_rollout: treatment}` (`:387-407`, funnel set at `:380-384`); and the client keeps emitting `experiment_exposed` for every overlaid flag key on first consumption (`mobile/src/state/useFeatureFlags.ts:132-149`, provenance built in `flags.ts:65-67`). That attributes now-default product behavior to an experiment and corrupts the plan's §8 pre/post activation seam — which is the whole measurement basis for the flip.
+
+**Conclusion:** retire the experiment. `experiments.engine` itself stays **true** (`aggregate_tier_labels` / `trades_home_inline` depend on it — see `config-reference.md`).
+
+### Deploy-day procedure (run AFTER the Phase A deploy is live; prod, operator-only)
+
+`CRON_SECRET` lives in `secrets.local.env` — read it from there, never paste it into chat.
+
+```bash
+export CRON_SECRET="$(grep -E '^CRON_SECRET=' secrets.local.env | cut -d= -f2-)"
+export FTF_PROD=https://fantasy-trade-finder.onrender.com
+```
+
+**Step 1 — discover what is actually running.** Do not assume `onboarding_v2_rollout` is the live row: `trades_first_operator_test` (P0-9, section above) occupies the same layer, and `validate_spec(for_launch=True)` forbids overlapping buckets in one layer (`backend/experiments.py:474-484`) — so launching that one required stopping this one.
+
+```bash
+curl -s "$FTF_PROD/api/admin/experiments" -H "X-Cron-Secret: $CRON_SECRET" | python3 -m json.tool
+```
+Expected: a JSON array of `{key, version, layer, status, primary_metric, created_at, started_at, decision}`. **Act only on rows whose `layer` is `onboarding` and whose `status` is `running` or `paused`.** Rows already `stopped` or `decided` need nothing.
+
+**Step 2 — snapshot the full row before touching it.** `stopped` is a one-way door (no `stopped → running` edge, `backend/experiments.py:76-81`); this response is the only restore spec.
+
+```bash
+curl -s "$FTF_PROD/api/admin/experiments/onboarding_v2_rollout" -H "X-Cron-Secret: $CRON_SECRET" \
+  | tee docs/business/analytics/2026-08-15-onboarding_v2_rollout-final-row.json | python3 -m json.tool
+```
+(Commit that snapshot — it sits next to the experiment's own doc and is the only restore spec. `docs/recovery/` is **not** the right home: that folder is for branch/worktree tip shas.)
+Expected: the full row including `variants_json`, `targeting_json`, `bucket_start`/`bucket_end`, `status`, `version`. **Note the `version`** — the transition call needs it and defaults to `1`.
+
+**Step 3 — stop it.** (`running|paused → stopped` are the legal edges, `backend/experiments.py:76-81`.)
+
+```bash
+curl -s -X POST "$FTF_PROD/api/admin/experiments/onboarding_v2_rollout/transition" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{"version": 1, "to": "stopped", "actor": "operator",
+       "reason": "open-access Phase A: v2 onboarding shipped as the default in config/features.json; the overlay is retired, the flags are the revert lever"}'
+```
+Expected: `{"key":"onboarding_v2_rollout","version":1,"status":"stopped"}`. A `409` with `illegal_transition: <from> -> stopped` means it was already stopped — nothing to do.
+
+**Step 4 — record the decision** (`stopped → decided`; `decide` refuses from any other status, `backend/experiments.py:568-571`). This is the audit trail for "we shipped it," not a no-op.
+
+```bash
+curl -s -X POST "$FTF_PROD/api/admin/experiments/onboarding_v2_rollout/decide" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{"version": 1, "decision": "ship",
+       "rationale": "Shipped as product default (open-access plan §5 Phase A / O-1). v1 was an allowlist rollout, never a powered test — no readout drawn, per its own experiment doc."}'
+```
+Expected: `{"key":…,"version":1,"status":"decided","decision":"ship"}`.
+
+**Step 5 — verify the overlay is gone.** Use the operator device id from `config/tester_allowlist.json`, **without** the `device:` prefix (the file stores the prefix; the header does not).
+
+```bash
+curl -s "$FTF_PROD/api/feature-flags" -H "X-Device-Id: dev_loc-mrpy6qog-2t72t6" | python3 -m json.tool
+```
+Expected: `"experiments": {}` and `"configs": {}` (or entries for *other* layers only — `aggregate_tier_labels` / `trades_home_inline` are account-unit and unaffected), while `flags` shows the six Phase A keys **true**. Allow up to **60 s** for the running-experiment cache to refresh (`_CACHE_TTL_S = 60.0`, `backend/experiments.py:82`); the `transition`/`decide` calls also invalidate it in-process (`:556`, `:581`), but only on the worker that served the request.
+
+### What deliberately does NOT change
+
+- **`config/tester_allowlist.json` is left intact.** It is not `onboarding_v2_rollout`'s private list: `load_tester_allowlist()` is the shared source for the `is_tester_allowlist` attribute used by `aggregate_tier_labels` and `trades_home_inline`, **and** for the `POST /api/test-users` stage-user spawner gate (`backend/server.py:19006,19018`; `backend/test_users.py`). Emptying it would silently break all three.
+- **`experiments.engine` stays true** — other layers are live.
+- **`onboarding.share_sheet`, `rank_routing`, `demo_bridge`, `guided_layer`, `keep_warm` stay false.** Not named in the plan's §5 flip list; not Phase A.
+
+### Rollback
+
+Config-only, no deploy: set any of the six keys back to `false` in `config/features.json`, then `POST /api/feature-flags/reload` with `X-Cron-Secret` (`backend/server.py:18517-18527`). Revert `onboarding.landing` and `landing.try_before_sync` **together** — `/api/session/demo` 404s without the latter (`backend/server.py:18929`). Restarting the retired experiment is *not* the rollback path: it needs a `revise` to a new version with metrics reset (Step 2's snapshot is the spec).
 
 ## Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)
 
