@@ -18,6 +18,8 @@
 - [Code Conventions](#code-conventions)
 - [Living-Memory File Schemas](#living-memory-file-schemas)
 - [Tooling & Constraints](#tooling--constraints)
+- [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
+- [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
 
 ---
 
@@ -206,3 +208,12 @@ Every Analyst beat declares, in `analystScript.ts`, machine-checked by `mobile/t
 `retireAfter` ({event,count} client receipt, or `'never'` + in-file reason) · `maxDisplayCount` · `invalidateOn` (receipt ids) · `adoptionEvent` (a REGISTERED analytics event — the M6 join key; receipts are not events) · degrade contract (`degradeLine` | `degrade:'suppress'` | non-deictic line) · copy class caps (auto 12w + autoMs floor / action 16 / tap 20 / cta 16).
 **Client-receipt rule:** retirement/invalidation read only `recordGuideReceipt(...)` receipts written by screens at the real moment — never server-fired event names (`quickset_completed`, `trio_swipe` are the standing traps). Receipt names live in `GUIDE_RECEIPTS` (analystScript.ts) — the single authority; screens import it.
 New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader release cap). The guided-regen payoff mailbox is `onboardingBus.ts` (`setPendingGuidedRegen(source)`; markers are positions ONLY for `'quickset'` — `isRegenPosition()` before forwarding to analytics).
+
+## Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)
+
+`backend/trade_gen_v2.py` (flag `trade_gen.v2`, dark) sets three conventions:
+- **`gen2_*` config namespace** — every tunable of the staged pipeline lives in `trade_service._DEFAULT_CFG` under a `gen2_` prefix (read through the same `_c()` accessor / model_config overlay as every other engine knob). New pipeline knobs go there, never as module constants.
+- **Dual-board ε extends #108 to both sides.** `gen2_epsilon` gates BOTH sides' own-board gain on every generated package (consolidation-discounted, `trade_gen_v2.side_gain`) — the two-sided generalization of `user_gain_epsilon`. The directed `side_gain(in, out, value_of)` decomposition is the unit a future 3-team-cycle layer reuses; don't collapse it into a pairwise-only formula.
+- **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
+
+Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.

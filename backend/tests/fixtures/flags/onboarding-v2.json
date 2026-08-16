@@ -57,6 +57,7 @@
   "trade.outlook_direction": true,
   "trade.pool_calibration": true,
   "trade.divergence_fallback": true,
+  "trade_gen.v2": false,
   "outlook.odds": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,

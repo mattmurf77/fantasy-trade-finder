@@ -15,6 +15,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)](#flags-owned-draft-picks-in-calculator-suggestions-158170171-ship-dark)
 - [Flags — Directional outlook weighting (feedback #175 — ships dark)](#flags-directional-outlook-weighting-feedback-175-ships-dark)
 - [Flags — Compressed-board trade generation (2026-08-15 field bug — LIVE)](#flags-compressed-board-trade-generation-2026-08-15-field-bug-live)
+- [Flags — Trade generation pipeline v2 (matchmaking research — ships dark)](#flags-trade-generation-pipeline-v2-matchmaking-research-ships-dark)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
 - [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
@@ -43,6 +44,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Suggestion telemetry & ghost holdout (flag `suggestion.telemetry`)](#suggestion-telemetry-ghost-holdout-flag-suggestiontelemetry)
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
+  - [Trade generation pipeline v2 (flag `trade_gen.v2` — dark)](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -172,6 +174,12 @@ opponent's whole batch is appended, so the deck can overshoot by up to
 `max_per_opponent - 1`. The post-deploy FFV3 read returned **34** cards, not 30 —
 earlier pre-deploy reads landed on exactly 30 only because every batch was a full
 5 and the running total hit the threshold exactly.
+
+## Flags — Trade generation pipeline v2 (matchmaking research — ships dark)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade_gen.v2` | false | Routes `TradeService.generate_trades` to `backend/trade_gen_v2.py`, the research-driven staged pipeline (matchmaking research item 2 — `docs/research/matchmaking/` rounds 1–2; scope block `docs/plans/matchmaking-engine/trade-gen-v2-scope.md`). Stages: divergence-driven partner + centerpiece selection (want/accept boards applied as filters, targets as priority) → bounded return-package search around each centerpiece (≤3 assets + picks per side) → hard gates IN ORDER (composition hygiene reusing #141 filler + #227 pick-churn → roster feasibility both sides → **dual-board ε-gain**: each side must gain ≥ `gen2_epsilon` on its OWN board, with a non-linear consolidation discount so junk can't stuff a package → **consensus fairness band** ±`gen2_band` as a defensibility constraint, never an objective) → rank by joint gain, tiebreak by surplus-split symmetry → empirical-Bayes **acceptance-prior** multiplier → league-level **exposure shaping** (per-counterparty cap + viable-suggestion floor — ordering only, counts logged) → **tier metadata** (`endorsed`/`featured`/`browse`) + **MESO** return-package variants + structured two-sided `rationale` on the cards. **No engine truncation** (operator decision 2026-08-16): the engine returns the FULL ranked survivor set — uncapped discovery + uncapped browsable list as a ranking-signal surface; scarcity applies only to endorsement via the `tier` field, and any list-length limits are caller-passed presentation parameters. Built dark ALONGSIDE the v2/v3 engine: OFF (default) ⇒ the module is never imported and every existing generation path is byte-identical. Divergence-only by design — unranked opponents keep the flag-off engine's consensus path. Kill switch is the flag itself (deploy-free). |
 
 ## Flags — Send in Sleeper (flagged beta)
 
@@ -615,6 +623,28 @@ Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignore
 | `cycle_edge_min_gain` | 100.0 | Min per-edge value gain for a 3-team cycle edge |
 | `cycle_min_net` | 200.0 | Min net surplus per participating team in a cycle |
 | `cycle_max_results` | 3 | Max 3-team cycle cards surfaced |
+
+### Trade generation pipeline v2 (flag `trade_gen.v2` — dark) — `trade_service._DEFAULT_CFG`, consumed by `backend/trade_gen_v2.py`
+
+| Key | Default | Meaning |
+|---|---|---|
+| `gen2_epsilon` | 100.0 | Dual-board ε-gain gate: minimum own-board gain PER SIDE (value space, on consolidation-discounted packages). Extends the #108 `user_gain_epsilon` convention to BOTH sides of every generated package. 100 ≈ 5% of a generic mid-1st — between the existing marginal (60) and raw (150) surplus floors: big enough to beat board noise, small enough to keep genuinely mutual depth trades alive. |
+| `gen2_band` | 0.15 | Consensus fairness band half-width: discounted consensus package values must satisfy min/max ≥ 1 − band (±15%, the research's defensibility band). A constraint, never an objective — own-board gain decides *acceptance*, this band decides *league defensibility*. |
+| `gen2_consol_gamma` | 1.5 | Consolidation discount exponent γ: `contribution(v) = v · (floor + (1−floor)·(v/v_best_own)^γ)`, benchmarked against the side's OWN best asset. Single-asset sides are never discounted. |
+| `gen2_consol_floor` | 0.15 | Consolidation discount floor: a near-worthless filler contributes ≈ floor·v, so junk cannot stuff a package to fairness. **1.0 restores naive additivity** (the documented KTC exploit) — the discount's kill switch. |
+| `gen2_centerpiece_top_k` | 5 | Stage-1: divergence-ranked centerpieces examined per opponent. Bounds **search breadth** (which opponent assets anchor a package search), never output length — the engine returns every gate survivor. Raised 3 → 5 with the 2026-08-16 no-truncation decision: at 3, deep divergent rosters starved the browse tier of centerpiece variety; 5 keeps worst-case enumeration ≈ 9.6k combos/pair. |
+| `gen2_give_pool` | 10 | Stage-2: user-side return-asset pool (ranked by `v_opp − v_user`). |
+| `gen2_recv_extra_pool` | 4 | Stage-2: divergence-positive extras eligible to round out the receive side (receive = centerpiece + ≤2 extras). |
+| `gen2_min_divergence` | 0.0 | Minimum own-board divergence (value space) for a centerpiece; candidates need `v_user − v_opp` strictly above this. |
+| `gen2_exposure_cap` | 3 | Exposure budget — **ordering, never truncation** (operator decision 2026-08-16): max suggestions per counterparty in the shaped HEAD of the list; cap-overflow cards are demoted below the head in rank order, never dropped. |
+| `gen2_exposure_floor` | 1 | Exposure floor: every counterparty with ≥1 viable (gate-surviving) suggestion gets at least this many cards in the shaped head. 0 disables the floor. |
+| `gen2_featured_count` | 4 | Tier metadata: after the single `endorsed` pick, cards ranking inside this count are `featured`; every remaining survivor is `browse`. Scarcity lives in the tier field, not in list length. |
+| `gen2_dedup_jaccard` | 0.6 | Batch dedup: a lower-ranked suggestion whose combined asset set overlaps a kept same-counterparty suggestion at-or-above this Jaccard is a near-duplicate. (Exact-set and same-(counterparty, centerpiece, shape-bucket) duplicates are always dropped.) |
+| `gen2_meso_band` | 0.05 | MESO variants: alternate return packages must sit within ±this fraction of the base return's value **on the RECIPIENT's (counterparty's) board** — equivalence on the recipient's board, so their choice reveals shape preference, not value preference. |
+| `gen2_meso_max_variants` | 3 | Max MESO variants on each pair's top card (research guidance: never exceed ~3 offers). |
+| `gen2_accept_prior_strength` | 10.0 | Completion-probability hook: empirical-Bayes pseudo-observation count m in `p = (accepts + m·p0)/(responses + m)`. |
+| `gen2_accept_global_prior` | 0.5 | Global acceptance prior p0 — the fallback when a manager has no accept/response history (uniform scaling, ordering unchanged). |
+| `gen2_youth_age` | 25 | MESO shape vocabulary: a package is `youth_heavy` when the value-weighted mean age of its non-pick players is ≤ this. |
 
 ### Outlook odds (#169) — `backend/outlook/`
 

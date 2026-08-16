@@ -10059,6 +10059,23 @@ def trade_card_to_dict(card, players: dict) -> dict:
                 out["reasons"] = list(reasons)
         except Exception:
             pass
+    # trade_gen.v2 — structured two-sided rationale + MESO return-package
+    # variants. Only the gen-v2 pipeline stamps these (flag-gated at
+    # generation), so flag-off payloads stay byte-identical. The per-card
+    # health metrics deliberately stay server-side (logs / telemetry) and
+    # are never serialized.
+    rationale = getattr(card, "rationale", None)
+    if rationale:
+        out["rationale"] = rationale
+    meso_variants = getattr(card, "meso_variants", None)
+    if meso_variants:
+        out["meso_variants"] = meso_variants
+    # trade_gen.v2 — tier metadata ("endorsed" | "featured" | "browse"):
+    # scarcity lives in this field, not in list length (operator decision
+    # 2026-08-16). Only the gen-v2 pipeline stamps it.
+    tier = getattr(card, "tier", None)
+    if tier:
+        out["tier"] = tier
     # Feature 1 + 2 — templated narrative + structured roster-aware match context.
     narrative = getattr(card, "narrative", None)
     if narrative:

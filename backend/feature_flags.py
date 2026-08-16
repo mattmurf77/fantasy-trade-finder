@@ -737,6 +737,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # ever silently dropped. Cards stay labeled basis="consensus". OFF
     # (default) = boarded members keep the zero-card cliff.
     "trade.divergence_fallback",
+    # trade_gen.v2 — matchmaking-research staged generation pipeline
+    # (backend/trade_gen_v2.py): divergence-driven partner+centerpiece
+    # selection → bounded return-package search → feasibility /
+    # dual-board-ε / consensus-band gates in order → joint-gain ranking →
+    # acceptance-prior multiplier → exposure cap+floor shaping → MESO
+    # variants + two-sided rationale. Built DARK alongside the v2/v3
+    # engine; OFF (default) = the module is never imported and every
+    # existing generation path is byte-identical.
+    "trade_gen.v2",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

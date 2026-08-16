@@ -298,7 +298,31 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // user has no declared/seeded window
   "fit_premium":     { "value_paid": float,    // OPTIONAL — flag trade.fit_premium; honest flag on
                        "position": "WR" },     // a need-filling 1-for-1 that loses a little raw value
-  "aggression_variant": "light"|"fair"|"generous"  // OPTIONAL — flag trade.aggression_ab (A/B joins)
+  "aggression_variant": "light"|"fair"|"generous",  // OPTIONAL — flag trade.aggression_ab (A/B joins)
+  "rationale":       {                          // OPTIONAL — flag trade_gen.v2 (dark): structured TWO-SIDED
+                                                // rationale, each side's gain in its OWN board's terms —
+                                                // never a single winner score. Absent on every other path.
+                       "user": { "own_board_gain": float, "board": "personal",
+                                 "centerpiece": {"id": "...", "name": "..."},
+                                 "receive_positions": ["WR", ...], "fills_needs": ["WR", ...] },
+                       "counterparty": { "own_board_gain": float, "board": "personal",
+                                 "timeline": {"value": "rebuilder", "source": "declared"|"inferred"},
+                                 "why_yes": { "values_return_above_cost": true,
+                                              "gives_from_surplus": [...], "fills_needs": [...],
+                                              "timeline_fit": "rebuild_gets_youth_or_picks"|"contender_gets_win_now"|null } } },
+  "tier":            "endorsed"|"featured"|"browse",  // OPTIONAL — flag trade_gen.v2 (dark): scarcity
+                                                // metadata (operator decision 2026-08-16 — the engine
+                                                // returns the FULL ranked survivor set; scarcity lives
+                                                // here, not in list length). endorsed = the cycle's single
+                                                // best mutual pick (at most 1); featured = the next
+                                                // gen2_featured_count by rank; browse = the rest, ranked.
+  "meso_variants":   [                          // OPTIONAL — flag trade_gen.v2 (dark): up to 3 alternate
+                                                // return packages on each pair's TOP card, ≈equivalent on
+                                                // the RECIPIENT's (counterparty's) board (±gen2_meso_band),
+                                                // different in shape. Absent on non-top cards + other paths.
+                       { "shape": "consolidation"|"pick_heavy"|"youth_heavy"|"balanced",
+                         "give_player_ids": ["...", ...],
+                         "recipient_value_delta_pct": float } ]
 }
 ```
 

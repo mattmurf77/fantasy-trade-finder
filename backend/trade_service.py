@@ -482,6 +482,64 @@ _DEFAULT_CFG: dict[str, float] = {
     "suggestion_match_lookback_days": 14,
     # Partial-match floor: matched-token share of the larger asset set.
     "suggestion_match_min_overlap":   0.5,
+
+    # ------------------------------------------------------------------
+    # trade_gen.v2 — divergence-driven staged pipeline (backend/
+    # trade_gen_v2.py; matchmaking research item 2, flag default OFF).
+    # All knobs documented in docs/config-reference.md § trade_gen.v2.
+    # ------------------------------------------------------------------
+    # Dual-board ε-gain: min own-board gain PER SIDE (value space, on
+    # consolidation-discounted packages). Extends the #108 user_gain_epsilon
+    # convention to both sides of every generated package; 100 ≈ 5% of a
+    # generic mid-1st, between the existing marginal (60) and raw (150)
+    # surplus floors — big enough to beat board noise, small enough to
+    # keep genuinely mutual depth trades alive.
+    "gen2_epsilon":             100.0,
+    # Consensus fairness band half-width: discounted consensus package
+    # values must satisfy min/max ≥ 1 − band (±15% — the research's
+    # defensibility band, round-2/02 BP 5).
+    "gen2_band":                  0.15,
+    # Consolidation discount curve (see trade_gen_v2.consolidated_value):
+    # contribution(v) = v·(floor + (1−floor)·(v/v_best_own)^γ). Junk
+    # contributes ≈ floor·v, so packages can't be stuffed to fairness.
+    "gen2_consol_gamma":          1.5,
+    "gen2_consol_floor":          0.15,
+    # Stage-1/2 pool sizes: centerpieces per opponent, user-side return
+    # pool, receive-side balancing extras. NOTE: gen2_centerpiece_top_k
+    # bounds SEARCH BREADTH (which opponent assets anchor a package
+    # search), never output length — the engine returns every gate
+    # survivor (operator decision 2026-08-16: no engine truncation).
+    # Raised 3 → 5 with that decision: at 3, deep divergent rosters
+    # starved the browse tier of centerpiece variety; 5 keeps worst-case
+    # enumeration ≈ 9.6k combos/pair, well under the safety budget.
+    "gen2_centerpiece_top_k":     5.0,
+    "gen2_give_pool":            10.0,
+    "gen2_recv_extra_pool":       4.0,
+    # Minimum own-board divergence (value space) for a centerpiece.
+    "gen2_min_divergence":        0.0,
+    # Exposure shaping (round-1/03 BP 1-2): per-counterparty appearance cap
+    # per batch + guaranteed floor for every counterparty with ≥1 viable
+    # suggestion.
+    "gen2_exposure_cap":          3.0,
+    "gen2_exposure_floor":        1.0,
+    # Batch dedup: Jaccard overlap of combined asset sets (same
+    # counterparty) at-or-above this is a near-duplicate.
+    "gen2_dedup_jaccard":         0.6,
+    # MESO variants: recipient-board equivalence band (±fraction of the
+    # base return package's opp-board value) and max variants per top card.
+    "gen2_meso_band":             0.05,
+    "gen2_meso_max_variants":     3.0,
+    # Completion-probability hook: empirical-Bayes shrinkage strength
+    # (pseudo-observations) and the global acceptance prior fallback.
+    "gen2_accept_prior_strength": 10.0,
+    "gen2_accept_global_prior":   0.5,
+    # Youth-heavy MESO shape: value-weighted mean age at or below this.
+    "gen2_youth_age":            25.0,
+    # Tier metadata (operator decision 2026-08-16 — scarcity lives in the
+    # tier field, not in list length): cards after the single "endorsed"
+    # pick that rank inside this count are "featured"; the rest of the
+    # full ranked survivor set is "browse".
+    "gen2_featured_count":        4.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -2178,6 +2236,29 @@ class TradeCard:
     # {"fairness_band", "fairness_band+surplus_floor"} — which stage emitted.
     relaxed: bool = False
     relaxed_reason: Optional[str] = None
+    # trade_gen.v2 (backend/trade_gen_v2.py) — additive fields only that
+    # pipeline stamps; every other path leaves them None so flag-off
+    # payloads stay byte-identical.
+    #   rationale     — structured two-sided rationale: {"user": {...},
+    #                   "counterparty": {...}} — each side's gain in its
+    #                   OWN board's terms + why the counterparty plausibly
+    #                   says yes. Never a single winner score.
+    #   meso_variants — up to 3 return-package variants for the pair's top
+    #                   card, ≈equivalent on the RECIPIENT's board,
+    #                   different in shape: [{shape, give_player_ids,
+    #                   recipient_value_delta_pct}].
+    #   health        — per-suggestion health metrics (joint_gain,
+    #                   split_ratio, IR margins, band_position, …).
+    #                   In-process/log record only, never serialized.
+    #   tier          — "endorsed" (the cycle's single best mutual pick,
+    #                   at most 1) | "featured" (next gen2_featured_count
+    #                   by rank) | "browse" (every remaining survivor,
+    #                   still ranked). Scarcity lives HERE, not in list
+    #                   length (operator decision 2026-08-16).
+    rationale: Optional[dict] = None
+    meso_variants: Optional[list] = None
+    health: Optional[dict] = None
+    tier: Optional[str] = None
 
 
 @dataclass
@@ -2374,6 +2455,46 @@ class TradeService:
         # off ⇒ trade_intent is never read, so flag-off responses stay
         # byte-identical to today regardless of what the caller passed.
         _intent = trade_intent if FLAGS.trades_intent_modes else None
+
+        # trade_gen.v2 — matchmaking-research staged pipeline (backend/
+        # trade_gen_v2.py). Ships DARK alongside the v2/v3 engine: flag off
+        # (the default) ⇒ this branch is never taken, the module is never
+        # imported, and every existing path below is byte-identical.
+        # Divergence-only by design — unranked opponents are served by the
+        # flag-off engine's consensus path, not by this one.
+        if FLAGS.trade_gen_v2:
+            from .trade_gen_v2 import generate_league_suggestions
+            cards, _gen2_report = generate_league_suggestions(
+                players=self._players,
+                league=league,
+                user_id=user_id,
+                user_elo=user_elo,
+                user_roster=user_roster,
+                seed_elo=seed_elo,
+                confidence=confidence,
+                # Operator decision 2026-08-16 — no engine truncation: the
+                # pipeline returns the FULL ranked survivor set; scarcity
+                # rides the per-card `tier` field, and any deck-size
+                # limits are downstream presentation concerns
+                # (_order_deck / _cap_per_target), never engine defaults.
+                # The route's max_per_opponent is deliberately NOT
+                # forwarded.
+                max_per_opponent=None,
+                scoring_format=scoring_format,
+                untouchable_ids=untouchable_ids,
+                target_ids=target_ids,
+                not_interested_ids=not_interested_ids,
+                opponent_user_id=opponent_user_id,
+                opponent_outlooks=opponent_outlooks,
+                opponent_pick_shares=opponent_pick_shares,
+                past_decision_keys=self._past_decision_keys,
+                on_opponent_done=on_opponent_done,
+            )
+            cards = _filter_by_trade_intent(cards, _intent, seed_elo,
+                                            self._players, scoring_format)
+            for card in cards:
+                self._trade_cards[card.trade_id] = card
+            return cards
 
         # Trade engine v2 — entirely separate scoring path so the legacy
         # branch below stays byte-for-byte identical when the flag is off.
