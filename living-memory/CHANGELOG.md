@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-16 (Matchmaking engine phase 1 — telemetry + trade-gen v2 SHIPPED dark; research corpus + mockup)
+
+- **Operating thesis landed: FTF is matchmaking for trade partners** (Tinder/Hinge model — suggest a trade both managers will accept). 3 research rounds (11 memos, ~400 sources) in `docs/research/matchmaking/`; presentation mockup (9 Chalkline states, operator-approved pyramid: endorsed hero → featured → **uncapped** browse) in `mockups/trade-suggestion-redesign/`.
+- **`suggestion.telemetry` (dark):** counterfactual logging on the deck spine (candidate sets, policy version, rank), deterministic 1-in-10 ghost holdout, `suggestion_trade_links` (`was_recommended` + ghost incrementality), admin ratio route. Zero mobile diff.
+- **`trade_gen.v2` (dark):** staged divergence-driven pipeline — dual-board ε on consolidation-discounted packages, ±15% consensus band, joint-gain ranking, EB acceptance prior, MESO variants, two-sided rationale, exposure shaping as head-ordering; **no engine truncation** — full survivor set with endorsed/featured/browse tiers (operator decision).
+- Both squash-merged from branches (tips `deb965c`, `c940a86`; fork `0b2dcee`); scope blocks in `docs/plans/matchmaking-engine/`. Operator waivers: Maestro (backend-only dark flags), telemetry analytics waiver, sim gate Tier 4. Merged-state suite result in TEST_LEDGER. Next: wire acceptance stats into the prior, mobile pyramid UI (needs real Maestro flows), lighting checklist per flag.
+
 ## 2026-08-15 (Fit-congruence signal weighting — SHIPPED, PR #134)
 
 - Swipe ingestion now weights Elo K by **surprise vs the user's window** ([D-060](DECISIONS.md)): fit-explained swipes (rebuilder passes the vet) ×0.4, fit-defying swipes (rebuilder likes the vet anyway) full K, no-window/sub-threshold exactly 1.0. Reuses the lanes machinery (`signed_lane_shift`); applied to in-memory signal AND persisted `k_factor` (DB replay agreement). Knob-only kill switch (`fit_k_explained_mult` = 1.0). Lands **before** Phase B's grading lane starts counting these signals toward "your board" — plan §B-2 now notes flags/declines get the same rule at build time; sends stay full-K. `main` @ `6f293f4`.

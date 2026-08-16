@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-16 — Matchmaking engine phase 1 shipped dark; mobile pyramid UI is the open half](#2026-08-16--matchmaking-engine-phase-1-shipped-dark-mobile-pyramid-ui-is-the-open-half)
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122-flags-live)
 - [2026-08-15 — Sleeper co-owner support SHIPPED (PR #121); mobile half needs an EAS build](#2026-08-15--sleeper-co-owner-support-shipped-pr-121-mobile-half-needs-an-eas-build)

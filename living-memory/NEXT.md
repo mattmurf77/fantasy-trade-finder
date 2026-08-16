@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-16 — Matchmaking engine follow-ons](#2026-08-16--matchmaking-engine-follow-ons)
 - [2026-08-15 — Guided Onboarding v2 built dark; graduation + Phase 2 queued](#2026-08-15--guided-onboarding-v2-built-dark-graduation--phase-2-queued)
 - [2026-08-15 — Open-access Phase A SHIPPED; B/C queued](#2026-08-15--open-access-phase-a-shipped-bc-queued)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122)
@@ -66,6 +67,14 @@ P0 capture is built on `feat/roster-history` (see [`HANDOFF.md`](HANDOFF.md)). I
 2. **P1 — backfill audit + C3 hardening.** What did P0 miss before it landed? Sleeper transaction-log replay is the salvage tool (plan §2.3, a salvage not a plan). C5's cadence backstop is already covered by `league_board_history`.
 3. **P2 — end-of-season fetchers (F1–F8).** Verify ESPN/MFL transaction-log retention BEFORE the recap design leans on it; degrade trade P&L to Sleeper-only rather than blocking the recap.
 4. **P3 — recap compute + UI + the nine analytics events**, taxonomy addendum registered before any emitter, `wrapped_viewed` finally fires. Monetization call (free vs premium hook) is owed **before** P3 starts.
+
+## 2026-08-16 — Matchmaking engine follow-ons
+
+Phase 1 shipped dark 2026-08-16 (see [`HANDOFF.md`](HANDOFF.md) top entry). In order:
+
+1. **Light `suggestion.telemetry`** *(S; it only collects — the learning loop is logging-gated and retroactively impossible)* then watch the ghost/organic ratio route for a week.
+2. **Light `trade_gen.v2`** once telemetry accumulates accept/response stats for the EB prior; verify fixture-league behavior against prod boards first.
+3. **Mobile pyramid UI** from `mockups/trade-suggestion-redesign/` *(M-L; full gates — real Maestro flows, no waiver)*.
 
 ## 2026-08-13 — Notification inbox follow-ons
 

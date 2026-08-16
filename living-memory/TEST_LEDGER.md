@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-16 — Matchmaking engine phase 1 SHIPPED dark (telemetry + trade-gen v2)
+
+- **Change:** two squash merges to `main` (operator directive: "waive Maestro, merge and ship"): `suggestion.telemetry` (branch tip `deb965c`) and `trade_gen.v2` (branch tip `c940a86`), both flags **OFF**, backend-only, zero mobile diff; plus research corpus + presentation mockup. Scope blocks + waivers: `docs/plans/matchmaking-engine/`.
+- **Sim gate: Tier 4** (backend-only per runbook matrix — no sim run; pytest is the gate). Maestro **waived by operator 2026-08-16** (backend-only dark flags). Pre-push hook not implicated (no `mobile/src` changes).
+- **Merged-state full backend suite (ship branch, post conflict-resolution): 2924 passed / 1 skipped / 0 failed (299s).** Branch-level baselines beforehand: telemetry worktree 2878/1/0; gen-v2 worktree 2888/1/0 (its 24-test suite incl. the 12-team fixture league + uncapped/tier assertions); clean-main-at-fork context: 2855/1 (premium-import session, 2026-08-15). Conflicts resolved in the merge: 3 flag-parity fixtures (keep-both, JSON-validated) + `trade_service.py` `_DEFAULT_CFG` adjacent insertion (both knob blocks kept, `ast.parse` verified).
+- **Not run:** no simulator flows (Tier 4), no on-device pass — nothing user-visible shipped. First lighting of either flag owes its own checklist (NEXT.md 2026-08-16 section).
+
+---
+
 ## 2026-08-15 — Fit-congruence signal weighting SHIPPED (PR #134)
 
 - **Change:** `6f293f4` — swipe-signal K scaled by fit-congruence ([D-060](DECISIONS.md)): `signed_lane_shift` extracted from `classify_lane` (byte-identical, pinned incl. the `total <= 0` corner), `TradeCard.lane_shift` stamped unconditionally, `fit_congruence_mult` applied at the swipe route to BOTH the in-memory signal and the **persisted `k_factor`** — the build agent caught that `_compute_elo` replays `swipe_decisions` rows, so an in-memory-only mult would have reverted boards to flat K on every deploy. Reviewer verified the replay claim and the serializer allow-list (no client leak).
