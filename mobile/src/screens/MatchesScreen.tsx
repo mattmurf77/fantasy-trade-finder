@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { getBaseUrl } from '../api/client';
@@ -43,6 +43,12 @@ import { useFlag } from '../state/useFeatureFlags';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
 import { readErrorCopy } from '../utils/verification';
+import {
+  guideV2Active,
+  markGuideStepConsumed,
+  requestGuideStep,
+} from '../state/useGuide';
+import { S as GUIDE } from '../components/analystScript';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a dismiss's archive
@@ -129,12 +135,82 @@ export default function MatchesScreen() {
   // contract: tile → manually toggle the chip to "All" → tile again still
   // rescopes, because `at` changed even though leagueId didn't (S-10).
   const route = useRoute<any>();
+  // ── Guided Onboarding v2 (flag onboarding.guide_v2) ──────────────────
+  // `N6.1`'s primary CTA navigates here as `{segment:'awaiting', at,
+  // guidedArrival:'n6.1'}` — the chain marker that (a) sources the
+  // `awaiting_segment_viewed` funnel row and (b) suppresses `N9`, whose
+  // teaching that arrival has already done.
+  const guidedArrival: string | null =
+    typeof route.params?.guidedArrival === 'string'
+      ? route.params.guidedArrival
+      : null;
+  // How the CURRENT awaiting episode was entered. Latched when the segment
+  // changes rather than read at emit time: route params outlive the episode
+  // (they stay on the route after a manual toggle back and forth), so
+  // reading them at emit time would report `guide` for a later tab visit.
+  const awaitingSourceRef = useRef<'guide' | 'tab'>('tab');
   useEffect(() => {
     const s = route.params?.segment;
     if (s === 'mutual' || s === 'awaiting') setSegment(s);
+    if (s === 'awaiting') {
+      awaitingSourceRef.current = guidedArrival === 'n6.1' ? 'guide' : 'tab';
+    }
     const lid = route.params?.leagueId;
     if (typeof lid === 'string' && lid) setFilterLeagueId(lid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.segment, route.params?.leagueId, route.params?.at]);
+
+  // `awaiting_segment_viewed {source}` — the N6.1 funnel step (NOT its
+  // adoption event: N6.1's own CTA causes this, so reading it as adoption
+  // would manufacture a ~100% win — PRD §5.3). One row per episode: the
+  // segment being on screen while the tab is focused. Toggling away and
+  // back is a genuine second view; a re-render is not.
+  //
+  // `source` is `guide | tab` only. The taxonomy registers `push` as well,
+  // but no push payload routes to this segment today — `routeNotificationTap`
+  // passes `{match_id, src:'push', ts}` and never a `segment`
+  // (`utils/deepLinks.ts`), so every push arrival lands on `mutual` and any
+  // subsequent awaiting view is a real toggle. Emitting `push` for it would
+  // be a false attribution; the value stays reserved for a push path that
+  // actually targets the segment.
+  const isFocused = useIsFocused();
+  // Reactive read of the owning flag. `guideV2Active()` stays the gate (it
+  // also carries the `onboarding.v2` master switch); this exists so the two
+  // effects below re-run if the flag payload lands after this screen mounts
+  // — a cold start whose first destination is this tab (a push tap).
+  const guideV2Flag = useFlag('onboarding.guide_v2');
+  const awaitingViewedRef = useRef(false);
+  useEffect(() => {
+    if (!guideV2Active()) return;
+    if (!isFocused || segment !== 'awaiting') {
+      awaitingViewedRef.current = false;
+      return;
+    }
+    if (awaitingViewedRef.current) return;
+    awaitingViewedRef.current = true;
+    track('awaiting_segment_viewed', { source: awaitingSourceRef.current }, 'Matches');
+  }, [isFocused, segment, guideV2Flag]);
+
+  // `N9` — the first-visit floor for this screen (O-7). Requested on every
+  // focus; the engine's `once` + `maxDisplayCount` refuse the repeats, so
+  // "first visit ever" needs no second persistence layer here. A guided
+  // arrival consumes it instead: N6.1 already taught this moment, and
+  // consuming (rather than dropping) keeps the beat from ambushing the user
+  // on their next, unguided visit.
+  useFocusEffect(
+    useCallback(() => {
+      if (!guideV2Active()) return;
+      if (guidedArrival) {
+        // `'matched'` is the engine's "a call site decided this teaching
+        // already happened" value on the closed `GuideBlockedBy` union
+        // (useGuide.ts) — it marks the step seen + retired and measures the
+        // suppression, with no bubble and no `guide_step_shown`.
+        markGuideStepConsumed('n9', 'matched');
+        return;
+      }
+      requestGuideStep(GUIDE.n9());
+    }, [guidedArrival, guideV2Flag]),
+  );
 
   // Stable query key — `'all'` not the active league. The endpoint returns
   // every-league results, so league switching shouldn't invalidate this
@@ -716,7 +792,12 @@ export default function MatchesScreen() {
         <SegmentBtn
           label="Awaiting them"
           active={segment === 'awaiting'}
-          onPress={() => setSegment('awaiting')}
+          onPress={() => {
+            // A hand-tapped segment is a `tab` view even on a route that
+            // still carries N6.1's `guidedArrival` param.
+            awaitingSourceRef.current = 'tab';
+            setSegment('awaiting');
+          }}
           testID="matches.segment.awaiting"
         />
       </View>

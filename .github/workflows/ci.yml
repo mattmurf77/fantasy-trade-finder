@@ -34,6 +34,13 @@ jobs:
         working-directory: mobile
       - run: npx tsc --noEmit
         working-directory: mobile
+      # Structural suites (mobile/tests/check-*.js): they parse the shipped
+      # source with the project's own TypeScript, so they run here, after the
+      # same `npm ci`. Since D-056 retired Maestro these are the primary
+      # regression evidence for client invariants — including the guided-tour
+      # copy budget and eligibility contract (check-guide-script.js).
+      - run: for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done
+        working-directory: mobile
 
   maestro-testid-lint:
     runs-on: ubuntu-latest

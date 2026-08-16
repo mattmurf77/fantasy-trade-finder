@@ -495,6 +495,16 @@
 | D-054 | 1QB QB Cap Is a Value-Side Re-Pricing, Not a Label Cap | 2026-08-15 |
 | D-055 | Deck-Quality Bars Ratified; likes_you Gets a User-Gain Floor; s5.1 Fix Gates the Phase A Flip | 2026-08-15 |
 | D-056 | Maestro / Simulator Retired Entirely, Not Just as a Gate | 2026-08-15 |
+| D-059 | Guide v2: Declarative Eligibility Layer; FR-E1 Reachability Rewiring Descoped | 2026-08-15 |
+
+---
+
+## D-059 — Guide v2: Declarative Eligibility Layer; FR-E1 Reachability Rewiring Descoped
+**Date:** 2026-08-15
+**Context:** The dual-agent guided-onboarding-v2 PRD (docs/plans/guided-onboarding-v2/) was validated against a pre-Phase-A tree whose tour was flag-dark. Phase A (#129) flipped every gating flag ON before the build started, mooting FR-E1's headline job (un-gating). D-057/D-058 are skipped here — they are claimed by the unmerged feat/premium-import-v1 branch (numbering across concurrent sessions).
+**Decision:** (1) Every guide beat now carries a machine-enforced eligibility contract on `GuideStep` (retireAfter/maxDisplayCount/invalidateOn/adoptionEvent/degrade, CI-linted by mobile/tests/check-guide-script.js) — behavioral retirement is mandatory because the measured harms come from users who ENGAGE with stale scaffolds (Andersen CHI 2012; Aleven r=-0.46). (2) Client retirement never reads server-fired events (quickset_completed, trio_swipe) — screens record client receipts via recordGuideReceipt. (3) FR-E1's second-gate rewiring is DESCOPED — flags are live; rewiring live-gating buys little at real regression risk. What shipped instead: the s7.1 cut (fired pointing at an unmountable target in production), the guide claiming the interrupt slot, and onboarding.guide_v2 as the single new gate.
+**Alternatives considered:** Full FR-E1 rewiring (rejected: Phase A made it redundant); buying a DAP tool (rejected in PRD research: MAU pricing, no native-mobile support, dead OSS libs); per-step flags (rejected: 2^n QA space).
+**Consequences:** Rollback = onboarding.guide_v2 false, which restores the v1 behavior graph (incl. the s6.1 toast and s2.3 beat on the flag-off arm) — but the copy trims and the s7.1/s3.1 removals ship unconditionally (safe: shorter lines, one broken beat cut, one merged beat). The tour's quality is now governed by self-termination + the quarterly failed-to-retire review, not by anyone remembering.
 
 ---
 

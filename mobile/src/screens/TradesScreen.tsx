@@ -76,6 +76,7 @@ import {
   swipeTrade,
   flagBadTrade,
   getLikedTrades,
+  getAwaitingTrades,
   undoDeckSuppression,
   fetchAssetIdeas,
   type AssetIdea,
@@ -115,15 +116,29 @@ import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
 import AppleSaveMomentSheet from '../components/AppleSaveMomentSheet';
-import { consumePendingQuicksetRegen } from '../state/onboardingBus';
+import {
+  consumePendingQuicksetRegen,
+  consumeGuidedRegenSource,
+  isRegenPosition,
+} from '../state/onboardingBus';
 import {
   useGuide,
   requestGuideStep,
   advanceGuideIfActive,
   guidedAvatarActive,
+  guideV2Active,
+  guideActiveStepId,
+  dismissActiveGuideStep,
+  recordGuideReceipt,
+  markGuideStepConsumed,
+  type GuideCompletionVia,
 } from '../state/useGuide';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
-import { S as GUIDE, nextUnrankedPosition } from '../components/analystScript';
+import {
+  S as GUIDE,
+  GUIDE_RECEIPTS,
+  nextUnrankedPosition,
+} from '../components/analystScript';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFinderTargets } from '../state/useFinderTargets';
@@ -183,6 +198,12 @@ const UNDO_HOLD_MS = 5000;
 // after which a card counts as `viewed` (served ≠ seen).
 const DWELL_CAP_MS = 120_000;
 const VIEWED_MIN_MS = 500;
+
+// N6.1 (PRD §5.3): how long the empty-awaiting gate waits on the
+// `['awaiting-trades']` fetch before falling back to the router-less
+// variant. Well inside the beat's own 8 s lifetime — a bubble that lands
+// four seconds after the swipe is no longer about that swipe.
+const N61_AWAITING_TIMEOUT_MS = 2500;
 
 // Stable empty-array reference so the zustand selector doesn't return a
 // brand-new `[]` on every render (which would trigger an infinite re-render
@@ -345,7 +366,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // it early (the deck clear below re-runs the diff effect while the old job
   // is still in state).
   const pendingRegenRef = useRef<{
-    position: string;
+    /** Quick Set position, or null for trios/import guided returns. */
+    position: string | null;
     jobId: string | null;
     prevPackages: Set<string>;
   } | null>(null);
@@ -619,6 +641,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // legacy `editDna:true` route param — old deep links / stored routes
   // that used to auto-expand the hub's panel — opens the same sheet.
   const [dnaSheetOpen, setDnaSheetOpen] = useState(false);
+  // Who opened the DNA sheet — labels outlook_saved.source (TradeDnaSheet's
+  // openSource prop). Reset to the default on close.
+  const [dnaOpenSource, setDnaOpenSource] = useState<'guide' | 'sheet' | 'strip'>('sheet');
   // #257 — "Preferences changed" refresh strip. Fairness/lane/targeting
   // edits already reset or re-filter the deck themselves; the only stale-
   // deck case is a DNA edit (outlook/chasing/shopping/untouchables), which
@@ -641,6 +666,7 @@ export default function TradesScreen({ navigation, route }: any) {
     'team' | 'league' | null
   >(null);
   function handleEditSheetClose() {
+    setDnaOpenSource('sheet');
     setDnaSheetOpen(false);
     // Only worth a nudge if there's an existing deck to go stale and no
     // search is already in flight (that search will land under whatever
@@ -1655,6 +1681,12 @@ export default function TradesScreen({ navigation, route }: any) {
         // Liked-trades count is per-league (backend filters by session). Use a
         // league-scoped key so switching leagues doesn't show a stale count.
         queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+        // N6.1 (PRD §5.3): first-like determination and the empty-awaiting
+        // gate BOTH live here, on the swipe response. A like-time read lets
+        // two rapid likes both see first-like true, and a like-time prefetch
+        // races the POST and reads a list that cannot contain this like.
+        // No-op unless guide_v2 is on.
+        v2OnLikeSwipeSuccess(res);
       }
     },
     onError: (_err, _vars, ctx) => {
@@ -2169,6 +2201,24 @@ export default function TradesScreen({ navigation, route }: any) {
     if (targetDirection === 'trade_away') store.addGive(player);
     else store.addReceive(player);
     haptics.selection();
+    // N4's adoption receipt (PRD §5.3.1). `side` uses the give/receive
+    // vocabulary the taxonomy registered; `source` separates the guided
+    // hand-off off the deck-summary card from an organic board pin, so
+    // adoption is attributable without a session join. The client receipt
+    // is what actually retires the beat — a retirement wired to an event
+    // the client can't observe never fires (FR-E3).
+    if (guideV2Active()) {
+      track(
+        'finder_target_pinned',
+        {
+          side: targetDirection === 'trade_away' ? 'give' : 'receive',
+          source: v2PinHandoffRef.current ? 'deck_summary' : 'board',
+        },
+        'Trades',
+      );
+      recordGuideReceipt(GUIDE_RECEIPTS.finderTargetPinned);
+      v2PinHandoffRef.current = false;
+    }
     resetDeckForNewTargets();
   }
 
@@ -2615,18 +2665,71 @@ export default function TradesScreen({ navigation, route }: any) {
   const [guidedS55Done, setGuidedS55Done] = useState<string | null>(null);
   const guidePromptPos = fitTargetPositions?.[0] ?? 'WR';
 
+  // ── Guided Onboarding v2 bookkeeping (flag onboarding.guide_v2) ───────
+  // Every ref below is written only under `guideV2Active()`, so with the
+  // flag off they hold their initial values and no branch reads them.
+  // N1 — dispositions THIS app session (the beat fires on the third).
+  const v2SessionDispositionsRef = useRef(0);
+  // N2 — the failure family: three consecutive passes with no like.
+  const v2ConsecutivePassesRef = useRef(0);
+  const v2SessionHadLikeRef = useRef(false);
+  const [v2N2Armed, setV2N2Armed] = useState(false);
+  // "No DECLARED outlook" — an INFERRED direction still counts as absent
+  // (it is exactly the Form A case: the receipt resolves off the inference,
+  // and the beat asks the user to declare).
+  const v2OutlookDeclared =
+    !!prefsQuery.data?.team_outlook && prefsQuery.data.team_outlook !== 'not_sure';
+  // N1 arms from advance() and is requested from the chain effect, so it
+  // never preempts a live bubble (s2.2 is usually still up on swipe 1).
+  const [v2N1Armed, setV2N1Armed] = useState(false);
+  // …and s3.2 waits on it. "Settled" is the PRD's "seen OR ineligible":
+  // ineligible covers redraft leagues (N1 is suppressed there), a beat the
+  // engine refused (retired/invalidated/display cap), and any session past
+  // the first — N1's trigger is a first-session boundary, so after that it
+  // can never fire and a strict after-N1 chain would kill s3.2 forever.
+  const [v2N1Skipped, setV2N1Skipped] = useState(false);
+  const v2N1Seen = useOnboardingState((s) => !!s.ob.guideSeen['n1']);
+  const v2N1Retired = useOnboardingState((s) => !!s.ob.guideRetired['n1']);
+  const v2SessionCount = useOnboardingState((s) => s.ob.sessionCount);
+  const v2N1Settled =
+    v2N1Seen ||
+    v2N1Retired ||
+    v2N1Skipped ||
+    isRedraftLeague ||
+    v2SessionCount > 1;
+  // N6.1 — the first-like router. The claim is taken in
+  // `swipeMutation.onSuccess`, so two rapid likes cannot both read
+  // first-like true; it is released again if the beat is never shown, so a
+  // refused request does not burn the moment (the P0-9 bug shape).
+  const v2FirstLikeClaimedRef = useRef(false);
+  // The s6.2 + Apple-ask chain is deferred behind N6.1's completion. When
+  // the exit was the CTA (we navigated away), it runs on the next focus
+  // of this screen instead — the other three exits never leave it.
+  const v2LikeChainOnFocusRef = useRef(false);
+  const v2N61NavigatedRef = useRef(false);
+  // N4 — the deck-summary pin hand-off, for `finder_target_pinned.source`.
+  const v2PinHandoffRef = useRef(false);
+
   // Spotlight targets The Analyst points at on this screen.
   const deckWrapRef = useRef<View | null>(null);
   const chipWrapRef = useRef<View | null>(null);
   const trioWrapRef = useRef<View | null>(null);
+  // N2 Form A's target. The `trades.outlook-receipt.change` control lives
+  // inside OutlookBiasReceipt (another agent's file this wave), so the
+  // registration is hosted here on the wrapper around the mounted receipt —
+  // a superset of the Change link that always contains it. TODO: move to a
+  // per-instance registration inside the component when that file is free.
+  const outlookReceiptWrapRef = useRef<View | null>(null);
   useEffect(() => {
     registerGuideTarget('trades.card-body', deckWrapRef);
     registerGuideTarget('trades.provenance-chip', chipWrapRef);
     registerGuideTarget('trades.trio-entry', trioWrapRef);
+    registerGuideTarget('trades.outlook-receipt.change', outlookReceiptWrapRef);
     return () => {
       unregisterGuideTarget('trades.card-body');
       unregisterGuideTarget('trades.provenance-chip');
       unregisterGuideTarget('trades.trio-entry');
+      unregisterGuideTarget('trades.outlook-receipt.change');
     };
   }, []);
 
@@ -2659,13 +2762,52 @@ export default function TradesScreen({ navigation, route }: any) {
       requestGuideStep(GUIDE.s2_2());
       return;
     }
-    // s3.1 → s3.2 (the pitch, CTAs in the bubble)
-    if (guidedS3Pending) {
+    const v2 = guideV2Active();
+    // N1 — prices, and where yours come from (PRD §5.3; replaces s2.3).
+    // Armed by the third disposition of the first session; requested from
+    // here so it never preempts the s2.2 coaching bubble.
+    if (v2 && v2N1Armed) {
+      setV2N1Armed(false);
+      if (!requestGuideStep(GUIDE.n1())) setV2N1Skipped(true);
+      return;
+    }
+    // N2 — re-aim the deck (PRD §5.3, two-form). Form A spotlights the
+    // outlook receipt's Change control when the receipt actually resolves;
+    // otherwise Form B, whose CTA opens the DNA sheet directly. The form is
+    // chosen HERE, before the request — copy never swaps after render.
+    if (v2 && v2N2Armed) {
+      setV2N2Armed(false);
+      if (outlookReceiptShown) {
+        requestGuideStep(GUIDE.n2a());
+      } else {
+        // Completion is "sheet opened + ≥1 preference write" — the sheet
+        // records the `outlook_saved` receipt itself; this CTA only opens
+        // it (NG-11: the sheet is a <Modal> and is never coached).
+        requestGuideStep(GUIDE.n2b(), {
+          onAccept: () => {
+            setDnaOpenSource('guide');
+            setDnaSheetOpen(true);
+          },
+        });
+      }
+      return;
+    }
+    // s3.1 → s3.2 (the pitch, CTAs in the bubble). Under guide_v2 the beat
+    // waits for N1 to be seen or settled (§5.3): N1 owns the calibration
+    // framing s3.2's ask depends on, and "or ineligible" is what keeps the
+    // whole s3.2→s4.1→s5.x chain alive for redraft-only users (§5.4).
+    if (guidedS3Pending && (!v2 || v2N1Settled)) {
       setGuidedS3Pending(false);
       requestGuideStep(
         GUIDE.s3_2(guidePromptPos, !!fitTargetPositions?.length),
         {
-          onAccept: () => acceptQuicksetPrompt('prompt', guidePromptPos),
+          // O-6 — the ranking process now opens on RankHome's guided entry
+          // (N8 asks the import question there) instead of dropping the
+          // user straight into QuickSetTiers.
+          onAccept: () =>
+            v2
+              ? acceptGuidedRankEntry(guidePromptPos)
+              : acceptQuicksetPrompt('prompt', guidePromptPos),
           onDismiss: () => snoozeQuicksetPrompt(),
         },
       );
@@ -2698,16 +2840,25 @@ export default function TradesScreen({ navigation, route }: any) {
     // who saw nothing but the first-like celebration was told the tour was
     // over, having been taught one line — the P0-8 finding. The gate reads
     // product state, never a flag, so it is correct under both flag sets.
+    //
+    // Round-5 rewire: N6.1 REPLACES s6.1 as the first-like beat, so the
+    // second conjunct reads `n6.1 || s6.1` or the tour permanently loses
+    // its ending for every v2 user (the P0-8 failure shape). `guideSeen`
+    // is written on all four of N6.1's exits AND on its matched-suppression
+    // path, so this is true exactly when the first-like moment happened —
+    // however it resolved. Unconditional: `guideSeen['n6.1']` can only be
+    // written by v2 code paths, so with the flag off this is the v1
+    // predicate verbatim.
     if (
       ob.guideSeen['s2.2'] &&
-      ob.guideSeen['s6.1'] &&
+      (ob.guideSeen['n6.1'] || ob.guideSeen['s6.1']) &&
       !ob.guideSeen['s8.1'] &&
       !ob.guideTourCompleted
     ) {
       requestGuideStep(GUIDE.s8_1());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guideActive, guidedS3Pending, guidedS55Done, topCard]);
+  }, [guideActive, guidedS3Pending, guidedS55Done, topCard, v2N1Armed, v2N2Armed, v2N1Settled]);
 
   // S8 advanced → tour formally completes (reactive-only mode thereafter).
   const s81Seen = useOnboardingState((s) => !!s.ob.guideSeen['s8.1']);
@@ -2737,12 +2888,15 @@ export default function TradesScreen({ navigation, route }: any) {
     });
     track('quickset_prompt_shown', { show_count: ob.quicksetPromptShows + 1 }, 'Trades');
     if (guidedAvatarActive()) {
-      // Guided arm: The Analyst delivers the pitch (s3.1 → s3.2 with
-      // in-bubble CTAs) instead of the inline prompt card. Same trigger,
-      // same bookkeeping, same funnel event above.
-      if (!getOnboardingState().guideSeen['s3.1']) {
-        requestGuideStep(GUIDE.s3_1());
-      }
+      // Guided arm: The Analyst delivers the pitch (s3.2, CTAs in the
+      // bubble) instead of the inline prompt card. Same trigger, same
+      // bookkeeping, same funnel event above.
+      //
+      // s3.1 is CUT (PRD §5.2 — the builder is gone from the script): its
+      // content is absorbed by s3.2 and its "you and consensus disagree"
+      // framing is N1's job now. Safe by construction: this
+      // `setGuidedS3Pending(true)` was always unconditional and s3.2 chains
+      // off it, never off `guideSeen['s3.1']`.
       setGuidedS3Pending(true);
       return;
     }
@@ -2770,13 +2924,30 @@ export default function TradesScreen({ navigation, route }: any) {
     });
   }
 
+  // O-6 (PRD §5.3-A) — the guided entry to the ranking process. s3.2's CTA
+  // lands on RankHome, where N8 asks the import question first, instead of
+  // dropping the user straight into QuickSetTiers. `guidedEntry` is the
+  // chain param RankHome reads to fire N8; the position is carried so the
+  // Quick Set arm can still open on the position s3.2 named.
+  function acceptGuidedRankEntry(position?: string) {
+    track('quickset_prompt_accepted', { via: 'guide_rank_entry' }, 'Trades');
+    navigation.navigate('Rank', {
+      screen: 'RankHome',
+      params: { guidedEntry: 'n8', ...(position ? { position } : {}) },
+    });
+  }
+
   // Consume the QuickSet→Trades handoff on focus: snapshot the old deck,
   // force a fresh job (server cache key doesn't see board changes), and
   // let the diff effect below count what's new.
   useFocusEffect(
     useCallback(() => {
-      const pos = consumePendingQuicksetRegen();
-      if (!pos || !leagueId) return;
+      const marker = consumePendingQuicksetRegen();
+      if (!marker || !leagueId) return;
+      // R1's bus generalization: the marker is a position ONLY for the
+      // Quick Set source; 'trios'/'import' returns carry the source name.
+      const regenSource = consumeGuidedRegenSource() ?? 'quickset';
+      const pos = regenSource === 'quickset' && isRegenPosition(marker) ? marker : null;
       flushPendingPassRef.current(); // regen rewinds the deck — commit first
       pendingRegenRef.current = {
         position: pos,
@@ -2808,7 +2979,7 @@ export default function TradesScreen({ navigation, route }: any) {
       // Item 8: first-Quick-Set-save celebration beat, then the Apple ask
       // for this save-moment class (win-then-ask; the diff banner that
       // follows is a passive receipt, not an ask).
-      if (guidedOn && !getOnboardingState().celebrationsShown.first_quickset_save) {
+      if (pos != null && guidedOn && !getOnboardingState().celebrationsShown.first_quickset_save) {
         setToast({
           msg: "That's your board now. The deck rebuilds around it.",
           tone: 'success',
@@ -2816,7 +2987,9 @@ export default function TradesScreen({ navigation, route }: any) {
         patchOnboardingState({ celebrationsShown: { first_quickset_save: true } });
         track('celebration_shown', { beat: 'first_quickset_save' }, 'Trades');
       }
-      maybeAskApple('quickset_save');
+      // The save-moment Apple class belongs to Quick Set only — a trios or
+      // import return must not burn it (consume-only-on-show, P0-9 class).
+      if (pos != null) maybeAskApple('quickset_save');
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [deck, leagueId]),
   );
@@ -2847,20 +3020,30 @@ export default function TradesScreen({ navigation, route }: any) {
     ).length;
     track(
       'deck_regenerated',
-      { position: pending.position, new_trades: fresh },
+      pending.position != null
+        ? { position: pending.position, new_trades: fresh }
+        : { new_trades: fresh },
       'Trades',
     );
     if (guidedAvatarActive()) {
       // Guided arm: The Analyst delivers the reveal himself — celebrate on
       // new trades, honest oops on the null result (script S5.1/S5.0) —
       // then arms the S5.5 next-position ask via the chain effect.
-      requestGuideStep(
-        fresh > 0 ? GUIDE.s5_1(fresh, pending.position) : GUIDE.s5_0(pending.position),
-      );
-      setGuidedS55Done(pending.position);
+      if (pending.position != null) {
+        requestGuideStep(
+          fresh > 0 ? GUIDE.s5_1(fresh, pending.position) : GUIDE.s5_0(pending.position),
+        );
+        setGuidedS55Done(pending.position);
+      } else if (fresh > 0) {
+        // Trios/import return: the positive reveal reads fine without a
+        // position; the honest-null line (s5.0) is Quick-Set-worded, so a
+        // null result stays silent here. TODO(guide-v2 phase 2): craft a
+        // pos-less null line if trios/import null-reveals prove common.
+        requestGuideStep(GUIDE.s5_1(fresh, undefined));
+      }
       return;
     }
-    if (fresh > 0) {
+    if (fresh > 0 && pending.position != null) {
       setQuicksetDiffBanner({ position: pending.position, count: fresh });
       if (guidedOn && !getOnboardingState().coachMarksShown.diff_banner) {
         patchOnboardingState({ coachMarksShown: { diff_banner: true } });
@@ -2922,11 +3105,13 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     track('deck_exhausted_viewed', { deck_size: deck.length }, 'Trades');
     maybeShowQuicksetPrompt('like'); // swipes ≥3 path; pass-trigger n/a here
-    // Guided tour S7 — the trio ramp, pointed at the real CTA below (once
-    // per session; never preempts an active bubble).
-    if (guidedAvatarActive() && !guideS7ShownThisSession) {
-      if (requestGuideStep(GUIDE.s7_1())) guideS7ShownThisSession = true;
-    }
+    // s7.1 (the trio ramp) is CUT (PRD §5.2, DELTA row A7 — the builder is
+    // gone from the script): the step is deictic and its target
+    // `trades.trio-entry` mounts only under `onboarding.rank_routing`,
+    // which is false — and even with it on, the live `deck.replenishment`
+    // summary card renders in place of that whole branch. It fired pointing
+    // at nothing, every time. The exhausted-deck boundary belongs to the
+    // summary card + N4 now (§5.3); Trios stay a pull surface.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckExhausted]);
 
@@ -2953,6 +3138,36 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryVisible]);
 
+  // ── N4 — the empty deck (PRD §5.3) ───────────────────────────────────
+  // Rides the shipped `trades.deck-summary` card as an added line + primary
+  // action, never a competing card or an overlay bubble: one boundary, one
+  // surface. Fails closed on all three owning flags (`deck.replenishment`
+  // is inside `summaryVisible`, `trade.finder_targeting` is the pin board,
+  // `trades.finder_hub` is what makes `finderMode` resolvable at all) and
+  // on `!firstRun`, because the board the CTA hands off to is itself gated
+  // on it — a taught control that cannot render is exactly the incoherence
+  // the s7.1 cut exists to remove.
+  const v2N4Retired = useOnboardingState(
+    (s) => (s.ob.guideReceipts[GUIDE_RECEIPTS.finderTargetPinned] ?? 0) > 0,
+  );
+  const v2N4PinLine =
+    guideV2Active() &&
+    summaryVisible &&
+    targetingEnabled &&
+    finderHubOn &&
+    !firstRun &&
+    !v2N4Retired &&
+    pinnedGive.length + pinnedReceive.length === 0;
+
+  function handleSummaryPinTargets() {
+    haptics.selection();
+    // Attribution for the pin receipt below: this pin came from the guided
+    // hand-off, not from someone browsing the board on their own.
+    v2PinHandoffRef.current = true;
+    switchFinderMode('player');
+    mainScrollRef.current?.scrollTo({ y: 0, animated: true });
+  }
+
   function handleSummaryDone() {
     haptics.selection();
     // #246 — the deck IS the landing now (the launcher hub is unrouted),
@@ -2973,20 +3188,153 @@ export default function TradesScreen({ navigation, route }: any) {
     return !getOnboardingState().applePromptShownFor[cls];
   }
 
+  // P0-9 (PRD §5.2 `s6.2`): the once-per-class shot must be spent on a show
+  // that actually happens. v1 consumed it here, BEFORE the 700 ms win-then-
+  // ask delay, so an ask that never rendered still burned the class for
+  // good — and under guide_v2 this call is deferred behind N6.1, which makes
+  // that window much wider. Under the flag the consume moves inside the
+  // timer; `applePendingRef` keeps two calls inside the same window from
+  // stacking two sheets. Flag off = the shipped ordering, unchanged.
+  const applePendingRef = useRef(false);
   function maybeAskApple(cls: 'like' | 'quickset_save') {
     if (!appleAskEligible(cls)) return;
-    appleAskShownThisSession = true;
-    patchOnboardingState(
-      cls === 'like'
-        ? { applePromptShownFor: { like: true } }
-        : { applePromptShownFor: { quickset_save: true } },
-    );
+    const v2 = guideV2Active();
+    if (v2 && applePendingRef.current) return;
+    const consume = () => {
+      appleAskShownThisSession = true;
+      patchOnboardingState(
+        cls === 'like'
+          ? { applePromptShownFor: { like: true } }
+          : { applePromptShownFor: { quickset_save: true } },
+      );
+    };
+    if (v2) applePendingRef.current = true;
+    else consume();
     // Win-then-ask: the celebration toast lands before the modal.
     setTimeout(() => {
+      if (v2) {
+        applePendingRef.current = false;
+        consume();
+      }
       setAppleAsk(cls);
       track('apple_prompt_shown', { trigger: cls }, 'Trades');
     }, 700);
   }
+
+  // ── N6.1 — first like → "Awaiting them" (PRD §5.3) ───────────────────
+  // The s6.2 setup line + the Apple save-moment ask. Under guide_v2 this
+  // chain no longer hangs off the like handler: N6.1 owns that moment, so
+  // it fires from the beat's completion (all four exits, plus the paths
+  // where the beat never renders) and re-checks `appleAskEligible` HERE, at
+  // fire time — session and verification state can change in the interval.
+  function v2RunLikeChain() {
+    if (!getOnboardingState().guideSeen['s6.2'] && appleAskEligible('like')) {
+      requestGuideStep(GUIDE.s6_2());
+      setTimeout(() => maybeAskApple('like'), 2800);
+    } else {
+      maybeAskApple('like');
+    }
+  }
+
+  function v2OnN61Complete(via: GuideCompletionVia) {
+    // Only the CTA-navigation exit leaves this screen, so only it waits for
+    // the next TradesScreen focus; `Later`, the ✕, the swipe-away and the
+    // timeout all stay here, where a focus hook would never fire and would
+    // starve the chain outright.
+    if (via === 'cta' && v2N61NavigatedRef.current) {
+      v2N61NavigatedRef.current = false;
+      v2LikeChainOnFocusRef.current = true;
+      return;
+    }
+    v2RunLikeChain();
+  }
+
+  function v2ShowN61(hasAwaiting: boolean) {
+    const shown = hasAwaiting
+      ? requestGuideStep(GUIDE.n6_1(true), {
+          onAccept: () => {
+            v2N61NavigatedRef.current = true;
+            navigation.navigate('Matches', {
+              segment: 'awaiting',
+              at: Date.now(),
+              // The guided-chain param: MatchesScreen reads it to suppress
+              // N9 (that arrival already teaches) and, from Phase 2, to
+              // mount N6.2 on the row this chain carried.
+              guidedArrival: 'n6.1',
+            });
+          },
+          onComplete: v2OnN61Complete,
+        })
+      : requestGuideStep(GUIDE.n6_1(false), { onComplete: v2OnN61Complete });
+    if (shown) {
+      // Consume the first-like moment only on a beat that actually
+      // rendered, and keep the v1 celebration series continuous — N6.1 is
+      // the same moment s6.1 owned, so the funnel does not step at the
+      // flag flip.
+      patchOnboardingState({ celebrationsShown: { first_like: true } });
+      track('celebration_shown', { beat: 'first_like' }, 'Trades');
+      return;
+    }
+    // Refused (slot busy, retired, invalidated…). Release the claim so a
+    // later like can still take the moment — consuming it on a beat that
+    // never rendered is the P0-9 shape — and give this like the shipped
+    // receipt plus the chain the beat would have owned.
+    v2FirstLikeClaimedRef.current = false;
+    setToast({ msg: 'Liked', tone: 'success' });
+    v2RunLikeChain();
+  }
+
+  // Called from swipeMutation.onSuccess for every like under guide_v2.
+  function v2OnLikeSwipeSuccess(res: any) {
+    if (!guideV2Active() || !guidedAvatarActive()) return;
+    if (v2FirstLikeClaimedRef.current) return;
+    const ob = getOnboardingState();
+    if (
+      ob.celebrationsShown.first_like ||
+      ob.guideSeen['n6.1'] ||
+      ob.guideRetired['n6.1']
+    ) {
+      return;
+    }
+    v2FirstLikeClaimedRef.current = true;
+    // The like matured into a mutual match on the way in: there is no
+    // "awaiting" row to route to and the copy would be false. Consume the
+    // moment — `guideSeen['n6.1']` + retired + a measured suppression, no
+    // `guide_step_shown` — so s8.1's rewired predicate still becomes true
+    // for instant-matchers, and run the chain the beat would have owned.
+    if (res?.matched === true) {
+      markGuideStepConsumed('n6.1', 'matched');
+      v2RunLikeChain();
+      return;
+    }
+    // Otherwise ask the awaiting list whether there is anything to route
+    // to, and pick the variant BEFORE requesting — the bubble's copy is
+    // chosen once and never swaps after render. Empty, failed and slow all
+    // take the router-less line rather than route the user one tap into
+    // "No pending trades" at the most trust-critical moment of the tour.
+    let settled = false;
+    const decide = (hasAwaiting: boolean) => {
+      if (settled) return;
+      settled = true;
+      v2ShowN61(hasAwaiting);
+    };
+    setTimeout(() => decide(false), N61_AWAITING_TIMEOUT_MS);
+    queryClient
+      .fetchQuery({ queryKey: ['awaiting-trades'], queryFn: getAwaitingTrades })
+      .then((rows) => decide(Array.isArray(rows) && rows.length > 0))
+      .catch(() => decide(false));
+  }
+
+  // The deferred chain's CTA exit: it ran only because we navigated away,
+  // so it lands on the next focus of this screen.
+  useFocusEffect(
+    useCallback(() => {
+      if (!v2LikeChainOnFocusRef.current) return;
+      v2LikeChainOnFocusRef.current = false;
+      v2RunLikeChain();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
 
   function closeAppleAsk(bound: boolean) {
     const cls = appleAsk;
@@ -3309,6 +3657,17 @@ export default function TradesScreen({ navigation, route }: any) {
       // (at most one undoable action in flight; ordering preserved).
       flushPendingPass();
     }
+    // N6.1's lifetime bound (PRD §5.3): the bubble auto-dismisses on the
+    // next swipe as well as after 8 s, so a cta step can never hold the
+    // interrupt slot across further swipes and starve the push primer or
+    // the Apple ask. Its `onComplete('swipe')` runs the deferred s6.2 +
+    // Apple chain, so when THIS swipe is the dismissing one the inline
+    // chain below is skipped — ownership is declared, not left to timing.
+    let n61DismissedByThisSwipe = false;
+    if (guideV2Active() && guideActiveStepId() === 'n6.1') {
+      n61DismissedByThisSwipe = true;
+      dismissActiveGuideStep('swipe');
+    }
     // Onboarding item 4: persist first-swipe + lifetime swipe count
     // (items 7/8 read these for the prompt-card and Apple-ask triggers).
     // Gated on ANY consumer feature so each flag works independently
@@ -3326,11 +3685,57 @@ export default function TradesScreen({ navigation, route }: any) {
     maybeShowQuicksetPrompt(decision);
     // Guided tour: the real swipe advances the s2.2 coaching step; s2.3
     // (the provenance-chip beat) follows immediately in the freed slot.
+    // s2.3 is REPLACED by N1 (PRD §5.2): both pointed at
+    // `trades.provenance-chip`, so keeping s2.3 would teach the same target
+    // twice, the first time with the framing N1 exists to correct. Its
+    // request site is gone; the script's builder is deprecated for deletion
+    // alongside it.
     if (guidedAvatarActive()) {
       advanceGuideIfActive('s2.2');
-      const seen = getOnboardingState().guideSeen;
-      if (seen['s2.2'] && !seen['s2.3']) {
-        requestGuideStep(GUIDE.s2_3());
+      // Flag-off (v1) arm keeps the s2.3 provenance beat so the rollback
+      // lever restores the shipped tour; the v2 arm replaces it with N1 at
+      // the third disposition (PRD §5.2 REPLACE row).
+      if (!guideV2Active()) {
+        const seenV1 = getOnboardingState().guideSeen;
+        if (seenV1['s2.2'] && !seenV1['s2.3']) requestGuideStep(GUIDE.s2_3());
+      }
+    }
+    // ── v2 trigger accumulators (N1, N2) ────────────────────────────────
+    if (guideV2Active() && guidedAvatarActive()) {
+      v2SessionDispositionsRef.current += 1;
+      if (decision === 'pass') {
+        v2ConsecutivePassesRef.current += 1;
+      } else {
+        v2ConsecutivePassesRef.current = 0;
+        v2SessionHadLikeRef.current = true;
+      }
+      const obv = getOnboardingState();
+      // N1 — third disposition of the FIRST session (a post-success
+      // boundary, never idle time). Suppressed for redraft leagues, where
+      // "your swipes are teaching me your prices" has no dynasty board to
+      // teach, and for anyone who already has a Quick-Set board.
+      if (
+        v2SessionDispositionsRef.current === 3 &&
+        !isRedraftLeague &&
+        obv.sessionCount <= 1 &&
+        obv.quicksetCompletedPositions.length === 0
+      ) {
+        setV2N1Armed(true);
+      }
+      // N2 — the failure family: three consecutive passes, no like this
+      // session, no DECLARED outlook, and all three owning flags on
+      // (`consolidateOn` IS `edit_full_sheet && finder_hub`-in-a-mode —
+      // without it the outlook entry points route to the legacy sheet and
+      // the adoption receipt never renders). All fail closed.
+      if (
+        v2ConsecutivePassesRef.current >= 3 &&
+        !v2SessionHadLikeRef.current &&
+        outlookDirectionOn &&
+        consolidateOn &&
+        !v2OutlookDeclared
+      ) {
+        v2ConsecutivePassesRef.current = 0;
+        setV2N2Armed(true);
       }
     }
     // Guided layer: any disposition (swipe or button) retires an active
@@ -3446,7 +3851,23 @@ export default function TradesScreen({ navigation, route }: any) {
       // win-then-ask ordering, never two overlapping surfaces.
       setLastLikedCard(topCard);
       const firstLike = !getOnboardingState().celebrationsShown.first_like;
-      if (guidedAvatarActive()) {
+      if (guidedAvatarActive() && guideV2Active()) {
+        // N6.1 (PRD §5.3) owns the first-like moment, and whether THIS like
+        // is the first is decided in `swipeMutation.onSuccess` — a like-time
+        // read lets two rapid likes both see first-like true, and the
+        // empty-awaiting gate needs a response that a like-time prefetch
+        // would race. So a like that is still a candidate fires nothing
+        // here; the router (or its router-less variant) and the deferred
+        // s6.2 + Apple chain both hang off that response.
+        //
+        // A like that is definitively NOT the first keeps today's inline
+        // chain — except the one that just swipe-dismissed a live n6.1
+        // bubble, whose chain that step's `onComplete` owns.
+        if (!firstLike && !n61DismissedByThisSwipe) {
+          setToast({ msg: 'Liked', tone: 'success' });
+          v2RunLikeChain();
+        }
+      } else if (guidedAvatarActive()) {
         // Guided arm: s6.1 celebrate replaces the toast; the honest Apple
         // setup line (s6.2) precedes the system sheet, which opens after
         // the auto-step clears (never two overlapping surfaces).
@@ -3701,6 +4122,7 @@ export default function TradesScreen({ navigation, route }: any) {
           other DNA-only caller) keeps this byte-identical to before. */}
       <TradeDnaSheet
         visible={dnaSheetOpen}
+        openSource={dnaOpenSource}
         onClose={handleEditSheetClose}
         full={
           consolidateOn
@@ -3853,10 +4275,19 @@ export default function TradesScreen({ navigation, route }: any) {
             receipt is the closest existing analog (same "Change"
             affordance, same data source) — see status doc. */}
         {finderMode ? (
-          <OutlookBiasReceipt
-            details={receiptDetails}
-            onChange={() => setDnaSheetOpen(true)}
-          />
+          // The wrapper exists only to give N2 Form A's spotlight a frame
+          // (see outlookReceiptWrapRef); it adds no layout of its own.
+          <View ref={outlookReceiptWrapRef} collapsable={false}>
+            <OutlookBiasReceipt
+              details={receiptDetails}
+              onChange={() => {
+                // N2 form A is an `action` step: the real tap on the
+                // control it spotlights is what advances it.
+                advanceGuideIfActive('n2a');
+                setDnaSheetOpen(true);
+              }}
+            />
+          </View>
         ) : null}
 
         {/* #257 (operator decision Q2) — dismissing the full sheet does NOT
@@ -5259,6 +5690,12 @@ export default function TradesScreen({ navigation, route }: any) {
                   Fresh ideas land every week — or tap Find more trades to
                   search again now.
                 </Text>
+                {/* N4 (PRD §5.3) — the pin line reads as content on the
+                    card, not chrome, and its verb has a reachable control:
+                    the CTA hands off to the FB-47 targeting board. */}
+                {v2N4PinLine ? (
+                  <Text style={styles.emptyBody}>{GUIDE.n4().line}</Text>
+                ) : null}
                 <View style={styles.summaryBtnRow}>
                   <Button
                     testID="trades.deck-summary.see-liked"
@@ -5267,12 +5704,24 @@ export default function TradesScreen({ navigation, route }: any) {
                     compact
                     onPress={() => navigation.navigate('Portfolio')}
                   />
+                  {/* Button budget (PRD §5.3): the card keeps ONE primary.
+                      With the pin line up, `Pin targets →` is it and Done
+                      demotes to ghost; See liked stays secondary. */}
                   <Button
                     testID="trades.deck-summary.done"
                     label="Done"
+                    variant={v2N4PinLine ? 'ghost' : 'primary'}
                     compact
                     onPress={handleSummaryDone}
                   />
+                  {v2N4PinLine ? (
+                    <Button
+                      testID="trades.deck-summary.pin"
+                      label={GUIDE.n4().ctas?.[0]?.label ?? 'Pin targets →'}
+                      compact
+                      onPress={handleSummaryPinTargets}
+                    />
+                  ) : null}
                 </View>
               </View>
             </Card>
@@ -5295,7 +5744,6 @@ export default function TradesScreen({ navigation, route }: any) {
                       variant="secondary"
                       compact
                       onPress={() => {
-                        advanceGuideIfActive('s7.1');
                         track('trio_entry_tapped', { from: 'deck_exhausted' }, 'Trades');
                         navigation.navigate('Rank', { screen: 'Trios' });
                       }}

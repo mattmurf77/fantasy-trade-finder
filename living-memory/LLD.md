@@ -199,3 +199,10 @@ Required: H1 with project suffix, purpose blockquote, Table of Contents, ISO dat
 - **Browser extension is MV3** — load unpacked in Chrome/Edge.
 - **Tests:** ad-hoc scripts (`dump_mismatches.py`, `tmp_check_db.py`, etc.). No pytest suite yet — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md).
 - **Port 5000 conflict on macOS:** AirPlay Receiver uses it. Kill via `lsof -ti:5000 | xargs kill -9`. See [`GOTCHAS.md`](GOTCHAS.md).
+
+## Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)
+
+Every Analyst beat declares, in `analystScript.ts`, machine-checked by `mobile/tests/check-guide-script.js` (CI):
+`retireAfter` ({event,count} client receipt, or `'never'` + in-file reason) · `maxDisplayCount` · `invalidateOn` (receipt ids) · `adoptionEvent` (a REGISTERED analytics event — the M6 join key; receipts are not events) · degrade contract (`degradeLine` | `degrade:'suppress'` | non-deictic line) · copy class caps (auto 12w + autoMs floor / action 16 / tap 20 / cta 16).
+**Client-receipt rule:** retirement/invalidation read only `recordGuideReceipt(...)` receipts written by screens at the real moment — never server-fired event names (`quickset_completed`, `trio_swipe` are the standing traps). Receipt names live in `GUIDE_RECEIPTS` (analystScript.ts) — the single authority; screens import it.
+New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader release cap). The guided-regen payoff mailbox is `onboardingBus.ts` (`setPendingGuidedRegen(source)`; markers are positions ONLY for `'quickset'` — `isRegenPosition()` before forwarding to analytics).

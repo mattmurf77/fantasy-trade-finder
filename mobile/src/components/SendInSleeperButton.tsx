@@ -23,6 +23,8 @@ import {
 } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { track } from '../api/events';
+import { recordGuideReceipt } from '../state/useGuide';
+import { GUIDE_RECEIPTS } from './analystScript';
 
 // "Send in Sleeper" — and the single PLATFORM ROUTER for the send action.
 // Renders on any real trade surface (found / matched / suggested).
@@ -355,6 +357,9 @@ export default function SendInSleeperButton({
     // send-funnel denominator (hld.md §1.4).
     // has_target=false means this tap becomes the openInSleeper() handoff
     // below, NOT a real send — the denominator needs that distinction.
+    // guide-v2: client receipt for n6.1/n9 invalidation (Phase-1 scope;
+    // the MFL/ESPN twins gain theirs with the Phase-2 attempt events).
+    recordGuideReceipt(GUIDE_RECEIPTS.sendAttempted);
     track('sleeper_send_attempted', {
       surface,
       give_n: givePlayerIds.length,

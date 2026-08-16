@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { Icon, TickLabel } from '../components/chalkline';
 import RankImportSheet from '../components/RankImportSheet';
@@ -8,6 +9,13 @@ import Toast from '../components/Toast';
 import { setRankingMethod } from '../api/rankings';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import {
+  guideV2Active,
+  recordGuideReceipt,
+  requestGuideStep,
+} from '../state/useGuide';
+import { setPendingGuidedRegen } from '../state/onboardingBus';
+import { S as GUIDE } from '../components/analystScript';
 import { chalk, flare, ice, ink, radii, space, type, fonts } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
 import {
@@ -40,7 +48,7 @@ import { CONSOLIDATED_VIEW, useRookieScope } from '../state/rookieScope';
 // slider changes it later. The callout carries the value prop: trades are
 // priced off this board.
 
-export default function RankHomeScreen({ navigation }: any) {
+export default function RankHomeScreen({ navigation, route }: any) {
   const setPref = useSession((s) => s.setRankingMethodPref);
   const importOn = useFlag('ranks.import');
   // rookie-draft M2 / O1-expanded — the chooser is where a user goes to
@@ -74,10 +82,46 @@ export default function RankHomeScreen({ navigation }: any) {
   const onImportApplied = (count: number) => {
     setImportOpen(false);
     setToast(`Imported ${count} rank${count === 1 ? '' : 's'} onto your board`);
+    if (guideV2Active()) {
+      // The board receipt (retires N8 + every other "help me build a board"
+      // nudge) and the payoff handoff: the next Trades focus force-regens and
+      // the s5.x reveal fires on the imported numbers — the strongest payoff
+      // path in the tour (PRD §5.3-A). Client-observed at the real moment,
+      // never off a server-fired event (FR-E3).
+      recordGuideReceipt('import_completed');
+      setPendingGuidedRegen('import');
+    }
     // Land on the Overall board so the imported order is immediately
     // visible (every method writes to the same board).
     navigation.navigate('ManualRanks');
   };
+
+  // N8 — request on guided entry (s3.2's CTA routes here with
+  // `guidedEntry: 'n8'`) OR on any RankHome focus (the O-7 first-visit
+  // floor). Both arms request the same step; `once` + `invalidateOn` in the
+  // eligibility contract make it once-per-device and retire it the moment the
+  // user has a board by any method, so re-requesting on focus is self-
+  // limiting (a suppressed request re-arms for the next visit).
+  //
+  // Fail closed on `ranks.import`: that flag is the kill switch for the
+  // import entry, and a beat must never outlive the feature it points at —
+  // with it off there is nothing for `Upload →` to open, so N8 is not asked.
+  const guidedEntry = route?.params?.guidedEntry;
+  useFocusEffect(
+    useCallback(() => {
+      if (!guideV2Active() || !importOn) return;
+      requestGuideStep(GUIDE.n8(), {
+        onAccept: () => setImportOpen(true),
+        // "No — start simple" → Trios, the lightest rung (O-6). RankHome and
+        // Trios are siblings in the Rank stack, so this is a plain sibling
+        // navigate — the nested `navigate('Rank', { screen: … })` form is for
+        // call sites in another tab.
+        onDismiss: () => navigation.navigate('Trios', { guidedEntry: 'n8' }),
+      });
+      // `guidedEntry` is a dependency, not decoration: a fresh guided arrival
+      // re-runs the request even when the screen was already focused.
+    }, [guidedEntry, importOn, navigation]),
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
