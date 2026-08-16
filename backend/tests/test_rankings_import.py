@@ -14,11 +14,19 @@ Covers the four contract layers:
      composed apply_reorder call and end-to-end on a real RankingService.
   4. Route auth/flag: 404 while `ranks.import` is off, 401 without a
      session, 400 on empty input.
+  5. Structured rows + team/pos hints (premium rankings import v1,
+     [D-058]; addendum §3.2): hints disambiguate same-name candidates,
+     are ignored when the name already resolves, never reject a match,
+     take precedence over names/text on the route, honour the row cap —
+     and the paste path stays BYTE-IDENTICAL (golden fixture captured
+     from the pre-hint implementation).
 
 Isolation pattern mirrors test_rankings_submit_authz.py: Flask test
 client, in-memory SQLite, injected sessions, no network.
 """
+import csv
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -58,6 +66,8 @@ POOL = [
 SEED = {"p_lj_qb": 1900.0, "p_lj_wr": 1200.0, "p_allen": 1950.0,
         "p_chase": 1940.0, "p_walker": 1700.0, "p_mhj": 1800.0,
         "p_stroud": 1750.0, "p_lamb": 1930.0}
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +179,196 @@ def test_match_full_paste_counts():
     rows = match_rank_list(text, POOL, SEED)
     statuses = [r["status"] for r in rows]
     assert statuses == ["matched", "matched", "ambiguous", "unmatched"]
+
+
+# ---------------------------------------------------------------------------
+# 2b. Structured rows + team/pos hints (premium import v1, [D-058])
+# ---------------------------------------------------------------------------
+
+def _match_rows(rows):
+    return match_rank_list([], POOL, SEED, rows=rows)
+
+
+def test_hint_team_resolves_same_name_pair():
+    """The one thing hints exist for: two pool players named Lamar Jackson,
+    the CSV's Team column picks the right one."""
+    rows = _match_rows([{"name": "Lamar Jackson", "team": "BAL", "pos": None}])
+    assert len(rows) == 1
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "p_lj_qb"
+    assert rows[0]["candidates"] == []
+
+
+def test_hint_pos_resolves_same_name_pair():
+    rows = _match_rows([{"name": "Lamar Jackson", "team": None, "pos": "WR"}])
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "p_lj_wr"
+
+
+def test_hint_codes_are_case_and_punctuation_insensitive():
+    rows = _match_rows([{"name": "Lamar Jackson", "team": "bal.", "pos": "qb"}])
+    assert rows[0]["player"]["id"] == "p_lj_qb"
+
+
+def test_hint_stale_team_falls_back_to_position():
+    """A traded player's CSV team code is stale — position still resolves it.
+    (Strictest-first: both hints → 0 candidates → position alone → 1.)"""
+    rows = _match_rows([{"name": "Lamar Jackson", "team": "NYJ", "pos": "QB"}])
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "p_lj_qb"
+
+
+def test_hints_ignored_when_name_is_unambiguous():
+    """Hints may NEVER reject a name-only match. Wrong team AND wrong
+    position still matches the single Josh Allen in the pool."""
+    rows = _match_rows([{"name": "Josh Allen", "team": "JAX", "pos": "LB"}])
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "p_allen"
+
+
+def test_hints_ignored_when_fuzzy_match_is_unambiguous():
+    rows = _match_rows([{"name": "Kenneth Walker", "team": "WAS", "pos": "WR"}])
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "p_walker"
+
+
+def test_hints_matching_nothing_leave_the_ambiguity_intact():
+    """No candidate satisfies the hints ⇒ the untouched name-only candidate
+    list comes back (degrade to today's behaviour, never reject)."""
+    rows = _match_rows([{"name": "Lamar Jackson", "team": "NYJ", "pos": "TE"}])
+    assert rows[0]["status"] == "ambiguous"
+    assert [c["id"] for c in rows[0]["candidates"]] == ["p_lj_qb", "p_lj_wr"]
+
+
+def test_rows_without_hints_behave_like_names():
+    rows = _match_rows([{"name": "Lamar Jackson"}])
+    assert rows[0]["status"] == "ambiguous"
+    assert [c["id"] for c in rows[0]["candidates"]] == ["p_lj_qb", "p_lj_wr"]
+
+
+def test_rows_unmatched_and_order_preserved():
+    rows = _match_rows([
+        {"name": "CeeDee Lamb", "team": "DAL", "pos": "WR"},
+        {"name": "Nobody Realname", "team": "FA", "pos": "WR"},
+        {"name": "Josh Allen", "team": "BUF", "pos": "QB"},
+    ])
+    assert [r["status"] for r in rows] == ["matched", "unmatched", "matched"]
+    assert [r["name"] for r in rows] == \
+        ["CeeDee Lamb", "Nobody Realname", "Josh Allen"]
+    assert rows[0]["input"] == "CeeDee Lamb"
+
+
+def test_rows_drop_blank_and_non_dict_entries():
+    rows = _match_rows([
+        {"name": "  Josh Allen  ", "team": "BUF", "pos": "QB"},
+        {"name": "   "},
+        {"name": None},
+        {"team": "DAL"},
+        "Josh Allen",
+        {"name": "CeeDee Lamb"},
+    ])
+    assert [r["name"] for r in rows] == ["Josh Allen", "CeeDee Lamb"]
+
+
+def test_rows_never_read_value_columns():
+    """Premium CSVs carry Value/Trend/PPG; the pipeline is order-only, so a
+    row that smuggles them in is matched on name/team/pos and nothing else
+    leaks into the response."""
+    rows = _match_rows([{"name": "Josh Allen", "team": "BUF", "pos": "QB",
+                         "value": 8655, "trend": "-63", "ppg": 24.9}])
+    assert rows[0]["status"] == "matched"
+    assert set(rows[0]) == {"input", "name", "status", "player", "candidates"}
+    assert set(rows[0]["player"]) == {"id", "name", "team", "position"}
+
+
+# ---------------------------------------------------------------------------
+# 2c. Paste-path regression — the hint extension must not move the live path
+# ---------------------------------------------------------------------------
+
+def test_text_path_is_byte_identical_to_pre_hint_implementation():
+    """fixtures/rankings_paste_golden.json holds match_rank_list's output for
+    a realistic mixed-shape paste, CAPTURED FROM THE PRE-HINT CODE. This
+    function serves the shipped paste import, so the structured-rows work is
+    only allowed to be additive."""
+    golden = json.loads((FIXTURES / "rankings_paste_golden.json").read_text())
+    assert match_rank_list(golden["corpus"], POOL, SEED) == golden["golden"]
+    # rows=None is the paste path, explicitly.
+    assert match_rank_list(golden["corpus"], POOL, SEED,
+                           rows=None) == golden["golden"]
+
+
+# ---------------------------------------------------------------------------
+# 2d. Dynasty Nerds premium CSV → the rows contract, end to end
+# ---------------------------------------------------------------------------
+# fixtures/dynasty_rankings_sflextep.csv is SYNTHESIZED FROM RESEARCH and is
+# PENDING A REAL SUBSCRIBER EXPORT: its header
+# (`Rank,Player,Team,Position,Age,Exp,Value,Trend,PPG,Pos Rank`), filename
+# pattern and row shape come from
+# docs/plans/connected-rankings/research/2026-08-15-dynasty-nerds.md, not
+# from a file Dynasty Nerds actually produced. The preset does not graduate
+# until a real export lands (addendum §3.4 fixture gate); when it does,
+# replace this file and expect the assertions below to hold unchanged.
+
+DN_CSV = FIXTURES / "dynasty_rankings_sflextep.csv"
+
+
+def _dn_rows():
+    """The client-side parse: NAME/TEAM/POS columns only, rank order kept."""
+    with DN_CSV.open(newline="") as fh:
+        return [{"name": r["Player"], "team": r["Team"], "pos": r["Position"]}
+                for r in csv.DictReader(fh)]
+
+
+def _dn_pool():
+    """A universal pool covering the export, plus a real-world same-name
+    collision (Josh Allen the QB vs Josh Allen the edge rusher)."""
+    with DN_CSV.open(newline="") as fh:
+        players = [_p(f"dn_{i}", r["Player"], r["Position"], r["Team"])
+                   for i, r in enumerate(csv.DictReader(fh))]
+    players.append(_p("dn_allen_lb", "Josh Allen", "LB", "JAX"))
+    seed = {p.id: 2000.0 - i for i, p in enumerate(players)}
+    return players, seed
+
+
+def test_dn_fixture_header_is_the_documented_shape():
+    header = DN_CSV.read_text().splitlines()[0]
+    assert header == ("Rank,Player,Team,Position,Age,Exp,Value,Trend,PPG,"
+                      "Pos Rank")
+    assert DN_CSV.name == "dynasty_rankings_sflextep.csv"
+
+
+def test_dn_rows_carry_only_name_team_pos():
+    rows = _dn_rows()
+    assert len(rows) == 30
+    for row in rows:
+        assert set(row) == {"name", "team", "pos"}
+
+
+def test_dn_export_matches_end_to_end_with_hints():
+    rows = _dn_rows()
+    players, seed = _dn_pool()
+    matched = match_rank_list([], players, seed, rows=rows)
+
+    assert len(matched) == len(rows)
+    assert [m["name"] for m in matched] == [r["name"] for r in rows]
+    statuses = {m["status"] for m in matched}
+    assert statuses == {"matched"}, [m for m in matched
+                                     if m["status"] != "matched"]
+    # The colliding name resolved to the QB, not the linebacker.
+    allen = next(m for m in matched if m["name"] == "Josh Allen")
+    assert allen["player"]["position"] == "QB"
+    assert allen["player"]["team"] == "BUF"
+
+
+def test_dn_export_without_hints_is_ambiguous_on_the_collision():
+    """Proves the DN test above is actually exercising the hints: the same
+    export matched name-only leaves Josh Allen ambiguous."""
+    players, seed = _dn_pool()
+    name_only = [{"name": r["name"]} for r in _dn_rows()]
+    matched = match_rank_list([], players, seed, rows=name_only)
+    allen = next(m for m in matched if m["name"] == "Josh Allen")
+    assert allen["status"] == "ambiguous"
+    assert {c["position"] for c in allen["candidates"]} == {"QB", "LB"}
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +490,66 @@ def test_import_match_accepts_raw_text(client):
     assert r.get_json()["counts"]["matched"] == 2
 
 
+def test_import_match_accepts_structured_rows(client):
+    c, _svc = client
+    r = c.post("/api/rankings/import-match", headers=_h(),
+               data=json.dumps({"rows": [
+                   {"name": "Lamar Jackson", "team": "BAL", "pos": "QB"},
+                   {"name": "Lamar Jackson", "team": None, "pos": None},
+                   {"name": "Nobody Realname", "team": "FA", "pos": "WR"},
+               ]}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["counts"] == {"matched": 1, "ambiguous": 1, "unmatched": 1}
+    assert body["rows"][0]["player"]["id"] == "p_lj_qb"
+    assert body["scoring_format"] == "1qb_ppr"
+
+
+def test_import_match_rows_take_precedence_over_names_and_text(client):
+    c, _svc = client
+    r = c.post("/api/rankings/import-match", headers=_h(),
+               data=json.dumps({
+                   "rows":  [{"name": "Josh Allen", "team": "BUF", "pos": "QB"}],
+                   "names": ["CeeDee Lamb", "Ja'Marr Chase"],
+                   "text":  "C.J. Stroud\nKenneth Walker III\n",
+               }))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert [row["name"] for row in body["rows"]] == ["Josh Allen"]
+
+
+def test_import_match_rows_requires_a_usable_name(client):
+    c, _svc = client
+    for payload in ({"rows": []},
+                    {"rows": [{"team": "BUF"}, {"name": "  "}, "Josh Allen"]}):
+        r = c.post("/api/rankings/import-match", headers=_h(),
+                   data=json.dumps(payload))
+        assert r.status_code == 400, payload
+        assert r.get_json()["error"] == "rows[].name required"
+
+
+def test_import_match_row_cap_applies_to_structured_rows(client):
+    """Boundary: 500 rows pass, 501 are refused — counted on SUBMITTED rows,
+    before unusable ones are dropped."""
+    c, _svc = client
+    row = {"name": "Josh Allen", "team": "BUF", "pos": "QB"}
+    ok = c.post("/api/rankings/import-match", headers=_h(),
+                data=json.dumps({"rows": [dict(row)] * 500}))
+    assert ok.status_code == 200, ok.get_data(as_text=True)
+    assert ok.get_json()["counts"]["matched"] == 500
+
+    over = c.post("/api/rankings/import-match", headers=_h(),
+                  data=json.dumps({"rows": [dict(row)] * 501}))
+    assert over.status_code == 400
+    assert over.get_json() == {"error": "too_many_rows", "max": 500}
+
+    # …and a 501st row that would have been DROPPED still trips the cap.
+    padded = c.post("/api/rankings/import-match", headers=_h(),
+                    data=json.dumps({"rows": [dict(row)] * 500 + [{"name": ""}]}))
+    assert padded.status_code == 400
+    assert padded.get_json()["error"] == "too_many_rows"
+
+
 def test_import_match_requires_input(client):
     c, _svc = client
     r = c.post("/api/rankings/import-match", headers=_h(),
@@ -355,3 +615,51 @@ def test_import_apply_requires_session(client):
                headers={"Content-Type": "application/json"},
                data=json.dumps({"ordered_player_ids": ["a", "b"]}))
     assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 5. Premium import v1 registrations ([D-058]) — flags + taxonomy
+# ---------------------------------------------------------------------------
+
+PREMIUM_SOURCE_FLAGS = ("ranks.source.dynasty_nerds", "ranks.source.dlf")
+
+
+def test_premium_source_flags_registered_and_dark_everywhere():
+    """Both keys exist in FLAG_KEYS, in config/features.json, and in every
+    complete flag fixture — and every one of them is FALSE (G-034: a key
+    added to features.json but not the fixtures fails the suite later, in a
+    file that has nothing to do with the feature)."""
+    from backend import feature_flags
+
+    repo = Path(__file__).resolve().parents[2]
+    sources = [repo / "config/features.json"] + [
+        FIXTURES / "flags" / f"{n}.json"
+        for n in ("release", "onboarding-v2", "profiles-on")
+    ]
+    for key in PREMIUM_SOURCE_FLAGS:
+        assert key in feature_flags.FLAG_KEYS
+        assert feature_flags.DEFAULT_FLAGS[key] is False
+        for path in sources:
+            flags = json.loads(path.read_text())
+            assert flags.get(key) is False, f"{key} in {path.name}"
+
+
+def test_preset_events_registered_and_non_intent():
+    """Registration lands BEFORE any emitter: this registry is default-deny
+    behind a 200, so an unregistered name is silent data loss."""
+    from backend import analytics_queries as aq
+    from backend import analytics_taxonomy as tax
+
+    for name in ("rankings_preset_detected", "rankings_preset_fallback"):
+        assert name in tax.ALLOWED_CLIENT_EVENTS
+        assert name in tax.CLIENT_EVENT_PROPS
+        assert name in aq.NON_INTENT_EVENTS      # DAU-seam rule
+        assert name not in aq.INTENT_EVENTS
+    assert tax.CLIENT_EVENT_PROPS["rankings_preset_detected"] == \
+        frozenset({"source", "via", "set_confirmed"})
+    assert tax.CLIENT_EVENT_PROPS["rankings_preset_fallback"] == \
+        frozenset({"via"})
+    # The apply is the INTENT event of this funnel, and is server-fired.
+    assert "rankings_import_applied" in tax.SERVER_FIRED_EVENTS
+    assert "rankings_import_applied" not in tax.ALLOWED_CLIENT_EVENTS
+    assert "rankings_import_applied" in aq.INTENT_EVENTS

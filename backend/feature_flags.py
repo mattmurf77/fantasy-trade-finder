@@ -254,6 +254,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # "Have rankings already?" chooser entry. Ships ON in features.json —
     # this key is a kill switch, not a dark launch.
     "ranks.import",                # paste-a-table rankings import v1
+    # ── Premium rankings import v1 (2026-08-15, [D-058]) ──────────────
+    # docs/plans/connected-rankings/build-v1-premium-import/scope.md §2.
+    # One key per premium source row in the import half sheet; BOTH DARK.
+    # Off = the row is absent and that source's CSV preset never runs;
+    # paste + generic CSV upload are deliberately NOT gated by these.
+    # Order-only in both states — a premium CSV's Value/Trend/PPG columns
+    # are never read or stored (addendum §3.2 R14).
+    "ranks.source.dynasty_nerds",  # Dynasty Nerds premium CSV preset + sheet row
+    "ranks.source.dlf",            # DLF preset — also gated on a real fixture (§3.4)
     "marketplace.publisher_sets",  # publisher IAP + subscriber linking (phase 3)
     "marketplace.contributor_sales", # contributor credit-priced sales (phase 4)
     "marketplace.cash_payouts",    # Stripe Connect cash-out rung (phase 5)
