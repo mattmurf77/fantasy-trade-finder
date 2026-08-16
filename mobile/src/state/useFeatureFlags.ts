@@ -70,6 +70,22 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // two files rather than asserting a literal.
   'league.pos_candidates': true,
   'league.player_trade_handoff': true,
+  // ── Premium rank sets (Connected Rankings addendum §2, [D-058]) ────────
+  // DELIBERATELY `false`, and deliberately LISTED rather than absent.
+  //
+  // `false` because these gate a surface that reaches a paid third-party
+  // site: `espn.link`-style fail-open is forbidden here (scope block §2).
+  // Listed because the compiled default must state the answer rather than
+  // rely on a missing key reading falsy — an operator flipping one of these
+  // edits `config/features.json` AND this line, and a reviewer can see both
+  // sides agree. (`revalidateFlags` replaces the whole map, so an absent
+  // server key still resolves falsy; false → undefined is not a paint flip.)
+  //
+  // Graduation is an operator action after testing lane 2a on their own
+  // Dynasty Nerds account. Flags off ⇒ the premium rows vanish from the
+  // import sheet; the CSV-upload and paste rows are NOT gated by these.
+  'ranks.source.dynasty_nerds': false,
+  'ranks.source.dlf': false,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({
