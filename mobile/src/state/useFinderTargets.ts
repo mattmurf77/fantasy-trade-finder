@@ -20,10 +20,27 @@ import type { Player } from '../shared/types';
 // card's give side must carry EVERY pinned player). Defaults ON per the
 // operator-approved spec; meaningless (and not sent) below 2 give pins.
 
+// #330 — one-shot Offer/Target handoff from the league-rankings drill-in.
+// `opponent` is exactly the shape TradesScreen's `sheetOpponent` state holds,
+// so consumption is a plain `setSheetOpponent(handoff.opponent)`. `seq` is a
+// store-internal monotonic counter stamped on every non-null setHandoff: the
+// scoped opponent is a derived STRING downstream, so a repeat Offer to the
+// SAME team changes no dep the deck's choke-point effect watches — the seq is
+// the per-handoff nonce that makes it re-fire. Lifecycle is one-shot: set
+// only by LeagueSummaryScreen's row action, consumed (and nulled) by
+// TradesScreen on focus; an un-consumed handoff persists until consume,
+// `clear()`, or the league-switch subscription below — no timeout.
+export interface FinderHandoff {
+  seq: number;
+  opponent: { userId: string; name: string };
+  autoRun: true;
+}
+
 interface FinderTargetsState {
   pinnedGive: Player[];
   pinnedReceive: Player[];
   packageMode: boolean;
+  handoff: FinderHandoff | null;
 
   addGive: (p: Player) => void;
   addReceive: (p: Player) => void;
@@ -32,16 +49,24 @@ interface FinderTargetsState {
   /** Replace one side wholesale (#186 "build around this side"). */
   setSide: (side: 'give' | 'receive', players: Player[]) => void;
   setPackageMode: (on: boolean) => void;
+  /** Stamps `seq` internally — callers never supply it (#330). */
+  setHandoff: (h: Omit<FinderHandoff, 'seq'> | null) => void;
   clear: () => void;
 }
 
 const dedupeAdd = (list: Player[], p: Player) =>
   list.some((x) => x.id === p.id) ? list : [...list, p];
 
+// #330 — module-level so it survives every clear(): the counter is monotonic
+// for the session, which is what lets the consumer treat "seq changed" as
+// "a NEW handoff happened" with no reset ambiguity.
+let _handoffSeq = 0;
+
 export const useFinderTargets = create<FinderTargetsState>((set) => ({
   pinnedGive: [],
   pinnedReceive: [],
   packageMode: true,
+  handoff: null,
 
   addGive: (p) => set((s) => ({ pinnedGive: dedupeAdd(s.pinnedGive, p) })),
   addReceive: (p) =>
@@ -53,7 +78,10 @@ export const useFinderTargets = create<FinderTargetsState>((set) => ({
   setSide: (side, players) =>
     set(side === 'give' ? { pinnedGive: players } : { pinnedReceive: players }),
   setPackageMode: (on) => set({ packageMode: on }),
-  clear: () => set({ pinnedGive: [], pinnedReceive: [], packageMode: true }),
+  setHandoff: (h) =>
+    set({ handoff: h ? { ...h, seq: ++_handoffSeq } : null }),
+  clear: () =>
+    set({ pinnedGive: [], pinnedReceive: [], packageMode: true, handoff: null }),
 }));
 
 // League switch (or sign-out) invalidates player-id pins. Module-level

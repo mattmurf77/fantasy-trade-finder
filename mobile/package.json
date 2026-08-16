@@ -34,7 +34,9 @@
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:s51-regen-diff": "node tests/check-s51-regen-diff.js",
     "test:rank-presets": "node tests/check-rank-presets.js",
-    "test:premium-import": "node tests/check-premium-import.js"
+    "test:premium-import": "node tests/check-premium-import.js",
+    "test:offer-prefill-330": "node tests/check-offer-prefill-330.js",
+    "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
