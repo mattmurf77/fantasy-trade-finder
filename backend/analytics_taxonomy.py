@@ -905,8 +905,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # count (in manual mode every pick is by:"user").
     # `mock_create_refused.reason` is the typed-empty reason verbatim
     # (open string).
+    # #328: `ownership_source` ∈ platform|user|partial|none|null — resolved
+    # provenance of the traded-pick overlay, read off settings_echo like the
+    # rest. The fallback rate per platform is one query.
     "mock_started":        frozenset({"platform", "teams", "rounds", "type",
-                                      "order_source", "mode"}),
+                                      "order_source", "mode",
+                                      "ownership_source"}),
     "mock_pick_made":      frozenset({"platform", "mode", "round", "pick_no",
                                       "for_own_team"}),
     "mock_completed":      frozenset({"platform", "mode", "rounds", "teams",

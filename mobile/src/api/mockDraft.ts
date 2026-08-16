@@ -28,6 +28,12 @@ export const MOCK_DRAFT_SCHEMA = 1;
 export type MockStatus = 'active' | 'complete' | 'abandoned';
 export type MockDraftType = 'linear' | 'snake';
 export type MockOrderSource = 'assigned' | 'randomized';
+
+/** #328 — provenance of the traded-pick ownership overlay. OPEN set on the
+ *  client (server may grow it); `null` = row predates the field (unknown,
+ *  NOT "none"). `partial` = applied but not covering every slot. */
+export type MockOwnershipSource =
+  'platform' | 'user' | 'partial' | 'none' | (string & {});
 export type MockPickBy = 'user' | 'cpu';
 
 /** #305 — who makes the picks. A CLOSED two-member enum on the wire
@@ -90,6 +96,9 @@ export interface MockSettingsEcho {
   type: MockDraftType | null;
   teams: number | null;
   order_source: MockOrderSource | null;
+  /** #328 — provenance of the traded-pick overlay. `null` = the mock row
+   *  predates the label (unknown, never "none"). */
+  ownership_source: MockOwnershipSource | null;
   personas: Record<string, MockPersona> | null;
   noise: Record<string, number> | null;
   /** #305 — the ONLY source of mode truth. Never infer mode from `by`

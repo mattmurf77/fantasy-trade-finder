@@ -86,6 +86,7 @@ import {
   pickInMockDraft,
   type MockDraftResponse,
   type MockDraftState,
+  type MockOwnershipSource,
   type MockPick,
 } from '../api/mockDraft';
 import { setAssetPref } from '../api/league';
@@ -99,6 +100,19 @@ import type { Player } from '../shared/types';
 /** How many recent picks the ticker shows. Enough to see the run that
  *  happened while you were away, short enough not to become the page. */
 const TICKER_DEPTH = 8;
+
+/** #328 — the ownership-provenance disclosure, ONE caption for ONE fact,
+ *  rendered from `settings_echo.ownership_source` only. `partial`
+ *  deliberately drops the platform-vs-user provenance suffix; null /
+ *  undefined / any unknown future value renders nothing (a pre-#328 row is
+ *  UNKNOWN, never "none"). Exported for the structural check. */
+export function ownershipCaption(src: MockOwnershipSource | null | undefined): string | null {
+  if (src === 'platform') return 'Real pick ownership applied';
+  if (src === 'user') return 'Real pick ownership applied · entered by your league';
+  if (src === 'partial') return 'Some real pick ownership applied — other slots use draft order';
+  if (src === 'none') return 'Traded picks unavailable — each team drafts its own slot';
+  return null; // null / undefined / unknown future value → render nothing
+}
 
 /** Plain-words persona labels. The engine's outlook enum is shared with the
  *  trade side (`league_preferences.team_outlook`); this is the same
@@ -477,6 +491,7 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
               persona={personaLine}
               total={state.order.length}
               made={state.picks.length}
+              ownershipSource={state.settings_echo?.ownership_source ?? null}
             />
 
             <PickTicker
@@ -662,6 +677,7 @@ function OnTheClockCard({
   persona,
   total,
   made,
+  ownershipSource,
 }: {
   onClock: MockDraftState['on_the_clock'];
   isUser: boolean;
@@ -671,6 +687,8 @@ function OnTheClockCard({
   persona: string | null;
   total: number;
   made: number;
+  /** #328 — threaded off `settings_echo.ownership_source`. */
+  ownershipSource: MockOwnershipSource | null;
 }) {
   if (!onClock) return null;
   return (
@@ -698,6 +716,14 @@ function OnTheClockCard({
         round {onClock.round} · pick {onClock.pick_no} of {total} · {made} picks made
         {persona && !isUser ? ` · ${persona}` : ''}
       </Text>
+      {/* #328 — the ownership-provenance disclosure, DURING the draft (the
+          moment "why is Jake picking twice?" arises). Plain informational
+          text; flare stays reserved for the user's own turn. */}
+      {ownershipCaption(ownershipSource) ? (
+        <Text testID="mock-draft.ownership-caption" style={styles.clockHow}>
+          {ownershipCaption(ownershipSource)}
+        </Text>
+      ) : null}
       {/* #305 — the reminder, at the moment of confusion ("why am I picking
           for Jake?"), that drafting every team was the user's own choice. */}
       {isUser && !forOwnTeam ? (
@@ -825,6 +851,13 @@ function Recap({
           {state.picks.length} picks · {state.settings_echo?.rounds ?? '—'} rounds ·{' '}
           {state.settings_echo?.teams ?? '—'} teams
         </Text>
+        {/* #328 — same disclosure on the recap; the two mounts never
+            co-render (status active vs complete). */}
+        {ownershipCaption(state.settings_echo?.ownership_source ?? null) ? (
+          <Text testID="mock-draft.recap.ownership-caption" style={styles.clockHow}>
+            {ownershipCaption(state.settings_echo?.ownership_source ?? null)}
+          </Text>
+        ) : null}
       </View>
 
       {/* NOTE (contract gap G3): the design's "+3 / −1 vs consensus" column

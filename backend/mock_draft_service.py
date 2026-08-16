@@ -67,6 +67,15 @@ TYPE_SNAKE = "snake"
 ORDER_SOURCE_ASSIGNED = "assigned"
 ORDER_SOURCE_RANDOMIZED = "randomized"
 
+#: #328 — provenance of the traded-pick ownership overlay, snapshotted into
+#: ``settings`` at create like everything else. Closed server-side; clients
+#: type it open + nullable (``null`` = a row persisted before the label
+#: existed — *unknown*, never "none").
+OWNERSHIP_SOURCE_PLATFORM = "platform"   # platform-stated ownership (Sleeper board / MFL store), covering every slot of this mock
+OWNERSHIP_SOURCE_USER = "user"           # the ESPN manual assignment grid (user-asserted), covering every slot of this mock
+OWNERSHIP_SOURCE_PARTIAL = "partial"     # ownership data applied, but NOT covering every slot (rounds beyond grid/store depth, contested/orphaned exclusions, identity-dropped rows); uncovered slots use slot order
+OWNERSHIP_SOURCE_NONE = "none"           # no ownership data applied; every team drafts its own slot
+
 BY_USER = "user"
 BY_CPU = "cpu"
 
@@ -1000,6 +1009,7 @@ def build_settings(ctx: MockContext,
                    draft_type: str | None = None,
                    order: Sequence[str] | None = None,
                    order_source: str = ORDER_SOURCE_RANDOMIZED,
+                   ownership_source: str = OWNERSHIP_SOURCE_NONE,
                    mode: str = MODE_CPU,
                    ownership: Mapping[Any, str] | None = None,
                    traded_slots: Mapping[Any, str] | None = None,
@@ -1051,8 +1061,12 @@ def build_settings(ctx: MockContext,
         # an order (server precedent: "a partial slot map is not an order").
         # Fall back to the labelled shuffle, and drop the overlay with it: a
         # traded pick is meaningless without the slots it trades between.
+        # #328 — the label degrades at the SAME point the overlay is dropped
+        # (the honest-fallback rule); no other degrade point exists in the
+        # engine, all others live in the server resolvers.
         order = None
         traded_slots = None
+        ownership_source = OWNERSHIP_SOURCE_NONE
 
     if order:
         resolved_order = [str(o) for o in order]
@@ -1087,6 +1101,15 @@ def build_settings(ctx: MockContext,
         "teams": teams,
         "order": resolved_order,
         "order_source": resolved_source,
+        # #328 — closed-vocabulary coercion, the `mode` idiom below. Describes
+        # create-time provenance of the ownership overlay; the explicit
+        # `ownership` parameter (persisted/replay shape) never affects it.
+        "ownership_source": (ownership_source
+                             if ownership_source in (OWNERSHIP_SOURCE_PLATFORM,
+                                                     OWNERSHIP_SOURCE_USER,
+                                                     OWNERSHIP_SOURCE_PARTIAL,
+                                                     OWNERSHIP_SOURCE_NONE)
+                             else OWNERSHIP_SOURCE_NONE),
         # #305 — create-time-immutable. Engine-side coercion keeps this
         # function total (the `draft_type` idiom above); the route already
         # 400'd real garbage as `bad_mode`.
@@ -1416,6 +1439,9 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "type": settings.get("type"),
             "teams": settings.get("teams"),
             "order_source": settings.get("order_source"),
+            # #328 — `.get` IS the back-compat story: rows persisted before
+            # the label echo `null` (the #305 pre-mode read-time convention).
+            "ownership_source": settings.get("ownership_source"),
             "personas": settings.get("personas"),
             "noise": settings.get("noise"),
             # G3 — the denominator for "12th of 79 on the consensus board".
