@@ -191,6 +191,14 @@ function normalizeTradeCard(raw: any): TradeCard {
     // "WILDCARD — OUTSIDE YOUR USUAL" provenance chip.
     retest:             raw?.retest === true ? true : undefined,
     wildcard:           raw?.wildcard === true ? true : undefined,
+    // #189 relaxed-fallback disclosure (serialized only when true) — the
+    // deck card renders its STRETCH chip off `relaxed`; `relaxed_reason`
+    // rides along (validated to a string) for a11y/diagnostics.
+    relaxed:            raw?.relaxed === true ? true : undefined,
+    relaxed_reason:
+      raw?.relaxed === true && typeof raw?.relaxed_reason === 'string'
+        ? raw.relaxed_reason
+        : undefined,
     sweetener,
     partner_fit:        partnerFit,
     match_context:      matchContext,

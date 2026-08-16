@@ -200,6 +200,15 @@ export interface TradeCard {
   // (utils/sessionRerank.isPositionLocked — the slot never moves) and by
   // TradeCard's "WILDCARD — OUTSIDE YOUR USUAL" provenance chip.
   wildcard?: boolean;
+  // #189 relaxed fallback: true when this card came from the relaxed pass —
+  // a targeted job (pinned players and/or opponent scope) yielded zero cards
+  // under the normal gates, so the engine widened the fairness band (stage 2
+  // additionally floors surplus minimums) to keep offering something.
+  // Backend serializes `relaxed` only when true; `relaxed_reason` names the
+  // stage ('fairness_band' | 'fairness_band+surplus_floor'). Drives
+  // TradeCard's "STRETCH — OUTSIDE YOUR FAIRNESS BAND" disclosure chip.
+  relaxed?: boolean;
+  relaxed_reason?: string;
   // Low-value player added by the engine to balance an otherwise-unfair
   // trade. The player is ALREADY in give_players/receive_players — this
   // just identifies which one, so the UI can call it out.

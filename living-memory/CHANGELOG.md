@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-08-16 (#189 relaxed-pass disclosure on deck trade cards — SHIPPED, PR #135)
+
+- **Deck cards from the #189 relaxed fallback now say so.** The backend has stamped `relaxed`/`relaxed_reason` since #189, but mobile's `normalizeTradeCard` silently dropped the field — relaxed cards rendered like ordinary ones; only `AssetIdeasPanel` disclosed. Fix: `TradeCard` type + normalizer pass-through (strict-true, wildcard/retest pattern) + a "STRETCH — OUTSIDE YOUR FAIRNESS BAND" chip (wildcard provenance-chip construction, ADR-005 flare; wording shared with the asset-ideas line; testID `trade-card.relaxed-chip`).
+- Deliberately zero `TradesScreen.tsx` edits — the screen passes the whole card object, so the chain lands without touching G4's (330-offer-prefill) file this wave.
+- QA per [D-056]: new `check-relaxed-disclosure.js` (14 checks; normalizer cases *executed* with a stubbed `./client`) + testid-lint. Scope block: `docs/feedback/items/189-always-offer-fallback/scope-deck-disclosure.md`. Runtime proof owed: operator TestFlight walk (checklist in scope block, next build).
+
 ## 2026-08-15 (Fit-congruence signal weighting — SHIPPED, PR #134)
 
 - Swipe ingestion now weights Elo K by **surprise vs the user's window** ([D-060](DECISIONS.md)): fit-explained swipes (rebuilder passes the vet) ×0.4, fit-defying swipes (rebuilder likes the vet anyway) full K, no-window/sub-threshold exactly 1.0. Reuses the lanes machinery (`signed_lane_shift`); applied to in-memory signal AND persisted `k_factor` (DB replay agreement). Knob-only kill switch (`fit_k_explained_mult` = 1.0). Lands **before** Phase B's grading lane starts counting these signals toward "your board" — plan §B-2 now notes flags/declines get the same rule at build time; sends stay full-K. `main` @ `6f293f4`.
