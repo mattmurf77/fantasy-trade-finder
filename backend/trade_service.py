@@ -467,6 +467,21 @@ _DEFAULT_CFG: dict[str, float] = {
     # window-congruent card, like on an anti-window one). Full K; NOT
     # boosted above baseline without data to justify it.
     "fit_k_defying_mult":         1.0,
+
+    # ------------------------------------------------------------------
+    # suggestion.telemetry (matchmaking research item 1; scope block
+    # docs/plans/matchmaking-engine/telemetry-scope.md; read via
+    # suggestion_telemetry._cfg — the _deck_cfg pattern).
+    # ------------------------------------------------------------------
+    # Ghost holdout: withhold ~1-in-N organic deck cards from display
+    # (logged with is_ghost=1). ≤0 disables ghosting without touching the
+    # flag — the deploy-free rollback lever.
+    "ghost_holdout_one_in":       10,
+    # Executed-trade matcher: only suggestions served within this many days
+    # BEFORE the trade executed are match candidates.
+    "suggestion_match_lookback_days": 14,
+    # Partial-match floor: matched-token share of the larger asset set.
+    "suggestion_match_min_overlap":   0.5,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

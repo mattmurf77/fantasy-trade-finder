@@ -40,6 +40,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F5 — trade-taste vectors (flag `deck.taste_vectors`)](#f5-trade-taste-vectors-flag-decktaste_vectors)
   - [F7 — exploration slots & archetype audition (flag `deck.exploration`)](#f7-exploration-slots-archetype-audition-flag-deckexploration)
   - [F9 — first-session win engineering (flag `deck.first_session`)](#f9-first-session-win-engineering-flag-deckfirst_session)
+  - [Suggestion telemetry & ghost holdout (flag `suggestion.telemetry`)](#suggestion-telemetry-ghost-holdout-flag-suggestiontelemetry)
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
@@ -322,6 +323,7 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering (`backend/value_model.py`; §F6 keys below). Gates BOTH serving and the automatic nightly refit — dark = truly inert. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
 | `deck.first_session` | false | F9 first-session win: confidence-weighted top-5 + 8–10-card clamp on a user's FIRST deck per league, the honest mid-deck adaptation moment (client), the "Built from your updated board" header on every board-refreshed deck (2026-07-26 amendment; needs `deck.signal_v2` for the previous-deck timestamp), and the `first_session_*` activation events. Off ⇒ byte-identical payloads/ordering/UI. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
+| `suggestion.telemetry` | false | Matchmaking item 1 (`docs/plans/matchmaking-engine/telemetry-scope.md`) — counterfactual logging on the F1 spine: stamps `policy_version` / `candidate_set_id` + `candidate_set_size` (→ new `deck_candidate_sets` table) / `assets_json` on telemetry-era `deck_impressions`; the **ghost-suggestion holdout** (~1-in-`ghost_holdout_one_in` organic deck cards per league × ISO week deterministically withheld from display, logged with `is_ghost=1`, requires `deck.signal_v2` ON to withhold at all); the **executed-trade matcher** after each `market.trade_capture` sync (→ `suggestion_trade_links.was_recommended` + ghost incrementality columns); and `GET /api/admin/suggestion-telemetry/ratio`. Off ⇒ zero withholding, zero new column stamping, zero candidate-set/link writes, byte-identical serving; the ratio route 404s. Keys in the §suggestion.telemetry section below. |
 
 ## Flags — Rookie draft + Draft Room (2026-08-06)
 
@@ -577,6 +579,16 @@ Read via `server._deck_cfg`, consumed by the first-deck layer that runs AFTER th
 | `first_session_max_total_assets` | 3 | Total asset cap — defaults ⇒ 1x1 / 2x1 / 1x2 pass, 2x2/3x1+ serve later |
 | `first_session_deck_max` | 10 | First decks truncate to ≤ this many cards (session-one completion — F10's moment — must be reachable) |
 | `first_session_deck_min` | 8 | Documented target floor only — no padding, only the max clamps |
+
+### Suggestion telemetry & ghost holdout (flag `suggestion.telemetry`)
+
+Read via `suggestion_telemetry._cfg` (the `_deck_cfg` pattern — `trade_service._DEFAULT_CFG` defaults, live-tunable through `model_config` without deploy). Scope block: `docs/plans/matchmaking-engine/telemetry-scope.md`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ghost_holdout_one_in` | 10 | Ghost withholding rate: an organic deck card ghosts when `sha256("ghost\|league\|iso_week\|trade_hash") % N == 0`. **≤ 0 disables ghosting without touching the flag** — the deploy-free rollback lever. Exempt always: likes-you, wildcard, F3-retest cards; pinned/opponent-targeted decks; demo league |
+| `suggestion_match_lookback_days` | 14 | Executed-trade matcher window: only suggestions served within this many days BEFORE `traded_at` are candidates |
+| `suggestion_match_min_overlap` | 0.5 | Partial-match floor: matched-token share of the larger asset set (with ≥1 matched asset required on each side) |
 
 ### F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)
 

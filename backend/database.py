@@ -504,6 +504,28 @@ deck_impressions_table = Table("deck_impressions", metadata,
     # per-item fatigue key. Populated only while deck.fatigue is on
     # (NULL otherwise / on pre-F3 rows); additive via _migrate_db.
     Column("centerpiece_id", String),
+    # ── suggestion.telemetry (matchmaking item 1; scope block:
+    # docs/plans/matchmaking-engine/telemetry-scope.md) — counterfactual
+    # columns, all NULL while the flag is off / on pre-telemetry rows;
+    # additive via _migrate_db, no backfill.
+    #   is_ghost: 1 = ghost suggestion — logged fully but deterministically
+    #     WITHHELD from display (per league × ISO week × trade_hash, ~1-in-N
+    #     via model_config ghost_holdout_one_in). Ghost rows never receive
+    #     deck_outcomes, so outcome-joined reads ignore them naturally; their
+    #     card_index is the WOULD-HAVE-BEEN rank in the pre-withhold order
+    #     (served rows keep true served positions).
+    #   policy_version: serving-policy id (engine version + ordering-layer
+    #     flags + suggestion_telemetry.POLICY_REV) — the OPE attribution key.
+    #   candidate_set_id / candidate_set_size: join key + denormalized size
+    #     of the deck_candidate_sets row this card was chosen from.
+    #   assets_json: {"give": [...], "receive": [...]} asset-id bundle,
+    #     first-class (trade_hash alone can't be inverted) — what the
+    #     executed-trade matcher compares against Sleeper trades.
+    Column("is_ghost",           Integer),
+    Column("policy_version",     String),
+    Column("candidate_set_id",   String),
+    Column("candidate_set_size", Integer),
+    Column("assets_json",        Text),
 )
 
 Index(
@@ -514,6 +536,64 @@ Index(
 Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
+)
+
+# ── suggestion.telemetry — candidate-set reconstruction ─────────────────────
+# One row per completed generation job while the flag is on: the FULL action
+# set the serving policy chose from at ordering time — the post-gate,
+# pre-withhold deck (served + ghost cards) plus the untrimmed F7 exploration
+# over-generation pool (D-scope-6). candidates_json members:
+# {trade_hash, partner, give, receive, base_score, in_deck}. set_hash =
+# sha256 over the sorted member trade_hashes (16 hex chars, same truncation
+# as trade_hash itself) — the cheap "same candidate set?" comparator across
+# jobs. Soft-referenced from deck_impressions.candidate_set_id (no FK,
+# matching this schema's style).
+deck_candidate_sets_table = Table("deck_candidate_sets", metadata,
+    Column("candidate_set_id", String,  primary_key=True),  # uuid4 hex
+    Column("deck_job_id",      String,  nullable=False),
+    Column("user_id",          String,  nullable=False),
+    Column("league_id",        String,  nullable=False),
+    Column("size",             Integer, nullable=False),
+    Column("set_hash",         String,  nullable=False),
+    Column("candidates_json",  Text,    nullable=False),
+    Column("created_at",       String,  nullable=False),    # ISO UTC
+)
+
+Index(
+    "ix_deck_candidate_sets_user_league",
+    deck_candidate_sets_table.c.user_id,
+    deck_candidate_sets_table.c.league_id,
+)
+
+# ── suggestion.telemetry — executed-trade tagging ───────────────────────────
+# One row per captured sleeper_trades transaction examined by the matcher
+# (suggestion_telemetry.match_league_trades, hooked after every
+# sync_league_trades pass). was_recommended = 1 iff the trade matched a
+# NON-ghost (actually rendered) logged suggestion under the D-scope-5
+# similarity rule; the best GHOST match is linked separately — the
+# ghost_* columns are the incrementality read (did a withheld suggestion
+# execute anyway?). Multi-team / unresolvable trades get a row with
+# match_type NULL so the always-on per-league ratio
+# (SUM(was_recommended) / COUNT(*)) keeps an honest denominator.
+suggestion_trade_links_table = Table("suggestion_trade_links", metadata,
+    Column("id",                    Integer, primary_key=True, autoincrement=True),
+    Column("transaction_id",        String,  nullable=False),  # sleeper_trades.transaction_id
+    Column("league_id",             String,  nullable=False),
+    Column("was_recommended",       Integer, nullable=False, default=0),
+    Column("matched_impression_id", String),   # best non-ghost match
+    Column("match_type",            String),   # 'exact' | 'partial' | NULL
+    Column("overlap_score",         Float),
+    Column("ghost_impression_id",   String),   # best ghost match
+    Column("ghost_match_type",      String),
+    Column("ghost_overlap_score",   Float),
+    Column("traded_at",             String),
+    Column("computed_at",           String,  nullable=False),
+    UniqueConstraint("transaction_id", name="uq_suggestion_link_txid"),
+)
+
+Index(
+    "ix_suggestion_trade_links_league",
+    suggestion_trade_links_table.c.league_id,
 )
 
 # deck_outcomes: append-only labels joined to deck_impressions by
@@ -2179,6 +2259,14 @@ def _migrate_db() -> None:
         # existing rows are all live, which is the correct backfill and
         # needs no separate pass (same shape as dismissed_at above).
         ("trade_decisions",    "retracted_at",          "VARCHAR"),
+        # suggestion.telemetry — counterfactual columns on the F1 spine
+        # (see deck_impressions_table comments). NULL on all pre-telemetry
+        # rows; no backfill by design.
+        ("deck_impressions",   "is_ghost",              "INTEGER"),
+        ("deck_impressions",   "policy_version",        "VARCHAR"),
+        ("deck_impressions",   "candidate_set_id",      "VARCHAR"),
+        ("deck_impressions",   "candidate_set_size",    "INTEGER"),
+        ("deck_impressions",   "assets_json",           "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4854,6 +4942,134 @@ def save_deck_outcome(
                                else (1 if calc_opened else 0)),
             acted_at        = datetime.now(timezone.utc).isoformat(),
         ))
+
+
+# ── suggestion.telemetry — thin storage helpers ─────────────────────────────
+# Matching/scoring logic lives in backend/suggestion_telemetry.py; these are
+# the writes/reads only (the save_deck_impressions contract).
+
+def save_deck_candidate_set(row: dict) -> None:
+    """One pre-built deck_candidate_sets row per job (flag on). Caller wraps
+    in try/except — telemetry must never break trade generation."""
+    with engine.begin() as conn:
+        conn.execute(insert(deck_candidate_sets_table).values(**row))
+
+
+def load_unlinked_league_trades(league_id: str) -> list[dict]:
+    """Captured sleeper_trades rows for this league with no
+    suggestion_trade_links row yet — the matcher's idempotent work queue."""
+    with engine.connect() as conn:
+        linked = select(suggestion_trade_links_table.c.transaction_id).where(
+            suggestion_trade_links_table.c.league_id == league_id
+        )
+        rows = conn.execute(
+            select(sleeper_trades_table).where(
+                and_(
+                    sleeper_trades_table.c.league_id == league_id,
+                    sleeper_trades_table.c.transaction_id.notin_(linked),
+                )
+            )
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def load_impressions_for_matching(
+    league_id: str, since_iso: str, until_iso: str
+) -> list[dict]:
+    """Telemetry-era impressions (assets_json present) in the lookback
+    window, shaped for suggestion_telemetry._score_impression:
+    [{impression_id, user_id, league_id, partner_user_id, assets, is_ghost,
+    served_at}]. Pre-telemetry rows carry no assets_json and are honestly
+    unmatchable — they are excluded here, not fuzzed around."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                deck_impressions_table.c.impression_id,
+                deck_impressions_table.c.user_id,
+                deck_impressions_table.c.league_id,
+                deck_impressions_table.c.features_json,
+                deck_impressions_table.c.assets_json,
+                deck_impressions_table.c.is_ghost,
+                deck_impressions_table.c.served_at,
+            ).where(
+                and_(
+                    deck_impressions_table.c.league_id == league_id,
+                    deck_impressions_table.c.assets_json.isnot(None),
+                    deck_impressions_table.c.served_at >= since_iso,
+                    deck_impressions_table.c.served_at <= until_iso,
+                )
+            )
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        try:
+            assets = json.loads(r.assets_json) if r.assets_json else {}
+        except (TypeError, ValueError):
+            assets = {}
+        partner = None
+        try:
+            partner = (json.loads(r.features_json) or {}).get("partner_user_id")
+        except (TypeError, ValueError):
+            partner = None
+        out.append({
+            "impression_id":   r.impression_id,
+            "user_id":         r.user_id,
+            "league_id":       r.league_id,
+            "partner_user_id": partner,
+            "assets":          assets,
+            "is_ghost":        r.is_ghost,
+            "served_at":       r.served_at,
+        })
+    return out
+
+
+def save_suggestion_trade_links(rows: list[dict]) -> int:
+    """Append suggestion_trade_links rows, idempotent on transaction_id
+    (select-then-insert, the record_sleeper_trades pattern). Returns the
+    number of NEW rows inserted."""
+    if not rows:
+        return 0
+    txids = [r["transaction_id"] for r in rows]
+    with engine.begin() as conn:
+        existing = {
+            r.transaction_id
+            for r in conn.execute(
+                select(suggestion_trade_links_table.c.transaction_id)
+                .where(suggestion_trade_links_table.c.transaction_id.in_(txids))
+            ).fetchall()
+        }
+        new_rows = [r for r in rows if r["transaction_id"] not in existing]
+        if new_rows:
+            conn.execute(insert(suggestion_trade_links_table), new_rows)
+    return len(new_rows)
+
+
+def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
+    """The always-on endorsement dashboard: per league, executed trades
+    examined, how many matched a rendered suggestion (was_recommended), the
+    ratio, and how many matched a withheld ghost (the incrementality read)."""
+    q = select(
+        suggestion_trade_links_table.c.league_id,
+        func.count(suggestion_trade_links_table.c.id).label("executed"),
+        func.sum(suggestion_trade_links_table.c.was_recommended).label("recommended"),
+        func.count(suggestion_trade_links_table.c.ghost_impression_id).label("ghost_matches"),
+    ).group_by(suggestion_trade_links_table.c.league_id)
+    if league_id:
+        q = q.where(suggestion_trade_links_table.c.league_id == league_id)
+    with engine.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    out = []
+    for r in rows:
+        executed = int(r.executed or 0)
+        recommended = int(r.recommended or 0)
+        out.append({
+            "league_id":     r.league_id,
+            "executed":      executed,
+            "recommended":   recommended,
+            "ratio":         round(recommended / executed, 4) if executed else None,
+            "ghost_matches": int(r.ghost_matches or 0),
+        })
+    return out
 
 
 def load_board_state(

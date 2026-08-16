@@ -454,6 +454,21 @@ FLAG_KEYS: tuple[str, ...] = (
     "deck.value_model",     # F6 — learned P(like)/P(propose) heads × V-vector base ordering + nightly refit; DARK until an F8 replay win
     "deck.first_session",   # F9 — first-session win: confidence-weighted first-5 + size clamp on FIRST decks, board-refreshed deck header, adaptation moment
     "deck.replenishment",   # reserved (no consumer yet)
+    # ── Matchmaking research item 1 — suggestion telemetry / counterfactual
+    # logging (docs/plans/matchmaking-engine/telemetry-scope.md). When ON
+    # (and deck.signal_v2 ON — the F1 spine carries the rows): telemetry-era
+    # deck_impressions additionally stamp policy_version / candidate_set_id
+    # + size (joined to deck_candidate_sets) / assets_json; ~1-in-N organic
+    # deck cards (model_config ghost_holdout_one_in, default 10) are
+    # deterministically WITHHELD from display per league×ISO-week and logged
+    # with is_ghost=1 (never rendered — ghost-ads incrementality); executed
+    # Sleeper trades get matched to logged suggestions after each
+    # market.trade_capture sync (suggestion_trade_links.was_recommended) and
+    # GET /api/admin/suggestion-telemetry/ratio serves the per-league
+    # endorsement ratio. OFF (default) ⇒ no withholding, no new columns
+    # stamped, no candidate-set/link writes, ratio route 404s —
+    # byte-identical serving.
+    "suggestion.telemetry",
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

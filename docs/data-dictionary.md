@@ -47,6 +47,8 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 - [`trade_impressions`](#trade_impressions)
 - [`deck_impressions`](#deck_impressions)
 - [`deck_outcomes`](#deck_outcomes)
+- [`deck_candidate_sets`](#deck_candidate_sets)
+- [`suggestion_trade_links`](#suggestion_trade_links)
 - [`deck_suppressions`](#deck_suppressions)
 - [`deck_fatigue_resets`](#deck_fatigue_resets)
 - [`deck_replenish_log`](#deck_replenish_log)
@@ -351,6 +353,11 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `shape_bucket` | str | `"1x1"`, `"2x1"`, … (the Thompson arm) |
 | `served_at` | str | ISO UTC |
 | `centerpiece_id` | str | **F3** (flag `deck.fatigue`) — highest-consensus asset in the package (deterministic tie-break by id), the per-item fatigue key. Stamped only while `deck.fatigue` is on; NULL on pre-F3 / flag-off rows |
+| `is_ghost` | int | **suggestion.telemetry** (all five columns below: stamped only while the flag is on; NULL on flag-off / pre-telemetry rows; `docs/plans/matchmaking-engine/telemetry-scope.md`) — 1 = ghost suggestion: deterministically withheld from display (per league × ISO week × `trade_hash`, ~1-in-`ghost_holdout_one_in`), fully logged, **never rendered** — it appears in no job snapshot and can never receive a `deck_outcomes` row, so outcome-joined reads ignore ghosts naturally. Ghost rows' `card_index` is the **would-have-been** rank in the pre-withhold order; served rows keep true served positions (0..n-1 contiguous) |
+| `policy_version` | str | serving-policy id, e.g. `v3+ts.div.fat@r1` — engine version + active ordering-layer flags + `suggestion_telemetry.POLICY_REV`. The OPE attribution key |
+| `candidate_set_id` | str | soft reference → `deck_candidate_sets.candidate_set_id` (the action set this card was chosen from) |
+| `candidate_set_size` | int | denormalized `deck_candidate_sets.size` |
+| `assets_json` | JSON text | `{"give": [asset ids], "receive": [asset ids]}` — the first-class asset bundle (`trade_hash` can't be inverted); what the executed-trade matcher compares against `sleeper_trades` |
 
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
 
@@ -371,6 +378,48 @@ F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (sof
 | `acted_at` | str | ISO UTC (server clock) |
 
 Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+
+---
+
+## `deck_candidate_sets`
+
+**suggestion.telemetry** counterfactual layer (`docs/plans/matchmaking-engine/telemetry-scope.md`, D-scope-6) — one row per completed generation job **while the flag is on**: the full action set the serving policy chose from at ordering time — the post-gate pre-withhold deck (served + ghost cards) plus the untrimmed F7 exploration over-generation pool. Written by `server._log_deck_signal_impressions` (→ `save_deck_candidate_set`); soft-referenced from `deck_impressions.candidate_set_id` (no FK, house style). This is the "way to reconstruct the candidate set" the OPE literature requires — impossible to backfill, hence logged from day one.
+
+| Column | Type | Notes |
+|---|---|---|
+| `candidate_set_id` | str PK | uuid4 hex |
+| `deck_job_id` | str | generation job id (`_trade_jobs`) |
+| `user_id` | str | user the deck was generated for |
+| `league_id` | str | |
+| `size` | int | member count (= `deck_impressions.candidate_set_size`) |
+| `set_hash` | str | sha256[:16] over the sorted member `trade_hash`es — cheap same-set comparator across jobs |
+| `candidates_json` | JSON text | `[{trade_hash, partner, give, receive, base_score, in_deck}]` — `in_deck` false only for exploration-pool members that were generated but trimmed before serving |
+| `created_at` | str | ISO UTC |
+
+Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
+
+---
+
+## `suggestion_trade_links`
+
+**suggestion.telemetry** executed-trade tagging — one row per captured `sleeper_trades` transaction examined by the matcher (`suggestion_telemetry.match_league_trades`, hooked after every `sync_league_trades` pass in `session_init`'s background daemon; idempotent on `transaction_id`, so every sync retries any leftovers). Similarity rule (D-scope-5, glossary "Suggestion-trade match"): same unordered manager pair, `served_at ≤ traded_at ≤ served_at + suggestion_match_lookback_days`, direction-aligned asset tokens (players by id; owned picks → `pick:{season}:r{round}:{orig_roster}`; generic picks relax to round-only pairing); **exact** = both sides fully pair, **partial** = overlap ≥ `suggestion_match_min_overlap` with ≥1 match per side; best candidate = exact > overlap > recency. Only telemetry-era impressions (non-NULL `assets_json`) are matchable. Multi-team / unresolvable trades keep a row with `match_type` NULL so the ratio denominator stays honest.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `transaction_id` | str UNIQUE | `sleeper_trades.transaction_id` |
+| `league_id` | str | |
+| `was_recommended` | int | 1 iff a **rendered** (non-ghost) suggestion matched — per-league ratio `SUM(was_recommended)/COUNT(*)` is the always-on endorsement dashboard (`GET /api/admin/suggestion-telemetry/ratio`) |
+| `matched_impression_id` | str | best non-ghost match (soft ref → `deck_impressions`) |
+| `match_type` | str | `exact` \| `partial` \| NULL |
+| `overlap_score` | float | matched-token share of the larger asset set (1.0 on exact) |
+| `ghost_impression_id` | str | best **ghost** match — the incrementality read: a withheld suggestion that executed anyway |
+| `ghost_match_type` | str | `exact` \| `partial` \| NULL |
+| `ghost_overlap_score` | float | |
+| `traded_at` | str | ISO UTC (from the Sleeper transaction) |
+| `computed_at` | str | ISO UTC |
+
+Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestion_link_txid` on `transaction_id`.
 
 ---
 

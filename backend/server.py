@@ -84,6 +84,9 @@ from .database import (
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_deck_impression,
     load_board_state,
+    # suggestion.telemetry — candidate-set persistence + ratio dashboard
+    # (matcher logic lives in suggestion_telemetry.py)
+    save_deck_candidate_set, suggestion_ratio_by_league,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
     # frozen legacy seam, global prior base rate)
     load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
@@ -2780,15 +2783,21 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     return True
 
 
-def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value):
+def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value,
+                      league_id: str | None = None, ghost_active: bool = False):
     """Build a callback that snapshots cards into _trade_jobs[job_id] as
     each opponent finishes. Pre-binds the players_dict + outlook so the
-    closure can run inside the worker thread without re-reading session state."""
+    closure can run inside the worker thread without re-reading session state.
+
+    suggestion.telemetry: streaming snapshots pass the same ghost render
+    gate as the final publish (_served_cards) — a withheld card must never
+    flash during generation. ghost_active=False ⇒ byte-identical to pre-
+    telemetry behavior."""
     def _cb(opponents_done: int, opponents_total: int, sorted_cards):
         # Convert internal TradeCard objects → public dicts (same shape as
         # /api/trades/matches enrichment uses).
         snapshot = []
-        for c in sorted_cards:
+        for c in _served_cards(sorted_cards, league_id or "", ghost_active):
             d = trade_card_to_dict(c, players_dict)
             d["real_opponent"] = c.target_user_id in real_user_ids
             d["outlook"]       = outlook_value
@@ -3582,6 +3591,65 @@ def _deck_trade_hash(give: list, recv: list, target) -> str:
         .encode()).hexdigest()[:16]
 
 
+# ── suggestion.telemetry — ghost-suggestion holdout ─────────────────────────
+# Scope block: docs/plans/matchmaking-engine/telemetry-scope.md. A ghost is a
+# generated card deterministically withheld from display (per league × ISO
+# week × trade_hash, ~1-in-N) and logged fully with is_ghost=1 — the fantasy
+# analog of ghost ads: Sleeper shows us executed trades whether or not we
+# rendered the suggestion, so withheld-but-executed IS the organic baseline.
+
+from . import suggestion_telemetry as _sugg_tel
+
+
+def _suggestion_telemetry_enabled() -> bool:
+    return is_enabled("suggestion.telemetry")
+
+
+def _ghost_holdout_active(league_id, pinned_give, pinned_receive,
+                          opponent_user_id) -> bool:
+    """Ghost withholding runs only on ORGANIC guided decks (pinned /
+    opponent-targeted decks are explicit user intent — withholding there is
+    user harm), only when the F1 spine can log the counterfactual, and never
+    for the demo league. Withholding without logging would be pure UX loss,
+    hence the deck.signal_v2 conjunction."""
+    return (
+        _suggestion_telemetry_enabled()
+        and _deck_signal_v2_enabled()
+        and league_id != "league_demo"
+        and not pinned_give and not pinned_receive and not opponent_user_id
+        and _sugg_tel.ghost_one_in() > 0
+    )
+
+
+def _is_ghost_card(league_id: str, card) -> bool:
+    """Per-card ghost predicate. Exemptions (D-scope-3): likes-you cards
+    (counterparty already acted), wildcard cards (they ARE the exploration
+    arm), fatigue-retest cards (F3 grants exactly one retest — swallowing it
+    would re-arm suppression forever)."""
+    if (getattr(card, "likes_you", False)
+            or getattr(card, "wildcard", False)
+            or getattr(card, "fatigue_retest", False)):
+        return False
+    give = list(getattr(card, "give_player_ids", None) or [])
+    recv = list(getattr(card, "receive_player_ids", None) or [])
+    target = getattr(card, "target_user_id", None)
+    return _sugg_tel.is_ghost_suggestion(
+        league_id, _deck_trade_hash(give, recv, target))
+
+
+def _served_cards(cards: list, league_id: str, ghost_active: bool) -> list:
+    """The render gate: every published job snapshot (streaming AND final)
+    filters ghosts through here, so a withheld card can never flash
+    mid-generation. Identity when ghosting is inactive."""
+    if not ghost_active:
+        return cards
+    try:
+        return [c for c in cards if not _is_ghost_card(league_id, c)]
+    except Exception as g_err:   # telemetry must never break serving
+        log.warning("ghost filter failed (serving unfiltered): %s", g_err)
+        return cards
+
+
 def _log_deck_signal_impressions(
     *,
     user_id: str,
@@ -3594,6 +3662,11 @@ def _log_deck_signal_impressions(
     source: str | None = None,
     seed_map: dict | None = None,   # F3 — centerpiece derivation (flag-gated)
     first_deck: bool = False,       # F9 — first-deck features stamp (flag-gated)
+    # suggestion.telemetry — all three default to inert so flag-off calls
+    # (and every existing test/caller) write rows byte-identical to F1's.
+    ghost_cards: list | None = None,      # [(would_be_pos, card)] withheld
+    candidate_pool: list | None = None,   # untrimmed F7 over-generation pool
+    policy_version: str | None = None,    # non-None ⇒ telemetry stamping ON
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -3604,12 +3677,60 @@ def _log_deck_signal_impressions(
     `capture` comes from _order_deck: propensity is the Thompson multiplier
     actually applied (1.0 when ordering didn't run — a deterministic serve
     is a propensity-1 policy), final_score the post-multiplier ordering key
-    (falls back to the composite when ordering didn't run)."""
-    if not cards:
+    (falls back to the composite when ordering didn't run).
+
+    suggestion.telemetry (policy_version non-None): additionally writes one
+    deck_candidate_sets row (served + ghost + pool members — the action set
+    the policy chose from, D-scope-6), appends ghost rows (is_ghost=1,
+    card_index = would-have-been rank, never in imp_by_card so they can
+    never reach a snapshot), and stamps policy_version / candidate_set_id /
+    candidate_set_size / assets_json on every row."""
+    ghost_cards = ghost_cards or []
+    if not cards and not ghost_cards:
         return {}
 
     prop_by_card  = (capture or {}).get("propensity") or {}
     final_by_card = (capture or {}).get("final_key") or {}
+
+    # suggestion.telemetry — candidate-set persistence, one row per job.
+    telemetry_on = policy_version is not None
+    cand_set_id: str | None = None
+    cand_set_size: int | None = None
+    if telemetry_on:
+        try:
+            members = []
+            for c, in_deck in (
+                    [(c, True) for c in cards]
+                    + [(c, True) for _p, c in ghost_cards]
+                    + [(c, False) for c in (candidate_pool or [])]):
+                m_give = list(getattr(c, "give_player_ids", None) or [])
+                m_recv = list(getattr(c, "receive_player_ids", None) or [])
+                m_target = getattr(c, "target_user_id", None)
+                members.append({
+                    "trade_hash": _deck_trade_hash(m_give, m_recv, m_target),
+                    "partner":    m_target,
+                    "give":       m_give,
+                    "receive":    m_recv,
+                    "base_score": float(getattr(c, "composite_score", 0.0) or 0.0),
+                    "in_deck":    in_deck,
+                })
+            cand_set_id = uuid.uuid4().hex
+            cand_set_size = len(members)
+            save_deck_candidate_set({
+                "candidate_set_id": cand_set_id,
+                "deck_job_id":      job_id,
+                "user_id":          user_id,
+                "league_id":        league_id,
+                "size":             cand_set_size,
+                "set_hash":         hashlib.sha256(
+                    "|".join(sorted(m["trade_hash"] for m in members))
+                    .encode()).hexdigest()[:16],
+                "candidates_json":  json.dumps(members),
+                "created_at":       datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as cs_err:
+            log.warning("candidate-set logging failed (non-fatal): %s", cs_err)
+            cand_set_id, cand_set_size = None, None
 
     # Board-state-at-serve (PRD amendment 2026-07-26): one query; failure
     # degrades to the cold-board shape rather than aborting the spine.
@@ -3623,7 +3744,11 @@ def _log_deck_signal_impressions(
     served_at = datetime.now(timezone.utc).isoformat()
     imp_by_card: dict[int, str] = {}
     rows: list[dict] = []
-    for pos, card in enumerate(cards):
+    # Served rows keep true served positions (existing card_index contract);
+    # ghost rows append after with their would-have-been rank + is_ghost=1.
+    entries = [(pos, card, False) for pos, card in enumerate(cards)]
+    entries += [(pos, card, True) for pos, card in ghost_cards]
+    for pos, card, is_ghost in entries:
         give = list(getattr(card, "give_player_ids", None) or [])
         recv = list(getattr(card, "receive_player_ids", None) or [])
         target = getattr(card, "target_user_id", None)
@@ -3698,7 +3823,10 @@ def _log_deck_signal_impressions(
                 card, "wildcard_provenance", None)
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
-        imp_by_card[id(card)] = impression_id
+        if not is_ghost:
+            # Ghosts never enter imp_by_card — the caller stamps snapshot
+            # cards from this map, so a ghost id can never reach a client.
+            imp_by_card[id(card)] = impression_id
         row = {
             "impression_id": impression_id,
             "user_id":       user_id,
@@ -3718,6 +3846,14 @@ def _log_deck_signal_impressions(
         # flag is on so flag-off insert rows stay byte-identical to F1's.
         if _deck_fatigue_enabled():
             row["centerpiece_id"] = _fatigue_centerpiece(give, recv, seed_map or {})
+        # suggestion.telemetry — counterfactual columns, stamped only while
+        # the flag is on so flag-off insert rows stay byte-identical.
+        if telemetry_on:
+            row["is_ghost"]           = 1 if is_ghost else 0
+            row["policy_version"]     = policy_version
+            row["candidate_set_id"]   = cand_set_id
+            row["candidate_set_size"] = cand_set_size
+            row["assets_json"]        = json.dumps({"give": give, "receive": recv})
         rows.append(row)
     save_deck_impressions(rows)
     return imp_by_card
@@ -4912,7 +5048,14 @@ def _run_trade_job(
                 log.warning("trade-job: asset prefs load failed: %s", ap_err)
 
         players_dict = {p.id: p for p in g_players}
-        progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids, outlook_value)
+
+        # suggestion.telemetry — ghost holdout eligibility, computed once so
+        # every snapshot publish (streaming + final) filters identically.
+        ghost_on = _ghost_holdout_active(
+            league_id, pinned_give, pinned_receive, opponent_user_id)
+
+        progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids,
+                                         outlook_value, league_id, ghost_on)
 
         # Per-player comparison counts for the requesting user — feeds the
         # v2 confidence-shrinkage step (Tier 1, Change 4). None when the
@@ -4998,7 +5141,7 @@ def _run_trade_job(
                 final_cards, _EXPLORATION_BASE_PER_OPP)
             if exploration_pool:
                 snapshot = []
-                for c in final_cards:
+                for c in _served_cards(final_cards, league_id, ghost_on):
                     d = trade_card_to_dict(c, players_dict)
                     d["real_opponent"] = c.target_user_id in real_user_ids
                     d["outlook"]       = outlook_value
@@ -5029,7 +5172,7 @@ def _run_trade_job(
                     not_interested_ids = not_interested_ids or None,
                 )
                 snapshot = []
-                for c in final_cards:
+                for c in _served_cards(final_cards, league_id, ghost_on):
                     d = trade_card_to_dict(c, players_dict)
                     d["real_opponent"] = c.target_user_id in real_user_ids
                     d["outlook"]       = outlook_value
@@ -5075,7 +5218,7 @@ def _run_trade_job(
                     # Suppressed cards must vanish from (and retest labels
                     # appear in) the already-published snapshot.
                     snapshot = []
-                    for c in final_cards:
+                    for c in _served_cards(final_cards, league_id, ghost_on):
                         d = trade_card_to_dict(c, players_dict)
                         d["real_opponent"] = c.target_user_id in real_user_ids
                         d["outlook"]       = outlook_value
@@ -5162,7 +5305,7 @@ def _run_trade_job(
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
                     snapshot = []
-                    for c in final_cards:
+                    for c in _served_cards(final_cards, league_id, ghost_on):
                         d = trade_card_to_dict(c, players_dict)
                         d["real_opponent"] = c.target_user_id in real_user_ids
                         d["outlook"]       = outlook_value
@@ -5203,7 +5346,7 @@ def _run_trade_job(
                         id(_wc_card)] = _wc_info["propensity"]
                 if _wc_info.get("deck_changed"):
                     snapshot = []
-                    for c in final_cards:
+                    for c in _served_cards(final_cards, league_id, ghost_on):
                         d = trade_card_to_dict(c, players_dict)
                         d["real_opponent"] = c.target_user_id in real_user_ids
                         d["outlook"]       = outlook_value
@@ -5246,7 +5389,7 @@ def _run_trade_job(
                             or len(shaped) != len(final_cards)):
                         final_cards = shaped
                         snapshot = []
-                        for c in final_cards:
+                        for c in _served_cards(final_cards, league_id, ghost_on):
                             d = trade_card_to_dict(c, players_dict)
                             d["real_opponent"] = c.target_user_id in real_user_ids
                             d["outlook"]       = outlook_value
@@ -5273,13 +5416,33 @@ def _run_trade_job(
             except Exception as br_err:
                 log.warning("board-refresh header failed (non-fatal): %s", br_err)
 
+        # suggestion.telemetry — split the final deck into served cards and
+        # ghost cards (ghosts keep their would-have-been position for the
+        # counterfactual log). ghost_on=False ⇒ served_final IS final_cards
+        # and every downstream write is byte-identical to pre-telemetry.
+        served_final = final_cards
+        ghost_cards: list = []   # [(would_be_pos, card)]
+        if ghost_on:
+            try:
+                served_final = []
+                for _pos, c in enumerate(final_cards):
+                    if _is_ghost_card(league_id, c):
+                        ghost_cards.append((_pos, c))
+                    else:
+                        served_final.append(c)
+            except Exception as gs_err:
+                log.warning("ghost split failed (serving unfiltered): %s", gs_err)
+                served_final, ghost_cards = final_cards, []
+
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only
         # read the stored snapshot). This is the training-data pipeline for
         # the future acceptance model. Never allowed to break generation.
+        # Ghost cards are excluded — this table's contract is "every trade
+        # card SHOWN to a user"; ghosts land only on the F1 spine, flagged.
         try:
             if league_id != "league_demo":
-                log_trade_impressions(g_user_id, league_id, final_cards)
+                log_trade_impressions(g_user_id, league_id, served_final)
         except Exception as imp_err:
             log.warning("trade impression logging failed (non-fatal): %s", imp_err)
 
@@ -5291,27 +5454,39 @@ def _run_trade_job(
         # allowed to break generation.
         # F10 — provenance marker set by the replenishment cron's kickoff
         # (absent on every pull-generated job).
+        # suggestion.telemetry — telemetry_kw threads the counterfactual
+        # extras (policy version, candidate set incl. the untrimmed F7
+        # exploration pool, ghost rows). Empty dict when the flag is off ⇒
+        # _log_deck_signal_impressions writes rows byte-identical to F1's.
         with _trade_jobs_lock:
             _j = _trade_jobs.get(job_id)
             job_source = (_j or {}).get("source")
 
         try:
             if league_id != "league_demo" and _deck_signal_v2_enabled():
+                telemetry_kw: dict = {}
+                if _suggestion_telemetry_enabled():
+                    telemetry_kw = {
+                        "policy_version": _sugg_tel.serving_policy_version(),
+                        "ghost_cards":    ghost_cards,
+                        "candidate_pool": exploration_pool,
+                    }
                 imp_by_card = _log_deck_signal_impressions(
                     user_id        = g_user_id,
                     league_id      = league_id,
                     job_id         = job_id,
-                    cards          = final_cards,
+                    cards          = served_final,
                     players_dict   = players_dict,
                     capture        = signal_capture,
                     scoring_format = active_format,
                     source         = job_source,
                     seed_map       = seed_map,   # F3 — centerpiece stamping
                     first_deck     = fs_first_deck,   # F9 — frozen features stamp
+                    **telemetry_kw,
                 )
                 if imp_by_card:
                     snapshot = []
-                    for c in final_cards:
+                    for c in served_final:
                         d = trade_card_to_dict(c, players_dict)
                         d["real_opponent"] = c.target_user_id in real_user_ids
                         d["outlook"]       = outlook_value
@@ -5342,14 +5517,17 @@ def _run_trade_job(
         # no request context / device headers; never allowed to fail the job.
         try:
             _lanes: dict[str, int] = {}
-            for c in final_cards:
+            # served_final: the analytics contract is "cards the user can
+            # see" — ghosts must not inflate the deck count (== final_cards
+            # whenever ghosting is off).
+            for c in served_final:
                 _lane = getattr(c, "lane", None)
                 if _lane:
                     _lanes[_lane] = _lanes.get(_lane, 0) + 1
             _engine_version = ("v3" if is_enabled("trade_engine.v3")
                                else "v2" if is_enabled("trade_engine.v2")
                                else "v1")
-            _ev_props = {"count": len(final_cards), "gen_ms": gen_ms,
+            _ev_props = {"count": len(served_final), "gen_ms": gen_ms,
                          "engine_version": _engine_version, "lanes": _lanes}
             # F10 — replenish-generated jobs are distinguishable in analytics
             # (pull jobs carry no marker; props stay byte-identical for them).
@@ -7298,6 +7476,37 @@ def analytics_health_route():
         "wal":                    boot["wal"],
         "event_id_index_present": boot["event_id_index_present"],
         "wal_file_bytes":         wal_file_bytes(),
+    })
+
+
+@app.route("/api/admin/suggestion-telemetry/ratio", methods=["GET"])
+def suggestion_telemetry_ratio_route():
+    """GET /api/admin/suggestion-telemetry/ratio[?league_id=…] — the always-
+    on endorsement dashboard (suggestion.telemetry; scope block
+    docs/plans/matchmaking-engine/telemetry-scope.md).
+
+    Operator-only (X-Cron-Secret, same as /api/cron/*). Per league:
+    executed = captured Sleeper trades examined by the matcher,
+    recommended = those matching a RENDERED (non-ghost) logged suggestion,
+    ratio = recommended / executed, ghost_matches = executed trades whose
+    best ghost-suggestion match exists (the incrementality read: withheld
+    suggestions that happened anyway). 404 feature_disabled while dark.
+    """
+    _require_cron_auth()
+    if not _suggestion_telemetry_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+    league_id = request.args.get("league_id") or None
+    leagues = suggestion_ratio_by_league(league_id)
+    executed = sum(l["executed"] for l in leagues)
+    recommended = sum(l["recommended"] for l in leagues)
+    return jsonify({
+        "leagues": leagues,
+        "total": {
+            "executed":      executed,
+            "recommended":   recommended,
+            "ratio":         round(recommended / executed, 4) if executed else None,
+            "ghost_matches": sum(l["ghost_matches"] for l in leagues),
+        },
     })
 
 
@@ -15689,6 +15898,21 @@ def session_init():
                     from .sleeper_trades_service import sync_league_trades
                     _n_tr = sync_league_trades(league_id)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
+                    # suggestion.telemetry — executed-trade tagging: link
+                    # every not-yet-linked captured trade to its best-
+                    # matching logged suggestion (was_recommended + ghost
+                    # columns). Idempotent work queue, so calling on every
+                    # sync is cheap in steady state; its own try/except so
+                    # a matcher hiccup can't be mistaken for capture failure.
+                    try:
+                        if is_enabled("suggestion.telemetry"):
+                            _n_links = _sugg_tel.match_league_trades(league_id)
+                            if _n_links:
+                                log.info("  ✅ suggestion links written (%d)",
+                                         _n_links)
+                    except Exception as link_err:
+                        log.warning("  suggestion linking failed (continuing): %s",
+                                    link_err)
             except Exception as tr_err:
                 log.warning("  trade capture failed (continuing): %s", tr_err)
 
