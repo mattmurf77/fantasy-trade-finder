@@ -43,6 +43,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
+  - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
@@ -615,6 +616,19 @@ Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds
 | `outlook_seed` | 0.0 | Config seed XORed with `stable_hash(league_id)` for the deterministic RNG (same league+seed → identical odds). |
 | `outlook_bye_multiplier_enabled` | 0.0 | Gate for the EVALUATED per-week bye-week μ multiplier (`backend/outlook/bye_multiplier.py`) — **`pipeline.py` does not read this key; it exists only as the wiring point for a future ship decision.** See [feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md](feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md) for the backtest verdict before ever flipping this. |
 | `outlook_bye_multiplier_scale` | 1.0 | Linear scale from starting-lineup value-fraction-on-bye to the μ multiplier haircut (`mu_multipliers()`). **Heuristic, unshipped.** |
+
+### Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded
+
+Deck swipes feed personal Elo through `RankingService.record_trade_signal` at `trade_k_like` / `trade_k_pass`. Those K-factors treat every swipe as a pure valuation statement, and the flat half-K pass discount was the only acknowledgment that **"don't want" ≠ "don't value"** — a rebuilder passing a fairly-priced vet was sinking that vet on their board for a *window* reason.
+
+These two keys scale that K by how **surprising** the swipe is given the user's window. The congruence test reuses the existing lane machinery verbatim: `trade_service.signed_lane_shift()` — the value-weighted mean now/future lean of what changes hands (received counts +, given counts −), signed by the user's resolved window direction (declared `team_outlook` → #8 roster seed → none), on CONSENSUS values — against the same `lane_shift_frac` (0.10) threshold `classify_lane` uses. The signed shift is stamped on every v2-orchestrated card at generation (`TradeCard.lane_shift`, in-process only, never serialized) because the swipe route holds neither the resolved outlook nor a consensus value fn. `lane` itself is **not** sufficient: its `"value"` bucket collapses window-neutral and strongly anti-window cards, and the anti-window swipe is the signal this weights hardest.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fit_k_explained_mult` | 0.4 | **Fit-explained** — the window already predicted the swipe: a *like* on a window-congruent card (`lane_shift ≥ lane_shift_frac`), or a *pass* on an anti-window one (`lane_shift ≤ −lane_shift_frac`). Discounted: it is a weaker valuation statement than it looks. **Setting this to 1.0 is the kill switch** — with `fit_k_defying_mult` at its 1.0 default the engine is byte-identical to pre-feature behavior, deploy-free via `PUT /api/admin/config/fit_k_explained_mult`. There is deliberately **no feature flag**. |
+| `fit_k_defying_mult` | 1.0 | **Fit-defying** — the swipe contradicts the window: a *pass* on a window-congruent card, or a *like* on an anti-window one (the rebuilder who wants the vet anyway — the strongest board signal the deck produces). Full baseline K. **Deliberately not boosted above 1.0** without data to justify it; raising it is a live experiment, not a default. |
+
+Neutral cases weight at exactly 1.0 and are byte-identical to pre-feature behavior: no window direction (unset / `not_sure`), `|lane_shift| < lane_shift_frac`, no consensus value on the table, and FB-46 client-echo card reconstructions (which carry no stamped shift). The multiplier is applied to **both** the in-memory `record_trade_signal(fit_mult=…)` call and the persisted `save_trade_swipes` `k_factor` — `_compute_elo` replays the DB rows, so the two must carry the same K. Out of scope by design: `record_disposition_signal` (match accept/decline are deliberate decisions, not deck reflexes) and bad-trade flags.
 
 ### Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`
 

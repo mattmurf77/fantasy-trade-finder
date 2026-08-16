@@ -55,6 +55,8 @@ Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k
 | Trade accept | 20 |
 | Trade decline correction | 20 |
 
+**Trade like / pass are not the final K.** Since fit-congruence weighting they are scaled at the swipe site by `fit_k_explained_mult` (0.4) or `fit_k_defying_mult` (1.0) depending on whether the swipe agrees with the user's window — so a deck pass can land at 1.6 rather than 4. The *displayed* defaults above are still the baselines; any client that shows a "signal strength" must not claim the pass K is flat. The multiplier is applied identically to the in-memory update and the persisted `swipe_decisions.k_factor` (the replay source). See [config-reference.md § Fit-congruence signal weighting](config-reference.md#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded).
+
 **Locations:** `backend/ranking_service.py`, `backend/trade_service.py`. If you change the defaults in `_MODEL_CONFIG_DEFAULTS`, also update [config-reference.md](config-reference.md) and any client display.
 
 ---
