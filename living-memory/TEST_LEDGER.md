@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-15 — Premium Rankings Import v1 (feat/premium-import-v1, dark)
+
+- **Merged-state full backend suite: 2855 passed / 1 skipped (265s)** on `feat/premium-import-v1` (merge of `feat/premium-import-backend` `627dcd0` + `feat/premium-import-mobile` `52e4807`, base `d3fe3ac`). `test_rankings_import.py` 25 → 47.
+- **Paste-path regression golden**: `rankings_paste_golden.json` captured from the pre-change implementation; sabotage #2 (backend) proved it detects drift.
+- **Sabotage: 13/13 caught.** Backend 3 (hint-narrow winner, fallback-empty, rows-precedence). Mobile 10 (flag default flip, filter removal, contender override default, contender guard ×2, Value-column leak ×2, rows-unsupported, non-400 rethrow, FeedbackFAB unmount). All restored, trees verified clean.
+- Mobile: `npx tsc --noEmit` clean; `testid-lint.sh` OK; **36/36 `check-*.js` suites** incl. new `check-premium-import.js` (27 checks) + `check-rank-presets.js` (42 parser cases).
+- Maestro/sim: n/a per [D-056]. **Owed:** operator on-device DN export pass (`docs/plans/connected-rankings/build-v1-premium-import/testflight-checklist.md`) before `ranks.source.dynasty_nerds` flips; requires a **full EAS build** (new native dep `expo-document-picker`).
+
 ## 2026-08-15 — Open-access Phase A: gates run, fixes built, ALL SHIPPED (PRs #131, #132, #129)
 
 - **Context:** operator ratified O-1…O-9 of `docs/business/product/2026-08-14-open-access-onboarding.md`, then D-055/D-056. Merge order: likes_you floor (#131) → s5.1 fix (#132) → flag flip (#129), all squash-merged to `main` 2026-08-15 (tip `0d8d7bb`). Full gate report: `docs/plans/open-access-phase-a-gates.md`. Still owed by the operator: the 5-step TestFlight check (gate report § Manual TestFlight check) and the deploy-day experiment retirement (`docs/runbook.md` § Retiring the onboarding experiment overlay).

@@ -296,3 +296,9 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **League identity** — Which **team** the caller is in a given league: the `owner_id` of the roster they own or co-own (`sess["league_user_id"]`, read via `server._league_user_id`). Distinct from the **account identity** (`sess["user_id"]`), which is which *person* they are. The two are the same string for a sole owner, which is every league that predates co-owner support. League identity keys `league_members` rows, power-rankings `is_you`, free-agent "my roster" lookups and the mock-draft owner set; account identity keys rankings, swipes, tier overrides, entitlements, analytics, notifications and feedback. Mixing them up is the whole class of bug that made a co-managed league unusable — see [ADR-012](adr/adr-012-co-owned-roster-identity.md).
 
+
+## Premium rank set
+A paid site's expert rankings (e.g. DLF's consensus "Avg" board, DynastyGM's Dynasty/Contender value sets) that a user subscribes to. In FTF these import **order-only** into the user's own board via the import pipeline — the site's values never persist (D-058, R14). UI groups them as "Your subscriptions", never "Your rankings" or "Community rankings".
+
+## Assisted in-app-browser export
+The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app browser, logs in on the site itself, and taps the site's own Export CSV button; FTF passively intercepts the user-generated file and pipes it into the import preset pipeline. User-present and on-demand only — FTF never automates the site.
