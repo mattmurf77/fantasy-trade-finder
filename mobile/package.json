@@ -34,7 +34,11 @@
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:s51-regen-diff": "node tests/check-s51-regen-diff.js",
     "test:rank-presets": "node tests/check-rank-presets.js",
-    "test:premium-import": "node tests/check-premium-import.js"
+    "test:premium-import": "node tests/check-premium-import.js",
+    "test:calc-send-placement": "node tests/check-calc-send-placement.js",
+    "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
+    "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",
+    "test:picker-chip-alignment": "node tests/check-picker-chip-alignment.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

@@ -89,6 +89,19 @@ const RANK_STATE_A11Y: Record<RankState, string> = {
   NR: 'not ranked',
 };
 
+// #306 — ONE source for a partner-chip summary segment's visible and
+// spoken content: the server's pick-equivalent label when present
+// ("≈3 firsts" — rendered verbatim, spoken as "about 3 firsts"), the
+// rounded raw value ONLY as an old-server fallback. Both the visible
+// summary line and `a11ySummary` go through these two helpers, so a
+// sighted-only relabel (or a numeric-first regression) is structural,
+// not stylistic — pinned by mobile/tests/check-calc-partner-labels.js.
+type SummarySegment = { value: number; label?: string };
+const segmentText = (s: SummarySegment): string =>
+  s.label ?? Math.round(s.value).toLocaleString();
+const segmentSpoken = (s: SummarySegment): string =>
+  s.label ? s.label.replace('≈', 'about ') : String(Math.round(s.value));
+
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -158,20 +171,32 @@ export default function InLeagueCalculator({
     queryFn: () => getPowerRankings(leagueId, 'consensus'),
     staleTime: 5 * 60_000,
   });
+  // #306 (D-306-1 graduation) — each segment carries the server's
+  // pick-equivalent `value_label` ("≈3 firsts") alongside the raw value;
+  // the chip renders the LABEL when present and falls back to the numeric
+  // only on old servers (no-raw-numerics ruling, 2026-08-12). The picks
+  // segment's label is the D-306-2 literal-count label, never a client
+  // conversion of the dollar `picks.value`.
   const partnerSummaries = useMemo(() => {
     const m: Record<
       string,
-      { pos: Record<Position, number>; picks: number | null }
+      {
+        pos: Record<Position, { value: number; label?: string }>;
+        picks: { value: number; label?: string } | null;
+      }
     > = {};
     for (const t of powerQ.data?.teams ?? []) {
       m[t.user_id] = {
         pos: {
-          QB: t.positions?.QB?.value ?? 0,
-          RB: t.positions?.RB?.value ?? 0,
-          WR: t.positions?.WR?.value ?? 0,
-          TE: t.positions?.TE?.value ?? 0,
+          QB: { value: t.positions?.QB?.value ?? 0, label: t.positions?.QB?.value_label },
+          RB: { value: t.positions?.RB?.value ?? 0, label: t.positions?.RB?.value_label },
+          WR: { value: t.positions?.WR?.value ?? 0, label: t.positions?.WR?.value_label },
+          TE: { value: t.positions?.TE?.value ?? 0, label: t.positions?.TE?.value_label },
         },
-        picks: t.picks && t.picks.count > 0 ? t.picks.value : null,
+        picks:
+          t.picks && t.picks.count > 0
+            ? { value: t.picks.value, label: t.picks.value_label }
+            : null,
       };
     }
     return m;
@@ -235,15 +260,20 @@ export default function InLeagueCalculator({
   // #263 — pick-value ladder tier per row, server-computed off the RAW seed
   // Elo (see api/calc.ts CalcValueRow.tier) — reused as-is, never re-derived
   // from `board` above (elo_to_value scale, not the tier bands' Elo scale).
-  // Owned picks have no tier of their own (a pick already IS a tier rung);
-  // absent here, so callers fall back to their numeric board value.
-  const tierById = useMemo<Record<string, Tier>>(
-    () =>
-      Object.fromEntries(
-        (valuesQ.data?.players ?? []).map((r) => [r.id, r.tier]),
-      ) as Record<string, Tier>,
-    [valuesQ.data],
-  );
+  // #320 (D-320-1, supersedes #263's "picks stay numeric"): owned picks now
+  // carry a server-computed `tier` too (the band their DISCOUNTED
+  // pool_value sits in — a 2028 2nd may badge 3rd, D-320-2), merged here so
+  // every tierOf call site resolves picks and players identically. Null /
+  // absent (old servers, unpriced rows) leaves the numeric fallback.
+  const tierById = useMemo<Record<string, Tier>>(() => {
+    const m = Object.fromEntries(
+      (valuesQ.data?.players ?? []).map((r) => [r.id, r.tier]),
+    ) as Record<string, Tier>;
+    for (const p of picksQ.data?.all_picks ?? []) {
+      if (p.tier) m[p.pick_id] = p.tier;
+    }
+    return m;
+  }, [valuesQ.data, picksQ.data]);
   const playerById = useMemo(() => {
     const m: Record<string, CalcPlayer> = {};
     for (const r of valuesQ.data?.players ?? []) {
@@ -505,7 +535,10 @@ export default function InLeagueCalculator({
   // Share-as-image inputs: names/positions/values from the merged
   // player+pick map (picks share the same map, so they render too).
   // #277/#280 — player rows carry their tier so the share card matches the
-  // on-screen TradeSide labels; picks stay numeric (tier null).
+  // on-screen TradeSide labels; picks stay numeric (tier null) on the
+  // SHARE IMAGE ONLY — #320/D-320-3 kept that decision even though the
+  // on-screen rows now badge picks (D-320-1). The 'PICK' special-case
+  // below is therefore deliberate; do not "simplify" it to tierById.
   const shareAssets = (ids: string[]): ShareAsset[] =>
     (ids.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]).map((p) => ({
       id: p.id,
@@ -601,9 +634,9 @@ export default function InLeagueCalculator({
           const a11ySummary = summary
             ? ', ' +
               POSITIONS.map(
-                (pos) => `${pos} ${Math.round(summary.pos[pos])}`,
+                (pos) => `${pos} ${segmentSpoken(summary.pos[pos])}`,
               ).join(', ') +
-              (summary.picks != null ? `, picks ${Math.round(summary.picks)}` : '')
+              (summary.picks ? `, picks ${segmentSpoken(summary.picks)}` : '')
             : '';
           return (
             <Pressable
@@ -626,23 +659,26 @@ export default function InLeagueCalculator({
                 />
               </View>
               {summary ? (
+                // #306 — labels are longer than the raw numbers they
+                // replace: two lines so the tail segments (TE, Picks)
+                // aren't ellipsized away; 11px Plex Mono floor holds.
                 <Text
                   testID={`calc.partner-summary.${o.user_id}`}
                   style={styles.summaryLine}
-                  numberOfLines={1}
+                  numberOfLines={2}
                   ellipsizeMode="tail"
                 >
                   {POSITIONS.map((pos, i) => (
                     <Text key={pos}>
                       {i > 0 ? ' · ' : ''}
                       <Text style={{ color: posColor(pos) }}>{pos} </Text>
-                      {Math.round(summary.pos[pos]).toLocaleString()}
+                      {segmentText(summary.pos[pos])}
                     </Text>
                   ))}
-                  {summary.picks != null ? (
+                  {summary.picks ? (
                     <Text>
                       {' · Picks '}
-                      {Math.round(summary.picks).toLocaleString()}
+                      {segmentText(summary.picks)}
                     </Text>
                   ) : null}
                 </Text>
@@ -684,7 +720,7 @@ export default function InLeagueCalculator({
         teamName="your roster"
         players={giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
-        tierOf={(p) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
+        tierOf={(p) => tierById[p.id] ?? null}
         accent={semantic.neg}
         addTestID="calc.league-give-add"
         leagueId={leagueId}
@@ -706,7 +742,7 @@ export default function InLeagueCalculator({
         teamName={opponent ? `@${opponent.username}` : 'their roster'}
         players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
-        tierOf={(p) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
+        tierOf={(p) => tierById[p.id] ?? null}
         accent={semantic.pos}
         addTestID="calc.league-receive-add"
         leagueId={leagueId}
@@ -746,6 +782,36 @@ export default function InLeagueCalculator({
         />
       ) : null}
 
+      {/* #303 (D-303-1, operator 2026-08-16): the send action rides
+          directly with the content it acts on — the built trade — instead
+          of sitting below the whole verdict card and the balance
+          suggestions (#169 precedent: primary action beneath the tiles).
+          ONLY the send router moves; Share stays below because it renders
+          the VERDICT into the PNG, and Clear is destructive — end-of-flow
+          is where it belongs. #251 holds: eveners stay directly under the
+          trade window, above this. Same render condition + verbatim props
+          as the old bottom-block mount. */}
+      {bothSides && opponentId ? (
+        <View style={styles.actions}>
+          <SendInSleeperButton
+            leagueId={leagueId}
+            theirUserId={opponentId}
+            givePlayerIds={giveIds}
+            receivePlayerIds={receiveIds}
+            // audit P0-6 — same name resolution as ShareTradeImage's
+            // fallbackText below, so the calculator has one way of naming
+            // players. No leagueName: this component has a leagueId but no
+            // display name in scope, and the copy text drops that line
+            // cleanly. opponent?.username may be undefined — the formatter
+            // then omits the "To:" line rather than pasting "@them".
+            givePlayerNames={giveIds.map((id) => playerById[id]?.name ?? id)}
+            receivePlayerNames={receiveIds.map((id) => playerById[id]?.name ?? id)}
+            opponentUsername={opponent?.username}
+            surface="calculator"
+          />
+        </View>
+      ) : null}
+
       {anySide && evalQ.data ? (
         <LeagueVerdict
           ev={evalQ.data}
@@ -781,24 +847,9 @@ export default function InLeagueCalculator({
 
       {anySide ? (
         <View style={styles.actions}>
-          {bothSides && opponentId ? (
-            <SendInSleeperButton
-              leagueId={leagueId}
-              theirUserId={opponentId}
-              givePlayerIds={giveIds}
-              receivePlayerIds={receiveIds}
-              // audit P0-6 — same name resolution as ShareTradeImage's
-              // fallbackText below, so the calculator has one way of naming
-              // players. No leagueName: this component has a leagueId but no
-              // display name in scope, and the copy text drops that line
-              // cleanly. opponent?.username may be undefined — the formatter
-              // then omits the "To:" line rather than pasting "@them".
-              givePlayerNames={giveIds.map((id) => playerById[id]?.name ?? id)}
-              receivePlayerNames={receiveIds.map((id) => playerById[id]?.name ?? id)}
-              opponentUsername={opponent?.username}
-              surface="calculator"
-            />
-          ) : null}
+          {/* #303 — SendInSleeperButton used to lead this block; it now
+              renders above the verdict (see the D-303-1 comment there).
+              Share + Clear deliberately stay here. */}
           {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the
               verdict to a PNG for the native share sheet; text fallback. */}
           {bothSides && ev ? (
@@ -841,7 +892,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
-        tierOf={(p: CalcPlayer) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
+        tierOf={(p: CalcPlayer) => tierById[p.id] ?? null}
         leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();
@@ -856,7 +907,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
-        tierOf={(p: CalcPlayer) => (p.pos === 'PICK' ? null : tierById[p.id] ?? null)}
+        tierOf={(p: CalcPlayer) => tierById[p.id] ?? null}
         leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();

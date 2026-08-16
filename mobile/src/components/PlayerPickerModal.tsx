@@ -53,8 +53,10 @@ interface Props {
   /** Value on the roster owner's board (what it costs them / what they'd demand). */
   ownerBoardValue: (p: CalcPlayer) => number;
   /** #263 — pick-value ladder tier for the row (replaces `ownerBoardValue`'s
-   *  number for players; picks keep their numeric value). Omitted/null per
-   *  row falls back to the numeric value. */
+   *  number). #320/D-320-1 superseded #263's "picks keep their numeric
+   *  value" carve-out: the in-league calculator now resolves owned picks
+   *  too. Omitted/null per row falls back to the numeric value (old
+   *  servers, unpriced rows, unwired callers). */
   tierOf?: (p: CalcPlayer) => Tier | null | undefined;
   /** Second board's value shown under the primary (e.g. what it's worth to you). */
   secondaryValue?: (p: CalcPlayer) => number;
@@ -153,7 +155,15 @@ export default function PlayerPickerModal({
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       onPress={() => onPick(item)}
     >
-      <PositionChip position={item.pos} size="sm" />
+      {/* #320 — fixed-width chip slot: PICK (4 chars) is wider than
+          QB/RB/WR/TE, so a self-sized chip pushed pick rows' names right;
+          the slot left-aligns every row's name at one x. PositionChip
+          itself is untouched (shared with Tiers/Trades/Matches — no
+          drive-by). Same 44pt constant as TradeSide.chipCol; keep them in
+          lockstep (mobile/tests/check-picker-chip-alignment.js). */}
+      <View style={styles.chipCol}>
+        <PositionChip position={item.pos} size="sm" />
+      </View>
       <View style={styles.info}>
         <View style={styles.nameRow}>
           <Text style={type.title}>{item.name}</Text>
@@ -335,6 +345,10 @@ const styles = StyleSheet.create({
   suggestedWrap: { paddingTop: space.xs },
   suggestedFoot: { paddingTop: space.md },
   info: { flex: 1 },
+  // #320 — fixed chip slot so PICK/QB/RB/WR/TE rows all start the name
+  // column at the same x. 44 clears the sm PICK chip; same constant in
+  // TradeSide.chipCol.
+  chipCol: { width: 44, alignItems: 'flex-start' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   values: { alignItems: 'flex-end' },
   tierSlot: { alignSelf: 'flex-end' },
