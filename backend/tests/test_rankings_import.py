@@ -624,13 +624,18 @@ def test_import_apply_requires_session(client):
 PREMIUM_SOURCE_FLAGS = ("ranks.source.dynasty_nerds", "ranks.source.dlf")
 
 
-def test_premium_source_flags_registered_and_dark_everywhere():
+def test_premium_source_flags_registered_and_states_pinned():
     """Both keys exist in FLAG_KEYS, in config/features.json, and in every
-    complete flag fixture — and every one of them is FALSE (G-034: a key
-    added to features.json but not the fixtures fails the suite later, in a
-    file that has nothing to do with the feature)."""
+    complete flag fixture (G-034: a key added to features.json but not the
+    fixtures fails the suite later, in a file that has nothing to do with
+    the feature). Compiled DEFAULT_FLAGS stay False (fail-closed) for both.
+    Per-source config state pins the CURRENT graduation reality:
+    dynasty_nerds graduated ON 2026-08-16 (operator flip after D-058);
+    dlf stays dark until a real subscriber export pins its header shape
+    (addendum §3.4 fixture gate)."""
     from backend import feature_flags
 
+    expected = {"ranks.source.dynasty_nerds": True, "ranks.source.dlf": False}
     repo = Path(__file__).resolve().parents[2]
     sources = [repo / "config/features.json"] + [
         FIXTURES / "flags" / f"{n}.json"
@@ -641,7 +646,7 @@ def test_premium_source_flags_registered_and_dark_everywhere():
         assert feature_flags.DEFAULT_FLAGS[key] is False
         for path in sources:
             flags = json.loads(path.read_text())
-            assert flags.get(key) is False, f"{key} in {path.name}"
+            assert flags.get(key) is expected[key], f"{key} in {path.name}"
 
 
 def test_preset_events_registered_and_non_intent():
