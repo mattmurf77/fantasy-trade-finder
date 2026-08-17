@@ -540,6 +540,22 @@ _DEFAULT_CFG: dict[str, float] = {
     # pick that rank inside this count are "featured"; the rest of the
     # full ranked survivor set is "browse".
     "gen2_featured_count":        4.0,
+    # G6 presentment-rule parity (ported 2026-08-16, operator directive —
+    # ahead of the G6 wave's own v1-path merge; rules + reconciliation
+    # note in trade_gen_v2.py § G6 parity, addendum in docs/plans/
+    # matchmaking-engine/trade-gen-v2-scope.md). PROVISIONAL: at G6-merge
+    # reconciliation these alias/align to G6's calibrated v1 knobs
+    # (pos_net_cap / pick_gap_frac / pick_gap_min_value) — one source of
+    # truth.
+    # #341 net-position cap: |count(recv at P) − count(give at P)| ≤ cap
+    # for each P in {QB, RB, WR, TE}; picks uncounted. 1 = rule on with
+    # cap 1; ≤ 0 disables (per-rule kill switch).
+    "gen2_g6_net_position_cap":   1.0,
+    # #339 pick-not-the-gap two-sided band: for a raw-consensus gap ≥ 300,
+    # kill when a heavier-side pick sits inside [frac×gap, gap/frac].
+    # 0 disables. 0.8 mirrors the G6 spec default — unmeasured pending the
+    # pick-league replay (G6 prd R-12).
+    "gen2_pick_band_frac":        0.8,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

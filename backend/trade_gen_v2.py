@@ -174,6 +174,110 @@ def side_gain(in_ids: list[str], out_ids: list[str], value_of) -> float:
 
 
 # ---------------------------------------------------------------------------
+# G6 presentment-rule parity — #341 net-position cap + #339 pick-gap band
+# ---------------------------------------------------------------------------
+# Ported 2026-08-16 (operator directive, ahead of the G6 wave's own v1-path
+# merge) from the G6 spec at docs/feedback/items/304-positional-need-filter/
+# (prd R-2 / R-3, lld-delta §3). These join the composition-hygiene gate so
+# the successor generator carries the same package-shape guardrails as the
+# v1 path will after G6 ships. Deliberately NOT ported: #304's positional-
+# need hard gate — gen-v2 optimizes need in the objective, and a hard need
+# filter would double-penalize and kill the consolidation shapes G6 itself
+# protects (docs/plans/matchmaking-engine/2026-08-16-g6-validation.md).
+#
+# PROVISIONAL KNOBS: `gen2_g6_net_position_cap` and `gen2_pick_band_frac`
+# (plus the `_G6_PICK_GAP_MIN_VALUE` constant below) mirror G6's v1 knobs
+# `pos_net_cap` / `pick_gap_frac` / `pick_gap_min_value`, which are still
+# unmerged (branch feedback-2026-08-16-specs) and whose #339 values await a
+# pick-league replay (G6 prd R-12). At G6-merge reconciliation these must be
+# aliased/aligned to G6's calibrated values — one source of truth.
+
+# #341 counts positional bodies only: the four lineup positions, never
+# picks (a pick is not a positional body; picks are #339's domain) and
+# never K/DEF/IDP in exotic leagues (uncounted by design, per the spec).
+_G6_NET_POSITIONS = ("QB", "RB", "WR", "TE")
+
+# #339 gap floor, raw-consensus value units. Mirrors G6's
+# `pick_gap_min_value` default (300.0) — kept as a module constant rather
+# than a third knob so the two engines share exactly two provisional keys
+# to reconcile; alias to G6's key at reconciliation.
+_G6_PICK_GAP_MIN_VALUE = 300.0
+
+
+def g6_pos_net_ok(give_ids: list[str], recv_ids: list[str],
+                  players: dict) -> bool:
+    """#341 package-shape cap (G6 prd R-2): for each position P in
+    {QB, RB, WR, TE}, the signed net ``count(recv at P) − count(give at P)``
+    — one quantity per position, not a per-side count — must satisfy
+    ``|net_P| ≤ gen2_g6_net_position_cap``.
+
+    Semantics (operator's words): 2RB→2WR kills (net RB = −2); "give 2 RBs
+    only if getting 1 back" passes (net −1); 2RB→2RB is net 0 and passes;
+    every 1-for-1 passes trivially. Pick pseudo-assets are excluded
+    (``is_pick_asset``), as are positions outside the four. The net is one
+    side's view — the counterparty's net is its negation, so a single check
+    covers both sides. ``gen2_g6_net_position_cap ≤ 0`` disables (per-rule
+    kill switch, following the G6 `pos_net_cap`/`filler_min_frac` pattern).
+    """
+    cap = _c("gen2_g6_net_position_cap")
+    if cap <= 0:
+        return True
+    net: dict[str, int] = defaultdict(int)
+    for pid in recv_ids:
+        p = players.get(pid)
+        pos = getattr(p, "position", None)
+        if pos in _G6_NET_POSITIONS and not is_pick_asset(p):
+            net[pos] += 1
+    for pid in give_ids:
+        p = players.get(pid)
+        pos = getattr(p, "position", None)
+        if pos in _G6_NET_POSITIONS and not is_pick_asset(p):
+            net[pos] -= 1
+    return all(abs(n) <= cap for n in net.values())
+
+
+def g6_pick_gap_ok(give_ids: list[str], recv_ids: list[str], cval,
+                   players: dict) -> bool:
+    """#339 pick-not-the-gap (G6 prd R-3): only evaluated when the package
+    contains ≥1 pick. With ``g``/``r`` the RAW consensus sums of each side
+    (players and picks, undiscounted — the D-055 Δ currency), ``gap =
+    |g − r|``, and H the heavier side:
+
+        KILL when gap ≥ _G6_PICK_GAP_MIN_VALUE
+             AND ∃ pick p ∈ H with
+                 gen2_pick_band_frac × gap ≤ cval(p) ≤ gap / gen2_pick_band_frac
+
+    Two-sided band: the pick must *be* the gap — within the band of it in
+    both directions — not merely exceed a fraction of it. A pick far larger
+    than the gap (centerpiece consolidation, e.g. gap 300 with a mid-1st at
+    3,000 — "player + mid-1st for a stud", the operator's own stud-scaled
+    style) passes; the #339 shape (heavier by exactly one mid-1st: gap
+    3,000, pick 3,000) dies. The enumerators generate the pick-less sibling
+    shape independently, so the kill loses nothing.
+    ``gen2_pick_band_frac = 0`` disables.
+    """
+    frac = _c("gen2_pick_band_frac")
+    if frac <= 0:
+        return True
+    if not any(is_pick_asset(players.get(p)) for p in give_ids) \
+            and not any(is_pick_asset(players.get(p)) for p in recv_ids):
+        return True
+    g = sum(cval(p) for p in give_ids)
+    r = sum(cval(p) for p in recv_ids)
+    gap = abs(g - r)
+    if gap < _G6_PICK_GAP_MIN_VALUE:
+        return True
+    heavier = give_ids if g > r else recv_ids
+    for pid in heavier:
+        if not is_pick_asset(players.get(pid)):
+            continue
+        v = cval(pid)
+        if frac * gap <= v <= gap / frac:
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Completion-probability hook (empirical-Bayes acceptance prior)
 # ---------------------------------------------------------------------------
 
@@ -269,6 +373,8 @@ class GenerationReport:
     user_id: str
     considered: int = 0
     composition_rejects: int = 0  # #141 filler / #227 pick-churn hygiene
+    net_cap_rejects: int = 0     # G6 #341 net-position cap kills
+    pick_band_rejects: int = 0   # G6 #339 pick-not-the-gap band kills
     feasibility_rejects: int = 0
     ir_rejects: int = 0          # dual-board ε-gate failures
     band_rejects: int = 0        # consensus fairness-band failures
@@ -288,6 +394,8 @@ class GenerationReport:
             "user_id": self.user_id,
             "considered": self.considered,
             "composition_rejects": self.composition_rejects,
+            "net_cap_rejects": self.net_cap_rejects,
+            "pick_band_rejects": self.pick_band_rejects,
             "feasibility_rejects": self.feasibility_rejects,
             "ir_rejects": self.ir_rejects,
             "band_rejects": self.band_rejects,
@@ -405,6 +513,17 @@ def _pair_survivors(
                     continue
                 if not pick_swap_ok(give_ids, recv_ids, players):
                     report.composition_rejects += 1
+                    continue
+                # G6 parity rules (ported 2026-08-16; see the module
+                # section above): #341 net-position cap and #339
+                # pick-not-the-gap band join the hygiene gate — same
+                # placement as G6's v1 hooks (before feasibility, so a
+                # killed shape is refilled from the enumeration).
+                if not g6_pos_net_ok(give_ids, recv_ids, players):
+                    report.net_cap_rejects += 1
+                    continue
+                if not g6_pick_gap_ok(give_ids, recv_ids, cval, players):
+                    report.pick_band_rejects += 1
                     continue
 
                 # Gate a — roster feasibility, BOTH sides.
@@ -543,6 +662,14 @@ def _meso_variants(
         if frozenset(c.give_ids) == base_give:
             continue
         if abs(c.give_val_opp - base_val) > band * base_val:
+            continue
+        # G6 #339 on MESO variants: a variant that violates the pick-gap
+        # band is dropped, never emitted. Belt-and-suspenders — the pool
+        # only holds hard-gate survivors, which already passed the band —
+        # but the MESO surface must hold the invariant on its own even if
+        # the pool's provenance ever changes (e.g. a pick-heavy variant
+        # generator that doesn't re-run the hygiene gate).
+        if not g6_pick_gap_ok(c.give_ids, c.recv_ids, cval, players):
             continue
         shape = classify_package_shape(c.give_ids, players, cval)
         if shape in shapes_used:
@@ -884,6 +1011,7 @@ def generate_league_suggestions(
     report.shaped_head_by_opponent = dict(head_counts)
     report.emitted = len(cards)
     gate_b_entrants = (report.considered - report.composition_rejects
+                       - report.net_cap_rejects - report.pick_band_rejects
                        - report.feasibility_rejects)
     report.ir_rate = ((gate_b_entrants - report.ir_rejects)
                       / gate_b_entrants) if gate_b_entrants > 0 else 0.0

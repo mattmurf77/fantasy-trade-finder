@@ -33,9 +33,12 @@ import backend.trade_service as ts
 from backend.trade_gen_v2 import (
     _Candidate,
     _dedup_batch,
+    _meso_variants,
     acceptance_prior,
     classify_package_shape,
     consolidated_value,
+    g6_pick_gap_ok,
+    g6_pos_net_ok,
     generate_league_suggestions,
 )
 from backend.trade_service import (
@@ -349,6 +352,11 @@ def test_consolidation_discount_blocks_junk_stuffing():
     whose NAIVE sum is ~3400 — the discount collapses the junk, the band
     rejects. Restoring additivity (floor=1.0) lets the junk package
     through, proving the discount is what catches it."""
+    # Isolate the discount: the exploit shape (3 WRs for 1 WR) also trips
+    # the G6 #341 net-position cap ported 2026-08-16, which would mask
+    # what this test proves. Disable the cap; its own coverage lives in
+    # the G6-parity test block below.
+    ts._cfg["gen2_g6_net_position_cap"] = 0.0
     pos = {**_base_positions("u"), **_base_positions("o")}
     players = {pid: _Player(id=pid, name=pid, position=p)
                for pid, p in pos.items()}
@@ -810,3 +818,407 @@ def test_fixture_league_through_trade_service_flag_on():
     assert sum(1 for c in cards if c.tier == "endorsed") == 1
     # Cards are stored for later decision recording, like every other path.
     assert all(svc._trade_cards.get(c.trade_id) is c for c in cards)
+
+
+# ---------------------------------------------------------------------------
+# G6 parity rules (ported 2026-08-16) — #341 net-position cap +
+# #339 pick-not-the-gap band
+# ---------------------------------------------------------------------------
+
+def _elo_for(value: float) -> float:
+    """Inverse of elo_to_value at the default base/ref/k (1000/1500/0.005)."""
+    return 1500.0 + 200.0 * math.log(value / 1000.0)
+
+
+def _g6_players():
+    players = {
+        "rb_a": _Player(id="rb_a", name="rb_a", position="RB"),
+        "rb_b": _Player(id="rb_b", name="rb_b", position="RB"),
+        "wr_a": _Player(id="wr_a", name="wr_a", position="WR"),
+        "wr_b": _Player(id="wr_b", name="wr_b", position="WR"),
+        "te_a": _Player(id="te_a", name="te_a", position="TE"),
+        "pk_a": _Player(id="pk_a", name="2027 1st", position="PICK", age=None),
+        "pk_b": _Player(id="pk_b", name="2028 2nd", position="PICK", age=None),
+    }
+    return players
+
+
+def test_g6_pos_net_cap_predicate():
+    players = _g6_players()
+    # Every 1-for-1 passes trivially.
+    assert g6_pos_net_ok(["rb_a"], ["wr_a"], players)
+    # 2RB -> 2WR: net RB = -2 (and net WR = +2) -> killed.
+    assert not g6_pos_net_ok(["rb_a", "rb_b"], ["wr_a", "wr_b"], players)
+    # 2RB -> 1WR+1TE: net RB = -2 -> killed (nothing coming back at RB).
+    assert not g6_pos_net_ok(["rb_a", "rb_b"], ["wr_a", "te_a"], players)
+    # "Give 2 of a position only if getting 1 back": 2RB -> 1RB+1WR is
+    # net RB -1 -> passes.
+    players["rb_c"] = _Player(id="rb_c", name="rb_c", position="RB")
+    assert g6_pos_net_ok(["rb_a", "rb_b"], ["rb_c", "wr_a"], players)
+    # 2RB -> 2RB is net 0 -> passes (one signed net per position, never a
+    # per-side count).
+    players["rb_d"] = _Player(id="rb_d", name="rb_d", position="RB")
+    assert g6_pos_net_ok(["rb_a", "rb_b"], ["rb_c", "rb_d"], players)
+    # Receive side symmetric: getting 2 WRs while giving none back kills.
+    assert not g6_pos_net_ok(["rb_a"], ["wr_a", "wr_b"], players)
+    # Picks are uncounted (not positional bodies): 2 picks + RB -> WR
+    # passes; a sabotage counting PICK as a position would kill it.
+    assert g6_pos_net_ok(["pk_a", "pk_b", "rb_a"], ["wr_a"], players)
+    # Knob at <=0 disables the rule entirely.
+    ts._cfg["gen2_g6_net_position_cap"] = 0.0
+    assert g6_pos_net_ok(["rb_a", "rb_b"], ["wr_a", "wr_b"], players)
+
+
+def test_g6_pick_gap_band_predicate():
+    players = _g6_players()
+    vals = {"rb_a": 2000.0, "rb_b": 6000.0, "wr_a": 2000.0, "wr_b": 5000.0,
+            "te_a": 500.0, "pk_a": 3000.0, "pk_b": 400.0}
+    cval = lambda pid: vals[pid]
+
+    # No pick in the package -> never evaluated.
+    assert g6_pick_gap_ok(["rb_a"], ["wr_b"], cval, players)
+    # The #339 shape: heavier by exactly one mid-1st (gap 3000, pick 3000
+    # inside [2400, 3750]) -> killed.
+    assert not g6_pick_gap_ok(["rb_a", "pk_a"], ["wr_a"], cval, players)
+    # The same in-band pick on the LIGHTER side passes (only the heavier
+    # side's picks are audited): give 8000 vs recv 2000 + pick 3000 →
+    # gap 3000 inside the pick's band, but the pick isn't the overpay.
+    vals["big"] = 8000.0
+    players["big"] = _Player(id="big", name="big", position="RB")
+    assert g6_pick_gap_ok(["big"], ["wr_a", "pk_a"], cval, players)
+    # Sub-floor gap (< 300) passes: pk_b 400 vs wr_a... use te_a 500 vs
+    # pk_b 400 -> gap 100.
+    assert g6_pick_gap_ok(["pk_b"], ["te_a"], cval, players)
+    # Centerpiece consolidation passes ("player + mid-1st for a stud"):
+    # gap 300, pick 3000 far above the band's upper edge (375).
+    vals["stud"] = 5300.0
+    players["stud"] = _Player(id="stud", name="stud", position="WR")
+    assert g6_pick_gap_ok(["rb_a", "pk_a"], ["stud"], cval, players)
+    # Band edges are inclusive kills: gap 1000, band [800, 1250].
+    vals.update({"pk_e": 800.0})
+    players["pk_e"] = _Player(id="pk_e", name="pk", position="PICK", age=None)
+    vals.update({"body": 1200.0, "ret": 1000.0})
+    players["body"] = _Player(id="body", name="body", position="RB")
+    players["ret"] = _Player(id="ret", name="ret", position="WR")
+    # gap = (1200 + 800) - 1000 = 1000; pick 800 == frac*gap -> kill.
+    assert not g6_pick_gap_ok(["body", "pk_e"], ["ret"], cval, players)
+    # pick == gap/frac (1250) -> kill.
+    vals["pk_u"] = 1250.0
+    players["pk_u"] = _Player(id="pk_u", name="pk", position="PICK", age=None)
+    vals["body2"] = 750.0
+    players["body2"] = _Player(id="body2", name="b2", position="RB")
+    # gap = (750 + 1250) - 1000 = 1000; pick 1250 == gap/0.8 -> kill.
+    assert not g6_pick_gap_ok(["body2", "pk_u"], ["ret"], cval, players)
+    # Just outside the band on both edges -> passes.
+    vals["pk_lo"] = 799.0
+    players["pk_lo"] = _Player(id="pk_lo", name="pk", position="PICK", age=None)
+    vals["body3"] = 1201.0
+    players["body3"] = _Player(id="body3", name="b3", position="RB")
+    # gap = (1201 + 799) - 1000 = 1000; pick 799 < 800 -> pass.
+    assert g6_pick_gap_ok(["body3", "pk_lo"], ["ret"], cval, players)
+    vals["pk_hi"] = 1251.0
+    players["pk_hi"] = _Player(id="pk_hi", name="pk", position="PICK", age=None)
+    vals["body4"] = 749.0
+    players["body4"] = _Player(id="body4", name="b4", position="RB")
+    # gap = (749 + 1251) - 1000 = 1000; pick 1251 > 1250 -> pass.
+    assert g6_pick_gap_ok(["body4", "pk_hi"], ["ret"], cval, players)
+    # Knob at 0 disables.
+    ts._cfg["gen2_pick_band_frac"] = 0.0
+    assert g6_pick_gap_ok(["rb_a", "pk_a"], ["wr_a"], cval, players)
+
+
+def test_g6_net_cap_blocks_junk_stuffed_shape_even_without_discount():
+    """The 3WR-for-1WR exploit shape from the consolidation-discount test
+    is ALSO a #341 violation (net WR = -2). With the discount killed
+    (floor = 1.0, naive additivity), the net cap alone must still block
+    it; disabling the cap knob restores the pre-port leak."""
+    pos = {**_base_positions("u"), **_base_positions("o")}
+    players = {pid: _Player(id=pid, name=pid, position=p)
+               for pid, p in pos.items()}
+    user_roster = [p for p in pos if p.startswith("u_")]
+    opp_roster = [p for p in pos if p.startswith("o_")]
+
+    stud, mid, j1, j2 = "o_wr1", "u_wr1", "u_wr2", "u_wr3"
+    seed = {pid: 1500.0 for pid in pos}
+    seed[stud] = 1745.0
+    seed[mid] = 1691.0
+    seed[j1] = seed[j2] = 1317.0
+
+    user_elo = dict(seed)
+    user_elo[stud] = 1780.0
+    user_elo[mid] = 1600.0
+    user_elo[j1] = user_elo[j2] = 1200.0
+
+    opp_elo = dict(seed)
+    opp_elo[stud] = 1500.0
+    opp_elo[mid] = 1650.0
+    opp_elo[j1] = opp_elo[j2] = 1400.0
+
+    for extra in ("u_wr4", "u_wr5", "u_wr6"):
+        players[extra] = _Player(id=extra, name=extra, position="WR")
+        user_roster.append(extra)
+        seed[extra] = 1400.0
+        user_elo[extra] = 1400.0
+        opp_elo[extra] = 1400.0
+
+    opp = _member("opp", opp_roster, opp_elo)
+
+    def _stuffed(card):
+        return j1 in card.give_player_ids and j2 in card.give_player_ids
+
+    ts._cfg["gen2_consol_floor"] = 1.0        # discount OFF (the old leak)
+    cards, report = _run(players, [opp], user_elo, user_roster, seed)
+    assert all(not _stuffed(c) for c in cards), \
+        "#341 net cap failed to block the 3-for-1 same-position shape"
+    assert report.net_cap_rejects > 0
+
+    ts._cfg["gen2_g6_net_position_cap"] = 0.0  # cap knob OFF too
+    cards2, report2 = _run(players, [opp], user_elo, user_roster, seed)
+    assert any(_stuffed(c) for c in cards2)
+    assert report2.net_cap_rejects == 0
+
+
+def test_g6_two_give_one_get_same_position_passes_pipeline():
+    """'Give 2 WRs, get 1 WR back' is net -1 and must survive end-to-end
+    (the spec's legal consolidation direction for #341)."""
+    pos = {**_base_positions("u"), **_base_positions("o")}
+    players = {pid: _Player(id=pid, name=pid, position=p)
+               for pid, p in pos.items()}
+    user_roster = [p for p in pos if p.startswith("u_")]
+    opp_roster = [p for p in pos if p.startswith("o_")]
+    players["u_wr4"] = _Player(id="u_wr4", name="u_wr4", position="WR")
+    user_roster.append("u_wr4")
+
+    g1, g2, stud = "u_wr1", "u_wr2", "o_wr1"
+    seed = {pid: 1500.0 for pid in players}
+    seed[g1] = _elo_for(2000.0)
+    seed[g2] = _elo_for(1800.0)
+    seed[stud] = _elo_for(3400.0)
+
+    user_elo = dict(seed)
+    user_elo[stud] = _elo_for(4482.0)   # covets the stud
+    user_elo[g1] = _elo_for(1649.0)
+    user_elo[g2] = _elo_for(1492.0)
+
+    opp_elo = dict(seed)
+    opp_elo[stud] = 1500.0              # out on their own stud
+    opp_elo[g1] = _elo_for(2718.0)      # likes both user WRs
+    opp_elo[g2] = _elo_for(2117.0)
+
+    opp = _member("opp", opp_roster, opp_elo)
+    cards, report = _run(players, [opp], user_elo, user_roster, seed)
+    assert any(sorted(c.give_player_ids) == sorted([g1, g2])
+               and c.receive_player_ids == [stud] for c in cards), \
+        "legal 2-give-1-get same-position consolidation was killed"
+
+
+def test_g6_pick_band_blocks_gap_filler_in_pipeline():
+    """A near-fair package whose heavier side sweetens with a pick that IS
+    the gap (gap 800, pick 800 inside [640, 1000]) passes the consensus
+    band (the discount collapses the pick's contribution: ratio ≈ 0.873)
+    and the #141 filler bar (metric 900 > 679.5), but must die on #339;
+    knob at 0 re-admits it, proving attribution."""
+    # Relax the Jaccard dedup: the filler shape shares {give, cp} with the
+    # higher-scoring 1-for-1 (overlap 2/3 ≥ 0.6), which would mask WHERE
+    # it died. #339 is a gate question, not a dedup question.
+    ts._cfg["gen2_dedup_jaccard"] = 1.01
+    pos = {**_base_positions("u"), **_base_positions("o")}
+    players = {pid: _Player(id=pid, name=pid, position=p)
+               for pid, p in pos.items()}
+    players["o_pk1"] = _Player(id="o_pk1", name="2027 3rd", position="PICK",
+                               age=None)
+    user_roster = [p for p in pos if p.startswith("u_")]
+    opp_roster = [p for p in pos if p.startswith("o_")] + ["o_pk1"]
+
+    give, cp, pk = "u_wr1", "o_wr1", "o_pk1"
+    seed = {pid: 1500.0 for pid in players}
+    seed[give] = _elo_for(2000.0)
+    seed[cp] = _elo_for(2000.0)
+    seed[pk] = _elo_for(800.0)
+
+    user_elo = dict(seed)
+    user_elo[cp] = _elo_for(2718.0)     # centerpiece divergence
+    user_elo[pk] = _elo_for(900.0)      # mildly likes the pick too
+    user_elo[give] = _elo_for(1284.0)
+
+    opp_elo = dict(seed)
+    opp_elo[cp] = 1500.0
+    opp_elo[pk] = _elo_for(800.0)
+    opp_elo[give] = _elo_for(3490.0)    # covets the user's WR
+
+    opp = _member("opp", opp_roster, opp_elo)
+
+    def _filler(card):
+        return pk in card.receive_player_ids and cp in card.receive_player_ids \
+            and card.give_player_ids == [give]
+
+    cards, report = _run(players, [opp], user_elo, user_roster, seed)
+    assert all(not _filler(c) for c in cards), \
+        "#339 pick-as-the-gap package leaked through"
+    assert report.pick_band_rejects > 0
+
+    ts._cfg["gen2_pick_band_frac"] = 0.0
+    cards2, report2 = _run(players, [opp], user_elo, user_roster, seed)
+    assert any(_filler(c) for c in cards2), \
+        "knob-off should re-admit the shape (kill attribution proof)"
+    assert report2.pick_band_rejects == 0
+
+
+def test_g6_stud_consolidation_with_pick_passes_pipeline():
+    """The spec's explicit pass-case: 'player + mid-1st for a stud'. Gap
+    300 with a pick at 3000 sits far outside the band (upper edge 375) —
+    the operator's own stud-scaled consolidation style must survive with
+    both G6 knobs at their ON defaults."""
+    pos = {**_base_positions("u"), **_base_positions("o")}
+    players = {pid: _Player(id=pid, name=pid, position=p)
+               for pid, p in pos.items()}
+    players["u_pk1"] = _Player(id="u_pk1", name="2027 1st", position="PICK",
+                               age=None)
+    user_roster = [p for p in pos if p.startswith("u_")] + ["u_pk1"]
+    opp_roster = [p for p in pos if p.startswith("o_")]
+
+    body, pk, stud = "u_wr1", "u_pk1", "o_wr1"
+    seed = {pid: 1500.0 for pid in players}
+    seed[body] = _elo_for(2800.0)
+    seed[pk] = _elo_for(3000.0)
+    seed[stud] = _elo_for(5500.0)
+
+    user_elo = dict(seed)
+    user_elo[stud] = _elo_for(7389.0)
+    user_elo[body] = _elo_for(2117.0)
+    user_elo[pk] = _elo_for(2460.0)
+
+    opp_elo = dict(seed)
+    opp_elo[stud] = _elo_for(4055.0)
+    opp_elo[body] = _elo_for(3490.0)
+    opp_elo[pk] = _elo_for(3669.0)
+
+    opp = _member("opp", opp_roster, opp_elo)
+    cards, report = _run(players, [opp], user_elo, user_roster, seed)
+    assert any(sorted(c.give_player_ids) == sorted([body, pk])
+               and c.receive_player_ids == [stud] for c in cards), \
+        "stud-consolidation (player + mid-1st for a stud) must PASS #339"
+
+
+def test_g6_meso_variants_never_emit_pick_band_violation():
+    """#339 holds on the MESO surface in its own right: a pool candidate
+    whose give side carries a pick inside the band vs the gap is dropped
+    from the variants, never emitted."""
+    players = {
+        "X": _Player(id="X", name="X", position="WR"),
+        "a": _Player(id="a", name="a", position="RB", age=29),
+        "b": _Player(id="b", name="b", position="RB", age=29),
+        "pk": _Player(id="pk", name="2027 3rd", position="PICK", age=None),
+        "c1": _Player(id="c1", name="c1", position="RB", age=22),
+        "c2": _Player(id="c2", name="c2", position="WR", age=29),
+    }
+    vals = {"X": 2000.0, "a": 2000.0, "b": 2000.0, "pk": 400.0,
+            "c1": 1000.0, "c2": 1000.0}
+    cval = lambda pid: vals[pid]
+
+    def cand(score, give, val_opp):
+        return _Candidate(
+            opponent_id="opp", centerpiece="X", give_ids=list(give),
+            recv_ids=["X"], user_gain=1.0, opp_gain=1.0, joint_gain=2.0,
+            symmetry=1.0, split_ratio=0.5, fairness_ratio=1.0,
+            band_position=0.0, accept_prior=0.5, score=score,
+            give_val_opp=val_opp)
+
+    base = cand(10.0, ["a"], 1000.0)
+    # Violator: give [b, pk] -> raw 2400 vs 2000 recv; gap 400, heavier
+    # side pick 400 inside [320, 500]. Recipient-board value within the
+    # MESO band of the base.
+    violator = cand(9.0, ["b", "pk"], 1010.0)
+    # Clean alternate: give [c1, c2] -> raw 2000 == recv, gap 0.
+    clean = cand(8.0, ["c1", "c2"], 1005.0)
+
+    out = _meso_variants(base, [base, violator, clean], players, cval)
+    emitted = [tuple(sorted(v["give_player_ids"])) for v in out]
+    assert ("b", "pk") not in emitted, \
+        "MESO emitted a #339-violating pick-heavy variant"
+    assert ("c1", "c2") in emitted
+
+    # Without the guard (knob off) the violator would have been the one
+    # emitted (same shape bucket, higher score) — attribution proof.
+    ts._cfg["gen2_pick_band_frac"] = 0.0
+    out2 = _meso_variants(base, [base, violator, clean], players, cval)
+    emitted2 = [tuple(sorted(v["give_player_ids"])) for v in out2]
+    assert ("b", "pk") in emitted2
+
+
+def _card_signature(cards, report):
+    """Deterministic projection of a run's full output, excluding only the
+    random uuid trade_ids."""
+    sig = []
+    for c in cards:
+        sig.append((
+            c.target_user_id, tuple(c.give_player_ids),
+            tuple(c.receive_player_ids), c.give_value, c.receive_value,
+            c.mismatch_score, c.fairness_score, c.composite_score,
+            c.basis, c.tier, repr(c.rationale), repr(c.health),
+            repr(c.meso_variants),
+        ))
+    rep = report.as_dict()
+    return sig, rep
+
+
+def test_g6_knobs_at_disable_are_byte_identical_to_rule_bypass(monkeypatch):
+    """Parity: both knobs at their disable values produce output identical
+    to structurally bypassing the two rules (== the pre-port engine, whose
+    only delta was the absence of these hooks). Run on the pick-carrying
+    MESO fixture for maximal surface coverage."""
+    import backend.trade_gen_v2 as g2
+
+    def _fixture_run():
+        pos = {**_base_positions("u"), **_base_positions("o")}
+        players = {pid: _Player(id=pid, name=pid, position=p, age=27)
+                   for pid, p in pos.items()}
+        user_roster = [p for p in pos if p.startswith("u_")]
+        opp_roster = [p for p in pos if p.startswith("o_")]
+        for pid, p, age in (("u_y1", "WR", 22), ("u_y2", "WR", 22),
+                            ("u_pk1", "PICK", None), ("u_pk2", "PICK", None)):
+            players[pid] = _Player(id=pid, name=pid, position=p, age=age)
+            user_roster.append(pid)
+        X, C = "o_wr1", "u_rb1"
+        seed = {pid: 1500.0 for pid in players}
+        seed[X] = 1650.0
+        seed[C] = 1650.0
+        for pid in ("u_y1", "u_y2", "u_pk1", "u_pk2"):
+            seed[pid] = 1512.0
+        user_elo = dict(seed)
+        user_elo[X] = 1750.0
+        user_elo[C] = 1580.0
+        for pid in ("u_y1", "u_y2", "u_pk1", "u_pk2"):
+            user_elo[pid] = 1450.0
+        opp_elo = dict(seed)
+        opp_elo[X] = 1500.0
+        opp_elo[C] = 1700.0
+        for pid in ("u_y1", "u_y2", "u_pk1", "u_pk2"):
+            opp_elo[pid] = 1560.0
+        opp = _member("opp", opp_roster, opp_elo)
+        return _run(players, [opp], user_elo, user_roster, seed)
+
+    # Run 1 — knobs at their disable values.
+    ts._cfg["gen2_g6_net_position_cap"] = 0.0
+    ts._cfg["gen2_pick_band_frac"] = 0.0
+    cards_a, report_a = _fixture_run()
+    sig_a = _card_signature(cards_a, report_a)
+
+    # Run 2 — rules structurally bypassed (pre-port behavior), knobs back
+    # at their ON defaults so a knob-read leak would be caught.
+    ts._cfg["gen2_g6_net_position_cap"] = \
+        ts._DEFAULT_CFG["gen2_g6_net_position_cap"]
+    ts._cfg["gen2_pick_band_frac"] = ts._DEFAULT_CFG["gen2_pick_band_frac"]
+    monkeypatch.setattr(g2, "g6_pos_net_ok", lambda *a, **k: True)
+    monkeypatch.setattr(g2, "g6_pick_gap_ok", lambda *a, **k: True)
+    cards_b, report_b = _fixture_run()
+    sig_b = _card_signature(cards_b, report_b)
+
+    assert sig_a == sig_b
+
+
+def test_g6_report_counters_serialized():
+    r = gen2.GenerationReport(league_id="L", user_id="u")
+    d = r.as_dict()
+    assert d["net_cap_rejects"] == 0
+    assert d["pick_band_rejects"] == 0

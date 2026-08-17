@@ -172,3 +172,67 @@ and summing the same directed gains — deliberately NOT built now.
   no-truncation/tier follow-up) — **2888 passed, 1 skipped** (includes
   the 24 trade_gen_v2 tests), zero regressions.
 - Operator deviation from the matrix: none.
+
+## 6. Addendum — G6 presentment-rule parity port (2026-08-16, operator-directed)
+
+Operator directive 2026-08-16: port two G6 presentment rules into this
+engine NOW, ahead of the G6 wave's own v1-path merge (G6 spec:
+`docs/feedback/items/304-positional-need-filter/`, branch
+`feedback-2026-08-16-specs`, unmerged; decision trail:
+`docs/plans/matchmaking-engine/2026-08-16-g6-validation.md` — the
+"port #341's net-rule / #339's band into gen-v2 hygiene" rows).
+
+**What was ported** (both join the composition-hygiene gate in
+`_pair_survivors`, before feasibility, same placement as G6's v1 hooks;
+kills counted per-rule in `GenerationReport` as `net_cap_rejects` /
+`pick_band_rejects`):
+
+- **#341 net-position cap** (`g6_pos_net_ok`): for each P in
+  {QB, RB, WR, TE}, `|count(recv at P) − count(give at P)| ≤
+  gen2_g6_net_position_cap` (default 1; ≤0 disables). One signed net per
+  position — 2RB→2RB passes; give 2 of a position only if getting 1 back.
+  Picks and K/DEF/IDP uncounted (G6 prd R-2).
+- **#339 pick-not-the-gap band** (`g6_pick_gap_ok`): for packages carrying
+  ≥1 pick with raw-consensus gap ≥ 300, kill when a heavier-side pick sits
+  inside `[gen2_pick_band_frac × gap, gap / gen2_pick_band_frac]`
+  (default 0.8; 0 disables). Two-sided per G6 prd R-3 — stud-consolidation
+  ("player + mid-1st for a stud") passes and is pinned by test. Also
+  enforced on the MESO-variant surface (`_meso_variants` drops violating
+  variants in its own right, independent of pool provenance).
+
+**Deliberately NOT ported:** #304's positional-need hard gate — gen-v2
+optimizes need in the objective; a hard need filter would double-penalize
+and kill the consolidation shapes G6 itself protects (per the validation
+doc's warning). #340/#336 equivalents already exist in-pipeline
+(dual-board ε + consensus band; `past_decision_keys`).
+
+**PROVISIONAL KNOBS — reconciliation owed at G6 merge:**
+`gen2_g6_net_position_cap` and `gen2_pick_band_frac` (plus the module
+constant `_G6_PICK_GAP_MIN_VALUE = 300.0`) mirror G6's v1 knobs
+`pos_net_cap` / `pick_gap_frac` / `pick_gap_min_value`. G6's #339 values
+are unmeasured until its pick-league replay (G6 prd R-12). When G6 merges,
+alias/align gen-v2's knobs to G6's calibrated values — one source of
+truth. This is a named item for gen-v2's lighting checklist.
+
+**Gates for this addendum's change:**
+
+- Maestro delta: **waived** — backend-only change behind the default-OFF
+  `trade_gen.v2` flag; no client renders anything new while dark.
+- Simulator-gate tier: **Tier 4 — none / CI only** (backend-only dark-flag
+  change class). Branch `feat/gen2-g6-parity` is not pushed/merged by the
+  build agent (operator instruction); the shipping session runs the gate
+  per matrix at merge time.
+- Docs: this addendum + `docs/config-reference.md` (two knob rows) +
+  `docs/glossary.md` (Net-position cap #341, Pick-not-the-gap band #339).
+  `docs/api-reference.md` n/a — no route or payload change
+  (`GenerationReport` is logging/telemetry, not API surface).
+- Evidence: full backend suite in the worktree 2026-08-16 — **2932 passed,
+  1 skipped, 1 pre-existing failure**
+  (`test_release_flags_mirror_features_json`, caused by `3c0541c` lighting
+  `suggestion.telemetry` in `config/features.json` without updating
+  `backend/tests/fixtures/flags/release.json` — present on `origin/main`
+  independent of this branch, whose diff touches neither file). Gen-v2
+  suite: 33/33 including 8 new G6-parity tests (predicates + band edges,
+  pipeline kill/pass both rules, knob-off attribution proofs,
+  MESO-surface compliance, disable-knobs parity vs structural bypass,
+  fixture-league window trade unchanged).
