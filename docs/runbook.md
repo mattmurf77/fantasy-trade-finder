@@ -56,6 +56,7 @@ Operational procedures. Add to this as you learn things.
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
+- [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 
 ---
 
@@ -840,3 +841,32 @@ impression, 2026-08-16) somehow lack link rows; telemetry-era trades are deliber
 to the live matcher. First corpus report:
 `docs/business/analytics/2026-08-16-organic-trade-corpus.md`; scope addendum:
 `docs/plans/matchmaking-engine/backfill-scope.md`.
+## ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)
+
+The identity-binding release (feedback #321) verifies WHOSE ESPN account a
+captured cookie pair belongs to, not just that it works. Two support-visible
+effects:
+
+**1. Every ESPN-connected user is signed out of ESPN exactly once.** The
+deploy runs a one-time migration (`_evict_prerelease_espn_verified_stamps`,
+`backend/database.py`) that nulls every `espn_credentials.verified_at` stamp
+minted before the release cutoff — **any vintage, including sign-ins that
+were done correctly after the 2026-08-12 fixes** — because no pre-release
+stamp proves *identity* (the pre-release oracles accepted any valid ESPN
+session). Expected, deliberate, and resolved by one re-sign-in through
+Settings / the send flow, which now verifies identity before storing. The
+encrypted pair is kept (row not deleted); status simply reads *not
+connected* until re-proven. The migration is idempotent (date-bounded +
+NULL-fails-`<`), so re-deploys never re-sign anyone out.
+
+**2. A new rejection users may ask about: "it says my account doesn't own
+this team."** The wrong-account 403 copy is: *"That ESPN account can't open
+your linked league, so nothing was saved. Sign in with the ESPN account
+that owns your team."* It means the ESPN sign-in WORKED but belongs to a
+different human than the linked league's bound team (the #321 bleed shape:
+someone else signed in to ESPN on that device), or the user picked the
+wrong team at import. Fix: sign in with the owning ESPN account — or
+re-link the league and pick the right team. Wire code is still
+`espn_bad_credentials`; the additive `reason: "wrong_account"` field is
+what drives the dedicated mobile copy. Diagnosis from logs: grep
+`identity mismatch` (store / team-binding / re-sync variants all log it).

@@ -119,6 +119,23 @@ export function espnCredentialsRejected(err: unknown): boolean {
   );
 }
 
+/** #321 (2026-08-16): the server's optional, additive `reason` on a
+ *  credential rejection. The only value defined today is `'wrong_account'`
+ *  — the pair IS a live ESPN session, but for the wrong human (its SWID
+ *  doesn't own the caller's bound team), so the recovery is "sign in with
+ *  the ESPN account that owns your team", not "sign in again".
+ *
+ *  Returns null unless the failure is a credential rejection AND the server
+ *  sent a string `reason` — an absent field (old servers, plain rejections)
+ *  yields null and callers keep exactly today's behavior. Tolerate unknown
+ *  future values: compare against the constant you care about, never
+ *  exhaustively. */
+export function espnRejectionReason(err: unknown): string | null {
+  if (!espnCredentialsRejected(err)) return null;
+  const reason = ((err as ApiError).body as { reason?: unknown }).reason;
+  return typeof reason === 'string' ? reason : null;
+}
+
 export interface EspnLeagueMember {
   user_id: string;                 // FTF user id for you; synthetic `espn:` otherwise
   username: string;

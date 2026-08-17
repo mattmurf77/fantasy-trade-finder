@@ -19,6 +19,7 @@
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
+    "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",

@@ -2136,6 +2136,51 @@ _MODEL_CONFIG_DEFAULTS = [
 # Initialisation — called once on server startup
 # ---------------------------------------------------------------------------
 
+# ── #321 ESPN identity-binding release (2026-08-16) — R10 residue eviction ──
+# Cutoff for evicting pre-release `espn_credentials.verified_at` stamps.
+# WHY every pre-release stamp: no stamp minted before identity binding
+# shipped proves IDENTITY — the weak oracle vacuously accepts any account,
+# the public-league import gap stamped with no verify at all, and the strong
+# oracle passes any league member's pair. Under-eviction re-opens #321;
+# over-eviction costs one harmless re-sign-in.
+# CUTOFF MECHANICS: `_migrate_db` runs on every boot, so the UPDATE must
+# stay date-bounded — an unbounded "null all stamps" would sign users out on
+# every deploy. This literal is FINALIZED AT SHIP: the observed
+# deploy-completion time of the identity-binding release, else push-to-main
+# time plus a generous margin — erring LATER is safe (a stamp minted by the
+# new identity-bound code inside the margin is re-nulled once at the next
+# boot; that user re-signs-in one extra time, nothing worse), erring EARLIER
+# is not (a dishonest stamp survives as trusted). Reference timestamps
+# (verified from git, PRD §8): 2fa1ff2 (introduces the column)
+# 2026-08-12T04:25:58Z; 7dfcd16 (real-oracle fix) 2026-08-13T02:27:03Z.
+# Comparison is lexicographic over ISO-UTC strings — valid because
+# verified_at is always written via datetime.now(timezone.utc).isoformat()
+# (uniform +00:00 offset; a microsecond-bearing stamp still sorts after a
+# seconds-precision literal because '.' > '+').
+_ESPN_VERIFIED_AT_RELEASE_CUTOFF = "2026-08-17T06:00:00+00:00"
+
+
+def _evict_prerelease_espn_verified_stamps() -> int:
+    """#321 R10 — null every `espn_credentials.verified_at` stamp minted
+    before the identity-binding release (see the cutoff constant above).
+
+    Idempotent by construction, not by accident of data: after the first
+    run every matched row is NULL, and `NULL < '<cutoff>'` is NULL under
+    SQL three-valued logic — not matched — so re-runs are structural
+    no-ops. Rows are NOT deleted: the encrypted pair stays (forensics),
+    exactly how born-NULL legacy rows already behave, and the GET honesty
+    gate reads the nulled row as not connected → one re-sign-in through
+    the now identity-bound flow. Returns the evicted row count."""
+    with engine.begin() as conn:
+        res = conn.execute(
+            espn_credentials_table.update()
+            .where(espn_credentials_table.c.verified_at
+                   < _ESPN_VERIFIED_AT_RELEASE_CUTOFF)
+            .values(verified_at=None)
+        )
+        return res.rowcount or 0
+
+
 def _migrate_db() -> None:
     """
     Add columns that may be missing from older DB schemas.
@@ -2309,6 +2354,18 @@ def _migrate_db() -> None:
         backfill_anchor_unlocked_formats(_RS.ANCHOR_UNLOCK_MIN)
     except Exception as e:
         print(f"[backfill] anchor unlock backfill skipped: {e}")
+
+    # ── #321 R10 — evict pre-identity-binding ESPN verified_at stamps ─────
+    # Date-bounded + NULL-fails-`<` idempotent (see the function's
+    # docstring); named its own try/except so a permanently-failing UPDATE
+    # is at least VISIBLE in boot logs instead of silently swallowed.
+    try:
+        n = _evict_prerelease_espn_verified_stamps()
+        if n:
+            print(f"[migrate] espn verified_at eviction: {n} pre-release "
+                  f"stamp(s) nulled (cutoff {_ESPN_VERIFIED_AT_RELEASE_CUTOFF})")
+    except Exception as e:
+        print(f"[migrate] espn verified_at eviction FAILED: {e}")
 
     # ── Agent 1 additions — user_player_skips ─────────────────────────────
     # The table is created by metadata.create_all(); this block is for any
@@ -10711,6 +10768,25 @@ def delete_espn_credential(user_id: str) -> None:
         conn.execute(
             delete(espn_credentials_table)
             .where(espn_credentials_table.c.user_id == user_id)
+        )
+
+
+def clear_espn_credential_verification(user_id: str) -> None:
+    """#321 identity binding (2026-08-16): null a user's `verified_at` stamp
+    WITHOUT deleting the row — the encrypted pair stays for forensics, and
+    the GET honesty gate already reads a stamp-less row as not connected, so
+    the user is routed through the verifying, identity-bound sign-in.
+
+    Called when a stored credential's SWID conclusively fails the membership
+    assertion (team-binding step / re-sync) — the stamp was lying about
+    identity, so it must stop vouching. No-op when nothing is stored."""
+    if not user_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            espn_credentials_table.update()
+            .where(espn_credentials_table.c.user_id == user_id)
+            .values(verified_at=None, updated_at=_now())
         )
 
 
