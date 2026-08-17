@@ -92,6 +92,38 @@ is the accepted outcome. If it should be kept permanently at zero disk cost, tag
 
 ---
 
+## Section 4 — Branch DELETED: `ux-audit-p0-remediation` (superseded)
+
+| Tip sha | Branch | Worktree path |
+|---|---|---|
+| `399d5216bfe652027d98e35cc00c2144c4d12bd2` | `ux-audit-p0-remediation` | `/Users/teresadickens/Documents/Claude/Projects/ftf-ux-audit-p0` |
+
+Single commit not on `origin/main`: `399d521` (2026-08-10) — *"ux-audit: six P0
+launch-blocker fixes + the P0-7 analytics subset"*.
+
+**Why deletion was safe — verified by content, not ancestry.** This branch was never
+merged; its work was **redone** on the `p0-remediation` branch as a 15-commit series
+(`26fb5b2` … `716c2b7`) that is on `main`. Two independent content checks:
+
+1. The branch's own plan directory `docs/plans/ux-audit-p0-remediation/` and its
+   `mobile/.maestro/flows/ux-audit-p0-*.yaml` flows are **absent from `origin/main`**;
+   `main` instead carries `docs/plans/audit-p0-remediation/` (a fuller per-item scope /
+   PRD / LLD / plan set) and differently-named flows.
+2. A seven-agent review on 2026-08-16 verified **all eight live P0 items as shipped and
+   unflagged on `origin/main`**, with `path:line` citations — i.e. the fixes this branch
+   attempted are present, by a different and better-specified implementation. Evidence:
+   [`docs/reviews/2026-08-16-p0-remediation-status.md`](../../reviews/2026-08-16-p0-remediation-status.md).
+
+The branch's 784-file diff against `main` is dominated by `main`'s *later* additions
+(screenshots, docs), not by unmerged work — an artifact of staleness, not lost content.
+
+Frees ~2,908 MB, the single largest worktree in the repo.
+
+**Recovery (time-limited):** `git branch ux-audit-p0-remediation 399d5216bfe652027d98e35cc00c2144c4d12bd2` — valid while the
+objects remain reachable via reflog (~90 days from 2026-08-16, sooner if `git gc --prune`
+runs). To keep it permanently at zero disk cost, tag before that window closes:
+`git tag archive/ux-audit-p0-2026-08 399d521`.
+
 ## Section 3 — Held back, still needing a verdict (2)
 
 | Tip sha | Branch | Why held |
