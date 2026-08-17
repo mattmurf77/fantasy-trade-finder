@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-17 (Decline reason capture LIVE + fairness default OFF — v1 feedback instrument)
+
+- **The ✕ is gone.** A passed trade now asks *why* in two layers: three tiles (**Value · Fit · Neither**) where the tile tap **is** the pass, then the specific fault inline beneath it (Value: giving/getting too much · Other; Fit: outlook / new weakness / duplicate need · Other; Neither: free text). No receipt — the next trade is the confirmation. Design settled with the operator against `mockups/decline-reason-capture/07-two-step-diagnostic.html`; spec `docs/plans/decline-reason-capture/SPEC.md`.
+- **Every tap commits.** `trade_pass_reasons` upserts per passed card (`impression_id` PK, `local:` surrogate fallback marked by `key_source` when `deck.signal_v2` is off); the FIRST write performs the pass, later writes only sharpen. `/api/trades/swipe` untouched ⇒ the flag is a structural kill switch.
+- **Elo consequence (D-066):** a pass used to assert "I value my players more" for every decline. Now only `value_giving` keeps that write (claimed once via `elo_signal_at`); every other code suppresses it. Knob `pass_reason_elo_suppression=0` restores prior behavior with no deploy. **Not retracted** if a user later switches tiles — no negative-K path on this route.
+- **Fairness default flipped OFF** (client pref, unset ⇒ 0.5 wide net; an explicit `on` is preserved) so testers see and judge a wider set — the reason capture is the instrument that grades it. Both read sites derive from one helper so pregen and the screen can't disagree.
+- Ships **live for all users** (`feedback.decline_reasons: true`, no allowlist — operator decision). `trade_gen.v2` stays dark; feedback deliberately precedes v2 so pass reasons have a v1 baseline. Suite **3110 passed / 1 skipped**; 58 new backend tests, 38/38 mobile checks. **Sim gate waived by operator** — Maestro flows authored, unexecuted; TestFlight is the QA.
+
 ## 2026-08-16 (feedback wave: 17 items, 7 groups — presentment rules ON, calc labels graduated, mock-draft picks real)
 
 - **The largest single feedback wave to date: 27 open items triaged, 17 built across 7 groups, one closed as already-fixed** (#329). Merge `20b40db` off `main` `92c31d5`. Specs branch `feedback-2026-08-16-specs`, integration branch `feedback-2026-08-16-integration`. Batch plan + every operator decision: [`docs/feedback/items/304-positional-need-filter/batch-plan.md`](../docs/feedback/items/304-positional-need-filter/batch-plan.md).

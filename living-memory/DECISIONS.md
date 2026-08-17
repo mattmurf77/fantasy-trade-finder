@@ -672,3 +672,29 @@ For substantial decisions (large refactors, vendor changes, API surface changes)
 **Decision:** Pick rows get tier badges on calculator surfaces via server-computed `tier` on `/api/league/picks` (`tier_for_elo(seed_elo_for_value(pool_value))` — the discounted band, never a client-side derivation). Accepted consequence (D-320-2): a 2028 2nd may badge as a 3rd — it is the honest price. Share-image pick rows stay numeric (D-320-3; #277/#280 stands).
 **Alternatives considered:** Client-derived tiers from display values (forbidden — the #263/#277/#278 scale-mismatch class); undiscounted badges (would overstate far-out picks).
 **Status:** Active.
+
+## D-066 — A Pass Only Moves Elo When The User Actually Made A Value Claim
+
+**Date:** 2026-08-17 · **Context:** decline reason capture (`docs/plans/decline-reason-capture/SPEC.md` §4)
+
+Before this, every pass fired `record_trade_signal(winner=give_ids, loser=receive_ids,
+decision="pass")` — asserting *"I value my players more than theirs"* for **every** decline.
+That is true for exactly one of the reasons a user can now give.
+
+**Decision:** the pass Elo write survives only for `value_giving` ("giving up too much").
+It is suppressed for `value_getting` (the user said the **opposite** — writing it would
+invert the signal), for every `fit_*` code, for `other*`, and for a layer-1-only answer
+where no specific claim was made. Because layer-1-only always suppresses, the `value_giving`
+signal lands at the **layer-2 tap**, and `elo_signal_at` claims it once so it can never
+double-write. Knob `pass_reason_elo_suppression = 0` restores the old
+write-on-every-pass behavior with no deploy.
+
+**Why:** the boards are the product's foundation, and they were being fed a claim the user
+never made every time someone passed for a roster-fit reason. This is a correctness fix to
+ranking inputs, not a feature preference.
+
+**Known limitation, accepted:** the write is **not retracted** if a user earns
+`value_giving` and then switches tiles — there is no negative-K correction path on this
+route. Documented in the route, the scope block, and pinned by a test proving it cannot
+write twice.
+
