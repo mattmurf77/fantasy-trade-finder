@@ -23,6 +23,30 @@
 - **D-056 sabotage protocol:** 14/14 named sabotages RED on their catcher tests, green after revert (table in build-verification.md).
 - **Distributional (two-sided bands):** offline predicate replay over the D-055 corpus reproduces the Planner exactly — R1 42/474 = 8.9% (band 4–16% ✓), R2 37/474 = 7.8%, all multi-asset (3–14% ✓). Live instrumented replays (9 leagues × 108 first-run sims, local repo DB): flag-ON served-card violations **0/540** (flag-OFF would-serve 30/540); R5 exact 5.4% overall / 11.4% contender / **0.0% rebuilder** (bands 2–10 / 7–25 / exactly-0 ✓); deck size 99.7% of flag-OFF (bar ≥80%); empty decks 0/108; insults 0; tripwire 0 firings. **Caveat:** the local DB carries no member boards/likes for these leagues (all-consensus decks) and the environment's permission system blocked a prod-DB replay — the full-fidelity DB-1/DB-2 prod re-run (divergence + likes-you arms) is an operator-run pre-ship step (same command; deck_eval now emits `presentment_audit` + `presentment_kills`). DB-4 pick replay (Lakeview, 864 picks injected): pick cards serve, **zero R3-shaped candidates exist in the corpus** → R3 ships at unmeasured defaults with `pick_gap_frac` as the named lever (NEXT.md); `test_r3_engine_kill_through_v2_path` proves the hook is not a silent no-op.
 - **Not run:** Maestro/simulator (retired, D-056/D-057); operator TestFlight checklist (prd §3.4, 6 items) OWED on the first build after deploy.
+## 2026-08-16 — #322–#327 mock draft room UI (G2): sabotage matrix proven, suites green (branch, not yet shipped)
+
+- **Change:** branch `feat/fb322-draftui` (base `08eb04b` = G3's completed build, per PRD §3 serialization) — ascending fixed-height ticker (`tickerWindow` helper), `picks[].tier` backend emission via `RankingService.tier_for_elo`, tier+position chips in a 3-across `flexBasis` grid, `MockTeamSheet` modal, position filter + pool search (`filterPool` helper, both reset per turn), three operator-approved analytics events registered with their emitters. QA regime **D-056** (no Maestro/sim); spec `docs/feedback/items/322-mock-draft-room-ui/`.
+- **New suites:** backend T-P1..T-P4 in `test_mock_draft.py`; mobile `tests/check-mock-g2-ui.js` (76 checks — T-U1/T-U2 transpile-and-call over the pure helpers + T-S1..T-S10 AST structural).
+- **Sabotage matrix (apply → RED → revert → green), executed 2026-08-16:** T-P1 parity-instead-of-walk → RED · T-P2 missing-Elo-defaults-to-waivers → RED · T-P3 my_picks rebuilt dropping the key → RED · T-P4 SCHEMA=2 → RED · U1a `.reverse()` reintroduced → 10 RED · U1b boundary off-by-one → 7 RED · U1c defensive sort dropped → shuffled case RED · U2 search over full pool → 2 RED · S1 rows reversed at render → 2 RED · S2 inline `i < newest` → 2 RED · S3 literal tier instead of `pick.tier` → RED · S4 flexBasis dropped → RED · S5 view-team testID renamed → 2 RED · S6 raw-pool map → 2 RED · S7 effect stops clearing search → RED · S8 event name dropped → RED · S9 ticker mine keys on `by` → 2 RED · S10 gesture-handler import → RED. All reverted; suite 76/76 green.
+- **Green runs:** backend `test_mock_draft (122, incl. T-P1..T-P4) + test_mock_pick_ownership (G3, still green) + test_analytics_p0` = **162 passed / 0 failed**. Mobile: `npm ci` (797 pkgs), `npx tsc --noEmit` clean, `check-mock-g2-ui.js` 76 PASS, four existing mock structural suites + G3's `check-mock-ownership-caption.js` green, `testid-lint.sh` OK.
+- **Not run here:** full backend sweep (wave integration owes it); operator TestFlight checklist T-F1..T-F10 (PRD §5.5, the D-056 runtime net) — pending at ship.
+
+## 2026-08-16 — #328 mock-draft pick assignment (G3): sabotage matrix proven, suites green (branch, not yet shipped)
+
+- **Change:** branch `feat/fb328-picks` (base specs commit `56856f7` = origin/main `96f6945` + Phase-1 specs) — per-platform mock-draft ownership resolution + `ownership_source` label + mobile caption + `mock_started` prop. QA regime **D-056** (no Maestro/sim); spec `docs/feedback/items/328-mock-draft-pick-assignment/`.
+- **New suite:** `backend/tests/test_mock_pick_ownership.py` — 16 tests (T-1..T-12 per prd §6.1), in-memory SQLite, hermetic (egress tripwires on `_sleeper_get`/`_mfl_draft_opener`).
+- **Sabotage matrix (apply → RED → revert → green), executed 2026-08-16:**
+  - SAB-A (1.13.4 early return re-added) → T-1 RED, T-2 RED; T-3 deliberately GREEN (proves the MFL block lives in the create route, out of SAB-A's reach)
+  - SAB-B (identity guard skipped) → T-4 RED
+  - SAB-C (label hardcoded `platform`) → T-5 RED, T-6 RED
+  - SAB-D (franchise-ordinal anchoring) → T-3 RED (OBJ-4 seed-collision precondition asserted in-fixture and held)
+  - SAB-E (echo key removed) → T-8 RED (key-presence assertion)
+  - SAB-F (label hardcoded `none`) → T-1, T-3, T-7, T-9-ESPN, T-9-MFL all RED
+  - SAB-G (both coverage checks skipped) → T-12(a)(b)(c) RED; T-12(d) deliberately GREEN (matrix note honored)
+  - SAB-H (partial-slot-map rule deleted) → T-12(d) RED via the order-build KeyError, exactly the PRD-named failure mode
+- **Green runs (sabotages reverted):** targeted backend suite `test_mock_pick_ownership + test_mock_draft + test_pick_assignment(+_tradeable) + test_owned_picks + test_draft_board + test_analytics_p0` = **327 passed / 0 failed**. Mobile: `npx tsc --noEmit` clean; `check-mock-ownership-caption.js` (new, 24 PASS) + `check-mock-draft-modes.js` (extended pin) green; `testid-lint.sh` OK. `python -c "import backend.server"` OK.
+- **Existing-test deltas (deliberate, minimal):** MFL honest-empty pin gains the `ownership_source: "none"` key; `test_295_17` taxonomy pin grows to seven `mock_started` props; `_mock_owned_pick_overlay` added to the sanctioned `load_draft_picks` `source=` caller set (the designed decide-don't-drift mechanism).
+- **Not run here:** full 2900-test backend suite (group branch merge owes it); operator TestFlight checklist prd §6.3 (post-ship runtime net).
 
 ## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
 

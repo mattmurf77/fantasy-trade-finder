@@ -12436,47 +12436,80 @@ def _mock_capability(sess: dict, league_id: str, season: int) -> dict:
                           user_owner_id=_league_user_id(sess))
 
 
-def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
-    """W2d/G1 — order, order_source, traded picks and shape from the league's
-    REAL draft, via the very board the Draft Room renders.
-
-    Before this the create route passed none of the four resolution inputs the
-    engine accepts, so every mock was randomized-order and every traded pick was
-    silently discarded. The source here is `draft_board_service.build_board` —
-    literally the Draft Room's, cached, single-flight, budgeted and
-    breaker-guarded — so the mock's order and the room's order cannot disagree
-    and the mock costs no read the room has not already paid for.
-
-    Returns `{order, order_source, traded_slots, type}`. `build_board` never
-    raises, and every field degrades to the honest empty: no `draft_order` on
-    the platform ⇒ no `order`, which makes `build_settings` fall back to the
-    seeded shuffle and LABEL it `randomized` (KD-6). Never an invented order.
-    """
-    from . import draft_board_service as dbs
-    from . import mock_draft_service as mds
-
-    out = {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
-           "traded_slots": {}, "type": None}
+def _mock_platform(sess: dict, league_id: str) -> str:
+    """The mock create path's ONE platform sniff (#328) — session league,
+    overridden by the draft context when one exists. Two call sites
+    (`_mock_real_draft` and the create route's MFL overlay step) must never
+    disagree on which platform a league is."""
     g_league = sess.get("league")
     platform = str(getattr(g_league, "platform", "sleeper") or "sleeper").lower()
     ctx = get_league_draft_context(league_id)
     if ctx:
         platform = str(ctx.get("platform") or platform).lower()
-    if platform != dbs.SLEEPER or not is_enabled("draft.room"):
-        # MFL's grid states the CURRENT owner but never the original, so it
-        # cannot distinguish "slot order" from "traded pick" — reading it would
-        # produce an order that is really an ownership overlay. Non-Sleeper
-        # leagues therefore stay randomized-and-labelled, honestly.
+    return platform
+
+
+def _mock_real_draft(sess: dict, league_id: str, season: int,
+                     rounds: int | None = None) -> dict:
+    """W2d/G1 + #328 — order, order_source, traded picks, shape and ownership
+    provenance from the league's REAL draft, via the very board that
+    platform's Draft Room renders.
+
+    Sleeper reads `draft_board_service.build_board` — literally the Draft
+    Room's, cached, single-flight, budgeted and breaker-guarded — so the
+    mock's order and the room's order cannot disagree. ESPN (#328) reads
+    `dbs.assigned_board` over the SAME `_assignment_grid` the board route's
+    ESPN branch builds, so the mock and the ESPN Draft Room can never
+    disagree either; zero platform egress — the grid is our own DB.
+
+    Returns `{order, order_source, traded_slots, type, ownership_source}`.
+    Neither board builder raises, and every field degrades to the honest
+    empty: no assigned order ⇒ no `order`, which makes `build_settings` fall
+    back to the seeded shuffle and LABEL it `randomized` (KD-6), with
+    `ownership_source: "none"` — labeled, never silent (#328).
+
+    `rounds` is THIS mock's clamped round count — the coverage check's
+    denominator. The label promises every `(round, slot)` of the mock has
+    known ownership provenance; any hole (a round-≥2 contested/orphaned ESPN
+    slot, a mock deeper than the grid/board) degrades to `"partial"`.
+    Defaulted so the pre-#328 call shape still answers (tests drive it
+    3-arg); the route always passes the parsed value.
+    """
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    out = {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
+           "traded_slots": {}, "type": None,
+           "ownership_source": mds.OWNERSHIP_SOURCE_NONE}
+    if rounds is None:
+        rounds = mds.DEFAULT_ROUNDS
+    platform = _mock_platform(sess, league_id)
+
+    if platform == dbs.SLEEPER and is_enabled("draft.room"):
+        _pool, consensus_seed = _get_universal_pool(_active_format(sess))
+        board = dbs.build_board(
+            dbs.BoardRequest(league_id=str(league_id), platform=dbs.SLEEPER,
+                             season=int(season), user_id=sess.get("user_id"),
+                             consensus_elo=consensus_seed,
+                             scoring=_active_format(sess)),
+            dbs.PlatformFetchers(sleeper_get=_sleeper_get,
+                                 rookie_ids_fn=_rookie_player_ids))
+    elif platform == dbs.ESPN and is_enabled("picks.assign"):
+        # #328 — the same board the ESPN Draft Room renders (route parity:
+        # the gate matches the board route's ESPN branch). `fetchers=None`:
+        # no undrafted list is needed here, and recorded picks affect state,
+        # never order/order_confidence. Zero platform egress by construction.
+        board = dbs.assigned_board(
+            dbs.BoardRequest(league_id=str(league_id), platform=dbs.ESPN,
+                             season=int(season), user_id=sess.get("user_id")),
+            grid=_assignment_grid(str(league_id), int(season)))
+    else:
+        # Honest empty — Fleaflicker/unknown, MFL (the ORDER half: MFL states
+        # ownership but no slot sequence — the create route overlays it, KD-6
+        # keeps the order a labelled shuffle), or flag off.
+        # `ownership_source` stays "none".
         return out
 
-    _pool, consensus_seed = _get_universal_pool(_active_format(sess))
-    board = dbs.build_board(
-        dbs.BoardRequest(league_id=str(league_id), platform=dbs.SLEEPER,
-                         season=int(season), user_id=sess.get("user_id"),
-                         consensus_elo=consensus_seed,
-                         scoring=_active_format(sess)),
-        dbs.PlatformFetchers(sleeper_get=_sleeper_get,
-                             rookie_ids_fn=_rookie_player_ids))
     out["type"] = board.get("type")
     rows = board.get("order") or []
     if board.get("order_confidence") != dbs.ORDER_ASSIGNED:
@@ -12499,8 +12532,89 @@ def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
     else:
         # A partial slot map is not an order. Drop the overlay with it: a
         # traded pick is meaningless without the slots it trades between.
+        # (#328 asymmetry, on purpose: a round-1 hole drops the WHOLE
+        # resolution to "none"; a round-≥2 hole keeps the order and labels
+        # "partial" below.)
         out["traded_slots"] = {}
+    if out["order"] is not None:
+        source = (mds.OWNERSHIP_SOURCE_PLATFORM if platform == dbs.SLEEPER
+                  else mds.OWNERSHIP_SOURCE_USER)
+        # #328 coverage check: the source label promises EVERY slot of THIS
+        # mock has known ownership provenance. Board rows exist for every
+        # (round, slot) the platform/grid states — contested/orphaned
+        # exclusions and rounds beyond grid/board depth are the holes. An
+        # order that resolved with zero traded rows but full coverage still
+        # earns the source label: "no trades" is a fact, not a fallback.
+        teams = len(out["order"])
+        covered = {(int(r.get("round") or 0), int(r["slot"]))
+                   for r in rows if r.get("slot")}
+        expected = {(rnd, s) for rnd in range(1, int(rounds) + 1)
+                    for s in range(1, teams + 1)}
+        out["ownership_source"] = (source if expected <= covered
+                                   else mds.OWNERSHIP_SOURCE_PARTIAL)
     return out
+
+
+def _mock_owned_pick_overlay(league_id: str, season: int, rounds: int,
+                             resolved_order: list[str],
+                             ) -> tuple[dict[tuple[int, int], str], str]:
+    """#328 — `(traded_slots, ownership_source)` from the normalized
+    `draft_picks` store. MFL only, by construction: rows in the store with
+    platform ownership provenance and no slot sequence.
+
+    Anchored to the ORIGINAL owner's slot in `resolved_order`, wherever the
+    shuffle put them — ownership is a fact about the original owner, not a
+    slot number. Identity guard per the 2026-08-13 membership audit: rows
+    whose ids are unknown to `resolved_order` are dropped and counted; a
+    fully-dropped overlay reports "none", a partial drop applies what
+    matched, logs the count (server log only, never the payload) and labels
+    "partial". Deterministic — no rng, no egress.
+    """
+    from . import mock_draft_service as mds
+
+    # The default platform read (NULL reads as platform — MFL sync rows carry
+    # NULL `source`). NEVER source="any": user-asserted rows are ESPN's path.
+    rows = load_draft_picks(str(league_id), source=PICK_SOURCE_PLATFORM)
+    season_rows = [r for r in rows
+                   if int(r.get("season") or 0) == int(season)
+                   and 1 <= int(r.get("round") or 0) <= int(rounds)]
+    if not season_rows:
+        # No data for this season/rounds is a fallback, not a fact (#228/#207
+        # inheritance: a drafted season's rows are verdict-excluded ⇒ "none").
+        return {}, mds.OWNERSHIP_SOURCE_NONE
+
+    # Coverage census: MFL's futureDraftPicks export enumerates every pick
+    # (traded or not), one row per franchise per round, so a complete season
+    # has >= teams rows in every round of the mock. A shallow store (mock
+    # `rounds` deeper than the export) fails the census.
+    complete = all(
+        sum(1 for r in season_rows if int(r["round"]) == rnd)
+        >= len(resolved_order)
+        for rnd in range(1, int(rounds) + 1))
+
+    traded = [r for r in season_rows if r.get("is_traded")]
+    known = {str(u) for u in resolved_order}
+    slot_of = {str(u): i + 1 for i, u in enumerate(resolved_order)}
+    kept = [r for r in traded
+            if str(r.get("original_user_id") or "") in known
+            and str(r.get("owner_user_id") or "") in known]
+    drops = len(traded) - len(kept)
+    if traded and not kept:
+        log.warning("mock overlay: dropped ALL %d traded rows for %s "
+                    "(identity guard) — degrading to ownership_source=none",
+                    len(traded), league_id)
+        return {}, mds.OWNERSHIP_SOURCE_NONE
+    if drops:
+        log.warning("mock overlay: dropped %d/%d traded rows for %s "
+                    "(identity guard)", drops, len(traded), league_id)
+
+    # Last-write-wins on a duplicate (round, slot) key is acceptable — the
+    # store's pick_id uniqueness makes duplicates a data error, not a state.
+    overlay = {(int(r["round"]), slot_of[str(r["original_user_id"])]):
+               str(r["owner_user_id"]) for r in kept}
+    label = (mds.OWNERSHIP_SOURCE_PLATFORM if complete and drops == 0
+             else mds.OWNERSHIP_SOURCE_PARTIAL)
+    return overlay, label
 
 
 def _mock_personas(league_id: str, sess: dict) -> dict[str, dict[str, str]]:
@@ -12670,17 +12784,35 @@ def mock_draft_route():
     # G1 — the four resolution inputs the engine has always accepted and the
     # route never passed. `real` degrades to a randomized-and-labelled order
     # when the platform has no assigned one; `order_source` rides the payload
-    # so the client can DISCLOSE that rather than imply a real order.
-    real = _mock_real_draft(sess, league_id, season)
+    # so the client can DISCLOSE that rather than imply a real order. #328
+    # adds `ownership_source` — the same disclosure for the traded-pick
+    # overlay.
+    real = _mock_real_draft(sess, league_id, season, rounds)
+    rng = random.Random(rng_seed)
+    if real["order"] is None and _mock_platform(sess, league_id) == dbs.MFL:
+        # #328 — MFL states ownership but no slot sequence (KD-6: never
+        # invent an order). Resolve the same seeded shuffle build_settings
+        # would have produced — identical list-copy recipe, first rng draw —
+        # THEN anchor the overlay to it; build_settings sees an explicit
+        # order and does not reshuffle, so a given rng_seed yields the same
+        # permutation the internal shuffle produced pre-#328.
+        shuffled = [str(o) for o in owners]
+        rng.shuffle(shuffled)
+        overlay, own_src = _mock_owned_pick_overlay(league_id, season,
+                                                    rounds, shuffled)
+        real.update(order=shuffled, traded_slots=overlay,
+                    ownership_source=own_src)
+        # order_source stays ORDER_SOURCE_RANDOMIZED — the shuffle is ours.
     try:
         settings = mds.build_settings(
             ctx, owners=owners, user_owner_id=league_user_id, rounds=rounds,
             draft_type=body.get("type") or real["type"],
             order=real["order"], order_source=real["order_source"],
             traded_slots=real["traded_slots"],
+            ownership_source=real["ownership_source"],
             personas=_mock_personas(league_id, sess),
             mode=mode,
-            rng=random.Random(rng_seed))
+            rng=rng)
     except mds.UserNotInDraft:
         # INV-6 — the engine's backstop for the case the ladder is
         # structurally blind to (the user is an owner but the platform's

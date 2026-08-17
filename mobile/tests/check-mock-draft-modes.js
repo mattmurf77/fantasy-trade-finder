@@ -618,9 +618,14 @@ for (const name of ['mock_started', 'mock_pick_made', 'mock_abandoned']) {
   if (call) {
     const t = call.getText();
     assert(
-      (t.match(/settings_echo/g) || []).length >= 5,
-      'mock_started props read off res.settings_echo (all five)',
-      'a clamped rounds or degraded order_source must report as resolved',
+      (t.match(/settings_echo/g) || []).length >= 6,
+      'mock_started props read off res.settings_echo (all six, incl. #328 ownership_source)',
+      'a clamped rounds or degraded order_source/ownership_source must report as resolved',
+    );
+    assert(
+      /ownership_source:\s*res\.settings_echo\?\.ownership_source/.test(t),
+      "mock_started carries ownership_source off the RESOLVED echo (#328)",
+      'the fallback-rate-per-platform query needs the resolved value, never the request',
     );
     assert(
       !/setup\.|board\??\./.test(t),

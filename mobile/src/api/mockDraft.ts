@@ -22,12 +22,19 @@
 
 import { api } from './client';
 import { DraftSchemaError, type DraftBasis, type UndraftedRow } from './draft';
+import type { Tier } from '../shared/types';
 
 export const MOCK_DRAFT_SCHEMA = 1;
 
 export type MockStatus = 'active' | 'complete' | 'abandoned';
 export type MockDraftType = 'linear' | 'snake';
 export type MockOrderSource = 'assigned' | 'randomized';
+
+/** #328 — provenance of the traded-pick ownership overlay. OPEN set on the
+ *  client (server may grow it); `null` = row predates the field (unknown,
+ *  NOT "none"). `partial` = applied but not covering every slot. */
+export type MockOwnershipSource =
+  'platform' | 'user' | 'partial' | 'none' | (string & {});
 export type MockPickBy = 'user' | 'cpu';
 
 /** #305 — who makes the picks. A CLOSED two-member enum on the wire
@@ -77,6 +84,22 @@ export interface MockPick {
   /** Always null today — the engine does not stamp pick times (gap G8). */
   picked_at: string | null;
   by: MockPickBy;
+  /** #323 — server-computed pick-value tier rung, the canonical band walk
+   *  over the CONSENSUS Elo always (stable across basis toggles — PRD §2).
+   *  Clients render it through TierBadge/TIER_LABEL and NEVER derive a tier
+   *  from Elo, rank or label (cross-client-invariants). `null` = no tier to
+   *  show (unvalued, or below the waivers floor); absent = old server —
+   *  treat identically to null (TierBadge no-ops on falsy). */
+  tier?: Tier | null;
+  /** Emitted since 1.13.3 (the recap G3 fields), typed as of #323 — no UI
+   *  renders the two consensus fields yet (deferred, PRD §4). `null`, never
+   *  0, when the consensus cannot place the player. Absent = old server. */
+  consensus_rank?: number | null;
+  /** Signed in the ADP convention: positive = went later than consensus
+   *  said (value); negative = a reach. Absent = old server. */
+  consensus_delta?: number | null;
+  /** False for a D7 unvalued rookie. Absent = old server (treat as false). */
+  valued?: boolean;
 }
 
 /** A CPU team's drafting persona, snapshotted at creation. */
@@ -90,6 +113,9 @@ export interface MockSettingsEcho {
   type: MockDraftType | null;
   teams: number | null;
   order_source: MockOrderSource | null;
+  /** #328 — provenance of the traded-pick overlay. `null` = the mock row
+   *  predates the label (unknown, never "none"). */
+  ownership_source: MockOwnershipSource | null;
   personas: Record<string, MockPersona> | null;
   noise: Record<string, number> | null;
   /** #305 — the ONLY source of mode truth. Never infer mode from `by`

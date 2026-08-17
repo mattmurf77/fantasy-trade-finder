@@ -15,6 +15,7 @@
     "test:mock-lifecycle": "node tests/check-mock-lifecycle.js",
     "test:mock-draft-modes": "node tests/check-mock-draft-modes.js",
     "test:mock-user-not-in-draft": "node tests/check-mock-user-not-in-draft.js",
+    "test:mock-g2-ui": "node tests/check-mock-g2-ui.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
