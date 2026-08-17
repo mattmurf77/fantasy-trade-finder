@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-16 — G6 trade presentment rules built (branch `feat/fb304-presentment`, pre-merge evidence)
+
+- **Change:** `trade.presentment_rules` (#304 #336 #339 #340 #341) — R1 overpay ceiling / R2 pos-net cap / R3 pick-is-the-gap band / R5 need gate (construction hooks in v3 + sweetener + v2 + consensus) + R4 windowless awaiting/matched exclusion (dedup + likes-you) + 7 DB-seeded knobs + tripwire. Full evidence: `docs/feedback/items/304-positional-need-filter/build-verification.md`; gate coverage: `code-walk-proof.md` (same folder).
+- **Pytest:** `test_presentment_rules.py` **45 passed**; touched-module regression sweep **281 passed** (incl. `test_finder_targeting` — pin enforcement holds); `import backend.server` OK.
+- **D-056 sabotage protocol:** 14/14 named sabotages RED on their catcher tests, green after revert (table in build-verification.md).
+- **Distributional (two-sided bands):** offline predicate replay over the D-055 corpus reproduces the Planner exactly — R1 42/474 = 8.9% (band 4–16% ✓), R2 37/474 = 7.8%, all multi-asset (3–14% ✓). Live instrumented replays (9 leagues × 108 first-run sims, local repo DB): flag-ON served-card violations **0/540** (flag-OFF would-serve 30/540); R5 exact 5.4% overall / 11.4% contender / **0.0% rebuilder** (bands 2–10 / 7–25 / exactly-0 ✓); deck size 99.7% of flag-OFF (bar ≥80%); empty decks 0/108; insults 0; tripwire 0 firings. **Caveat:** the local DB carries no member boards/likes for these leagues (all-consensus decks) and the environment's permission system blocked a prod-DB replay — the full-fidelity DB-1/DB-2 prod re-run (divergence + likes-you arms) is an operator-run pre-ship step (same command; deck_eval now emits `presentment_audit` + `presentment_kills`). DB-4 pick replay (Lakeview, 864 picks injected): pick cards serve, **zero R3-shaped candidates exist in the corpus** → R3 ships at unmeasured defaults with `pick_gap_frac` as the named lever (NEXT.md); `test_r3_engine_kill_through_v2_path` proves the hook is not a silent no-op.
+- **Not run:** Maestro/simulator (retired, D-056/D-057); operator TestFlight checklist (prd §3.4, 6 items) OWED on the first build after deploy.
+
 ## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
 
 - **Change:** `242a399` — `expo.name` + `CFBundleDisplayName` -> `Fleeced`; `AppIcon.appiconset/App-Icon-1024x1024@1x.png` replaced with the ram mark. 4 files = 2 text lines + 2 PNGs. No schema, API, feature-flag or analytics surface; no user flow altered.

@@ -16,6 +16,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Directional outlook weighting (feedback #175 — ships dark)](#flags-directional-outlook-weighting-feedback-175-ships-dark)
 - [Flags — Compressed-board trade generation (2026-08-15 field bug — LIVE)](#flags-compressed-board-trade-generation-2026-08-15-field-bug-live)
 - [Flags — Trade generation pipeline v2 (matchmaking research — ships dark)](#flags-trade-generation-pipeline-v2-matchmaking-research-ships-dark)
+- [Flags — Trade presentment rules (G6 2026-08-16 — ships ON)](#flags-trade-presentment-rules-g6-2026-08-16-ships-on)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
 - [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
@@ -45,6 +46,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Trade generation pipeline v2 (flag `trade_gen.v2` — dark)](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py)
+  - [Trade presentment rules (flag `trade.presentment_rules`) — `trade_service._DEFAULT_CFG`, DB-seeded](#trade-presentment-rules-flag-tradepresentment_rules-trade_service_default_cfg-db-seeded)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -180,6 +182,12 @@ earlier pre-deploy reads landed on exactly 30 only because every batch was a ful
 | Flag | Default | Gates |
 |---|---|---|
 | `trade_gen.v2` | false | Routes `TradeService.generate_trades` to `backend/trade_gen_v2.py`, the research-driven staged pipeline (matchmaking research item 2 — `docs/research/matchmaking/` rounds 1–2; scope block `docs/plans/matchmaking-engine/trade-gen-v2-scope.md`). Stages: divergence-driven partner + centerpiece selection (want/accept boards applied as filters, targets as priority) → bounded return-package search around each centerpiece (≤3 assets + picks per side) → hard gates IN ORDER (composition hygiene reusing #141 filler + #227 pick-churn → roster feasibility both sides → **dual-board ε-gain**: each side must gain ≥ `gen2_epsilon` on its OWN board, with a non-linear consolidation discount so junk can't stuff a package → **consensus fairness band** ±`gen2_band` as a defensibility constraint, never an objective) → rank by joint gain, tiebreak by surplus-split symmetry → empirical-Bayes **acceptance-prior** multiplier → league-level **exposure shaping** (per-counterparty cap + viable-suggestion floor — ordering only, counts logged) → **tier metadata** (`endorsed`/`featured`/`browse`) + **MESO** return-package variants + structured two-sided `rationale` on the cards. **No engine truncation** (operator decision 2026-08-16): the engine returns the FULL ranked survivor set — uncapped discovery + uncapped browsable list as a ranking-signal surface; scarcity applies only to endorsement via the `tier` field, and any list-length limits are caller-passed presentation parameters. Built dark ALONGSIDE the v2/v3 engine: OFF (default) ⇒ the module is never imported and every existing generation path is byte-identical. Divergence-only by design — unranked opponents keep the flag-off engine's consensus path. Kill switch is the flag itself (deploy-free). |
+
+## Flags — Trade presentment rules (G6 2026-08-16 — ships ON)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.presentment_rules` | **true** (ships ON — operator decision Q-G6-3; feedback #304 #336 #339 #340 #341, specs in [feedback/items/304-positional-need-filter/](feedback/items/304-positional-need-filter/)) | Backend-only, no client surface. ON ⇒ two new layers on the **v1 generation path** (`trade_gen.v2` carries its own gate stack): **construction rules** run inside every generator (v3 loop, v3 sweetener re-validation, v2 `_consider`, consensus `_emit`) so killed candidates refill from the enumeration — R1 `overpay_ok` (#340: raw-consensus gap ≥ `max_overpay_min_value` AND ≥ `max_overpay_frac` of the larger side kills, BOTH directions, **independent of the client fairness toggle**), R2 `pos_net_ok` (#341: per-position signed net |recv−give| ≤ `pos_net_cap` over QB/RB/WR/TE, picks uncounted), R3 `pick_gap_ok` (#339: for gap ≥ `pick_gap_min_value`, a heavier-side pick inside the two-sided band [`pick_gap_frac`·gap, gap/`pick_gap_frac`] — "the pick IS the gap" — kills; a pick far larger than the gap passes), R5 `need_gate_ok` (#304: window-scaled need gate on the primary received player, **untargeted discovery decks only** — pinned/opponent-scoped/explicit-acquire jobs bypass via a server-derived flag, never client-passable); and **eligibility**: R4 (#336) windowless awaiting-like + pending/accepted-match exclusion at `_dedup_and_sort` (streaming snapshots included) and the likes-you injector (dedup only — Q21 keeps the quality rules off that surface; the D-055 floor is its quality gate; `declined`/retracted regenerate). Never relaxed by the #189 relaxed pass. Per-job per-rule kill counters + the `presentment-tripwire` WARNING ([runbook](runbook.md)) ship with it. Per-rule deploy-free kill switches are the knobs below; this flag is the one-line group revert and R4's only switch. OFF ⇒ every generation path byte-identical to pre-G6 (pinned by test). |
 
 ## Flags — Send in Sleeper (flagged beta)
 
@@ -645,6 +653,25 @@ Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignore
 | `gen2_accept_prior_strength` | 10.0 | Completion-probability hook: empirical-Bayes pseudo-observation count m in `p = (accepts + m·p0)/(responses + m)`. |
 | `gen2_accept_global_prior` | 0.5 | Global acceptance prior p0 — the fallback when a manager has no accept/response history (uniform scaling, ordering unchanged). |
 | `gen2_youth_age` | 25 | MESO shape vocabulary: a package is `youth_heavy` when the value-weighted mean age of its non-pick players is ≤ this. |
+
+### Trade presentment rules (flag `trade.presentment_rules`) — `trade_service._DEFAULT_CFG`, DB-seeded
+
+G6 2026-08-16 wave (#304 #336 #339 #340 #341). All seven are DB-seeded and
+live-tunable via `PUT /api/admin/config/<key>` — each is that rule's
+deploy-free kill switch (R4 has no knob; the flag is its revert). Units:
+raw summed consensus value (`seed_value` per side) — the D-055 Δ currency.
+Measured baselines + acceptance bands:
+[feedback/items/304-positional-need-filter/prd.md §2](feedback/items/304-positional-need-filter/prd.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `max_overpay_frac` | 0.25 | R1 #340: kill when the raw consensus gap is ≥ `max_overpay_min_value` AND ≥ this fraction of the larger side — either side overpaying, independent of `fairness_threshold` (the mobile toggle can never relax it). Corpus-fit: 0.20 killed 14–18% (too hot); 0.35 left the 25–35% insult band alive; 0.25 → 8.9% and covers every corpus insult card. **≤ 0 disables R1.** |
+| `max_overpay_min_value` | 500.0 | R1: absolute gap floor (D-055 materiality — also why a `fit_premium_max_loss` (300) need-fill card can never trip R1). |
+| `pos_net_cap` | 1.0 | R2 #341: max \|count(recv at P) − count(give at P)\| per position over {QB, RB, WR, TE} — one signed net per position (2RB→2RB is net 0), picks uncounted, K/DEF/IDP uncounted by design. **0 disables** (the `filler_min_frac` convention). |
+| `pick_gap_frac` | 0.8 | R3 #339: two-sided band — for a gap ≥ `pick_gap_min_value`, a pick on the HEAVIER side inside [frac·gap, gap/frac] kills ("the pick is the gap"); a pick far larger than the gap (stud-scaled centerpiece consolidation) passes. Same knob mirrored forms the upper bound. **0 disables.** **UNMEASURED default** — zero pick cards in the D-055 corpus and zero R3-shaped candidates in the 2026-08-16 local pick replay; this knob is the named tuning lever pending a prod-state divergence replay (NEXT.md follow-up). |
+| `pick_gap_min_value` | 300.0 | R3: consensus gap floor below which the band is never evaluated. |
+| `need_gate_min_value` | 500.0 | R5 #304: minimum consensus value of the primary received player before the need gate applies (sub-floor churn always passes). Untargeted discovery decks only (R-5b bypass). **≤ 0 disables the whole gate.** |
+| `need_gate_upgrade_margin` | 0.0 | R5: the primary must beat the post-give incumbent (S-th best body at P on `roster − give`) by this fraction to count as a starter upgrade. 0 = any strict upgrade passes. |
 
 ### Outlook odds (#169) — `backend/outlook/`
 

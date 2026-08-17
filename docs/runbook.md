@@ -19,6 +19,7 @@ Operational procedures. Add to this as you learn things.
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
+- [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -223,6 +224,28 @@ curl -H "X-Cron-Secret: $CRON_SECRET" -X PUT .../api/admin/config/<key> # update
 ```
 See [config-reference.md](config-reference.md) for keys. All `/api/admin/*`
 endpoints, `/api/debug/log`, and `/api/feature-flags/reload` share this auth.
+
+---
+
+## Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)
+
+Every trade job logs an INFO line `trade-job <id>: presentment kills={'R1':…,
+'R2':…, 'R3':…, 'R5':…, 'R4':…} served=<n>` (R1/R2/R3/R5 are
+construction-candidate kills — enumeration-scale numbers are normal; R4 is
+distinct excluded keys; `served` is the post-ghost count). A WARNING with the
+grep-able prefix **`presentment-tripwire`** fires only when a deck is thin
+AND the rules' own kills explain the thinness (`served < 5 AND served +
+rule_kills > 15`) — decks thinned by fairness/surplus never fire it.
+
+Response: identify the dominant rule in the logged counters, then kill that
+rule live (deploy-free) via `PUT /api/admin/config/<knob>`:
+R1 → `max_overpay_frac = 0` · R2 → `pos_net_cap = 0` · R3 →
+`pick_gap_frac = 0` · R5 → `need_gate_min_value = 0`. R4 has no knob; the
+whole group reverts by flipping `trade.presentment_rules` to `false` in
+`config/features.json` (one-line commit + deploy). Expect zero hits on
+healthy leagues; contender-heavy leagues thin the most by design (#304 is a
+contender complaint) — log any hit with its rule attribution in
+`docs/feedback/items/304-positional-need-filter/status.md`.
 
 ---
 
