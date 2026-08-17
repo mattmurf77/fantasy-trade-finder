@@ -111,7 +111,7 @@ from .database import (
     load_trade_block,
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
-    load_awaiting_trades,
+    load_awaiting_trades, load_matches_for_exclusion,
     retract_awaiting_likes,
     record_match_disposition,
     dismiss_match,
@@ -2888,6 +2888,7 @@ def _inject_likes_you_cards_impl(
     seed_map: dict,
     untouchable_ids: set | None = None,
     not_interested_ids: set | None = None,
+    exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -2965,6 +2966,17 @@ def _inject_likes_you_cards_impl(
         seen_keys.add(key)
         # Don't resurface a trade the user already swiped on.
         if (key[0], key[1]) in trade_service._past_decision_keys:
+            continue
+        # G6 R4 #336 (Q-G6-1) — never re-inject a trade that is currently
+        # live in the user's match pipeline (awaiting like or pending/
+        # accepted match). DEDUP only: the quality rules R1/R2/R3/R5 stay
+        # off this surface per Q21 — the D-055 user-gain floor below is
+        # its only quality gate.
+        if exclusion_keys and (key[0], key[1]) in exclusion_keys:
+            try:
+                trade_service._r4_excluded_keys.add((key[0], key[1]))
+            except Exception:
+                pass
             continue
         # D-055 — user-gain floor. The injection's pull is "they already
         # want this", but a like the VIEWER loses badly on reads as an
@@ -4906,6 +4918,80 @@ def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
     return outlook, signals
 
 
+def _presentment_need_gate_bypass(pinned_give, pinned_receive,
+                                  opponent_user_id, acquire_positions) -> bool:
+    """G6 R-5b — R5 #304 applies only to UNTARGETED discovery decks.
+
+    Derived SERVER-SIDE from job fields, never read from the request body
+    (no request-surface change — G4 contract). Any targeted shape bypasses
+    R5: pinned give ("what can I get for X?"), pinned receive ("get me
+    this player"), opponent scope (#156/#330), or explicit
+    acquire_positions (a saved league pref that REPLACES inferred need —
+    trade_service.py's `list(acquire_positions) or list(...needs)`
+    semantic). Deliberately NOT in the field list: trade_away_positions
+    alone (targets the give side; R5 judges the receive side) and
+    trade_intent (#172 modes are discovery-with-a-lens). Precedent for
+    server-derived targetedness: the likes-you injector's own skip
+    condition. R1/R2/R3/R4 apply to targeted and untargeted jobs alike.
+    """
+    return bool(pinned_give or pinned_receive or opponent_user_id
+                or acquire_positions)
+
+
+def _load_presentment_exclusions(user_id: str, league_id: str) -> set:
+    """G6 R4 #336 — windowless per-job exclusion set, built once per trade
+    job: (frozenset(my_give), frozenset(my_receive)) keys for (a) the
+    user's un-retracted awaiting likes in THIS league — NO time window
+    (the bug was the 7-day `since_days` on generation dedup: an 8-day-old
+    like still sitting in Awaiting legitimately regenerated) — and (b)
+    `pending`/`accepted` trade_matches rows, keyed from the user's
+    orientation. `declined` matches and retracted likes may regenerate
+    (Q-G6-2 / #318). load_awaiting_trades already excludes retracted likes
+    and already subtracts matured matches — both properties are relied on,
+    not re-implemented. Failure is non-fatal: log + empty set, matching
+    the surrounding pref-load posture.
+    """
+    exclusion_keys: set = set()
+    try:
+        for t in load_awaiting_trades(user_id):
+            if t.get("league_id") != league_id:
+                continue
+            exclusion_keys.add((frozenset(t["my_give"]),
+                                frozenset(t["my_receive"])))
+        for m in load_matches_for_exclusion(user_id, league_id):
+            exclusion_keys.add((frozenset(m["my_give"]),
+                                frozenset(m["my_receive"])))
+    except Exception as excl_err:
+        log.warning("trade-job: presentment exclusion-set build failed "
+                    "(non-fatal, serving without R4): %s", excl_err)
+        return set()
+    return exclusion_keys
+
+
+def _log_presentment_outcome(trade_service, job_id: str, league_id: str,
+                             served: int) -> None:
+    """G6 R-9 — per-job kill-counter INFO line + the `presentment-tripwire`
+    WARNING. `served` is the POST-GHOST count (lld §5 amendment):
+    ghost-withheld cards pass the rules before being withheld, so they feed
+    neither term and the tripwire keeps firing only on rule-explained
+    thinness. The attributable form (round-1 N2): fire only when the rules'
+    own kills explain the gap between a thin deck and a healthy one —
+    never blame presentment for decks thinned by fairness. Grep-able
+    prefix documented in docs/runbook.md.
+    """
+    try:
+        kills = trade_service.presentment_kill_counts()
+        rule_kills = (kills.get("R1", 0) + kills.get("R2", 0)
+                      + kills.get("R3", 0) + kills.get("R5", 0))
+        log.info("trade-job %s: presentment kills=%s served=%d",
+                 job_id, kills, served)
+        if served < 5 and served + rule_kills > 15:
+            log.warning("presentment-tripwire: job=%s league=%s served=%d "
+                        "kills=%s", job_id, league_id, served, kills)
+    except Exception as tw_err:
+        log.warning("presentment logging failed (non-fatal): %s", tw_err)
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -4991,6 +5077,15 @@ def _run_trade_job(
             seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
             if seeded:
                 outlook_value = seeded
+
+        # G6 presentment rules — R-5b bypass (server-derived, never
+        # client-passable) + the R4 #336 windowless exclusion set, both
+        # built once per job. Flag off ⇒ neither is consulted downstream.
+        bypass_need_gate = _presentment_need_gate_bypass(
+            pinned_give, pinned_receive, opponent_user_id, acquire_positions)
+        exclusion_keys: set = set()
+        if FLAGS.trade_presentment_rules:
+            exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
 
         # Update outlook on the job for cache freshness checks
         with _trade_jobs_lock:
@@ -5128,6 +5223,8 @@ def _run_trade_job(
             target_ids           = target_ids or None,
             not_interested_ids   = not_interested_ids or None,
             trade_intent         = trade_intent,
+            bypass_need_gate     = bypass_need_gate,
+            exclusion_keys       = exclusion_keys,
             **gen_kwargs,
         )
 
@@ -5170,6 +5267,7 @@ def _run_trade_job(
                     seed_map      = seed_map,
                     untouchable_ids = untouchable_ids or None,
                     not_interested_ids = not_interested_ids or None,
+                    exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                 )
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):
@@ -5433,6 +5531,12 @@ def _run_trade_job(
             except Exception as gs_err:
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
+
+        # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
+        # served count (lld §5 amendment). Flag off ⇒ no line at all.
+        if FLAGS.trade_presentment_rules:
+            _log_presentment_outcome(trade_service, job_id, league_id,
+                                     len(served_final))
 
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only

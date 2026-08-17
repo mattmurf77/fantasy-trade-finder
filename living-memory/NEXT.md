@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-08-16 — Matchmaking engine follow-ons](#2026-08-16--matchmaking-engine-follow-ons)
+- [2026-08-16 — Presentment-rules follow-ons (G6, D-061)](#2026-08-16--presentment-rules-follow-ons-g6-d-061)
 - [2026-08-15 — Guided Onboarding v2 built dark; graduation + Phase 2 queued](#2026-08-15--guided-onboarding-v2-built-dark-graduation--phase-2-queued)
 - [2026-08-15 — Open-access Phase A SHIPPED; B/C queued](#2026-08-15--open-access-phase-a-shipped-bc-queued)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122)
@@ -73,8 +74,14 @@ P0 capture is built on `feat/roster-history` (see [`HANDOFF.md`](HANDOFF.md)). I
 Phase 1 shipped dark 2026-08-16 (see [`HANDOFF.md`](HANDOFF.md) top entry). In order:
 
 1. **Light `suggestion.telemetry`** *(S; it only collects — the learning loop is logging-gated and retroactively impossible)* then watch the ghost/organic ratio route for a week.
-2. **Light `trade_gen.v2`** once telemetry accumulates accept/response stats for the EB prior; verify fixture-league behavior against prod boards first.
+2. **Light `trade_gen.v2`** once telemetry accumulates accept/response stats for the EB prior; verify fixture-league behavior against prod boards first (its lighting checklist also owes the R2 pos-net port — [D-061](DECISIONS.md)).
 3. **Mobile pyramid UI** from `mockups/trade-suggestion-redesign/` *(M-L; full gates — real Maestro flows, no waiver)*.
+
+## 2026-08-16 — Presentment-rules follow-ons (G6, [D-061](DECISIONS.md))
+
+1. **Prod-state deck-eval replay** *(S; operator-run — the build agent's environment was blocked from the prod DB)*: flag-OFF then flag-ON over the 9 corpus leagues with prod `DATABASE_URL`, `scripts/deck_eval.py` (now emits `presentment_audit` + `presentment_kills`) — confirms the R1/R2 bands on divergence decks and R4 on real like history (prd §2 bands; band miss = stop-and-report, prd's round-1 N8).
+2. **Tune `pick_gap_frac`/`pick_gap_min_value` (R-12)** *(S; blocked on the above)*: zero R3-shaped candidates exist in every available corpus (local pick replay served only fair 1-for-1 player-for-pick swaps) — measure the pick-card kill rate on a prod-state divergence replay with `--with-picks`, then set/confirm the knobs. Until then R3 runs at unmeasured defaults (0.8 / 300) — the knob is the acknowledged lever.
+3. **R5 user-board variant** *(M; named follow-up, not an oversight — D-061(3))*: re-judge the need gate on the user's raw board once comparison counts make it stable.
 
 ## 2026-08-13 — Notification inbox follow-ons
 

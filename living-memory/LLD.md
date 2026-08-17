@@ -20,6 +20,7 @@
 - [Tooling & Constraints](#tooling--constraints)
 - [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
+- [Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)](#presentment-rules-construction-gate-vs-presentment-filter-layering-2026-08-16-tradepresentment_rules)
 
 ---
 
@@ -217,3 +218,11 @@ New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader 
 - **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
 
 Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.
+
+## Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)
+
+G6 ([D-061](DECISIONS.md)) sets three conventions for anything joining the serve-or-don't-serve decision:
+
+- **Two layers, two hook kinds.** Package-quality rules (R1 overpay / R2 pos-net / R3 pick-gap and the R5 need gate) are **construction gates**: module-level predicates in `trade_service.py` (beside `filler_ok`/`pick_swap_ok`), bound once per job into a `presentment_ok_fn` threaded to every v1 generator (v3 loop + `_try_sweeten` re-validation, v2 `_consider`, consensus `_emit`), sitting after `filler_ok` and BEFORE feasibility/surplus/fairness so a killed candidate refills from the enumeration and can never be sweetener-rescued. Per-user duplicate state (R4 windowless awaiting/matched exclusion) is a **presentment filter** at `_dedup_and_sort` + the likes-you injector — the same candidate is fine tomorrow once the match resolves. New "never show this" logic must pick one of these two homes; post-hoc deck filtering converts kills into holes and is the rejected shape.
+- **The never-relaxed list grows.** The #189 relaxed pass never loosens R1/R2/R3/R5 (alongside the #108 gates + untouchables — safety properties, not taste); its stage overrides may only touch fairness/surplus knobs.
+- **Windowless exclusion-set pattern.** Per-job, league-scoped `(frozenset(give), frozenset(receive))` sets are built server-side (`_load_presentment_exclusions`), passed as a `generate_trades` kwarg with **overwrite-per-call** semantics (`None` ⇒ empty — never keep-previous: the TradeService instance serves multiple leagues). Server-derived job facts (like the R-5b `bypass_need_gate`) are computed in `_run_trade_job` from job fields, never read from the request body.
