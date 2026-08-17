@@ -152,6 +152,7 @@ Four client-fired events (`POST /api/events`) for the in-app ESPN login → nati
 | `espn_connect_otp_step` | injected MutationObserver detects Disney SSO's one-time-code step | — |
 | `espn_connect_captured` | both `espn_s2` + `SWID` read from the native cookie store | `saw_otp` |
 | `espn_connect_abandoned` | screen left without a capture (header back / swipe) | `saw_otp` |
+| `espn_connect_store_rejected` *(added 2026-08-16, #321)* | the server refuses (or can't judge) a captured pair at store time — before this event a refused store was analytically invisible | `reason` (`wrong_account` \| `bad_credentials` \| `unavailable` — derived from the store response: 403 + `reason:"wrong_account"` → `wrong_account`; other 403 `espn_bad_credentials` → `bad_credentials`; anything else → `unavailable`), `source` (`link_sheet` \| `send_button`), `saw_otp` |
 
 > **No credential ever becomes a property.** The only data that leaves the WebView is the two cookie strings, and they go to `POST /api/espn/link`, never to analytics. `saw_otp` measures how often the emailed-code step gates the flow; the code value is never read (see DECISIONS.md D-021).
 
