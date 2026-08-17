@@ -746,6 +746,28 @@ FLAG_KEYS: tuple[str, ...] = (
     # engine; OFF (default) = the module is never imported and every
     # existing generation path is byte-identical.
     "trade_gen.v2",
+    # ── Trade presentment rules — G6, 2026-08-16 feedback wave ───────────
+    # (#304 #336 #339 #340 #341; specs + kill-rate bands in
+    # docs/feedback/items/304-positional-need-filter/). Backend-only, no
+    # client surface. ON ⇒ four construction/eligibility layers on the v1
+    # generation path (trade_gen.v2 carries its own gate stack):
+    #   R1 #340 — absolute overpay ceiling on raw consensus sums, both
+    #     sides, independent of the client fairness toggle;
+    #   R2 #341 — per-position signed net cap (|recv−give| per position
+    #     over QB/RB/WR/TE; picks uncounted);
+    #   R3 #339 — "the pick IS the gap" two-sided band on the heavier side;
+    #   R5 #304 — window-scaled need gate on the primary received player,
+    #     UNTARGETED discovery decks only (pinned/opponent-scoped/explicit-
+    #     acquire jobs bypass, derived server-side — R-5b);
+    # plus R4 #336 — windowless awaiting-like/pending-accepted-match
+    # exclusion at dedup + the likes-you injector (likes-you stays exempt
+    # from R1/R2/R3/R5 per Q21 — the D-055 user-gain floor is its quality
+    # gate). Per-job per-rule kill counters + the `presentment-tripwire`
+    # WARNING ship with the flag. Each rule dies live via its model_config
+    # knob (max_overpay_*, pos_net_cap, pick_gap_*, need_gate_*); the flag
+    # is the group revert and R4's only switch. OFF ⇒ every generation
+    # path is byte-identical to pre-G6 (enforced by test).
+    "trade.presentment_rules",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

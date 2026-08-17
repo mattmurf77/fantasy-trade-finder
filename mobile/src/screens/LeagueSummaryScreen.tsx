@@ -856,8 +856,9 @@ export default function LeagueSummaryScreen() {
   // server-only pick seeds) and a raw numeric is not an allowed fallback on
   // this screen. So the field is required, not optional-with-a-guess: absent
   // ⇒ no divider at all. Its `value_label` may still be absent on its own
-  // (caller outside `aggregate_tier_labels`) — then the line draws with the
-  // bare caption, exactly as TeamRow degrades today.
+  // (defensively — the `aggregate_tier_labels` gate is retired since #303/G1,
+  // the server now always emits labels) — then the line draws with the bare
+  // caption, exactly as TeamRow degrades today.
   const medianAtPos = candidatePos
     ? query.data?.medians?.[candidatePos] ?? null
     : null;
@@ -1077,9 +1078,10 @@ export default function LeagueSummaryScreen() {
   // 2+ positions is NOT fixed and cannot be from the client: `value_label`
   // is per position and is not additive as a label (a sum of two
   // pick-equivalents is not the pick-equivalent of the sum), and no field on
-  // the wire names a combination. Those rows keep the numeric fallback that
-  // every non-`aggregate_tier_labels` caller already sees. Closing it needs
-  // a server-side combined label — see the build report.
+  // the wire names a combination. Those rows keep the numeric fallback —
+  // and that is a wire-shape limit, not a gating one: since D-064 the
+  // server emits labels to every caller. Closing it needs a server-side
+  // combined label — see the build report.
   const activeValueLabel = React.useCallback(
     (tc: TeamComputed): string | undefined => {
       if (subset === 'all' && posFilter.size === 0) return tc.team.total_value_label;
@@ -1170,9 +1172,27 @@ export default function LeagueSummaryScreen() {
       const store = useFinderTargets.getState();
       store.setSide('give', verb === 'offer' ? [player] : []);
       store.setSide('receive', verb === 'target' ? [player] : []);
+      // #330 — scope the finder to the drilled-in team and auto-run the
+      // search. Both verbs symmetrically: Offer scopes to the team the
+      // player is offered TO; Target scopes to the team that owns the
+      // pinned receive player (a results no-op — the pin already constrains
+      // the counterparty — but it makes the "Trading with" UI truthful).
+      // Same store contract as the pins above: route params stay dead.
+      if (selected) {
+        store.setHandoff({
+          opponent: {
+            userId: selected.tc.team.user_id,
+            name:
+              selected.tc.team.display_name ||
+              selected.tc.team.username ||
+              selected.tc.team.user_id,
+          },
+          autoRun: true,
+        });
+      }
       navigation.navigate('Trades', { screen: 'TradesHome' });
     },
-    [navigation, candidatePos, candidateDir, selectedIdx, route.name],
+    [navigation, candidatePos, candidateDir, selectedIdx, route.name, selected],
   );
 
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────
@@ -2156,7 +2176,8 @@ export default function LeagueSummaryScreen() {
                     screen's way of marking a threshold across a ranked list
                     — zero new patterns. It carries the median's PICK-TIER
                     label, never a number, and degrades to the bare caption
-                    when the caller is outside `aggregate_tier_labels`.
+                    if that label is ever absent (defensive only — the
+                    `aggregate_tier_labels` gate is retired since D-064).
                     `cutAfter` is null unless the list is genuinely sorted by
                     the position the median measures. */}
                 {cutAfter === idx + 1 ? (
@@ -2509,7 +2530,9 @@ function TeamRow({ team, rank, active, totalLabel, band, onPress }: {
   band?: 'Buyer' | 'Seller' | null;
   /** #279 — pick-equivalent label for `active`, passed only when it's known
    *  to equal the server's authoritative `total_value` (subset 'all', no
-   *  position filter) AND the caller is targeted by `aggregate_tier_labels`.
+   *  position filter). That is now the ONLY condition: the
+   *  `aggregate_tier_labels` gate is retired (D-064) and the server emits
+   *  the label to every caller.
    *  Undefined ⇒ render the numeric total exactly as before. */
   totalLabel?: string;
   onPress: () => void;

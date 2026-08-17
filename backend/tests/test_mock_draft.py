@@ -1223,15 +1223,18 @@ def test_w2_20_g1_the_real_order_and_traded_picks_come_off_the_lakeview_corpus(
 
 def test_w2_20_g1_a_non_sleeper_league_stays_randomized_rather_than_guessing(
         flag_on, session, monkeypatch):
-    """MFL's grid states the CURRENT owner and never the original, so it cannot
-    tell a slot order from an ownership overlay. Reading it would produce an
-    "order" that is really a trade log — so the mock stays randomized and says
-    so, which is KD-6 applied to a second platform."""
+    """MFL states ownership but no slot SEQUENCE, so `_mock_real_draft`'s
+    order half stays the honest empty — randomized-and-labelled, KD-6 applied
+    to a second platform. (#328 moved MFL's OWNERSHIP overlay to the create
+    route's `_mock_owned_pick_overlay` step and added the `ownership_source`
+    disclosure — `backend/tests/test_mock_pick_ownership.py` owns that
+    surface.)"""
     monkeypatch.setattr(server, "get_league_draft_context",
                         lambda lid: {"platform": "mfl", "season": 2026})
     real = server._mock_real_draft(session, "mfl-league", 2026)
     assert real == {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
-                    "traded_slots": {}, "type": None}
+                    "traded_slots": {}, "type": None,
+                    "ownership_source": mds.OWNERSHIP_SOURCE_NONE}
 
 
 def test_w2_20_g1_traded_slots_become_pick_ownership_and_move_the_clock():
@@ -3081,7 +3084,8 @@ def test_295_17_the_event_family_is_registered_with_its_intent_class():
     assert not ({"mock_started", "mock_pick_made", "mock_abandoned"}
                 & NON_INTENT_EVENTS)
     assert CLIENT_EVENT_PROPS["mock_started"] == frozenset(
-        {"platform", "teams", "rounds", "type", "order_source", "mode"})
+        {"platform", "teams", "rounds", "type", "order_source", "mode",
+         "ownership_source"})     # #328 — resolved overlay provenance (T-10)
     assert CLIENT_EVENT_PROPS["mock_pick_made"] == frozenset(
         {"platform", "mode", "round", "pick_no", "for_own_team"})
     assert CLIENT_EVENT_PROPS["mock_completed"] == frozenset(
@@ -3090,6 +3094,32 @@ def test_295_17_the_event_family_is_registered_with_its_intent_class():
         {"platform", "mode", "picks_made"})
     assert CLIENT_EVENT_PROPS["mock_create_refused"] == frozenset(
         {"platform", "reason"})
+
+
+def test_g2_room_affordance_taxonomy_registered():
+    """G2 R-15 taxonomy side (QA 2026-08-16 F-11) — the three room
+    affordances (#326 team sheet, #326 position filter, #327 pool search).
+    check-mock-g2-ui.js pins the SCREEN's emitters; this pins the backend
+    registration — the registry is default-deny behind a 200 (G-031), so a
+    merge-dropped name or prop would be silent data loss. Props maps must
+    match the emitters' payloads exactly (MockDraftScreen.tsx
+    openTeamSheet / onSelectFilter / onPoolQuery). All three are INTENT
+    (user gestures). Sabotage: drop `mock_pool_filtered` from
+    `ALLOWED_CLIENT_EVENTS`."""
+    from backend.analytics_taxonomy import (ALLOWED_CLIENT_EVENTS,
+                                            CLIENT_EVENT_PROPS)
+    from backend.analytics_queries import NON_INTENT_EVENTS
+
+    three = {"mock_team_sheet_opened", "mock_pool_filtered",
+             "mock_pool_searched"}
+    assert three <= ALLOWED_CLIENT_EVENTS
+    assert not (three & NON_INTENT_EVENTS)
+    assert CLIENT_EVENT_PROPS["mock_team_sheet_opened"] == frozenset(
+        {"platform", "mode", "round", "pick_no"})
+    assert CLIENT_EVENT_PROPS["mock_pool_filtered"] == frozenset(
+        {"platform", "mode", "position"})
+    assert CLIENT_EVENT_PROPS["mock_pool_searched"] == frozenset(
+        {"platform", "mode", "filter_position"})
 
 
 # --- #305 — manual mode ---------------------------------------------------
@@ -3320,3 +3350,67 @@ def test_305_07_manual_mode_never_consults_the_rng(client, flag_on, session):
     other_seed = _lap(99)
     assert [p["player_id"] for p in other_seed["picks"]] == \
         [p["player_id"] for p in state["picks"]]
+
+
+# ---------------------------------------------------------------------------
+# G2 (#322–#327) — `picks[].tier`, the one backend change of the room-UI wave
+# (docs/feedback/items/322-mock-draft-room-ui/prd.md §2, §5.1). Four pins,
+# each proven-to-fail on its named sabotage at authoring time.
+# ---------------------------------------------------------------------------
+
+def _g2_state_with_pick(ctx, player_id, *, by="user"):
+    """One made pick, hand-built (the :1431 idiom) so the tier input is a
+    known fixture value rather than an engine outcome."""
+    state = make_state(ctx, owners=["a", "b"], user="a", rounds=1)
+    state["picks"] = [{"pick_no": 1, "round": 1, "slot": 1, "roster_id": "a",
+                       "player_id": player_id, "by": by}]
+    return state
+
+
+def test_state_payload_picks_carry_tier():
+    """T-P1 — a valued pick's `tier` is the canonical band walk over the
+    SAME (elo, position, format) inputs — never a client-side or ad-hoc
+    derivation. SABOTAGE (proven red): emit tier from `pick_no` parity
+    instead of the walk."""
+    from backend.ranking_service import RankingService
+    # 1600.0 sits inside 1qb_ppr WR's `first_1` band (1580–1785) — a fixture
+    # value in a KNOWN band, so the assertion pins the walk's answer, not
+    # merely self-consistency.
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    entry = payload["picks"][0]
+    assert entry["tier"] == RankingService.tier_for_elo(
+        1600.0, "WR", ctx.scoring_format)
+    assert entry["tier"] == "first_1"
+
+
+def test_state_payload_tier_null_when_unvalued():
+    """T-P2 — a player absent from `consensus_elo` gets `tier: None` (and
+    keeps `valued: False`): None means "show no tier", never a fabricated
+    rung. SABOTAGE (proven red): default a missing Elo to `"waivers"`."""
+    ctx = make_ctx(players=linear_players(4) + [("z9", "WR", None)])
+    entry = mds.state_payload(_g2_state_with_pick(ctx, "z9"), ctx)["picks"][0]
+    assert entry["tier"] is None
+    assert entry["valued"] is False
+
+
+def test_my_picks_rows_carry_tier():
+    """T-P3 — `my_picks[]` is a filter of `picks[]` (the SAME dicts, by
+    identity), so the tier key cannot exist on one and not the other.
+    SABOTAGE (proven red): rebuild `my_picks` copying rows minus the key."""
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    assert len(payload["my_picks"]) == 1
+    twin = next(p for p in payload["picks"]
+                if p["player_id"] == payload["my_picks"][0]["player_id"])
+    assert payload["my_picks"][0] is twin
+    assert payload["my_picks"][0]["tier"] == "first_1"
+
+
+def test_schema_still_1_with_tier_key_present():
+    """T-P4 — the tier key is ADDITIVE under the plan-D10 open-payload
+    convention: `schema` stays 1. SABOTAGE (proven red): bump SCHEMA to 2."""
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    assert payload["schema"] == 1
+    assert "tier" in payload["picks"][0]

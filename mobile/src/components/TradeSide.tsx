@@ -15,10 +15,12 @@ interface Props {
   /** Value of each selected player on the viewer-relevant board. */
   valueOf: (p: CalcPlayer) => number;
   /** #263 — pick-value ladder tier for the row's display (replaces the raw
-   *  `valueOf` number for players; picks keep their numeric value since a
-   *  pick effectively already IS a tier rung). Omitted or null for a given
-   *  row falls back to the numeric value — e.g. picks, or a caller that
-   *  hasn't wired tier data. */
+   *  `valueOf` number). #320/D-320-1 superseded #263's "picks keep their
+   *  numeric value" carve-out: the in-league caller now resolves owned
+   *  picks too (server-computed off the pick's discounted pool_value).
+   *  Omitted or null for a given row still falls back to the numeric
+   *  value — old servers, unpriced rows, or a caller that hasn't wired
+   *  tier data. */
   tierOf?: (p: CalcPlayer) => Tier | null | undefined;
   accent: string;
   onAdd: () => void;
@@ -47,7 +49,16 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
         ) : (
           players.map((p) => (
             <View key={p.id} style={styles.row}>
-              <PositionChip position={p.pos} size="sm" />
+              {/* #320 — fixed-width chip slot: PICK (4 chars) is wider than
+                  QB/RB/WR/TE, so a self-sized chip pushed pick rows' names
+                  right. The slot pins one name x-position for every row.
+                  PositionChip itself is untouched — it's shared with
+                  Tiers/Trades/Matches (no drive-by). Same 44pt constant as
+                  PlayerPickerModal's chipCol; keep the two in lockstep
+                  (mobile/tests/check-picker-chip-alignment.js). */}
+              <View style={styles.chipCol}>
+                <PositionChip position={p.pos} size="sm" />
+              </View>
               <View style={styles.info}>
                 <Text style={type.title}>{p.name}</Text>
                 <Text style={type.bodySm}>
@@ -116,6 +127,10 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   info: { flex: 1 },
+  // #320 — fixed chip slot so PICK/QB/RB/WR/TE rows all start the name
+  // column at the same x. 44 clears the sm PICK chip; same constant in
+  // PlayerPickerModal.chipCol.
+  chipCol: { width: 44, alignItems: 'flex-start' },
   remove: {
     width: 32,
     height: 32,

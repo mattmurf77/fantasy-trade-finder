@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -181,6 +181,7 @@ import {
 } from '../utils/firstSessionMoment';
 // P0-2 — the read gate's 403 gets its own copy on the deck-failure card.
 import { readErrorCopy } from '../utils/verification';
+import { applyJobResult } from '../utils/applyJobResult';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -833,6 +834,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // clears the refresh nudge the same way.
   function handleFindTrades(source?: string) {
     setDeckFailure(null); // P0-2 — a search in flight has no failure
+    setScopedEmpty(null); // #330 — re-set by the completion effect if the re-run is empty too
     // #298 — `mode` always present; `source` only when a caller named one.
     // `source` has been sent here since #257 and STRIPPED on every row by
     // an empty prop registry until 2026-08-11; it is registered now.
@@ -860,6 +862,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setLaneFilter(null);
     setJob(null);
     setDeckFailure(null); // P0-2 — the deck AND the reason it failed
+    setScopedEmpty(null); // #330 — a fairness change can change results; drop the stale zero-result card
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
@@ -1357,6 +1360,28 @@ export default function TradesScreen({ navigation, route }: any) {
   // paths, cleared by every path that starts or invalidates a search.
   const [deckFailure, setDeckFailure] = useState<DeckFailure>(null);
 
+  // #330 R-6 — honest zero-result state for a SCOPED search: any generate
+  // job that completes with zero cards while a player is pinned AND an
+  // opponent is scoped (origin-independent — the handoff and a manual
+  // "Find a Trade" tap get the same card). Set by the completion effect
+  // below; cleared everywhere deckFailure is cleared (search start, league
+  // switch, reset). Job errors stay deckFailure's; an exhausted swiped-out
+  // deck stays the deck-summary's — zero cards GENERATED is the only
+  // trigger.
+  const [scopedEmpty, setScopedEmpty] = useState<{
+    playerName: string;
+    teamName: string;
+    direction: 'give' | 'receive';
+  } | null>(null);
+
+  // #330 R-10 — generation epoch. Incremented by every
+  // resetDeckForNewTargets(); onMutate stamps it into the mutation context
+  // and every result-application site drops mismatched-epoch results via
+  // applyJobResult (a stale in-flight search can never overwrite a scoped
+  // run's deck). Two manual taps without an intervening reset share an
+  // epoch — last-write-wins there is pre-existing behavior, out of scope.
+  const deckEpochRef = useRef(0);
+
   const generateMutation = useMutation({
     // `auto` marks the onboarding first-run auto-start (item 4): its
     // failures stay silent (retry below) instead of toasting. Manual taps
@@ -1399,13 +1424,26 @@ export default function TradesScreen({ navigation, route }: any) {
         trade_intent: tradeIntent ?? undefined,
       });
     },
-    onSuccess: (snapshot) => {
+    // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
+    // it against the current one and drop stale results entirely.
+    onMutate: () => ({ epoch: deckEpochRef.current }),
+    onSuccess: (snapshot, _vars, ctx) => {
+      if (
+        applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
+      ) {
+        return; // stale epoch — a reset intervened; nothing is applied
+      }
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
       // For instant cache-hit responses (status === 'complete') the deck
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
       if (snapshot.status === 'complete' && snapshot.cards.length === 0) {
+        // #330 R-6 — pinned + scoped zero-results get the honest empty CARD
+        // (set by the completion effect below), never the toast: the card
+        // is the single surface for that state.
+        const { pinnedGive: pg, pinnedReceive: pr } = useFinderTargets.getState();
+        if (pg.length + pr.length > 0 && scopedOpponent) return;
         // #172 — an active intent gets its own honest empty-state copy
         // (same mechanism as the existing fairness-aware message, not a
         // new one) so "no results" reads as "no results for THIS shape",
@@ -1425,7 +1463,14 @@ export default function TradesScreen({ navigation, route }: any) {
         });
       }
     },
-    onError: (e: Error, vars) => {
+    onError: (e: Error, vars, ctx) => {
+      // #330 R-10 — a stale mutation's failure is as dead as its success:
+      // no toast, no deckFailure, no auto-retry from a superseded dispatch.
+      if (
+        applyJobResult(e, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
+      ) {
+        return;
+      }
       if (vars?.auto) {
         // First-run auto-start failed — most likely the LeaguePicker
         // background session_init hasn't landed yet. Retry once, quietly;
@@ -1470,12 +1515,18 @@ export default function TradesScreen({ navigation, route }: any) {
     const MAX_POLL_FAILURES = 4;
     let intervalMs = 800;
     let prevOpponentsDone = job.opponents_done ?? 0;
+    // #330 R-10 — the epoch this poll loop attached under. A reset while a
+    // status fetch is in flight nulls `job` (cleanup flips `cancelled`),
+    // but the awaited response can still race the cleanup — route the
+    // application through the same epoch guard as the mutation callbacks.
+    const tickEpoch = deckEpochRef.current;
 
     const tick = async () => {
       if (cancelled) return;
       try {
         const next = await getTradeStatus(job.job_id);
         if (cancelled) return;
+        if (applyJobResult(next, tickEpoch, deckEpochRef.current) === null) return;
         failures = 0;
 
         // Shallow-equal guard: skip setState if nothing the UI reads has changed.
@@ -1543,6 +1594,34 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckFailure({ kind: 'job_error', message: jobErrorCopy(job.error) });
   }, [job?.status, job?.error]);
 
+  // #330 R-6 — scoped-empty derivation, at COMPLETION time. Both zero-card
+  // paths funnel through `job` (instant cache-hit onSuccess and the polled
+  // completion), so one effect covers them. Keyed on job_id too: a manual
+  // re-run of the same scoped search always creates a fresh job (pinned
+  // jobs bypass the server cache in both directions), and without the key
+  // a second zero-card completion — same status, same length — would never
+  // re-fire after handleFindTrades cleared the card (the B-3 dishonesty
+  // this exists to prevent). Names derive from the pin + scoped opponent at
+  // completion, never from handoff origin. Errors never reach here
+  // (status 'error' → deckFailure owns it); a completed job WITH cards
+  // clears any stale card.
+  useEffect(() => {
+    if (job?.status !== 'complete') return;
+    if (job.cards.length > 0) {
+      setScopedEmpty(null);
+      return;
+    }
+    const { pinnedGive: pg, pinnedReceive: pr } = useFinderTargets.getState();
+    const pinned = pg[0] ?? pr[0];
+    if (!pinned || !scopedOpponent) return;
+    setScopedEmpty({
+      playerName: pinned.name,
+      teamName: scopedOpponentName || 'that team',
+      direction: pg.length > 0 ? 'give' : 'receive',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.job_id, job?.status, job?.cards.length]);
+
   // Deck maintenance: append new cards as the snapshot grows, dedup by
   // trade_id so re-rendering doesn't duplicate. Don't reset the index —
   // the user may already be swiping on early cards.
@@ -1594,6 +1673,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setTradeIntent(null); // #172 — a declared shape is league-specific
     setJob(null);
     setDeckFailure(null); // P0-2 — last league's failure never follows you
+    setScopedEmpty(null); // #330 — ditto for the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
@@ -2140,12 +2220,16 @@ export default function TradesScreen({ navigation, route }: any) {
   // Trade" tap regenerates through the normal job flow (pinned jobs bypass
   // the server cache). Deliberately NOT auto-firing a job per chip change.
   function resetDeckForNewTargets() {
+    // #330 R-10 — every reset opens a new generation epoch; results from
+    // dispatches stamped under an older epoch are dropped on arrival.
+    deckEpochRef.current += 1;
     flushPendingPassRef.current(); // commit any undoable pass before reset
     lastDispositionedRef.current = null; // regenerated decks can reuse ids
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
     setJob(null);
+    setScopedEmpty(null); // #330 — a reset invalidates the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
     setPinIdeaResumed(false); // #317 — the next deck re-takes the slot
@@ -2173,11 +2257,52 @@ export default function TradesScreen({ navigation, route }: any) {
   // mode's route params, so this reads exactly as it did before.
   // CLEARING an opponent still only resets: broadening the search is not a
   // request for a new sweep, and it matches how pin add/remove behaves.
+  // ── #330 — Offer/Target handoff consumption (one-shot, focus-gated) ───
+  // LeagueSummaryScreen's row action pins the player (store `setSide`, the
+  // #300 contract) and now also parks a `handoff` {opponent, autoRun, seq}.
+  // Consumed HERE, on focus, exactly once: null the store field, adopt the
+  // opponent into sheet state, record the handoff's seq, and arm the
+  // auto-run ref — then let the existing scoped-opponent choke point below
+  // do the actual reset + dispatch. `navigation.navigate` in the row action
+  // focuses this screen right after setHandoff, so consumption is prompt;
+  // an un-consumed handoff (user never visits the tab) parks in the store
+  // until focus, `clear()`, or the league-switch GC — no timeout.
+  //
+  // Degradation matrix (R-8): when the choke point is gated off
+  // (`trades.finder_hub` OFF or no finderMode) the ref is NOT armed and the
+  // seq NOT recorded — the handoff degrades to prefill-without-autorun
+  // instead of leaving an armed ref to detonate on a later mode entry.
+  const navFocused = useIsFocused();
+  const finderHandoff = useFinderTargets((s) => s.handoff);
+  const [autoRunSeq, setAutoRunSeq] = useState(0);
+  const autoRunPendingRef = useRef(false);
+  useEffect(() => {
+    if (!navFocused || !finderHandoff) return;
+    useFinderTargets.getState().setHandoff(null); // one-shot: consume first
+    setSheetOpponent(finderHandoff.opponent);
+    if (finderHubOn && finderMode) {
+      autoRunPendingRef.current = true;
+      setAutoRunSeq(finderHandoff.seq);
+    }
+  }, [navFocused, finderHandoff, finderHubOn, finderMode]);
+
   const finderScopeSeen = useRef(false);
   useEffect(() => {
     if (!finderHubOn || !finderMode) return;
     resetDeckForNewTargets();
-    if (finderScopeSeen.current && scopedOpponent) {
+    // #330 — an armed handoff widens the fresh-mount gate (generate even on
+    // the first observation) and, via the `autoRunSeq` dep, re-fires this
+    // effect for a repeat Offer to the SAME team (`scopedOpponent` is a
+    // derived string — unchanged in that case). One choke point, one
+    // dispatch per handoff; no new mutate site.
+    const autoRun = autoRunPendingRef.current;
+    if ((finderScopeSeen.current || autoRun) && scopedOpponent) {
+      autoRunPendingRef.current = false;
+      if (autoRun) {
+        // R-4 — the auto-run is a find-trades dispatch the user asked for
+        // with the Offer/Target tap; same event, attributable source.
+        track('find_trades_tapped', { source: 'league_offer', mode: deckMode }, 'Trades');
+      }
       generateMutation.mutate({});
       // The sweep about to land IS the current prefs — don't leave the #257
       // "Preferences changed" nudge armed by the pick that triggered it
@@ -2187,7 +2312,7 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     finderScopeSeen.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finderMode, scopedOpponent]);
+  }, [finderMode, scopedOpponent, autoRunSeq]);
 
   function handleAddTarget(p: CalcPlayer) {
     const player: Player = {
@@ -5773,6 +5898,33 @@ export default function TradesScreen({ navigation, route }: any) {
                   variant="secondary"
                   compact
                   onPress={() => handleFindTrades('deck_error_retry')}
+                />
+              </View>
+            </Card>
+          ) : scopedEmpty ? (
+            // #330 R-6 — a SCOPED search (player pinned + opponent scoped)
+            // completed with zero cards. Honest about what already happened:
+            // the server's #189 relaxed pass has ALREADY widened the
+            // fairness band before returning zero, so the copy claims the
+            // stronger fact — do not "fix" it back to "under your current
+            // settings". The pin and the scope stay locked (R-7): the only
+            // ways out are this link and the sheet's own visible edits.
+            <Card>
+              <View style={styles.emptyInner} testID="trades.scoped-empty">
+                <Text style={styles.emptyTitle}>No trade found</Text>
+                <Text style={styles.emptyBody}>
+                  {scopedEmpty.direction === 'give'
+                    ? `We couldn't build a trade that sends ${scopedEmpty.playerName} to ${scopedEmpty.teamName} — even after stretching the fairness band. Your player and team stayed locked.`
+                    : `We couldn't build a trade that gets ${scopedEmpty.playerName} from ${scopedEmpty.teamName} — even after stretching the fairness band. Your target and team stayed locked.`}
+                </Text>
+                <Button
+                  testID="trades.scoped-empty.back"
+                  label="Back to league rankings"
+                  variant="secondary"
+                  compact
+                  onPress={() =>
+                    navigation.navigate('League', { screen: 'LeagueRankings' })
+                  }
                 />
               </View>
             </Card>

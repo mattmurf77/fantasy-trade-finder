@@ -6,7 +6,7 @@ Things that **must** stay in sync across backend, web, mobile, and the extension
 
 ## Tier keys, labels & color tokens
 
-**The tier taxonomy is the 8-tier pick-value ladder (2026-07-12, feedback #117/#118; supersedes the 2026-07-11 six):** tier keys/labels read directly in draft-pick terms — a tier says what a player in it is worth in the Pick Anchor wizard's vocabulary. The 2026-07-11 keys `firsts_2plus` and `bench` are retired (`firsts_2` and `waivers` replace them; `apply_tiers` no-ops unknown keys so stale clients sending old keys degrade safely, and `users.tier_overrides` stores raw Elo so saved boards re-bucket automatically). Keys are cross-client enums (sent verbatim in `/api/tiers/save`, served by `/api/tier-config`, `/api/extension/rankings`, `/api/anchor/save`, profile tier snapshots).
+**The tier taxonomy is the 8-tier pick-value ladder (2026-07-12, feedback #117/#118; supersedes the 2026-07-11 six):** tier keys/labels read directly in draft-pick terms — a tier says what a player in it is worth in the Pick Anchor wizard's vocabulary. The 2026-07-11 keys `firsts_2plus` and `bench` are retired (`firsts_2` and `waivers` replace them; `apply_tiers` no-ops unknown keys so stale clients sending old keys degrade safely, and `users.tier_overrides` stores raw Elo so saved boards re-bucket automatically). Keys are cross-client enums (sent verbatim in `/api/tiers/save`, served by `/api/tier-config`, `/api/extension/rankings`, `/api/anchor/save`, profile tier snapshots, `GET /api/league/power-rankings` `roster[].tier`, and — since #323 — the mock-draft payload's `picks[].tier`/`my_picks[].tier`: server-computed via `RankingService.tier_for_elo` over the consensus Elo always, `null` ⇒ the client shows NO tier — clients map the key through `TIER_LABEL`/`TierBadge` and never derive a tier themselves).
 
 Color rule unchanged (re-canonicalized 2026-07-10 to de-collide from position colors): **tier hues must not share a hue with any position color.** Tiers are the *bright* family (Tailwind 400-level), positions the *deeper* family (500-level). Lighter same-hue accents (300/200-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values. (The two hues added for the #117 top tiers: red-400 is a distinct hue family from the semantic `--neg` red-500 by the same bright-vs-deep rule that separates tier gold `#fbbf24` from `--warn` amber-500; fuchsia-400 is magenta, distinct from TE purple-500 and from tier pink `#f472b6`.)
 
@@ -658,6 +658,24 @@ produced by the `build_settings` `UserNotInDraft` raise, mapped to the
 byte-identical typed-empty at the create route. The reason enum stays OPEN
 on clients (`(string & {})` + `default:` arm).
 
+## Mock-draft ownership source (#328)
+
+**`settings_echo.ownership_source` is a CLOSED four-member vocabulary
+server-side:** `platform` | `user` | `partial` | `none` — constants
+`OWNERSHIP_SOURCE_*` in `backend/mock_draft_service.py`, coerced in
+`build_settings` (the `mode` idiom). Client type `MockOwnershipSource`
+(`mobile/src/api/mockDraft.ts`) is **OPEN + nullable** (`(string & {})`,
+`| null`): the server may grow the set, and `null` ⇔ the mock row was
+persisted before the label existed — clients treat absent/`null` as
+*unknown*, **never** as `"none"`. `partial` = ownership data applied but not
+covering every `(round, slot)` of the mock; uncovered slots draft at slot
+order. The mobile caption copy is pinned in
+`MockDraftScreen.ownershipCaption` (one helper, two mounts —
+`mock-draft.ownership-caption`, `mock-draft.recap.ownership-caption`) and by
+`mobile/tests/check-mock-ownership-caption.js`; an unknown value renders
+nothing. `mock_started` carries the resolved value as its seventh prop
+(`backend/analytics_taxonomy.py`).
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
@@ -683,3 +701,10 @@ NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkl
 | DN scoring → FTF board map | `PPR→1qb_ppr`, `SFLEXTEP→sf_tep` (exact); `SFLEX→sf_tep`, `STD→1qb_ppr` (nearest — labeled confirmation only) | `rankPresets.ts`, import confirmation UI |
 | Contender rule | `contender_` files never apply to a dynasty board without explicit user override | `ImportRankingsSheet.tsx`, `check-premium-import.js` |
 | Order-only rule | premium CSV `Value`/`Trend`/`PPG` columns are never sent to or persisted by FTF | `rankPresets.ts`, `rankings_import.py`, both check suites |
+
+## Aggregate value presentation (2026-08-16, D-064)
+
+Aggregate asset values shown to users are expressed as pick-equivalent labels
+("≈N firsts", `_aggregate_pick_label`), never raw numerics — on every client,
+ungated. Per-asset value uses the 8-rung `Tier` enum (server-computed). Raw
+numeric values are a debugging/share-image-only representation (#277/#280).

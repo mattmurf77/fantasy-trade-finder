@@ -19,6 +19,7 @@ Operational procedures. Add to this as you learn things.
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
+- [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -55,6 +56,7 @@ Operational procedures. Add to this as you learn things.
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
+- [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 
 ---
 
@@ -224,6 +226,28 @@ curl -H "X-Cron-Secret: $CRON_SECRET" -X PUT .../api/admin/config/<key> # update
 ```
 See [config-reference.md](config-reference.md) for keys. All `/api/admin/*`
 endpoints, `/api/debug/log`, and `/api/feature-flags/reload` share this auth.
+
+---
+
+## Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)
+
+Every trade job logs an INFO line `trade-job <id>: presentment kills={'R1':…,
+'R2':…, 'R3':…, 'R5':…, 'R4':…} served=<n>` (R1/R2/R3/R5 are
+construction-candidate kills — enumeration-scale numbers are normal; R4 is
+distinct excluded keys; `served` is the post-ghost count). A WARNING with the
+grep-able prefix **`presentment-tripwire`** fires only when a deck is thin
+AND the rules' own kills explain the thinness (`served < 5 AND served +
+rule_kills > 15`) — decks thinned by fairness/surplus never fire it.
+
+Response: identify the dominant rule in the logged counters, then kill that
+rule live (deploy-free) via `PUT /api/admin/config/<knob>`:
+R1 → `max_overpay_frac = 0` · R2 → `pos_net_cap = 0` · R3 →
+`pick_gap_frac = 0` · R5 → `need_gate_min_value = 0`. R4 has no knob; the
+whole group reverts by flipping `trade.presentment_rules` to `false` in
+`config/features.json` (one-line commit + deploy). Expect zero hits on
+healthy leagues; contender-heavy leagues thin the most by design (#304 is a
+contender complaint) — log any hit with its rule attribution in
+`docs/feedback/items/304-positional-need-filter/status.md`.
 
 ---
 
@@ -817,3 +841,32 @@ impression, 2026-08-16) somehow lack link rows; telemetry-era trades are deliber
 to the live matcher. First corpus report:
 `docs/business/analytics/2026-08-16-organic-trade-corpus.md`; scope addendum:
 `docs/plans/matchmaking-engine/backfill-scope.md`.
+## ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)
+
+The identity-binding release (feedback #321) verifies WHOSE ESPN account a
+captured cookie pair belongs to, not just that it works. Two support-visible
+effects:
+
+**1. Every ESPN-connected user is signed out of ESPN exactly once.** The
+deploy runs a one-time migration (`_evict_prerelease_espn_verified_stamps`,
+`backend/database.py`) that nulls every `espn_credentials.verified_at` stamp
+minted before the release cutoff — **any vintage, including sign-ins that
+were done correctly after the 2026-08-12 fixes** — because no pre-release
+stamp proves *identity* (the pre-release oracles accepted any valid ESPN
+session). Expected, deliberate, and resolved by one re-sign-in through
+Settings / the send flow, which now verifies identity before storing. The
+encrypted pair is kept (row not deleted); status simply reads *not
+connected* until re-proven. The migration is idempotent (date-bounded +
+NULL-fails-`<`), so re-deploys never re-sign anyone out.
+
+**2. A new rejection users may ask about: "it says my account doesn't own
+this team."** The wrong-account 403 copy is: *"That ESPN account can't open
+your linked league, so nothing was saved. Sign in with the ESPN account
+that owns your team."* It means the ESPN sign-in WORKED but belongs to a
+different human than the linked league's bound team (the #321 bleed shape:
+someone else signed in to ESPN on that device), or the user picked the
+wrong team at import. Fix: sign in with the owning ESPN account — or
+re-link the league and pick the right team. Wire code is still
+`espn_bad_credentials`; the additive `reason: "wrong_account"` field is
+what drives the dedicated mobile copy. Diagnosis from logs: grep
+`identity mismatch` (store / team-binding / re-sync variants all log it).

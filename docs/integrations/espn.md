@@ -252,19 +252,19 @@ Related league-binding columns on the `leagues` table (`backend/database.py:254-
    (`backend/database.py`, encrypted at rest), *then* the league +
    membership snapshot is written — order
    matters so a later re-import can reuse the cookies even if the league write
-   fails. The store stamps `verified_at`: the league fetch that just succeeded
-   ran WITH this pair attached, and the in-app flow only collects cookies after
-   an anonymous read 403s (private league), so that fetch was a genuine
-   authenticated proof — no second probe is made.
-   **Known residual (2026-08-12, not fixed by the oracle work below):** that
-   argument is about the *flow*, not the *read*. A manual paste against a
-   **public** league succeeds anonymously, so this path can still stamp
-   `verified_at` on a pair ESPN never validated. Smaller blast radius than the
-   credential-only path was — the `GET` honesty gate and the send pre-flight
-   both still catch it downstream — but the stamp is not honest. Fixing it
-   needs either an anonymous control read of the same league (one extra GET,
-   only when cookies were pasted) or routing this path through
-   `_espn_verify_credential` too.
+   fails. The store stamps `verified_at` only when the league is genuinely
+   auth-gated — one anonymous probe settles that. If the read needed the
+   cookies, the league fetch that just succeeded ran WITH this pair attached
+   and is itself authenticated proof; no second probe is made.
+   **Former public-league residual (2026-08-12), closed by #321 on
+   2026-08-16:** a paste against a **public** league used to stamp
+   `verified_at` on a pair ESPN never validated, since that fetch would have
+   succeeded anonymously. That path no longer self-stamps — the anonymous
+   probe classifies the league, and a public league's pair is judged by
+   `_espn_verify_credential` instead. A failing or unjudgeable pair never
+   fails the import: 200 with the additive `credential_stored: false` +
+   `credential_reason` (`"unverified"|"unavailable"`). See
+   `docs/api-reference.md` § `POST /api/espn/link`.
 1b. **Credential-only store (send-auth lazy flow, 2026-08-11; verification
    added 2026-08-12, oracle corrected the same day):** `POST /api/espn/link`
    with `espn_s2`+`swid` and NO `espn_league_id` — the ESPN Connect WebView

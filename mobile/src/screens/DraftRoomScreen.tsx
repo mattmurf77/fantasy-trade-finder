@@ -319,6 +319,9 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
           rounds: res.settings_echo?.rounds ?? null,
           type: res.settings_echo?.type ?? null,
           order_source: res.settings_echo?.order_source ?? null,
+          // #328 — resolved provenance of the traded-pick overlay; the
+          // fallback rate per platform is one query.
+          ownership_source: res.settings_echo?.ownership_source ?? null,
           mode: res.settings_echo?.mode ?? null,
         },
         'DraftRoom',

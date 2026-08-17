@@ -72,7 +72,8 @@ _bh = _BufferHandler()
 _bh.setFormatter(logging.Formatter("%(levelname)s  %(message)s"))
 log.addHandler(_bh)
 from .ranking_service import RankingService, Player, TIER_CONFIG, ORDERED_TIERS
-from .data_loader import load_consensus_maps, seed_elo_for_players, normalise_name
+from .data_loader import (load_consensus_maps, seed_elo_for_players,
+                          seed_elo_for_value, normalise_name)
 from .database import (
     init_db,
     upsert_user, upsert_league,
@@ -111,7 +112,7 @@ from .database import (
     load_trade_block,
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
-    load_awaiting_trades,
+    load_awaiting_trades, load_matches_for_exclusion,
     retract_awaiting_likes,
     record_match_disposition,
     dismiss_match,
@@ -2888,6 +2889,7 @@ def _inject_likes_you_cards_impl(
     seed_map: dict,
     untouchable_ids: set | None = None,
     not_interested_ids: set | None = None,
+    exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -2965,6 +2967,17 @@ def _inject_likes_you_cards_impl(
         seen_keys.add(key)
         # Don't resurface a trade the user already swiped on.
         if (key[0], key[1]) in trade_service._past_decision_keys:
+            continue
+        # G6 R4 #336 (Q-G6-1) — never re-inject a trade that is currently
+        # live in the user's match pipeline (awaiting like or pending/
+        # accepted match). DEDUP only: the quality rules R1/R2/R3/R5 stay
+        # off this surface per Q21 — the D-055 user-gain floor below is
+        # its only quality gate.
+        if exclusion_keys and (key[0], key[1]) in exclusion_keys:
+            try:
+                trade_service._r4_excluded_keys.add((key[0], key[1]))
+            except Exception:
+                pass
             continue
         # D-055 — user-gain floor. The injection's pull is "they already
         # want this", but a like the VIEWER loses badly on reads as an
@@ -4906,6 +4919,80 @@ def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
     return outlook, signals
 
 
+def _presentment_need_gate_bypass(pinned_give, pinned_receive,
+                                  opponent_user_id, acquire_positions) -> bool:
+    """G6 R-5b — R5 #304 applies only to UNTARGETED discovery decks.
+
+    Derived SERVER-SIDE from job fields, never read from the request body
+    (no request-surface change — G4 contract). Any targeted shape bypasses
+    R5: pinned give ("what can I get for X?"), pinned receive ("get me
+    this player"), opponent scope (#156/#330), or explicit
+    acquire_positions (a saved league pref that REPLACES inferred need —
+    trade_service.py's `list(acquire_positions) or list(...needs)`
+    semantic). Deliberately NOT in the field list: trade_away_positions
+    alone (targets the give side; R5 judges the receive side) and
+    trade_intent (#172 modes are discovery-with-a-lens). Precedent for
+    server-derived targetedness: the likes-you injector's own skip
+    condition. R1/R2/R3/R4 apply to targeted and untargeted jobs alike.
+    """
+    return bool(pinned_give or pinned_receive or opponent_user_id
+                or acquire_positions)
+
+
+def _load_presentment_exclusions(user_id: str, league_id: str) -> set:
+    """G6 R4 #336 — windowless per-job exclusion set, built once per trade
+    job: (frozenset(my_give), frozenset(my_receive)) keys for (a) the
+    user's un-retracted awaiting likes in THIS league — NO time window
+    (the bug was the 7-day `since_days` on generation dedup: an 8-day-old
+    like still sitting in Awaiting legitimately regenerated) — and (b)
+    `pending`/`accepted` trade_matches rows, keyed from the user's
+    orientation. `declined` matches and retracted likes may regenerate
+    (Q-G6-2 / #318). load_awaiting_trades already excludes retracted likes
+    and already subtracts matured matches — both properties are relied on,
+    not re-implemented. Failure is non-fatal: log + empty set, matching
+    the surrounding pref-load posture.
+    """
+    exclusion_keys: set = set()
+    try:
+        for t in load_awaiting_trades(user_id):
+            if t.get("league_id") != league_id:
+                continue
+            exclusion_keys.add((frozenset(t["my_give"]),
+                                frozenset(t["my_receive"])))
+        for m in load_matches_for_exclusion(user_id, league_id):
+            exclusion_keys.add((frozenset(m["my_give"]),
+                                frozenset(m["my_receive"])))
+    except Exception as excl_err:
+        log.warning("trade-job: presentment exclusion-set build failed "
+                    "(non-fatal, serving without R4): %s", excl_err)
+        return set()
+    return exclusion_keys
+
+
+def _log_presentment_outcome(trade_service, job_id: str, league_id: str,
+                             served: int) -> None:
+    """G6 R-9 — per-job kill-counter INFO line + the `presentment-tripwire`
+    WARNING. `served` is the POST-GHOST count (lld §5 amendment):
+    ghost-withheld cards pass the rules before being withheld, so they feed
+    neither term and the tripwire keeps firing only on rule-explained
+    thinness. The attributable form (round-1 N2): fire only when the rules'
+    own kills explain the gap between a thin deck and a healthy one —
+    never blame presentment for decks thinned by fairness. Grep-able
+    prefix documented in docs/runbook.md.
+    """
+    try:
+        kills = trade_service.presentment_kill_counts()
+        rule_kills = (kills.get("R1", 0) + kills.get("R2", 0)
+                      + kills.get("R3", 0) + kills.get("R5", 0))
+        log.info("trade-job %s: presentment kills=%s served=%d",
+                 job_id, kills, served)
+        if served < 5 and served + rule_kills > 15:
+            log.warning("presentment-tripwire: job=%s league=%s served=%d "
+                        "kills=%s", job_id, league_id, served, kills)
+    except Exception as tw_err:
+        log.warning("presentment logging failed (non-fatal): %s", tw_err)
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -4991,6 +5078,15 @@ def _run_trade_job(
             seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
             if seeded:
                 outlook_value = seeded
+
+        # G6 presentment rules — R-5b bypass (server-derived, never
+        # client-passable) + the R4 #336 windowless exclusion set, both
+        # built once per job. Flag off ⇒ neither is consulted downstream.
+        bypass_need_gate = _presentment_need_gate_bypass(
+            pinned_give, pinned_receive, opponent_user_id, acquire_positions)
+        exclusion_keys: set = set()
+        if FLAGS.trade_presentment_rules:
+            exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
 
         # Update outlook on the job for cache freshness checks
         with _trade_jobs_lock:
@@ -5128,6 +5224,8 @@ def _run_trade_job(
             target_ids           = target_ids or None,
             not_interested_ids   = not_interested_ids or None,
             trade_intent         = trade_intent,
+            bypass_need_gate     = bypass_need_gate,
+            exclusion_keys       = exclusion_keys,
             **gen_kwargs,
         )
 
@@ -5170,6 +5268,7 @@ def _run_trade_job(
                     seed_map      = seed_map,
                     untouchable_ids = untouchable_ids or None,
                     not_interested_ids = not_interested_ids or None,
+                    exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                 )
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):
@@ -5433,6 +5532,12 @@ def _run_trade_job(
             except Exception as gs_err:
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
+
+        # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
+        # served count (lld §5 amendment). Flag off ⇒ no line at all.
+        if FLAGS.trade_presentment_rules:
+            _log_presentment_outcome(trade_service, job_id, league_id,
+                                     len(served_final))
 
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only
@@ -9459,7 +9564,27 @@ def get_league_picks():
         supported = has_assigned_picks(league_id)
     try:
         raw = load_draft_picks(league_id=league_id, source=_pick_read_source())
+        # #320 (D-320-1, supersedes #263's "picks stay numeric") — additive
+        # `tier` per pick row: the pick-value ladder rung its DISCOUNTED
+        # `pool_value` sits in TODAY, so calculator surfaces can badge picks
+        # the same way they badge players. `seed_elo_for_value` inverts the
+        # value map back onto the tier bands' Elo scale before the canonical
+        # `tier_for_elo` band walk — never `pool_value` passed straight in
+        # (elo_to_value scale ≠ tier-band Elo scale, the exact #263 bug).
+        # Position None takes the bands' documented general-pool fallback;
+        # pick value is position-uniform by design (tier_config.json). A
+        # consequence the operator accepted (D-320-2): a far-out pick's
+        # badge reflects its discounted price — a 2028 2nd may badge 3rd.
+        # NULL pool_value → null tier; clients fall back to the numeric.
+        fmt = sess.get("active_format") or DEFAULT_SCORING
+        def _pick_tier(p: dict):
+            v = p.get("pool_value")
+            if v is None:
+                return None
+            return RankingService.tier_for_elo(
+                seed_elo_for_value(float(v)), None, fmt)
         all_picks = [{**p, "label": _owned_pick_label(p),
+                      "tier": _pick_tier(p),
                       **_pick_wire_source(p, tradeable)} for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
         return jsonify({
@@ -12332,47 +12457,80 @@ def _mock_capability(sess: dict, league_id: str, season: int) -> dict:
                           user_owner_id=_league_user_id(sess))
 
 
-def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
-    """W2d/G1 — order, order_source, traded picks and shape from the league's
-    REAL draft, via the very board the Draft Room renders.
-
-    Before this the create route passed none of the four resolution inputs the
-    engine accepts, so every mock was randomized-order and every traded pick was
-    silently discarded. The source here is `draft_board_service.build_board` —
-    literally the Draft Room's, cached, single-flight, budgeted and
-    breaker-guarded — so the mock's order and the room's order cannot disagree
-    and the mock costs no read the room has not already paid for.
-
-    Returns `{order, order_source, traded_slots, type}`. `build_board` never
-    raises, and every field degrades to the honest empty: no `draft_order` on
-    the platform ⇒ no `order`, which makes `build_settings` fall back to the
-    seeded shuffle and LABEL it `randomized` (KD-6). Never an invented order.
-    """
-    from . import draft_board_service as dbs
-    from . import mock_draft_service as mds
-
-    out = {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
-           "traded_slots": {}, "type": None}
+def _mock_platform(sess: dict, league_id: str) -> str:
+    """The mock create path's ONE platform sniff (#328) — session league,
+    overridden by the draft context when one exists. Two call sites
+    (`_mock_real_draft` and the create route's MFL overlay step) must never
+    disagree on which platform a league is."""
     g_league = sess.get("league")
     platform = str(getattr(g_league, "platform", "sleeper") or "sleeper").lower()
     ctx = get_league_draft_context(league_id)
     if ctx:
         platform = str(ctx.get("platform") or platform).lower()
-    if platform != dbs.SLEEPER or not is_enabled("draft.room"):
-        # MFL's grid states the CURRENT owner but never the original, so it
-        # cannot distinguish "slot order" from "traded pick" — reading it would
-        # produce an order that is really an ownership overlay. Non-Sleeper
-        # leagues therefore stay randomized-and-labelled, honestly.
+    return platform
+
+
+def _mock_real_draft(sess: dict, league_id: str, season: int,
+                     rounds: int | None = None) -> dict:
+    """W2d/G1 + #328 — order, order_source, traded picks, shape and ownership
+    provenance from the league's REAL draft, via the very board that
+    platform's Draft Room renders.
+
+    Sleeper reads `draft_board_service.build_board` — literally the Draft
+    Room's, cached, single-flight, budgeted and breaker-guarded — so the
+    mock's order and the room's order cannot disagree. ESPN (#328) reads
+    `dbs.assigned_board` over the SAME `_assignment_grid` the board route's
+    ESPN branch builds, so the mock and the ESPN Draft Room can never
+    disagree either; zero platform egress — the grid is our own DB.
+
+    Returns `{order, order_source, traded_slots, type, ownership_source}`.
+    Neither board builder raises, and every field degrades to the honest
+    empty: no assigned order ⇒ no `order`, which makes `build_settings` fall
+    back to the seeded shuffle and LABEL it `randomized` (KD-6), with
+    `ownership_source: "none"` — labeled, never silent (#328).
+
+    `rounds` is THIS mock's clamped round count — the coverage check's
+    denominator. The label promises every `(round, slot)` of the mock has
+    known ownership provenance; any hole (a round-≥2 contested/orphaned ESPN
+    slot, a mock deeper than the grid/board) degrades to `"partial"`.
+    Defaulted so the pre-#328 call shape still answers (tests drive it
+    3-arg); the route always passes the parsed value.
+    """
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    out = {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
+           "traded_slots": {}, "type": None,
+           "ownership_source": mds.OWNERSHIP_SOURCE_NONE}
+    if rounds is None:
+        rounds = mds.DEFAULT_ROUNDS
+    platform = _mock_platform(sess, league_id)
+
+    if platform == dbs.SLEEPER and is_enabled("draft.room"):
+        _pool, consensus_seed = _get_universal_pool(_active_format(sess))
+        board = dbs.build_board(
+            dbs.BoardRequest(league_id=str(league_id), platform=dbs.SLEEPER,
+                             season=int(season), user_id=sess.get("user_id"),
+                             consensus_elo=consensus_seed,
+                             scoring=_active_format(sess)),
+            dbs.PlatformFetchers(sleeper_get=_sleeper_get,
+                                 rookie_ids_fn=_rookie_player_ids))
+    elif platform == dbs.ESPN and is_enabled("picks.assign"):
+        # #328 — the same board the ESPN Draft Room renders (route parity:
+        # the gate matches the board route's ESPN branch). `fetchers=None`:
+        # no undrafted list is needed here, and recorded picks affect state,
+        # never order/order_confidence. Zero platform egress by construction.
+        board = dbs.assigned_board(
+            dbs.BoardRequest(league_id=str(league_id), platform=dbs.ESPN,
+                             season=int(season), user_id=sess.get("user_id")),
+            grid=_assignment_grid(str(league_id), int(season)))
+    else:
+        # Honest empty — Fleaflicker/unknown, MFL (the ORDER half: MFL states
+        # ownership but no slot sequence — the create route overlays it, KD-6
+        # keeps the order a labelled shuffle), or flag off.
+        # `ownership_source` stays "none".
         return out
 
-    _pool, consensus_seed = _get_universal_pool(_active_format(sess))
-    board = dbs.build_board(
-        dbs.BoardRequest(league_id=str(league_id), platform=dbs.SLEEPER,
-                         season=int(season), user_id=sess.get("user_id"),
-                         consensus_elo=consensus_seed,
-                         scoring=_active_format(sess)),
-        dbs.PlatformFetchers(sleeper_get=_sleeper_get,
-                             rookie_ids_fn=_rookie_player_ids))
     out["type"] = board.get("type")
     rows = board.get("order") or []
     if board.get("order_confidence") != dbs.ORDER_ASSIGNED:
@@ -12395,8 +12553,89 @@ def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
     else:
         # A partial slot map is not an order. Drop the overlay with it: a
         # traded pick is meaningless without the slots it trades between.
+        # (#328 asymmetry, on purpose: a round-1 hole drops the WHOLE
+        # resolution to "none"; a round-≥2 hole keeps the order and labels
+        # "partial" below.)
         out["traded_slots"] = {}
+    if out["order"] is not None:
+        source = (mds.OWNERSHIP_SOURCE_PLATFORM if platform == dbs.SLEEPER
+                  else mds.OWNERSHIP_SOURCE_USER)
+        # #328 coverage check: the source label promises EVERY slot of THIS
+        # mock has known ownership provenance. Board rows exist for every
+        # (round, slot) the platform/grid states — contested/orphaned
+        # exclusions and rounds beyond grid/board depth are the holes. An
+        # order that resolved with zero traded rows but full coverage still
+        # earns the source label: "no trades" is a fact, not a fallback.
+        teams = len(out["order"])
+        covered = {(int(r.get("round") or 0), int(r["slot"]))
+                   for r in rows if r.get("slot")}
+        expected = {(rnd, s) for rnd in range(1, int(rounds) + 1)
+                    for s in range(1, teams + 1)}
+        out["ownership_source"] = (source if expected <= covered
+                                   else mds.OWNERSHIP_SOURCE_PARTIAL)
     return out
+
+
+def _mock_owned_pick_overlay(league_id: str, season: int, rounds: int,
+                             resolved_order: list[str],
+                             ) -> tuple[dict[tuple[int, int], str], str]:
+    """#328 — `(traded_slots, ownership_source)` from the normalized
+    `draft_picks` store. MFL only, by construction: rows in the store with
+    platform ownership provenance and no slot sequence.
+
+    Anchored to the ORIGINAL owner's slot in `resolved_order`, wherever the
+    shuffle put them — ownership is a fact about the original owner, not a
+    slot number. Identity guard per the 2026-08-13 membership audit: rows
+    whose ids are unknown to `resolved_order` are dropped and counted; a
+    fully-dropped overlay reports "none", a partial drop applies what
+    matched, logs the count (server log only, never the payload) and labels
+    "partial". Deterministic — no rng, no egress.
+    """
+    from . import mock_draft_service as mds
+
+    # The default platform read (NULL reads as platform — MFL sync rows carry
+    # NULL `source`). NEVER source="any": user-asserted rows are ESPN's path.
+    rows = load_draft_picks(str(league_id), source=PICK_SOURCE_PLATFORM)
+    season_rows = [r for r in rows
+                   if int(r.get("season") or 0) == int(season)
+                   and 1 <= int(r.get("round") or 0) <= int(rounds)]
+    if not season_rows:
+        # No data for this season/rounds is a fallback, not a fact (#228/#207
+        # inheritance: a drafted season's rows are verdict-excluded ⇒ "none").
+        return {}, mds.OWNERSHIP_SOURCE_NONE
+
+    # Coverage census: MFL's futureDraftPicks export enumerates every pick
+    # (traded or not), one row per franchise per round, so a complete season
+    # has >= teams rows in every round of the mock. A shallow store (mock
+    # `rounds` deeper than the export) fails the census.
+    complete = all(
+        sum(1 for r in season_rows if int(r["round"]) == rnd)
+        >= len(resolved_order)
+        for rnd in range(1, int(rounds) + 1))
+
+    traded = [r for r in season_rows if r.get("is_traded")]
+    known = {str(u) for u in resolved_order}
+    slot_of = {str(u): i + 1 for i, u in enumerate(resolved_order)}
+    kept = [r for r in traded
+            if str(r.get("original_user_id") or "") in known
+            and str(r.get("owner_user_id") or "") in known]
+    drops = len(traded) - len(kept)
+    if traded and not kept:
+        log.warning("mock overlay: dropped ALL %d traded rows for %s "
+                    "(identity guard) — degrading to ownership_source=none",
+                    len(traded), league_id)
+        return {}, mds.OWNERSHIP_SOURCE_NONE
+    if drops:
+        log.warning("mock overlay: dropped %d/%d traded rows for %s "
+                    "(identity guard)", drops, len(traded), league_id)
+
+    # Last-write-wins on a duplicate (round, slot) key is acceptable — the
+    # store's pick_id uniqueness makes duplicates a data error, not a state.
+    overlay = {(int(r["round"]), slot_of[str(r["original_user_id"])]):
+               str(r["owner_user_id"]) for r in kept}
+    label = (mds.OWNERSHIP_SOURCE_PLATFORM if complete and drops == 0
+             else mds.OWNERSHIP_SOURCE_PARTIAL)
+    return overlay, label
 
 
 def _mock_personas(league_id: str, sess: dict) -> dict[str, dict[str, str]]:
@@ -12566,17 +12805,35 @@ def mock_draft_route():
     # G1 — the four resolution inputs the engine has always accepted and the
     # route never passed. `real` degrades to a randomized-and-labelled order
     # when the platform has no assigned one; `order_source` rides the payload
-    # so the client can DISCLOSE that rather than imply a real order.
-    real = _mock_real_draft(sess, league_id, season)
+    # so the client can DISCLOSE that rather than imply a real order. #328
+    # adds `ownership_source` — the same disclosure for the traded-pick
+    # overlay.
+    real = _mock_real_draft(sess, league_id, season, rounds)
+    rng = random.Random(rng_seed)
+    if real["order"] is None and _mock_platform(sess, league_id) == dbs.MFL:
+        # #328 — MFL states ownership but no slot sequence (KD-6: never
+        # invent an order). Resolve the same seeded shuffle build_settings
+        # would have produced — identical list-copy recipe, first rng draw —
+        # THEN anchor the overlay to it; build_settings sees an explicit
+        # order and does not reshuffle, so a given rng_seed yields the same
+        # permutation the internal shuffle produced pre-#328.
+        shuffled = [str(o) for o in owners]
+        rng.shuffle(shuffled)
+        overlay, own_src = _mock_owned_pick_overlay(league_id, season,
+                                                    rounds, shuffled)
+        real.update(order=shuffled, traded_slots=overlay,
+                    ownership_source=own_src)
+        # order_source stays ORDER_SOURCE_RANDOMIZED — the shuffle is ours.
     try:
         settings = mds.build_settings(
             ctx, owners=owners, user_owner_id=league_user_id, rounds=rounds,
             draft_type=body.get("type") or real["type"],
             order=real["order"], order_source=real["order_source"],
             traded_slots=real["traded_slots"],
+            ownership_source=real["ownership_source"],
             personas=_mock_personas(league_id, sess),
             mode=mode,
-            rng=random.Random(rng_seed))
+            rng=rng)
     except mds.UserNotInDraft:
         # INV-6 — the engine's backstop for the case the ladder is
         # structurally blind to (the user is an owner but the platform's
@@ -17039,12 +17296,25 @@ def _espn_reconnect_nudge(lg: dict, *, reason: str) -> None:
         key = f"{lid}:{episode}"
         if notification_exists_with_meta(uid, "espn_reconnect", "nudge_key", key):
             return
+        # #321 R9 — honest diagnosis for a wrong-account credential. SAME
+        # notification type (`espn_reconnect` — the web client allowlists
+        # inbox types, web/js/app.js, so a new type string would be silently
+        # dropped there); only the copy and meta.reason differ.
+        if reason == "wrong_account":
+            title = "Reconnect ESPN — wrong account signed in"
+            body = ("The ESPN sign-in saved here belongs to a different "
+                    "ESPN account than the one that owns your team in this "
+                    "league. Sign in with the ESPN account that owns your "
+                    "team to fix it.")
+        else:
+            title = "Reconnect ESPN to keep your league history"
+            body = ("Your saved ESPN sign-in stopped working, so weekly "
+                    "roster snapshots for this league are paused. Reconnect "
+                    "to resume them.")
         _write_inbox_row(
             uid, "espn_reconnect",
-            title="Reconnect ESPN to keep your league history",
-            body=("Your saved ESPN sign-in stopped working, so weekly "
-                  "roster snapshots for this league are paused. Reconnect "
-                  "to resume them."),
+            title=title,
+            body=body,
             meta={"league_id": lid, "nudge_key": key, "reason": reason},
         )
     except Exception as e:
@@ -17106,6 +17376,18 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             return None, "espn_fetch_failed"
         my_tid = lg.get("espn_my_team_id")
         my_uid = str(lg.get("user_id") or "")
+        # #321 R9 — the sweep is identity-aware: a stored SWID that
+        # conclusively doesn't own the bound team gets the honest
+        # wrong-account nudge (same `espn_reconnect` type, deduped per
+        # credential episode) instead of a later mislabeled "stopped
+        # working". The sync itself CONTINUES — league rosters are league
+        # truth regardless of whose credential read them.
+        if swid and my_tid is not None:
+            _bound = next((t for t in league["teams"] if t.team_id == my_tid), None)
+            if _bound and (_bound.owner_swid or "").strip() and \
+                    _espn.canonical_swid(_bound.owner_swid).upper() != \
+                    _espn.canonical_swid(swid).upper():
+                _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
             mid = my_uid if (my_uid and t.team_id == my_tid) \
@@ -20193,7 +20475,19 @@ def _espn_report_json(report: dict) -> dict:
     }
 
 
-def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
+# #321 identity binding (2026-08-16): the one wrong-account recovery copy,
+# shared by every surface that rejects a pair for OWNING THE WRONG ACCOUNT
+# (verify-time membership assertion, the league-link team-binding step, and
+# the re-sync assertion). Names the real fix — "sign in again" is the wrong
+# recovery for a pair that authenticates fine as the wrong human.
+_ESPN_WRONG_ACCOUNT_MSG = (
+    "That ESPN account can't open your linked league, so nothing was "
+    "saved. Sign in with the ESPN account that owns your team."
+)
+
+
+def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
+                            skip_league_id: str | None = None):
     """Prove an ESPN cookie pair against ESPN BEFORE it is stored.
 
     Returns `(verdict, oracle, detail)`:
@@ -20202,8 +20496,27 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
       "bad"         — ESPN answered and the pair proved nothing (a rejection,
                       or a read that returned no account-specific data).
                       Credential verdict → 403 espn_bad_credentials.
+      "wrong_account" — the pair IS a live ESPN session, but its SWID does
+                      not own the bound team of one of the caller's linked
+                      leagues (#321 identity binding, 2026-08-16). Verdict on
+                      the ACCOUNT, not the session → 403 espn_bad_credentials
+                      + additive `reason: "wrong_account"`.
       "unavailable" — transport failure / 5xx / a 200 that didn't parse. NOT
                       a verdict on the cookies → 502 espn_unavailable.
+
+    IDENTITY BINDING (#321): a passing oracle proves only "this pair is a
+    valid ESPN session for SOME account" — the 2026-08-12 incident stored a
+    different human's working session as the caller's. So after the auth
+    verdict, a MEMBERSHIP assertion runs regardless of oracle strength: the
+    pair's SWID must own the caller's bound team (`espn_my_team_id`) in
+    their linked ESPN leagues. Set semantics over EVERY bound league row —
+    one ESPN human owns one SWID, so a conclusive mismatch against ANY bound
+    league means the wrong account (or a mis-picked binding; either way the
+    re-link/re-sign-in recovery is right). Precedence: mismatch > accept >
+    unavailable. `skip_league_id` exempts a league whose binding is being
+    REWRITTEN by the caller right now (the import path already asserted the
+    pair against the newly chosen team, and holding the pair to the league's
+    OLD binding would deadlock the re-link that fixes a wrong binding).
 
     ORACLE CHOICE (verification-oracle fix, 2026-08-12). Two probes, in
     strength order:
@@ -20233,17 +20546,28 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
     from . import espn_service as _espn
     from .database import load_espn_leagues_for_user
 
+    # Linked-league inventory — drives BOTH the strong-oracle choice and the
+    # #321 membership assertion below.
+    linked: list[dict] = []
+    try:
+        linked = load_espn_leagues_for_user(user_id)
+    except Exception:
+        log.exception("espn verify: linked-league lookup failed for %s", user_id)
+
     # 1. Strong oracle: an already-linked league ESPN only serves to a
     #    signed-in member. PUBLIC links are skipped on purpose.
     gated = None
-    try:
-        for lg in load_espn_leagues_for_user(user_id):
-            if (lg.get("espn_auth") or "") == "cookie" and \
-                    str(lg.get("league_id") or "").isdigit():
-                gated = lg
-                break
-    except Exception:
-        log.exception("espn verify: linked-league lookup failed for %s", user_id)
+    for lg in linked:
+        if (lg.get("espn_auth") or "") == "cookie" and \
+                str(lg.get("league_id") or "").isdigit():
+            gated = lg
+            break
+
+    # Teams parsed during THIS verify, keyed by league id, so the membership
+    # phase never re-reads a league the oracle already fetched. None marks a
+    # league proven unreadable-but-inconclusive (purged) — don't retry it.
+    fetched_teams: dict[str, list | None] = {}
+    auth = None   # (verdict, oracle, detail) once the AUTH phase passes
 
     if gated:
         lid = str(gated["league_id"])
@@ -20262,6 +20586,7 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
             # nothing about the cookies. Fall through to the fan probe
             # rather than falsely rejecting a good sign-in.
             log.info("espn verify: linked league %s purged — falling back", lid)
+            fetched_teams[lid] = None
         except OSError as e:
             log.warning("espn verify: league oracle transport failure: %s", e)
             return "unavailable", "league_read", "transport"
@@ -20274,28 +20599,102 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str):
             except Exception:
                 teams = []
             if teams:
-                return "ok", "league_read", lid
-            log.warning("espn verify: league oracle 200 didn't parse (league=%s)",
-                        lid)
-            return "unavailable", "league_read", "unrecognized_payload"
+                fetched_teams[lid] = teams
+                auth = ("ok", "league_read", lid)
+            else:
+                log.warning("espn verify: league oracle 200 didn't parse (league=%s)",
+                            lid)
+                return "unavailable", "league_read", "unrecognized_payload"
 
-    # 2. Weak fallback: the fan profile. Result is BOUND and asserted — an
-    #    empty/unrecognised payload is NOT a pass (that was the bug).
-    try:
-        probe = _espn.probe_fan_profile(espn_s2, swid)
-    except _espn.EspnAuthError:
-        return "bad", "fan_profile", "rejected"
-    except (_espn.EspnError, OSError) as e:
-        log.warning("espn verify: fan probe unavailable [%s]: %s",
-                    getattr(e, "kind", "transport"), e)
-        return "unavailable", "fan_profile", getattr(e, "kind", "transport")
+    if auth is None:
+        # 2. Weak fallback: the fan profile. Result is BOUND and asserted —
+        #    an empty/unrecognised payload is NOT a pass (that was the bug).
+        try:
+            probe = _espn.probe_fan_profile(espn_s2, swid)
+        except _espn.EspnAuthError:
+            return "bad", "fan_profile", "rejected"
+        except (_espn.EspnError, OSError) as e:
+            log.warning("espn verify: fan probe unavailable [%s]: %s",
+                        getattr(e, "kind", "transport"), e)
+            return "unavailable", "fan_profile", getattr(e, "kind", "transport")
 
-    if probe.get("football_leagues"):
-        return "ok", "fan_profile", f"{len(probe['football_leagues'])} ffl"
-    if probe.get("fantasy_entries"):
-        # Real account, no FOOTBALL leagues — legitimate, not a rejection.
-        return "ok", "fan_profile", "no_football_leagues"
-    return "bad", "fan_profile", "no_account_data"
+        if probe.get("football_leagues"):
+            auth = ("ok", "fan_profile", f"{len(probe['football_leagues'])} ffl")
+        elif probe.get("fantasy_entries"):
+            # Real account, no FOOTBALL leagues — legitimate, not a rejection.
+            auth = ("ok", "fan_profile", "no_football_leagues")
+        else:
+            return "bad", "fan_profile", "no_account_data"
+
+    # ── 3. #321 membership assertion (identity binding) ──────────────────
+    # The auth phase proved a live session for SOME account; this asserts
+    # WHOSE. Every linked league with a team binding is evaluated (set
+    # semantics — deliberately not "first" or "newest"). At most ONE live
+    # read per league, store time only; cookies ride along (public leagues
+    # ignore them, cookie-gated ones need them). ZERO FALSE REJECTS:
+    # ownerless / co-owned / missing owner_swid, purged leagues, and
+    # vanished teams are all INCONCLUSIVE-ACCEPT — and deliberately WITHOUT
+    # plan §F1's "is any team's owner" fallback (dropped in review round 1;
+    # do not restore it). No bound league at all → vacuous; the auth
+    # verdict stands.
+    target = _espn.canonical_swid(swid or "").upper()
+    mismatch_detail = None
+    unavailable_detail = None
+    for lg in linked:
+        lid = str(lg.get("league_id") or "")
+        if lg.get("my_team_id") is None or not lid.isdigit():
+            continue
+        if skip_league_id and lid == str(skip_league_id):
+            continue   # binding being rewritten by the caller — see docstring
+        if lid in fetched_teams:
+            teams = fetched_teams[lid]
+            if not teams:
+                continue   # purged during the oracle phase — inconclusive
+        else:
+            try:
+                season = int(lg.get("season") or _ESPN_DEFAULT_SEASON)
+            except (TypeError, ValueError):
+                season = _ESPN_DEFAULT_SEASON
+            try:
+                raw = _espn.fetch_league(lid, season, espn_s2=espn_s2, swid=swid)
+            except _espn.EspnAuthError:
+                # The pair IS a live session (auth phase passed), yet this
+                # linked league refuses it — a non-member. Conclusive.
+                mismatch_detail = f"league {lid} refused this account"
+                break
+            except _espn.EspnError as e:
+                if getattr(e, "kind", "") == "not_found":
+                    continue   # purged — inconclusive, never a reject
+                unavailable_detail = getattr(e, "kind", "http")
+                continue       # keep scanning — a later mismatch outranks this
+            except OSError:
+                unavailable_detail = "transport"
+                continue
+            try:
+                teams = _espn.parse_league(raw)["teams"] if isinstance(raw, dict) else []
+            except Exception:
+                teams = []
+            if not teams:
+                unavailable_detail = "unrecognized_payload"
+                continue
+            fetched_teams[lid] = teams
+        bound = next((t for t in teams
+                      if t.team_id == lg.get("my_team_id")), None)
+        if bound is None or not (bound.owner_swid or "").strip():
+            continue   # team vanished / ownerless — inconclusive-accept
+        if target and _espn.canonical_swid(bound.owner_swid).upper() != target:
+            mismatch_detail = f"league {lid} bound-team owner mismatch"
+            break      # nothing outranks a conclusive mismatch
+
+    if mismatch_detail:
+        return "wrong_account", auth[1], mismatch_detail
+    if unavailable_detail:
+        # R6 fail-open: a membership read failed and nothing conclusively
+        # mismatched — NOT a verdict on the account. 502, nothing stored; a
+        # user with a good sign-in is never told it's bad because ESPN was
+        # down.
+        return "unavailable", "membership", unavailable_detail
+    return auth
 
 
 @app.route("/api/espn/link", methods=["GET", "POST", "DELETE"])
@@ -20356,6 +20755,7 @@ def espn_link():
     from . import espn_service as _espn
     from .database import (get_espn_credential, upsert_espn_credential,
                            delete_espn_credential,
+                           clear_espn_credential_verification,
                            upsert_espn_league, replace_espn_league_members)
 
     sess = _require_session()
@@ -20422,6 +20822,17 @@ def espn_link():
         # reported {connected:true}, and only surfaced as a 409 at the next
         # trade send. MFL/Sleeper never had this gap.
         verdict, oracle, detail = _espn_verify_credential(user_id, espn_s2, swid)
+        if verdict == "wrong_account":
+            # #321 identity binding: the pair authenticates, but its SWID
+            # does not own the caller's bound team. Wire code UNCHANGED
+            # (espn_bad_credentials — old builds keep matching and show the
+            # generic rejected copy); the additive `reason` field names the
+            # real failure for builds that read it. Nothing is stored.
+            log.info("espn_link: credential identity mismatch user=%s "
+                     "oracle=%s detail=%s", user_id, oracle, detail)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
         if verdict == "bad":
             # ESPN answered and the pair proved nothing — a credential
             # verdict, not an outage. Nothing is stored; the client re-runs
@@ -20439,9 +20850,7 @@ def espn_link():
                 # someone else's account). Storing it would only defer the
                 # failure to the send, which is the bug being fixed, so it
                 # is refused — with copy that names the actual recovery.
-                msg = ("That ESPN account can't open your linked league, so "
-                       "nothing was saved. Sign in with the ESPN account "
-                       "that owns your team.")
+                msg = _ESPN_WRONG_ACCOUNT_MSG
             else:
                 msg = ("ESPN didn't accept that sign-in — nothing was saved. "
                        "Sign in to ESPN again.")
@@ -20534,25 +20943,116 @@ def espn_link():
         return jsonify({"error": "espn_bad_team_id",
                         "message": "That team isn't in this league."}), 400
 
+    # ── #321 R3 — identity assertion at the team-binding step, regardless
+    # of cookie provenance (pasted, captured, or the stored-credential
+    # fallback). The team list with owner_swids is already in hand from the
+    # import fetch — comparison only, no extra ESPN read. Zero false
+    # rejects: an ownerless / co-owned / owner_swid-less chosen team is
+    # INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
+    # stored under a vacuous accept (no league yet) is re-checked the
+    # moment a league gets a team binding.
+    if espn_s2 and swid:
+        chosen = next((t for t in league["teams"] if t.team_id == team_id), None)
+        chosen_owner = _espn.canonical_swid(chosen.owner_swid).upper() \
+            if chosen and (chosen.owner_swid or "").strip() else None
+        pair_swid = _espn.canonical_swid(swid).upper()
+        if chosen_owner and pair_swid and chosen_owner != pair_swid:
+            # When the mismatching SWID is the STORED credential's (the
+            # stored-cookie fallback, or a paste equal to the stored pair),
+            # null that row's verified_at so GET status stops lying — row
+            # kept, no delete (forensics posture). A mismatching paste that
+            # DIFFERS from the stored pair says nothing about the stored
+            # row and leaves it untouched.
+            stored = get_espn_credential(user_id)
+            if stored and _espn.canonical_swid(
+                    stored.get("swid") or "").upper() == pair_swid:
+                clear_espn_credential_verification(user_id)
+                log.info("espn_link: stored credential un-verified after "
+                         "binding mismatch user=%s league=%s", user_id, league_id)
+            log.info("espn_link: team-binding identity mismatch user=%s "
+                     "league=%s team=%s pasted=%s",
+                     user_id, league_id, team_id, pasted_cookie)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
+
     # Persist cookies first (so a later re-import can reuse them), then the
     # league + membership snapshot.
     auth_mode = "cookie" if (espn_s2 and swid) else "public"
+    # #321 R4 — additive response facts about the pair's fate (present only
+    # when a pair accompanied the import; absent otherwise).
+    credential_stored: bool | None = None
+    credential_reason: str | None = None
+    if espn_s2 and swid and not pasted_cookie:
+        # Stored-credential fallback: the pair is already at rest — its fate
+        # was decided at its own store time, and R3 above just re-checked
+        # identity against the chosen team. Nothing to (re)store.
+        credential_stored = True
     if pasted_cookie:
         if not _sleeper_write.token_encryption_available():
             return jsonify({"error": "espn_unconfigured",
                             "message": "Credential encryption key missing."}), 503
+        # #321 R4 — the import fetch above is a genuine AUTHENTICATED proof
+        # only when the league actually requires auth. One anonymous read
+        # settles gatedness: refused → auth-gated → the cookie fetch WAS
+        # real proof (existing stamp semantics, unchanged). Served
+        # anonymously → PUBLIC → the fetch proved nothing (the pre-fix
+        # "Known residual"): _espn_verify_credential decides the pair's
+        # fate, and a failing/unjudgeable pair never fails a working
+        # public-league import — the pair is simply NOT stored and the
+        # response says so. Identity failures still always block (above and
+        # via the verify's own membership assertion).
+        proof: bool | None = None
         try:
-            # verified_at: the league fetch above already succeeded WITH this
-            # pair attached — and the in-app flow only collects cookies after
-            # an anonymous read 403s (private league), so that fetch was a
-            # genuine authenticated proof. No second probe (don't double-hit
-            # ESPN or slow the import).
-            upsert_espn_credential(
-                user_id, swid, _sleeper_write.encrypt_token(espn_s2),
-                verified_at=datetime.now(timezone.utc).isoformat())
-        except Exception:
-            log.exception("espn_link: credential store failed")
-            return jsonify({"error": "store_failed"}), 500
+            _espn.fetch_league(league_id, season)   # anonymous — no cookies
+            proof = False                           # public league
+        except _espn.EspnAuthError:
+            proof = True                            # auth-gated: fetch was proof
+        except (_espn.EspnError, OSError):
+            proof = None                            # couldn't tell — no stamp
+        if proof is False:
+            # skip_league_id: THIS league's binding is being rewritten right
+            # now — R3 already asserted the pair against the new team, and
+            # holding it to the old binding would deadlock the fixing re-link.
+            verdict, v_oracle, v_detail = _espn_verify_credential(
+                user_id, espn_s2, swid, skip_league_id=league_id)
+            if verdict == "wrong_account":
+                log.info("espn_link: import-path verify identity mismatch "
+                         "user=%s league=%s detail=%s",
+                         user_id, league_id, v_detail)
+                return jsonify({"error": "espn_bad_credentials",
+                                "reason": "wrong_account",
+                                "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
+            if verdict == "ok":
+                proof = True
+            else:
+                credential_reason = ("unverified" if verdict == "bad"
+                                     else "unavailable")
+                log.info("espn_link: public-league import pair not stored "
+                         "user=%s league=%s verdict=%s oracle=%s detail=%s",
+                         user_id, league_id, verdict, v_oracle, v_detail)
+        elif proof is None:
+            credential_reason = "unavailable"
+            log.info("espn_link: gatedness probe inconclusive — pair not "
+                     "stored user=%s league=%s", user_id, league_id)
+        if proof:
+            try:
+                upsert_espn_credential(
+                    user_id, swid, _sleeper_write.encrypt_token(espn_s2),
+                    verified_at=datetime.now(timezone.utc).isoformat())
+            except Exception:
+                log.exception("espn_link: credential store failed")
+                return jsonify({"error": "store_failed"}), 500
+            credential_stored = True
+        else:
+            # An unproven pair must not reach the DB (existing principle).
+            credential_stored = False
+            if proof is False:
+                # The league is PUBLIC (the anonymous probe read it) and no
+                # pair was persisted — label the link honestly so re-sync
+                # keeps working anonymously instead of demanding cookies a
+                # public league doesn't need.
+                auth_mode = "public"
 
     members = []
     for t in league["teams"]:
@@ -20591,7 +21091,7 @@ def espn_link():
              "match_rate=%.1f%% unmatched=%d",
              user_id, league_id, season, len(members), auth_mode,
              r["match_rate"] * 100, len(r["unmatched"]))
-    return jsonify({
+    resp = {
         "ok": True,
         "league_id":      league_id,
         "name":           league["name"],
@@ -20603,7 +21103,15 @@ def espn_link():
         "my_team_id":     team_id,
         "my_roster":      mapped["rosters"].get(team_id, []),
         "report":         _espn_report_json(r),
-    })
+    }
+    # #321 R4 additive fields — present only when a pair accompanied the
+    # import; states the pair's fate instead of implying it. Clients must
+    # tolerate absence and unknown values.
+    if credential_stored is not None:
+        resp["credential_stored"] = credential_stored
+        if not credential_stored and credential_reason:
+            resp["credential_reason"] = credential_reason
+    return jsonify(resp)
 
 
 @app.route("/api/espn/leagues")
@@ -20707,6 +21215,7 @@ def espn_import():
         return jsonify({"error": "feature_disabled"}), 404
     from . import espn_service as _espn
     from .database import (get_espn_league, get_espn_credential,
+                           clear_espn_credential_verification,
                            replace_espn_league_members, upsert_espn_league)
 
     sess = _require_session()
@@ -20745,6 +21254,25 @@ def espn_import():
         return jsonify({"error": "espn_team_missing",
                         "message": "Your team is no longer in this ESPN "
                                    "league — re-link to pick a team."}), 409
+
+    # ── #321 R3b — re-sync identity assertion. The stored SWID, the row's
+    # team binding, and the fetched teams (with owner_swids) are all in
+    # hand — comparison only, no extra ESPN read. Catches wrong-identity
+    # rows bound BEFORE identity binding shipped, which the R10 migration
+    # alone cannot identify. Only asserted for the linker's own binding
+    # (zero false rejects if another user ever re-syncs), and an ownerless
+    # / owner_swid-less bound team is inconclusive-accept.
+    if swid and str(row.get("user_id") or "") == str(user_id):
+        bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
+        pair_swid = _espn.canonical_swid(swid).upper()
+        if bound and (bound.owner_swid or "").strip() and pair_swid and \
+                _espn.canonical_swid(bound.owner_swid).upper() != pair_swid:
+            clear_espn_credential_verification(user_id)
+            log.info("espn_import: re-sync identity mismatch — stamp nulled "
+                     "user=%s league=%s team=%s", user_id, league_id, my_team_id)
+            return jsonify({"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
 
     members = []
     for t in league["teams"]:
@@ -21007,12 +21535,14 @@ def _position_medians(teams: list[dict]) -> dict[str, dict]:
        property the design leans on for odd counts: an odd league leaves
        exactly one team sitting ON the median, an even one leaves none.
        Rounded to 1dp like every other value on this wire.
-    3. **`value_label` is UNGATED.** The per-team `value_label` under `#279`
-       rides the operator-only `aggregate_tier_labels` experiment, but
-       `_aggregate_pick_label` is a pure function of the value with no
-       experiment dependency — it is read directly here. A divider that
-       rendered a label for the operator and a blank for everyone else would
-       be worse than no divider.
+    3. **`value_label` is UNGATED.** When this shipped, the per-team
+       `value_label` under `#279` rode the operator-only
+       `aggregate_tier_labels` experiment, but `_aggregate_pick_label` is a
+       pure function of the value with no experiment dependency — it is read
+       directly here. A divider that rendered a label for the operator and a
+       blank for everyone else would be worse than no divider. (That gate is
+       gone: #306/D-306-1 graduated the experiment on 2026-08-16, so the
+       per-team labels are now ungated too — this field led the way.)
 
     SUBSET SCOPE — the All subset ONLY. `teams[].positions[P].value` is the
     whole-roster positional subtotal; the client's Starters/Bench subsets are
@@ -21119,43 +21649,48 @@ def league_power_rankings_route():
         _me = _league_user_id(sess)
         for t in teams:
             t["is_you"] = (t["user_id"] == _me)
-        # #279 — aggregate_tier_labels experiment (operator-only rollout;
-        # docs/feedback/items/279-aggregate-tier-labels/status.md, mirrors
-        # the onboarding_v2_rollout precedent: an account-unit experiment
-        # targeted via `is_tester_allowlist`, weighted 0/10000 so a captured
-        # unit is always `treatment`). Only the RESOLVING caller's own
-        # assignment matters here — this is per-request labeling of a
-        # league-shared aggregate, not a per-league toggle. When targeted,
-        # each team additionally carries `total_value_label` and a
+        # #279 → GRADUATED #306 (D-306-1, operator 2026-08-16) — the
+        # aggregate pick-equivalent labels shipped behind the operator-only
+        # `aggregate_tier_labels` experiment now emit UNCONDITIONALLY for
+        # every caller: each team carries `total_value_label` and a
         # `value_label` per core position (the SAME value→pick-equivalent
         # formula already live as "a Late 2nd" on trade cards, applied to a
-        # raw aggregate instead of a gap — see _aggregate_pick_label).
-        # Non-targeted callers (everyone but the allowlisted operator today)
-        # get no new keys at all — byte-identical to pre-#279.
+        # raw aggregate instead of a gap — see _aggregate_pick_label). The
+        # experiment ran since #279 with #285 and #300-D6 both pushing the
+        # same direction; #306 was a tester bug FILED AGAINST the control
+        # arm (raw numerics on the calculator's partner chips), and the #300
+        # medians divider already ships the identical label ungated on the
+        # same screen — the control arm had become the defect. The
+        # experiment record itself is retired via the admin lifecycle
+        # (stop → decide, docs/feedback/items/279-aggregate-tier-labels/
+        # status.md §runbook); this code simply no longer consults it.
         #
-        # #285 (docs/feedback/items/285-pick-sums/status.md) — the operator's
-        # bug against this same experiment: `total_value_label` now folds in
-        # each team's owned picks via a literal count (1st = 1.0 firsts,
-        # 2nd = 1/3.5 firsts, 3rd+ = 0), NOT their dollar-priced pool_value.
-        # The base is `positions_value` (players only), never `total_value`
-        # (which already includes picks' dollar value) — adding the literal
-        # count on top of that would double-count draft capital. `total_value`
-        # itself is UNCHANGED: it drives `teams.sort` inside
-        # compute_power_rankings (rank order), the drill-in's raw-number
-        # fallback, and every non-experiment consumer, so touching it would
-        # both leak the experiment to non-treatment callers and reshuffle
-        # rank for the treatment caller too. Positional `value_label`s stay
-        # position-scoped and never receive a pick contribution — picks
-        # aren't tied to a position.
-        from . import experiments as _experiments_mod
-        if _experiments_mod.variant_for(g_user_id, "aggregate_tier_labels") == "treatment":
-            for t in teams:
-                pick_firsts = _pick_firsts_equivalent(
-                    picks_by_owner.get(t["user_id"]) or [])
-                t["total_value_label"] = _aggregate_pick_label(
-                    t["positions_value"], pick_firsts)
-                for _pv in t["positions"].values():
-                    _pv["value_label"] = _aggregate_pick_label(_pv["value"])
+        # #285 (docs/feedback/items/285-pick-sums/status.md) —
+        # `total_value_label` folds in each team's owned picks via a literal
+        # count (1st = 1.0 firsts, 2nd = 1/3.5 firsts, 3rd+ = 0), NOT their
+        # dollar-priced pool_value. The base is `positions_value` (players
+        # only), never `total_value` (which already includes picks' dollar
+        # value) — adding the literal count on top of that would double-count
+        # draft capital. `total_value` itself is UNCHANGED: it drives
+        # `teams.sort` inside compute_power_rankings (rank order), the
+        # drill-in's raw-number fallback, and every other consumer.
+        # Positional `value_label`s stay position-scoped and never receive a
+        # pick contribution — picks aren't tied to a position.
+        #
+        # #306 (D-306-2) — `picks.value_label`: the draft-capital group's own
+        # label, the SAME #285 literal count expressed alone (value base 0.0)
+        # — NEVER a conversion of the dollar-priced `picks.value` (that is
+        # precisely the #285 bug re-introduced one key over). A team whose
+        # picks are all 3rd+ round honestly labels "≈0 firsts"; the client
+        # keeps its own count>0 gate for whether the segment renders at all.
+        for t in teams:
+            pick_firsts = _pick_firsts_equivalent(
+                picks_by_owner.get(t["user_id"]) or [])
+            t["total_value_label"] = _aggregate_pick_label(
+                t["positions_value"], pick_firsts)
+            for _pv in t["positions"].values():
+                _pv["value_label"] = _aggregate_pick_label(_pv["value"])
+            t["picks"]["value_label"] = _aggregate_pick_label(0.0, pick_firsts)
         # League Analyzer replication (2026-07-26): per-team `starters` is
         # the DERIVED value-optimal lineup (optimal_starters over the
         # league's slot template — no per-week lineup data). The client's

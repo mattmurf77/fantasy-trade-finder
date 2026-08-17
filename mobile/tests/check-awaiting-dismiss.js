@@ -195,5 +195,138 @@ assert(
   );
 }
 
-console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED (21)');
+// ── S-10 (#334, G9 2026-08-16): dismiss resurrect-race — render-layer
+// suppression + cancellation hygiene + the B-1 unhide ordering.
+//
+// Named sabotages:
+//   S-10a: delete a cancelQueries call → an in-flight list read overwrites
+//       the optimistic removal and the tile resurrects until reconcile.
+//   S-10b: revert visibleMatches/visibleAwaiting to a raw league filter →
+//       repopulation paths P1–P6 can render a pending-dismiss row again.
+//   S-10c "unhide before await" (B-1): move the onSuccess hidden-key clear
+//       above the awaited invalidateQueries (or revert to a bare onSettled
+//       clear) → the unhide can land against a cache resurrected by a GET
+//       that raced the POST's commit — exactly the pre-fix ordering.
+//   S-10d: drop undoDismiss's unhide → Undo restores the cache but the
+//       tile stays hidden until the next dismiss settles.
+//   S-10e (NB-5): flip refetchOnWindowFocus anywhere on this path → mints
+//       an unanalyzed seventh repopulation path (the focusManager IS
+//       AppState-bridged in App.tsx).
+{
+  const flat = SCREEN.replace(/\s+/g, ' ');
+  const slice = (from, to) => {
+    const i = flat.indexOf(from);
+    const j = flat.indexOf(to, i);
+    return i > -1 && j > i ? flat.slice(i, j) : '';
+  };
+  const mutMutual = slice('const dismissMutation = useMutation(', 'const dismissAwaitingMutation');
+  const mutAwait = slice('const dismissAwaitingMutation = useMutation(', 'const pendingDismissRef');
+  const hMutual = slice('async function handleDismiss(m: TradeMatch)', 'async function handleDismissAwaiting');
+  const hAwait = slice('async function handleDismissAwaiting', 'async function handleOpenInCalc');
+
+  // S-10a — cancelQueries immediately before each of the 4 optimistic
+  // setQueryData sites (both keys).
+  const cancelBeforeSet = (src, key) => {
+    const c = src.indexOf(`await queryClient.cancelQueries({ queryKey: [${key}] })`);
+    const s = src.indexOf('queryClient.setQueryData(');
+    return c > -1 && s > c;
+  };
+  const within = (src, from, to) => {
+    const i = src.indexOf(from);
+    const j = src.indexOf(to, i);
+    return i > -1 && j > i ? src.slice(i, j) : '';
+  };
+  assert(
+    cancelBeforeSet(within(mutMutual, 'onMutate:', 'onError:'), "'matches', 'all'"),
+    "22. S-10a — dismissMutation.onMutate cancels ['matches','all'] before the optimistic removal",
+  );
+  assert(
+    cancelBeforeSet(within(mutAwait, 'onMutate:', 'onError:'), "'awaiting-trades'"),
+    "23. S-10a — dismissAwaitingMutation.onMutate cancels ['awaiting-trades'] before the optimistic removal",
+  );
+  assert(
+    cancelBeforeSet(hMutual, "'matches', 'all'"),
+    '24. S-10a — handleDismiss tap-time removal is preceded by cancelQueries',
+  );
+  assert(
+    cancelBeforeSet(hAwait, "'awaiting-trades'"),
+    '25. S-10a — handleDismissAwaiting tap-time removal is preceded by cancelQueries',
+  );
+
+  // S-10b — the rendered lists derive through the hidden-keys filter.
+  assert(
+    /const visibleMatches = useMemo\( \(\) => filterVisible\(allMatches, filterLeagueId, hiddenKeys, matchRowKey\)/.test(flat)
+      && /const visibleAwaiting = useMemo\( \(\) => filterVisible\(allAwaiting, filterLeagueId, hiddenKeys, awaitingRowKey\)/.test(flat)
+      && /from '\.\.\/utils\/matchesDerive'/.test(flat),
+    '26. S-10b — visibleMatches/visibleAwaiting derive via filterVisible(hiddenKeys), not a raw league filter',
+  );
+
+  // S-10c — B-1 ordered unhide, pinned in both mutations; no onSettled.
+  const orderedUnhide = (mut, name) => {
+    const onErr = within(mut, 'onError:', 'onSuccess:');
+    const onSucc = mut.slice(mut.indexOf('onSuccess:'));
+    const errUnhides = onErr.includes('unhideKey(');
+    const awaitIdx = onSucc.indexOf('await queryClient.invalidateQueries(');
+    const unhideIdx = onSucc.indexOf('unhideKey(');
+    const ordered = awaitIdx > -1 && unhideIdx > awaitIdx;
+    const noSettled = !mut.includes('onSettled');
+    assert(
+      errUnhides && ordered && noSettled,
+      name,
+      `errUnhides=${errUnhides} ordered=${ordered} noSettled=${noSettled}`,
+    );
+  };
+  orderedUnhide(
+    mutMutual,
+    '27. S-10c — mutual: onError unhides immediately; onSuccess unhides only AFTER the awaited invalidate; no onSettled',
+  );
+  orderedUnhide(
+    mutAwait,
+    '28. S-10c — awaiting: onError unhides immediately; onSuccess unhides only AFTER the awaited invalidate; no onSettled',
+  );
+
+  // S-10d — undo clears the hidden key (both kinds), so the snapshot
+  // restore renders in the same frame.
+  const undo = slice('function undoDismiss()', 'useEffect(');
+  assert(
+    undo.includes('unhideKey(matchHiddenKey(p.id))')
+      && undo.includes('unhideKey(awaitingHiddenKey(p.row.league_id, p.row.trade_id))'),
+    '29. S-10d — undoDismiss clears the hidden key for both dismiss kinds',
+  );
+
+  // S-10e (NB-5) — the "no focus refetch" premise of the race analysis:
+  // app default stays false and this screen never overrides it.
+  const QC = stripComments(read('src/state/queryClient.ts'));
+  assert(
+    /refetchOnWindowFocus: false/.test(QC) && !/refetchOnWindowFocus/.test(SCREEN),
+    '30. S-10e — refetchOnWindowFocus stays false app-wide and is not overridden on MatchesScreen',
+  );
+
+  // S-10f (#334 R-1/R-2; QA 2026-08-16 F-7) — the hideKey ADD is pinned, not
+  // just the unhide ordering: each handler hides at TAP time, ABOVE the
+  // ux.swipe_undo branch, so the call covers BOTH flag branches. Deleting
+  // either call (or moving it inside one branch) silently reverts #334's fix
+  // while checks 26-29 stay green.
+  const tapTimeHide = (h, call, name) => {
+    const hideIdx = h.indexOf(call);
+    const flagIdx = h.indexOf('if (!swipeUndoOn)');
+    assert(
+      hideIdx > -1 && flagIdx > hideIdx,
+      name,
+      `hideIdx=${hideIdx} flagIdx=${flagIdx} — the hide must exist and precede the flag branch`,
+    );
+  };
+  tapTimeHide(
+    hMutual,
+    'hideKey(matchHiddenKey(m.match_id))',
+    '31. S-10f — handleDismiss hides the match key at tap time, above the swipeUndoOn branch (both flag branches)',
+  );
+  tapTimeHide(
+    hAwait,
+    'hideKey(awaitingHiddenKey(a.league_id, a.trade_id))',
+    '32. S-10f — handleDismissAwaiting hides the awaiting key at tap time, above the swipeUndoOn branch (both flag branches)',
+  );
+}
+
+console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED (32)');
 process.exit(failures ? 1 : 0);

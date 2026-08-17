@@ -3,6 +3,13 @@
 **Status:** in-progress · 2026-08-09 · branch `worktree-agent-a18d2616a61a99ae1`
 (worktree build against the live `aggregate_tier_labels` experiment, #279)
 
+> **CLOSED via graduation 2026-08-16 (#306, D-306-1/D-306-2).** The literal
+> pick-count label math this item added now ships ungated to every caller on
+> `total_value_label`, and the same literal count (expressed alone) became the
+> new `picks.value_label` — never a conversion of the dollar-priced
+> `picks.value`, which is exactly the double-count this item existed to kill.
+> See `docs/feedback/items/303-calc-send-placement/status.md`.
+
 ## The bug report
 
 Operator, filed against `LeagueRankings` (the live `aggregate_tier_labels`

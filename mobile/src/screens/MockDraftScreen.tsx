@@ -43,7 +43,14 @@
 // (NON_INTENT, fired only on the active→complete transition, never from a
 // GET) and `mock_abandoned`. `DraftRoomScreen` fires the create-side pair.
 
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -51,6 +58,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -62,7 +70,9 @@ import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
 import AnchorSheet, { type AnchorTarget } from '../components/AnchorSheet';
 import Toast from '../components/Toast';
+import TierBadge from '../components/TierBadge';
 import { MockRail } from '../components/draft/MockChrome';
+import MockTeamSheet from '../components/draft/MockTeamSheet';
 import {
   BasisChip,
   MY_BOARD_FALLBACK_COPY,
@@ -86,12 +96,19 @@ import {
   pickInMockDraft,
   type MockDraftResponse,
   type MockDraftState,
+  type MockOwnershipSource,
   type MockPick,
 } from '../api/mockDraft';
 import { setAssetPref } from '../api/league';
 import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
+import { tickerWindow } from '../utils/tickerWindow';
+import {
+  filterPool,
+  POOL_POSITIONS,
+  type PoolPositionFilter,
+} from '../utils/mockPool';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import type { Player } from '../shared/types';
@@ -99,6 +116,19 @@ import type { Player } from '../shared/types';
 /** How many recent picks the ticker shows. Enough to see the run that
  *  happened while you were away, short enough not to become the page. */
 const TICKER_DEPTH = 8;
+
+/** #328 — the ownership-provenance disclosure, ONE caption for ONE fact,
+ *  rendered from `settings_echo.ownership_source` only. `partial`
+ *  deliberately drops the platform-vs-user provenance suffix; null /
+ *  undefined / any unknown future value renders nothing (a pre-#328 row is
+ *  UNKNOWN, never "none"). Exported for the structural check. */
+export function ownershipCaption(src: MockOwnershipSource | null | undefined): string | null {
+  if (src === 'platform') return 'Real pick ownership applied';
+  if (src === 'user') return 'Real pick ownership applied · entered by your league';
+  if (src === 'partial') return 'Some real pick ownership applied — other slots use draft order';
+  if (src === 'none') return 'Traded picks unavailable — each team drafts its own slot';
+  return null; // null / undefined / unknown future value → render nothing
+}
 
 /** Plain-words persona labels. The engine's outlook enum is shared with the
  *  trade side (`league_preferences.team_outlook`); this is the same
@@ -121,6 +151,13 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
   const [menuTarget, setMenuTarget] = useState<UndraftedRow | null>(null);
   const [anchorTarget, setAnchorTarget] = useState<AnchorTarget | null>(null);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+  // #326/#327 — pool controls + the team sheet.
+  const [posFilter, setPosFilter] = useState<PoolPositionFilter>('ALL');
+  const [poolQuery, setPoolQuery] = useState('');
+  const [teamSheetOpen, setTeamSheetOpen] = useState(false);
+  // mock_pool_searched fires at most ONCE per turn (scope.md §1) — never per
+  // keystroke. Reset alongside the controls on every clock advance.
+  const searchedTurnRef = useRef(false);
 
   const queryClient = useQueryClient();
   const rowActionsOn = useFlag('draft.rank_inline');
@@ -150,6 +187,82 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
   // `user_owner_id`, never off `by` (HLD §4.3).
   const forOwnTeam =
     !onClock?.roster_id || !userOwnerId || String(onClock.roster_id) === userOwnerId;
+
+  // #326/#327 R-12 (operator decision) — when the clock advances, the
+  // filter goes back to All AND the search clears, in BOTH modes: a stale
+  // narrow view silently hiding the pool on a new turn is the trap this
+  // kills. Also re-arms the once-per-turn search event.
+  useEffect(() => {
+    setPosFilter('ALL');
+    setPoolQuery('');
+    searchedTurnRef.current = false;
+  }, [state?.on_the_clock?.pick_no]);
+
+  // LEAGUE platform from the session league cache — never the device
+  // platform (the screen's standing convention for the mock family).
+  const leaguePlatform = useCallback(
+    () =>
+      useSession.getState().leagues.find((lg) => lg.league_id === leagueId)
+        ?.platform ?? 'unknown',
+    [leagueId],
+  );
+
+  // #326 — the "Your team" sheet. A modal over the live draft, never
+  // navigation: the screen (and the clock) never unmounts.
+  const openTeamSheet = useCallback(() => {
+    setTeamSheetOpen(true);
+    track(
+      'mock_team_sheet_opened',
+      {
+        platform: leaguePlatform(),
+        mode: state?.settings_echo?.mode ?? null,
+        round: onClock?.round ?? null,
+        pick_no: onClock?.pick_no ?? null,
+      },
+      'MockDraft',
+    );
+  }, [leaguePlatform, state?.settings_echo?.mode, onClock?.round, onClock?.pick_no]);
+
+  // #326 — a non-All chip is the tracked decision; the All chip is the
+  // reset and fires nothing.
+  const onSelectFilter = useCallback(
+    (f: PoolPositionFilter) => {
+      setPosFilter(f);
+      if (f !== 'ALL') {
+        track(
+          'mock_pool_filtered',
+          {
+            platform: leaguePlatform(),
+            mode: state?.settings_echo?.mode ?? null,
+            position: f,
+          },
+          'MockDraft',
+        );
+      }
+    },
+    [leaguePlatform, state?.settings_echo?.mode],
+  );
+
+  // #327 — once per turn, on the first non-empty query. The query string
+  // itself is never sent.
+  const onPoolQuery = useCallback(
+    (text: string) => {
+      setPoolQuery(text);
+      if (text.trim() && !searchedTurnRef.current) {
+        searchedTurnRef.current = true;
+        track(
+          'mock_pool_searched',
+          {
+            platform: leaguePlatform(),
+            mode: state?.settings_echo?.mode ?? null,
+            filter_position: posFilter,
+          },
+          'MockDraft',
+        );
+      }
+    },
+    [leaguePlatform, state?.settings_echo?.mode, posFilter],
+  );
 
   // ── mutations ─────────────────────────────────────────────────────────
 
@@ -420,6 +533,14 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
       .map((o) => ({ slot: o, pick: madeByNo.get(o.pick_no) ?? null, isTraded: o.is_traded }));
   }, [state, userOwnerId]);
 
+  // #326/#327 — the undrafted list's ONE render source: position filter
+  // first, then search scoped to that subset, composed inside the tested
+  // helper (`utils/mockPool`) — never inline in JSX (PRD R-11/R-13).
+  const visiblePool = useMemo(
+    () => filterPool(state?.undrafted ?? [], posFilter, poolQuery),
+    [state?.undrafted, posFilter, poolQuery],
+  );
+
   const railStatus =
     state?.status === 'complete'
       ? `complete · ${state.picks.length} picks`
@@ -435,6 +556,8 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
       <ScrollView
         testID="mock-draft.scroll"
         contentContainerStyle={styles.scrollContent}
+        // #327 R-14 — a row tap while the keyboard is up drafts in ONE tap.
+        keyboardShouldPersistTaps="handled"
       >
         {!leagueId ? (
           <Text testID="mock-draft.empty-text" style={styles.emptyBody}>
@@ -477,6 +600,8 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
               persona={personaLine}
               total={state.order.length}
               made={state.picks.length}
+              ownershipSource={state.settings_echo?.ownership_source ?? null}
+              onViewTeam={openTeamSheet}
             />
 
             <PickTicker
@@ -489,19 +614,40 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
             {myPickSlots.length ? (
               <View style={styles.section}>
                 <TickLabel>Your picks</TickLabel>
+                {/* #323/#324 — equal-width three-across grid; wrap, NEVER an
+                    inner scroll (a nested scrollable is the gesture-capture
+                    class that broke TestFlight builds #11/#12). A made
+                    pick's chip: slot numeral, meta line of position + tier
+                    (server-computed `pick.tier` through TierBadge — never
+                    client-derived, #263/#277/#278), then the surname. */}
                 <View style={styles.myPicksRow}>
                   {myPickSlots.map(({ slot, pick, isTraded }) => (
                     <View key={slot.pick_no} style={styles.myPickChip}>
                       <Text style={styles.myPickLabel}>{pickLabelOf(slot)}</Text>
-                      <Text style={styles.myPickFrom} numberOfLines={1}>
-                        {pick
-                          ? lastName(pick.name || pick.player_id)
-                          : slot.pick_no === onClock?.pick_no
+                      {pick ? (
+                        <>
+                          <View style={styles.myPickMeta}>
+                            <Text
+                              style={[styles.myPickPos, { color: positionOf(pick.position) }]}
+                              numberOfLines={1}
+                            >
+                              {pick.position || '—'}
+                            </Text>
+                            <TierBadge tier={pick.tier ?? null} size="sm" />
+                          </View>
+                          <Text style={styles.myPickFrom} numberOfLines={1}>
+                            {lastName(pick.name || pick.player_id)}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.myPickFrom} numberOfLines={1}>
+                          {slot.pick_no === onClock?.pick_no
                             ? 'on the clock'
                             : isTraded
                               ? `from ${slot.original_username ?? 'another team'}`
                               : ''}
-                      </Text>
+                        </Text>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -543,12 +689,83 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
                   The computer drafters use consensus values, not your board.
                 </Text>
               ) : null}
+              {/* #326 R-11 — position filter, the PositionTabs construction
+                  (hairline group; active segment = ink3 well + underline in
+                  the position's color, ice for All). */}
+              <View style={styles.posFilterRow}>
+                {(['ALL', ...POOL_POSITIONS] as const).map((f) => {
+                  const active = posFilter === f;
+                  return (
+                    <Pressable
+                      key={f}
+                      testID={`mock-draft.pos-filter.${f.toLowerCase()}`}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={f === 'ALL' ? 'All positions' : f}
+                      onPress={() => onSelectFilter(f)}
+                      style={({ pressed }) => [
+                        styles.posFilterSegment,
+                        active && [
+                          styles.posFilterSegmentActive,
+                          {
+                            borderBottomColor:
+                              f === 'ALL' ? ice.base : positionOf(f),
+                          },
+                        ],
+                        pressed && { backgroundColor: ink.ink3 },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.posFilterText, active && styles.posFilterTextActive]}
+                      >
+                        {f}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {/* #327 R-13 — search scopes to the active filter subset
+                  (composition lives in `filterPool`, not here). */}
+              <View style={styles.poolSearchWrap}>
+                <TextInput
+                  testID="mock-draft.pool-search"
+                  style={styles.poolSearch}
+                  placeholder="Search the board…"
+                  placeholderTextColor={chalk.faint}
+                  value={poolQuery}
+                  onChangeText={onPoolQuery}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {poolQuery.length > 0 ? (
+                  <Pressable
+                    testID="mock-draft.pool-search.clear"
+                    onPress={() => setPoolQuery('')}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                    style={styles.poolSearchClear}
+                  >
+                    <Text style={styles.poolSearchClearText}>×</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               {state.undrafted.length === 0 ? (
                 <Text testID="mock-draft.undrafted-empty" style={styles.emptyBody}>
                   Every rookie is off the board.
                 </Text>
+              ) : visiblePool.length === 0 ? (
+                // Honest zero-match line; the All chip above stays present
+                // to clear the narrow view (R-11).
+                <Text testID="mock-draft.pool-empty" style={styles.emptyBody}>
+                  {poolQuery.trim()
+                    ? posFilter === 'ALL'
+                      ? `No players match “${poolQuery.trim()}”.`
+                      : `No ${posFilter}s match “${poolQuery.trim()}” — try All.`
+                    : `No ${posFilter}s left on the board.`}
+                </Text>
               ) : (
-                state.undrafted.map((r) => (
+                visiblePool.map((r) => (
                   <UndraftedRowView
                     key={r.player_id}
                     row={r}
@@ -618,6 +835,14 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
         </View>
       ) : null}
 
+      {/* #326 — "Your team" as a modal sibling (never navigation): the
+          screen and its clock state stay mounted underneath. */}
+      <MockTeamSheet
+        visible={teamSheetOpen}
+        leagueId={leagueId}
+        myPicks={state?.my_picks ?? []}
+        onClose={() => setTeamSheetOpen(false)}
+      />
       <PlayerContextMenu
         visible={!!menuTarget}
         player={menuTarget ? rowAsPlayer(menuTarget) : null}
@@ -662,6 +887,8 @@ function OnTheClockCard({
   persona,
   total,
   made,
+  ownershipSource,
+  onViewTeam,
 }: {
   onClock: MockDraftState['on_the_clock'];
   isUser: boolean;
@@ -671,6 +898,11 @@ function OnTheClockCard({
   persona: string | null;
   total: number;
   made: number;
+  /** #328 — threaded off `settings_echo.ownership_source`. */
+  ownershipSource: MockOwnershipSource | null;
+  /** #326 — opens the "Your team" sheet; the link renders on every active
+   *  turn (the card only exists while a slot is on the clock). */
+  onViewTeam: () => void;
 }) {
   if (!onClock) return null;
   return (
@@ -698,6 +930,14 @@ function OnTheClockCard({
         round {onClock.round} · pick {onClock.pick_no} of {total} · {made} picks made
         {persona && !isUser ? ` · ${persona}` : ''}
       </Text>
+      {/* #328 — the ownership-provenance disclosure, DURING the draft (the
+          moment "why is Jake picking twice?" arises). Plain informational
+          text; flare stays reserved for the user's own turn. */}
+      {ownershipCaption(ownershipSource) ? (
+        <Text testID="mock-draft.ownership-caption" style={styles.clockHow}>
+          {ownershipCaption(ownershipSource)}
+        </Text>
+      ) : null}
       {/* #305 — the reminder, at the moment of confusion ("why am I picking
           for Jake?"), that drafting every team was the user's own choice. */}
       {isUser && !forOwnTeam ? (
@@ -710,6 +950,17 @@ function OnTheClockCard({
       {isUser ? (
         <Text style={styles.clockHow}>Tap a rookie below, then confirm.</Text>
       ) : null}
+      {/* #326 — the team-sheet entry, on EVERY active turn (ice = action,
+          per ADR-005; the sheet is a modal, the room never unmounts). */}
+      <Pressable
+        testID="mock-draft.view-team"
+        onPress={onViewTeam}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="View your team"
+      >
+        <Text style={styles.viewTeamLink}>Your team</Text>
+      </Pressable>
     </View>
   );
 }
@@ -731,12 +982,20 @@ function PickTicker({
    *  never says whose team a pick landed on. */
   nameOf?: Map<string, string>;
 }) {
-  const recent = useMemo(() => [...picks].reverse().slice(0, TICKER_DEPTH), [picks]);
-  if (!recent.length) return null;
+  // #322/#325 — ONE fixed-height ascending window: earliest visible pick at
+  // the top (1.01 from pick one), newest at the bottom; grows to
+  // TICKER_DEPTH rows and then the earliest falls off the top. Ordering and
+  // the highlight boundary both come out of the pure helper — the screen
+  // holds no reverse, no slice, no inline off-by-one.
+  const { rows, firstNewIndex } = useMemo(
+    () => tickerWindow(picks, TICKER_DEPTH, newest),
+    [picks, newest],
+  );
+  if (!rows.length) return null;
   return (
     <View style={styles.section}>
       <TickLabel>{newest > 0 ? 'Since your last pick' : 'Just picked'}</TickLabel>
-      {recent.map((p, i) => {
+      {rows.map((p, i) => {
         const mine = userOwnerId != null && String(p.picked_by_user_id) === userOwnerId;
         return (
           <View
@@ -745,7 +1004,7 @@ function PickTicker({
             style={[
               styles.tickerRow,
               mine && styles.tickerRowMine,
-              !mine && i < newest && styles.tickerRowNew,
+              !mine && i >= firstNewIndex && styles.tickerRowNew,
             ]}
           >
             <Text style={styles.tickerPick}>
@@ -825,6 +1084,13 @@ function Recap({
           {state.picks.length} picks · {state.settings_echo?.rounds ?? '—'} rounds ·{' '}
           {state.settings_echo?.teams ?? '—'} teams
         </Text>
+        {/* #328 — same disclosure on the recap; the two mounts never
+            co-render (status active vs complete). */}
+        {ownershipCaption(state.settings_echo?.ownership_source ?? null) ? (
+          <Text testID="mock-draft.recap.ownership-caption" style={styles.clockHow}>
+            {ownershipCaption(state.settings_echo?.ownership_source ?? null)}
+          </Text>
+        ) : null}
       </View>
 
       {/* NOTE (contract gap G3): the design's "+3 / −1 vs consensus" column
@@ -1019,15 +1285,78 @@ const styles = StyleSheet.create({
   tickerWho: { ...type.bodySm, fontSize: 11, color: chalk.faint },
 
   myPicksRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  // #324 — fixed 3-per-row equal-width grid (flexBasis-based): rows of
+  // three grow equally to fill the line; a short last row is capped so its
+  // chips stay the same width as their siblings. minHeight 44 is vertical
+  // rhythm / two-line headroom only — the chips are non-interactive, so
+  // this is NOT a touch-target rule (PRD R-8). Flare border: the chips are
+  // the user's OWN picks — flare is the informational accent (ADR-005).
   myPickChip: {
+    flexBasis: '30%',
+    flexGrow: 1,
+    maxWidth: '32.5%',
+    minHeight: 44,
     borderWidth: 1,
     borderColor: flare.base,
     borderRadius: radii.xs,
     paddingHorizontal: space.sm,
     paddingVertical: space.xs,
+    gap: 2,
   },
   myPickLabel: { ...type.data, color: chalk.base },
+  // Meta line at bodySm (13) — position color is the data encoding;
+  // TierBadge's internal label is 11, the design-system floor.
+  myPickMeta: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  myPickPos: { ...type.bodySm },
   myPickFrom: { ...type.bodySm, fontSize: 11, color: chalk.faint },
+
+  // #326 — PositionTabs construction (FreeAgentsScreen precedent).
+  posFilterRow: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+  },
+  posFilterSegment: {
+    flex: 1,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  posFilterSegmentActive: { backgroundColor: ink.ink3 },
+  posFilterText: { ...type.label },
+  posFilterTextActive: { color: chalk.base },
+
+  // #327 — the PlayerPickerModal search construction, ink1 fill (the
+  // screen's sections sit on ink0).
+  poolSearchWrap: { justifyContent: 'center' },
+  poolSearch: {
+    ...type.body,
+    height: 44,
+    backgroundColor: ink.ink1,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    paddingHorizontal: space.md,
+    paddingRight: space.xxl,
+    color: chalk.base,
+  },
+  poolSearchClear: {
+    position: 'absolute',
+    right: 0,
+    height: 44,
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  poolSearchClearText: { ...type.body, fontSize: 18, color: chalk.dim },
+
+  // #326 — team-sheet entry link (ice = action, ADR-005).
+  viewTeamLink: { ...type.label, color: ice.base, paddingTop: 2 },
 
   cpuBasisNote: { ...type.bodySm, fontSize: 11, color: chalk.faint },
 

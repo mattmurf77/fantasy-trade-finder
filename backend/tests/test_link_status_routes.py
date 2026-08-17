@@ -131,6 +131,10 @@ def _must_not_call(kind):
 FFL = ({"league_id": "111", "league_name": "Dynasty", "season": 2026,
         "team_name": "Team"},)
 
+# #321 — team 1's owner in the league fixture; `_link_league` binds team 1,
+# so a pair carrying this SWID passes the membership assertion.
+OWNER1_SWID = "{A1111111-1111-1111-1111-111111111111}"
+
 
 @pytest.fixture(autouse=True)
 def _no_live_espn():
@@ -437,7 +441,11 @@ def test_credential_only_store_prefers_the_linked_league_oracle(client):
     """A league the user already belongs to that ESPN only serves to an
     authenticated member is a REAL authentication oracle (it is the read
     that rejected the bad pair in production, as the send-path 409). When
-    one exists it is used, and the weak fan probe is not consulted."""
+    one exists it is used, and the weak fan probe is not consulted.
+
+    #321: the pair's SWID is the fixture's team-1 owner (the bound team), so
+    the membership assertion passes off the SAME read — exactly one league
+    fetch, no re-read."""
     c, token, engine, _ = client
     _link_league("cookie")
     calls = []
@@ -446,11 +454,12 @@ def test_credential_only_store_prefers_the_linked_league_oracle(client):
                       _must_not_call("the fan probe"), create=True), \
          patch.object(es, "fetch_fan_leagues", _must_not_call("the fan probe")):
         r = c.post("/api/espn/link", headers=_h(token),
-                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+                   data=json.dumps({"espn_s2": "s2", "swid": OWNER1_SWID}))
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json()["verified_via"] == "league_read"
-    # probed the LINKED league, with the pair the client sent
-    assert calls == [("league", LINKED_LEAGUE, "s2", "{OK-1}")]
+    # probed the LINKED league, with the pair the client sent — ONCE (the
+    # membership assertion reuses the oracle's parsed teams)
+    assert calls == [("league", LINKED_LEAGUE, "s2", OWNER1_SWID)]
     with engine.connect() as conn:
         assert conn.execute(
             select(db_module.espn_credentials_table)).fetchone()._mapping[
@@ -524,19 +533,25 @@ def test_credential_only_store_league_oracle_200_must_parse_as_a_league(client):
 
 def test_credential_only_store_public_linked_league_is_not_an_oracle(client):
     """A PUBLIC league reads without any cookies, so a successful read of one
-    says nothing about the pair. The route must fall back to the fan probe
-    rather than treat that 200 as proof."""
+    says nothing about the pair — AUTH must come from the fan probe.
+
+    #321 amendment: the public league IS still read once, as the MEMBERSHIP
+    oracle (its owner_swids are what the identity assertion compares
+    against) — but `verified_via` stays `fan_profile`, because that read
+    proved membership, not authentication."""
     c, token, engine, _ = client
     _link_league("public")
-    calls = []
-    with _fan_probe(football=FFL, calls=calls), \
-         patch.object(es, "fetch_league",
-                      _must_not_call("a public league read")):
+    fan_calls = []
+    league_calls = []
+    with _fan_probe(football=FFL, calls=fan_calls), \
+         _league_read(calls=league_calls):
         r = c.post("/api/espn/link", headers=_h(token),
-                   data=json.dumps({"espn_s2": "s2", "swid": "{OK-1}"}))
+                   data=json.dumps({"espn_s2": "s2", "swid": OWNER1_SWID}))
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json()["verified_via"] == "fan_profile"
-    assert calls == [("fan", "s2", "{OK-1}")]
+    assert fan_calls == [("fan", "s2", OWNER1_SWID)]
+    # exactly one league read — the membership assertion, pair attached
+    assert league_calls == [("league", LINKED_LEAGUE, "s2", OWNER1_SWID)]
 
 
 def test_credential_only_store_purged_league_falls_back_to_fan_probe(client):

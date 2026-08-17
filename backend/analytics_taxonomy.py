@@ -96,6 +96,12 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # WebView, and they go to POST /api/espn/link, not analytics.
     "espn_connect_opened", "espn_connect_otp_step",
     "espn_connect_captured", "espn_connect_abandoned",
+    # #321 (2026-08-16): the connect flow's first FAILURE event — fired when
+    # the server refuses (or can't judge) a captured pair at store time.
+    # `reason` distinguishes wrong_account / bad_credentials / unavailable,
+    # so the identity-binding rejection is measurable and the R10
+    # migration's re-sign-in wave has a signal.
+    "espn_connect_store_rejected",
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
     # Plans: docs/plans/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
     # Tracking-plan addendum (the precondition this module's docstring
@@ -264,6 +270,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # cache (the InLeagueCalculator convention), never the device platform.
     "mock_started", "mock_pick_made", "mock_completed", "mock_abandoned",
     "mock_create_refused",
+    # ── #322–#327 mock-draft room UI (G2), 2026-08-16 ────────────────────
+    # Operator-approved extension of the mock family (scope.md §1 of
+    # docs/feedback/items/322-mock-draft-room-ui/): the three new room
+    # affordances — team sheet, position filter, pool search. Registered in
+    # the SAME change as their emitters (the G-031 lesson: this registry is
+    # default-deny behind a 200, so a name that ships after its track() call
+    # is silent data loss). All three CLIENT-fired from MockDraftScreen; all
+    # INTENT (user gestures). `mock_pool_searched` fires at most once per
+    # turn, on the first non-empty query — never per keystroke, and the
+    # query string is never sent.
+    "mock_team_sheet_opened", "mock_pool_filtered", "mock_pool_searched",
     # Notification-inbox growth surface, 2026-08-13 — the bell's first
     # instrumentation of any kind. Tracking plan:
     # docs/plans/notif-inbox-growth/analytics.md.
@@ -663,6 +680,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "espn_connect_otp_step":  frozenset(),
     "espn_connect_captured":  frozenset({"saw_otp"}),
     "espn_connect_abandoned": frozenset({"saw_otp"}),
+    # #321 — `reason` ∈ wrong_account | bad_credentials | unavailable
+    # (derived from the store response: 403 + reason:"wrong_account" →
+    # wrong_account; other 403 espn_bad_credentials → bad_credentials;
+    # anything else → unavailable); `source`/`saw_otp` mirror the events
+    # above. No cookie/credential prop exists or may be added.
+    "espn_connect_store_rejected": frozenset({"reason", "source", "saw_otp"}),
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
     # NOTE `platform` on league_view is the LEAGUE platform (sleeper /
     # espn / mfl / fleaflicker), matching league_selected's precedent
@@ -905,14 +928,35 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # count (in manual mode every pick is by:"user").
     # `mock_create_refused.reason` is the typed-empty reason verbatim
     # (open string).
+    # #328: `ownership_source` ∈ platform|user|partial|none|null — resolved
+    # provenance of the traded-pick overlay, read off settings_echo like the
+    # rest. The fallback rate per platform is one query.
     "mock_started":        frozenset({"platform", "teams", "rounds", "type",
-                                      "order_source", "mode"}),
+                                      "order_source", "mode",
+                                      "ownership_source"}),
     "mock_pick_made":      frozenset({"platform", "mode", "round", "pick_no",
                                       "for_own_team"}),
     "mock_completed":      frozenset({"platform", "mode", "rounds", "teams",
                                       "user_picks"}),
     "mock_abandoned":      frozenset({"platform", "mode", "picks_made"}),
     "mock_create_refused": frozenset({"platform", "reason"}),
+    # ── #322–#327 mock-draft room UI (G2), 2026-08-16 ────────────────────
+    # Same prop conventions as the family above: `platform` is the LEAGUE
+    # platform from the session league cache (never the device platform);
+    # `mode` ∈ cpu | manual = settings_echo.mode. Low-cardinality only.
+    # mock_team_sheet_opened — "Your team" link tapped (the sheet opens);
+    #   `round`/`pick_no` locate the moment in the draft.
+    # mock_pool_filtered — a non-All position chip selected; `position` ∈
+    #   QB | RB | WR | TE (the All chip fires nothing — it is the reset).
+    # mock_pool_searched — at most ONCE per turn, on the first non-empty
+    #   query. `filter_position` is the position filter active when the
+    #   search began (ALL | QB | RB | WR | TE) — the query string is NOT
+    #   sent, by design.
+    "mock_team_sheet_opened": frozenset({"platform", "mode", "round",
+                                         "pick_no"}),
+    "mock_pool_filtered":     frozenset({"platform", "mode", "position"}),
+    "mock_pool_searched":     frozenset({"platform", "mode",
+                                         "filter_position"}),
     # ── Bell inbox, 2026-08-13 ────────────────────────────────────────────
     # Tracking plan: docs/plans/notif-inbox-growth/analytics.md. MOBILE
     # ONLY — web/js/app.js has no analytics SDK (no track(), no /api/events

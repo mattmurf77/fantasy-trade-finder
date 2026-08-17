@@ -130,6 +130,9 @@ See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public)
 2. System surfaces the match: `GET /api/trades/matches`.
 3. Either side accepts or declines: `POST /api/trades/matches/<id>/disposition`.
 
+### Flow E — Mock-draft creation (per-platform ownership resolution, 2026-08-16 #328)
+`POST /api/mock-draft` resolves real order + traded-pick ownership per platform, all inside the create route (the engine `mock_draft_service.py` stays I/O-free): Sleeper via the Draft Room's cached board (`draft_board_service.build_board` — the one platform read, at creation only); ESPN via the pick-assignment grid the ESPN Draft Room renders (`_assignment_grid` → `assigned_board`, DB-only); MFL via the normalized `draft_picks` store (`_mock_owned_pick_overlay`, ownership anchored to the original owner's slot in the seeded shuffle — the order itself is never invented). Every mock is stamped `ownership_source` ∈ `platform`|`user`|`partial`|`none` so any fallback is labeled, never silent. Wiring detail: `../docs/architecture.md` (mock_draft_service row); contract: `../docs/api-reference.md` § Mock draft.
+
 ---
 
 ## Living-Memory Layer (this project)

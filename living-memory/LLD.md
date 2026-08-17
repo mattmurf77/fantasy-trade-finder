@@ -20,6 +20,9 @@
 - [Tooling & Constraints](#tooling--constraints)
 - [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
+- [Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)](#presentment-rules-construction-gate-vs-presentment-filter-layering-2026-08-16-tradepresentment_rules)
+- [Mock-draft ownership honesty: resolver-owned labels (2026-08-16, #328)](#mock-draft-ownership-honesty-resolver-owned-labels-2026-08-16-328)
+- [Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)](#finder-preselection-contract-now-carries-opponent--auto-run-intent-2026-08-16-330)
 
 ---
 
@@ -217,3 +220,30 @@ New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader 
 - **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
 
 Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.
+
+## Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)
+
+G6 ([D-062](DECISIONS.md)) sets three conventions for anything joining the serve-or-don't-serve decision:
+
+- **Two layers, two hook kinds.** Package-quality rules (R1 overpay / R2 pos-net / R3 pick-gap and the R5 need gate) are **construction gates**: module-level predicates in `trade_service.py` (beside `filler_ok`/`pick_swap_ok`), bound once per job into a `presentment_ok_fn` threaded to every v1 generator (v3 loop + `_try_sweeten` re-validation, v2 `_consider`, consensus `_emit`), sitting after `filler_ok` and BEFORE feasibility/surplus/fairness so a killed candidate refills from the enumeration and can never be sweetener-rescued. Per-user duplicate state (R4 windowless awaiting/matched exclusion) is a **presentment filter** at `_dedup_and_sort` + the likes-you injector — the same candidate is fine tomorrow once the match resolves. New "never show this" logic must pick one of these two homes; post-hoc deck filtering converts kills into holes and is the rejected shape.
+- **The never-relaxed list grows.** The #189 relaxed pass never loosens R1/R2/R3/R5 (alongside the #108 gates + untouchables — safety properties, not taste); its stage overrides may only touch fairness/surplus knobs.
+- **Windowless exclusion-set pattern.** Per-job, league-scoped `(frozenset(give), frozenset(receive))` sets are built server-side (`_load_presentment_exclusions`), passed as a `generate_trades` kwarg with **overwrite-per-call** semantics (`None` ⇒ empty — never keep-previous: the TradeService instance serves multiple leagues). Server-derived job facts (like the R-5b `bypass_need_gate`) are computed in `_run_trade_job` from job fields, never read from the request body.
+## Mock-draft ownership honesty: resolver-owned labels (2026-08-16, #328)
+
+Create-time resolution owns ownership honesty. The server resolvers
+(`server._mock_real_draft`, `server._mock_owned_pick_overlay`, the create
+route's MFL step) are the ONLY places an `ownership_source` label is chosen,
+and **the resolver that drops an overlay degrades the label at the same
+site** — identity drop-all → `none`, partial drop / coverage hole →
+`partial`, round-1 order hole → `none`. The engine
+(`mock_draft_service.py`) stays I/O-free: it carries the label
+(`build_settings` kwarg, coerced closed-vocabulary), degrades it in exactly
+one place (the §14-2 short-order branch, where the overlay itself is
+dropped), and echoes it via `.get` (pre-#328 rows read `null` — the #305
+pre-mode convention; no backfill ever). New resolution sources must ship
+their own label decision with the resolution — never a post-hoc inference
+from the resolved data. Vocabulary + client contract:
+`docs/cross-client-invariants.md` § Mock-draft ownership source.
+## Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)
+
+The finder preselection contract (store `useFinderTargets`, never route params — #300) now also carries the scoped opponent and a one-shot auto-run intent: `handoff: {opponent {userId,name}, autoRun, seq} | null`, seq store-stamped monotonic (a same-team repeat handoff must still re-fire TradesScreen's choke-point effect, whose deps gain the consumed `autoRunSeq`). Consumed on focus, exactly once; `clear()`/league-switch GC it. Pinned by `mobile/tests/check-offer-prefill-330.js` + `-unit.js`.

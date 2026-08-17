@@ -2119,12 +2119,67 @@ _MODEL_CONFIG_DEFAULTS = [
     # bye-week-multiplier-2026-08-09.md before ever reading these knobs live.
     ("outlook_bye_multiplier_enabled", 0.0, "#169: gate for the (evaluated, unshipped) per-week bye multiplier; 0=off (default) — pipeline.py does not read this yet"),
     ("outlook_bye_multiplier_scale",   1.0, "#169: linear scale from starting-lineup value-fraction-on-bye to mu multiplier haircut; FLAGGED heuristic, unshipped"),
+    # ── G6 trade presentment rules (flag trade.presentment_rules) ─────────
+    # docs/feedback/items/304-positional-need-filter/lld-delta.md §2. Each
+    # knob is that rule's deploy-free kill switch via PUT /api/admin/config.
+    ("max_overpay_frac",         0.25,  "G6 R1 #340: kill when raw consensus gap >= max_overpay_min_value AND gap/max(side) >= this, BOTH sides, independent of fairness_threshold; <=0 disables R1"),
+    ("max_overpay_min_value",   500.0,  "G6 R1 #340: absolute gap floor (D-055 materiality) below which R1 never fires"),
+    ("pos_net_cap",               1.0,  "G6 R2 #341: max |count(recv at P) - count(give at P)| per position over QB/RB/WR/TE (picks uncounted); 0 disables"),
+    ("pick_gap_frac",             0.8,  "G6 R3 #339: two-sided band — kill when a heavier-side pick sits in [frac*gap, gap/frac]; 0 disables. UNMEASURED default (no pick cards in the D-055 corpus) — the R-12 pick-league replay is the tuning task"),
+    ("pick_gap_min_value",      300.0,  "G6 R3 #339: consensus gap floor below which R3 never fires"),
+    ("need_gate_min_value",     500.0,  "G6 R5 #304: min consensus value of the primary received player before the need gate applies (untargeted decks only); <=0 disables the whole gate"),
+    ("need_gate_upgrade_margin",  0.0,  "G6 R5 #304: primary must beat the post-give incumbent by this fraction to count as a starter upgrade; 0 = any strict upgrade passes"),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Initialisation — called once on server startup
 # ---------------------------------------------------------------------------
+
+# ── #321 ESPN identity-binding release (2026-08-16) — R10 residue eviction ──
+# Cutoff for evicting pre-release `espn_credentials.verified_at` stamps.
+# WHY every pre-release stamp: no stamp minted before identity binding
+# shipped proves IDENTITY — the weak oracle vacuously accepts any account,
+# the public-league import gap stamped with no verify at all, and the strong
+# oracle passes any league member's pair. Under-eviction re-opens #321;
+# over-eviction costs one harmless re-sign-in.
+# CUTOFF MECHANICS: `_migrate_db` runs on every boot, so the UPDATE must
+# stay date-bounded — an unbounded "null all stamps" would sign users out on
+# every deploy. This literal is FINALIZED AT SHIP: the observed
+# deploy-completion time of the identity-binding release, else push-to-main
+# time plus a generous margin — erring LATER is safe (a stamp minted by the
+# new identity-bound code inside the margin is re-nulled once at the next
+# boot; that user re-signs-in one extra time, nothing worse), erring EARLIER
+# is not (a dishonest stamp survives as trusted). Reference timestamps
+# (verified from git, PRD §8): 2fa1ff2 (introduces the column)
+# 2026-08-12T04:25:58Z; 7dfcd16 (real-oracle fix) 2026-08-13T02:27:03Z.
+# Comparison is lexicographic over ISO-UTC strings — valid because
+# verified_at is always written via datetime.now(timezone.utc).isoformat()
+# (uniform +00:00 offset; a microsecond-bearing stamp still sorts after a
+# seconds-precision literal because '.' > '+').
+_ESPN_VERIFIED_AT_RELEASE_CUTOFF = "2026-08-17T06:00:00+00:00"
+
+
+def _evict_prerelease_espn_verified_stamps() -> int:
+    """#321 R10 — null every `espn_credentials.verified_at` stamp minted
+    before the identity-binding release (see the cutoff constant above).
+
+    Idempotent by construction, not by accident of data: after the first
+    run every matched row is NULL, and `NULL < '<cutoff>'` is NULL under
+    SQL three-valued logic — not matched — so re-runs are structural
+    no-ops. Rows are NOT deleted: the encrypted pair stays (forensics),
+    exactly how born-NULL legacy rows already behave, and the GET honesty
+    gate reads the nulled row as not connected → one re-sign-in through
+    the now identity-bound flow. Returns the evicted row count."""
+    with engine.begin() as conn:
+        res = conn.execute(
+            espn_credentials_table.update()
+            .where(espn_credentials_table.c.verified_at
+                   < _ESPN_VERIFIED_AT_RELEASE_CUTOFF)
+            .values(verified_at=None)
+        )
+        return res.rowcount or 0
+
 
 def _migrate_db() -> None:
     """
@@ -2299,6 +2354,18 @@ def _migrate_db() -> None:
         backfill_anchor_unlocked_formats(_RS.ANCHOR_UNLOCK_MIN)
     except Exception as e:
         print(f"[backfill] anchor unlock backfill skipped: {e}")
+
+    # ── #321 R10 — evict pre-identity-binding ESPN verified_at stamps ─────
+    # Date-bounded + NULL-fails-`<` idempotent (see the function's
+    # docstring); named its own try/except so a permanently-failing UPDATE
+    # is at least VISIBLE in boot logs instead of silently swallowed.
+    try:
+        n = _evict_prerelease_espn_verified_stamps()
+        if n:
+            print(f"[migrate] espn verified_at eviction: {n} pre-release "
+                  f"stamp(s) nulled (cutoff {_ESPN_VERIFIED_AT_RELEASE_CUTOFF})")
+    except Exception as e:
+        print(f"[migrate] espn verified_at eviction FAILED: {e}")
 
     # ── Agent 1 additions — user_player_skips ─────────────────────────────
     # The table is created by metadata.create_all(); this block is for any
@@ -7271,6 +7338,51 @@ def load_matches(user_id: str, league_id: str | None = None) -> list[dict]:
     return result
 
 
+def load_matches_for_exclusion(user_id: str, league_id: str) -> list[dict]:
+    """G6 R4 #336 — narrow read feeding the trade-generation exclusion set.
+
+    Returns the user's `pending`/`accepted` trade_matches rows in ONE
+    league, keyed from the USER's orientation (user_a_give/receive,
+    mirrored when the user is user_b): [{"my_give": [...],
+    "my_receive": [...]}]. `declined` rows deliberately do NOT block
+    (Q-G6-2: a market-rejected trade regenerating later is defensible —
+    "blocked" means currently live in the match pipeline). Windowless by
+    design — the #336 bug was the 7-day window on generation dedup. Hits
+    the ix_trade_matches_user_{a,b}_league composite indexes.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_matches_table.c.user_a_id,
+                trade_matches_table.c.user_a_give,
+                trade_matches_table.c.user_a_receive,
+            ).where(
+                and_(
+                    or_(
+                        trade_matches_table.c.user_a_id == user_id,
+                        trade_matches_table.c.user_b_id == user_id,
+                    ),
+                    trade_matches_table.c.league_id == league_id,
+                    trade_matches_table.c.status.in_(("pending", "accepted")),
+                )
+            )
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        try:
+            a_give    = json.loads(r.user_a_give)
+            a_receive = json.loads(r.user_a_receive)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.user_a_id == user_id:
+            my_give, my_receive = a_give, a_receive
+        else:
+            my_give, my_receive = a_receive, a_give
+        result.append({"my_give": my_give, "my_receive": my_receive})
+    return result
+
+
 def load_awaiting_trades(user_id: str) -> list[dict]:
     """
     Return cross-league trades the user has swiped "like" on that have NOT
@@ -10656,6 +10768,25 @@ def delete_espn_credential(user_id: str) -> None:
         conn.execute(
             delete(espn_credentials_table)
             .where(espn_credentials_table.c.user_id == user_id)
+        )
+
+
+def clear_espn_credential_verification(user_id: str) -> None:
+    """#321 identity binding (2026-08-16): null a user's `verified_at` stamp
+    WITHOUT deleting the row — the encrypted pair stays for forensics, and
+    the GET honesty gate already reads a stamp-less row as not connected, so
+    the user is routed through the verifying, identity-bound sign-in.
+
+    Called when a stored credential's SWID conclusively fails the membership
+    assertion (team-binding step / re-sync) — the stamp was lying about
+    identity, so it must stop vouching. No-op when nothing is stored."""
+    if not user_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            espn_credentials_table.update()
+            .where(espn_credentials_table.c.user_id == user_id)
+            .values(verified_at=None, updated_at=_now())
         )
 
 

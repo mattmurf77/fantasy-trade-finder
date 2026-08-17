@@ -16,9 +16,11 @@
     "test:mock-lifecycle": "node tests/check-mock-lifecycle.js",
     "test:mock-draft-modes": "node tests/check-mock-draft-modes.js",
     "test:mock-user-not-in-draft": "node tests/check-mock-user-not-in-draft.js",
+    "test:mock-g2-ui": "node tests/check-mock-g2-ui.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
+    "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
@@ -35,7 +37,13 @@
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:s51-regen-diff": "node tests/check-s51-regen-diff.js",
     "test:rank-presets": "node tests/check-rank-presets.js",
-    "test:premium-import": "node tests/check-premium-import.js"
+    "test:premium-import": "node tests/check-premium-import.js",
+    "test:calc-send-placement": "node tests/check-calc-send-placement.js",
+    "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
+    "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",
+    "test:picker-chip-alignment": "node tests/check-picker-chip-alignment.js",
+    "test:offer-prefill-330": "node tests/check-offer-prefill-330.js",
+    "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
