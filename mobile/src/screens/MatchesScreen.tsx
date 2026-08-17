@@ -42,6 +42,14 @@ import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
+import {
+  filterVisible,
+  countsByLeague,
+  matchHiddenKey,
+  awaitingHiddenKey,
+  matchRowKey,
+  awaitingRowKey,
+} from '../utils/matchesDerive';
 import { readErrorCopy } from '../utils/verification';
 import {
   guideV2Active,
@@ -86,6 +94,35 @@ export default function MatchesScreen() {
   } | null>(null);
   const [filterLeagueId, setFilterLeagueId] = useState<LeagueFilter>('all');
   const [segment, setSegment] = useState<Segment>('mutual');
+
+  // #334 (R-1) — render-layer pending-dismiss suppression. Keys of rows a
+  // dismiss has hidden; the visible-list memos below exclude them, so a
+  // background cache rewrite (mount refetch, pull-to-refresh, reconnect,
+  // league-switch invalidation, tab-press prefetch, TradesScreen's guide-v2
+  // fetchQuery) can NEVER resurrect a dismissed tile — visibility no longer
+  // depends on cache contents. A Set, not a single key: a previous
+  // dismiss's POST can be in flight while a new dismiss is pending.
+  // Lifecycle (R-2): added at tap time in handleDismiss[Awaiting] (both
+  // flag branches); removed in undoDismiss (instant restore), in onError
+  // (immediately — the snapshot restore honestly returned the row), and in
+  // onSuccess (only AFTER the awaited reconcile refetch resolves — B-1).
+  const [hiddenKeys, setHiddenKeys] = useState<ReadonlySet<string>>(() => new Set());
+  function hideKey(k: string) {
+    setHiddenKeys((prev) => {
+      if (prev.has(k)) return prev;
+      const next = new Set(prev);
+      next.add(k);
+      return next;
+    });
+  }
+  function unhideKey(k: string) {
+    setHiddenKeys((prev) => {
+      if (!prev.has(k)) return prev;
+      const next = new Set(prev);
+      next.delete(k);
+      return next;
+    });
+  }
 
   // ── Teardown-remediation flags (all default false — flag off is
   // byte-identical behavior) ──────────────────────────────────────────
@@ -224,14 +261,19 @@ export default function MatchesScreen() {
     placeholderData: (prev) => prev,
   });
 
-  // Awaiting trades — fetched lazily the first time the segment is opened,
-  // then kept warm so toggling back is instant. Same cross-league scope
-  // as matches/all; client-side league filter is reused.
+  // Awaiting trades — fetched on MOUNT (#335 R-7), not lazily on first
+  // segment open: the segment pill and chip counts must be correct on
+  // landing, before the segment is ever tapped. Costs one extra GET per
+  // Matches visit for users who never open the segment (an endpoint already
+  // called opportunistically on TradesScreen focus, bounded by staleTime).
+  // Same cross-league scope as matches/all; client-side league filter is
+  // reused. `placeholderData` for parity with matchesQuery — no blank on
+  // re-entry.
   const awaitingQuery = useQuery({
     queryKey: ['awaiting-trades'],
     queryFn:  getAwaitingTrades,
     staleTime: 15_000,
-    enabled:  segment === 'awaiting',
+    placeholderData: (prev) => prev,
   });
 
   // #229/#234 — the mutual empty state mounts the compact
@@ -262,6 +304,9 @@ export default function MatchesScreen() {
   const dismissMutation = useMutation({
     mutationFn: (id: string) => dismissMatch(id),
     onMutate: async (id) => {
+      // #334 (R-3) — kill any in-flight list read so a response that left
+      // the server pre-dismiss can't overwrite the optimistic removal.
+      await queryClient.cancelQueries({ queryKey: ['matches', 'all'] });
       // Optimistic — drop the match from the list so the UI feels instant.
       const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
       if (prev) {
@@ -272,7 +317,10 @@ export default function MatchesScreen() {
       }
       return { prev };
     },
-    onError: (_err, _id, ctx) => {
+    onError: (_err, id, ctx) => {
+      // #334 (R-2) — unhide IMMEDIATELY: the snapshot restore below
+      // honestly returns the row, and it must render at once.
+      unhideKey(matchHiddenKey(id));
       if (ctx?.prev) queryClient.setQueryData(['matches', 'all'], ctx.prev);
       // Undo path (ux.swipe_undo): the row was removed at TAP time, so
       // ctx.prev here is the already-filtered list — refetch to restore
@@ -282,10 +330,21 @@ export default function MatchesScreen() {
       }
       setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
     },
-    onSuccess: () => {
+    onSuccess: async (_res, id) => {
       // Dismissed matches are gone server-side, so refetch to reconcile
       // (the optimistic removal already hid it locally).
-      queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+      //
+      // #334 (R-2, B-1) — ORDERED unhide: a GET that started after
+      // onMutate's cancelQueries (pull-to-refresh / reconnect / guide-v2
+      // fetchQuery racing the POST round-trip) can read the row PRE-commit
+      // server-side and resurrect the cache. Unhiding before that cache is
+      // reconciled would re-show the tile for one round-trip — the exact
+      // #334 symptom. `invalidateQueries`' promise settles when its refetch
+      // completes (and settles even if the refetch fails, so no tile is
+      // hidden forever) — only then is the hidden key cleared, against a
+      // post-commit list.
+      await queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+      unhideKey(matchHiddenKey(id));
     },
   });
 
@@ -296,6 +355,8 @@ export default function MatchesScreen() {
   const dismissAwaitingMutation = useMutation({
     mutationFn: (row: AwaitingTrade) => dismissAwaitingTrade(row),
     onMutate: async (row) => {
+      // #334 (R-3) — same cancellation hygiene as the mutual mutation.
+      await queryClient.cancelQueries({ queryKey: ['awaiting-trades'] });
       const prev = queryClient.getQueryData<AwaitingTrade[]>(['awaiting-trades']);
       if (prev) {
         queryClient.setQueryData(
@@ -305,7 +366,9 @@ export default function MatchesScreen() {
       }
       return { prev };
     },
-    onError: (_err, _row, ctx) => {
+    onError: (_err, row, ctx) => {
+      // #334 (R-2) — unhide immediately; the restore below is honest.
+      unhideKey(awaitingHiddenKey(row.league_id, row.trade_id));
       if (ctx?.prev) queryClient.setQueryData(['awaiting-trades'], ctx.prev);
       // Undo path: same reasoning as the mutual mutation above — the row was
       // removed at TAP time, so ctx.prev is the already-filtered list;
@@ -315,8 +378,10 @@ export default function MatchesScreen() {
       }
       setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+    onSuccess: async (_res, row) => {
+      // #334 (R-2, B-1) — ordered unhide; see dismissMutation.onSuccess.
+      await queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+      unhideKey(awaitingHiddenKey(row.league_id, row.trade_id));
     },
   });
 
@@ -361,9 +426,13 @@ export default function MatchesScreen() {
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
     if (p.kind === 'match') {
+      // #334 (R-2) — clear the hidden key so the snapshot restore renders
+      // in the same frame.
+      unhideKey(matchHiddenKey(p.id));
       if (p.prev) queryClient.setQueryData(['matches', 'all'], p.prev);
       track('match_dismiss_undone', { match_id: p.id }, 'Matches');
     } else {
+      unhideKey(awaitingHiddenKey(p.row.league_id, p.row.trade_id));
       // Awaiting undo fires nothing — the mutual path's event above is
       // already unregistered/dropped by ingest; we don't replicate a dead
       // emitter (plan § Analytics, waived in writing).
@@ -379,17 +448,28 @@ export default function MatchesScreen() {
     [],
   );
 
-  function handleDismiss(m: TradeMatch) {
+  async function handleDismiss(m: TradeMatch) {
     haptics.selection();
-    if (!swipeUndoOn) {
-      dismissMutation.mutate(m.match_id);
-      return;
-    }
     // Double-fire guard: the tile's Dismiss can only be pending once.
+    // (Moved above the flag branch for #334; with the flag off the ref is
+    // always null, so this stays a no-op there.)
     if (
       pendingDismissRef.current?.kind === 'match'
       && pendingDismissRef.current.id === m.match_id
     ) return;
+    // #334 (R-1/R-2) — hide at TAP time, in BOTH flag branches: the tile
+    // leaves in this frame and no cache rewrite can bring it back.
+    hideKey(matchHiddenKey(m.match_id));
+    if (!swipeUndoOn) {
+      dismissMutation.mutate(m.match_id);
+      return;
+    }
+    flushPendingDismiss();
+    // #334 (R-3) — kill any in-flight list read before snapshotting, so the
+    // snapshot can't be overwritten by a pre-dismiss payload. Re-flush after
+    // the await: if another dismiss landed during it, its hold must commit
+    // before we overwrite the single-slot ref below.
+    await queryClient.cancelQueries({ queryKey: ['matches', 'all'] });
     flushPendingDismiss();
     // Optimistic removal now; the POST waits out the undo window.
     const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
@@ -417,18 +497,24 @@ export default function MatchesScreen() {
   // guarantees are identical: optimistic removal is reversed on error (S-9),
   // and the delayed-POST undo means a post-window failure refetches so the
   // row reappears rather than staying invisibly un-dismissed.
-  function handleDismissAwaiting(a: AwaitingTrade) {
+  async function handleDismissAwaiting(a: AwaitingTrade) {
     haptics.selection();
-    if (!swipeUndoOn) {
-      dismissAwaitingMutation.mutate(a);
-      return;
-    }
     const rowKey = `${a.league_id}:${a.trade_id}`;
-    // Double-fire guard, keyed the way the list is keyed.
+    // Double-fire guard, keyed the way the list is keyed. (Above the flag
+    // branch for #334; a no-op with the flag off — the ref is always null.)
     if (
       pendingDismissRef.current?.kind === 'awaiting'
       && `${pendingDismissRef.current.row.league_id}:${pendingDismissRef.current.row.trade_id}` === rowKey
     ) return;
+    // #334 (R-1/R-2) — hide at TAP time, in both flag branches.
+    hideKey(awaitingHiddenKey(a.league_id, a.trade_id));
+    if (!swipeUndoOn) {
+      dismissAwaitingMutation.mutate(a);
+      return;
+    }
+    flushPendingDismiss();
+    // #334 (R-3) — same cancel-then-re-flush as handleDismiss above.
+    await queryClient.cancelQueries({ queryKey: ['awaiting-trades'] });
     flushPendingDismiss();
     const prev = queryClient.getQueryData<AwaitingTrade[]>(['awaiting-trades']);
     if (prev) {
@@ -582,15 +668,56 @@ export default function MatchesScreen() {
     });
   }
 
-  const visibleMatches = useMemo(() => {
-    if (filterLeagueId === 'all') return allMatches;
-    return allMatches.filter((m) => m.league_id === filterLeagueId);
-  }, [allMatches, filterLeagueId]);
+  // #334 (R-1) — the rendered lists derive through the shared hidden-aware
+  // filter: league scope AND pending-dismiss suppression in one predicate.
+  const visibleMatches = useMemo(
+    () => filterVisible(allMatches, filterLeagueId, hiddenKeys, matchRowKey),
+    [allMatches, filterLeagueId, hiddenKeys],
+  );
 
-  const visibleAwaiting = useMemo(() => {
-    if (filterLeagueId === 'all') return allAwaiting;
-    return allAwaiting.filter((a) => a.league_id === filterLeagueId);
-  }, [allAwaiting, filterLeagueId]);
+  const visibleAwaiting = useMemo(
+    () => filterVisible(allAwaiting, filterLeagueId, hiddenKeys, awaitingRowKey),
+    [allAwaiting, filterLeagueId, hiddenKeys],
+  );
+
+  // #335 (R-8/R-10) — count inputs: hidden-aware, league-UNfiltered arrays
+  // (league chips count the whole segment, whatever chip is active). `null`
+  // while the list's first fetch is unresolved — a pill/chip then renders
+  // NO count, never a fabricated 0. Same helper family as the visible
+  // lists, so a dismissed tile and its counts move in the same frame.
+  const hiddenAwareMatches = useMemo(
+    () => (matchesQuery.data === undefined
+      ? null
+      : filterVisible(matchesQuery.data, 'all', hiddenKeys, matchRowKey)),
+    [matchesQuery.data, hiddenKeys],
+  );
+  const hiddenAwareAwaiting = useMemo(
+    () => (awaitingQuery.data === undefined
+      ? null
+      : filterVisible(awaitingQuery.data, 'all', hiddenKeys, awaitingRowKey)),
+    [awaitingQuery.data, hiddenKeys],
+  );
+  const matchCounts = useMemo(
+    () => countsByLeague(hiddenAwareMatches ?? undefined),
+    [hiddenAwareMatches],
+  );
+  const awaitingCounts = useMemo(
+    () => countsByLeague(hiddenAwareAwaiting ?? undefined),
+    [hiddenAwareAwaiting],
+  );
+  // Segment pills count rows under the ACTIVE league filter (the list the
+  // pill would show) — literally the rendered array's length, so pill and
+  // list can never disagree.
+  const mutualPillCount =
+    hiddenAwareMatches === null ? null : visibleMatches.length;
+  const awaitingPillCount =
+    hiddenAwareAwaiting === null ? null : visibleAwaiting.length;
+  // League chips count rows in the ACTIVE segment.
+  const segmentChipCounts = segment === 'mutual' ? matchCounts : awaitingCounts;
+  const segmentChipTotal =
+    segment === 'mutual'
+      ? (hiddenAwareMatches === null ? null : hiddenAwareMatches.length)
+      : (hiddenAwareAwaiting === null ? null : hiddenAwareAwaiting.length);
 
   // Filter chips: "All" + one per league. Default to the cached session
   // leagues so chips are stable even if the user has matches in leagues no
@@ -785,12 +912,14 @@ export default function MatchesScreen() {
       <View style={styles.segmentRow}>
         <SegmentBtn
           label="Mutual matches"
+          count={mutualPillCount}
           active={segment === 'mutual'}
           onPress={() => setSegment('mutual')}
           testID="matches.segment.mutual"
         />
         <SegmentBtn
           label="Awaiting them"
+          count={awaitingPillCount}
           active={segment === 'awaiting'}
           onPress={() => {
             // A hand-tapped segment is a `tab` view even on a route that
@@ -815,6 +944,14 @@ export default function MatchesScreen() {
       >
         {filterChips.map((c) => {
           const isActive = c.id === filterLeagueId;
+          // #335 (R-8/R-10) — chips count the active segment; null (list
+          // unresolved) renders no count, a missing league honestly reads 0.
+          const chipCount =
+            c.id === 'all'
+              ? segmentChipTotal
+              : segmentChipCounts === null
+                ? null
+                : segmentChipCounts[c.id] ?? 0;
           return (
             <Pressable
               key={c.id}
@@ -823,7 +960,11 @@ export default function MatchesScreen() {
               testID={c.id === 'all' ? 'matches.league-chip.all' : `matches.league-chip.${c.id}`}
               accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
-              accessibilityLabel={`Filter: ${c.name}`}
+              accessibilityLabel={
+                typeof chipCount === 'number'
+                  ? `Filter: ${c.name}, ${chipCount} ${chipCount === 1 ? 'trade' : 'trades'}`
+                  : `Filter: ${c.name}`
+              }
               onPress={() => setFilterLeagueId(c.id)}
               hitSlop={{ top: 6, bottom: 6 }}
               style={({ pressed }) => [
@@ -832,9 +973,20 @@ export default function MatchesScreen() {
                 pressed && { backgroundColor: ink.ink3 },
               ]}
             >
-              <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                {c.name}
-              </Text>
+              <View style={styles.chipInner}>
+                {/* Long names truncate the NAME, never the count. */}
+                <Text
+                  style={[styles.chipText, isActive && styles.chipTextActive]}
+                  numberOfLines={1}
+                >
+                  {c.name}
+                </Text>
+                {typeof chipCount === 'number' ? (
+                  <Text style={[styles.chipCount, isActive && styles.chipCountActive]}>
+                    {chipCount}
+                  </Text>
+                ) : null}
+              </View>
             </Pressable>
           );
         })}
@@ -1203,11 +1355,15 @@ function SegmentBtn({
   active,
   onPress,
   testID,
+  count,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
   testID?: string;
+  // #335 (R-11) — inline Plex Mono count after the label. Omitted or null
+  // (list not yet resolved — R-10) renders exactly as before.
+  count?: number | null;
 }) {
   return (
     <Pressable
@@ -1215,15 +1371,27 @@ function SegmentBtn({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
+      accessibilityLabel={
+        typeof count === 'number'
+          ? `${label}, ${count} ${count === 1 ? 'trade' : 'trades'}`
+          : label
+      }
       style={({ pressed }) => [
         styles.segmentBtn,
         active && styles.segmentBtnActive,
         pressed && { backgroundColor: ink.ink3 },
       ]}
     >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-        {label}
-      </Text>
+      <View style={styles.segmentInner}>
+        <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+          {label}
+        </Text>
+        {typeof count === 'number' ? (
+          <Text style={[styles.segmentCount, active && styles.segmentCountActive]}>
+            {count}
+          </Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -1345,6 +1513,21 @@ const styles = StyleSheet.create({
   },
   segmentText: { ...type.label },
   segmentTextActive: { color: chalk.base },
+  // #335 (R-11) — label + inline mono count on one row, space.xs apart.
+  segmentInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+  // Bare Plex Mono inline numeral (ScorePill/tier-header mono-count
+  // convention — no box, no CountBadge). 11 = the type floor.
+  segmentCount: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    color: chalk.dim,
+  },
+  segmentCountActive: { color: chalk.base },
 
   chipRow: {
     paddingHorizontal: space.lg,
@@ -1367,8 +1550,23 @@ const styles = StyleSheet.create({
   chipActive: {
     borderColor: ice.base,
   },
-  chipText: { ...type.label },
+  // #335 (R-11) — same construction as segmentInner: the NAME shrinks and
+  // truncates under any future width cap; the count never does.
+  chipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+  chipText: { ...type.label, flexShrink: 1 },
   chipTextActive: { color: chalk.base },
+  chipCount: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    color: chalk.dim,
+    flexShrink: 0,
+  },
+  chipCountActive: { color: chalk.base },
 
   list: { padding: space.lg, paddingBottom: 96 },
   leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: space.xs },
