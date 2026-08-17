@@ -701,3 +701,10 @@ NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkl
 | DN scoring → FTF board map | `PPR→1qb_ppr`, `SFLEXTEP→sf_tep` (exact); `SFLEX→sf_tep`, `STD→1qb_ppr` (nearest — labeled confirmation only) | `rankPresets.ts`, import confirmation UI |
 | Contender rule | `contender_` files never apply to a dynasty board without explicit user override | `ImportRankingsSheet.tsx`, `check-premium-import.js` |
 | Order-only rule | premium CSV `Value`/`Trend`/`PPG` columns are never sent to or persisted by FTF | `rankPresets.ts`, `rankings_import.py`, both check suites |
+
+## Aggregate value presentation (2026-08-16, D-064)
+
+Aggregate asset values shown to users are expressed as pick-equivalent labels
+("≈N firsts", `_aggregate_pick_label`), never raw numerics — on every client,
+ungated. Per-asset value uses the 8-rung `Tier` enum (server-computed). Raw
+numeric values are a debugging/share-image-only representation (#277/#280).

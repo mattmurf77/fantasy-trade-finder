@@ -502,6 +502,8 @@
 | D-061 | Retro Suggestion Links: `retro_exact` Match Type + Telemetry-Era Boundary | 2026-08-16 |
 | D-062 | Presentment Rules Filter, Don't Reorder; R5 Binds Untargeted Decks Only, on the Consensus Board, Fail-Open on Unresolved Windows | 2026-08-16 |
 | D-063 | Mock-Draft Ownership Resolution Is Per-Platform at Create, With a Labeled Fallback | 2026-08-16 |
+| D-064 | `aggregate_tier_labels` Graduated — Pick-Equivalent Labels Ship to Everyone | 2026-08-16 |
+| D-065 | Calculator Pick Rows Carry Tier Badges at Discounted Value (Supersedes #263) | 2026-08-16 |
 
 ---
 
@@ -654,4 +656,19 @@ For substantial decisions (large refactors, vendor changes, API surface changes)
 **Decision:** Create-time resolution goes per-platform in the server route (`_mock_real_draft` + new `_mock_owned_pick_overlay`), and every mock is labeled with `settings.ownership_source` ∈ `platform`|`user`|`partial`|`none` (closed server-side, open + nullable on clients, `null` = pre-change row = unknown). ESPN reads the **board** (`_assignment_grid` → `assigned_board`, the same gate + grid as the board route); MFL reads the store, anchors trades to the original owner's slot in the seeded shuffle, and never derives an order (KD-6); the label degrades at exactly the point an overlay is dropped (identity guard, round-1 grid hole, empty store, short order). Coverage is two-sided: full coverage earns `platform`/`user` even with zero trades; any hole labels `partial` while the applied rows still apply.
 **Alternatives considered:** Engine reads `draft_picks` itself (breaks the no-I/O module contract); ESPN read of raw stored JSON + `draft_picks` (re-implements padding/exclusion; surfaces drift); deriving an MFL order from standings (an invented order); backfilling labels onto old rows (inventing provenance); degrading partial coverage to `none` (throws away real data); a dedicated kill-flag (flag-surface growth — rollback is a code revert on an additive contract, operator-accepted).
 **Consequences:** The `POST/GET /api/mock-draft` payload contract gains one nullable `settings_echo` field; `mock_started` gains the `ownership_source` prop (fallback rate per platform is one query); the mobile screen renders one disclosure caption (two mounts). `_mock_owned_pick_overlay` joins the sanctioned `load_draft_picks` `source=` callers as a deliberate literal platform read (never flag-following — user rows are ESPN's path). Sleeper is byte-identical except the label.
+**Status:** Active.
+
+## D-064 — `aggregate_tier_labels` Graduated — Pick-Equivalent Labels Ship to Everyone
+**Date:** 2026-08-16 (operator, Q1/D-306-1 = A, 2026-08-16 feedback wave G1)
+**Context:** #306: the in-league calculator's team selector showed raw numerics to everyone but the operator — the `aggregate_tier_labels` experiment (from #279) had run allowlist-only, weighted 0/10000, while the no-raw-numerics ruling became standing policy and #300 shipped the same labels ungated on the same screen's divider. The control arm was the defect.
+**Decision:** Graduate. The `variant_for` guard is removed from `/api/league/power-rankings`; `total_value_label` + positional `value_label` (+ new `picks.value_label`, D-306-2, literal-count firsts per #285) emit for every caller. Prod experiment retirement = the #279 runbook `transition → decide` curls, post-deploy.
+**Alternatives considered:** De-gate positional labels only (incoherent split); operator-only render (fixes the bug for nobody, worse than declining).
+**Consequences:** LeagueSummary per-team/per-position rows light for all users with zero client edits (clients already rendered the keys when present). `docs/config-reference.md` experiment row updated; cross-client invariant addition below.
+**Status:** Active.
+
+## D-065 — Calculator Pick Rows Carry Tier Badges at Discounted Value (Supersedes #263)
+**Date:** 2026-08-16 (operator, Q4/Q5 = D-320-1/D-320-2, 2026-08-16 feedback wave G1)
+**Context:** #320: pick values on calculator roster lists rendered as raw numerics while players carried tier badges; #263 had deliberately kept picks numeric.
+**Decision:** Pick rows get tier badges on calculator surfaces via server-computed `tier` on `/api/league/picks` (`tier_for_elo(seed_elo_for_value(pool_value))` — the discounted band, never a client-side derivation). Accepted consequence (D-320-2): a 2028 2nd may badge as a 3rd — it is the honest price. Share-image pick rows stay numeric (D-320-3; #277/#280 stands).
+**Alternatives considered:** Client-derived tiers from display values (forbidden — the #263/#277/#278 scale-mismatch class); undiscounted badges (would overstate far-out picks).
 **Status:** Active.
