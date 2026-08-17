@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-17 — Dismiss cooldown built and HELD on `fix/pass-cooldown` (not merged)](#2026-08-17--dismiss-cooldown-built-and-held-on-fixpass-cooldown-not-merged)
 - [2026-08-17 — Feedback wave merged to main, push + TestFlight owed](#2026-08-17--feedback-wave-merged-to-main-push--testflight-owed)
 - [2026-08-16 — Matchmaking engine phase 1 shipped dark; mobile pyramid UI is the open half](#2026-08-16--matchmaking-engine-phase-1-shipped-dark-mobile-pyramid-ui-is-the-open-half)
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
@@ -25,6 +26,65 @@
 - [2026-08-11 — #169 frame E + card frame C shipped; sim debt owed](#2026-08-11--169-frame-e--card-frame-c-shipped-sim-debt-owed)
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
+
+
+## 2026-08-17 — Dismiss cooldown built and HELD on `fix/pass-cooldown` (not merged)
+
+### Where I am right now
+
+The 2026-08-16 feedback wave **shipped** (17 items, v1.13.5 build 114 — see the
+entry below and CHANGELOG). Since then, one new piece of work is **built,
+tested, and deliberately unmerged**: the dismiss cooldown.
+
+**Branch `fix/pass-cooldown`** (worktree `.claude/worktrees/pass-cooldown`),
+rebased onto the shipped decline-reason capture. Full backend suite **3125
+passed / 0 failed**. Decision **D-067**. Plan + full diagnosis:
+[`../docs/plans/pass-cooldown/plan.md`](../docs/plans/pass-cooldown/plan.md).
+
+### What it does
+
+Operator report: identical suggestions in the same order between sessions.
+**Dispositions were saving correctly** — that was never the bug. `deck.fatigue`
+gives a dismiss only a score multiplier floored at 0.25 (demote, never remove);
+the one hard filter shared a 7-day window with likes; and a dismiss did not bind
+until the next `session_init`. Measured: one card served across **41 deck jobs**
+in 12 days.
+
+- `pass_cooldown_days` (14.0) — dismisses get their own hard window
+- Dismisses bind **immediately** across every service in `sess["trade_svcs"]`
+  (`sess["trade_svc"]` is an alias for the active format only)
+- `pass_cooldown_start_epoch` — **legacy amnesty**: dismisses before
+  `2026-08-17T22:30:00Z` are exempt (they predate reason capture, so carry no
+  reason)
+- No new flag: the knobs are the deploy-free revert
+
+### Next actions
+
+1. **Decide whether to merge.** It was held pending the terminology revision —
+   which has since landed, and the branch is already reconciled with it.
+2. **Consider raising `pass_cooldown_start_epoch`.** The default sits just past
+   the reason-capture BACKEND landing (`22:22:56Z`). The reason tiles are a
+   MOBILE change, so users cannot produce a reasoned dismiss until a build
+   carrying them ships — every dismiss until then is unlabelled and arguably
+   deserves amnesty too. One `PUT /api/admin/config` call, no deploy.
+3. **Route labelled reasons to engine actions.** D-067 is the *unlabelled*
+   default only. The shipped taxonomy (`value|fit|other` + 8 detail codes,
+   `backend/database.py:777`) is captured but not yet routed — e.g. a stated
+   outgoing blocker should suppress that asset broadly, which exact-pair
+   matching deliberately does not do.
+
+### Notes / hazards
+
+- **Second decision-ID collision in two days.** Reason capture took D-066
+  concurrently; ours is D-067. Grep DECISIONS.md before claiming an ID.
+- **Served-but-unacted repetition is out of scope by operator decision** — it is
+  98.5% of what the reporting user sees (4,003 impressions vs 61 decisions in
+  14 days). Only dismissed cards are suppressed.
+- **Operator principle (D-067):** *accuracy, not volume — bad suggestions are
+  worse than limited suggestions.* Deck thinning is an accepted cost; do not
+  weaken a correctness rule to protect deck size.
+
+---
 
 ---
 
