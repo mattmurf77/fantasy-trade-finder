@@ -40,7 +40,12 @@ the next attempt can be re-gated without a rebuild.
 
 **INV-10 — deterministic and self-contained.** Same ``rng_seed`` ⇒ a
 byte-identical draft; zero platform egress after creation (this module
-imports no HTTP client and performs no I/O of any kind).
+imports no HTTP client and performs no I/O of any kind at runtime). The one
+qualifier (#323): :func:`state_payload` labels picks through
+:meth:`ranking_service.RankingService.tier_for_elo` — a pure classmethod
+over the checked-in ``tier_config.json``, which ``ranking_service`` loads
+once at module import (a module the server already imports at boot). The
+per-pick band walk is in-memory; nothing here gains I/O or egress.
 """
 
 from __future__ import annotations
@@ -53,6 +58,10 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from . import draft_board_service as dbs
+# #323 — the ONE canonical tier walk (stdlib-only module, config read at
+# import; INV-10 note above). Never wire `board_elo` into it: a pick's tier
+# is consensus-denominated, stable across basis toggles (PRD §2).
+from .ranking_service import RankingService
 
 SCHEMA = 1
 
@@ -1398,13 +1407,14 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
         row = ctx.player_rows.get(str(pick["player_id"])) or {}
         seed = pre_draft.get(str(pick["player_id"])) or {}
         rank = seed.get("rank")
+        position = str(row.get("position") or "").upper()
         picks.append({
             "round": pick["round"],
             "pick_no": pick["pick_no"],
             "slot": pick["slot"],
             "player_id": pick["player_id"],
             "name": row.get("full_name") or row.get("name") or "",
-            "position": str(row.get("position") or "").upper(),
+            "position": position,
             "team": row.get("team") or None,
             "picked_by_user_id": pick["roster_id"],
             "picked_at": None,
@@ -1420,6 +1430,16 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "consensus_delta": (int(rank) - int(pick["pick_no"])
                                 if rank is not None else None),
             "valued": bool(seed.get("valued")) if seed else False,
+            # #323 — the pick-value tier ladder rung, server-computed via the
+            # canonical band walk (the #263/#277/#278 rule: clients render
+            # tiers, never derive them). CONSENSUS-denominated always — never
+            # `board_elo`, so the chip cannot flip on a basis toggle (PRD §2
+            # basis-independence). None when the player has no consensus Elo
+            # (the `valued: false` rows) or sits below the waivers floor —
+            # None means "show no tier", never a fabricated one.
+            "tier": RankingService.tier_for_elo(
+                ctx.consensus_elo.get(str(pick["player_id"])),
+                position, ctx.scoring_format),
         })
 
     return {

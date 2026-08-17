@@ -3324,3 +3324,67 @@ def test_305_07_manual_mode_never_consults_the_rng(client, flag_on, session):
     other_seed = _lap(99)
     assert [p["player_id"] for p in other_seed["picks"]] == \
         [p["player_id"] for p in state["picks"]]
+
+
+# ---------------------------------------------------------------------------
+# G2 (#322–#327) — `picks[].tier`, the one backend change of the room-UI wave
+# (docs/feedback/items/322-mock-draft-room-ui/prd.md §2, §5.1). Four pins,
+# each proven-to-fail on its named sabotage at authoring time.
+# ---------------------------------------------------------------------------
+
+def _g2_state_with_pick(ctx, player_id, *, by="user"):
+    """One made pick, hand-built (the :1431 idiom) so the tier input is a
+    known fixture value rather than an engine outcome."""
+    state = make_state(ctx, owners=["a", "b"], user="a", rounds=1)
+    state["picks"] = [{"pick_no": 1, "round": 1, "slot": 1, "roster_id": "a",
+                       "player_id": player_id, "by": by}]
+    return state
+
+
+def test_state_payload_picks_carry_tier():
+    """T-P1 — a valued pick's `tier` is the canonical band walk over the
+    SAME (elo, position, format) inputs — never a client-side or ad-hoc
+    derivation. SABOTAGE (proven red): emit tier from `pick_no` parity
+    instead of the walk."""
+    from backend.ranking_service import RankingService
+    # 1600.0 sits inside 1qb_ppr WR's `first_1` band (1580–1785) — a fixture
+    # value in a KNOWN band, so the assertion pins the walk's answer, not
+    # merely self-consistency.
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    entry = payload["picks"][0]
+    assert entry["tier"] == RankingService.tier_for_elo(
+        1600.0, "WR", ctx.scoring_format)
+    assert entry["tier"] == "first_1"
+
+
+def test_state_payload_tier_null_when_unvalued():
+    """T-P2 — a player absent from `consensus_elo` gets `tier: None` (and
+    keeps `valued: False`): None means "show no tier", never a fabricated
+    rung. SABOTAGE (proven red): default a missing Elo to `"waivers"`."""
+    ctx = make_ctx(players=linear_players(4) + [("z9", "WR", None)])
+    entry = mds.state_payload(_g2_state_with_pick(ctx, "z9"), ctx)["picks"][0]
+    assert entry["tier"] is None
+    assert entry["valued"] is False
+
+
+def test_my_picks_rows_carry_tier():
+    """T-P3 — `my_picks[]` is a filter of `picks[]` (the SAME dicts, by
+    identity), so the tier key cannot exist on one and not the other.
+    SABOTAGE (proven red): rebuild `my_picks` copying rows minus the key."""
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    assert len(payload["my_picks"]) == 1
+    twin = next(p for p in payload["picks"]
+                if p["player_id"] == payload["my_picks"][0]["player_id"])
+    assert payload["my_picks"][0] is twin
+    assert payload["my_picks"][0]["tier"] == "first_1"
+
+
+def test_schema_still_1_with_tier_key_present():
+    """T-P4 — the tier key is ADDITIVE under the plan-D10 open-payload
+    convention: `schema` stays 1. SABOTAGE (proven red): bump SCHEMA to 2."""
+    ctx = make_ctx(players=[("p1", "WR", 1600.0), ("p2", "RB", 1450.0)])
+    payload = mds.state_payload(_g2_state_with_pick(ctx, "p1"), ctx)
+    assert payload["schema"] == 1
+    assert "tier" in payload["picks"][0]
