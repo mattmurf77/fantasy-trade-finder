@@ -215,6 +215,18 @@ def _entries_from_rows(rows: list) -> list[tuple]:
     return out
 
 
+# Nickname/formal-name aliases the fuzzy tier cannot bridge. Keys AND values
+# are normalized forms; values are Sleeper's canonical names (the pool's name
+# space). Premium rank sites (Dynasty Nerds, DLF) export the formal forms.
+# Verified against Sleeper's live player dump 2026-08-16. Keep this surgical:
+# only add pairs proven to fail a real import — the fuzzy tier already handles
+# prefix and initial forms.
+_NAME_ALIASES = {
+    "kenneth gainwell": "kenny gainwell",     # 7567, RB TB
+    "chigoziem okonkwo": "chig okonkwo",      # 8210, TE WAS
+}
+
+
 def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None,
                     max_candidates: int = 3,
                     rows: Optional[list[dict]] = None) -> list[dict]:
@@ -252,6 +264,7 @@ def match_rank_list(lines: list[str], players: list, seed: Optional[dict] = None
     out = []
     for line, name, team_hint, pos_hint in entries:
         query = normalize_player_name(name)
+        query = _NAME_ALIASES.get(query, query)
         row = {"input": line.strip(), "name": name, "status": "unmatched",
                "player": None, "candidates": []}
         exact = norm_index.get(query, [])

@@ -7912,8 +7912,8 @@ def sync_players(player_db: dict, adp_map: dict | None = None) -> int:
       • Position must be QB, RB, WR, or TE
       • Must have a full_name
       • Removed only if status != 'Active' AND years_exp is not None
-        (i.e., retired/Inactive players who actually played; prospects
-        with years_exp=None are kept as potential draft targets)
+        AND the player has no team (retired/out-of-league veterans;
+        rostered Inactive/IR players and years_exp=None prospects are kept)
 
     player_db : dict of {player_id: raw_sleeper_player_data}
     adp_map   : optional {player_id: float} — ADP values from the Sleeper
@@ -7933,11 +7933,16 @@ def sync_players(player_db: dict, adp_map: dict | None = None) -> int:
             continue
 
         # Keep Active players; also keep anyone with no years_exp data
-        # (undrafted rookies / prospects).  Remove Inactive/IR players
-        # who have actually played before (years_exp is not None).
+        # (undrafted rookies / prospects).  Remove non-Active veterans ONLY
+        # when they carry no team: Sleeper marks rostered-but-unavailable
+        # players (IR / suspended / NFI) "Inactive" while they still hold a
+        # team slot, and those are real dynasty assets — dropping them made
+        # Ricky Pearsall (SF, status Inactive) vanish from the pool and fail
+        # a premium rankings import (G-008 class, found 2026-08-16). A
+        # teamless non-Active veteran is retired / out of the league.
         status    = p.get("status") or ""
         years_exp = p.get("years_exp")
-        if status != "Active" and years_exp is not None:
+        if status != "Active" and years_exp is not None and not p.get("team"):
             continue
 
         # Safely coerce numeric fields

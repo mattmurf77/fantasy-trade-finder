@@ -546,3 +546,29 @@ def test_status_refresh_leaves_the_mfl_path_alone_for_a_sleeper_league(
     monkeypatch.setattr(server, "_sync_mfl_owned_picks",
                         lambda lid: pytest.fail("MFL path must not run"))
     assert server._refresh_league_draft_status(LEAGUE_ID).status == ds.DRAFTED
+
+
+# ── Inactive-with-team retention (G-008 class, 2026-08-16) ─────────────────
+# Sleeper marks rostered-but-unavailable players (IR / suspended / NFI)
+# "Inactive" while they still hold a team; the sync must keep them (they are
+# real dynasty assets — Ricky Pearsall vanished this way). Only teamless
+# non-Active veterans (retired / out of the league) are removed.
+
+def test_sync_players_keeps_rostered_inactive_veteran(mem_db):
+    db_module.sync_players(dict([
+        _sleeper_player("p_ir", "Ricky Pearsall", 2, "SF", None,
+                        status="Inactive", pos="WR"),
+        _sleeper_player("p_ret", "Retired Guy", 8, None, None,
+                        status="Inactive", pos="WR"),
+        _sleeper_player("p_act", "Active Guy", 3, "KC", None,
+                        status="Active", pos="WR"),
+        _sleeper_player("p_rook", "Prospect Kid", None, None, None,
+                        status="Inactive", pos="WR"),
+    ]))
+    with mem_db.connect() as conn:
+        got = {r.player_id for r in conn.execute(
+            select(players_table.c.player_id)).fetchall()}
+    assert "p_ir" in got            # rostered Inactive: KEPT (the fix)
+    assert "p_act" in got           # Active: kept
+    assert "p_rook" in got          # years_exp None prospect: kept
+    assert "p_ret" not in got       # teamless Inactive veteran: dropped

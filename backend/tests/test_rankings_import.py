@@ -668,3 +668,36 @@ def test_preset_events_registered_and_non_intent():
     assert "rankings_import_applied" in tax.SERVER_FIRED_EVENTS
     assert "rankings_import_applied" not in tax.ALLOWED_CLIENT_EVENTS
     assert "rankings_import_applied" in aq.INTENT_EVENTS
+
+
+# ── _NAME_ALIASES: formal-name forms premium sites export (2026-08-16) ─────
+# Sleeper's canonical names are "Kenny Gainwell" / "Chig Okonkwo"; Dynasty
+# Nerds exports "Kenneth Gainwell" / "Chigoziem Okonkwo" and the fuzzy tier
+# cannot bridge either pair (proven by the operator's first real DN import).
+
+def _alias_pool():
+    return [
+        SimpleNamespace(id="7567", name="Kenny Gainwell", position="RB", team="TB"),
+        SimpleNamespace(id="8210", name="Chig Okonkwo", position="TE", team="WAS"),
+        SimpleNamespace(id="1", name="Bijan Robinson", position="RB", team="ATL"),
+    ]
+
+
+def test_alias_bridges_formal_name_forms():
+    rows = match_rank_list(["Kenneth Gainwell", "Chigoziem Okonkwo"], _alias_pool())
+    assert [r["status"] for r in rows] == ["matched", "matched"]
+    assert rows[0]["player"]["id"] == "7567"
+    assert rows[1]["player"]["id"] == "8210"
+
+
+def test_alias_applies_on_structured_rows_too():
+    rows = match_rank_list([], _alias_pool(), rows=[
+        {"name": "Kenneth Gainwell", "team": "TB", "pos": "RB"},
+    ])
+    assert rows[0]["status"] == "matched"
+    assert rows[0]["player"]["id"] == "7567"
+
+
+def test_alias_does_not_shadow_exact_canonical_names():
+    rows = match_rank_list(["Kenny Gainwell", "Chig Okonkwo"], _alias_pool())
+    assert [r["status"] for r in rows] == ["matched", "matched"]
