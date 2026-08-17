@@ -2202,6 +2202,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # The UI's "dismiss" is the API's decision='pass'. Deploy-free revert to
     # the pre-fix behavior: set this to 7.0.
     ("pass_cooldown_days",       14.0,  "Dismiss cooldown: a passed trade is excluded from generation for this many days (was hard-coded 7 alongside likes). Set 7.0 to restore pre-fix behavior; likes keep their own 7-day window"),
+    ("pass_cooldown_start_epoch", 1787005800.0, "Legacy-dismiss amnesty (D-067): unix epoch; dismisses recorded BEFORE this instant are exempt from the cooldown because they predate decline-reason capture (D-066, live 2026-08-17T22:22:56Z) and carry no reason. Default 2026-08-17T22:30:00Z. Raise it to the moment the reason-carrying MOBILE build reaches testers; 0 disables the amnesty"),
 ]
 
 

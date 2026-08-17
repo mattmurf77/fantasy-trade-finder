@@ -277,3 +277,60 @@ D-066 deliberately did **not** touch that write (out of scope, and the fix needs
 the reason codes to gate it). Flagging it here so it is not lost between the two
 threads: **reason capture is a gate on a corrupting write, not only a routing
 feature.** It should be logged as its own item rather than absorbed silently.
+
+---
+
+## Reconciliation — decline-reason capture landed first (2026-08-17)
+
+The terminology revision **shipped to `main` while this branch was held**
+(`c95a70a` backend + `00b2a2c` mobile, `8082aa2` ship record). Branch rebased
+onto it. Three things changed:
+
+1. **Decision-ID collision, resolved.** The reason-capture thread also claimed
+   **D-066** (*"A Pass Only Moves Elo When The User Actually Made A Value
+   Claim"*). Theirs stays; this plan's decision is renumbered **D-067**, refs
+   swept across code, tests and docs. Second ID collision of the day — same
+   class as the wave's three-way D-061.
+2. **The corrupting Elo write is fixed — by them, not us.** The lab-flagged
+   defect (every pass writing an Elo signal treating the give side as the
+   winner) is now gated: `trade_pass_reasons.elo_signal_at` NULL ⇒ suppressed.
+   The addendum's flag is discharged; no separate item needed.
+3. **The shipped taxonomy is not the lab's draft.** Live shape is two-layer —
+   `reason` ∈ `value | fit | other` (layer 1) plus 8 layer-2 `detail` codes,
+   keyed on `impression_id`, with `free_text` explicitly never an analytics
+   prop. The addendum above documents the lab's earlier 7-code draft; treat the
+   table in it as historical, and `backend/database.py:777` as current truth.
+
+**D-067 remains the unlabelled/default cooldown** — correct and unchanged.
+Routing labelled reasons to their own engine actions is still future work.
+
+## Legacy-dismiss amnesty (operator 2026-08-17)
+
+> *"Because we've added decline feedback, I want every decline pushed live
+> before this change to avoid the avoidance rule we've built."*
+
+New knob **`pass_cooldown_start_epoch`** (default `1787005800.0` =
+`2026-08-17T22:30:00Z`): dismisses recorded before it are exempt from the
+cooldown and re-present immediately. Dismiss-scoped; likes untouched; `0`
+disables. Logged per session (`… N pre-reason dismissals amnestied`).
+
+**Two facts the operator should see, because the requested value and the safe
+value differ:**
+
+- The operator said *"around 5pm est."* Reason capture actually went live at
+  **18:22 EDT (22:22:56Z)** — 5pm ET is **~82 minutes too early**, and dismisses
+  taken in that gap are exactly the unlabelled ones the amnesty exists to
+  protect. The default is therefore set just past the real landing, not at 5pm.
+  Direction-of-safety: exempting **more** matches the intent; exempting fewer
+  reintroduces the problem.
+- **The backend landing is not the true boundary.** The reason tiles are a
+  *mobile* change, so no user can produce a reasoned dismiss until a build
+  carrying them reaches testers. Every dismiss until then is unlabelled and
+  arguably deserves amnesty too. The knob is deploy-free — raise it to the
+  build's release moment if that is the intent.
+
+Tests: 5 added (15 total in the suite), each proven-to-fail —
+`ignore-amnesty`, `amnesty-everything` (two-sided: the amnesty is a boundary,
+not an off-switch), `amnesty-likes`. One test pins that the shipped default
+never predates reason capture going live. Full backend suite **3125 passed /
+1 skipped / 0 failed** post-rebase.

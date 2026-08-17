@@ -709,6 +709,7 @@ Measured baselines + acceptance bands:
 
 Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds`; string source select is the `FTF_OUTLOOK_STRENGTH_SOURCE` env var). **The roster-value→points calibration (`outlook_mean_points`/`outlook_points_per_value_sd`/`outlook_sigma_default`) is a documented heuristic, not an empirically fit model — flagged for operator tuning via the offline backtest scaffold in `test_outlook_odds.py`.**
 
+| `pass_cooldown_start_epoch` | 1787005800.0 (2026-08-17T22:30:00Z) | **Legacy-dismiss amnesty** (D-067, operator 2026-08-17). Dismisses recorded **before** this instant are exempt from the cooldown and can be re-presented immediately: they predate decline-reason capture (D-066, backend live `2026-08-17T22:22:56Z`) and therefore carry no reason, so applying the avoidance rule to them would suppress taps the user was never given the chance to explain. Unix epoch seconds. **Scoped to dismisses only** — likes are unaffected. **0 disables the amnesty.** ⚠️ The default sits just past the BACKEND landing; the reason tiles are a MOBILE change, so users cannot produce reasoned dismisses until a build carrying them reaches testers — raise this key to that moment (one `PUT /api/admin/config` call, no deploy) if pre-build dismisses should also be amnestied. |
 | Key | Default | Meaning |
 |---|---|---|
 | `outlook_mean_points` | 110.0 | Assumed league-average weekly fantasy score — the affine anchor for `RosterValueStrength` μ. **Heuristic.** |

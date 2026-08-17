@@ -40,7 +40,7 @@ def _svc(past_keys=None):
 # R-1 / R-3 — the window itself
 # ---------------------------------------------------------------------------
 
-def _window_cut(rows, *, pass_days, like_days=7.0, now=None):
+def _window_cut(rows, *, pass_days, like_days=7.0, now=None, amnesty_epoch=0.0):
     """Mirror of server.py's per-type window cut (the logic under test).
 
     Kept as a pure helper so the window rule is unit-testable without standing
@@ -49,11 +49,14 @@ def _window_cut(rows, *, pass_days, like_days=7.0, now=None):
     now = now or datetime.now(timezone.utc)
     kept = set()
     for r in rows:
-        window = pass_days if r.get("decision") == "pass" else like_days
+        is_pass = r.get("decision") == "pass"
+        window = pass_days if is_pass else like_days
         try:
             at = datetime.fromisoformat(r["created_at"])
             if at.tzinfo is None:
                 at = at.replace(tzinfo=timezone.utc)
+            if is_pass and amnesty_epoch > 0 and at.timestamp() < amnesty_epoch:
+                continue
             if (now - at).total_seconds() > window * 86400.0:
                 continue
         except (KeyError, TypeError, ValueError):
@@ -210,3 +213,67 @@ def test_knob_is_registered_in_both_config_surfaces():
     seeded = {k: v for k, v, _ in _MODEL_CONFIG_DEFAULTS}
     assert seeded.get("pass_cooldown_days") == 14.0
     assert ts._DEFAULT_CFG.get("pass_cooldown_days") == 14.0
+
+
+# ---------------------------------------------------------------------------
+# Legacy-dismiss amnesty (operator 2026-08-17) — pre-reason dismisses exempt
+# ---------------------------------------------------------------------------
+
+def test_amnesty_exempts_dismisses_recorded_before_reason_capture():
+    """A dismiss taken before decline-reason capture went live carries no
+    reason, so the avoidance rule must not apply to it.
+
+    SABOTAGE 'ignore-amnesty': drop the amnesty_epoch branch → the pre-cutoff
+    dismiss suppresses again → RED."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=1)).timestamp()
+    pre = _row("pass", 2)     # 2 days old ⇒ before the cutoff
+    assert _window_cut([pre], pass_days=14.0, amnesty_epoch=cutoff) == set(), \
+        "a pre-cutoff dismiss must be amnestied, not suppressed"
+
+
+def test_amnesty_does_not_exempt_dismisses_after_the_cutoff():
+    """Two-sided: the amnesty is a one-time boundary, not a blanket off-switch.
+
+    SABOTAGE 'amnesty-everything': compare with > instead of < → the post-cutoff
+    dismiss is exempted too and the cooldown never binds → RED."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=3)).timestamp()
+    post = _row("pass", 1)    # 1 day old ⇒ after the cutoff
+    assert len(_window_cut([post], pass_days=14.0, amnesty_epoch=cutoff)) == 1, \
+        "a post-cutoff dismiss must still suppress"
+
+
+def test_amnesty_never_touches_likes():
+    """The amnesty is scoped to dismisses — a like predating the cutoff keeps
+    today's behavior.
+
+    SABOTAGE 'amnesty-likes': drop the is_pass guard → the old like is exempted
+    too → RED."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=1)).timestamp()
+    old_like = _row("like", 2, give=("L",), recv=("M",))
+    assert (frozenset(["L"]), frozenset(["M"])) in _window_cut(
+        [old_like], pass_days=14.0, like_days=7.0, amnesty_epoch=cutoff), \
+        "the amnesty must not exempt likes"
+
+
+def test_amnesty_disabled_at_zero():
+    """0 disables the amnesty — every dismiss counts regardless of age."""
+    now = datetime.now(timezone.utc)
+    pre = _row("pass", 2)
+    assert len(_window_cut([pre], pass_days=14.0, amnesty_epoch=0.0)) == 1
+
+
+def test_amnesty_epoch_is_registered_and_predates_now():
+    """The shipped default must sit at/after reason capture going live
+    (2026-08-17T22:22:56Z) — an earlier value would suppress dismisses the user
+    was never asked to explain."""
+    from backend.database import _MODEL_CONFIG_DEFAULTS
+    seeded = {k: v for k, v, _ in _MODEL_CONFIG_DEFAULTS}
+    val = seeded.get("pass_cooldown_start_epoch")
+    assert val == ts._DEFAULT_CFG.get("pass_cooldown_start_epoch")
+    reason_capture_live = datetime(2026, 8, 17, 22, 22, 56,
+                                   tzinfo=timezone.utc).timestamp()
+    assert val >= reason_capture_live, \
+        "the amnesty cutoff must not predate decline-reason capture going live"
