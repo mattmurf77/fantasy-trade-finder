@@ -264,6 +264,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # cache (the InLeagueCalculator convention), never the device platform.
     "mock_started", "mock_pick_made", "mock_completed", "mock_abandoned",
     "mock_create_refused",
+    # ── #322–#327 mock-draft room UI (G2), 2026-08-16 ────────────────────
+    # Operator-approved extension of the mock family (scope.md §1 of
+    # docs/feedback/items/322-mock-draft-room-ui/): the three new room
+    # affordances — team sheet, position filter, pool search. Registered in
+    # the SAME change as their emitters (the G-031 lesson: this registry is
+    # default-deny behind a 200, so a name that ships after its track() call
+    # is silent data loss). All three CLIENT-fired from MockDraftScreen; all
+    # INTENT (user gestures). `mock_pool_searched` fires at most once per
+    # turn, on the first non-empty query — never per keystroke, and the
+    # query string is never sent.
+    "mock_team_sheet_opened", "mock_pool_filtered", "mock_pool_searched",
     # Notification-inbox growth surface, 2026-08-13 — the bell's first
     # instrumentation of any kind. Tracking plan:
     # docs/plans/notif-inbox-growth/analytics.md.
@@ -917,6 +928,23 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                       "user_picks"}),
     "mock_abandoned":      frozenset({"platform", "mode", "picks_made"}),
     "mock_create_refused": frozenset({"platform", "reason"}),
+    # ── #322–#327 mock-draft room UI (G2), 2026-08-16 ────────────────────
+    # Same prop conventions as the family above: `platform` is the LEAGUE
+    # platform from the session league cache (never the device platform);
+    # `mode` ∈ cpu | manual = settings_echo.mode. Low-cardinality only.
+    # mock_team_sheet_opened — "Your team" link tapped (the sheet opens);
+    #   `round`/`pick_no` locate the moment in the draft.
+    # mock_pool_filtered — a non-All position chip selected; `position` ∈
+    #   QB | RB | WR | TE (the All chip fires nothing — it is the reset).
+    # mock_pool_searched — at most ONCE per turn, on the first non-empty
+    #   query. `filter_position` is the position filter active when the
+    #   search began (ALL | QB | RB | WR | TE) — the query string is NOT
+    #   sent, by design.
+    "mock_team_sheet_opened": frozenset({"platform", "mode", "round",
+                                         "pick_no"}),
+    "mock_pool_filtered":     frozenset({"platform", "mode", "position"}),
+    "mock_pool_searched":     frozenset({"platform", "mode",
+                                         "filter_position"}),
     # ── Bell inbox, 2026-08-13 ────────────────────────────────────────────
     # Tracking plan: docs/plans/notif-inbox-growth/analytics.md. MOBILE
     # ONLY — web/js/app.js has no analytics SDK (no track(), no /api/events
