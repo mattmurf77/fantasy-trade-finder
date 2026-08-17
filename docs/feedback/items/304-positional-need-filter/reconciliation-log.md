@@ -74,3 +74,24 @@ Documentation-only clarifications of existing behavior; no requirement, knob,
 or contract change. Build note: main moved to `d6de017` + two matchmaking
 squash merges — build agent must rebase (expect adjacent-insertion conflicts
 in `_DEFAULT_CFG` tail + keep-both in 3 flag-parity fixtures).
+
+## Post-build-launch correction + gen-v2 parity notes (2026-08-16)
+
+- **U-R2-3 gloss contradiction (caught by the matchmaking session's gen-v2
+  parity port, branch `feat/gen2-g6-parity`):** the gloss "pick+RB→2WR passes"
+  contradicted R-2's own formula (net_WR = +2 → KILL). Formula binds; gloss
+  corrected in prd.md to the discriminating shape "2 picks + RB → 1 WR
+  passes". Build agent notified mid-flight and directed to implement the
+  formula. Loop lesson: a worked example in a test gloss is itself a claim
+  against the formula — round-2 verification checked dispositions, not
+  arithmetic of examples.
+- **Gen-v2 knob aliasing (owed at G6 merge):** the parity port introduces
+  provisional `gen2_g6_net_position_cap` (=1) and `gen2_pick_band_frac`
+  (=0.8) + a module constant mirroring `pick_gap_min_value` (=300). At/after
+  G6's merge these must alias or align to G6's calibrated `model_config`
+  values — one source of truth for both pipelines. R-12's pick-league replay
+  calibration result feeds `gen2_pick_band_frac` too.
+- **Repo movement:** main gained `dddb86a` (fixture-mirror fix) + `dd893b8`
+  (worktree sweep) after the build base `96f6945` was pinned. Integration
+  must re-fetch and check the fixture-mirror fix against G6's flag-parity
+  fixture edits before merge.
