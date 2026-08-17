@@ -22,6 +22,8 @@
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
     "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
+    "test:decline-reasons": "node tests/check-decline-reasons.js",
+    "test:fairness-default": "node tests/check-fairness-default.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",

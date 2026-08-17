@@ -13,7 +13,10 @@ import {
   AppState,
   Platform,
   Share,
+  Keyboard,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -48,6 +51,7 @@ import {
 import { posColor } from '../theme/colors';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
+import { type DeclineReasonPanelProps } from '../components/DeclineReasonPanel';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
@@ -82,6 +86,11 @@ import {
   type AssetIdea,
   type SwipeSignal,
 } from '../api/trades';
+import {
+  postDeclineReason,
+  type Layer1Code,
+  type Layer2Code,
+} from '../api/declineReasons';
 import AssetIdeasPanel from '../components/AssetIdeasPanel';
 import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWindow';
 import {
@@ -150,8 +159,8 @@ import {
 } from '../state/useOnboardingState';
 import {
   FAIRNESS_PREF_KEY,
-  FAIRNESS_ON_THRESHOLD,
-  FAIRNESS_OFF_THRESHOLD,
+  fairnessOnFromPref,
+  fairnessThresholdFor,
 } from '../api/tradePregen';
 import { navigationRef } from '../navigation/RootNav';
 import NewPartnersBanner from '../components/NewPartnersBanner';
@@ -443,7 +452,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // by ranking-mismatch magnitude (TradeCard.match_score, which is the
   // server's mismatch_score: how big the ELO gap between owners is on
   // the swapped players). Persisted across sessions via AsyncStorage.
-  const [fairnessOn, setFairnessOn] = useState(true);
+  //
+  // DEFAULT OFF since 2026-08-17 (operator decision — widen the net so
+  // testers see and judge more trades, with the decline-reason capture
+  // collecting their verdicts). The initial state MUST match what an unset
+  // preference resolves to (`fairnessOnFromPref(null)` === false), or the
+  // toggle would paint ON while 0.5 was being sent. An explicit 'on' is
+  // restored by the hydrate below; nobody's stored value is rewritten.
+  const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
   // #288 — the deck snapshot from the moment a "Keep · more offers" tap
@@ -522,6 +538,26 @@ export default function TradesScreen({ navigation, route }: any) {
   // sourced header (amendment) reads job.board_refresh, which the server
   // emits for ANY board-refreshed deck while the flag is on.
   const firstSessionOn = useFlag('deck.first_session');
+  // Decline-reason capture (flag `feedback.decline_reasons`, tester-allowlist
+  // scoped, default OFF — SPEC §5). On ⇒ the card's ✕ is replaced by the
+  // three layer-1 tiles and the pass commits on the tile tap, with the deck
+  // advance deferred until layer 2 answers. Off ⇒ nothing below this flag
+  // runs and the ✓/✕ row renders byte-identically.
+  const declineReasonsOn = useFlag('feedback.decline_reasons');
+  // The raw deck id whose pass is banked but whose deck advance is still
+  // waiting on layer 2. Blocks a second disposition on the same card (the ✓,
+  // the swipe gesture, the a11y actions) and is cleared on every advance.
+  const [reasonBankedId, setReasonBankedId] = useState<string | null>(null);
+  // Same value as the state above, readable synchronously: the layer-1 tap
+  // and a fast follow-up gesture can land in one React batch.
+  const reasonBankedIdRef = useRef<string | null>(null);
+  // Card fronted → now, for the SPEC §6 `ms_since_render` property. Its own
+  // stamp rather than the F1 dwell ref, which only runs under deck.signal_v2 /
+  // deck.session_rerank and is capped + background-paused.
+  const cardRenderedAtRef = useRef(Date.now());
+  // Main-ScrollView offset, tracked only while this flag is on, so the
+  // free-text composer can be scrolled clear of the keyboard.
+  const mainScrollYRef = useRef(0);
   const [adaptationMoment, setAdaptationMoment] = useState<{
     phrase: string;
     attribute: string;
@@ -810,20 +846,22 @@ export default function TradesScreen({ navigation, route }: any) {
   // Effective threshold sent to the backend. OFF still passes a (low)
   // value rather than dropping the field so the cache key on the server
   // stays stable — `_trade_job_is_fresh` keys on fairness_threshold.
-  const effectiveFairness = fairnessOn ? FAIRNESS_ON_THRESHOLD : FAIRNESS_OFF_THRESHOLD;
+  // Derived through the SAME helper the session-init pregen uses — a second
+  // derivation here is how the two drift and miss the server cache slot.
+  const effectiveFairness = fairnessThresholdFor(fairnessOn);
 
-  // Hydrate the persisted toggle on mount. Default is ON if nothing's
-  // stored — matches the prior slider's 0.75 starting position.
+  // Hydrate the persisted toggle on mount. Unset resolves to OFF (the
+  // 2026-08-17 default); an explicit 'on' is restored here. Read-only —
+  // this never writes the key back, so nobody's stored choice is touched.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(FAIRNESS_PREF_KEY);
         if (cancelled) return;
-        if (raw === 'off') setFairnessOn(false);
-        else if (raw === 'on') setFairnessOn(true);
+        setFairnessOn(fairnessOnFromPref(raw));
       } catch {
-        /* AsyncStorage unavailable — fall back to default ON */
+        /* AsyncStorage unavailable — keep the default (OFF) */
       }
     })();
     return () => { cancelled = true; };
@@ -2740,6 +2778,17 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signalV2On, rerankOn, topTradeId, topImpressionId]);
 
+  // ── Decline reasons (flag `feedback.decline_reasons`): per-fronted-card
+  // reset. Stamps the render clock for SPEC §6's `ms_since_render` and drops
+  // any banked pass left over from a deck reset / job swap. Flag off ⇒ the
+  // effect returns on its first line and nothing here ever runs.
+  useEffect(() => {
+    if (!declineReasonsOn) return;
+    cardRenderedAtRef.current = Date.now();
+    reasonBankedIdRef.current = null;
+    setReasonBankedId(null);
+  }, [declineReasonsOn, topTradeId]);
+
   // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
   // v2.1): coach marks 1–2. Each shows once ever (persisted at show time),
   // never modal, never stacked — if the swipe hint claims this mount, the
@@ -3769,12 +3818,30 @@ export default function TradesScreen({ navigation, route }: any) {
     doRemove();
   }
 
-  function advance(decision: 'like' | 'pass') {
+  function advance(
+    decision: 'like' | 'pass',
+    // Decline-reason capture (SPEC §3): the layer-1 tile tap IS the pass, but
+    // layer 2 has to answer on the SAME card, so the disposition commits here
+    // while the deck advance waits for `commitReasonAdvance()`. Nothing else
+    // in this function changes.
+    opts?: { deferDeckAdvance?: boolean },
+  ) {
     if (!topCard) return;
     // S3 PRD-03 (ux.swipe_undo) — double-fire guard: the gesture's
     // animation-end callback and the disposition buttons can both fire for
     // the same top card; no-op the repeat on the RAW deck id.
     const dispatchRawId = rawTopCard?.trade_id ?? topCard.trade_id;
+    // Decline reasons: once a card's pass is banked, the ✓, the swipe gesture
+    // and the VoiceOver actions are all inert on it — layer 2 owns the
+    // advance. Ref, not state: the layer-1 tap and a fast second gesture can
+    // land in the same React batch.
+    if (
+      declineReasonsOn &&
+      !opts?.deferDeckAdvance &&
+      reasonBankedIdRef.current === dispatchRawId
+    ) {
+      return;
+    }
     if (swipeUndoOn) {
       if (lastDispositionedRef.current === dispatchRawId) return;
       lastDispositionedRef.current = dispatchRawId;
@@ -3948,7 +4015,10 @@ export default function TradesScreen({ navigation, route }: any) {
         }
       }
     }
-    if (swipeUndoOn && decision === 'pass') {
+    // Decline reasons suppress the undo window: the tile tap is a deliberate,
+    // reasoned gesture (like the bad-trade flag), and an "Undo" toast under a
+    // live layer-2 panel would offer to rewind a deck that has not moved yet.
+    if (swipeUndoOn && decision === 'pass' && !declineReasonsOn) {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
       pendingPassRef.current = {
@@ -3968,7 +4038,10 @@ export default function TradesScreen({ navigation, route }: any) {
           : { ...t, passed: t.passed + 1 },
       );
     }
-    setDeckIdx((i) => i + 1);
+    // Decline reasons: the card must stay put so layer 2 can open beneath its
+    // own tiles. `commitReasonAdvance()` does this line (and only this line)
+    // once layer 2 answers — the next trade IS the confirmation (SPEC §1).
+    if (!opts?.deferDeckAdvance) setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();
       // Item 8: remember the liked card for the share affordance, fire the
@@ -4043,6 +4116,136 @@ export default function TradesScreen({ navigation, route }: any) {
       }
     }
   }
+
+  // ── Decline-reason capture (flag `feedback.decline_reasons`) ───────────
+  // SPEC docs/plans/decline-reason-capture/SPEC.md; prototype
+  // mockups/decline-reason-capture/07-two-step-diagnostic.html.
+  //
+  // PROGRESSIVE WRITES (SPEC §3). Three commit moments, each firing on its
+  // own tap — nothing waits for a submit:
+  //   layer-1 tile  → the pass disposition (the unchanged swipe POST) AND
+  //                   the reason row. A tester who stops here leaves a
+  //                   complete record; that is why the ✕ is gone.
+  //   layer-2 option→ the detail, then the deck advances.
+  //   "Other"       → the code banks BEFORE the box opens; the send upgrades
+  //                   the same row with the free text and advances.
+  // Free text is stored on the row and NEVER sent as an analytics property.
+  // The per-card reset lives with the other fronted-card effects above.
+
+  // Shared analytics props (SPEC §6). `platform` is set explicitly at the
+  // emitter, never inferred — the NULL-platform incident is why.
+  function reasonEventProps() {
+    return {
+      impression_id: rawTopCard?.impression_id ?? 'none',
+      trade_id: rawTopCard?.trade_id ?? topCard?.trade_id ?? '',
+      ms_since_render: Math.max(0, Date.now() - cardRenderedAtRef.current),
+      platform:
+        Platform.OS === 'android' ? 'android' : Platform.OS === 'web' ? 'web' : 'ios',
+    };
+  }
+
+  function reasonWriteTarget() {
+    return {
+      impressionId: rawTopCard?.impression_id,
+      tradeId: rawTopCard?.trade_id ?? topCard?.trade_id ?? '',
+      leagueId: topCard?.league_id || undefined,
+    };
+  }
+
+  // The deferred half of the pass: layer 2 answered, so front the next card.
+  // No receipt, no toast — the next trade is the confirmation (SPEC §1).
+  function commitReasonAdvance() {
+    reasonBankedIdRef.current = null;
+    setReasonBankedId(null);
+    setDeckIdx((i) => i + 1);
+  }
+
+  function handleReasonLayer1(reason: Layer1Code, switchedFrom: Layer1Code | 'none') {
+    if (!topCard) return;
+    const rawId = rawTopCard?.trade_id ?? topCard.trade_id;
+    const firstForThisCard = reasonBankedIdRef.current !== rawId;
+    track(
+      'trade_pass_layer1',
+      { reason, switched_from: switchedFrom, ...reasonEventProps() },
+      'Trades',
+    );
+    void postDeclineReason({ ...reasonWriteTarget(), layer: 1, reason, switchedFrom });
+    // A tile switch refines the existing answer; only the FIRST tile tap on a
+    // card carries the disposition.
+    if (!firstForThisCard) return;
+    reasonBankedIdRef.current = rawId;
+    setReasonBankedId(rawId);
+    advance('pass', { deferDeckAdvance: true });
+  }
+
+  function handleReasonLayer2Select(reason: Layer1Code, detail: Layer2Code) {
+    track(
+      'trade_pass_layer2',
+      { reason, detail, has_free_text: false, ...reasonEventProps() },
+      'Trades',
+    );
+    void postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail });
+    commitReasonAdvance();
+  }
+
+  // "Other" tapped: bank the code so a tester who opens the box and bails
+  // still leaves "none of the listed reasons" (SPEC §3.3). No analytics event
+  // here — `trade_pass_layer2` fires at the two moments that ADVANCE (a fixed
+  // option tap, or the free-text send), so the funnel never double-counts.
+  function handleReasonLayer2Bank(reason: Layer1Code, detail: Layer2Code) {
+    void postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail });
+  }
+
+  function handleReasonLayer2Send(
+    reason: Layer1Code,
+    detail: Layer2Code,
+    freeText: string,
+  ) {
+    track(
+      'trade_pass_layer2',
+      {
+        reason,
+        detail,
+        // The text itself is stored on the row only; the event carries the
+        // BOOLEAN and nothing else (SPEC §3.4).
+        has_free_text: freeText.length > 0,
+        ...reasonEventProps(),
+      },
+      'Trades',
+    );
+    void postDeclineReason({
+      ...reasonWriteTarget(),
+      layer: 2,
+      reason,
+      detail,
+      freeText: freeText || undefined,
+    });
+    Keyboard.dismiss();
+    commitReasonAdvance();
+  }
+
+  // The composer's send button opens BELOW the text box, so focusing the
+  // input is not enough. The panel measures the button against the keyboard's
+  // top edge and asks for exactly the overlap; the ScrollView already carries
+  // `keyboardShouldPersistTaps="handled"` (so the first tap lands) and gains
+  // `automaticallyAdjustKeyboardInsets` while this flag is on (so the extra
+  // scroll range exists at all).
+  function handleReasonReveal(dy: number) {
+    mainScrollRef.current?.scrollTo({
+      y: mainScrollYRef.current + dy,
+      animated: true,
+    });
+  }
+
+  const declineReasonProps: DeclineReasonPanelProps | undefined = declineReasonsOn
+    ? {
+        onLayer1: handleReasonLayer1,
+        onLayer2Select: handleReasonLayer2Select,
+        onLayer2Bank: handleReasonLayer2Bank,
+        onLayer2Send: handleReasonLayer2Send,
+        onRevealRequest: handleReasonReveal,
+      }
+    : undefined;
 
   // Bad-trade flag (feedback #85): file the engine-quality flag, then move
   // past the card exactly like a pass — flagging implies "not interested",
@@ -4319,6 +4522,19 @@ export default function TradesScreen({ navigation, route }: any) {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
+        // Decline reasons only (both `undefined` when the flag is off, which
+        // is identical to not passing them): the inline free-text composer
+        // needs scroll range BELOW the keyboard for its send button, and the
+        // panel's reveal callback needs the current offset to scroll from.
+        automaticallyAdjustKeyboardInsets={declineReasonsOn ? true : undefined}
+        onScroll={
+          declineReasonsOn
+            ? (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+              }
+            : undefined
+        }
+        scrollEventThrottle={declineReasonsOn ? 16 : undefined}
       >
         {/* FB #156/#246 — the persistent mode chip strip. Since the
             guided-first landing (#246) this renders on the tab's landing
@@ -5617,7 +5833,14 @@ export default function TradesScreen({ navigation, route }: any) {
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
-                dispositionDisabled={swipeMutation.isPending}
+                dispositionDisabled={
+                  swipeMutation.isPending ||
+                  // Decline reasons: once the pass is banked the ✓ is inert —
+                  // layer 2 owns what happens next on this card.
+                  // (RAW deck id — an edited card's derived id would miss.)
+                  (declineReasonsOn && reasonBankedId === rawTopCard?.trade_id)
+                }
+                declineReasons={declineReasonProps}
                 untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
                 onToggleUntouchable={
                   untouchablesEnabled ? handleToggleUntouchable : undefined
@@ -6345,6 +6568,10 @@ interface SwipableProps {
   // #169 — disables the card's in-card Pass/Like row while a swipe
   // mutation is in flight (the same condition the old below-deck row used).
   dispositionDisabled?: boolean;
+  // Decline-reason capture (flag `feedback.decline_reasons`) — pass-through
+  // to TradeCard's `disposition.reasons`. Present ⇒ the ✕ is replaced by the
+  // three layer-1 tiles; absent ⇒ today's ✓/✕ row, unchanged.
+  declineReasons?: DeclineReasonPanelProps;
   untouchableIds?: ReadonlySet<string>;
   onToggleUntouchable?: (player: Player) => void;
   // Player-swap (feedback #86) — pass-throughs to TradeCard.
@@ -6375,6 +6602,7 @@ function SwipableTopCard({
   onLike,
   onPass,
   dispositionDisabled,
+  declineReasons,
   untouchableIds,
   onToggleUntouchable,
   onSwapPlayer,
@@ -6466,7 +6694,12 @@ function SwipableTopCard({
           data={card}
           // #169 — the in-card Pass/Like row; top card only (the peek card
           // and every other mount get no `disposition`).
-          disposition={{ onPass, onLike, disabled: dispositionDisabled }}
+          disposition={{
+            onPass,
+            onLike,
+            disabled: dispositionDisabled,
+            reasons: declineReasons,
+          }}
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}

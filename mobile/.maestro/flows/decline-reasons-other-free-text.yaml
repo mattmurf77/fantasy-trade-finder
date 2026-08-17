@@ -1,0 +1,128 @@
+appId: com.fantasytradefinder.app
+# tc: TC-DECLINE-02 — decline-reason capture, "Other" → free text → send
+#     (docs/plans/decline-reason-capture/SPEC.md §3.3)
+# profile: standard
+# flags: all-on
+#
+# REQUIRES `feedback.decline_reasons: true` in the resolved flag fixture —
+# same backend-owned dependency as TC-DECLINE-01; see that flow's header.
+#
+# What this proves (SPEC §3.3): "Other" is NOT a dead end. Tapping it banks
+# its code and only THEN reveals the composer, and the send button is
+# reachable with the keyboard up — the panel measures it against the
+# keyboard's top edge and scrolls the host ScrollView by exactly the overlap
+# (TradesScreen `handleReasonReveal`), so the assert below is the regression
+# guard for a send button hidden behind the keyboard.
+#
+# Law 20: no `hideKeyboard` — it taps whatever sits underneath. The send tap
+# lands with the keyboard up, which the ScrollView's existing
+# `keyboardShouldPersistTaps="handled"` makes a single-tap action.
+tags: [trades, decline-reasons]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- assertVisible: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+
+# ── Layer 1: Fit (four layer-2 options, the widest panel) ─────────────────
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-reason.fit"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "trades.pass-reason.fit"
+- extendedWaitUntil:
+    visible:
+      id: "trades.pass-reason.l2.fit_outlook"
+    timeout: 5000
+- assertVisible:
+    id: "trades.pass-reason.l2.fit_new_weakness"
+- assertVisible:
+    id: "trades.pass-reason.l2.fit_duplicate"
+
+# ── "Other": banks first, THEN opens the composer ─────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-reason.l2.fit_other"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "trades.pass-reason.l2.fit_other"
+- extendedWaitUntil:
+    visible:
+      id: "trades.pass-reason.text"
+    timeout: 5000
+# THE KEYBOARD GUARD: the send button is on screen with the keyboard up.
+- extendedWaitUntil:
+    visible:
+      id: "trades.pass-reason.send"
+    timeout: 5000
+- takeScreenshot: decline-reasons-other-composer
+
+# The composer autofocuses, so this types into the free-text box.
+- inputText: "Their WR room is already my strength"
+- assertVisible: ".*Their WR room is already my strength.*"
+
+# ── Send commits the text and advances — no receipt ───────────────────────
+- tapOn:
+    id: "trades.pass-reason.send"
+- extendedWaitUntil:
+    notVisible:
+      id: "trades.pass-reason.text"
+    timeout: 8000
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 10000
+- assertVisible:
+    id: "trades.pass-reasons"
+    childOf:
+      id: "trades.card-top"
+- takeScreenshot: decline-reasons-other-next-trade

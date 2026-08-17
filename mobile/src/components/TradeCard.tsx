@@ -13,6 +13,9 @@ import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
 import SendInSleeperButton from './SendInSleeperButton';
+import DeclineReasonPanel, {
+  type DeclineReasonPanelProps,
+} from './DeclineReasonPanel';
 import { LockGlyph } from './PlayerContextMenu';
 import { useFlag } from '../state/useFeatureFlags';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
@@ -86,6 +89,13 @@ interface Props {
     onPass: () => void;
     onLike: () => void;
     disabled?: boolean;
+    // Decline-reason capture (flag `feedback.decline_reasons`, SPEC §1/§5).
+    // Present ⇒ the ✕ is replaced by the three layer-1 tiles (Value · Fit ·
+    // Neither) rendered beneath this row, with layer 2 opening under them;
+    // the ✓ is untouched. Absent (flag off, or any non-deck mount) ⇒ the
+    // shipped ✓/✕ row renders byte-identically. Only TradesScreen's top
+    // card ever supplies it.
+    reasons?: DeclineReasonPanelProps;
   };
   // #319 — rendered as the card's FINAL block, after the actions/send rows.
   // The Matches inbox mounts MatchValueSection (and the awaiting Dismiss row)
@@ -539,42 +549,55 @@ function TradeCardComp({
           path. Disabled while a swipe mutation is in flight to prevent
           double-firing. */}
       {disposition ? (
-        <View style={styles.dispositionRow}>
-          <Pressable
-            testID="trades.pass-btn"
-            onPress={disposition.onPass}
-            disabled={disposition.disabled}
-            style={({ pressed }) => [
-              styles.dispositionBtn,
-              styles.dispositionBtnPass,
-              pressed && styles.dispositionBtnPassPressed,
-              disposition.disabled && styles.dispositionDisabled,
-            ]}
-            accessibilityLabel="Pass on this trade"
-            accessibilityRole="button"
-          >
-            {({ pressed }) => (
-              <Icon name="x" color={pressed ? ink.ink0 : semantic.neg} />
+        <>
+          <View style={styles.dispositionRow}>
+            {/* Decline-reason capture (flag `feedback.decline_reasons`,
+                SPEC §1): with `reasons` wired, the three layer-1 tiles ARE
+                the pass, so the ✕ is removed and this row holds the ✓
+                alone — unchanged in every other respect. `reasons` absent
+                (flag off, and on every non-deck mount) ⇒ this renders
+                byte-identically to the shipped ✓/✕ row. */}
+            {disposition.reasons ? null : (
+              <Pressable
+                testID="trades.pass-btn"
+                onPress={disposition.onPass}
+                disabled={disposition.disabled}
+                style={({ pressed }) => [
+                  styles.dispositionBtn,
+                  styles.dispositionBtnPass,
+                  pressed && styles.dispositionBtnPassPressed,
+                  disposition.disabled && styles.dispositionDisabled,
+                ]}
+                accessibilityLabel="Pass on this trade"
+                accessibilityRole="button"
+              >
+                {({ pressed }) => (
+                  <Icon name="x" color={pressed ? ink.ink0 : semantic.neg} />
+                )}
+              </Pressable>
             )}
-          </Pressable>
-          <Pressable
-            testID="trades.like-btn"
-            onPress={disposition.onLike}
-            disabled={disposition.disabled}
-            style={({ pressed }) => [
-              styles.dispositionBtn,
-              styles.dispositionBtnLike,
-              pressed && styles.dispositionBtnLikePressed,
-              disposition.disabled && styles.dispositionDisabled,
-            ]}
-            accessibilityLabel="Like this trade"
-            accessibilityRole="button"
-          >
-            {({ pressed }) => (
-              <Icon name="check" color={pressed ? ink.ink0 : semantic.pos} />
-            )}
-          </Pressable>
-        </View>
+            <Pressable
+              testID="trades.like-btn"
+              onPress={disposition.onLike}
+              disabled={disposition.disabled}
+              style={({ pressed }) => [
+                styles.dispositionBtn,
+                styles.dispositionBtnLike,
+                pressed && styles.dispositionBtnLikePressed,
+                disposition.disabled && styles.dispositionDisabled,
+              ]}
+              accessibilityLabel="Like this trade"
+              accessibilityRole="button"
+            >
+              {({ pressed }) => (
+                <Icon name="check" color={pressed ? ink.ink0 : semantic.pos} />
+              )}
+            </Pressable>
+          </View>
+          {disposition.reasons ? (
+            <DeclineReasonPanel {...disposition.reasons} />
+          ) : null}
+        </>
       ) : null}
 
       {/* #190 — full-editor path: the manual calculator, prefilled with

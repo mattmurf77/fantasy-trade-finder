@@ -88,3 +88,13 @@ dna.outlook.*
 dna.chase.*
 # AssetIdeasPanel.tsx: testID={`featured-trade.idea.${assetIdeaKey(idea)}`}
 featured-trade.idea.*
+# --- 2026-08-17 decline-reason capture ---
+# DeclineReasonPanel.tsx renders the layer-1 tiles as testID={t.testID} and
+# the layer-2 options as testID={o.testID}. The literal strings are object
+# VALUES on the TILES taxonomy table in that same file (`testID: '…'`, which
+# the grep's `testID=` anchor cannot see); the table IS the SPEC §2 taxonomy,
+# so keeping them there is what stops the codes and the ids from drifting.
+# Covers the panel's own static ids too (trades.pass-reasons is a real
+# testID="…" attribute and stays greppable regardless).
+trades.pass-reason.*
+trades.pass-reasons

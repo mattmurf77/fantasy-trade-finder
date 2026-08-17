@@ -1,0 +1,133 @@
+appId: com.fantasytradefinder.app
+# tc: TC-DECLINE-01 — decline-reason capture, fixed-option path
+#     (docs/plans/decline-reason-capture/SPEC.md §1/§2/§3)
+# profile: standard
+# flags: all-on
+#
+# REQUIRES `feedback.decline_reasons: true` in the resolved flag fixture.
+# The flag key is owned by the backend half (config/features.json +
+# backend/tests/fixtures/flags/*.json, branch feat/decline-reasons-backend);
+# until it lands there this flow runs against a flag-off build and fails at
+# the first `trades.pass-reasons` assert — which is the correct failure, not
+# a flaky one. See docs/plans/decline-reason-capture/scope-mobile.md §3.
+#
+# What this proves (SPEC §1): with the flag ON the ✕ is GONE, the three
+# layer-1 tiles sit inside the top card, tapping one opens layer 2 beneath
+# them on the SAME card (the deck has not advanced), and picking a fixed
+# option advances to the next trade with no receipt screen in between.
+#
+# Law 2: the tiles and the layer-2 options sit below the player tiles inside
+# a ScrollView, so every tap is preceded by scrollUntilVisible with
+# visibilityPercentage 100 — a bare `visible:` would pass on an off-screen
+# child and the tap would land on dead coordinates.
+tags: [trades, decline-reasons]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- assertVisible: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+# First Trades visit auto-opens the team-outlook sheet (Contender pre-selected).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+
+# ── SPEC §1: the ✕ is replaced, the ✓ is untouched ─────────────────────────
+- assertVisible:
+    id: "trades.pass-reasons"
+    childOf:
+      id: "trades.card-top"
+- assertVisible:
+    id: "trades.like-btn"
+    childOf:
+      id: "trades.card-top"
+- assertNotVisible:
+    id: "trades.pass-btn"
+
+# ── Layer 1: the tile tap IS the pass ─────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-reason.value"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "trades.pass-reason.value"
+
+# ── Layer 2 opens beneath the tiles, on the SAME card ─────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "trades.pass-reason.l2.value_giving"
+    timeout: 5000
+- assertVisible:
+    id: "trades.pass-reason.l2.value_getting"
+- assertVisible:
+    id: "trades.pass-reason.l2.value_other"
+# Still the same card: the deck did NOT advance on the layer-1 tap.
+- assertVisible:
+    id: "trades.card-top"
+- takeScreenshot: decline-reasons-layer2-value
+
+# ── Layer 2 commits and advances — no receipt, the next trade is it ───────
+- scrollUntilVisible:
+    element:
+      id: "trades.pass-reason.l2.value_giving"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "trades.pass-reason.l2.value_giving"
+- extendedWaitUntil:
+    notVisible:
+      id: "trades.pass-reason.l2.value_giving"
+    timeout: 8000
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 10000
+# The next card fronts with a fresh, unanswered tile row.
+- assertVisible:
+    id: "trades.pass-reasons"
+    childOf:
+      id: "trades.card-top"
+- takeScreenshot: decline-reasons-next-trade
