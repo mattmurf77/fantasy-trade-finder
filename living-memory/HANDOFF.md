@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-17 — Feedback wave merged to main, push + TestFlight owed](#2026-08-17--feedback-wave-merged-to-main-push--testflight-owed)
 - [2026-08-16 — Matchmaking engine phase 1 shipped dark; mobile pyramid UI is the open half](#2026-08-16--matchmaking-engine-phase-1-shipped-dark-mobile-pyramid-ui-is-the-open-half)
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
 - [2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122), flags live](#2026-08-15--compressed-board-engine-fixes-shipped-pr-122-flags-live)
@@ -26,6 +27,58 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 ---
+
+## 2026-08-17 — Feedback wave merged to main, push + TestFlight owed
+
+### Where I am right now
+
+The 2026-08-16 feedback wave (17 items, 7 groups) is **merged to `main` locally at
+`20b40db`** off `main` `92c31d5` — gates green on the merged tree (pytest 3050/0,
+tsc clean, 48/48 structural suites, testid-lint OK). **The push to `origin/main`
+was blocked by this session's permission classifier**, so the merge commit sits in
+the `ship-main` worktree unpushed. Nothing is deployed yet.
+
+Full record: [`CHANGELOG.md`](CHANGELOG.md) top entry · batch plan and every
+operator decision in
+[`../docs/feedback/items/304-positional-need-filter/batch-plan.md`](../docs/feedback/items/304-positional-need-filter/batch-plan.md).
+
+### Next actions, in order
+
+1. **Push** (operator, one command):
+   `cd .claude/worktrees/ship-main && FTF_SKIP_SIM_GATE=1 git push origin HEAD:main`
+   Render auto-deploys backend + web. Verify **by content**, not uptime: poll
+   `/api/feature-flags` for `trade.presentment_rules`.
+2. **Set the 17 items `fixed`** (`fetch_feedback.py set <id> fixed`) — only after
+   the push lands: #303 #304 #306 #320 #321 #322-#328 #330 #334 #335 #336 #339
+   #340 #341. (#329 already `fixed`.)
+3. **Sweep worktrees** through `docs/recovery/` — capture tips, then remove:
+   `specs-2026-08-16`, `wave-integration`, `ship-main`, `fb303-calc`,
+   `fb321-espn`, `fb322-draftui`, `fb328-picks`, `fb330-offer`, `fb334-matches`,
+   `fb304-presentment`.
+4. **EAS build + TestFlight submit** (operator). Check `eas-cli build:list --json`
+   for the real latest version before bumping — versions race between sessions,
+   and `app.json` does NOT ship the version: bump both `MARKETING_VERSION` in
+   `project.pbxproj` and `CFBundleShortVersionString` in `Info.plist`.
+
+### Blocking / owed
+
+- **Prod-DB deck-eval replay** — the G6 build agent was permission-denied on
+  `DATABASE_URL_PROD`; commands in that group's `build-verification.md` §3. Only
+  unmeasured part of the presentment bands (divergence boards + real like
+  history). Flag ships ON regardless, per operator decision.
+- **#339's pick-gap band defaults are untuned** — zero pick-carrying candidates
+  in any available corpus. `pick_gap_frac` is the named lever; NEXT.md carries it.
+- **`_ESPN_VERIFIED_AT_RELEASE_CUTOFF = 2026-08-17T06:00:00+00:00`**
+  (`backend/database.py`) — safe for a deploy before 06:00Z; **bump it if deploy
+  slips past that**, or late-window rows keep dishonest stamps (#321 re-opens).
+- **Post-deploy:** `transition → decide` curls retire `aggregate_tier_labels`
+  (runbook #279). **First week:** watch `presentment-tripwire` WARNINGs on
+  contender-heavy leagues.
+- **TestFlight checklists per group are the only runtime evidence this wave gets**
+  (D-056 — no simulator ran).
+
+---
+
 
 ## 2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)
 
