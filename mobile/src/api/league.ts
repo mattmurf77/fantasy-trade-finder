@@ -136,6 +136,15 @@ export interface OwnedPick {
   pool_value?: number | null;
   /** Display label, e.g. "2027 1st". */
   label: string;
+  /** #320 (D-320-1, supersedes #263's "picks stay numeric") — the
+   *  pick-value ladder rung this pick's DISCOUNTED `pool_value` sits in
+   *  TODAY, server-computed via seed_elo_for_value + the canonical
+   *  tier_for_elo band walk. Never re-derive client-side from
+   *  `pool_value` (value scale ≠ the tier bands' Elo scale — the exact
+   *  #263 bug class; docs/cross-client-invariants.md). D-320-2: a far-out
+   *  pick badges its discounted price — a 2028 2nd may badge 3rd. Null
+   *  (unpriced row) or absent (old servers) → numeric fallback. */
+  tier?: Tier | null;
   /** draft-extensions W3 M-C (D17) — `draft_picks.source`. `'user'` means a
    *  LEAGUEMATE asserted this ownership on the ESPN assignment grid and no
    *  platform will ever confirm it, so every surface that renders this
@@ -563,11 +572,11 @@ export interface PowerRankedTeam {
   display_name: string;
   is_you: boolean;
   total_value: number;
-  /** #279 — pick-equivalent label ("≈14 firsts") for the team total. Present
-   *  ONLY when the caller is targeted by the operator-only
-   *  `aggregate_tier_labels` experiment (docs/feedback/items/
-   *  279-aggregate-tier-labels/status.md); absent for everyone else and on
-   *  old servers — clients must fall back to the numeric `total_value`.
+  /** #279 → #306 GRADUATED (D-306-1, 2026-08-16) — pick-equivalent label
+   *  ("≈14 firsts") for the team total. Shipped behind the operator-only
+   *  `aggregate_tier_labels` experiment; now emitted UNGATED for every
+   *  caller. Optional only for old servers — clients fall back to the
+   *  numeric `total_value` when absent.
    *  #285 (docs/feedback/items/285-pick-sums/status.md): the number is
    *  `positions_value`'s value→pick-equivalent firsts (same formula as "a
    *  Late 2nd" on trade cards) PLUS a literal count of the team's owned
@@ -577,8 +586,10 @@ export interface PowerRankedTeam {
   positions: Record<'QB' | 'RB' | 'WR' | 'TE', {
     count: number;
     value: number;
-    /** #279 — pick-equivalent label for this position's `value`, same
-     *  gating as `total_value_label` above. */
+    /** #279 → #306 graduated — pick-equivalent label for this position's
+     *  `value`, ungated like `total_value_label` above; absent only on
+     *  old servers (numeric fallback). Position-scoped: never includes a
+     *  pick contribution. */
     value_label?: string;
   }>;
   /** Grouped QB→RB→WR→TE→other, value-desc within each group (#144). */
@@ -589,6 +600,13 @@ export interface PowerRankedTeam {
   picks?: {
     count: number;
     value: number;
+    /** #306 (D-306-2) — the draft-capital group's own pick-equivalent
+     *  label: the #285 LITERAL pick count expressed alone (1st = 1.0,
+     *  2nd = 1/3.5, 3rd+ = 0 firsts) — deliberately NOT a conversion of
+     *  the dollar-priced `value` above. "≈0 firsts" is an honest zero for
+     *  all-3rd+ holdings; the client's own count>0 gate decides whether
+     *  the segment renders. Absent on old servers → numeric fallback. */
+    value_label?: string;
     /** draft-extensions W3 M-C (D17/S2): `pick_id`/`season`/`source` ride
      *  each item so an ASSERTED pick can be marked and corrected from the
      *  draft-capital group. All three are optional — a Sleeper/MFL payload
@@ -626,7 +644,8 @@ export interface PowerRankingsResponse {
   starters_available?: boolean;
   /** #300 — the league's MEDIAN value at each core position, with the same
    *  pick-equivalent label the per-team `positions[P].value_label` carries
-   *  (same `_aggregate_pick_label`, same `aggregate_tier_labels` gating).
+   *  (same `_aggregate_pick_label`; ungated from day one — and since the
+   *  #306/D-306-1 graduation the per-team labels are ungated too).
    *
    *  It exists because the divider's label cannot be computed client-side:
    *  the client can derive the median VALUE exactly (every team's
@@ -637,9 +656,10 @@ export interface PowerRankingsResponse {
    *
    *  Absent on old servers and on any server that has not shipped the field:
    *  the client then draws NO divider rather than one placed off a number it
-   *  cannot name. `value_label` alone may be absent (caller outside the
-   *  experiment) — then the line still draws, captioned "League median" with
-   *  no value, exactly as `TeamRow` falls back today. */
+   *  cannot name. `value_label` alone may be absent (defensive: a server
+   *  variant that served the field without the label) — then the line still
+   *  draws, captioned "League median" with no value, exactly as `TeamRow`
+   *  falls back today. */
   medians?: Partial<
     Record<'QB' | 'RB' | 'WR' | 'TE', { value: number; value_label?: string }>
   >;
