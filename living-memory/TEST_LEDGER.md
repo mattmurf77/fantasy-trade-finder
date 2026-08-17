@@ -10,6 +10,47 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-17 — Decline reason capture SHIPPED + v1.14.0 build 116 to TestFlight
+
+**Code.** Two squash merges: backend `feat/decline-reasons-backend` @ `5056d1e`, mobile
+`feat/decline-reasons-mobile` @ `4d57aae` (main `b97744c..8082aa2`), plus the gen-v2 G6 knob
+reconciliation `92d2358`. Flag `feedback.decline_reasons` ships **true for all users**.
+
+- **Merged-state backend suite: 3110 passed / 1 skipped / 0 failed** (254s), incl. 58 new tests in
+  `test_decline_reasons.py` — gate + kill-switch byte-identity, progressive-write idempotency,
+  impression_id fallback matrix, the mobile payload verbatim, the per-code Elo matrix with the knob
+  on AND off, analytics props.
+- **Mobile:** `tsc --noEmit` **clean** and `testid-lint OK` on a worktree at `main` after `npm ci`
+  from main's lockfile. 38/38 mobile check suites green on the branch tip; merged mobile files were
+  verified byte-identical to that tip, so the result carries.
+- **Correction to an earlier claim:** the `ImportRankingsSheet.tsx` → `expo-document-picker` TS error
+  previously recorded as "pre-existing on origin/main" is **not a real defect** — it is an artifact of
+  a stale shared `node_modules`. A correct install yields zero TS errors.
+
+**SIM GATE: WAIVED by operator, 2026-08-17.** Tier-1-class mobile screen change; operator waived the
+requirement and accepted "green on touched flows + documented notes on the rest". The two Maestro
+flows (`decline-reasons-fixed-option.yaml`, `decline-reasons-other-free-text.yaml`) were **authored
+but never executed** — they were blocked on the all-on flag fixture, which this merge supplies, so
+they are runnable from now on with no passing run behind them. Pushed with `FTF_SKIP_SIM_GATE=1`.
+**TestFlight is the only runtime evidence this feature has.** Not covered by any executed test: the
+on-device keyboard/send-button interaction, and the real device → route write path.
+
+**Release.** EAS build `d57f593e` = **v1.14.0 build 116**, production profile, built from a clean
+worktree at `main` @ `67b54f6`; status `finished`; `eas submit` uploaded to App Store Connect
+(submission `e834b0bf`) during an active EAS Submit partial outage — build and submit were
+deliberately decoupled for that reason.
+
+- **Build-source trap caught (worth remembering).** The first attempt, build `e26e0fc6`/115, was
+  **cancelled**: `eas build` archives the *local working directory*, and this repo's main checkout sits
+  on `session-2026-08-13-notif-ship`, **141 commits behind main**. That archive contained neither
+  `DeclineReasonPanel.tsx` nor `declineReasons.ts` and carried version 1.13.2 — it would have shipped
+  the feature-less old app to TestFlight labelled as a downgrade. Always build from a checkout you have
+  confirmed contains the feature files.
+- **Prod flags verified live** post-deploy via `GET /api/feature-flags`: `feedback.decline_reasons: true`,
+  `trade_gen.v2: false`, `trade.presentment_rules: true`.
+
+---
+
 ## 2026-08-17 — 2026-08-16 feedback wave shipped (17 items, v1.13.5 build 114)
 
 - **Merged-tree gates (orchestrator-run, integration branch):** pytest **3050 passed / 1 skipped / 0 failed**; `tsc --noEmit` clean; **48/48** `check-*.js` structural suites; `testid-lint.sh` OK.
