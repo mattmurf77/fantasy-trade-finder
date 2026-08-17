@@ -250,7 +250,7 @@ Constraint: `uq_trade_block` on `(league_id, player_id)`. Written via `replace_t
 
 ## `sleeper_trades`
 
-Market-data readiness (operator directive 2026-07-26; PRD #43 Phase-1 data foundation / backlog #26) — **executed Sleeper league trades, captured raw**. Source: the documented public v1 endpoint `GET /league/<id>/transactions/<week>`, swept over legs 1–18 by `backend/sleeper_trades_service.sync_league_trades` during `session_init`'s background daemon (flag `market.trade_capture`, Sleeper numeric league ids only, best-effort). Only `type="trade"` + `status="complete"` rows are stored. Capture ONLY — no scoring, no aggregation, no UI; this table exists so a future observed-market model (PRD #43 Phases 2–3) and league-specific market signals have raw material accumulating from today.
+Market-data readiness (operator directive 2026-07-26; PRD #43 Phase-1 data foundation / backlog #26) — **executed Sleeper league trades, captured raw**. Source: the documented public v1 endpoint `GET /league/<id>/transactions/<week>`, swept over legs 1–18 by `backend/sleeper_trades_service.sync_league_trades` during `session_init`'s background daemon (flag `market.trade_capture`, Sleeper numeric league ids only, best-effort). Only `type="trade"` + `status="complete"` rows are stored. Capture ONLY — no scoring, no aggregation, no UI; this table exists so a future observed-market model (PRD #43 Phases 2–3) and league-specific market signals have raw material accumulating from today. Also populated by the operator-run backfill `scripts/backfill_sleeper_trades.py` (2026-08-16), which additionally walks each league's `previous_league_id` chain — so `league_id` here may be a prior-season Sleeper league that has no row in `leagues`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -402,7 +402,7 @@ Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
 
 ## `suggestion_trade_links`
 
-**suggestion.telemetry** executed-trade tagging — one row per captured `sleeper_trades` transaction examined by the matcher (`suggestion_telemetry.match_league_trades`, hooked after every `sync_league_trades` pass in `session_init`'s background daemon; idempotent on `transaction_id`, so every sync retries any leftovers). Similarity rule (D-scope-5, glossary "Suggestion-trade match"): same unordered manager pair, `served_at ≤ traded_at ≤ served_at + suggestion_match_lookback_days`, direction-aligned asset tokens (players by id; owned picks → `pick:{season}:r{round}:{orig_roster}`; generic picks relax to round-only pairing); **exact** = both sides fully pair, **partial** = overlap ≥ `suggestion_match_min_overlap` with ≥1 match per side; best candidate = exact > overlap > recency. Only telemetry-era impressions (non-NULL `assets_json`) are matchable. Multi-team / unresolvable trades keep a row with `match_type` NULL so the ratio denominator stays honest.
+**suggestion.telemetry** executed-trade tagging — one row per captured `sleeper_trades` transaction examined by the matcher (`suggestion_telemetry.match_league_trades`, hooked after every `sync_league_trades` pass in `session_init`'s background daemon; idempotent on `transaction_id`, so every sync retries any leftovers). Similarity rule (D-scope-5, glossary "Suggestion-trade match"): same unordered manager pair, `served_at ≤ traded_at ≤ served_at + suggestion_match_lookback_days`, direction-aligned asset tokens (players by id; owned picks → `pick:{season}:r{round}:{orig_roster}`; generic picks relax to round-only pairing); **exact** = both sides fully pair, **partial** = overlap ≥ `suggestion_match_min_overlap` with ≥1 match per side; best candidate = exact > overlap > recency. Only telemetry-era impressions (non-NULL `assets_json`) are matchable. Multi-team / unresolvable trades keep a row with `match_type` NULL so the ratio denominator stays honest. Rows can also be written by the operator-run retro backfill (`scripts/backfill_suggestion_links.py`, 2026-08-16): it covers pre-telemetry trades only (the live matcher owns the telemetry era) and marks its matches `retro_exact` — exact serve-time trade_hash identity, the only semantics possible without historical `assets_json`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -411,10 +411,10 @@ Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
 | `league_id` | str | |
 | `was_recommended` | int | 1 iff a **rendered** (non-ghost) suggestion matched — per-league ratio `SUM(was_recommended)/COUNT(*)` is the always-on endorsement dashboard (`GET /api/admin/suggestion-telemetry/ratio`) |
 | `matched_impression_id` | str | best non-ghost match (soft ref → `deck_impressions`) |
-| `match_type` | str | `exact` \| `partial` \| NULL |
-| `overlap_score` | float | matched-token share of the larger asset set (1.0 on exact) |
+| `match_type` | str | `exact` \| `partial` \| `retro_exact` (backfill) \| NULL |
+| `overlap_score` | float | matched-token share of the larger asset set (1.0 on exact/retro_exact) |
 | `ghost_impression_id` | str | best **ghost** match — the incrementality read: a withheld suggestion that executed anyway |
-| `ghost_match_type` | str | `exact` \| `partial` \| NULL |
+| `ghost_match_type` | str | `exact` \| `partial` \| `retro_exact` (backfill) \| NULL |
 | `ghost_overlap_score` | float | |
 | `traded_at` | str | ISO UTC (from the Sleeper transaction) |
 | `computed_at` | str | ISO UTC |

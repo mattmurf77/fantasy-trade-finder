@@ -54,6 +54,7 @@ Operational procedures. Add to this as you learn things.
 - [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
+- [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 
 ---
 
@@ -789,3 +790,30 @@ To rebuild a league's grid from scratch, replay those rows in `occurred_at` orde
 - **Kill the v2 layer only:** `onboarding.guide_v2 → false` (hot-reload via `POST /api/feature-flags/reload`, cron-secret gated). Restores the v1 tour graph: v1 beats (incl. `s6.1` toast + `s2.3`), no eligibility layer, no new beats. Copy trims persist (they ship in the binary, unconditionally).
 - **Kill the whole tour:** `onboarding.guided_avatar → false`. **Reality check (PRD FR-E11):** the documented "falls back to the passive layer" claim is FALSE while `onboarding.guided_layer` is `false` — turning the avatar off today falls back to NOTHING. If a passive fallback is wanted, flip `onboarding.guided_layer → true` in the same change.
 - **Guide flag preconditions** (beats fail closed when their owning feature flag is off — pulling one of these mid-season silently suppresses the beat, by design): `trade.outlook_direction` + `trades.edit_full_sheet` + `trades.finder_hub` → N2 · `deck.replenishment` + `trade.finder_targeting` + `trades.finder_hub` → N4 · `ranks.import` → N8 · `league.pos_candidates` (+ `league.player_trade_handoff` for the pin clause) → N5 · `trade.send_in_sleeper` → the send-teaching beats (N6.2/N3, Phase 2).
+
+## Organic trade backfill (2026-08-16)
+
+Two operator-run scripts (flag-independent — `market.trade_capture` only gates the
+background daemon) populate the organic executed-trade corpus and its suggestion links.
+Both are idempotent by construction (insert-only through the existing
+`record_sleeper_trades` / `save_suggestion_trade_links` helpers), so re-running is
+always safe; both take `--dry-run` and `--league <id>`.
+
+```bash
+# against prod (reads DATABASE_URL_PROD from secrets.local.env; quotes stripped):
+export DATABASE_URL="$(grep '^DATABASE_URL_PROD=' secrets.local.env | cut -d= -f2- | sed "s/^['\"]//; s/['\"]$//")"
+python3 scripts/backfill_sleeper_trades.py --dry-run     # inspect counts first
+python3 scripts/backfill_sleeper_trades.py               # sweep every synced league + 3 prior seasons
+python3 scripts/backfill_suggestion_links.py --dry-run
+python3 scripts/backfill_suggestion_links.py             # retro-link pre-telemetry trades (exact-hash only)
+unset DATABASE_URL                                       # don't leave the shell pointed at prod
+```
+
+**When to re-run:** `backfill_sleeper_trades.py` after new leagues are synced, at season
+rollover (new `previous_league_id` hops appear), or if the capture daemon was dark for a
+while — deeper history needs `--max-prior-seasons N`. `backfill_suggestion_links.py`
+rarely — only if captured trades predating the telemetry era (first `assets_json`
+impression, 2026-08-16) somehow lack link rows; telemetry-era trades are deliberately left
+to the live matcher. First corpus report:
+`docs/business/analytics/2026-08-16-organic-trade-corpus.md`; scope addendum:
+`docs/plans/matchmaking-engine/backfill-scope.md`.

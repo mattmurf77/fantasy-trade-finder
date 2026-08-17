@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-08-16 — Organic-trade backfill scripts + prod backfill run (Tier 4)
+
+- **Change:** `feat/organic-backfill` (unmerged) — `scripts/backfill_sleeper_trades.py`, `scripts/backfill_suggestion_links.py`, `backend/tests/test_backfill_scripts.py`, docs. Backend/ops-only: **sim gate Tier 4** (pytest only), Maestro n/a (also retired per D-056). No schema/API/flag/analytics surface.
+- **Tests:** new suite **20 passed** (chain-walk depth/terminator/flake cases, sweep dry-run + idempotency, retro exact/direction/window-edge/ghost-split/pick pseudo-id/idempotency/never-overwrite/dry-run/era-skip). Full backend suite on branch: **2943 passed / 1 skipped / 1 failed** — the failure is `test_seed_ui_test_db.py::test_release_flags_mirror_features_json`, **pre-existing on clean origin/main** (verified by stash-and-rerun): `release-300.json` fixture still has `suggestion.telemetry: false` after the 2026-08-16 flag lighting. Flagged as a separate task; zero regressions from this branch.
+- **Prod runs (evidence = script logs, dry-run-then-real, idempotency re-verified):** trades backfill dry-run 555 found/529 new → real run inserted **529** (22 league-seasons swept, 0 failed week fetches); retro linker dry-run 109/0-match → real run wrote **109** rows (0 recommended, 0 ghost); immediate re-runs of both wrote **0** (idempotent). Read-only validation: impressions era starts 2026-07-27; exactly 1 captured trade postdates it (already live-linked) — 0 retro matches is the honest expected result.
+
 ## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
 
 - **Change:** `242a399` — `expo.name` + `CFBundleDisplayName` -> `Fleeced`; `AppIcon.appiconset/App-Icon-1024x1024@1x.png` replaced with the ram mark. 4 files = 2 text lines + 2 PNGs. No schema, API, feature-flag or analytics surface; no user flow altered.

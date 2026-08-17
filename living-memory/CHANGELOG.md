@@ -18,6 +18,13 @@
 - **Drive-by repair:** `3c0541c` (another session) flipped `suggestion.telemetry` in features.json without the three fixture mirrors — main's suite was red; mirrored in #136.
 - 4 new tests, sabotage-proven; full suite green on the branch. Caveat: Brazzell (2026 rookie) is in `players` but ranked-pool membership depends on consensus-value coverage — verify via import **preview** (never apply, it overwrites the board).
 
+## 2026-08-16 (Organic trade corpus BACKFILLED to prod + first POM patterns report)
+
+- **555 executed Sleeper trades now in prod `sleeper_trades`** (529 new): every synced league swept plus up to 3 prior seasons via `previous_league_id` chains — 22 league-seasons, 5 franchises, 2022–2026. New operator scripts `scripts/backfill_sleeper_trades.py` + `scripts/backfill_suggestion_links.py` (both idempotent, `--dry-run`, flag-independent; runbook § Organic trade backfill).
+- **Retro suggestion links written:** 109 pre-telemetry trades examined by exact serve-time trade_hash ([D-061](DECISIONS.md) — `retro_exact` match type, telemetry-era trades left to the live matcher). Result: **0 matched — honest baseline**, impressions only exist since 2026-07-27 and just 1 captured trade postdates that. `was_recommended` ratio now 0/121.
+- **First patterns report** (`docs/business/analytics/2026-08-16-organic-trade-corpus.md`) — the POM calibration filters for the future league simulator: trades/league-season median 22 (10–86, strong per-league propensity); 31% of trades have 3+ assets on a side; 69% mix players+picks; Aug/Nov spikes with Dec collapse; dyad repetition above chance (369 distinct pairs vs 410 expected); participation Gini mean 0.374.
+- Built on `feat/organic-backfill` (unmerged worktree; scripts + 20 tests + docs). Backend suite green (2943/1 + 20 new); pre-existing `release-300.json` fixture mismatch with `suggestion.telemetry: true` flagged separately.
+
 ## 2026-08-16 (App identity — Fleeced name + ram icon SHIPPED to TestFlight)
 
 - **The app is `Fleeced` on the home screen, `Fleeced: Dynasty Trade Finder` in the store** — the implementation of [D-057](DECISIONS.md), recorded 2026-08-09 but never built. Exactly the two keys that decision names: `expo.name` (`mobile/app.json`) + `CFBundleDisplayName` (`Info.plist`) — app.json alone does nothing in this bare workflow.
