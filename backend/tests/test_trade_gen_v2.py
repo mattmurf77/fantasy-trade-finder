@@ -356,7 +356,7 @@ def test_consolidation_discount_blocks_junk_stuffing():
     # the G6 #341 net-position cap ported 2026-08-16, which would mask
     # what this test proves. Disable the cap; its own coverage lives in
     # the G6-parity test block below.
-    ts._cfg["gen2_g6_net_position_cap"] = 0.0
+    ts._cfg["pos_net_cap"] = 0.0
     pos = {**_base_positions("u"), **_base_positions("o")}
     players = {pid: _Player(id=pid, name=pid, position=p)
                for pid, p in pos.items()}
@@ -865,7 +865,7 @@ def test_g6_pos_net_cap_predicate():
     # passes; a sabotage counting PICK as a position would kill it.
     assert g6_pos_net_ok(["pk_a", "pk_b", "rb_a"], ["wr_a"], players)
     # Knob at <=0 disables the rule entirely.
-    ts._cfg["gen2_g6_net_position_cap"] = 0.0
+    ts._cfg["pos_net_cap"] = 0.0
     assert g6_pos_net_ok(["rb_a", "rb_b"], ["wr_a", "wr_b"], players)
 
 
@@ -923,7 +923,7 @@ def test_g6_pick_gap_band_predicate():
     # gap = (749 + 1251) - 1000 = 1000; pick 1251 > 1250 -> pass.
     assert g6_pick_gap_ok(["body4", "pk_hi"], ["ret"], cval, players)
     # Knob at 0 disables.
-    ts._cfg["gen2_pick_band_frac"] = 0.0
+    ts._cfg["pick_gap_frac"] = 0.0
     assert g6_pick_gap_ok(["rb_a", "pk_a"], ["wr_a"], cval, players)
 
 
@@ -972,7 +972,7 @@ def test_g6_net_cap_blocks_junk_stuffed_shape_even_without_discount():
         "#341 net cap failed to block the 3-for-1 same-position shape"
     assert report.net_cap_rejects > 0
 
-    ts._cfg["gen2_g6_net_position_cap"] = 0.0  # cap knob OFF too
+    ts._cfg["pos_net_cap"] = 0.0  # cap knob OFF too
     cards2, report2 = _run(players, [opp], user_elo, user_roster, seed)
     assert any(_stuffed(c) for c in cards2)
     assert report2.net_cap_rejects == 0
@@ -1057,7 +1057,7 @@ def test_g6_pick_band_blocks_gap_filler_in_pipeline():
         "#339 pick-as-the-gap package leaked through"
     assert report.pick_band_rejects > 0
 
-    ts._cfg["gen2_pick_band_frac"] = 0.0
+    ts._cfg["pick_gap_frac"] = 0.0
     cards2, report2 = _run(players, [opp], user_elo, user_roster, seed)
     assert any(_filler(c) for c in cards2), \
         "knob-off should re-admit the shape (kill attribution proof)"
@@ -1140,7 +1140,7 @@ def test_g6_meso_variants_never_emit_pick_band_violation():
 
     # Without the guard (knob off) the violator would have been the one
     # emitted (same shape bucket, higher score) — attribution proof.
-    ts._cfg["gen2_pick_band_frac"] = 0.0
+    ts._cfg["pick_gap_frac"] = 0.0
     out2 = _meso_variants(base, [base, violator, clean], players, cval)
     emitted2 = [tuple(sorted(v["give_player_ids"])) for v in out2]
     assert ("b", "pk") in emitted2
@@ -1199,16 +1199,16 @@ def test_g6_knobs_at_disable_are_byte_identical_to_rule_bypass(monkeypatch):
         return _run(players, [opp], user_elo, user_roster, seed)
 
     # Run 1 — knobs at their disable values.
-    ts._cfg["gen2_g6_net_position_cap"] = 0.0
-    ts._cfg["gen2_pick_band_frac"] = 0.0
+    ts._cfg["pos_net_cap"] = 0.0
+    ts._cfg["pick_gap_frac"] = 0.0
     cards_a, report_a = _fixture_run()
     sig_a = _card_signature(cards_a, report_a)
 
     # Run 2 — rules structurally bypassed (pre-port behavior), knobs back
     # at their ON defaults so a knob-read leak would be caught.
-    ts._cfg["gen2_g6_net_position_cap"] = \
-        ts._DEFAULT_CFG["gen2_g6_net_position_cap"]
-    ts._cfg["gen2_pick_band_frac"] = ts._DEFAULT_CFG["gen2_pick_band_frac"]
+    ts._cfg["pos_net_cap"] = \
+        ts._DEFAULT_CFG["pos_net_cap"]
+    ts._cfg["pick_gap_frac"] = ts._DEFAULT_CFG["pick_gap_frac"]
     monkeypatch.setattr(g2, "g6_pos_net_ok", lambda *a, **k: True)
     monkeypatch.setattr(g2, "g6_pick_gap_ok", lambda *a, **k: True)
     cards_b, report_b = _fixture_run()
@@ -1222,3 +1222,38 @@ def test_g6_report_counters_serialized():
     d = r.as_dict()
     assert d["net_cap_rejects"] == 0
     assert d["pick_band_rejects"] == 0
+
+
+# ---------------------------------------------------------------------------
+# G6 knob reconciliation (2026-08-17) — gen-v2 shares G6's model_config keys
+# rather than carrying copies, so one knob change moves both pipelines.
+# ---------------------------------------------------------------------------
+
+def test_g6_knobs_are_shared_not_duplicated():
+    """The gen2_* copies are gone; the rules read G6's own keys."""
+    import backend.trade_service as ts
+    assert "gen2_g6_net_position_cap" not in ts._DEFAULT_CFG
+    assert "gen2_pick_band_frac" not in ts._DEFAULT_CFG
+    for key in ("pos_net_cap", "pick_gap_frac", "pick_gap_min_value"):
+        assert key in ts._DEFAULT_CFG, f"{key} must exist as G6's shared knob"
+
+
+def test_g6_knob_change_moves_gen_v2(monkeypatch):
+    """Zeroing G6's knob disables the rule inside gen-v2 too — the single
+    kill switch the reconciliation exists to provide. Guards against a future
+    edit reintroducing a gen-v2-local copy."""
+    import backend.trade_service as ts
+    from backend.trade_gen_v2 import g6_pos_net_ok
+
+    from types import SimpleNamespace as NS
+    players = {
+        "a": NS(position="RB", team="SEA"), "b": NS(position="RB", team="BUF"),
+        "c": NS(position="WR", team="PHI"),
+    }
+    give, recv = ["a", "b"], ["c"]          # net RB -2, net WR +1 → violates cap 1
+
+    ts._cfg["pos_net_cap"] = 1.0
+    assert g6_pos_net_ok(give, recv, players) is False
+    ts._cfg["pos_net_cap"] = 0.0            # G6's kill switch…
+    assert g6_pos_net_ok(give, recv, players) is True   # …also disables gen-v2
+    ts._cfg["pos_net_cap"] = ts._DEFAULT_CFG["pos_net_cap"]

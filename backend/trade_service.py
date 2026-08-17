@@ -552,12 +552,10 @@ _DEFAULT_CFG: dict[str, float] = {
     # #341 net-position cap: |count(recv at P) − count(give at P)| ≤ cap
     # for each P in {QB, RB, WR, TE}; picks uncounted. 1 = rule on with
     # cap 1; ≤ 0 disables (per-rule kill switch).
-    "gen2_g6_net_position_cap":   1.0,
     # #339 pick-not-the-gap two-sided band: for a raw-consensus gap ≥ 300,
     # kill when a heavier-side pick sits inside [frac×gap, gap/frac].
     # 0 disables. 0.8 mirrors the G6 spec default — unmeasured pending the
     # pick-league replay (G6 prd R-12).
-    "gen2_pick_band_frac":        0.8,
 
     # ------------------------------------------------------------------
     # trade.presentment_rules — G6 2026-08-16 feedback wave

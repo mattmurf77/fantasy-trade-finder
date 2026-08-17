@@ -185,23 +185,22 @@ def side_gain(in_ids: list[str], out_ids: list[str], value_of) -> float:
 # filter would double-penalize and kill the consolidation shapes G6 itself
 # protects (docs/plans/matchmaking-engine/2026-08-16-g6-validation.md).
 #
-# PROVISIONAL KNOBS: `gen2_g6_net_position_cap` and `gen2_pick_band_frac`
-# (plus the `_G6_PICK_GAP_MIN_VALUE` constant below) mirror G6's v1 knobs
-# `pos_net_cap` / `pick_gap_frac` / `pick_gap_min_value`, which are still
-# unmerged (branch feedback-2026-08-16-specs) and whose #339 values await a
-# pick-league replay (G6 prd R-12). At G6-merge reconciliation these must be
-# aliased/aligned to G6's calibrated values — one source of truth.
+# RECONCILED 2026-08-17 (G6 shipped ON in the 2026-08-16 wave): these gates
+# now read G6's OWN model_config knobs — `pos_net_cap`, `pick_gap_frac`,
+# `pick_gap_min_value` — rather than gen-v2 copies. One source of truth, so a
+# knob change (notably G6 prd R-12's pending pick-league calibration of
+# `pick_gap_frac`) moves both pipelines at once, and each knob is a single
+# kill switch for the rule everywhere.
+#
+# Scope note: the knobs govern BOTH pipelines; G6's `trade.presentment_rules`
+# flag is the v1 path's group revert only. Turning that flag off leaves these
+# rules active in gen-v2 (which has its own flag, `trade_gen.v2`). To disable
+# a rule everywhere, zero its knob.
 
 # #341 counts positional bodies only: the four lineup positions, never
 # picks (a pick is not a positional body; picks are #339's domain) and
 # never K/DEF/IDP in exotic leagues (uncounted by design, per the spec).
 _G6_NET_POSITIONS = ("QB", "RB", "WR", "TE")
-
-# #339 gap floor, raw-consensus value units. Mirrors G6's
-# `pick_gap_min_value` default (300.0) — kept as a module constant rather
-# than a third knob so the two engines share exactly two provisional keys
-# to reconcile; alias to G6's key at reconciliation.
-_G6_PICK_GAP_MIN_VALUE = 300.0
 
 
 def g6_pos_net_ok(give_ids: list[str], recv_ids: list[str],
@@ -209,17 +208,17 @@ def g6_pos_net_ok(give_ids: list[str], recv_ids: list[str],
     """#341 package-shape cap (G6 prd R-2): for each position P in
     {QB, RB, WR, TE}, the signed net ``count(recv at P) − count(give at P)``
     — one quantity per position, not a per-side count — must satisfy
-    ``|net_P| ≤ gen2_g6_net_position_cap``.
+    ``|net_P| ≤ pos_net_cap`` (G6's knob — shared, not a gen-v2 copy).
 
     Semantics (operator's words): 2RB→2WR kills (net RB = −2); "give 2 RBs
     only if getting 1 back" passes (net −1); 2RB→2RB is net 0 and passes;
     every 1-for-1 passes trivially. Pick pseudo-assets are excluded
     (``is_pick_asset``), as are positions outside the four. The net is one
     side's view — the counterparty's net is its negation, so a single check
-    covers both sides. ``gen2_g6_net_position_cap ≤ 0`` disables (per-rule
+    covers both sides. ``pos_net_cap ≤ 0`` disables (per-rule
     kill switch, following the G6 `pos_net_cap`/`filler_min_frac` pattern).
     """
-    cap = _c("gen2_g6_net_position_cap")
+    cap = _c("pos_net_cap")
     if cap <= 0:
         return True
     net: dict[str, int] = defaultdict(int)
@@ -243,9 +242,9 @@ def g6_pick_gap_ok(give_ids: list[str], recv_ids: list[str], cval,
     (players and picks, undiscounted — the D-055 Δ currency), ``gap =
     |g − r|``, and H the heavier side:
 
-        KILL when gap ≥ _G6_PICK_GAP_MIN_VALUE
+        KILL when gap ≥ pick_gap_min_value
              AND ∃ pick p ∈ H with
-                 gen2_pick_band_frac × gap ≤ cval(p) ≤ gap / gen2_pick_band_frac
+                 pick_gap_frac × gap ≤ cval(p) ≤ gap / pick_gap_frac
 
     Two-sided band: the pick must *be* the gap — within the band of it in
     both directions — not merely exceed a fraction of it. A pick far larger
@@ -254,9 +253,9 @@ def g6_pick_gap_ok(give_ids: list[str], recv_ids: list[str], cval,
     style) passes; the #339 shape (heavier by exactly one mid-1st: gap
     3,000, pick 3,000) dies. The enumerators generate the pick-less sibling
     shape independently, so the kill loses nothing.
-    ``gen2_pick_band_frac = 0`` disables.
+    ``pick_gap_frac = 0`` disables.
     """
-    frac = _c("gen2_pick_band_frac")
+    frac = _c("pick_gap_frac")
     if frac <= 0:
         return True
     if not any(is_pick_asset(players.get(p)) for p in give_ids) \
@@ -265,7 +264,7 @@ def g6_pick_gap_ok(give_ids: list[str], recv_ids: list[str], cval,
     g = sum(cval(p) for p in give_ids)
     r = sum(cval(p) for p in recv_ids)
     gap = abs(g - r)
-    if gap < _G6_PICK_GAP_MIN_VALUE:
+    if gap < _c("pick_gap_min_value"):
         return True
     heavier = give_ids if g > r else recv_ids
     for pid in heavier:

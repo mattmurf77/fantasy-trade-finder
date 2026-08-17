@@ -236,3 +236,30 @@ truth. This is a named item for gen-v2's lighting checklist.
   pipeline kill/pass both rules, knob-off attribution proofs,
   MESO-surface compliance, disable-knobs parity vs structural bypass,
   fixture-league window trade unchanged).
+
+
+---
+
+## Addendum — G6 knob reconciliation (2026-08-17)
+
+G6's presentment rules shipped **ON** in the 2026-08-16 feedback wave, closing the
+obligation recorded when the #341/#339 parity port landed. The two provisional gen-v2
+knobs and the mirrored gap-floor constant are **removed**; `g6_pos_net_ok` and
+`g6_pick_gap_ok` now read G6's own `model_config` keys directly:
+
+| was (gen-v2 copy) | now (shared, G6's key) | value |
+|---|---|---|
+| `gen2_g6_net_position_cap` | `pos_net_cap` | 1.0 |
+| `gen2_pick_band_frac` | `pick_gap_frac` | 0.8 — still unmeasured, pending G6 prd R-12's pick-league replay |
+| `_G6_PICK_GAP_MIN_VALUE` (module constant) | `pick_gap_min_value` | 300.0 |
+
+The ported values were already identical to G6's calibrated ones, so this is a
+no-behavior-change refactor — pinned by the existing 33 gen-v2 tests plus two new ones
+(`test_g6_knobs_are_shared_not_duplicated`, `test_g6_knob_change_moves_gen_v2`). The
+payoff is forward-looking: when R-12 calibrates `pick_gap_frac`, both pipelines move
+together instead of gen-v2 silently keeping 0.8.
+
+**Scope note worth knowing at kill-switch time:** the knobs govern both pipelines, but
+G6's `trade.presentment_rules` flag is the **v1 path's group revert only**. Turning that
+flag off leaves these two rules active inside gen-v2 (gated by its own `trade_gen.v2`
+flag). To disable a rule *everywhere*, zero its knob.
