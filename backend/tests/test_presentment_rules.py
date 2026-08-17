@@ -382,6 +382,45 @@ def test_r3_playerless_packages_ignored():
                        _R3_PLAYERS)
 
 
+def test_r1_engine_kill_through_consensus_path():
+    """R-6 / CW-1 path 4 (QA 2026-08-16 F-5) — a rule kill through the live
+    CONSENSUS generator (`_generate_consensus_for_pair`'s inner `_emit`
+    hook), the one engine path no other G6 test exercises (every other
+    engine fixture has has_rankings=True). Opponent has NO rankings, so the
+    card is consensus-basis by construction: give G (1,000) for R (1,600) —
+    the user comes out ahead (+600 consensus gain, so the #108 user-gain
+    gate and fairness 0.625 ≥ 0.5 all pass) but R1's absolute bound kills
+    it (gap 600 ≥ 500 floor, frac 0.375 ≥ 0.25). The knob-off control
+    resurrects the same card and pins attribution to R1. Proven RED by
+    deleting the `presentment_ok_fn` check inside `_emit`
+    (trade_service.py:4412-4414) — the sabotage that leaves every other G6
+    test green."""
+    players = {"G": _Player("G", "WR"), "R": _Player("R", "WR")}
+    seed = {"G": _elo(1000.0), "R": _elo(1600.0)}
+
+    def run():
+        opp = LeagueMember(user_id="opp", username="opp", roster=["R"],
+                           elo_ratings={}, has_rankings=False)
+        svc = TradeService(players=players)
+        svc.add_league(League(league_id="L1", name="T", platform="demo",
+                              members=[opp]))
+        return svc.generate_trades(
+            user_id="user", user_elo={"G": 1500, "R": 1700},
+            user_roster=["G"], league_id="L1", seed_elo=dict(seed),
+            fairness_threshold=0.5, max_per_opponent=5)
+
+    _set_flags(**{"trade_engine.v2": True, "trade.presentment_rules": True})
+    assert _find(run(), ["G"], ["R"]) is None, (
+        "overpay-shaped card escaped R1 in the consensus path")
+    ts._cfg["max_overpay_frac"] = 0.0
+    resurrected = _find(run(), ["G"], ["R"])
+    assert resurrected is not None, (
+        "knob-off control failed — the kill was not R1's")
+    assert resurrected.basis == "consensus", (
+        "fixture drifted off the consensus path — this test exists to "
+        "cover _generate_consensus_for_pair's _emit hook specifically")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # R5 #304 — window-scaled need gate (need_gate_ok)
 # ═══════════════════════════════════════════════════════════════════════════

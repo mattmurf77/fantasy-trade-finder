@@ -862,6 +862,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setLaneFilter(null);
     setJob(null);
     setDeckFailure(null); // P0-2 — the deck AND the reason it failed
+    setScopedEmpty(null); // #330 — a fairness change can change results; drop the stale zero-result card
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);

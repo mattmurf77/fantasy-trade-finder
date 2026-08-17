@@ -3096,6 +3096,32 @@ def test_295_17_the_event_family_is_registered_with_its_intent_class():
         {"platform", "reason"})
 
 
+def test_g2_room_affordance_taxonomy_registered():
+    """G2 R-15 taxonomy side (QA 2026-08-16 F-11) — the three room
+    affordances (#326 team sheet, #326 position filter, #327 pool search).
+    check-mock-g2-ui.js pins the SCREEN's emitters; this pins the backend
+    registration — the registry is default-deny behind a 200 (G-031), so a
+    merge-dropped name or prop would be silent data loss. Props maps must
+    match the emitters' payloads exactly (MockDraftScreen.tsx
+    openTeamSheet / onSelectFilter / onPoolQuery). All three are INTENT
+    (user gestures). Sabotage: drop `mock_pool_filtered` from
+    `ALLOWED_CLIENT_EVENTS`."""
+    from backend.analytics_taxonomy import (ALLOWED_CLIENT_EVENTS,
+                                            CLIENT_EVENT_PROPS)
+    from backend.analytics_queries import NON_INTENT_EVENTS
+
+    three = {"mock_team_sheet_opened", "mock_pool_filtered",
+             "mock_pool_searched"}
+    assert three <= ALLOWED_CLIENT_EVENTS
+    assert not (three & NON_INTENT_EVENTS)
+    assert CLIENT_EVENT_PROPS["mock_team_sheet_opened"] == frozenset(
+        {"platform", "mode", "round", "pick_no"})
+    assert CLIENT_EVENT_PROPS["mock_pool_filtered"] == frozenset(
+        {"platform", "mode", "position"})
+    assert CLIENT_EVENT_PROPS["mock_pool_searched"] == frozenset(
+        {"platform", "mode", "filter_position"})
+
+
 # --- #305 — manual mode ---------------------------------------------------
 
 def test_305_01_manual_create_stops_at_pick_one(client, flag_on, session):

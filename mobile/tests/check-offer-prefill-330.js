@@ -281,6 +281,18 @@ assert(
   /setScopedEmpty\(null\);/.test(resetFn),
   'S-5 a reset also clears the scoped zero-result card',
 );
+// F-4 (2026-08-16 QA): the fairness toggle is a deck reset that can change
+// results — it must clear the card like every other deckFailure-clearing site.
+const fairnessFn = region(
+  tradesCode,
+  /function handleToggleFairness\(next: boolean\) \{[\s\S]*?\n  \}/,
+  'S-5 handleToggleFairness',
+);
+assert(
+  /setScopedEmpty\(null\);/.test(fairnessFn),
+  'S-5 the fairness toggle also clears the scoped zero-result card',
+  'sabotage detected: after a scoped zero-result, toggling fairness leaves the stale "No trade found" card until the next search (QA F-4)',
+);
 assert(
   /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current \}\)/.test(tradesCode),
   'S-5 every dispatch stamps the current epoch into the mutation context',

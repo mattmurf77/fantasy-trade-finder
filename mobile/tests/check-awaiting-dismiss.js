@@ -301,7 +301,32 @@ assert(
     /refetchOnWindowFocus: false/.test(QC) && !/refetchOnWindowFocus/.test(SCREEN),
     '30. S-10e — refetchOnWindowFocus stays false app-wide and is not overridden on MatchesScreen',
   );
+
+  // S-10f (#334 R-1/R-2; QA 2026-08-16 F-7) — the hideKey ADD is pinned, not
+  // just the unhide ordering: each handler hides at TAP time, ABOVE the
+  // ux.swipe_undo branch, so the call covers BOTH flag branches. Deleting
+  // either call (or moving it inside one branch) silently reverts #334's fix
+  // while checks 26-29 stay green.
+  const tapTimeHide = (h, call, name) => {
+    const hideIdx = h.indexOf(call);
+    const flagIdx = h.indexOf('if (!swipeUndoOn)');
+    assert(
+      hideIdx > -1 && flagIdx > hideIdx,
+      name,
+      `hideIdx=${hideIdx} flagIdx=${flagIdx} — the hide must exist and precede the flag branch`,
+    );
+  };
+  tapTimeHide(
+    hMutual,
+    'hideKey(matchHiddenKey(m.match_id))',
+    '31. S-10f — handleDismiss hides the match key at tap time, above the swipeUndoOn branch (both flag branches)',
+  );
+  tapTimeHide(
+    hAwait,
+    'hideKey(awaitingHiddenKey(a.league_id, a.trade_id))',
+    '32. S-10f — handleDismissAwaiting hides the awaiting key at tap time, above the swipeUndoOn branch (both flag branches)',
+  );
 }
 
-console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED (30)');
+console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED (32)');
 process.exit(failures ? 1 : 0);

@@ -21,6 +21,11 @@ What is pinned here, and why each failure mode is silent:
       failure inside that transaction would leave a league with zero
       members.
   (f) The ESPN reconnect nudge fires once per credential-expiry episode.
+  (g) The sweep is identity-aware (#321 R9): a stored credential that
+      conclusively doesn't own the bound team gets the honest
+      wrong-account nudge, and the sync CONTINUES — league rosters are
+      league truth regardless of whose credential read them. Silent
+      failure mode: a mislabeled "stopped working" nudge months later.
 
 Harness pattern follows test_notif_inbox_growth.py: isolated file-backed
 SQLite engine patched into backend.database.
@@ -455,3 +460,66 @@ def test_espn_reconnect_nudge_once_per_episode(tmp_path):
     assert len(rows) == 2, "one nudge per expiry episode, re-armed on re-verify"
     assert all(r.type == "espn_reconnect" for r in rows)
     assert all(r.user_id == "u1" for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# (g) #321 R9 — identity-aware ESPN sweep: wrong-account nudge (QA F-1)
+# ---------------------------------------------------------------------------
+
+def _espn_sweep(eng, *, stored_swid, bound_owner_swid):
+    """Run _sweep_fetch_teams for a cookie-auth ESPN league whose bound team
+    (espn_my_team_id) is owned by `bound_owner_swid` while the stored
+    credential carries `stored_swid`. Returns ((teams, skip), inbox rows)."""
+    import backend.server as server
+    lg = {"league_id": "777", "user_id": "u1", "platform": "espn",
+          "espn_auth": "cookie", "espn_my_team_id": 3, "espn_season": 2026}
+    cred = {"verified_at": "2026-07-01T00:00:00", "updated_at": "x",
+            "swid": stored_swid, "espn_s2_encrypted": "enc"}
+    league = {"teams": [
+        SimpleNamespace(team_id=3, owner_swid=bound_owner_swid),
+        SimpleNamespace(team_id=4,
+                        owner_swid="{CCCCCCCC-0000-0000-0000-0000000000CC}"),
+    ]}
+    mapped = {"rosters": {3: ["p1"], 4: ["p2"]}}
+    with patch.object(db_module, "engine", eng), \
+         patch.object(db_module, "get_espn_credential", return_value=cred), \
+         patch.object(server._sleeper_write, "decrypt_token",
+                      return_value="s2cookie"), \
+         patch.object(server, "_espn_import_payload",
+                      return_value=(league, mapped)):
+        out = server._sweep_fetch_teams(lg)
+    with eng.connect() as conn:
+        rows = conn.execute(select(notifications_table)).fetchall()
+    return out, rows
+
+
+def test_sweep_wrong_account_nudges_and_sync_continues(tmp_path):
+    """A stored SWID that conclusively does NOT own the bound team gets the
+    honest wrong-account nudge — same `espn_reconnect` type (the web inbox
+    allowlists types), meta.reason == "wrong_account" — AND the sync itself
+    CONTINUES: league rosters are league truth regardless of whose
+    credential read them. Proven RED by neutering the sweep's mismatch
+    comparison (canonical-SWID `!=` → `==` at the server.py R9 hook)."""
+    import json as _json
+    (teams, skip), rows = _espn_sweep(
+        _engine(tmp_path),
+        stored_swid="{AAAAAAAA-0000-0000-0000-000000000001}",
+        bound_owner_swid="{BBBBBBBB-0000-0000-0000-000000000002}")
+    assert skip is None and teams is not None and len(teams) == 2, \
+        "the sweep must CONTINUE on a wrong-account credential"
+    assert len(rows) == 1, "exactly one nudge row"
+    assert rows[0].type == "espn_reconnect"
+    meta = _json.loads(rows[0].metadata_json)
+    assert meta["reason"] == "wrong_account"
+    assert meta["league_id"] == "777"
+
+
+def test_sweep_matching_swid_no_nudge(tmp_path):
+    """R9 control — the same account's credential (case-different SWID:
+    the comparison is canonical + case-folded) syncs with NO nudge row."""
+    (teams, skip), rows = _espn_sweep(
+        _engine(tmp_path),
+        stored_swid="{aaaaaaaa-0000-0000-0000-000000000001}",
+        bound_owner_swid="{AAAAAAAA-0000-0000-0000-000000000001}")
+    assert skip is None and teams is not None and len(teams) == 2
+    assert rows == [], "no mismatch, no nudge"
