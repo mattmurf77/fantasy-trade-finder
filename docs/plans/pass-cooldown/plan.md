@@ -206,3 +206,74 @@ decision instead of a constant shared with likes.
 
 **Not claimed:** this does not address served-but-unacted repetition, which is
 98.5% of what the reporting user sees and is out of scope by operator decision.
+
+---
+
+## Addendum — reason-capture terminology revision (drafted 2026-08-17, NOT yet landed)
+
+**Status: forward-compatibility note written ahead of the revision. Nothing in
+this addendum is built.** Source: the decline-reason-capture design lab
+(`mockups/decline-reason-capture/`, produced by the matchmaking-engine session;
+labelled "design lab · not shipped code"). Its taxonomy was still moving when
+this was written — treat codes as provisional.
+
+### What the revision does to "pass"
+
+A pass stops being one undifferentiated action. It becomes a taxonomy of
+**seven codes routing to five distinct engine actions** — the lab's canonical
+`Reason → engine action` table (`01-post-pass-sheet.html`), which it states every
+approach maps to:
+
+| Code | Class | Engine action |
+|---|---|---|
+| `value_low` | value | Revise package — widen the split toward the user |
+| `value_overpay_them` | value (inverse) | Revise package — rebalance toward the partner |
+| `blocker_incoming` | hard constraint | Change assets — hold counterparty + outgoing, change the incoming asset |
+| `blocker_outgoing` | hard constraint | Change assets — **remove that asset from all packages for 30 days** / offer Trade DNA untouchables |
+| `fit` | fit | Suppress archetype — re-compose at ~constant value |
+| `partner` | partner | Change counterparty — suppress the pair, user-reversible |
+| `timing` | timing | **No action + cooldown** — re-arm on a trigger event, not a bare timer |
+| `unknown` (skipped / plain ✕) | unknown | No action — today's behavior |
+
+Recommended shape is **B "reason as action"**: the chips *are* the pass, one tap,
+the plain ✕ still fires an unlabelled pass. Governing constraint from the lab:
+**the pass must stay free** — dismissed-after-viewed is graded the only
+trustworthy negative in the implicit-feedback ladder, so anything that lowers the
+pass rate destroys the asset. Our cooldown adds no friction, so it is compatible.
+
+### Where D-066 lands in that world
+
+**D-066's exact-pair cooldown becomes the `unknown` / `timing` engine action** —
+the correct default for an unlabelled pass, which is what every pass is today and
+what the plain ✕ will keep producing. The work does not need to be undone.
+
+Three adjustments the revision will require:
+
+1. **`pass_cooldown_days` should be read as the *unlabelled* cooldown.** When
+   codes land, labelled passes route to their own actions; only `unknown` (and
+   `timing`, pending its trigger design) should fall through to this timer.
+   Rename or scope-document at that point.
+2. **The "explicitly NOT doing near-duplicate suppression" section above needs
+   qualifying, not reversing.** It is right for an *inferred* dismissal — we do
+   not know why, so we suppress exactly what we showed. It is wrong for
+   `blocker_outgoing`, where the user has *named the asset*: the lab specifies
+   removing it from **all** packages for 30 days. Explicit blockers earn wider
+   scope precisely because they are stated rather than guessed. Same reasoning
+   that separates a dismiss from a decline in D-066.
+3. **`timing` wants a trigger-based re-arm** (injury, bye-week hole, depth
+   change, deadline), not a bare day count. `pass_cooldown_days` cannot express
+   that; it is a floor, not the mechanism.
+
+### Adjacent defect the lab surfaces — worth its own item
+
+The lab names a live bug in the exact code D-066 touched: **every pass writes an
+Elo signal treating the give side as the winner** (`record_trade_signal`,
+`k = trade_k_pass`, `server.py` swipe route). That is only correct for
+`value_low`. When the real reason is "I don't want this player" or "not this
+manager," the board is taught a value lesson the user never intended — a
+corrupting write on ~496 prod passes and counting.
+
+D-066 deliberately did **not** touch that write (out of scope, and the fix needs
+the reason codes to gate it). Flagging it here so it is not lost between the two
+threads: **reason capture is a gate on a corrupting write, not only a routing
+feature.** It should be logged as its own item rather than absorbed silently.
