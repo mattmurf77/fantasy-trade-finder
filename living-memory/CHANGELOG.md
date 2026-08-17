@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-16 (rank nav: one exit per surface — SHIPPED, dark-free, device-unproven)
+
+- **Back is gone from all 8 flag-on rank surfaces; "More ways to rank" now navigates to the RankHome chooser** ([PR #137](https://github.com/mattmurf77/fantasy-trade-finder/pull/137), `3a10751`). Operator called the redundancy: Back's fallback was RankHome and the RankMenu sheet listed the same methods RankHome already shows — two controls, one destination. Side effect that motivated it: the rankings-import entry ("Have rankings already?") lives ONLY on the chooser, so it was a tap deeper than the sheet and the operator couldn't find it.
+- **Never-strand preserved** (#162/#165's "stuck in a ranking loop" trap): `RankHome` keeps its own back control — it is the one rank screen with no More-ways control — and iOS edge-swipe is untouched. `headerBackVisible: false` is **load-bearing, not belt-and-braces**: native stack draws the OS chevron on a PUSHED screen even with a null `headerLeft`.
+- **The three-option RankMenu sheet is now unreachable in production** (that is the intent). It stays mounted for the `ux.rank_tab_destination: false` tab-press path, which makes flipping that flag the complete rollback — no deploy, no new flag added.
+- **Gates:** new `check-rank-nav-exit.js` (9 assertions, **6 sabotages caught** — restoring headerLeft, dropping headerBackVisible, re-pointing More-ways at the sheet, stripping RankHome's back, breaking the flag-off branch, dropping MoreWaysButton); tsc clean; testid-lint OK; CI green. Maestro n/a per [D-056] — and the existing flows that tap `rank.more-ways` expecting the sheet now document stale behavior (kept, never run, flagged in the scope block).
+- **Owed:** operator TestFlight pass on a build **newer than 112** — header rendering is device-only evidence. Scope block: `docs/plans/rank-nav-single-exit/scope.md`.
+
 ## 2026-08-16 (premium import: first real DN run, all 4 unmatched fixed — PR #136 live)
 
 - **The operator ran the first real Dynasty Nerds in-app-browser import** (build 112, `ranks.source.dynasty_nerds` flipped ON same day): capture → confirm → apply worked end-to-end; `rankings_preset_detected {via: browser, set_confirmed: true}` + `rankings_import_applied {296/296}` verified in prod. Board was **backed up from prod before the test and restored byte-exact after** (md5-verified; `feedback-workspace/board-backup/`) — v1 has no in-app undo (WS-A2), the backup was the net.
