@@ -22,6 +22,7 @@
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
 - [Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)](#presentment-rules-construction-gate-vs-presentment-filter-layering-2026-08-16-tradepresentment_rules)
 - [Mock-draft ownership honesty: resolver-owned labels (2026-08-16, #328)](#mock-draft-ownership-honesty-resolver-owned-labels-2026-08-16-328)
+- [Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)](#finder-preselection-contract-now-carries-opponent--auto-run-intent-2026-08-16-330)
 
 ---
 
@@ -243,3 +244,6 @@ pre-mode convention; no backfill ever). New resolution sources must ship
 their own label decision with the resolution — never a post-hoc inference
 from the resolved data. Vocabulary + client contract:
 `docs/cross-client-invariants.md` § Mock-draft ownership source.
+## Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)
+
+The finder preselection contract (store `useFinderTargets`, never route params — #300) now also carries the scoped opponent and a one-shot auto-run intent: `handoff: {opponent {userId,name}, autoRun, seq} | null`, seq store-stamped monotonic (a same-team repeat handoff must still re-fire TradesScreen's choke-point effect, whose deps gain the consumed `autoRunSeq`). Consumed on focus, exactly once; `clear()`/league-switch GC it. Pinned by `mobile/tests/check-offer-prefill-330.js` + `-unit.js`.

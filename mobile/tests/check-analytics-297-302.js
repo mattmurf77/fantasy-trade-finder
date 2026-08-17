@@ -258,9 +258,17 @@ assert(
 
 const findTapped = trackPropKeys(tradesText, 'find_trades_tapped');
 assert(
-  findTapped.length === 2,
-  '#298 both find_trades_tapped call sites are accounted for',
-  `expected 2 (handleFindTrades + the legacy !consolidateOn arm), saw ${findTapped.length}`,
+  findTapped.length === 3,
+  '#298 all find_trades_tapped call sites are accounted for',
+  `expected 3 (handleFindTrades + the legacy !consolidateOn arm + the #330 auto-run emit in the choke-point effect), saw ${findTapped.length}`,
+);
+assert(
+  countOf(
+    tradesCode,
+    "track('find_trades_tapped', { source: 'league_offer', mode: deckMode }, 'Trades')",
+  ) === 1,
+  "#330 the third emitter is the auto-run's source:'league_offer' dispatch, reading the same deckMode",
+  'a third emitter with its own mode derivation is how the arms come to disagree; details pinned by check-offer-prefill-330.js S-3',
 );
 assert(
   /source \? \{ source, mode: deckMode \} : \{ mode: deckMode \}/.test(tradesText),

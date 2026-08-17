@@ -47,6 +47,14 @@
 - **Green runs (sabotages reverted):** targeted backend suite `test_mock_pick_ownership + test_mock_draft + test_pick_assignment(+_tradeable) + test_owned_picks + test_draft_board + test_analytics_p0` = **327 passed / 0 failed**. Mobile: `npx tsc --noEmit` clean; `check-mock-ownership-caption.js` (new, 24 PASS) + `check-mock-draft-modes.js` (extended pin) green; `testid-lint.sh` OK. `python -c "import backend.server"` OK.
 - **Existing-test deltas (deliberate, minimal):** MFL honest-empty pin gains the `ownership_source: "none"` key; `test_295_17` taxonomy pin grows to seven `mock_started` props; `_mock_owned_pick_overlay` added to the sanctioned `load_draft_picks` `source=` caller set (the designed decide-don't-drift mechanism).
 - **Not run here:** full 2900-test backend suite (group branch merge owes it); operator TestFlight checklist prd §6.3 (post-ship runtime net).
+## 2026-08-16 — #330 Offer prefill + auto-run (G4) BUILT on `feat/fb330-offer`; D-056 evidence classes all green
+
+- **Change:** `154c211`+ on `feat/fb330-offer` (base `56856f7` = `origin/main` `96f6945` + Phase-1 specs) — #330 handoff store extension, LeagueSummary row-action writer, TradesScreen focus-gated consume + choke-point auto-run (`autoRunSeq` dep), R-10 generation-epoch guard (`applyJobResult`), R-6 scoped zero-result card, `find_trades_tapped source:'league_offer'`. Zero backend production changes; new backend TEST `test_offer_hard_lock_330.py` is the G6-merge tripwire.
+- **Unit (U-1..U-4):** `mobile/tests/check-offer-prefill-330-unit.js` 14/14 PASS; each proven-to-fail on its named sabotage (seq stamping removed → RED; handoff dropped from clear() → RED; setSide made additive → RED; epoch guard removed → RED), each reverted to green.
+- **Structural (S-1..S-5):** `mobile/tests/check-offer-prefill-330.js` 45/45 PASS (mutate call-site count pinned at base 8; never-relax swept over all three zero-card regions). Full sweep: all 39 `mobile/tests/check-*.js` PASS — `check-analytics-297-302.js` #298 emitter count updated 2→3 for the PRD-required auto-run emit, with a new pinning assertion. `testid-lint.sh` OK.
+- **Backend (BT-1):** `pytest backend/tests/test_offer_hard_lock_330.py` **4 passed** against current backend (pre-G6-merge baseline); red-proof via transient neutralization of the pin filters in both engines → 4 failed → reverted → green, production files verified untouched. Sanity: + `test_finder_targeting.py` = 11 passed.
+- **Toolchain:** fresh `npm ci` (no symlink); `npx tsc --noEmit` clean.
+- **NOT run (per D-056):** no Maestro/simulator. Runtime proof owed = operator TestFlight checklist, 8 steps in `docs/feedback/items/330-offer-prefill/prd.md` §Test plan (steps 6/7 cover the B-1/B-2/B-3 races). Code-walk proofs P-1..P-3 in the item's `status.md`.
 
 ## 2026-08-16 — App identity (Fleeced name + ram icon) shipped to TestFlight; gates NOT run
 

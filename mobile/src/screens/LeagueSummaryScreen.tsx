@@ -1170,9 +1170,27 @@ export default function LeagueSummaryScreen() {
       const store = useFinderTargets.getState();
       store.setSide('give', verb === 'offer' ? [player] : []);
       store.setSide('receive', verb === 'target' ? [player] : []);
+      // #330 — scope the finder to the drilled-in team and auto-run the
+      // search. Both verbs symmetrically: Offer scopes to the team the
+      // player is offered TO; Target scopes to the team that owns the
+      // pinned receive player (a results no-op — the pin already constrains
+      // the counterparty — but it makes the "Trading with" UI truthful).
+      // Same store contract as the pins above: route params stay dead.
+      if (selected) {
+        store.setHandoff({
+          opponent: {
+            userId: selected.tc.team.user_id,
+            name:
+              selected.tc.team.display_name ||
+              selected.tc.team.username ||
+              selected.tc.team.user_id,
+          },
+          autoRun: true,
+        });
+      }
       navigation.navigate('Trades', { screen: 'TradesHome' });
     },
-    [navigation, candidatePos, candidateDir, selectedIdx, route.name],
+    [navigation, candidatePos, candidateDir, selectedIdx, route.name, selected],
   );
 
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────
