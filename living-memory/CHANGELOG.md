@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-08-16 (premium import: first real DN run, all 4 unmatched fixed — PR #136 live)
+
+- **The operator ran the first real Dynasty Nerds in-app-browser import** (build 112, `ranks.source.dynasty_nerds` flipped ON same day): capture → confirm → apply worked end-to-end; `rankings_preset_detected {via: browser, set_confirmed: true}` + `rankings_import_applied {296/296}` verified in prod. Board was **backed up from prod before the test and restored byte-exact after** (md5-verified; `feedback-workspace/board-backup/`) — v1 has no in-app undo (WS-A2), the backup was the net.
+- **All 4 unmatched rows root-caused via DN's public widget data (full arrays + sleeperIds are public; only display is premium-capped)** and fixed in PR #136 (`3aad130`): (1) `_NAME_ALIASES` bridges Kenneth→Kenny Gainwell + Chigoziem→Chig Okonkwo (Sleeper canonical forms); (2) **`sync_players` dropped rostered IR/suspended players** — Sleeper marks them `Inactive` while they hold a team; Ricky Pearsall + Chris Brazzell were invisible app-wide (G-008 class). Non-Active veterans are now dropped only when TEAMLESS. Post-deploy forced players-refresh verified both rows in prod.
+- **Drive-by repair:** `3c0541c` (another session) flipped `suggestion.telemetry` in features.json without the three fixture mirrors — main's suite was red; mirrored in #136.
+- 4 new tests, sabotage-proven; full suite green on the branch. Caveat: Brazzell (2026 rookie) is in `players` but ranked-pool membership depends on consensus-value coverage — verify via import **preview** (never apply, it overwrites the board).
+
 ## 2026-08-16 (App identity — Fleeced name + ram icon SHIPPED to TestFlight)
 
 - **The app is `Fleeced` on the home screen, `Fleeced: Dynasty Trade Finder` in the store** — the implementation of [D-057](DECISIONS.md), recorded 2026-08-09 but never built. Exactly the two keys that decision names: `expo.name` (`mobile/app.json`) + `CFBundleDisplayName` (`Info.plist`) — app.json alone does nothing in this bare workflow.
