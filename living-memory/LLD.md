@@ -221,7 +221,7 @@ Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped
 
 ## Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)
 
-G6 ([D-061](DECISIONS.md)) sets three conventions for anything joining the serve-or-don't-serve decision:
+G6 ([D-062](DECISIONS.md)) sets three conventions for anything joining the serve-or-don't-serve decision:
 
 - **Two layers, two hook kinds.** Package-quality rules (R1 overpay / R2 pos-net / R3 pick-gap and the R5 need gate) are **construction gates**: module-level predicates in `trade_service.py` (beside `filler_ok`/`pick_swap_ok`), bound once per job into a `presentment_ok_fn` threaded to every v1 generator (v3 loop + `_try_sweeten` re-validation, v2 `_consider`, consensus `_emit`), sitting after `filler_ok` and BEFORE feasibility/surplus/fairness so a killed candidate refills from the enumeration and can never be sweetener-rescued. Per-user duplicate state (R4 windowless awaiting/matched exclusion) is a **presentment filter** at `_dedup_and_sort` + the likes-you injector — the same candidate is fine tomorrow once the match resolves. New "never show this" logic must pick one of these two homes; post-hoc deck filtering converts kills into holes and is the rejected shape.
 - **The never-relaxed list grows.** The #189 relaxed pass never loosens R1/R2/R3/R5 (alongside the #108 gates + untouchables — safety properties, not taste); its stage overrides may only touch fairness/surplus knobs.
