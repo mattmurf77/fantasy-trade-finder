@@ -177,3 +177,32 @@ number and keep the exclusion.
 after), and an operator TestFlight pass — dismiss a card, regenerate, confirm
 absent; repeat after switching scoring format (the R-2 path that unit tests
 cover structurally but not on-device).
+
+## Thinning measurement (owed by §Risk) — 2026-08-17, prod data
+
+**Result: negligible at current volume, and it revises which change is doing the work.**
+
+| Measure | Value |
+|---|---|
+| Passes aged 7–14 days (the set newly excluded by 7d → 14d) | **2 rows, across all of prod** |
+| User/league pairs affected | **1** |
+| Average deck size, last 14 days | **27.8 cards** (min 2, max 38) |
+
+So R-1's window widening removes ~2 cards from one user's pool today — far
+below the D-055 empty-deck bar, no mitigation needed, knob untouched at 14.
+
+**Honest reading:** most dismissals are either recent (315 of 810 within 7 days,
+already excluded before this change) or months old (April–May, well past any
+sane cooldown). The 7–14 day band is nearly empty right now, so **R-1 is not
+what fixes the reported symptom at today's volume — R-2 is.** A dismiss
+previously did not bind until the next `session_init`, so a card dismissed and
+then regenerated in the same session came straight back; that is the defect
+users could actually hit repeatedly.
+
+R-1 still earns its place, for two reasons: it scales (as swipe volume grows the
+7-day window will age out real cards — the 61%-aged-out figure is what that
+looks like at the tail), and it makes the cooldown an explicit, tunable product
+decision instead of a constant shared with likes.
+
+**Not claimed:** this does not address served-but-unacted repetition, which is
+98.5% of what the reporting user sees and is out of scope by operator decision.
