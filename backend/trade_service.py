@@ -305,6 +305,12 @@ _DEFAULT_CFG: dict[str, float] = {
     "fatigue_decline_suppress_days": 30.0,  # hard near-duplicate window after a decline
     "fatigue_decline_value_band": 0.10,  # near-duplicate ⇔ package value within ±this fraction
     "fatigue_retest_mult":        0.5,   # low-exposure multiplier for the ONE post-window retest card
+    # Dismiss cooldown (D-067, docs/plans/pass-cooldown/plan.md). The UI's
+    # "dismiss" is decision='pass'. Unlike the fatigue_* knobs above this is a
+    # HARD exclusion window, not a multiplier — soft demotion (floored at
+    # fatigue_floor) is what let dismissed cards resurface. 7.0 restores the
+    # pre-fix behavior; likes keep their own separate 7-day window.
+    "pass_cooldown_days":        14.0,
     # ------------------------------------------------------------------
     # F5 — trade-taste vectors (flag: deck.taste_vectors — consumed by
     # backend/taste_service.py + server's taste layer around _order_deck).

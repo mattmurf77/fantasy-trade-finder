@@ -699,6 +699,12 @@ Measured baselines + acceptance bands:
 | `need_gate_min_value` | 500.0 | R5 #304: minimum consensus value of the primary received player before the need gate applies (sub-floor churn always passes). Untargeted discovery decks only (R-5b bypass). **≤ 0 disables the whole gate.** |
 | `need_gate_upgrade_margin` | 0.0 | R5: the primary must beat the post-give incumbent (S-th best body at P on `roster − give`) by this fraction to count as a starter upgrade. 0 = any strict upgrade passes. |
 
+### Dismiss cooldown (D-067) — `backend/server.py` session_init + swipe route
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pass_cooldown_days` | 14.0 | **Hard** exclusion window for a dismissed suggestion (the UI's "dismiss" is the API's `decision='pass'`). A dismissed `(give, receive)` pair is filtered out of every generation for this many days, and binds **immediately** at swipe time on every service in `sess["trade_svcs"]` — not just at the next `session_init`. Distinct from the `fatigue_*` knobs above, which only demote (floored at `fatigue_floor`) and are what let dismissed cards resurface. **Likes keep their own separate 7-day window** (a like that matured into a match/awaiting is excluded windowlessly by #336's R4). **Set to `7.0` to restore the pre-fix behavior** — this knob is the deploy-free revert, which is why the fix ships without a feature flag. Scope is exact-pair by design, NOT the decline path's near-duplicate suppression (`fatigue_decline_suppress_days`): a dismiss is one cheap swipe at a generated hypothesis, a decline is backing out of a deal a league-mate agreed to. |
+
 ### Outlook odds (#169) — `backend/outlook/`
 
 Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds`; string source select is the `FTF_OUTLOOK_STRENGTH_SOURCE` env var). **The roster-value→points calibration (`outlook_mean_points`/`outlook_points_per_value_sd`/`outlook_sigma_default`) is a documented heuristic, not an empirically fit model — flagged for operator tuning via the offline backtest scaffold in `test_outlook_odds.py`.**
