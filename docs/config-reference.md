@@ -28,12 +28,14 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Rookie draft + Draft Room (2026-08-06)](#flags-rookie-draft-draft-room-2026-08-06)
 - [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
+- [Flags — Decline-reason capture (2026-08-17, ships **ON**)](#flags-decline-reason-capture-2026-08-17-ships-on)
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [Analytics events — Guided Onboarding v2 addendum (2026-08-15)](#analytics-events-guided-onboarding-v2-addendum-2026-08-15)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
   - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
+  - [Decline-reason Elo suppression — `ranking_service._DEFAULT_CFG`](#decline-reason-elo-suppression-ranking_service_default_cfg)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -383,6 +385,22 @@ Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recor
 
 ---
 
+## Flags — Decline-reason capture (2026-08-17, ships **ON**)
+
+Spec: `docs/plans/decline-reason-capture/SPEC.md`. The trade card's ✕ is replaced by three layer-1 tiles — **Value · Fit · Neither** — and tapping one *is* the pass: one gesture commits the disposition and the reason together.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `feedback.decline_reasons` | **true** in `config/features.json` (registered default false) | `POST /api/trades/pass-reason` (`backend/server.py`) and the `trade_pass_reasons` table it upserts. **Flag-only** — checked before any session work, with ordinary write auth (`@_gate_unverified_write` + an initialized session) behind it. **This key is the kill switch:** OFF ⇒ the route 404s `feature_disabled`, no `trade_pass_reasons` row is ever written, and `/api/trades/swipe` is **untouched by this feature** (nothing in the shipped ✓/✕ path reads this flag), so the disposition behaves byte-identically to today. Flipping it is a config edit plus `POST /api/feature-flags/reload` — no deploy. Pinned by `test_decline_reasons.py::test_flag_off_*`. |
+
+**Scope: ALL users.** SPEC §5 proposed tester-allowlist scoping; the operator superseded that on 2026-08-17 and this ships to everyone. There is deliberately **no allowlist half anywhere in the feature** — not on the route, not on the served flag map — which is precisely what makes this key a true one-line revert: there is no second condition to reason about, and `GET /api/feature-flags` serves the same value to every caller, so the client surface and the route can never disagree about whether the feature is on.
+
+**Rollback.** Flip to `false` and reload. The `trade_pass_reasons` rows already written are retained (they are the diagnostic's whole output); nothing reads them on any user-facing path.
+
+**Elo consequence** rides a **separate** knob, not this flag — see [`pass_reason_elo_suppression`](#decline-reason-elo-suppression-ranking_service_default_cfg). That separation is deliberate: the ranking-math change can be reverted without taking the capture down with it, and vice versa.
+
+---
+
 ## Flags — API observability (2026-08-09, ships **ON**)
 
 | Flag | Default | Gates |
@@ -452,6 +470,14 @@ The trio loop rotates among three strategies (never repeating the previous one),
 | `trio_repeat_avoid` | 8.0 | Don't reuse a player seen in the last **N** served trios (fixes "same 2 players trio after trio"). Relaxes gracefully when a pool/tier is too small to honour it — the longest-unseen players are re-admitted first, never the whole avoid set at once. Default raised 3 → 8 (FB #97) to match the live prod tune; 3 was too short to keep the top value cluster from recurring. |
 
 > Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config`. See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md).
+
+### Decline-reason Elo suppression — `ranking_service._DEFAULT_CFG`
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pass_reason_elo_suppression` | 1.0 (**ON**) | Decline-reason capture (flag `feedback.decline_reasons`, SPEC §4). Today every pass fires `record_trade_signal(winner=give, loser=receive)` — it asserts *"I value my players more than theirs"*. Once the tester says **why** they passed, that assertion holds for exactly one answer. **ON (≥0.5):** only `value_giving` ("Giving up too much") writes the pass's Elo signal. `value_getting` says the *opposite*, so writing the usual signal would invert it; every `fit_*`, every `other*` and every layer-1-only answer makes no valuation claim at all — all suppressed. Because layer-1-only always suppresses, a kept signal lands at the **layer-2 tap**, not the tile tap, and `trade_pass_reasons.elo_signal_at` makes it once-only per impression. **OFF (<0.5):** every reasoned pass writes Elo at the tile tap, exactly as today's ✕ does — the deploy-free rollback lever for the one part of this feature that touches ranking math. Read **only** on the reasoned-pass path: `/api/trades/swipe` never consults it, so unreasoned passes are unaffected in either position. Not currently in `_MODEL_CONFIG_DEFAULTS`, so it is a code default until seeded. |
+
+> Known one-way behavior, recorded rather than fixed: an Elo signal earned by `value_giving` is **not retracted** if the tester later switches tiles — there is no negative-K correction path on this route (that machinery exists only for match dispositions, `trade_k_decline_correction`). It can never write a second time. See [data-dictionary § trade_pass_reasons](data-dictionary.md#trade_pass_reasons).
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

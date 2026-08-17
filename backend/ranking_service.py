@@ -91,6 +91,14 @@ _DEFAULT_CFG: dict[str, float] = {
     # (oldest-seen first) when the pool is too small to honour it. Raised
     # 3 → 8 (FB #97): 3 was too short to stop the top value cluster recurring.
     "trio_repeat_avoid":          8.0,
+    # Decline-reason capture (docs/plans/decline-reason-capture/SPEC.md §4).
+    # 1.0 = ON (default): a reasoned pass writes Elo only when the user's
+    # reason actually asserts "my side is worth more" — see
+    # pass_reason_writes_elo below. 0.0 = OFF: every reasoned pass writes Elo
+    # exactly as today's unreasoned pass does, i.e. the deploy-free rollback
+    # lever for the one part of this feature that touches ranking math. Read
+    # ONLY on the reasoned-pass path; /api/trades/swipe never consults it.
+    "pass_reason_elo_suppression": 1.0,
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -110,6 +118,44 @@ def reload_config() -> None:
 
 def _c(key: str) -> float:
     return _cfg.get(key, _DEFAULT_CFG[key])
+
+
+# ---------------------------------------------------------------------------
+# Decline-reason capture — which passes are allowed to move Elo (SPEC §4)
+# ---------------------------------------------------------------------------
+# Today EVERY pass fires record_trade_signal(winner=give, loser=receive),
+# i.e. it asserts "I value my players more than theirs". Once the user
+# tells us WHY they passed, that assertion is true for exactly one answer:
+#
+#   value_giving  "Giving up too much"  -> KEEP.   The user did say their
+#                                                  side is worth more.
+#   value_getting "Getting too much"    -> SUPPRESS. The user said the
+#                                                  OPPOSITE; writing the
+#                                                  usual signal inverts it.
+#   fit_*, other*, and layer-1-only     -> SUPPRESS. No value claim was
+#   value / fit / other                            made at all.
+#
+# This is the only ranking-math change in the feature and it is knob-gated
+# both ways: `pass_reason_elo_suppression` = 0 restores today's behavior for
+# every code without a deploy.
+
+#: The one code whose pass still asserts a valuation. A frozenset (not an
+#: `== "value_giving"`) so extending the taxonomy is a one-line change here
+#: rather than an edit inside the route.
+PASS_REASON_ELO_KEEP: frozenset[str] = frozenset({"value_giving"})
+
+
+def pass_reason_writes_elo(code: str | None) -> bool:
+    """Should a pass carrying reason/detail `code` write an Elo signal?
+
+    `code` is the MOST SPECIFIC code known at the moment of the write — the
+    layer-2 detail when there is one, else the layer-1 reason. With the knob
+    off this always returns True, which is exactly the pre-feature behavior
+    (every pass writes Elo, whatever the user said).
+    """
+    if _c("pass_reason_elo_suppression") < 0.5:
+        return True
+    return bool(code) and code in PASS_REASON_ELO_KEEP
 
 
 # ---------------------------------------------------------------------------

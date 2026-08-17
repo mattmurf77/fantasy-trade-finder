@@ -768,6 +768,25 @@ FLAG_KEYS: tuple[str, ...] = (
     # is the group revert and R4's only switch. OFF ⇒ every generation
     # path is byte-identical to pre-G6 (enforced by test).
     "trade.presentment_rules",
+    # ── Decline-reason capture — 2026-08-17, ships ON for ALL users ───────
+    # docs/plans/decline-reason-capture/SPEC.md. ON = the trade card's ✕ is
+    # replaced by three layer-1 tiles (Value · Fit · Neither); tapping one IS
+    # the pass, and POST /api/trades/pass-reason accepts the progressive
+    # writes. OFF = that route 404s `feature_disabled` before any session
+    # work, no trade_pass_reasons row is ever written, and /api/trades/swipe
+    # is untouched (nothing in the shipped ✓/✕ path reads this key), so the
+    # disposition row behaves byte-identically.
+    #
+    # SPEC §5 proposed tester-allowlist scoping; the operator SUPERSEDED that
+    # on 2026-08-17 — this ships to everyone. There is deliberately no
+    # allowlist half anywhere in the feature: this key is the whole switch,
+    # which is what makes it a true one-line kill switch (flip + POST
+    # /api/feature-flags/reload, no deploy).
+    #
+    # The Elo consequence rides a SEPARATE model_config knob
+    # (pass_reason_elo_suppression), not this flag, so ranking math can be
+    # reverted without taking the capture down with it.
+    "feedback.decline_reasons",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

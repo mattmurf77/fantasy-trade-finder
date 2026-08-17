@@ -728,6 +728,74 @@ archetype_auditions_table = Table("archetype_auditions", metadata,
 )
 
 
+# ── Decline-reason capture (flag feedback.decline_reasons) ─────────────────
+# docs/plans/decline-reason-capture/SPEC.md. The trade card's ✕ is replaced
+# by three layer-1 tiles (Value · Fit · Neither); tapping one IS the pass, and
+# layer 2 sharpens it. ONE row per passed card, keyed on the F1
+# `impression_id` (deck_impressions.impression_id — soft reference, no FK,
+# matching this schema's style).
+#
+# UPSERT, not append-only — and that is the one place this table deliberately
+# departs from its deck_outcomes sibling. SPEC §3 is explicit: every tap
+# commits on its own and a later tap must never lose an earlier one, so the
+# row grows in place (layer 1 → layer 2 → free text). deck_outcomes could not
+# host this: its rows are NEVER mutated by contract, it carries several rows
+# per impression (viewed / pass / undo), and it has no unique key to upsert
+# on. The pass DISPOSITION still lands in deck_outcomes as action='pass',
+# exactly as the ✕ wrote it — this table is the reason, not the disposition.
+#
+# Column semantics:
+#   reason         layer-1 code — value | fit | other. Never NULL once the
+#                  row exists: the row is CREATED by the layer-1 tap, and a
+#                  layer-2-first write derives it from the detail prefix.
+#   detail         layer-2 code — value_giving | value_getting | value_other |
+#                  fit_outlook | fit_new_weakness | fit_duplicate | fit_other |
+#                  other_text. NULL = the user stopped at layer 1, which is
+#                  a first-class answer (SPEC §6: layer-1-without-layer-2 must
+#                  be directly measurable).
+#   free_text      the user's own words. STORED HERE AND NOWHERE ELSE — it
+#                  is never an analytics property (SPEC §3.4), so no free text
+#                  ever reaches user_events.props.
+#   switched_from  the PRIOR layer-1 reason when the user moved to another
+#                  tile, else NULL. Switching is a refinement, not a reset:
+#                  a stored detail is kept even when it belonged to the prior
+#                  reason (losing it would violate SPEC §3's never-lose rule).
+#   elo_signal_at  ISO UTC of the Elo write this pass produced, or NULL when
+#                  the reason suppressed it (SPEC §4). Doubles as the
+#                  once-only guard: the write is claimed with a conditional
+#                  UPDATE ... WHERE elo_signal_at IS NULL, so no sequence of
+#                  retries or re-taps can double-count a pass into Elo.
+#   key_source     'impression' | 'local' — whether the PK is a real
+#                  deck_impressions id or the degraded surrogate (operator
+#                  decision 2026-08-17: a client with no impression_id must
+#                  still be recorded, never refused). Only 'impression' rows
+#                  join to the F1 spine and are usable for off-policy
+#                  evaluation; 'local' rows are honest reason counts with no
+#                  card features behind them. Storing it explicitly means
+#                  analysis never has to infer the distinction from a key
+#                  prefix — the kind of implicit encoding that rots.
+trade_pass_reasons_table = Table("trade_pass_reasons", metadata,
+    Column("impression_id", String, primary_key=True),   # deck_impressions.impression_id
+    Column("user_id",       String, nullable=False),
+    Column("league_id",     String),
+    Column("trade_id",      String),
+    Column("key_source",    String),                     # impression | local
+    Column("reason",        String),                     # value | fit | other
+    Column("detail",        String),                     # 8 layer-2 codes; NULL = layer-1 only
+    Column("free_text",     Text),                       # never an analytics prop
+    Column("switched_from", String),                     # prior layer-1 reason, or NULL
+    Column("elo_signal_at", String),                     # ISO UTC, or NULL = suppressed
+    Column("created_at",    String, nullable=False),     # ISO UTC — the layer-1 tap
+    Column("updated_at",    String, nullable=False),     # ISO UTC — the latest tap
+)
+
+Index(
+    "ix_trade_pass_reasons_user_league",
+    trade_pass_reasons_table.c.user_id,
+    trade_pass_reasons_table.c.league_id,
+)
+
+
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
 # Contains all skill-position players (QB/RB/WR/TE) that are Active or
@@ -5009,6 +5077,174 @@ def save_deck_outcome(
                                else (1 if calc_opened else 0)),
             acted_at        = datetime.now(timezone.utc).isoformat(),
         ))
+
+
+# ── Decline-reason capture (flag feedback.decline_reasons) — storage ────────
+# docs/plans/decline-reason-capture/SPEC.md §3. Three thin helpers; every
+# policy decision (which codes are legal, which write Elo, who may call)
+# lives in the route + ranking_service, not here.
+
+#: Layer-1 codes — the three tiles. Closed set; do not improvise labels.
+PASS_REASON_LAYER1: tuple[str, ...] = ("value", "fit", "other")
+
+#: layer-1 code → its legal layer-2 codes (SPEC §2, exact). `other` has no
+#: option list: "Neither" opens the free-text box directly and its only
+#: layer-2 code is `other_text`.
+PASS_REASON_LAYER2: dict[str, tuple[str, ...]] = {
+    "value": ("value_giving", "value_getting", "value_other"),
+    "fit":   ("fit_outlook", "fit_new_weakness", "fit_duplicate", "fit_other"),
+    "other": ("other_text",),
+}
+
+#: The layer-2 code → layer-1 code inverse, so a layer-2 write that arrives
+#: without (or before) its layer-1 sibling can still name its own reason
+#: instead of storing a half row.
+PASS_REASON_PARENT: dict[str, str] = {
+    detail: parent
+    for parent, details in PASS_REASON_LAYER2.items()
+    for detail in details
+}
+
+#: Free text is capped at storage time. Same bound as the bad-trade flag's
+#: `reason` field, for the same reason: it is read by a human, not parsed.
+PASS_REASON_TEXT_MAX = 500
+
+
+def upsert_trade_pass_reason(
+    impression_id: str,
+    user_id: str,
+    *,
+    league_id: str | None = None,
+    trade_id: str | None = None,
+    reason: str | None = None,
+    detail: str | None = None,
+    free_text: str | None = None,
+    key_source: str | None = None,
+) -> dict:
+    """Upsert ONE trade_pass_reasons row; return what the write did.
+
+    The load-bearing contract (SPEC §3): **a later write never loses an
+    earlier one.** Only the fields passed non-None are written, so a
+    layer-2 tap cannot blank the layer-1 reason, and a free-text send
+    cannot blank the detail it upgrades. Nothing here is ever deleted.
+
+    Returns::
+
+        {"created":       bool,   # True ⇒ this call minted the row, i.e.
+                                  #        THIS is the tap that passed the card
+         "reason":        str|None,   # post-write state
+         "detail":        str|None,
+         "switched_from": str|None,
+         "prior_reason":  str|None,   # pre-write state, for the caller's event
+         "prior_detail":  str|None,
+         "elo_signal_at": str|None}
+
+    `switched_from` is derived HERE, from the stored row — never taken from
+    the client — so it cannot disagree with the row it describes. It is
+    (re)set only when an incoming `reason` differs from the stored one, and
+    always names the most recent prior answer.
+    """
+    now = _now()
+    with engine.begin() as conn:
+        prior = conn.execute(
+            select(trade_pass_reasons_table).where(
+                trade_pass_reasons_table.c.impression_id == impression_id
+            )
+        ).first()
+
+        if prior is None:
+            row_reason = reason or (PASS_REASON_PARENT.get(detail or "") or None)
+            conn.execute(insert(trade_pass_reasons_table).values(
+                impression_id = impression_id,
+                user_id       = user_id,
+                league_id     = league_id,
+                trade_id      = trade_id,
+                key_source    = key_source,
+                reason        = row_reason,
+                detail        = detail,
+                free_text     = free_text,
+                switched_from = None,
+                elo_signal_at = None,
+                created_at    = now,
+                updated_at    = now,
+            ))
+            return {
+                "created": True, "reason": row_reason, "detail": detail,
+                "switched_from": None, "prior_reason": None,
+                "prior_detail": None, "elo_signal_at": None,
+                "key_source": key_source,
+            }
+
+        p = dict(prior._mapping)
+        values: dict = {"updated_at": now}
+        if reason and reason != p.get("reason"):
+            # A different tile. Record where we came from; the stored detail
+            # is DELIBERATELY kept (SPEC §3: a refinement, not a reset).
+            values["switched_from"] = p.get("reason")
+            values["reason"] = reason
+        elif reason and not p.get("reason"):
+            values["reason"] = reason
+        if detail is not None:
+            values["detail"] = detail
+            # A layer-2 code implies its parent — adopt it when the row has
+            # no reason yet (writes that arrived out of order).
+            if not p.get("reason") and "reason" not in values:
+                values["reason"] = PASS_REASON_PARENT.get(detail)
+        if free_text is not None:
+            values["free_text"] = free_text
+        if league_id and not p.get("league_id"):
+            values["league_id"] = league_id
+        if trade_id and not p.get("trade_id"):
+            values["trade_id"] = trade_id
+
+        conn.execute(
+            update(trade_pass_reasons_table)
+            .where(trade_pass_reasons_table.c.impression_id == impression_id)
+            .values(**values)
+        )
+        return {
+            "created": False,
+            "reason":        values.get("reason", p.get("reason")),
+            "detail":        values.get("detail", p.get("detail")),
+            "switched_from": values.get("switched_from", p.get("switched_from")),
+            "prior_reason":  p.get("reason"),
+            "prior_detail":  p.get("detail"),
+            "elo_signal_at": p.get("elo_signal_at"),
+            # Never rewritten: the key a row was minted under is a fact about
+            # the row, not a field a later tap gets to revise.
+            "key_source":    p.get("key_source"),
+        }
+
+
+def claim_trade_pass_elo(impression_id: str) -> bool:
+    """Claim the ONE Elo write this passed card is allowed (SPEC §4).
+
+    True exactly once per impression: the conditional UPDATE succeeds only
+    while `elo_signal_at` is NULL, so re-taps, client retries and a
+    layer-1-then-layer-2 sequence can never double-count one pass into the
+    ranking math. Callers write Elo only when this returns True.
+    """
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(trade_pass_reasons_table)
+            .where(and_(
+                trade_pass_reasons_table.c.impression_id == impression_id,
+                trade_pass_reasons_table.c.elo_signal_at.is_(None),
+            ))
+            .values(elo_signal_at=_now())
+        )
+    return bool(res.rowcount)
+
+
+def load_trade_pass_reason(impression_id: str) -> dict | None:
+    """The single row for one passed card, or None. Operator/test read."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(trade_pass_reasons_table).where(
+                trade_pass_reasons_table.c.impression_id == impression_id
+            )
+        ).first()
+    return dict(row._mapping) if row else None
 
 
 # ── suggestion.telemetry — thin storage helpers ─────────────────────────────

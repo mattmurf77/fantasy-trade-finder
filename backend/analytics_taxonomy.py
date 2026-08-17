@@ -411,6 +411,41 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "guide_step_suppressed",
     "outlook_saved", "finder_target_pinned", "quickset_started",
     "awaiting_segment_viewed",
+    # ── Decline-reason capture, 2026-08-17 ──────────────────────────────
+    # Spec: docs/plans/decline-reason-capture/SPEC.md §6 (operator-approved;
+    # it IS the tracking-plan entry for these two names).
+    #
+    # REGISTERED BEFORE ANY EMITTER SHIPS — the registry is default-deny
+    # behind a 200, so a name that lands after its track() call is silent,
+    # unrecoverable data loss with a success-shaped response. Mobile-only:
+    # web and the extension have no trade deck.
+    #
+    # CLIENT-fired, not server-fired, and the split is deliberate. The
+    # DURABLE truth of a reasoned pass is the `trade_pass_reasons` row the
+    # route upserts plus the `deck_outcomes` action='pass' — neither is
+    # forgeable and neither depends on this allowlist (the deck_card_viewed
+    # precedent above). These two names are the CLIENT-side receipt: they
+    # carry `ms_since_render`, which only the emitter knows, and they fire
+    # at the tap rather than at the write. The server keeps firing
+    # `match_swiped` on the pass exactly as the ✕ did, so no existing funnel
+    # moves and nothing double-counts a disposition.
+    #
+    #   trade_pass_layer1 — the tile tap. It carries the DISPOSITION: there
+    #     is no separate pass event any more, because there is no ✕.
+    #   trade_pass_layer2 — the option tap, or the free-text send.
+    #
+    # Layer-1-WITHOUT-layer-2 is the metric this pair exists to produce (a
+    # tile people tap but never drill into means that category's options are
+    # wrong or missing), so both stay INTENT and neither belongs in
+    # analytics_queries.NON_INTENT_EVENTS: both are real user decisions, and
+    # every user who fires one has already fired trade_card_viewed on the
+    # same card, so admitting them cannot step-change DAU/WAU.
+    #
+    # NOT registered, and never to be: the user's free text. It is stored
+    # on the trade_pass_reasons row and nowhere else (SPEC §3.4) — no prop
+    # below carries it, `has_free_text` is a BOOLEAN, and no event in this
+    # family may gain a text prop.
+    "trade_pass_layer1", "trade_pass_layer2",
 })
 
 # ---------------------------------------------------------------------------
@@ -1053,6 +1088,45 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # started, NOT a device platform (the NULL-`platform` incident).
     "quickset_started":        frozenset({"position", "source"}),
     "awaiting_segment_viewed": frozenset({"source"}),
+    # ── Decline-reason capture, 2026-08-17 ──────────────────────────────
+    # SPEC §6, which enumerates every property — these two rows are that
+    # list and nothing more. See the block in ALLOWED_CLIENT_EVENTS for why
+    # they are client-fired and why no free-text prop exists.
+    #
+    # CLOSED ENUMS, exactly as SPEC §2 defines them:
+    #   reason        ∈ value | fit | other                     (3 values)
+    #   detail        ∈ value_giving | value_getting | value_other |
+    #                   fit_outlook | fit_new_weakness | fit_duplicate |
+    #                   fit_other | other_text                  (8 values)
+    #   switched_from ∈ the three `reason` values, or the LITERAL string
+    #                   'none' when the user did not change tiles. 'none'
+    #                   is a real value, not a placeholder: absence would be
+    #                   indistinguishable from a dropped prop, and the
+    #                   switch RATE is what says whether the three tiles
+    #                   read clearly on first contact.
+    #
+    # `platform` here is the DEVICE platform (ios | android | web), set
+    # explicitly at the emitter per SPEC §6. That makes this the one
+    # deliberate exception to the rule stated on invite_shared and
+    # lineup_impact_unavailable above — device platform is normally a
+    # user_events COLUMN derived server-side in analytics_ingest.py and
+    # never a prop. It is registered because the spec is operator-approved
+    # and explicit, and because a prop the client sends but this registry
+    # omits is stripped silently behind a 200 (the failure mode this file
+    # exists to prevent). The COLUMN remains authoritative for any
+    # cross-event platform cut; this prop is the emitter's own claim, and
+    # a disagreement between the two is a client bug worth seeing.
+    #
+    # `ms_since_render` is card-render → this write, in ms.
+    # `has_free_text` (layer 2 only) is a BOOLEAN — whether the row carries
+    # free text, never the text.
+    "trade_pass_layer1": frozenset({"reason", "switched_from",
+                                    "impression_id", "trade_id",
+                                    "ms_since_render", "platform"}),
+    "trade_pass_layer2": frozenset({"reason", "detail", "has_free_text",
+                                    "switched_from",
+                                    "impression_id", "trade_id",
+                                    "ms_since_render", "platform"}),
 }
 
 

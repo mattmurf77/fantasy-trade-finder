@@ -47,6 +47,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 - [`trade_impressions`](#trade_impressions)
 - [`deck_impressions`](#deck_impressions)
 - [`deck_outcomes`](#deck_outcomes)
+- [`trade_pass_reasons`](#trade_pass_reasons)
 - [`deck_candidate_sets`](#deck_candidate_sets)
 - [`suggestion_trade_links`](#suggestion_trade_links)
 - [`deck_suppressions`](#deck_suppressions)
@@ -378,6 +379,37 @@ F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (sof
 | `acted_at` | str | ISO UTC (server clock) |
 
 Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+
+---
+
+## `trade_pass_reasons`
+
+Decline-reason capture (flag `feedback.decline_reasons`, `docs/plans/decline-reason-capture/SPEC.md`) — **one UPSERT row per passed card**, keyed on `impression_id` (soft reference to `deck_impressions`, no FK, house style). Written only by `POST /api/trades/pass-reason`, gated by that flag alone (operator decision 2026-08-17: ships to all users; SPEC §5's tester-allowlist scoping is superseded).
+
+The three tiles (Value · Fit · Neither) replace the card's ✕, so **tapping a tile IS the pass** — one gesture writes the disposition and the layer-1 reason together. The disposition itself still lands in `deck_outcomes` as `action='pass'` exactly as the ✕ wrote it; this table is the *reason*, not the disposition.
+
+**Why upsert, when its `deck_outcomes` sibling is append-only:** every tap commits on its own and no tap may lose an earlier one (SPEC §3), so the row grows in place — layer 1 → layer 2 → free text. `deck_outcomes` could not host this: its rows are never mutated by contract, it holds several rows per impression, and it has no unique key to upsert on. Only the fields a given call supplies are written, so a layer-2 tap cannot blank layer 1.
+
+**`impression_id` is never required** (operator decision 2026-08-17): a client that sends none — `deck.signal_v2` off, or a legacy card — must still be recorded, never refused. When one IS sent it is **validated before it becomes a key** (the 2026-08-14 ownership rule): an id that names no impression, or belongs to another user, degrades to the same per-user surrogate `local:<user_id>:<trade_id>`, so the answer is never lost and the write never lands in another user's key space. `key_source` records which path a row took — only `impression` rows join the F1 spine and are usable for off-policy evaluation.
+
+| Column | Type | Notes |
+|---|---|---|
+| `impression_id` | str PK | `deck_impressions.impression_id`, or `local:<user_id>:<trade_id>` when unvalidatable |
+| `user_id` | str | the passing user (session-resolved, never a body field) |
+| `league_id` | str | league the card belonged to |
+| `trade_id` | str | the card's per-deck uuid4 prefix |
+| `key_source` | str | `impression` \| `local` — whether the PK is a real `deck_impressions` id or the degraded surrogate. Stored explicitly rather than inferred from the key's prefix, which is the kind of implicit encoding that rots. Never rewritten by a later tap: the key a row was minted under is a fact about the row |
+| `reason` | str | layer-1 code: `value` \| `fit` \| `other`. A layer-2-first write derives it from the detail's parent |
+| `detail` | str | layer-2 code: `value_giving` \| `value_getting` \| `value_other` \| `fit_outlook` \| `fit_new_weakness` \| `fit_duplicate` \| `fit_other` \| `other_text`. **NULL is a first-class answer** — the user stopped at layer 1, which is the signal that that tile's options are wrong or missing |
+| `free_text` | text | the user's own words, ≤500 chars, trimmed. **Stored here and nowhere else** — never an analytics property (SPEC §3.4); `trade_pass_layer2` carries only the boolean `has_free_text` |
+| `switched_from` | str | the prior layer-1 reason when the user moved to another tile, else NULL. Derived server-side from the stored row, never taken from the client. A stored `detail` is deliberately **kept** across a switch (a refinement, not a reset) |
+| `elo_signal_at` | str | ISO UTC of the Elo write this pass produced, or NULL when the reason suppressed it (SPEC §4). Doubles as the once-only guard: the write is claimed with `UPDATE … WHERE elo_signal_at IS NULL`, so no retry or re-tap double-counts a pass into ranking math |
+| `created_at` | str | ISO UTC — the tap that passed the card |
+| `updated_at` | str | ISO UTC — the most recent tap |
+
+Indexes: `ix_trade_pass_reasons_user_league` on `(user_id, league_id)`.
+
+**Elo consequence (SPEC §4, model_config knob `pass_reason_elo_suppression`, default 1.0 = ON):** with the knob on, only `value_giving` keeps the pass's Elo write — it is the one answer that actually asserts "my side is worth more". `value_getting` would *invert* the signal; every `fit_*`, every `other*`, and every layer-1-only answer makes no valuation claim at all. Because layer-1-only always suppresses, a `value_giving` write lands at the **layer-2 tap**, not the tile tap. Knob at 0.0 ⇒ every reasoned pass writes Elo at the tile tap, exactly as today's ✕ does. Switching away from `value_giving` after the fact does **not** retract the signal (there is no negative-K correction path on this route) — it only cannot write a second one.
 
 ---
 

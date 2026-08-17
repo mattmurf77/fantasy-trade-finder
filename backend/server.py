@@ -85,6 +85,11 @@ from .database import (
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_deck_impression,
     load_board_state,
+    # Decline-reason capture (feedback.decline_reasons) — one upsert row per
+    # passed card, keyed on impression_id
+    upsert_trade_pass_reason, claim_trade_pass_elo,
+    PASS_REASON_LAYER1, PASS_REASON_LAYER2, PASS_REASON_PARENT,
+    PASS_REASON_TEXT_MAX,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
     save_deck_candidate_set, suggestion_ratio_by_league,
@@ -10920,6 +10925,386 @@ def swipe_trade():
     except Exception as e:
         log.exception("swipe_trade failed")
         return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# Decline-reason capture (flag feedback.decline_reasons)
+# docs/plans/decline-reason-capture/SPEC.md
+# ---------------------------------------------------------------------------
+# The trade card loses its ✕. Three tiles sit under the card — Value · Fit ·
+# Neither — and TAPPING ONE IS THE PASS: it commits the disposition and the
+# layer-1 reason in a single gesture. Layer 2 opens beneath the tiles and
+# sharpens the answer; free text upgrades an "Other". Every tap commits on
+# its own (SPEC §3) — there is no submit, and no receipt screen.
+#
+# WHY A SEPARATE ROUTE, not a `reason` field on /api/trades/swipe:
+#   * Only the FIRST write of an impression is a disposition; layers 2 and 3
+#     are refinements that must NOT re-run record_decision, the deck-outcome
+#     append, the trade_decisions write or the swipe event. A `reason` field
+#     on /api/trades/swipe would either fire all of that three times or need
+#     an idempotency mode bolted onto a route that has none.
+#   * /api/trades/swipe stays literally untouched by this feature, so the
+#     shipped ✓/✕ path is byte-identical whatever this flag does — which is
+#     what SPEC §5's "flag off ⇒ the current row renders byte-identically"
+#     is worth in the backend.
+# The cost is that the pass side effects are written out twice in this file
+# (here and in swipe_trade). That is deliberate: a shared helper would have
+# had to be threaded through the live like/pass path, and a bug in the
+# refactor would take likes down with it. _apply_reasoned_pass below mirrors
+# swipe_trade's pass branch line for line, with ONE divergence — the Elo
+# write, which SPEC §4 moves behind a reason test.
+
+def _decline_reasons_enabled() -> bool:
+    """The feature's ONE switch (docs/plans/decline-reason-capture/SPEC.md §5,
+    superseded by the operator's 2026-08-17 decision to ship for ALL users —
+    no tester-allowlist scoping).
+
+    ON ⇒ the client renders the three tiles and this route accepts the
+    progressive writes. OFF ⇒ the route 404s `feature_disabled` before any
+    session work, no `trade_pass_reasons` row is ever written, and the shipped
+    ✓/✕ path behaves byte-identically — nothing in `swipe_trade` reads it. It
+    is the whole rollback lever, and flipping it is a config edit, not a
+    deploy (`POST /api/feature-flags/reload`).
+    """
+    return getattr(FLAGS, "feedback_decline_reasons", False)
+
+
+def _pass_reason_writes_elo(code) -> bool:
+    """SPEC §4, read fresh on every call so the `pass_reason_elo_suppression`
+    knob is a live kill switch (model_config reloads without a deploy). The
+    rule itself lives in ranking_service — this is ranking math, not routing.
+    """
+    from .ranking_service import pass_reason_writes_elo as _rule
+    return _rule(code if isinstance(code, str) else None)
+
+
+def _decline_reasons_denied():
+    """Gate for /api/trades/pass-reason — an error response, or None.
+
+    Flag-only, checked BEFORE any session work (the `draft.room` / `espn.link`
+    convention). There is deliberately no tester-allowlist half: the operator
+    scoped this to ALL users on 2026-08-17, superseding SPEC §5. Ordinary
+    write auth still applies via `@_gate_unverified_write` and
+    `_require_initialized_session`.
+    """
+    if not _decline_reasons_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+    return None
+
+
+def _pass_reason_key(impression_id, user_id: str, trade_id: str) -> tuple[str, str]:
+    """`(upsert key, key_source)` for one passed card — a VALIDATED
+    impression_id, or a per-user surrogate.
+
+    **The fallback is a product decision, not a safety net** (operator,
+    2026-08-17): a client that sends no `impression_id` — `deck.signal_v2`
+    off, or a legacy card — must still have its pass and its reason RECORDED.
+    Refusing the write, or hiding the feature whenever the F1 spine is off,
+    was the alternative and was rejected. So the id is never required; when
+    it IS present and valid the row joins the impression (which is what makes
+    it usable for off-policy evaluation), and `key_source` records which of
+    the two happened so analysis never has to infer it.
+
+    `impression_id` arrives in a client-supplied body, so it gets the same
+    ownership check `_save_deck_outcome_safe` applies (the 2026-08-14
+    LLD-review fix): an id that names no impression, or one that belongs to
+    another user, must never become the key of a row this user writes. Those
+    cases degrade to the surrogate too — the answer is kept, the write stays
+    in the caller's own key space. `trade_id` is a per-card uuid4 prefix, so
+    `local:<user>:<trade_id>` is stable for the life of the card and collides
+    with nothing.
+    """
+    surrogate = (f"local:{user_id}:{trade_id}"[:64], "local")
+    if not isinstance(impression_id, str) or not impression_id.strip():
+        return surrogate
+    candidate = impression_id.strip()[:64]
+    if not _deck_signal_v2_enabled():
+        # No F1 spine to validate against; the id is unverifiable, so it does
+        # not get to be a key.
+        return surrogate
+    try:
+        imp = load_deck_impression(candidate)
+    except Exception:
+        imp = None
+    if imp is None or imp.get("user_id") != user_id:
+        log.warning("pass-reason: impression_id %s not owned by %s — keying "
+                    "on the local surrogate", candidate, user_id)
+        return surrogate
+    return candidate, "impression"
+
+
+def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
+    """The pass disposition for a layer-1 tap. Mirrors swipe_trade's pass
+    branch; `elo` is SPEC §4's one divergence.
+
+    Runs EXACTLY ONCE per impression — the caller only reaches here when the
+    upsert reports it minted the row. Every side effect is individually
+    non-fatal, same as the route it mirrors: a reasoned pass that lost its
+    analytics row is a bad day, a reasoned pass that 500s is a lost pass.
+    """
+    g_user_id = sess["user_id"]
+    service   = sess["service"]
+
+    # Fit-congruence weighting (D-060) — computed identically to the swipe
+    # path so the in-memory signal and the persisted k_factor agree; unused
+    # when `elo` is False.
+    fit_mult = _trade_service_mod.fit_congruence_mult(
+        getattr(card, "lane_shift", None), "pass")
+
+    if elo:
+        service.record_trade_signal(
+            winner_ids = card.give_player_ids,
+            loser_ids  = card.receive_player_ids,
+            decision   = "pass",
+            fit_mult   = fit_mult,
+        )
+
+    # F1 (deck.signal_v2) — the disposition itself. This is the row that
+    # replaces what the ✕ used to write; it is NOT conditional on the Elo
+    # decision, because the user did pass whatever their reason was.
+    _save_deck_outcome_safe(
+        body.get("impression_id"),
+        "pass",
+        acting_user_id  = g_user_id,
+        dwell_ms        = body.get("dwell_ms"),
+        detail_expanded = body.get("detail_expanded"),
+        calc_opened     = body.get("calc_opened"),
+    )
+
+    try:
+        save_trade_decision(
+            user_id            = g_user_id,
+            league_id          = card.league_id,
+            trade_id           = card.trade_id,
+            give_player_ids    = card.give_player_ids,
+            receive_player_ids = card.receive_player_ids,
+            decision           = "pass",
+        )
+        if elo:
+            from .ranking_service import _c as _rs_c
+            save_trade_swipes(
+                user_id        = g_user_id,
+                winner_ids     = card.give_player_ids,
+                loser_ids      = card.receive_player_ids,
+                k_factor       = _rs_c("trade_k_pass") * fit_mult,
+                scoring_format = _active_format(sess),
+            )
+        try:
+            record_event(
+                g_user_id,
+                "match_swiped",
+                league_id = card.league_id,
+                source    = "api",
+                props     = {
+                    "decision":   "pass",
+                    "trade_id":   card.trade_id,
+                    "give":       card.give_player_ids,
+                    "receive":    card.receive_player_ids,
+                    "target":     card.target_user_id,
+                    "aggression_variant": getattr(card, "aggression_variant", None),
+                    "lane":               getattr(card, "lane", None),
+                    "fit_premium":        bool(getattr(card, "fit_premium", None)),
+                },
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(reasoned pass) failed: %s", ev_err)
+    except Exception as db_err:
+        log.warning("DB write failed for reasoned pass (continuing): %s", db_err)
+
+
+@app.route("/api/trades/pass-reason", methods=["POST"])
+@_gate_unverified_write
+def trade_pass_reason():
+    """POST /api/trades/pass-reason — one progressive decline-reason write.
+
+    Body (all optional except trade_id and one of reason/detail/free_text):
+      trade_id       required — the card being passed
+      impression_id  the F1 upsert key. Absent (deck.signal_v2 off, or a
+                     legacy card) ⇒ a `local:<user>:<trade_id>` surrogate, so
+                     the pass and the reason are still both recorded — never
+                     refused (operator decision, 2026-08-17). `key_source` on
+                     the row records which of the two the write used.
+      reason         layer-1 code: value | fit | other
+      detail         layer-2 code (8 values, SPEC §2)
+      free_text      free text for an "Other" (≤500 chars; `text` accepted as
+                     an alias). Stored on the row; NEVER an analytics prop.
+      give_player_ids / receive_player_ids / target_user_id /
+      target_username / league_id   card context, for the FB-46 rebuild
+      dwell_ms / detail_expanded / calc_opened   deck-outcome telemetry
+
+    Accepted and deliberately UNUSED, so the mobile client's payload needs no
+    trimming: `layer` (which layer the client thinks it is writing — derived
+    here from the fields present, which survives a reordered or dropped
+    request) and `switched_from` (derived server-side from the stored row, so
+    it can never disagree with the row it describes).
+
+    THE CONTRACT (SPEC §3): every call commits on its own and no call can
+    lose an earlier one. The FIRST call for an impression — whichever layer
+    it carries — performs the pass; later calls only sharpen the row. A
+    repeated or re-ordered call is therefore safe: re-sending layer 1 does
+    not pass the card twice, and a layer-2 write that arrives with no layer
+    1 (dropped request, app restart mid-flow) still passes the card and
+    names its own reason from the detail's prefix.
+
+    Elo (SPEC §4) is decided per write from the MOST SPECIFIC code known and
+    claimed at most once per impression — see ranking_service.
+    """
+    denied = _decline_reasons_denied()
+    if denied is not None:
+        return denied
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    trade_service = sess["trade_svc"]
+    g_user_id     = sess["user_id"]
+    g_league      = sess["league"]
+
+    body     = request.get_json(force=True, silent=True) or {}
+    trade_id = body.get("trade_id")
+    if not trade_id or not isinstance(trade_id, str):
+        return jsonify({"error": "missing_field", "field": "trade_id"}), 400
+
+    reason = body.get("reason")
+    detail = body.get("detail")
+    # `free_text` is the field name the mobile client sends; `text` is
+    # accepted as an alias so neither spelling is silently dropped.
+    text_raw = body.get("free_text")
+    if text_raw is None:
+        text_raw = body.get("text")
+
+    # Closed enums, validated before anything is written. An unknown code is
+    # a client bug and must be loud — a junk reason is worse than no reason,
+    # because the whole point of this table is that the codes are countable.
+    if reason is not None and reason not in PASS_REASON_LAYER1:
+        return jsonify({"error": "invalid_reason", "field": "reason"}), 400
+    if detail is not None:
+        if detail not in PASS_REASON_PARENT:
+            return jsonify({"error": "invalid_detail", "field": "detail"}), 400
+        if reason is not None and PASS_REASON_PARENT[detail] != reason:
+            # e.g. reason='fit' with detail='value_giving' — one of the two
+            # is wrong and we cannot tell which. Refuse rather than guess.
+            return jsonify({"error": "detail_reason_mismatch"}), 400
+    if reason is None and detail is None and text_raw is None:
+        return jsonify({"error": "missing_field", "field": "reason"}), 400
+
+    free_text = None
+    if text_raw is not None:
+        if not isinstance(text_raw, str):
+            return jsonify({"error": "invalid_text", "field": "free_text"}), 400
+        free_text = text_raw.strip()[:PASS_REASON_TEXT_MAX] or None
+    # Free text under "Neither" carries the taxonomy's own layer-2 code, so
+    # the row reads the same as every other free-text answer.
+    if free_text is not None and detail is None and reason == "other":
+        detail = "other_text"
+
+    key, key_source = _pass_reason_key(body.get("impression_id"),
+                                       g_user_id, trade_id)
+
+    league_id = (body.get("league_id")
+                 or (g_league.league_id if g_league else None))
+
+    # Resolve the card BEFORE the upsert: a pass we cannot attribute to a
+    # package is a pass we cannot write, and finding that out after the row
+    # exists would leave a reason with no disposition.
+    card = None
+    try:
+        card = trade_service._trade_cards.get(trade_id)
+    except Exception:
+        card = None
+    if card is None:
+        # Deck predates a restart/re-init — same FB-46 rebuild the swipe
+        # route uses, from the card context the client echoes back.
+        try:
+            card = _reconstruct_swipe_card(
+                trade_service, {**body, "trade_id": trade_id},
+                g_user_id, league_id or "")
+        except Exception:
+            card = None
+
+    try:
+        state = upsert_trade_pass_reason(
+            key, g_user_id,
+            league_id  = league_id,
+            trade_id   = trade_id,
+            reason     = reason,
+            detail     = detail,
+            free_text  = free_text,
+            key_source = key_source,
+        )
+    except Exception as e:
+        log.exception("pass-reason upsert failed")
+        return jsonify({"error": "write_failed"}), 500
+
+    # SPEC §4 — the Elo decision, from the most specific code THIS write
+    # knows. Layer-1-only always suppresses (no valuation was claimed), so
+    # with the knob on the write lands at the moment `value_giving` arrives,
+    # not at the tile tap. claim_trade_pass_elo makes it once-only.
+    code_now = state.get("detail") or state.get("reason")
+    elo_now  = False
+    if card is not None and _pass_reason_writes_elo(code_now):
+        try:
+            elo_now = claim_trade_pass_elo(key)
+        except Exception as e:
+            log.warning("pass-reason elo claim failed (non-fatal): %s", e)
+
+    if state["created"]:
+        if card is None:
+            # Nothing to pass against: the reason row is banked (the user's
+            # answer is never thrown away) but the disposition cannot be
+            # written. Loud, because it means the client stopped echoing the
+            # card context.
+            log.warning("pass-reason: no card for trade_id=%s — reason stored, "
+                        "disposition NOT written", trade_id)
+        else:
+            try:
+                trade_service.record_decision(trade_id=trade_id, decision="pass")
+            except Exception as rd_err:
+                log.warning("pass-reason record_decision failed: %s", rd_err)
+            _apply_reasoned_pass(sess, card, body, elo=elo_now)
+    elif elo_now and card is not None:
+        # A later write earned the Elo signal the layer-1 tap suppressed.
+        _apply_reasoned_pass_elo_only(sess, card)
+
+    return jsonify({
+        "ok":            True,
+        "passed":        bool(state["created"]),
+        "reason":        state.get("reason"),
+        "detail":        state.get("detail"),
+        "switched_from": state.get("switched_from"),
+        "elo_written":   bool(elo_now),
+    })
+
+
+def _apply_reasoned_pass_elo_only(sess, card) -> None:
+    """The deferred half of SPEC §4: write the pass's Elo signal on a LATER
+    tap than the one that passed the card.
+
+    Reached only when the knob is on and the user's layer-2 answer was
+    `value_giving` — the one code that actually asserts "my side is worth
+    more". The disposition was already written by the layer-1 tap; this adds
+    the ranking signal it deliberately withheld, at the same K and with the
+    same fit-congruence weight the swipe path would have used.
+    """
+    fit_mult = _trade_service_mod.fit_congruence_mult(
+        getattr(card, "lane_shift", None), "pass")
+    try:
+        sess["service"].record_trade_signal(
+            winner_ids = card.give_player_ids,
+            loser_ids  = card.receive_player_ids,
+            decision   = "pass",
+            fit_mult   = fit_mult,
+        )
+        from .ranking_service import _c as _rs_c
+        save_trade_swipes(
+            user_id        = sess["user_id"],
+            winner_ids     = card.give_player_ids,
+            loser_ids      = card.receive_player_ids,
+            k_factor       = _rs_c("trade_k_pass") * fit_mult,
+            scoring_format = _active_format(sess),
+        )
+    except Exception as e:
+        log.warning("deferred pass-reason Elo write failed (non-fatal): %s", e)
 
 
 # ---------------------------------------------------------------------------
