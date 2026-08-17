@@ -23,6 +23,13 @@
   test_dismiss_match, test_suggestion_telemetry, test_deck_exploration,
   test_deck_fatigue, test_deck_ordering).
 - `python3 -c "import backend.server"` — IMPORT-OK.
+- **Full backend suite on the branch: 2969 passed / 1 skipped / 0 failed
+  (264s).** The base was already red on
+  `test_seed_ui_test_db.py::test_release_flags_mirror_features_json`
+  (pre-existing: `3c0541c` lit `suggestion.telemetry` in features.json
+  without updating the parity fixtures — verified via `git show` at
+  `56856f7`); fixed here alongside mirroring `trade.presentment_rules`
+  into release/onboarding-v2/profiles-on fixtures.
 
 ## 2. Sabotage protocol (every behavioral test proven RED, then green)
 
