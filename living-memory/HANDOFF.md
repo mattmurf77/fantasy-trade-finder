@@ -32,33 +32,28 @@
 
 ### Where I am right now
 
-The 2026-08-16 feedback wave (17 items, 7 groups) is **merged to `main` locally at
-`20b40db`** off `main` `92c31d5` — gates green on the merged tree (pytest 3050/0,
-tsc clean, 48/48 structural suites, testid-lint OK). **The push to `origin/main`
-was blocked by this session's permission classifier**, so the merge commit sits in
-the `ship-main` worktree unpushed. Nothing is deployed yet.
+The 2026-08-16 feedback wave (17 items, 7 groups) is **SHIPPED**. `origin/main`
+`1927506`; backend/web **deployed and verified by content**
+(`trade.presentment_rules = True` in prod `/api/feature-flags`); iOS **1.13.5
+build 114** finished and submitted to App Store Connect (EAS build
+`d6fd09c4`). All 17 items set `fixed`; all 10 wave worktrees/branches swept.
+**Remaining work is operator-side only** (below) — nothing is half-built.
 
 Full record: [`CHANGELOG.md`](CHANGELOG.md) top entry · batch plan and every
 operator decision in
 [`../docs/feedback/items/304-positional-need-filter/batch-plan.md`](../docs/feedback/items/304-positional-need-filter/batch-plan.md).
 
-### Next actions, in order
+### Next actions (all operator-side)
 
-1. **Push** (operator, one command):
-   `cd .claude/worktrees/ship-main && FTF_SKIP_SIM_GATE=1 git push origin HEAD:main`
-   Render auto-deploys backend + web. Verify **by content**, not uptime: poll
-   `/api/feature-flags` for `trade.presentment_rules`.
-2. **Set the 17 items `fixed`** (`fetch_feedback.py set <id> fixed`) — only after
-   the push lands: #303 #304 #306 #320 #321 #322-#328 #330 #334 #335 #336 #339
-   #340 #341. (#329 already `fixed`.)
-3. **Sweep worktrees** through `docs/recovery/` — capture tips, then remove:
-   `specs-2026-08-16`, `wave-integration`, `ship-main`, `fb303-calc`,
-   `fb321-espn`, `fb322-draftui`, `fb328-picks`, `fb330-offer`, `fb334-matches`,
-   `fb304-presentment`.
-4. **EAS build + TestFlight submit** (operator). Check `eas-cli build:list --json`
-   for the real latest version before bumping — versions race between sessions,
-   and `app.json` does NOT ship the version: bump both `MARKETING_VERSION` in
-   `project.pbxproj` and `CFBundleShortVersionString` in `Info.plist`.
+1. **TestFlight pass on build 114** — the per-group checklists in each
+   `docs/feedback/items/<id>-*/` are this wave's ONLY runtime evidence (D-056).
+   Highest-value step: G1's "verify tier labels on a **non-operator account**"
+   — that is the entire point of the `aggregate_tier_labels` graduation.
+2. **Retire the experiment**: `transition → decide` curls, runbook #279.
+3. **Prod-DB deck-eval replay**: commands in
+   `docs/feedback/items/304-positional-need-filter/build-verification.md` §3.
+   G6's rules are live and ON with bands measured only on local corpora.
+4. **Watch `presentment-tripwire`** WARNINGs on contender-heavy leagues this week.
 
 ### Blocking / owed
 
