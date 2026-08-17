@@ -26,3 +26,17 @@ fully committed and pushed before removal).
 Recovery: `git branch feat/suggestion-telemetry deb965c` · `git branch feat/trade-gen-v2 c940a86` · `git branch ship/matchmaking-engine ca44aa4`
 
 2026-08-16 (later): detached worktree `wt-flag` (scratchpad, session 5451272b) used for the suggestion.telemetry flag flip; removed after push — tip 3c0541c == origin/main, zero unique content.
+
+2026-08-16 (second pass): matchmaking follow-up sweep.
+
+| tip sha | branch | worktree path |
+|---|---|---|
+| `77959b1` | `feat/gen2-g6-parity` | scratchpad `wt-g6parity` (session 5451272b) |
+| `cef378d` | `feat/organic-backfill` | scratchpad `wt-backfill` (session 5451272b) |
+| (== main) | detached `wt-ship2` | scratchpad `wt-ship2` (session 5451272b) |
+
+Safe by content: both squash-merged to `main` (push `363fbb8..55405c1`, entries
+`617b0ee` parity / `cf1202c` backfill pre-rebase); merged suite 2957/1/0 includes both
+branches' new suites (33 gen-v2 tests incl. 8 parity, 20 backfill tests). Only manual
+resolution: living-memory/CHANGELOG.md keep-both (premium-import entry + backfill entry).
+Recovery: `git branch feat/gen2-g6-parity 77959b1` · `git branch feat/organic-backfill cef378d`.
