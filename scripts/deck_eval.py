@@ -240,7 +240,45 @@ def build_first_run_session(league_info: dict, team: dict,
     return sess, (time.perf_counter() - t0) * 1000
 
 
-def generate_first_deck(sess: dict) -> tuple[list, float, dict]:
+def _presentment_audit(cards, *, trade_service, user_roster, seed_map,
+                       outlook, fmt) -> dict:
+    """G6 (DB-1/DB-2) — per-card presentment predicate replay with the SAME
+    context the construction hooks see: {trade_id: {r1,r2,r3,r5}} where True
+    = that rule's predicate would KILL the card. Computed on every run
+    (flag-on or off) so a flag-OFF corpus carries would-be kill rates and a
+    flag-ON corpus proves served-card violation == 0."""
+    import backend.trade_service as ts_mod
+    players = trade_service._players
+
+    def sv(pid):
+        return ts_mod.elo_to_value(seed_map.get(pid, 1500.0))
+
+    prof = ts_mod.analyze_roster_strengths(user_roster, players, fmt)
+    upv: dict = {}
+    for pid in user_roster:
+        p = players.get(pid)
+        if p is None or ts_mod.is_pick_asset(p):
+            continue
+        pos = getattr(p, "position", None)
+        if pos in ts_mod._PRESENTMENT_POSITIONS:
+            upv.setdefault(pos, []).append((pid, sv(pid)))
+    out = {}
+    for c in cards:
+        g, r = c.give_player_ids, c.receive_player_ids
+        out[c.trade_id] = {
+            "r1": not ts_mod.overpay_ok(g, r, sv),
+            "r2": not ts_mod.pos_net_ok(g, r, players),
+            "r3": not ts_mod.pick_gap_ok(g, r, sv, players),
+            "r5": not ts_mod.need_gate_ok(
+                g, r, seed_value=sv, players=players, user_pos_values=upv,
+                outlook=outlook, position_needs=prof["position_needs"],
+                position_surplus=prof["position_surplus"],
+                scoring_format=fmt),
+        }
+    return out
+
+
+def generate_first_deck(sess: dict, with_picks: bool = False) -> tuple[list, float, dict]:
     """Replicate the _run_trade_job worker path for a brand-new user.
     Returns (cards, gen_ms, extras)."""
     t0 = time.perf_counter()
@@ -303,6 +341,27 @@ def generate_first_deck(sess: dict) -> tuple[list, float, dict]:
 
     confidence = service.comparison_counts()
 
+    # G6 R-12 / DB-4 — owned-pick injection, mirroring _run_trade_job, so a
+    # pick-synced league's replay produces pick-carrying cards. Opt-in
+    # (--with-picks): the D-055 baseline corpus was captured without it.
+    n_injected_picks = 0
+    if with_picks and srv._owned_picks_available(league_id, league):
+        try:
+            seed_map, new_roster, n_injected_picks = srv._inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = fmt,
+                trade_service  = trade_service,
+                players_dict   = {p.id: p for p in sess["players"]},
+                seed_map       = seed_map,
+                user_elo       = user_elo,
+                user_id        = user_id,
+                user_roster    = sess["user_roster"],
+                league         = league,
+            )
+            sess["user_roster"] = new_roster
+        except Exception as pick_err:
+            print(f"  !! pick injection failed (continuing): {pick_err}")
+
     cards = trade_service.generate_trades(
         user_id=user_id,
         user_elo=user_elo,
@@ -344,8 +403,27 @@ def generate_first_deck(sess: dict) -> tuple[list, float, dict]:
 
     # NOTE: log_trade_impressions deliberately NOT called (eval is read-only).
     gen_ms = (time.perf_counter() - t0) * 1000
+
+    # G6 (DB-1..DB-4) — per-rule kill counters from the job + per-card
+    # predicate replay over the served deck.
+    try:
+        presentment_kills = trade_service.presentment_kill_counts()
+    except Exception:
+        presentment_kills = {}
+    try:
+        audit = _presentment_audit(
+            cards, trade_service=trade_service,
+            user_roster=sess["user_roster"], seed_map=seed_map,
+            outlook=outlook_value, fmt=fmt)
+    except Exception as audit_err:
+        print(f"  !! presentment audit failed: {audit_err}")
+        audit = {}
+
     return cards, gen_ms, {"outlook": outlook_value,
-                           "real_ranked_opponents": len(real_user_ids)}
+                           "real_ranked_opponents": len(real_user_ids),
+                           "presentment_kills": presentment_kills,
+                           "presentment_audit": audit,
+                           "n_injected_picks": n_injected_picks}
 
 
 def card_record(card, players_dict: dict, seed_map: dict) -> dict:
@@ -536,6 +614,9 @@ def main() -> None:
                     help="resolve a Sleeper user's 2026 leagues")
     ap.add_argument("--max-teams", type=int, default=0,
                     help="cap teams per league (0 = all)")
+    ap.add_argument("--with-picks", action="store_true",
+                    help="G6 R-12/DB-4: inject owned picks like the trade "
+                         "job (pick-synced leagues only)")
     ap.add_argument("--report", default=str(
         PROJECT_ROOT / "docs/plans/onboarding-conversion/deck-eval-report.md"))
     args = ap.parse_args()
@@ -609,9 +690,15 @@ def main() -> None:
 
         for team in teams:
             sess, init_ms = build_first_run_session(info, team, active_format)
-            cards, gen_ms, extras = generate_first_deck(sess)
-            first5 = [card_record(c, fmt_players_dict, fmt_seed)
+            cards, gen_ms, extras = generate_first_deck(
+                sess, with_picks=args.with_picks)
+            _tsvc_players = sess["trade_svcs"][active_format]._players
+            first5 = [card_record(c, {**fmt_players_dict, **_tsvc_players},
+                                  fmt_seed)
                       for c in cards[:5]]
+            for rec, c in zip(first5, cards[:5]):
+                rec["presentment_audit"] = (
+                    extras["presentment_audit"].get(c.trade_id))
             init_times.append(init_ms)
             gen_times.append(gen_ms)
             deck_sizes.append(len(cards))
@@ -632,6 +719,8 @@ def main() -> None:
                 "deck_size": len(cards),
                 "outlook": extras["outlook"],
                 "real_ranked_opponents": extras["real_ranked_opponents"],
+                "presentment_kills": extras["presentment_kills"],
+                "n_injected_picks": extras["n_injected_picks"],
                 "cards": first5,
             })
             print(f"  @{team['username']:<22} deck={len(cards):>3}  "

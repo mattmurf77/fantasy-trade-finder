@@ -342,6 +342,40 @@ def test_r3_band_edges():
     assert _r3({"A": 4248.0, "PK": 3752.0}, {"B": 5000.0})      # above band
 
 
+def test_r3_engine_kill_through_v2_path():
+    """R3 through the live v2 divergence path with an injected-pick-style
+    pseudo-asset: give A (3,000) for B (2,900) + PK (600) — raw gap 500 on
+    the heavier receive side with the pick inside [400, 625]: the pick IS
+    the gap. R1 passes (frac 0.143 < 0.25), so the knob-off control pins
+    the kill to R3. Companion to the DB-4 replay, whose local corpus
+    contained zero R3-shaped candidates (fair 1-for-1 player-for-pick
+    swaps only) — this proves the hook is not a silent no-op in-engine."""
+    players = {"A": _Player("A", "WR"), "B": _Player("B", "WR"),
+               "PK": _pick("PK")}
+    user_elo = {"A": 1500, "B": 1700, "PK": 1600}
+    opp_elo = {"A": 1700, "B": 1500, "PK": 1500}
+    seed = {"A": _elo(3000.0), "B": _elo(2900.0), "PK": _elo(600.0)}
+
+    def run():
+        opp = LeagueMember(user_id="opp", username="opp",
+                           roster=["B", "PK"], elo_ratings=dict(opp_elo),
+                           has_rankings=True)
+        svc = TradeService(players=players)
+        svc.add_league(League(league_id="L1", name="T", platform="demo",
+                              members=[opp]))
+        return svc.generate_trades(
+            user_id="user", user_elo=dict(user_elo), user_roster=["A"],
+            league_id="L1", seed_elo=dict(seed), fairness_threshold=0.75,
+            max_per_opponent=5)
+
+    _set_flags(**{"trade_engine.v2": True, "trade.presentment_rules": True})
+    assert _find(run(), ["A"], ["B", "PK"]) is None, (
+        "pick-is-the-gap package escaped R3 in the v2 path")
+    ts._cfg["pick_gap_frac"] = 0.0
+    assert _find(run(), ["A"], ["B", "PK"]) is not None, (
+        "knob-off control failed — the kill was not R3's")
+
+
 def test_r3_playerless_packages_ignored():
     """No pick anywhere ⇒ R3 never evaluates, whatever the gap."""
     assert pick_gap_ok(["A"], ["B"], _sv({"A": 9000.0, "B": 1000.0}),
