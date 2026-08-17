@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-16 — #322–#327 mock draft room UI (G2): sabotage matrix proven, suites green (branch, not yet shipped)
+
+- **Change:** branch `feat/fb322-draftui` (base `08eb04b` = G3's completed build, per PRD §3 serialization) — ascending fixed-height ticker (`tickerWindow` helper), `picks[].tier` backend emission via `RankingService.tier_for_elo`, tier+position chips in a 3-across `flexBasis` grid, `MockTeamSheet` modal, position filter + pool search (`filterPool` helper, both reset per turn), three operator-approved analytics events registered with their emitters. QA regime **D-056** (no Maestro/sim); spec `docs/feedback/items/322-mock-draft-room-ui/`.
+- **New suites:** backend T-P1..T-P4 in `test_mock_draft.py`; mobile `tests/check-mock-g2-ui.js` (76 checks — T-U1/T-U2 transpile-and-call over the pure helpers + T-S1..T-S10 AST structural).
+- **Sabotage matrix (apply → RED → revert → green), executed 2026-08-16:** T-P1 parity-instead-of-walk → RED · T-P2 missing-Elo-defaults-to-waivers → RED · T-P3 my_picks rebuilt dropping the key → RED · T-P4 SCHEMA=2 → RED · U1a `.reverse()` reintroduced → 10 RED · U1b boundary off-by-one → 7 RED · U1c defensive sort dropped → shuffled case RED · U2 search over full pool → 2 RED · S1 rows reversed at render → 2 RED · S2 inline `i < newest` → 2 RED · S3 literal tier instead of `pick.tier` → RED · S4 flexBasis dropped → RED · S5 view-team testID renamed → 2 RED · S6 raw-pool map → 2 RED · S7 effect stops clearing search → RED · S8 event name dropped → RED · S9 ticker mine keys on `by` → 2 RED · S10 gesture-handler import → RED. All reverted; suite 76/76 green.
+- **Green runs:** backend `test_mock_draft (122, incl. T-P1..T-P4) + test_mock_pick_ownership (G3, still green) + test_analytics_p0` = **162 passed / 0 failed**. Mobile: `npm ci` (797 pkgs), `npx tsc --noEmit` clean, `check-mock-g2-ui.js` 76 PASS, four existing mock structural suites + G3's `check-mock-ownership-caption.js` green, `testid-lint.sh` OK.
+- **Not run here:** full backend sweep (wave integration owes it); operator TestFlight checklist T-F1..T-F10 (PRD §5.5, the D-056 runtime net) — pending at ship.
+
 ## 2026-08-16 — #328 mock-draft pick assignment (G3): sabotage matrix proven, suites green (branch, not yet shipped)
 
 - **Change:** branch `feat/fb328-picks` (base specs commit `56856f7` = origin/main `96f6945` + Phase-1 specs) — per-platform mock-draft ownership resolution + `ownership_source` label + mobile caption + `mock_started` prop. QA regime **D-056** (no Maestro/sim); spec `docs/feedback/items/328-mock-draft-pick-assignment/`.
