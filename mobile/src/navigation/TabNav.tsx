@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Text, Pressable, View, StyleSheet, Modal } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -135,18 +135,30 @@ const subScreenOptions = (title: string, fallback: string) =>
     headerLeft: () => <HeaderBack navigation={navigation} fallback={fallback} />,
   });
 
-// ── PRD 01-02 (flag `ux.rank_tab_destination`) — RankMenu-from-header ────
+// ── PRD 01-02 (flag `ux.rank_tab_destination`) — the ONE rank exit ──────
 // With the flag on, the Rank tab navigates instead of opening the mode
-// menu, so every rank surface carries a "More ways to rank" header control
-// that opens the existing RankMenu sheet (generalizing the QuickSetTiers
-// pattern). The sheet's open-state lives in the TabNav component; this
-// module-level hook lets header buttons (rendered by the stack navigator)
-// reach it without prop-drilling through `component={...}` screens.
-let _openRankMenu: (() => void) | null = null;
-
-function MoreWaysButton() {
+// menu, so every rank surface carries a "More ways to rank" header control.
+//
+// 2026-08-16 (operator): that control now navigates straight to the
+// RankHome chooser ("Build your board") instead of opening the RankMenu
+// sheet, and the back control is GONE from these surfaces. Both used to
+// ship side by side and did the same job — Back fell back to RankHome and
+// the sheet listed the same methods RankHome already shows — so a rank
+// surface carried two controls for one destination while the chooser (the
+// only place the import entry point lives) stayed a tap deeper than the
+// sheet. One control, one destination, and the fuller page wins.
+//
+// Never-strand still holds (#162/#165): every flag-on rank surface reaches
+// RankHome through this control, RankHome keeps its own back control to the
+// preferred surface, and the iOS edge-swipe gesture is untouched. The
+// RankMenu sheet itself stays mounted for the FLAG-OFF tab-press path.
+function MoreWaysButton({ navigation }: { navigation: any }) {
   return (
-    <Pressable testID="rank.more-ways" onPress={() => _openRankMenu?.()} hitSlop={8}>
+    <Pressable
+      testID="rank.more-ways"
+      onPress={() => navigation.navigate('RankHome')}
+      hitSlop={8}
+    >
       {({ pressed }) => (
         <Text style={[styles.moreWaysLink, pressed && { color: chalk.base }]}>
           More ways to rank
@@ -156,11 +168,16 @@ function MoreWaysButton() {
   );
 }
 
-// subScreenOptions + the More-ways header control (flag-on rank surfaces).
-const rankSubScreenOptions = (title: string, fallback: string) =>
+// Chalkline header + the More-ways control, and NO back control (flag-on
+// rank surfaces). `headerBackVisible: false` is load-bearing on top of the
+// null headerLeft: this is a NATIVE stack, so a pushed screen renders the
+// platform chevron on its own unless the option says otherwise.
+const rankSubScreenOptions = (title: string) =>
   ({ navigation }: { navigation: any }) => ({
-    ...subScreenOptions(title, fallback)({ navigation }),
-    headerRight: () => <MoreWaysButton />,
+    ...chalklineHeader(title),
+    headerBackVisible: false,
+    headerLeft: () => null,
+    headerRight: () => <MoreWaysButton navigation={navigation} />,
   });
 
 // #217 — QuickSetTiers doubles as the Rank tab's launch route (#122). At the
@@ -269,7 +286,7 @@ function RankStackNav() {
         component={RankScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Trios', 'RankHome')
+            ? rankSubScreenOptions('Trios')
             : subScreenOptions('Trios', 'RankHome')
         }
       />
@@ -278,7 +295,7 @@ function RankStackNav() {
         component={PickAnchorScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Pick Anchors', 'RankHome')
+            ? rankSubScreenOptions('Pick Anchors')
             : subScreenOptions('Pick Anchors', 'RankHome')
         }
       />
@@ -287,7 +304,7 @@ function RankStackNav() {
         component={TiersScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Tiers', 'RankHome')
+            ? rankSubScreenOptions('Tiers')
             : subScreenOptions('Tiers', 'RankHome')
         }
       />
@@ -314,10 +331,9 @@ function RankStackNav() {
         // screen was PUSHED — see quickSetBackWhenPushed.
         options={
           rankDest
-            ? ({ navigation, route }) => ({
-                ...rankSubScreenOptions('Quick Set Tiers', 'RankHome')({ navigation }),
-                headerLeft: () => quickSetBackWhenPushed(navigation, route),
-              })
+            // #217's pushed-only back control is moot with the flag on —
+            // these surfaces carry no back control at all now.
+            ? rankSubScreenOptions('Quick Set Tiers')
             : ({ navigation, route }) => ({
                 ...subScreenOptions('Quick Set Tiers', 'RankHome')({ navigation }),
                 headerLeft: () => quickSetBackWhenPushed(navigation, route),
@@ -355,7 +371,7 @@ function RankStackNav() {
         component={QuickRankScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Quick Rank', 'RankHome')
+            ? rankSubScreenOptions('Quick Rank')
             : subScreenOptions('Quick Rank', 'RankHome')
         }
       />
@@ -364,7 +380,7 @@ function RankStackNav() {
         component={ManualRanksScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Overall Ranks', 'RankHome')
+            ? rankSubScreenOptions('Overall Ranks')
             : subScreenOptions('Overall Ranks', 'RankHome')
         }
       />
@@ -376,7 +392,7 @@ function RankStackNav() {
         component={RookieRanksScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Rookie Ranks', 'RankHome')
+            ? rankSubScreenOptions('Rookie Ranks')
             : subScreenOptions('Rookie Ranks', 'RankHome')
         }
       />
@@ -385,7 +401,7 @@ function RankStackNav() {
         component={TrendsScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Trends', 'RankHome')
+            ? rankSubScreenOptions('Trends')
             : subScreenOptions('Trends', 'RankHome')
         }
       />
@@ -537,15 +553,6 @@ export default function TabNav() {
   const rankDest = useFlag('ux.rank_tab_destination');
   // PRD 01-05: focused-tab re-tap pops to root / scrolls to top.
   const retapOn = useFlag('ux.retap_active_tab');
-
-  // Expose the RankMenu opener to the rank surfaces' header buttons
-  // (MoreWaysButton above). Module-level hook — see its comment.
-  useEffect(() => {
-    _openRankMenu = () => setRankMenuOpen(true);
-    return () => {
-      _openRankMenu = null;
-    };
-  }, []);
 
   // Onboarding trades-first (the gap found in the build-48 operator smoke):
   // nothing routed a treatment user to the deck — every onboarding surface
