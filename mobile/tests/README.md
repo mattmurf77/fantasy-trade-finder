@@ -1,6 +1,6 @@
 # mobile/tests/
 
-50 **structural guards**, 41 of them wired to an `npm run test:<name>` script. Since [D-056](../../living-memory/DECISIONS.md) (2026-08-15) retired Maestro and the simulator, these plus unit tests are the primary automated evidence for any mobile change.
+50 **structural guards** — all 50 run in CI (the `mobile-typecheck` job globs `tests/check-*.js`); 41 also have an `npm run test:<name>` script for local use. Since [D-056](../../living-memory/DECISIONS.md) (2026-08-15) retired Maestro and the simulator, these plus unit tests are the primary automated evidence for any mobile change.
 
 They are not a conventional unit-test suite. Most pin a claim about **code shape** — placement, an unconditional render, a marker's presence, a threshold shared across clients — that a value-based test cannot see and a passing UI would hide. Several transpile a real module and execute it under plain node. Read the `WHY THIS EXISTS` block at the top of any file: nearly every guard was written after a specific defect shipped.
 
@@ -32,7 +32,15 @@ node tests/check-<name>.js   # same thing, for the ones with no script
 
 ## Guards with no npm script
 
-`check-analytics-300.js` and `check-espn-nav-policy.js` are in the tree but absent from `package.json`. A guard with no script does not run — add one when you touch either.
+`check-analytics-300.js` and `check-espn-nav-policy.js` are in the tree but absent from `package.json`.
+
+**They still run in CI.** The `mobile-typecheck` job globs the directory rather than calling npm scripts:
+
+```yaml
+- run: for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done
+```
+
+So a guard is live in CI the moment the file exists — dropping a `check-*.js` here is enough to gate `main`, and a broken one fails the build whether or not anyone wired a script. The missing npm script only costs local ergonomics (`node tests/check-<name>.js` still works). Add the script when you touch either, but do not assume an unscripted guard is inert.
 
 ## Writing one
 
