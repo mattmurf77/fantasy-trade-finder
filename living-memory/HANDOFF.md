@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-17 — Dismiss cooldown built and HELD on `fix/pass-cooldown` (not merged)](#2026-08-17--dismiss-cooldown-built-and-held-on-fixpass-cooldown-not-merged)
+- [2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut](#2026-08-18--dismiss-cooldown-shipped-d-067-backend-only-no-build-cut)
 - [2026-08-17 — Feedback wave merged to main, push + TestFlight owed](#2026-08-17--feedback-wave-merged-to-main-push--testflight-owed)
 - [2026-08-16 — Matchmaking engine phase 1 shipped dark; mobile pyramid UI is the open half](#2026-08-16--matchmaking-engine-phase-1-shipped-dark-mobile-pyramid-ui-is-the-open-half)
 - [2026-08-15 — Trade-card narrative said the wrong position; SHIPPED (PR #125)](#2026-08-15--trade-card-narrative-said-the-wrong-position-shipped-pr-125)
@@ -28,18 +28,21 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-17 — Dismiss cooldown built and HELD on `fix/pass-cooldown` (not merged)
+## 2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut
 
 ### Where I am right now
 
-The 2026-08-16 feedback wave **shipped** (17 items, v1.13.5 build 114 — see the
-entry below and CHANGELOG). Since then, one new piece of work is **built,
-tested, and deliberately unmerged**: the dismiss cooldown.
-
-**Branch `fix/pass-cooldown`** (worktree `.claude/worktrees/pass-cooldown`),
-rebased onto the shipped decline-reason capture. Full backend suite **3125
-passed / 0 failed**. Decision **D-067**. Plan + full diagnosis:
+The dismiss cooldown is **SHIPPED and live** — merge `505ca2c`, ship record
+`791da23`. Deploy verified by content: both knobs present in prod
+`/api/admin/config` (`pass_cooldown_days = 14.0`,
+`pass_cooldown_start_epoch = 1787005800.0`). Suite **3125 passed / 0 failed**.
+Decision **D-067**. Full diagnosis:
 [`../docs/plans/pass-cooldown/plan.md`](../docs/plans/pass-cooldown/plan.md).
+
+**No TestFlight build was cut, deliberately** — the change is backend-only and
+`git diff 67b54f6..main -- mobile/` is empty, so main's mobile tree is
+byte-identical to what **v1.14.0 build 116** already carried. Cutting one would
+have shipped identical app code under a new build number.
 
 ### What it does
 
@@ -60,18 +63,22 @@ in 12 days.
 
 ### Next actions
 
-1. **Decide whether to merge.** It was held pending the terminology revision —
-   which has since landed, and the branch is already reconciled with it.
-2. **Consider raising `pass_cooldown_start_epoch`.** The default sits just past
-   the reason-capture BACKEND landing (`22:22:56Z`). The reason tiles are a
-   MOBILE change, so users cannot produce a reasoned dismiss until a build
-   carrying them ships — every dismiss until then is unlabelled and arguably
-   deserves amnesty too. One `PUT /api/admin/config` call, no deploy.
-3. **Route labelled reasons to engine actions.** D-067 is the *unlabelled*
+1. **Consider raising `pass_cooldown_start_epoch` — still open, now with a
+   concrete number.** The shipped default (`2026-08-17T22:30:00Z`) sits just
+   past the reason-capture BACKEND landing. But the reason tiles are MOBILE:
+   **v1.14.0 build 116 finished 2026-08-17T22:46Z**, and testers install some
+   time after that. Dismisses in the gap carry no reason yet are NOT amnestied.
+   If the intent is "no unlabelled dismiss ever suppresses", raise the knob to
+   the moment build 116 actually reached devices — one `PUT /api/admin/config`
+   call, no deploy.
+2. **Route labelled reasons to engine actions.** D-067 is the *unlabelled*
    default only. The shipped taxonomy (`value|fit|other` + 8 detail codes,
    `backend/database.py:777`) is captured but not yet routed — e.g. a stated
    outgoing blocker should suppress that asset broadly, which exact-pair
    matching deliberately does not do.
+3. **TestFlight pass owed on build 116** — the decline-reason tiles have never
+   had a runtime check on device, and D-057 means TestFlight is the only
+   runtime evidence path.
 
 ### Notes / hazards
 
