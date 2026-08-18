@@ -114,7 +114,7 @@ import {
 import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
-import { getBaseUrl } from '../api/client';
+import { ApiError, getBaseUrl } from '../api/client';
 import { resolveShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
@@ -142,7 +142,11 @@ import {
   markGuideStepConsumed,
   type GuideCompletionVia,
 } from '../state/useGuide';
-import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  registerGuideTarget,
+  unregisterGuideTarget,
+  notifyGuideTargetsMoved,
+} from '../state/guideTargets';
 import {
   S as GUIDE,
   GUIDE_RECEIPTS,
@@ -202,6 +206,10 @@ const FEATURED_HISTORY_CAP = 10;
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a pass swipe's
 // disposition POST is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
+// A failed swipe's toast carries the only recovery affordance (Retry), so it
+// outlasts the 1.5s default — the POST is held UNDO_HOLD_MS before it even
+// fires, so the failure lands long after the tap that caused it.
+const SWIPE_ERROR_HOLD_MS = 6000;
 
 // F1 signal spine (flag deck.signal_v2, PRD F1): dwell timer cap (guards
 // against left-open decks inflating dwell) and the front-of-deck threshold
@@ -1807,7 +1815,7 @@ export default function TradesScreen({ navigation, route }: any) {
         v2OnLikeSwipeSuccess(res);
       }
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err, _vars, ctx) => {
       // Silent-deck-advance was the bug (api-layer review onError + silent
       // bugs sweep). `advance()` bumps deckIdx synchronously regardless of
       // mutation outcome; on a network/5xx failure the deck has already
@@ -1832,8 +1840,32 @@ export default function TradesScreen({ navigation, route }: any) {
         if (prevCard && prevCard.trade_id === rawId) return cur - 1;
         return cur;
       });
+      // The rewind above re-fronts the card `advance()` just stamped into the
+      // double-fire guard, so clear it — otherwise every later ✕/✓/swipe on
+      // that card is a silent no-op and the deck stalls with no error and no
+      // visual change. Same reason handleLaneFilter clears when a lane change
+      // re-surfaces an already-dispositioned card. Clearing on the id match
+      // (not inside the rewind branch) also covers the no-rewind case, so a
+      // poisoned id is never left behind.
+      if (ctx?.rawId && lastDispositionedRef.current === ctx.rawId) {
+        lastDispositionedRef.current = null;
+      }
       queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
-      setToast({ msg: "Swipe didn't save — try again.", tone: 'warn' });
+      // No Retry action on either branch. The guard is cleared just above, so
+      // the card's own ✕/✓ now re-POSTS *and* advances the deck — strictly
+      // more than a Retry button could do, which would re-POST while leaving
+      // the card fronted and invite a second, duplicate pass
+      // (`save_trade_decision` is a plain INSERT: a repeat writes a second row
+      // and replays `trade_k_pass` twice). The 403 is a standing gate rather
+      // than a blip, so it says so and points at the verify banner the same
+      // failure just raised.
+      setToast({
+        msg: err instanceof ApiError && err.isVerificationRequired
+          ? 'Verify your account to save swipes — see the banner above.'
+          : "Swipe didn't save. Tap again to retry.",
+        tone: 'warn',
+        holdMs: SWIPE_ERROR_HOLD_MS,
+      });
     },
   });
 
@@ -4522,19 +4554,19 @@ export default function TradesScreen({ navigation, route }: any) {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
-        // Decline reasons only (both `undefined` when the flag is off, which
-        // is identical to not passing them): the inline free-text composer
-        // needs scroll range BELOW the keyboard for its send button, and the
-        // panel's reveal callback needs the current offset to scroll from.
+        // Decline reasons only (`undefined` when the flag is off, which is
+        // identical to not passing it): the inline free-text composer needs
+        // scroll range BELOW the keyboard for its send button.
         automaticallyAdjustKeyboardInsets={declineReasonsOn ? true : undefined}
-        onScroll={
-          declineReasonsOn
-            ? (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                mainScrollYRef.current = e.nativeEvent.contentOffset.y;
-              }
-            : undefined
-        }
-        scrollEventThrottle={declineReasonsOn ? 16 : undefined}
+        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+          // B1 — a measured spotlight frame is absolute window coordinates,
+          // so the guide must re-measure whenever this list moves.
+          notifyGuideTargetsMoved();
+          // The decline-reason panel's reveal callback needs the offset to
+          // scroll from; the ref write is flag-scoped, the listener is not.
+          if (declineReasonsOn) mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
       >
         {/* FB #156/#246 — the persistent mode chip strip. Since the
             guided-first landing (#246) this renders on the tab's landing
@@ -6426,6 +6458,11 @@ export default function TradesScreen({ navigation, route }: any) {
         selectedIds={(targetDirection === 'trade_away' ? pinnedGive : pinnedReceive).map(
           (p) => p.id,
         )}
+        // Both queries are ENABLED by this picker opening (see their
+        // `targetPickerOpen` guards), so on a cold deck they start from zero
+        // here — without this the sheet would assert "No players match."
+        // while the pool is still in flight.
+        loading={valuesQuery.isLoading || rostersQuery.isLoading}
         ownerBoardValue={(p) => p.base}
         // #277 — target-picker rows show the tier label, not the numeric
         // (deferred here because the tier-pass agent didn't own this file).

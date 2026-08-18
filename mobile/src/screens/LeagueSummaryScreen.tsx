@@ -45,7 +45,11 @@ import { useOutlookStripExpanded } from '../state/outlookStrip';
 import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
 import { registerScrollToTop } from '../navigation/scrollToTop';
-import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  registerGuideTarget,
+  unregisterGuideTarget,
+  notifyGuideTargetsMoved,
+} from '../state/guideTargets';
 import {
   advanceGuideIfActive,
   guideV2Active,
@@ -1480,6 +1484,11 @@ export default function LeagueSummaryScreen() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
+        // B1 — this screen registers guide targets, and a measured spotlight
+        // frame is absolute window coordinates: tell the guide to re-measure
+        // so its cutout stays locked to the row it points at while we scroll.
+        onScroll={notifyGuideTargetsMoved}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={query.isFetching && !!query.data}

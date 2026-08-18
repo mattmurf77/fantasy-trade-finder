@@ -11,7 +11,11 @@ import {
 import { ink, chalk, ice, space, radii, fonts, type } from '../theme/chalkline';
 import { useGuide } from '../state/useGuide';
 import { useOnboardingFeature } from '../state/useFeatureFlags';
-import { measureGuideTarget, type TargetFrame } from '../state/guideTargets';
+import {
+  measureGuideTarget,
+  subscribeGuideTargetsMoved,
+  type TargetFrame,
+} from '../state/guideTargets';
 import { AnalystAvatar } from './analyst';
 
 // The Analyst — guided-tour overlay host (guided-avatar-script.md §2).
@@ -42,11 +46,14 @@ export default function AnalystGuide() {
   const guideV2 = useOnboardingFeature('onboarding.guide_v2');
   const spotlight = useGuide((s) => s.spotlight);
   const engineFrame = useGuide((s) => s.spotlightFrame);
+  const trackSpotlightFrame = useGuide((s) => s.trackSpotlightFrame);
   const { width: winW, height: winH } = useWindowDimensions();
 
   const [localFrame, setLocalFrame] = useState<TargetFrame | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const slide = useRef(new Animated.Value(0)).current;
+  // B1 — band placement, latched per step (see the solver below).
+  const bandRef = useRef<{ id: string; atTop: boolean } | null>(null);
 
   // NFR-2 — honor the OS "Reduce Motion" setting for the entry spring.
   useEffect(() => {
@@ -63,6 +70,7 @@ export default function AnalystGuide() {
   useEffect(() => {
     let cancelled = false;
     setLocalFrame(null);
+    bandRef.current = null;
     if (!guideV2 && active?.target) {
       measureGuideTarget(active.target).then((f) => {
         if (!cancelled) setLocalFrame(f);
@@ -84,6 +92,51 @@ export default function AnalystGuide() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
+
+  // B1 — keep the cutout locked to its target while the host scrolls.
+  // `measureInWindow` returns absolute window coordinates, so the one-shot
+  // frame above goes stale the instant the host ScrollView moves; hosts call
+  // `notifyGuideTargetsMoved()` and we re-measure. This effect only ever
+  // MOVES an existing spotlight — it is armed after a frame resolved, and a
+  // null re-measure (250 ms timeout, target unmounted mid-fling) keeps the
+  // last good frame rather than degrading, because degrading here would
+  // re-fire `guide_step_shown`.
+  const spotlightTarget = active?.target;
+  const frameResolved = !!(guideV2 ? engineFrame : localFrame);
+  useEffect(() => {
+    if (!spotlightTarget || !frameResolved) return;
+    let cancelled = false;
+    let raf: number | null = null;
+    let inFlight = false;
+    let pending = false;
+    const remeasure = (): void => {
+      // Coalesce to one measure per frame. A notification arriving while a
+      // measure is outstanding is REMEMBERED, not dropped: a one-shot shift
+      // (a keyboard inset, a banner mounting) emits a single event, and
+      // losing it would strand the ring off by the whole delta until the
+      // next scroll.
+      if (raf !== null || inFlight) { pending = true; return; }
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        inFlight = true;
+        measureGuideTarget(spotlightTarget).then((f) => {
+          inFlight = false;
+          if (cancelled) return;
+          if (f) {
+            if (guideV2) trackSpotlightFrame(f);
+            else setLocalFrame(f);
+          }
+          if (pending) { pending = false; remeasure(); }
+        });
+      });
+    };
+    const unsubscribe = subscribeGuideTargetsMoved(remeasure);
+    return () => {
+      cancelled = true;
+      if (raf !== null) cancelAnimationFrame(raf);
+      unsubscribe();
+    };
+  }, [spotlightTarget, frameResolved, guideV2, trackSpotlightFrame]);
 
   // Auto-advance steps (celebrations, pre-modal setup lines).
   useEffect(() => {
@@ -128,17 +181,48 @@ export default function AnalystGuide() {
 
   // ── Placement solver (simplified per spec) ────────────────────────────
   const targetInBottomBand = !!frame && frame.y + frame.height > winH * 0.6;
-  const atTop = targetInBottomBand;
+  // B1 — LATCH the band for the life of the step. This predicate re-solves
+  // every render, so once the frame tracks scroll the avatar+bubble would
+  // flip between {top:54} and {bottom:92} mid-fling. Latched on the first
+  // RESOLVED frame: latching earlier would freeze the pre-measure `false`
+  // and park the bubble on top of a bottom-band cutout.
+  if (frame && bandRef.current?.id !== active.id) {
+    bandRef.current = { id: active.id, atTop: targetInBottomBand };
+  }
+  const atTop = bandRef.current?.id === active.id
+    ? bandRef.current.atTop
+    : targetInBottomBand;
   const side = active.side ?? 'left';
   const pad = 8 + (frame ? 6 : 0);
 
-  const cutout = frame
-    ? {
-        left: Math.max(0, frame.x - 8),
-        top: Math.max(0, frame.y - 8),
-        width: Math.min(winW, frame.width + 16),
-        height: frame.height + 16,
-      }
+  // B1 — a tracked target can scroll clean out of the viewport. The cutout
+  // clamps x/y but not width/height, so clamping would smear the ring flat
+  // against the edge; drop the scrim and ring instead (the bubble stays —
+  // the step is still on screen, it just has nothing to point at).
+  const frameOffscreen =
+    !!frame &&
+    (frame.y + frame.height <= 0 ||
+      frame.y >= winH ||
+      frame.x + frame.width <= 0 ||
+      frame.x >= winW);
+
+  // Clamp the SPAN by the same delta the origin was clamped by, or a target
+  // mid-transit past an edge keeps its full height while its top sticks at 0
+  // — a frozen, oversized ring glued to the edge for the whole transit (the
+  // dominant case: scrolling down past a full-height deck card).
+  const cutout = frame && !frameOffscreen
+    ? (() => {
+        const rawLeft = frame.x - 8;
+        const rawTop  = frame.y - 8;
+        const left = Math.max(0, rawLeft);
+        const top  = Math.max(0, rawTop);
+        return {
+          left,
+          top,
+          width:  Math.max(0, Math.min(winW - left, frame.width  + 16 - (left - rawLeft))),
+          height: Math.max(0, Math.min(winH - top,  frame.height + 16 - (top  - rawTop))),
+        };
+      })()
     : null;
 
   const tapToAdvance = active.advance === 'tap';

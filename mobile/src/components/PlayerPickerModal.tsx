@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Modal,
   Pressable,
@@ -25,6 +26,7 @@ import {
   ink,
   chalk,
   flare,
+  ice,
   position as positionColor,
   type,
   space,
@@ -34,6 +36,24 @@ import {
 } from '../theme/chalkline';
 
 const POSITIONS: CalcPos[] = ['QB', 'RB', 'WR', 'TE', 'PICK'];
+
+// B3 — mirror of the canonical backend predicate `is_pick_asset`
+// (backend/trade_service.py:1138-1147). A pick reaches this modal in three
+// shapes and only BOTH fields together cover them: owned picks (pos 'PICK',
+// nflTeam 'PICK'), the universal pool's generic rungs (a FAKE player
+// position from `_PICK_POS`, backend/server.py:1464, marked as picks by
+// `team == 'PICK'` alone), and demo picks (pos 'PICK', nflTeam '—'). The
+// magic string is the server's; do not drift it without the backend.
+const isPickAsset = (p: CalcPlayer) => p.pos === 'PICK' || p.nflTeam === 'PICK';
+
+// B3 — two-sided position filter. The PICK chip keeps every pick asset (a
+// generic rung typed 'RB' server-side included, which is why the old
+// one-field `p.pos === posFilter` painted a blank sheet); a player chip
+// keeps that position MINUS picks, so a 1st stops listing under "RB".
+const matchesPosFilter = (p: CalcPlayer, posFilter: CalcPos | null) => {
+  if (!posFilter) return true;
+  return posFilter === 'PICK' ? isPickAsset(p) : p.pos === posFilter && !isPickAsset(p);
+};
 
 // #203 — one "Suggested" row: an asset close in value to the current trade
 // gap, with `need` marking that its position is a roster need of the team
@@ -75,6 +95,13 @@ interface Props {
    *  it; the deck's target picker and the demo calculator hold no league
    *  picks at all, so the marker there has nothing to mark. */
   leagueId?: string | null;
+  /** B3 — the pool's queries are still in flight. An in-flight pool is
+   *  UNKNOWN, not empty, so this suppresses the empty state (see the
+   *  ListEmptyComponent below). Mirrors the sibling picker's contract —
+   *  `SwapPlayerSheet loading={...}` in TradesScreen. Defaults false, so
+   *  callers whose pool is static (the demo calculator's mock rosters)
+   *  need not pass it. */
+  loading?: boolean;
   onPick: (p: CalcPlayer) => void;
   onClose: () => void;
 }
@@ -95,6 +122,7 @@ export default function PlayerPickerModal({
   secondaryPrefix = 'you',
   badgeFor,
   leagueId,
+  loading = false,
   onPick,
   onClose,
 }: Props) {
@@ -111,7 +139,7 @@ export default function PlayerPickerModal({
     const q = query.trim().toLowerCase();
     return players
       .filter((p) => !selectedIds.includes(p.id))
-      .filter((p) => (posFilter ? p.pos === posFilter : true))
+      .filter((p) => matchesPosFilter(p, posFilter))
       .filter((p) => (q ? p.name.toLowerCase().includes(q) : true))
       .sort((a, b) => ownerBoardValue(b) - ownerBoardValue(a));
   }, [players, selectedIds, posFilter, query, ownerBoardValue]);
@@ -126,6 +154,10 @@ export default function PlayerPickerModal({
   const renderRow = (item: CalcPlayer, testID: string, need = false) => {
     const marked =
       picksTradeable && isMemberEntered(item.pickSource) && !!item.id && !!leagueId;
+    // B3 — one verdict drives the chip, the a11y label and the subtitle, so
+    // a generic rung stops badging "RB" while its row calls itself a pick.
+    const isPick = isPickAsset(item);
+    const posLabel: CalcPos = isPick ? 'PICK' : item.pos;
     const itemTier = tierOf?.(item);
     const valuePhrase = itemTier
       ? `tier ${TIER_LABEL[itemTier]}`
@@ -134,8 +166,8 @@ export default function PlayerPickerModal({
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${item.name}, ${item.pos}, ${
-        item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
+      accessibilityLabel={`${item.name}, ${posLabel}, ${
+        isPick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
       }, ${valuePhrase}${
         need ? ', fills a roster need for the receiving team' : ''
       }${marked ? `. ${MEMBER_ENTERED_COPY}` : ''}`}
@@ -162,7 +194,7 @@ export default function PlayerPickerModal({
           drive-by). Same 44pt constant as TradeSide.chipCol; keep them in
           lockstep (mobile/tests/check-picker-chip-alignment.js). */}
       <View style={styles.chipCol}>
-        <PositionChip position={item.pos} size="sm" />
+        <PositionChip position={posLabel} size="sm" />
       </View>
       <View style={styles.info}>
         <View style={styles.nameRow}>
@@ -173,7 +205,7 @@ export default function PlayerPickerModal({
           ) : null}
         </View>
         <Text style={type.bodySm}>
-          {item.pick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
+          {isPick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
         </Text>
         {/* D17 — priced surface 1 of 5: the trade-away / acquire picker.
             UNCONDITIONAL (the marker self-gates); the row already shows the
@@ -244,6 +276,7 @@ export default function PlayerPickerModal({
                 return (
                   <Pressable
                     key={pos}
+                    testID={`calc.picker.filter.${pos.toLowerCase()}`}
                     hitSlop={4}
                     accessibilityRole="button"
                     style={({ pressed }) => [
@@ -277,6 +310,31 @@ export default function PlayerPickerModal({
                     </View>
                   </View>
                 ) : null
+              }
+              ListEmptyComponent={
+                loading ? (
+                  // B3 — `filtered === []` during a fetch is not an empty
+                  // pool, and "No players match." there is a false
+                  // statement. Not theoretical: the TradesScreen target
+                  // picker's two queries are ENABLED BY THIS SHEET OPENING
+                  // (`enabled: deck.length > 0 || targetPickerOpen`), so a
+                  // cold Trades home starts both fetches from zero at open
+                  // and the list is empty until they land.
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator color={ice.base} />
+                    <Text testID="calc.picker.loading" style={type.bodySm}>
+                      Loading players…
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.empty}>
+                    <Text testID="calc.picker.empty" style={styles.emptyText}>
+                      {posFilter === 'PICK'
+                        ? 'No draft picks available here.'
+                        : 'No players match.'}
+                    </Text>
+                  </View>
+                )
               }
               renderItem={({ item }) => renderRow(item, `calc.picker.row.${item.id}`)}
             />
@@ -342,6 +400,23 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   rowPressed: { backgroundColor: ink.ink3 },
+  // House empty-state construction (FreeAgentsScreen.centerFill/emptyBody).
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: space.xl,
+    paddingHorizontal: space.lg,
+  },
+  emptyText: { ...type.bodySm, textAlign: 'center' },
+  // Mirrors SwapPlayerSheet.loadingRow; centered because it stands in the
+  // same slot as the centered empty state.
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.md,
+    paddingVertical: space.xl,
+  },
   suggestedWrap: { paddingTop: space.xs },
   suggestedFoot: { paddingTop: space.md },
   info: { flex: 1 },

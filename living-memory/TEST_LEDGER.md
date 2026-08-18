@@ -10,6 +10,49 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18 — Operator bug sweep B1–B5 (five fixes, two adversarial rounds)
+
+**Branch:** `fix/bug-sweep-2026-08-18` (off `origin/main` `90fb19a`). **Ticket:** [`docs/reviews/2026-08-18-bug-sweep/ticket.md`](../docs/reviews/2026-08-18-bug-sweep/ticket.md).
+
+| Gate | Baseline (pre-change) | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3125 passed, 1 skipped | **3148 passed, 1 skipped** |
+| `npx tsc --noEmit` (mobile) | clean | **clean** |
+| `mobile/tests/check-*.js` | 48 suites, all pass | **54 suites, all pass** |
+| `mobile/scripts/testid-lint.sh` | OK | **OK** |
+
+Baseline was captured on a clean worktree **before any edit**, so every post-change result is
+attributable. Note the baseline required a real `npm ci` — an initial copied `node_modules` was
+stale and produced a phantom `expo-document-picker` error that was **not** a real failure.
+
+**Six new suites** (+23 tests): `test_pick_labels_in_matches.py` (16), `test_tier_order_roundtrip.py`
+(7), `check-guide-spotlight-tracking.js`, `check-tier-move-placement.js`,
+`check-picker-pick-filter.js`, `check-swipe-failure-recovery.js`. None registered in
+`mobile/package.json` — CI globs `tests/check-*.js`.
+
+**Every new test was sabotage-verified RED→GREEN.** Notable, because the first attempts were not
+sound:
+- `check-tier-move-placement.js` was **polarity-blind** — a reviewer inverted both direction guards (shipping the opposite of the requested behavior) and all 12 assertions stayed green. Rewritten to lift the updater bodies out of source and assert real placement; the same inversion now fires 10 assertions.
+- `test_digit_only_ids_skip_the_pick_query` was **vacuous** — it raised `AssertionError` inside a block guarded by `except Exception`. Rewritten against a connection spy with a positive control. See **G-050**.
+- `check-swipe-failure-recovery.js` asserted the guard clear by text containment, so keying it on `ctx.tradeId` instead of `ctx.rawId` would have passed while silently restoring the bug for edited cards. Now pins `ctx.rawId`.
+- `check-guide-spotlight-tracking.js` check 8 asserted only that a viewport predicate existed, and pinned an incomplete clamp. Now executes the arithmetic.
+
+**Simulator gate:** not run — Maestro/simulator work is retired (**D-056**, 2026-08-15);
+`FTF_SKIP_SIM_GATE=1` is the standing posture. TestFlight is primary QA.
+
+**Not covered by automation:** B1's spotlight tracking is verified structurally only — no test
+exercises a real scroll, so the visual behavior rests on review plus on-device QA. B2's client-side
+ordering is now behavioral, but no flow drives the multi-select chip row (TiersScreen still exposes
+only four testIDs). **On-device checks owed:** (1) analyst tour on Trades — scroll during `s2.2`,
+ring must track and must vanish cleanly when the card leaves the viewport; (2) Tiers **single-position**
+tab (not "All" — its per-position re-spread confounds the read), chip-move a player down, confirm top
+placement, then tap the same chip again and confirm nothing moves; (3) calculator "Real values" →
+PICK chip shows rungs, and RB no longer lists them; (4) Matches both segments on a Sleeper league
+with traded picks — expect `2026 1st` / `2026 2nd (from Jared)`; (5) force a swipe failure and
+confirm the card can still be passed afterward.
+
+---
+
 ## 2026-08-18 — Dismiss cooldown (D-067) shipped
 
 - **pytest 3125 passed / 1 skipped / 0 failed** on the merged tree (`505ca2c`), run pre-push.

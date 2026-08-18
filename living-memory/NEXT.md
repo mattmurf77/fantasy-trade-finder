@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-18 — Bug-sweep follow-ons (B1–B5)](#2026-08-18--bug-sweep-follow-ons-b1b5)
 - [2026-08-16 — Matchmaking engine follow-ons](#2026-08-16--matchmaking-engine-follow-ons)
 - [2026-08-16 — Presentment-rules follow-ons (G6, D-062)](#2026-08-16--presentment-rules-follow-ons-g6-d-062)
 - [2026-08-15 — Guided Onboarding v2 built dark; graduation + Phase 2 queued](#2026-08-15--guided-onboarding-v2-built-dark-graduation--phase-2-queued)
@@ -20,6 +21,21 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-18 — Bug-sweep follow-ons (B1–B5)
+
+Five operator-reported bugs shipped (CHANGELOG 2026-08-18, D-068/069/070). What the sweep
+deliberately did **not** do:
+
+1. **Operator: on-device QA of the five fixes** *(next TestFlight build)* — the checklist is in `TEST_LEDGER.md` under this date. B1's scroll tracking and B2's chip placement have **no** automated behavioral coverage on device; both rest on structural tests plus review.
+2. **The web client has B3's picks bug too** *(unfixed, now diverged from mobile)* — `web/index.html:635` renders a chip labeled "Picks"; `web/js/app.js:3156/3184/3219` filter roster-scoped pools that hold zero pick assets, so the tab is permanently empty with no empty state.
+3. **`swipe_guard_blocked` analytics event** *(needs a taxonomy row)* — the B4 stall was invisible in every telemetry stream: a user could tap ✕ fifty times and produce zero events. Deferred because a new event crosses the CLAUDE.md bright line, not because it isn't worth having.
+4. **`/api/trade/values` should emit `is_pick: true`** — five clients currently re-derive pick identity from the `team == "PICK"` magic string. Would have prevented both B3 and #222.
+5. **Upsert or unique-constrain `trade_decisions`** *(G-049)* — `save_trade_decision` is a plain INSERT, so a duplicate pass double-counts `trade_k_pass`. D-068 narrowly widened the path to it.
+6. **B1: layout-driven target movement is still unhandled** — a banner mounting shifts a spotlight target with **no scroll event**, reproducing the same stale-frame symptom. The pub/sub is named "targets moved" precisely so an `onLayout` notify can close this.
+7. **Possible seventh guard-clear site** at `TradesScreen.tsx:3138` (Quick-Set regen) — safe today only because regenerated cards carry fresh uuids, which contradicts the comment at two sibling reset sites.
 
 ---
 

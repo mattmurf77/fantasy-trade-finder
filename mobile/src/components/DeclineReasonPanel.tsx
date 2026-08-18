@@ -175,6 +175,12 @@ export default function DeclineReasonPanel({
   // ── Commits ──────────────────────────────────────────────────────────────
   function tapTile(key: Layer1Code) {
     if (committedRef.current) return;
+    // Re-tapping the OPEN tile used to collapse layer 2. Once the pass is
+    // banked that strands the user: the host disables ✓ and makes the swipe
+    // gesture and the VoiceOver actions inert on this card, so layer 2 is the
+    // only way forward and collapsing it leaves nothing to tap. Banked ⇒ the
+    // re-tap is a no-op and the panel stays open (no second write either).
+    if (open === key && banked) return;
     const next = open === key ? null : key; // tapping the open tile collapses it
     setOpen(next);
     setOpenText(null);

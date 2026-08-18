@@ -891,6 +891,11 @@ export default function InLeagueCalculator({
         players={myPoolPlayers}
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
+        // B3 — the pool resolves roster ids through `playerById` (valuesQ)
+        // and appends `picksByOwner` (picksQ); either still in flight means
+        // the list is incomplete, not empty. rostersQ/coverageQ can't be
+        // pending here — they gate the whole component above.
+        loading={valuesQ.isLoading || picksQ.isLoading}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierById[p.id] ?? null}
         leagueId={leagueId}
@@ -906,6 +911,11 @@ export default function InLeagueCalculator({
         players={oppPoolPlayers}
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
+        // B3 — the pool resolves roster ids through `playerById` (valuesQ)
+        // and appends `picksByOwner` (picksQ); either still in flight means
+        // the list is incomplete, not empty. rostersQ/coverageQ can't be
+        // pending here — they gate the whole component above.
+        loading={valuesQ.isLoading || picksQ.isLoading}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierById[p.id] ?? null}
         leagueId={leagueId}

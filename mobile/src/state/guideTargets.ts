@@ -38,3 +38,23 @@ export function measureGuideTarget(testID: string): Promise<TargetFrame | null> 
     });
   });
 }
+
+// ── Movement notifications (B1) ────────────────────────────────────────────
+// `measureInWindow` returns absolute WINDOW coordinates, so a measured frame
+// goes stale the moment the host ScrollView moves. Hosts announce movement
+// here — one call, no guide internals imported — and the overlay re-measures
+// the active target. With no overlay mounted this is a walk over an empty
+// Set, i.e. a no-op on every screen that is not currently guided.
+
+type GuideTargetsMovedListener = () => void;
+
+const movedListeners = new Set<GuideTargetsMovedListener>();
+
+export function subscribeGuideTargetsMoved(fn: GuideTargetsMovedListener): () => void {
+  movedListeners.add(fn);
+  return () => { movedListeners.delete(fn); };
+}
+
+export function notifyGuideTargetsMoved(): void {
+  movedListeners.forEach((fn) => fn());
+}

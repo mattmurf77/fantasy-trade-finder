@@ -9613,6 +9613,121 @@ def _owned_pick_label(p: dict) -> str:
     return base
 
 
+def _pick_labels_by_id(asset_ids) -> dict[str, str]:
+    """Display labels for the DRAFT-PICK asset ids inside `asset_ids` (B5).
+
+    The Matches serializers name assets out of the `players` table, but a
+    pick is never a player row: generic ladder rungs are universal-pool
+    pseudo-assets (`generic_pick_<round>_<tier>`) and owned picks live in
+    `draft_picks`, keyed `{league_id}_{season}_{round}_{original_roster_id}`.
+    Without this overlay every pick falls through to `get(pid, pid)` and is
+    emitted as its raw id. Callers overlay it AFTER the players map:
+    `player_name_by_id.get(pid) or pick_label_by_id.get(pid) or pid`.
+
+    Formatting is delegated, never re-derived — `generic_pick_label` for
+    rungs, `_owned_pick_label` for owned picks — so the string stays the one
+    the deck already shows. Per docs/cross-client-invariants.md:520 the label
+    is the shared display string; provenance is NOT folded into it beyond the
+    "(from …)" suffix `_owned_pick_label` itself owns.
+
+    Two cost guards: real Sleeper player ids are digit-only, so a pick-free
+    payload never touches the DB; and `pick_id` is globally unique, so ONE
+    `IN` query covers a cross-league payload. Unknown ids are simply absent
+    from the result, leaving the caller's existing raw-id fallback intact.
+    """
+    candidates = {str(a) for a in (asset_ids or []) if a and not str(a).isdigit()}
+    if not candidates:
+        return {}
+
+    labels: dict[str, str] = {}
+    owned_ids: set[str] = set()
+    for aid in candidates:
+        parsed = parse_generic_pick_id(aid)
+        if parsed is not None:
+            labels[aid] = generic_pick_label(*parsed)
+        else:
+            owned_ids.add(aid)
+    if not owned_ids:
+        return labels
+
+    try:
+        from sqlalchemy import select as _sa_select
+        from .database import draft_picks_table, engine as _engine
+        # Deliberately opens its OWN short-lived connection rather than
+        # taking one from the caller: two of the four call sites
+        # (`/api/trades/matches` and the disposition refresh) hold no
+        # connection at all, and the other two have already closed theirs by
+        # the time they overlay labels. A pooled checkout for one `IN` query
+        # keeps the helper callable from any serializer without threading a
+        # `_conn` parameter through four routes.
+        with _engine.connect() as _conn:
+            rows = _conn.execute(
+                _sa_select(
+                    draft_picks_table.c.pick_id,
+                    draft_picks_table.c.season,
+                    draft_picks_table.c.round,
+                    draft_picks_table.c.is_traded,
+                    draft_picks_table.c.original_username,
+                ).where(draft_picks_table.c.pick_id.in_(owned_ids))
+            ).fetchall()
+        for r in rows:
+            m = r._mapping
+            labels[m["pick_id"]] = _owned_pick_label({
+                "season":            m["season"],
+                "round":             m["round"],
+                "is_traded":         m["is_traded"],
+                "original_username": m["original_username"],
+            })
+    except Exception as e:
+        # Display-only enrichment — a lookup failure must never fail the
+        # route; the caller falls back to the raw id exactly as before.
+        log.warning("_pick_labels_by_id lookup failed: %s", e)
+    return labels
+
+
+def _player_names_by_id(player_ids) -> dict[str, str]:
+    """Display names for `player_ids` straight out of `players_table` (B5).
+
+    The two session-scoped Matches serializers (`/api/trades/matches` and the
+    disposition refresh) name assets from `sess["players"]`, which is the
+    RANKING POOL — `build_universal_pool`'s DP-valued players plus the generic
+    rungs, NOT the full player DB. A player who dropped out of that pool
+    between the like and the view is a pool MISS, and would otherwise fall
+    through to the raw-id fallback and render as a bare Sleeper id. The two
+    league-scoped routes (`/api/trades/matches/all`, `/api/trades/awaiting`)
+    already resolve against `players_table`; this helper puts all four routes
+    on one resolution ladder:
+
+        session pool → players_table → pick label → raw id
+
+    Callers pass ONLY the pool misses, so a fully-pooled payload costs zero
+    queries and the digit-only pick guard downstream stays on its fast path.
+    One batched `IN` query; a lookup failure is swallowed because this is
+    display enrichment and must never fail a route.
+    """
+    ids = {str(p) for p in (player_ids or []) if p}
+    if not ids:
+        return {}
+    names: dict[str, str] = {}
+    try:
+        from sqlalchemy import select as _sa_select
+        from .database import players_table as _players_table, engine as _engine
+        # Own connection, same reasoning as _pick_labels_by_id above.
+        with _engine.connect() as _conn:
+            rows = _conn.execute(
+                _sa_select(
+                    _players_table.c.player_id,
+                    _players_table.c.full_name,
+                ).where(_players_table.c.player_id.in_(ids))
+            ).fetchall()
+        for r in rows:
+            if r.full_name:
+                names[r.player_id] = r.full_name
+    except Exception as e:
+        log.warning("_player_names_by_id lookup failed: %s", e)
+    return names
+
+
 # search_rank per round for injected pick pseudo-players — mirrors the generic
 # picks in build_universal_pool so owned picks slot alongside players sanely.
 _OWNED_PICK_SEARCH_RANK = {1: 10, 2: 50, 3: 100, 4: 200}
@@ -13958,14 +14073,37 @@ def get_trade_matches():
         matches      = load_matches(user_id=g_user_id, league_id=league_id)
         players_dict = {p.id: p for p in g_players}
 
+        # B5 — draft picks are never rows in the session player pool, and the
+        # old `if pid in players_dict` filter DROPPED them, so a 2-for-1
+        # rendered as a 1-for-1. Names now stay index-parallel with the id
+        # arrays via the shared ladder:
+        #   session pool → players_table → pick label → raw id
+        # `players_dict` here is the RANKING pool, not the player DB, so a
+        # player who fell out of it since the like still resolves by name
+        # instead of leaking a raw Sleeper id.
+        _all_ids: list[str] = []
+        for m in matches:
+            _all_ids.extend(m.get("my_give") or [])
+            _all_ids.extend(m.get("my_receive") or [])
+        _misses = {pid for pid in _all_ids if pid not in players_dict}
+        db_name_by_id    = _player_names_by_id(_misses)
+        pick_label_by_id = _pick_labels_by_id(_misses)
+
+        def _name(pid):
+            # Membership check, not `or`, so a pooled player's name is
+            # returned verbatim — the fallbacks only ever fill a MISS.
+            if pid in players_dict:
+                return players_dict[pid].name
+            return (db_name_by_id.get(pid)
+                    or pick_label_by_id.get(pid)
+                    or pid)
+
         enriched = []
         for m in matches:
             enriched.append({
                 **m,
-                "my_give_names":    [players_dict[pid].name for pid in m["my_give"]
-                                     if pid in players_dict],
-                "my_receive_names": [players_dict[pid].name for pid in m["my_receive"]
-                                     if pid in players_dict],
+                "my_give_names":    [_name(pid) for pid in m["my_give"]],
+                "my_receive_names": [_name(pid) for pid in m["my_receive"]],
             })
         if matches:
             try:
@@ -14066,6 +14204,14 @@ def get_trade_matches_all():
                     player_team_by_id[pr.player_id] = pr.team or ""
                     player_pos_by_id[pr.player_id]  = pr.position or ""
 
+        # B5 — picks aren't players_table rows; overlay their canonical
+        # labels after the players map so they stop rendering as raw ids.
+        # Teams/positions stay blank for picks (pre-existing gap).
+        pick_label_by_id = _pick_labels_by_id(all_pids)
+
+        def _name(pid):
+            return player_name_by_id.get(pid) or pick_label_by_id.get(pid) or pid
+
         enriched = []
         for m in matches:
             give_ids    = m.get("my_give")    or []
@@ -14073,8 +14219,8 @@ def get_trade_matches_all():
             enriched.append({
                 **m,
                 "league_name":         league_name_by_id.get(m["league_id"], ""),
-                "my_give_names":       [player_name_by_id.get(pid, pid) for pid in give_ids],
-                "my_receive_names":    [player_name_by_id.get(pid, pid) for pid in receive_ids],
+                "my_give_names":       [_name(pid) for pid in give_ids],
+                "my_receive_names":    [_name(pid) for pid in receive_ids],
                 "my_give_teams":       [player_team_by_id.get(pid, "") for pid in give_ids],
                 "my_receive_teams":    [player_team_by_id.get(pid, "") for pid in receive_ids],
                 "my_give_positions":   [player_pos_by_id.get(pid, "")  for pid in give_ids],
@@ -14153,6 +14299,14 @@ def get_awaiting_trades():
                 for pr in prows:
                     player_name_by_id[pr.player_id] = pr.full_name or pr.player_id
 
+        # B5 — the reported bug: a liked package containing a draft pick
+        # showed the raw `{league}_{season}_{round}_{roster}` id on the
+        # "Awaiting them" tile. Overlay pick labels after the players map.
+        pick_label_by_id = _pick_labels_by_id(all_pids)
+
+        def _name(pid):
+            return player_name_by_id.get(pid) or pick_label_by_id.get(pid) or pid
+
         enriched = []
         for a in awaiting:
             give_ids    = a.get("my_give")    or []
@@ -14160,8 +14314,8 @@ def get_awaiting_trades():
             enriched.append({
                 **a,
                 "league_name":      league_name_by_id.get(a["league_id"], ""),
-                "my_give_names":    [player_name_by_id.get(pid, pid) for pid in give_ids],
-                "my_receive_names": [player_name_by_id.get(pid, pid) for pid in receive_ids],
+                "my_give_names":    [_name(pid) for pid in give_ids],
+                "my_receive_names": [_name(pid) for pid in receive_ids],
             })
         return jsonify(enriched)
     except Exception as e:
@@ -14578,14 +14732,35 @@ def disposition_trade_match(match_id):
         matches      = load_matches(user_id=g_user_id, league_id=match_league_id)
         players_dict = {p.id: p for p in g_players} if g_players else {}
 
+        # B5 — same serializer shape as /api/trades/matches, same ladder:
+        #   session pool → players_table → pick label → raw id
+        # Note `players_dict` is the ACTIVE session's ranking pool while
+        # `matches` is loaded for the MATCH's league, so a cross-league
+        # disposition is nearly all pool misses — the players_table fallback
+        # is what keeps that payload from rendering raw ids.
+        _all_ids: list[str] = []
+        for m in matches:
+            _all_ids.extend(m.get("my_give") or [])
+            _all_ids.extend(m.get("my_receive") or [])
+        _misses = {pid for pid in _all_ids if pid not in players_dict}
+        db_name_by_id    = _player_names_by_id(_misses)
+        pick_label_by_id = _pick_labels_by_id(_misses)
+
+        def _name(pid):
+            # Membership check, not `or`, so a pooled player's name is
+            # returned verbatim — the fallbacks only ever fill a MISS.
+            if pid in players_dict:
+                return players_dict[pid].name
+            return (db_name_by_id.get(pid)
+                    or pick_label_by_id.get(pid)
+                    or pid)
+
         enriched = []
         for m in matches:
             enriched.append({
                 **m,
-                "my_give_names":    [players_dict[pid].name for pid in m["my_give"]
-                                     if pid in players_dict],
-                "my_receive_names": [players_dict[pid].name for pid in m["my_receive"]
-                                     if pid in players_dict],
+                "my_give_names":    [_name(pid) for pid in m["my_give"]],
+                "my_receive_names": [_name(pid) for pid in m["my_receive"]],
             })
         return jsonify({"ok": True, "both_decided": result["both_decided"],
                         "outcome": result["outcome"], "matches": enriched})

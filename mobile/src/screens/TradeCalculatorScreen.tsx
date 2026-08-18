@@ -968,6 +968,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           isLive ? livePlayers : CALC_MY_TEAM.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])
         }
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
+        // B3 — live mode's pool is `valuesQuery`; the demo pool is a static
+        // mock import that is never in flight.
+        loading={isLive && valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => theirBoard[p.id]}
@@ -995,6 +998,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         title={isLive ? 'Add to Side B' : `Receive from ${partner.teamName}`}
         players={isLive ? livePlayers : partner.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
+        loading={isLive && valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeOtherBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeOtherBoard, p)}
         secondaryValue={isLive ? undefined : (p: CalcPlayer) => MY_BOARD[p.id]}

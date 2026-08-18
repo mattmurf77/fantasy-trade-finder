@@ -586,8 +586,10 @@ export default function TiersScreen() {
   );
 
   // ── Quick tier-move (multi-select) — FB4-62 ─────────────────────────
-  // Send EVERY selected player straight to `target`, appended to the end of
-  // that tier in their current flattened (top-to-bottom) order. Non-selected
+  // Send EVERY selected player straight to `target`, placed by DIRECTION of
+  // travel (same rule as moveTierByOne): movers dropping DOWN from a higher
+  // tier land at the TOP of `target`, movers coming UP from a lower tier land
+  // at the BOTTOM. Relative order is preserved inside each group. Non-selected
   // players keep their tier + within-tier order. Selection persists so the
   // user can fine-tune with ↑/↓. `unassigned` is untouched (mirrors bulkMove).
   const moveSelectedToTier = useCallback(
@@ -595,22 +597,41 @@ export default function TiersScreen() {
       if (selectedIds.size === 0) return;
       bucketsDirtyRef.current = true;
       setBuckets((prev) => {
-        // Gather selected players in current flattened tier order so their
-        // relative order is preserved when appended to the target tier.
-        const movers: RankedPlayer[] = [];
+        // Gather selected players in current flattened tier order, tagging
+        // each with its SOURCE tier in the same pass so the direction split
+        // below needs no second walk. Order within a group is preserved.
+        // A player ALREADY in `target` is skipped outright: tapping the chip
+        // of the tier you are already in is a no-op, not a re-placement.
+        // (Restripping them would send a double-tap from the top of the tier
+        // straight back to the bottom — the very symptom this fixes.)
+        const targetIdx = TIERS.indexOf(target);
+        const movers: { p: RankedPlayer; from: Tier }[] = [];
         for (const t of TIERS) {
-          for (const p of prev[t]) if (selectedIds.has(p.id)) movers.push(p);
+          if (t === target) continue;
+          for (const p of prev[t]) if (selectedIds.has(p.id)) movers.push({ p, from: t });
         }
         if (movers.length === 0) return prev;
 
         const next = emptyBuckets();
         next.unassigned = [...prev.unassigned];
-        // Each non-target tier keeps only its non-selected players.
+        // Strip only the players actually moving, so the destination's own
+        // selected members keep their positions.
+        const moverIds = new Set(movers.map((m) => m.p.id));
         for (const t of TIERS) {
-          next[t] = prev[t].filter((p) => !selectedIds.has(p.id));
+          next[t] = prev[t].filter((p) => !moverIds.has(p.id));
         }
-        // Append the movers to the END of the target tier.
-        next[target] = [...next[target], ...movers];
+        // Split the movers around the tier's existing members by direction:
+        // a source tier ABOVE `target` means moving DOWN, so those enter at
+        // the top; sources below enter at the bottom. A selection spanning
+        // both sides legitimately lands in two groups — that is what keeps
+        // global rank order intact.
+        const fromAbove = movers.filter((m) => TIERS.indexOf(m.from) < targetIdx);
+        const fromBelow = movers.filter((m) => TIERS.indexOf(m.from) > targetIdx);
+        next[target] = [
+          ...fromAbove.map((m) => m.p),
+          ...next[target],
+          ...fromBelow.map((m) => m.p),
+        ];
         return next;
       });
       haptics.success();
@@ -619,18 +640,27 @@ export default function TiersScreen() {
   );
 
   // ── Single-player tier move (S8 PRD-01, VoiceOver custom actions) ──
-  // Mirrors moveSelectedToTier's placement semantics (append to the END
-  // of the target tier) for ONE player, and — like the drag path — also
-  // accepts a pool (unassigned) source, reconciling clearedPids the same
+  // Mirrors moveSelectedToTier's direction-aware placement (down → TOP of
+  // the target tier, up → BOTTOM) for ONE player, and — like the drag path —
+  // also accepts a pool (unassigned) source, reconciling clearedPids the same
   // way onDragEnd does. Only reachable via the row custom actions, so
   // touch behavior is unchanged.
   const movePlayerToTier = useCallback((player: RankedPlayer, target: Tier) => {
     bucketsDirtyRef.current = true;
     setBuckets((prev) => {
+      // A pool source has no tier index (findIndex → -1) and keeps the append.
+      const fromIdx = TIERS.findIndex((t) => prev[t].some((p) => p.id === player.id));
+      const targetIdx = TIERS.indexOf(target);
+      // Already in the destination: a repeat activation is a no-op, not a
+      // re-placement, or it would send the player to the bottom of the tier
+      // they were just moved to the top of.
+      if (fromIdx === targetIdx) return prev;
       const next = emptyBuckets();
       next.unassigned = prev.unassigned.filter((p) => p.id !== player.id);
       for (const t of TIERS) next[t] = prev[t].filter((p) => p.id !== player.id);
-      next[target] = [...next[target], player];
+      next[target] = fromIdx !== -1 && fromIdx < targetIdx
+        ? [player, ...next[target]]
+        : [...next[target], player];
       return next;
     });
     // The player now sits in a tier — drop any pending clear (drag-out-

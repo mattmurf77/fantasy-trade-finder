@@ -140,6 +140,10 @@ interface GuideStore {
   spotlight: GuideSpotlight | 'pending';
   /** Measured target frame (guide_v2 only — v1's overlay measures itself). */
   spotlightFrame: TargetFrame | null;
+  /** B1 — the target moved (host scrolled) and was re-measured: swap the
+   *  frame ONLY. Never touches `spotlight`, never emits `guide_step_shown`;
+   *  a re-measure is a new position, not a new outcome. */
+  trackSpotlightFrame: (frame: TargetFrame) => void;
   stepsSeenCount: number;
   /** Gate + show. Returns true if the step became active. */
   requestStep: (step: GuideStep, handlers?: GuideHandlers) => boolean;
@@ -422,6 +426,15 @@ export const useGuide = create<GuideStore>((set, get) => {
         commitShown(step, 'none');
       }
       return true;
+    },
+
+    trackSpotlightFrame: (frame) => {
+      // Only a step whose spotlight already RESOLVED can track: this must
+      // never resolve the first frame (that is `resolveSpotlight`, which
+      // owns the outcome and the deferred `guide_step_shown`) and never
+      // rescue a degraded one.
+      if (!get().active || get().spotlight !== 'measured') return;
+      set({ spotlightFrame: frame });
     },
 
     advance: (via) => {

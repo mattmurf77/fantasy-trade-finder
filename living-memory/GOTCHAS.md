@@ -247,6 +247,37 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 
 ---
 
+## 2026-08-18
+
+### G-050 — A test that asserts inside a swallowed `try` can never fail
+**Symptom:** `test_digit_only_ids_skip_the_pick_query` passed green whether or not the guard it
+claimed to protect existed.
+**Cause:** it patched a query to raise `AssertionError` — but `AssertionError` IS an `Exception`,
+and the helper under test wraps its lookup in `except Exception: log.warning(...)`. The assertion
+fired, was swallowed, and the helper returned its empty default exactly as the passing case does.
+**Lesson:** when the code under test swallows exceptions, **assert on an observable outside the
+`try`** — a call counter, a spy, a returned value — never on an exception you inject into the
+swallowed region. Generalizes: any "prove this expensive path was skipped" test near defensive
+error handling. Verified by running the old assertion under a real sabotage and watching it stay
+green. Same class bit the source-assertion tests this sweep: three of six new suites asserted
+*shape* (an append exists, a comparison exists) rather than *behavior*, and one of them passed with
+the comparison inverted — i.e. with the exact opposite of the requested feature shipped. Prefer
+lifting the real function out of source and running it over a fixture (the
+`check-picker-pick-filter.js` idiom) over matching source text.
+
+### G-049 — `save_trade_decision` is a plain INSERT — a duplicate pass double-counts Elo
+**Symptom:** n/a (latent). Recorded because D-068 deliberately opens a narrow path to it.
+**Cause:** `backend/database.py:4794` inserts unconditionally; `trade_decisions` has no unique
+constraint on `(user_id, league_id, trade_id)`. A repeated pass writes a second `trade_decisions`
+row, a second `trade_swipes` row, and `_compute_elo`'s replay applies `trade_k_pass` **twice**. The
+D-067 cooldown key is genuinely idempotent (a `frozenset` into a set), which makes the write path
+look safer than it is.
+**Lesson:** do not describe this path as idempotent — the 2026-08-18 sweep's own ticket did, and
+that error nearly shipped a Retry button whose whole cost was the duplicate. Any change that makes
+a re-swipe reachable (retry affordances, guard re-arming, offline replay) must weigh a doubled Elo
+signal, bounded by `trade_k_pass`. The durable fix is an upsert or a unique constraint; not done
+here because it is a schema change, not a bug fix.
+
 ## 2026-08-11
 
 ### G-028 — six rookie-scope tests fail only in checkouts that carry real data
