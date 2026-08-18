@@ -1,0 +1,336 @@
+# Plan — dismissed ("pass") suggestions come back
+
+> Operator report 2026-08-17: *"Users are reporting that they're getting the
+> exact same suggestions between sessions in the same order. There needs to be
+> a cool down process after a 'pass' decision."*
+> Base: `origin/main` @ `ac71a67`. Branch `fix/pass-cooldown`.
+
+## Vocabulary (three different actions, easily conflated)
+
+| UI label | API | Meaning |
+|---|---|---|
+| **Dismiss** (swipe-left on a deck card) | `POST /api/trades/swipe` `decision:'pass'` | Rejecting an engine-invented *suggestion*. Private, cheap, high-volume. **This plan's subject.** |
+| **Decline** | `POST /api/trades/matches/<id>/disposition` `decision:'decline'` | Backing out of a **mutual match** a real league-mate already agreed to. Heavy: K=20 corrective Elo + 30-day near-duplicate suppression. |
+| **Dismiss** (awaiting) | `POST /api/trades/awaiting/dismiss` | Retracting a trade you sent that's pending the other owner. Got windowless exclusion in #336. |
+
+The UI word "dismiss" maps to the API's `pass`, and a *different* endpoint is
+literally named `dismiss`. Anyone reading this code will conflate them at least
+once; that is why this table is first.
+
+## Diagnosis (evidence, 2026-08-17)
+
+**Dispositions save correctly — that is not the bug.** Prod `trade_decisions`:
+496 passes, 314 likes, newest same-day. `save_trade_decision` fires on every
+swipe (`server.py:10739`); `load_trade_decisions` applies **no** decision filter
+so passes are loaded; `_dedup_and_sort` (`trade_service.py:2884`) correctly drops
+any card whose `(frozenset(give), frozenset(recv))` key matches a past decision.
+Only 8 duplicate-decision groups exist across 810 decisions.
+
+**What actually happens.** `deck.fatigue` is ON in prod, but it has two tiers and
+a dismiss only earns the weak one:
+
+- **Decline** → durable hard suppression row (`deck_suppressions`), 30 days,
+  kills near-duplicates (centerpiece + shape bucket + value band).
+  `_save_decline_suppression` is reached **only** under
+  `decision == "decline"` (`server.py:13977`).
+- **Dismiss/pass** → a **score multiplier only**, floored at
+  `fatigue_floor = 0.25`. It demotes; it never removes.
+
+`deck_suppressions` has **0 rows in prod** — the hard path has never fired for
+any user.
+
+**Three ways a dismiss fails to stick:**
+
+1. **Soft demotion, not removal.** A dismissed card keeps ≥25% of its score and
+   can resurface at the top of a thin league.
+2. **The one hard filter expires at 7 days.** `past_decision_keys` loads with
+   `since_days=7` (`server.py:15735`). **495 of 810 prod decisions (61%) are
+   already outside that window** and suppress nothing. Declines get 30 days.
+3. **A dismiss does not bind until the next `session_init`.** The swipe route
+   writes the DB row but never updates the live `TradeService`'s in-memory
+   `_past_decision_keys`. Regenerating inside one session can re-serve the card
+   just dismissed (prod trace: one trade decided 5× in 6 minutes).
+
+**Why the order is identical.** The final sort is
+`sorted(cards, key=composite_score, reverse=True)` — no randomization, rotation
+or shuffle anywhere in `trade_service.py`, and `deck_impressions` is written on
+every serve but **never read back at generation**. Same league state ⇒ same
+candidate set ⇒ same order.
+
+**Scope decision (operator, 2026-08-17):** re-showing a card that was *served
+but never acted on* is acceptable and stays as-is. Only dismissed cards are in
+scope. (Context for why that matters: the reporting user logged 4,003
+impressions against 61 decisions in 14 days — 98.5% of repetition is un-acted
+cards, deliberately left alone.)
+
+## Fix
+
+Three surgical changes. **No new table, no schema change, no new flag** — the
+existing exact-pair mechanism is widened, made live, and given a knob.
+
+### R-1 — Dismiss cooldown gets its own window (default 14 days)
+
+`server.py:15733-15742` partitions `load_trade_decisions` rows by
+`td["decision"]` and applies a per-type window:
+
+- `pass` → new knob **`pass_cooldown_days`** (default **14.0**)
+- `like` → unchanged 7-day behavior (a like that matured into a match/awaiting
+  is already excluded windowlessly by #336's R4; this window only covers likes
+  that never matched)
+
+The DB read widens to `since_days = max(pass_cooldown_days, 7)` and the
+per-row cut happens in Python, so one query still serves both.
+
+**Why 14 and not 30:** a dismiss is a far cheaper signal than a decline — it is
+one swipe against an invented hypothesis, not a rejection of a deal a
+league-mate agreed to. 14 days lets a genuinely changed market resurface a name
+without the user seeing it again this week or next.
+
+### R-2 — A dismiss binds immediately, in every format
+
+In the swipe route after `save_trade_decision`, add the key to the in-memory set
+of **every** service in `sess["trade_svcs"]` (not just `sess["trade_svc"]`).
+
+`sess["trade_svc"]` aliases `trade_svcs[active_format]` (`server.py:2308`,
+`:7034`), so updating only that handle leaves a stale set on every *other*
+scoring format's service — the card returns after a format switch. Applies to
+`pass` only; `like` keeps today's behavior.
+
+### R-3 — The knob is the kill switch
+
+`pass_cooldown_days` lands in `trade_service._DEFAULT_CFG` and
+`database._MODEL_CONFIG_DEFAULTS` (the G6 pattern), so the cooldown is tunable
+— and revertible to today's behavior by setting it to `7` — via
+`PUT /api/admin/config/<key>` with no deploy. No new feature flag: this is a
+bug fix, and a flag would add a surface with no rollback value the knob doesn't
+already give.
+
+### Explicitly NOT doing: near-duplicate suppression
+
+Declines kill near-duplicates (same centerpiece + shape + value band). Applying
+that to dismisses would let one dismissive swipe silence a player's entire trade
+space, and dismisses outnumber declines by orders of magnitude (496 vs 0 rows).
+Exact-pair matching is sufficient for the reported symptom — the 41-job repeat
+was the *same* `trade_hash`, i.e. byte-identical assets. If repetition persists
+as near-variants after this ships, widening is a follow-up with its own
+evidence, not a guess bundled in now.
+
+## Tests (D-056 — no Maestro/simulator; every test proven-to-fail on a sabotage)
+
+| ID | Assertion | Sabotage that must turn it RED |
+|---|---|---|
+| T-1 | A pass 3 days old is excluded from a fresh generation | restore `since_days=7` → still passes (control); set window to 1 day → RED |
+| T-2 | A pass 20 days old **is** re-served (two-sided — the cooldown expires) | make the window unbounded → RED |
+| T-3 | `pass_cooldown_days = 7` reproduces today's exact behavior (revert path) | ignore the knob, hardcode 14 → RED |
+| T-4 | Swipe→regenerate **within one session** excludes the card, no `session_init` | drop the in-memory update → RED |
+| T-5 | Same, **after a scoring-format switch** | update only `sess["trade_svc"]`, not the dict → RED |
+| T-6 | A `like` is unaffected by `pass_cooldown_days` | apply the pass window to likes → RED |
+| T-7 | Likes-you injection unchanged (Q21: quality rules never applied there) | route the injector through the pass filter → RED |
+
+Plus: full backend pytest, `import backend.server` smoke. Runtime proof is an
+operator TestFlight checklist (dismiss a card → regenerate → confirm absent;
+repeat after switching scoring format).
+
+## Risk
+
+**Deck thinning.** Every exclusion mechanism competes for the same finite
+candidate pool, and G6's presentment rules already kill 18.4% of cards. Doubling
+the dismiss window will thin decks further for heavy swipers in small leagues.
+Mitigation: measure before/after empty-deck rate against the D-055 bar (<5%)
+during the build, and report it — the knob is the lever if it breaches.
+
+---
+
+## Build record — 2026-08-17
+
+**Shipped as specced.** Decision record: **D-067**. Branch `fix/pass-cooldown`.
+
+| Req | Where |
+|---|---|
+| R-1 per-type window | `backend/server.py` session_init — one query at the widest window, per-row cut by `td["decision"]`; unparseable stamp **fails closed** (keeps excluding) |
+| R-2 immediate bind | `backend/server.py` swipe route, gated `decision == "pass"`, traverses every service in `sess["trade_svcs"]` plus the aliased handle; best-effort try/except so a swipe never fails on bookkeeping |
+| R-3 knob | `trade_service._DEFAULT_CFG` + `database._MODEL_CONFIG_DEFAULTS` (`pass_cooldown_days = 14.0`) |
+
+**Tests:** `backend/tests/test_pass_cooldown.py` — 10 passing. Full backend
+suite **3060 passed / 1 skipped / 0 failed** (was 3050 pre-change).
+
+**Sabotages — each applied, observed RED, reverted:**
+
+| Sabotage | Caught by | Result |
+|---|---|---|
+| `unbounded-window` (drop the age comparison) | 3 tests incl. the two-sided expiry bar | RED |
+| `one-window` (apply the dismiss window to likes too) | like-independence | RED |
+| `fail-open` (treat a bad timestamp as expired) | fail-closed test | RED |
+| `db-only` (no in-memory update) | both R-2 tests | RED |
+| `alias-only` (update `trade_svc` alone, not the dict) | **only** the format-switch test | RED |
+
+The `alias-only` result is the one worth keeping: it REDs exactly one test —
+the format-switch case — proving that test catches the alias trap and isn't
+redundant with the same-session test.
+
+**Operator principle recorded in D-067** — *"accuracy, not volume; bad
+suggestions are worse than limited suggestions."* This governs the deck-thinning
+tradeoff: when a cooldown and the D-055 empty-deck bar conflict, report the
+number and keep the exclusion.
+
+**Owed at ship:** the empty-deck measurement named in §Risk (deck-eval before/
+after), and an operator TestFlight pass — dismiss a card, regenerate, confirm
+absent; repeat after switching scoring format (the R-2 path that unit tests
+cover structurally but not on-device).
+
+## Thinning measurement (owed by §Risk) — 2026-08-17, prod data
+
+**Result: negligible at current volume, and it revises which change is doing the work.**
+
+| Measure | Value |
+|---|---|
+| Passes aged 7–14 days (the set newly excluded by 7d → 14d) | **2 rows, across all of prod** |
+| User/league pairs affected | **1** |
+| Average deck size, last 14 days | **27.8 cards** (min 2, max 38) |
+
+So R-1's window widening removes ~2 cards from one user's pool today — far
+below the D-055 empty-deck bar, no mitigation needed, knob untouched at 14.
+
+**Honest reading:** most dismissals are either recent (315 of 810 within 7 days,
+already excluded before this change) or months old (April–May, well past any
+sane cooldown). The 7–14 day band is nearly empty right now, so **R-1 is not
+what fixes the reported symptom at today's volume — R-2 is.** A dismiss
+previously did not bind until the next `session_init`, so a card dismissed and
+then regenerated in the same session came straight back; that is the defect
+users could actually hit repeatedly.
+
+R-1 still earns its place, for two reasons: it scales (as swipe volume grows the
+7-day window will age out real cards — the 61%-aged-out figure is what that
+looks like at the tail), and it makes the cooldown an explicit, tunable product
+decision instead of a constant shared with likes.
+
+**Not claimed:** this does not address served-but-unacted repetition, which is
+98.5% of what the reporting user sees and is out of scope by operator decision.
+
+---
+
+## Addendum — reason-capture terminology revision (drafted 2026-08-17, NOT yet landed)
+
+**Status: forward-compatibility note written ahead of the revision. Nothing in
+this addendum is built.** Source: the decline-reason-capture design lab
+(`mockups/decline-reason-capture/`, produced by the matchmaking-engine session;
+labelled "design lab · not shipped code"). Its taxonomy was still moving when
+this was written — treat codes as provisional.
+
+### What the revision does to "pass"
+
+A pass stops being one undifferentiated action. It becomes a taxonomy of
+**seven codes routing to five distinct engine actions** — the lab's canonical
+`Reason → engine action` table (`01-post-pass-sheet.html`), which it states every
+approach maps to:
+
+| Code | Class | Engine action |
+|---|---|---|
+| `value_low` | value | Revise package — widen the split toward the user |
+| `value_overpay_them` | value (inverse) | Revise package — rebalance toward the partner |
+| `blocker_incoming` | hard constraint | Change assets — hold counterparty + outgoing, change the incoming asset |
+| `blocker_outgoing` | hard constraint | Change assets — **remove that asset from all packages for 30 days** / offer Trade DNA untouchables |
+| `fit` | fit | Suppress archetype — re-compose at ~constant value |
+| `partner` | partner | Change counterparty — suppress the pair, user-reversible |
+| `timing` | timing | **No action + cooldown** — re-arm on a trigger event, not a bare timer |
+| `unknown` (skipped / plain ✕) | unknown | No action — today's behavior |
+
+Recommended shape is **B "reason as action"**: the chips *are* the pass, one tap,
+the plain ✕ still fires an unlabelled pass. Governing constraint from the lab:
+**the pass must stay free** — dismissed-after-viewed is graded the only
+trustworthy negative in the implicit-feedback ladder, so anything that lowers the
+pass rate destroys the asset. Our cooldown adds no friction, so it is compatible.
+
+### Where D-066 lands in that world
+
+**D-066's exact-pair cooldown becomes the `unknown` / `timing` engine action** —
+the correct default for an unlabelled pass, which is what every pass is today and
+what the plain ✕ will keep producing. The work does not need to be undone.
+
+Three adjustments the revision will require:
+
+1. **`pass_cooldown_days` should be read as the *unlabelled* cooldown.** When
+   codes land, labelled passes route to their own actions; only `unknown` (and
+   `timing`, pending its trigger design) should fall through to this timer.
+   Rename or scope-document at that point.
+2. **The "explicitly NOT doing near-duplicate suppression" section above needs
+   qualifying, not reversing.** It is right for an *inferred* dismissal — we do
+   not know why, so we suppress exactly what we showed. It is wrong for
+   `blocker_outgoing`, where the user has *named the asset*: the lab specifies
+   removing it from **all** packages for 30 days. Explicit blockers earn wider
+   scope precisely because they are stated rather than guessed. Same reasoning
+   that separates a dismiss from a decline in D-066.
+3. **`timing` wants a trigger-based re-arm** (injury, bye-week hole, depth
+   change, deadline), not a bare day count. `pass_cooldown_days` cannot express
+   that; it is a floor, not the mechanism.
+
+### Adjacent defect the lab surfaces — worth its own item
+
+The lab names a live bug in the exact code D-066 touched: **every pass writes an
+Elo signal treating the give side as the winner** (`record_trade_signal`,
+`k = trade_k_pass`, `server.py` swipe route). That is only correct for
+`value_low`. When the real reason is "I don't want this player" or "not this
+manager," the board is taught a value lesson the user never intended — a
+corrupting write on ~496 prod passes and counting.
+
+D-066 deliberately did **not** touch that write (out of scope, and the fix needs
+the reason codes to gate it). Flagging it here so it is not lost between the two
+threads: **reason capture is a gate on a corrupting write, not only a routing
+feature.** It should be logged as its own item rather than absorbed silently.
+
+---
+
+## Reconciliation — decline-reason capture landed first (2026-08-17)
+
+The terminology revision **shipped to `main` while this branch was held**
+(`c95a70a` backend + `00b2a2c` mobile, `8082aa2` ship record). Branch rebased
+onto it. Three things changed:
+
+1. **Decision-ID collision, resolved.** The reason-capture thread also claimed
+   **D-066** (*"A Pass Only Moves Elo When The User Actually Made A Value
+   Claim"*). Theirs stays; this plan's decision is renumbered **D-067**, refs
+   swept across code, tests and docs. Second ID collision of the day — same
+   class as the wave's three-way D-061.
+2. **The corrupting Elo write is fixed — by them, not us.** The lab-flagged
+   defect (every pass writing an Elo signal treating the give side as the
+   winner) is now gated: `trade_pass_reasons.elo_signal_at` NULL ⇒ suppressed.
+   The addendum's flag is discharged; no separate item needed.
+3. **The shipped taxonomy is not the lab's draft.** Live shape is two-layer —
+   `reason` ∈ `value | fit | other` (layer 1) plus 8 layer-2 `detail` codes,
+   keyed on `impression_id`, with `free_text` explicitly never an analytics
+   prop. The addendum above documents the lab's earlier 7-code draft; treat the
+   table in it as historical, and `backend/database.py:777` as current truth.
+
+**D-067 remains the unlabelled/default cooldown** — correct and unchanged.
+Routing labelled reasons to their own engine actions is still future work.
+
+## Legacy-dismiss amnesty (operator 2026-08-17)
+
+> *"Because we've added decline feedback, I want every decline pushed live
+> before this change to avoid the avoidance rule we've built."*
+
+New knob **`pass_cooldown_start_epoch`** (default `1787005800.0` =
+`2026-08-17T22:30:00Z`): dismisses recorded before it are exempt from the
+cooldown and re-present immediately. Dismiss-scoped; likes untouched; `0`
+disables. Logged per session (`… N pre-reason dismissals amnestied`).
+
+**Two facts the operator should see, because the requested value and the safe
+value differ:**
+
+- The operator said *"around 5pm est."* Reason capture actually went live at
+  **18:22 EDT (22:22:56Z)** — 5pm ET is **~82 minutes too early**, and dismisses
+  taken in that gap are exactly the unlabelled ones the amnesty exists to
+  protect. The default is therefore set just past the real landing, not at 5pm.
+  Direction-of-safety: exempting **more** matches the intent; exempting fewer
+  reintroduces the problem.
+- **The backend landing is not the true boundary.** The reason tiles are a
+  *mobile* change, so no user can produce a reasoned dismiss until a build
+  carrying them reaches testers. Every dismiss until then is unlabelled and
+  arguably deserves amnesty too. The knob is deploy-free — raise it to the
+  build's release moment if that is the intent.
+
+Tests: 5 added (15 total in the suite), each proven-to-fail —
+`ignore-amnesty`, `amnesty-everything` (two-sided: the amnesty is a boundary,
+not an off-switch), `amnesty-likes`. One test pins that the shipped default
+never predates reason capture going live. Full backend suite **3125 passed /
+1 skipped / 0 failed** post-rebase.

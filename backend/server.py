@@ -10738,6 +10738,31 @@ def swipe_trade():
             calc_opened     = body.get("calc_opened"),
         )
 
+        # D-067 — bind the dismiss to the LIVE services immediately, before
+        # the DB write. Without this the exclusion only takes effect at the
+        # next session_init, so regenerating inside one session re-serves the
+        # card just dismissed (prod trace: one trade decided 5x in 6 minutes).
+        #
+        # Every service in sess["trade_svcs"], not just sess["trade_svc"] —
+        # that key is an ALIAS for trade_svcs[active_format] (see :2308,
+        # :7034), so updating it alone leaves a stale set on every other
+        # scoring format's service and the card returns after a format switch.
+        # Best-effort: a swipe must never fail on bookkeeping.
+        if decision == "pass":
+            try:
+                _dismiss_key = (frozenset(card.give_player_ids),
+                                frozenset(card.receive_player_ids))
+                _svcs = list((sess.get("trade_svcs") or {}).values())
+                if trade_service is not None and trade_service not in _svcs:
+                    _svcs.append(trade_service)
+                for _svc in _svcs:
+                    keys = getattr(_svc, "_past_decision_keys", None)
+                    if keys is not None:
+                        keys.add(_dismiss_key)
+            except Exception as _mem_err:
+                log.warning("dismiss cooldown: in-memory update skipped: %s",
+                            _mem_err)
+
         # Persist to DB — write-through
         match_data = None
         try:
@@ -16114,15 +16139,56 @@ def session_init():
 
 
     # Trade services: one per scoring format, rebuilt per league.
-    # Load past trade decisions (last 7 days) so already-swiped trades don't reappear.
+    # Load past trade decisions so already-swiped trades don't reappear.
+    #
+    # D-067 (docs/plans/pass-cooldown/plan.md) — a dismiss ("pass" in the API)
+    # gets its OWN, longer window than a like. Before this, both shared a
+    # hard-coded 7 days, and 61% of prod decisions had already aged out of it,
+    # which is why dismissed cards came back. Likes keep 7 days: a like that
+    # matured into a match/awaiting is already excluded windowlessly by #336's
+    # R4, so this window only covers likes the counterparty never reciprocated.
     past_decision_keys: set = set()
     try:
-        past_td = load_trade_decisions(user_id=user_id, league_id=league_id, since_days=7)
+        pass_days = float(_deck_cfg("pass_cooldown_days", 14.0))
+        like_days = 7.0
+        # One query at the widest window; the per-type cut happens below.
+        past_td = load_trade_decisions(
+            user_id=user_id, league_id=league_id,
+            since_days=int(max(pass_days, like_days)) or 1,
+        )
+        now_utc = datetime.now(timezone.utc)
+        # Legacy-dismiss amnesty (operator 2026-08-17): a dismiss recorded
+        # before decline-reason capture went live carries no reason, so the
+        # avoidance rule must not be applied to it — the user was never given
+        # the chance to say why. Applies to dismisses ONLY; likes are unchanged.
+        amnesty_epoch = float(_deck_cfg("pass_cooldown_start_epoch", 0.0))
+        n_pass = n_like = n_amnesty = 0
         for td in past_td:
+            is_pass = td.get("decision") == "pass"
+            window = pass_days if is_pass else like_days
+            try:
+                decided_at = datetime.fromisoformat(td["created_at"])
+                if decided_at.tzinfo is None:
+                    decided_at = decided_at.replace(tzinfo=timezone.utc)
+                if is_pass and amnesty_epoch > 0 and \
+                        decided_at.timestamp() < amnesty_epoch:
+                    n_amnesty += 1
+                    continue
+                if (now_utc - decided_at).total_seconds() > window * 86400.0:
+                    continue
+            except (KeyError, TypeError, ValueError):
+                pass  # unparseable stamp ⇒ keep excluding (fail closed)
             key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
             past_decision_keys.add(key)
+            if td.get("decision") == "pass":
+                n_pass += 1
+            else:
+                n_like += 1
         if past_decision_keys:
-            log.info("  loaded %d past trade decisions (7-day window)", len(past_decision_keys))
+            log.info("  loaded %d past trade decisions (%d dismissed / %.0fd, "
+                     "%d liked / %.0fd, %d pre-reason dismissals amnestied)",
+                     len(past_decision_keys), n_pass, pass_days,
+                     n_like, like_days, n_amnesty)
     except Exception as db_err:
         log.warning("  could not load past trade decisions: %s", db_err)
 

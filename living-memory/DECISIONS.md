@@ -504,6 +504,7 @@
 | D-063 | Mock-Draft Ownership Resolution Is Per-Platform at Create, With a Labeled Fallback | 2026-08-16 |
 | D-064 | `aggregate_tier_labels` Graduated — Pick-Equivalent Labels Ship to Everyone | 2026-08-16 |
 | D-065 | Calculator Pick Rows Carry Tier Badges at Discounted Value (Supersedes #263) | 2026-08-16 |
+| D-067 | A Dismiss Is a Hard 14-Day Exclusion, Not a Score Demotion; Accuracy Over Volume | 2026-08-17 |
 
 ---
 
@@ -698,3 +699,11 @@ ranking inputs, not a feature preference.
 route. Documented in the route, the scope block, and pinned by a test proving it cannot
 write twice.
 
+## D-067 — A Dismiss Is a Hard 14-Day Exclusion, Not a Score Demotion; Accuracy Over Volume
+**Date:** 2026-08-17 (operator: *"Users are reporting that they're getting the exact same suggestions between sessions in the same order… there needs to be a cool down process after a 'pass' decision"*; scope + principle confirmed same day)
+**Context:** `deck.fatigue` shipped ON with two tiers, and a dismiss only ever earned the weak one. A **decline** (backing out of a mutual match a league-mate already agreed to) writes a durable 30-day near-duplicate suppression; a **dismiss** (`decision='pass'` — swiping away an engine-invented suggestion) got only a score multiplier floored at `fatigue_floor = 0.25`, which demotes but never removes. The one hard filter, `past_decision_keys`, was windowed at 7 days shared with likes — and 61% of prod decisions (495 of 810) had already aged out of it. `deck_suppressions` had **0 rows in prod**: the hard path had never fired for any user. Measured symptom: one card served across 41 separate deck jobs in 12 days. Dispositions themselves were saving correctly (496 passes, 314 likes) — the bug was never persistence.
+**Decision:** (1) A dismiss becomes a **hard exclusion** for `pass_cooldown_days` (default **14.0**), a `model_config` knob — separate from the like window, which stays 7 days. (2) The exclusion **binds immediately** to every service in `sess["trade_svcs"]` at swipe time, not at the next `session_init`; `sess["trade_svc"]` is an alias for the active format's service, so updating it alone leaves other formats stale. (3) Scope stays **exact-pair**, deliberately NOT the decline path's near-duplicate suppression — a dismiss is one cheap swipe at a hypothesis, not a rejection of an agreed deal, and dismisses outnumber declines by orders of magnitude. (4) **Re-showing a card that was served but never acted on is acceptable** and is left alone (98.5% of the reporting user's repetition; 4,003 impressions vs 61 decisions in 14 days).
+**Operator principle (governs future tuning):** *"The goal of these revisions is accuracy, not volume. Bad suggestions are worse than limited suggestions."* Deck thinning is an accepted cost of exclusion work — when a cooldown and the D-055 empty-deck bar conflict, report the number and keep the exclusion; do not weaken a correctness rule to protect deck size.
+**Alternatives considered:** Reusing `deck_suppressions` near-duplicate semantics for dismisses (rejected — one swipe would silence a player's whole trade space); a new feature flag (rejected — the knob at `7.0` is the deploy-free revert, a flag adds surface with no extra rollback value); windowless dismissal like #336's matched/awaiting (rejected — a genuinely changed market should be able to resurface a name); reading `deck_impressions` back at generation to suppress served-but-unacted cards (out of scope per the operator, and a much larger change).
+**Consequences:** Decks thin further for heavy swipers in small leagues, on top of G6's 18.4% presentment kill — accepted per the principle above; `pass_cooldown_days` is the lever. Soft fatigue multipliers are untouched and still apply underneath. Naming hazard recorded: the UI's "dismiss" is the API's `pass`, while `/api/trades/awaiting/dismiss` is a *different* action (#336).
+**Status:** Active.
