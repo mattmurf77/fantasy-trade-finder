@@ -1,6 +1,8 @@
 # mobile/src/state/
 
-Context-based state. Each file exports a hook + provider. MAP, not a changelog — present behavior only. History: `git log -- <this file>` and `living-memory/CHANGELOG.md`.
+Cross-screen state. **zustand**, not Context — 11 of the 19 modules are zustand stores; the rest are module buses, plain hooks, or the shared `QueryClient`. Shapes + persistence keys: [README.md](README.md).
+
+MAP, not a changelog — present behavior only. History: `git log -- <this file>` and `living-memory/CHANGELOG.md`.
 
 - `useSession.ts` — current Sleeper user / selected league. `connectLeague` MERGES the refreshed league list instead of replacing it, because `getLeagues()`'s response can never contain a platform-imported (ESPN/MFL/Fleaflicker) row — a wholesale `setLeagues(lgs)` would silently drop every one of them the moment a user connects a Sleeper league mid-session. Rows whose `platform` isn't `'sleeper'` and whose id is absent from the fresh list are carried forward; a fresh row for the same `league_id` still wins. **Caveat:** `platform` is only trustworthy while `draft.room` is on — the server stamps it inside that flag's block.
 - `useFeatureFlags.ts` — flags fetched from `/api/flags`; onboarding.* features MUST be read via `useOnboardingFeature()` / `onboardingEnabled()` (master `onboarding.v2` AND the individual flag).
@@ -17,4 +19,16 @@ Context-based state. Each file exports a hook + provider. MAP, not a changelog �
 - `useGuide.ts` — The Analyst guided-tour engine (flag `onboarding.guided_avatar`): one-bubble-at-a-time step store, `guidedAvatarActive()` gate, guide_* analytics; `enableTour()` (Settings toggle re-enable) clears `guideDismissed`/`guideSeen`/`guideTourCompleted` via `resetGuideProgress()`.
 - `guideTargets.ts` — spotlight target registry: screens register views by testID, the overlay measures at show time (missing target → bubble-only, never a blank cutout).
 
-No Redux/Zustand — keep it Context until pain demands more.
+- `useFeedback.ts` — in-app feedback capture. **Local AsyncStorage (`ftf_inapp_feedback_v1`) is the source of truth from the user's POV**: every save lands on-device immediately and never blocks the UI; a background `POST /api/feedback` then mirrors it, and `synced` tracks the round-trip. Failures are silent except for the inbox badge; `retrySync()` re-attempts on foreground (wired in `App.tsx`).
+- `useTradeQueue.ts` — stacked trade ideas, mirroring the web's 2K-style queue; "Send All" opens each Sleeper propose URL with a 500 ms stagger. Persisted per-USER (`ftf_trade_queue_<user_id>`) so signing in/out never mixes queues across accounts; per-league scoping lives in the in-memory `byLeague` map.
+- `outlookStrip.ts` — per-user, per-league memory of the League Summary outlook strip's expanded state (#169 frame E). Plain hook + AsyncStorage, deliberately NOT a zustand store; borrows only `useTradeQueue`'s error-swallowing persist posture and user-scoped key shape. Sparse record — collapsing DELETES the league's entry rather than writing `false`, so the blob only ever names leagues the user opted into.
+- `espnConnectBus.ts` — module mailbox for the ESPN Connect WebView handoff, the same shape and reason as `rankImportBus.ts`. `EspnLinkSheet` is an RN `<Modal>`; the WebView push lands BEHIND it, so the sheet hides its own Modal — and RN unmounts a hidden Modal's children. The sheet therefore subscribes from its component body rather than through navigation focus, which it cannot observe from inside a Modal.
+- `queryClient.ts` — the single app-lifetime `QueryClient`, shared between `App.tsx`'s provider and non-React modules that invalidate imperatively (e.g. `useSession` swapping the active league outside any component tree). Defaults: retry 1, `staleTime` 30 s, `gcTime` 30 min (vs TanStack's 5 min — tab switches and AppState suspensions must not nuke the cache), refetch on mount/focus/reconnect. Pairs with screen-level `placeholderData: (prev) => prev` for "instant content, refetch silently".
+
+## Conventions
+
+- **zustand for anything two screens read**, or that a non-React module must reach via `.getState()`. Context is not the pattern here, despite what this file used to say.
+- **Persist only what should survive a relaunch, and scope the key by user id.** `useFinderTargets` and `rookieScope` are session-only on purpose — a pin list or a board filter must not outlive its session.
+- **A store coordinates; it does not compute or fetch.** Math goes in `../utils/` (where a `tests/check-*.js` guard can reach it), requests go in `../api/`.
+- **Clearing on league switch is a subscription**, not a screen's responsibility — `useFinderTargets` subscribes to `useSession` and is the pattern to copy.
+- **A module bus is for two surfaces separated by a `Modal` boundary**, where neither navigation params nor focus can reach across — `espnConnectBus`, `rankImportBus`, `onboardingBus`. Nothing else.

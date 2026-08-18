@@ -1,6 +1,8 @@
 # mobile/src/components/
 
-Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP, not a changelog. History: `git log -- <this file>`, `living-memory/CHANGELOG.md`. testID grammar/registry: `docs/plans/mobile-testing/lld.md` Appendix A (checked by `mobile/scripts/testid-lint.sh`).
+Stateless / lightly-stateful reusable UI — prop-driven by default. MAP, not a changelog. History: `git log -- <this file>`, `living-memory/CHANGELOG.md`. testID grammar/registry: `docs/plans/mobile-testing/lld.md` Appendix A (checked by `mobile/scripts/testid-lint.sh`). Conventions + how to add one: [README.md](README.md).
+
+Subfolders: [`chalkline/`](chalkline/CLAUDE.md) (design-system primitives — build from these), [`analyst/`](analyst/CLAUDE.md) (mascot poses), `draft/` (Draft Room / Mock rows, listed below).
 
 | Component | Use |
 |---|---|
@@ -50,6 +52,7 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `draft/MockChrome` | `MockRail` mode marker + `DraftModeToggle` segmented control (flag `draft.mock`) |
 | `draft/MockEntryPanel` | Mock-mode entry card: start/resume/recap + a muted card per refusal reason; exports `MOCK_MIN_TEAMS` |
 | `draft/MockSetupSheet` | Mock draft setup sheet: rounds stepper, linear/snake toggle, no-published-order notice |
+| `draft/MockTeamSheet` | Mock room's "Your team" sheet (#326). A `Modal` bottom sheet, **never navigation** — the draft screen stays mounted underneath so the clock state survives dismissal. Mounted by `MockDraftScreen` as a sibling of `PlayerContextMenu`/`AnchorSheet` inside its single return |
 | `HelpSheet` | Lightweight help sheet (flag `ux.help_surface`); exports `InfoButton` |
 | `RankImportSheet` | Paste-first rankings import (flag `ranks.import`): parse preview → match/review → apply. Optional preset intake (`presetRows` / `initialText`) lets `ImportRankingsSheet` hand it a confirmed premium CSV or an unrecognized file's raw text — both land on the SAME match → review → apply step, so there is exactly one apply implementation. Both props default to today's behavior; the "Paste rankings" row opens it unchanged |
 | `ImportRankingsSheet` | Premium Rankings Import v1 intake chooser ([D-058]): Dynasty Nerds / DLF rows (flags `ranks.source.dynasty_nerds` / `ranks.source.dlf`, both **default false — no fail-open**, row absent when off), always-visible Upload CSV file, and Paste rankings. Step 2 is the mandatory value-system + format **confirmation**: DN's header is byte-identical across all four formats AND across Dynasty/Contender (only the filename differs, risk R16), so nothing applies on an inference — nearest-format remaps (`SFLEX`→`sf_tep`, `STD`→`1qb_ppr`) are named in copy, and a `contender_` file is blocked until the user explicitly overrides. Unknown header signature → the generic paste flow, never a guess. Pinned by `mobile/tests/check-premium-import.js` |
@@ -59,6 +62,30 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 | `TradingWithStrip` | Inline-home (`trades_home_inline` strip/canvas) two-pill League / "Trading with" filter row; taps open the host's existing pickers directly. #314: mounts BELOW `OutlookBiasReceipt` (+ the prefs-changed nudge), outside `modeBarWrap`; a third "Players" pill is a documented seam HELD for an operator decision. testIDs `trades.trading-with-strip`, `.league`, `.team`. Pinned by `mobile/tests/check-trades-banner-region.js` |
 | `MarketPulseStrip` | Compact top-riser/top-faller line (flag `market.movers`); opens a full Risers/Fallers sheet |
 | `TopBar` | Global header: active-league cluster (opens switcher) + scoring-format tile + bell + settings gear |
+| `LeagueSwitcherSheet` | Bottom-sheet league picker opened from `TopBar`'s league cluster |
+| `MatchValueSection` | #319 — the Matches inbox's expandable trade-value disclosure + open-in-calc CTA, mounted through `TradeCard`'s `footer` slot on BOTH segments. The matches/awaiting payloads carry asset ids + names only (no `give_value`/`receive_value`), so this fetches the verdict lazily from the same public `POST /api/trade/evaluate` that stamps deck cards. The bar is `TradeValueBar` **verbatim, no fork** — the inbox can never disagree with the deck about the same package. Fetch is disclosure-gated: scrolling the inbox costs zero requests |
+| `FeedbackFAB` | The in-app feedback FAB (#188). **One global mount in `navigation/RootNav.tsx`** covers every tab-stack screen; root-stack pushes render their own with `aboveTabBar={false}`. Also exports `setPinnedBottomBarHeight` — the registry screens with a pinned bottom action bar (Tiers save bar, Quick Set, Quick Rank) use instead of a second FAB (flag `ux.touch_polish`) |
+| `FeedbackSheet` | Keyboard-avoiding modal sheet capturing one feedback note (severity + text) |
+| `AnalystGuide` | The Analyst guided-tour overlay host. Mounted ONCE in `RootNav`, above the nav tree and below system modals (native sheets/alerts always render above RN views, satisfying "system modals win"). Driven by `state/useGuide` + `state/guideTargets` |
+| `analystScript.ts` | DATA, not UI — the Analyst's dialogue table (source of truth: `docs/plans/onboarding-conversion/guided-avatar-script.md` §3). Copy edits land here without touching engine or screen logic |
+| `PushPrimingModal` | Pre-permission priming sheet, shown once when `usePushNotifications` sees iOS permission `undetermined` AND the user has progressed far enough to benefit (rankings unlocked → first match imminent). Decline backoff lives in `state/usePushPriming` |
+| `ActivityFeed` | League-tab activity rows + empty state. The caller decides whether the section mounts at all |
+| `ContrarianLeaderboard` | Leaguemate list sorted by divergence score; caller supplies rows |
+| `LeaderboardsSection` | Two inline leaderboards on League Home (league-specific + universal), each with its own metric/window picker; top 10 plus a sticky self-row when the user is out of it. Owns its `useQuery` against `api/leaderboard` |
+| `RankChipBadge` | League-card rank chip ("#3 of 12", consensus basis) from the open `GET /api/league/rank-chip`. **Silent-fail** — any error or missing data renders nothing |
+| `InviteLeaguematesBanner` | Cold-start banner atop TradesScreen when NO leaguemate has ranked yet — every card is a consensus-basis fair-value idea until the divergence engine has a second board |
+| `NewPartnersBanner` | Dismissible TradesScreen banner when a leaguemate newly unlocks; each unique "latest partner" id shows once per (user, league) |
+| `FormatToggle` | SF/1QB scoring-format toggle (#80). Presentational; state lives in `hooks/useScoringFormat` |
+| `FormatGate` | Single-format gate error on TradesHome (FB4-59) — keys off `unlocked_formats` vs the league's detected format |
+| `TierStickyHeader` | Pinned banner naming the tier of the topmost VISIBLE player as the Tiers list scrolls (FB4-63) |
+| `TierTargetChips` | Multi-select row of tier-target chips; tapping one asks the parent to move every selected player into that tier. Colors + labels come from `tierBands`, never hardcoded (FB4-62) |
+| `TileStats` | Compact stat strip under a Tiers player tile — the SAME two stats (rank + 30d trend) for both the user and consensus (FB4-61 / #65) |
+| `TrendBar` | Signed-delta bar; positive paints pos (riser), negative paints neg (faller), width normalised against the section's largest absolute delta |
+| `SwapPlayerSheet` | Per-player swap affordance on a suggested trade card (#86) — replaces one player with another from the SAME roster (give side → the user's roster, receive side → the partner's) |
+| `RookieDraftBoardSheet` | Bottom-sheet rookie draft board; owns its own query |
+| `QueueChip` | Chip rendering one queued trade's give/receive summary plus a dequeue button; backed by `state/useTradeQueue` |
+| `TradeHomeUtilityRow` | Inline trades-home utility row — experiment `trades_home_inline`, variant `strip` (#270/#272) |
+| `TradeBuildCanvas` | Inline trades-home manual-calc canvas — same experiment, variant `canvas` (#270) |
 
 ## Sharp edges
 
@@ -67,4 +94,4 @@ Stateless / lightly-stateful reusable UI — no data fetching, accept props. MAP
 - iOS won't stack sibling Modals — a sheet needing a second layer nests it inside the same Modal (`TradeDnaSheet`'s untouchables layer) instead of opening a second Modal.
 - Touchable containers with implicit `accessible={true}` swallow child testIDs on iOS — `PlayerPickerModal`/`SwapSuggestSheet` fold the marker text into the row's a11y label instead.
 - `AnchorSheet` must never reach `/api/tiers/save` or the merged-band path — anchor lane only (`backend/tests/test_draft_extensions_w1.py`).
-- Every new user-facing screen mounts `FeedbackFAB` by default; modals/sheets and onboarding flows are exceptions.
+- Every new user-facing screen shows `FeedbackFAB`, but only root-stack pushes mount one — the global mount lives in `navigation/RootNav.tsx` inside the `Main` screen and covers every tab-stack screen. A second FAB on a tab screen is the #196/#197 double-FAB bug (`DraftRoomScreen` avoids it via `initialParams {inTabs:true}`). Modals/sheets and onboarding flows are exceptions.

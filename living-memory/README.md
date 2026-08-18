@@ -54,28 +54,52 @@ OPEN_QUESTIONS.md  TEST_LEDGER.md       MISTAKES.md
 - **Authority** — where truth comes from (sources of record, distilled practices).
 - **Identity** — how we sound, how our agents behave.
 
-Plus `archive/` — a sixth, non-conceptual bucket: immutable, rotated-out entries from the Motion/Reality files above (e.g. `archive/CHANGELOG-2026Q3.md`, `archive/TEST_LEDGER-pre-2026-06.md`). Not read at session start; only consulted when the live file's pointer sends you there. See [`FORMAT.md`](FORMAT.md) §Retention & Rotation.
+All 18 files above exist, plus [`FORMAT.md`](FORMAT.md) (the spec) and this README — 20 files, matching the count in the opening paragraph. Verified 2026-08-18.
+
+Plus `archive/` — a sixth, non-conceptual bucket: immutable, rotated-out entries from the Motion/Reality files above. Not read at session start; only consulted when the live file's pointer sends you there. See [`FORMAT.md`](FORMAT.md) §Retention & Rotation. Currently three files:
+
+| Archive file | Covers |
+|---|---|
+| [`archive/CHANGELOG-2026Q2.md`](archive/CHANGELOG-2026Q2.md) | Rotated CHANGELOG entries, 2026 Q2 |
+| [`archive/CHANGELOG-2026Q3.md`](archive/CHANGELOG-2026Q3.md) | Rotated CHANGELOG entries, 2026 Q3 |
+| [`archive/TEST_LEDGER-pre-2026-06.md`](archive/TEST_LEDGER-pre-2026-06.md) | Test-ledger run entries before 2026-06 |
 
 ---
 
 ## Read-at / write-at quick reference
 
+> **⚠ CONFLICT with the root [`../CLAUDE.md`](../CLAUDE.md) — unresolved; do not silently
+> pick a side.** The root CLAUDE.md §"Session memory" states **"Session start requires zero
+> reads"**: a `SessionStart` hook injects HANDOFF, NEXT, the CHANGELOG top-2, and the
+> GOTCHAS index automatically, and it explicitly says *never re-read HANDOFF.md, NEXT.md,
+> or CHANGELOG.md at boot*. It also puts `PRACTICES.md` and `OPEN_QUESTIONS.md` on
+> pull-on-demand, not session start. The "Session start" rows below predate that hook.
+>
+> **Both hooks exist and were verified in `.claude/settings.json` on 2026-08-18** — a
+> `SessionStart` command injecting the four capped slices, and a `Stop` command that warns
+> once per session when a code file is newer than every file in `living-memory/`.
+>
+> Per the project's own precedence rule, **root `CLAUDE.md` + `docs/` win** — so in practice
+> treat the five "Session start" rows as *already delivered by the hook*, and read the file
+> only when you need more than the injected slice. The rows are left as written pending an
+> operator/doc-owner reconciliation.
+
 Retention policy (max live entries/age, per-entry cap, archive target, index style) is specified per file in [`FORMAT.md`](FORMAT.md) §Retention & Rotation — the column below just flags whether a file rotates at all.
 
 | File | Read at | Write at | Retention |
 |---|---|---|---|
-| [`CHANGELOG.md`](CHANGELOG.md) | Session start | Session end | Rotates — last 10 entries live; older in `archive/CHANGELOG-*.md` |
-| [`HANDOFF.md`](HANDOFF.md) | Session start | Session end (overwrite, don't accumulate) | Capped — 2,000 bytes, one live entry |
-| [`NEXT.md`](NEXT.md) | Session start, after CHANGELOG + HANDOFF | When priority order shifts | Capped — 1.5KB queue, 7 active items |
-| [`PRACTICES.md`](PRACTICES.md) | Session start (cheat sheet) | When patterns solidify | Rotates once >~15KB |
-| [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) | Session start (any answers?) | The instant you'd otherwise block | Rotates once >~15KB |
+| [`CHANGELOG.md`](CHANGELOG.md) | Session start *(injected — top 2 entries)* | Session end | Rotates — last 10 entries live; older in `archive/CHANGELOG-*.md` |
+| [`HANDOFF.md`](HANDOFF.md) | Session start *(injected)* | Session end (overwrite, don't accumulate) | Capped — 2,000 bytes, one live entry |
+| [`NEXT.md`](NEXT.md) | Session start *(injected)*, after CHANGELOG + HANDOFF | When priority order shifts | Capped — 1.5KB queue, 7 active items |
+| [`PRACTICES.md`](PRACTICES.md) | Session start (cheat sheet) — *root CLAUDE.md says on-demand* | When patterns solidify | Rotates once >~15KB |
+| [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) | Session start (any answers?) — *root CLAUDE.md says before asking the operator anything* | The instant you'd otherwise block | Rotates once >~15KB |
 | [`HLD.md`](HLD.md) | Before structural changes | Quarterly at most | Reference, not rotated |
 | [`LLD.md`](LLD.md) | Before schema / template changes | When conventions shift | Reference, not rotated |
 | [`CONTEXT.md`](CONTEXT.md) | New agent onboarding | Major scope shifts | Reference, not rotated |
 | [`GLOSSARY.md`](GLOSSARY.md) | When an unfamiliar term appears | When a term is coined | Rotates once >~15KB |
 | [`DECISIONS.md`](DECISIONS.md) | Before changing a major design choice | When you make one | Not archived — bottom index table, never deleted |
 | [`MISTAKES.md`](MISTAKES.md) | Before proposing a new approach | When you abandon a path | Rotates once >~15KB |
-| [`GOTCHAS.md`](GOTCHAS.md) | Before debugging weirdness | After wasting >30 min on a quirk | Marker-delimited top index; rotates once >~20KB |
+| [`GOTCHAS.md`](GOTCHAS.md) | Before debugging weirdness *(the index is injected at session start; grep the file by ID when a row matches your symptom)* | After wasting >30 min on a quirk | Marker-delimited top index; rotates once >~20KB |
 | [`TEST_LEDGER.md`](TEST_LEDGER.md) | Before claiming a result | After running a test | Rotates — last 2 months live; older in `archive/TEST_LEDGER-*.md` |
 | [`DEPENDENCIES.md`](DEPENDENCIES.md) | Before any integration change | When a quirk is discovered | Rotates once >~15KB |
 | [`THIRD_PARTY.md`](THIRD_PARTY.md) | Before vendor decisions | When vendor terms change | Rotates once >~15KB |
