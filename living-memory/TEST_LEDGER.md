@@ -10,6 +10,15 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18 — Dismiss cooldown (D-067) shipped
+
+- **pytest 3125 passed / 1 skipped / 0 failed** on the merged tree (`505ca2c`), run pre-push.
+- **15 tests** in `backend/tests/test_pass_cooldown.py`; **8 named sabotages** applied → RED → reverted: `shrink-window`, `unbounded-window`, `one-window`, `fail-open`, `db-only`, `alias-only`, `ignore-amnesty`, `amnesty-everything`, `amnesty-likes`. `alias-only` REDs **only** the format-switch test — that test earns its place catching the alias trap rather than duplicating its neighbour.
+- Two-sided bars included by design: the cooldown must **expire** (a 20-day dismiss returns) and the amnesty must be a **boundary** (a post-cutoff dismiss still suppresses).
+- **Sim gate: n/a per D-057** (Maestro/simulator retired). No TestFlight build cut — backend-only change; mobile identical to v1.14.0 build 116.
+- Deploy verified **by content** (`pass_cooldown_days` present in prod `/api/admin/config`), not by uptime.
+
+
 ## 2026-08-17 — Decline reason capture SHIPPED + v1.14.0 build 116 to TestFlight
 
 **Code.** Two squash merges: backend `feat/decline-reasons-backend` @ `5056d1e`, mobile

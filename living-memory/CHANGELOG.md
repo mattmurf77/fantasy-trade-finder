@@ -10,6 +10,18 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-18 (dismiss cooldown SHIPPED — a pass finally sticks; D-067)
+
+- **A dismissed suggestion is now a hard exclusion, not a score demotion** (`505ca2c`, merged off `f2c81f6`). Operator report: identical suggestions in the same order between sessions. **Dispositions were saving correctly the whole time** — 496 passes / 314 likes in prod, and `_dedup_and_sort` filtered them properly. The bug was that `deck.fatigue` has two tiers and a dismiss only ever earned the weak one: a **score multiplier floored at `fatigue_floor = 0.25`** that demotes but never removes. The durable path (`deck_suppressions`, 30-day near-duplicate) fires **only** on `decision == "decline"` — a mutual-match backout — so `deck_suppressions` had **0 rows in prod**, having never fired for anyone. Measured symptom: one card served across **41 separate deck jobs** in 12 days.
+- **Three fixes.** `pass_cooldown_days` (**14.0**) gives dismisses their own hard window, split from the 7-day like window that 61% of prod decisions had already aged out of. A dismiss now **binds immediately** to every service in `sess["trade_svcs"]` — `sess["trade_svc"]` is an alias for the *active format only*, so updating it alone left other formats stale (prod trace: one trade decided 5× in 6 minutes). Both knobs are the deploy-free revert (`pass_cooldown_days = 7.0` restores pre-fix behavior), so **no new feature flag**.
+- **Legacy-dismiss amnesty** (`pass_cooldown_start_epoch`, default `2026-08-17T22:30:00Z`): dismisses recorded before decline-reason capture went live carry no reason, so the avoidance rule must not apply to them. Operator asked for "around 5pm est"; reason capture actually landed at **18:22 EDT**, so 5pm would have suppressed the very taps the amnesty protects — the default is set just past the verified landing instead. **Still owed:** the true boundary is when the reason-carrying *mobile* build reaches testers; raise the knob to that moment if pre-build dismisses should also be amnestied (one `PUT /api/admin/config` call).
+- **Scope, deliberately narrow.** Exact-pair matching only — **not** the decline path's near-duplicate suppression, which would let one swipe silence a player's whole trade space. **Served-but-unacted repetition is untouched by operator decision**, and it is 98.5% of what the reporting user actually sees (4,003 impressions vs 61 decisions in 14 days). Measured thinning from the window change: **2 rows prod-wide**, against a 27.8-card average deck — so R-2 (the immediate bind), not R-1, is what fixes the symptom at today's volume.
+- **Gates:** pytest **3125 passed / 1 skipped / 0 failed**; 15 tests, **8 named sabotages** each proven RED then reverted (incl. two-sided bars proving the cooldown *expires* and the amnesty is a boundary, not an off-switch). Deploy verified by content. **No TestFlight build cut** — the change is backend-only and main's mobile tree is byte-identical to v1.14.0 build 116.
+- **Ledger note:** second decision-ID collision in two days — decline-reason capture claimed D-066 concurrently; this is **D-067**.
+
+---
+
+
 
 ## 2026-08-17 (Decline reason capture LIVE + fairness default OFF — v1 feedback instrument)
 
