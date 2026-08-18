@@ -40,6 +40,16 @@ sound:
 **Simulator gate:** not run — Maestro/simulator work is retired (**D-056**, 2026-08-15);
 `FTF_SKIP_SIM_GATE=1` is the standing posture. TestFlight is primary QA.
 
+**Shipped:** `main` `60105ca` (sweep) → Render **live**; `7583358` is the final tip. TestFlight
+**build 117**, submitted and processing. Note the marketing version stayed **1.14.0**, not 1.14.1:
+`eas.json` sets `appVersionSource: remote` and the project has an `ios/` directory, so EAS reads
+`CFBundleShortVersionString` from `Info.plist` — the `app.json` bump was inert (the #131 bare-workflow
+gotcha, `docs/runbook.md:452`) and was reverted so the repo states what actually shipped. A real
+version bump means editing `Info.plist` and cutting another build.
+
+**Sim gate skipped** (`FTF_SKIP_SIM_GATE=1` on all three pushes): Maestro/simulator work is retired
+per **D-056**; this is the standing posture, not a deviation.
+
 **Not covered by automation:** B1's spotlight tracking is verified structurally only — no test
 exercises a real scroll, so the visual behavior rests on review plus on-device QA. B2's client-side
 ordering is now behavioral, but no flow drives the multi-select chip row (TiersScreen still exposes
