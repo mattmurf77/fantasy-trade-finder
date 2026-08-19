@@ -44,7 +44,8 @@ GOLDEN = (Path(__file__).parent / "fixtures" / "bakeoff"
 
 #: The columns this change ADDS to deck_impressions. Everything else in a
 #: flag-off row must equal the captured golden exactly.
-NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold")
+NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
+               "group_key", "group_rank", "lane_slot", "trade_intent")
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +61,22 @@ def _strip_new_columns(capture: dict) -> dict:
     return out
 
 
-def _bakeoff_patches(*, enabled: bool, interleaved: bool = False):
+#: Phase 3's serving shape as knob KILL values: no group composition, no deck
+#: cap, arm A in the roster. The tests written for Phase 3 keep asserting it,
+#: which is what proves the kill values still restore it.
+PHASE3_KNOBS = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0,
+                "bakeoff_include_baseline": 1.0}
+
+
+def _bakeoff_patches(*, enabled: bool, interleaved: bool = False,
+                     composed: bool = False, **knob_overrides):
+    """`composed=False` (the default) pins the Phase-3 fallback so the
+    pre-composition tests keep testing what they were written for;
+    `composed=True` runs the live 2026-08-18 defaults."""
     knobs = {"bakeoff_serve_interleaved": 1.0 if interleaved else 0.0}
+    if not composed:
+        knobs.update(PHASE3_KNOBS)
+    knobs.update({k: float(v) for k, v in knob_overrides.items()})
     return [
         patch.object(bo, "bakeoff_enabled", lambda: enabled),
         patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))),
@@ -183,7 +198,8 @@ def test_interleaved_deck_is_the_team_draft_order():
     c = [_card(["qb1"], ["rb3"])]
     order = ["current", "baseline", "gen_v2"]
 
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(order)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]):
         capture, _job, eng = H.run_capture(
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True)
             + _stub_arms(a, b, c))
@@ -241,7 +257,8 @@ def test_post_generation_rerankers_cannot_touch_the_merged_deck():
                                           or (list(cards), None, set()))),
     ]
     order = ["baseline", "current", "gen_v2"]
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(order)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]):
         capture, _job, _eng = H.run_capture(
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True)
             + _stub_arms(a, b, c) + layers)
@@ -287,7 +304,8 @@ def test_likes_you_injection_does_not_reorder_the_interleave():
                       key=lambda x: x.composite_score, reverse=True)
 
     order = ["baseline", "current", "gen_v2"]
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(order)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]):
         capture, _job, _eng = H.run_capture(
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True)
             + _stub_arms(a, b, c)
@@ -313,7 +331,8 @@ def test_interleaved_run_records_agreement_and_forfeits():
     c = []
     order = ["baseline", "current", "gen_v2"]
 
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(order)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]):
         capture, _job, eng = H.run_capture(
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True)
             + _stub_arms(a, b, c))
@@ -396,7 +415,8 @@ def test_served_cards_record_the_threshold_they_were_generated_under():
     c = [_card(["te1"], ["rb3"])]
     order = ["baseline", "current", "gen_v2"]
 
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(order)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]):
         capture, _job, eng = H.run_capture(
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True)
             + _stub_arms(a, b, c))
@@ -450,3 +470,283 @@ def test_threshold_clean_query_answers_itself_from_the_table():
     for arm, distinct_thresholds in rows:
         assert distinct_thresholds <= 1, (
             f"arm {arm} mixes fairness thresholds within one deck")
+
+
+# ---------------------------------------------------------------------------
+# Deck composition through the real serving path
+# (operator decision 2026-08-18; scope-composition.md)
+# ---------------------------------------------------------------------------
+
+def _lane_card(give, recv, *, basis, lane, target=H.OPP, composite=1.0):
+    c = _card(give, recv, target=target, composite=composite)
+    c.basis = basis
+    c.lane = lane
+    return c
+
+
+def test_served_deck_is_composed_of_groups_and_every_row_carries_its_group():
+    """Groups 1 and 2 come from arm `current` at the two bases; group 3 is arm
+    `gen_v2`. The impression rows must carry the group, the rank inside it and
+    the lane slot — without them the analysis cannot separate "this group's
+    quota" from "this arm" or from deck position."""
+    cur = [_lane_card(["qb1"], ["rb2"], basis="divergence", lane="value"),
+           _lane_card(["rb1"], ["wr1"], basis="divergence", lane="window"),
+           _lane_card(["wr2"], ["rb3"], basis="consensus",  lane="value"),
+           _lane_card(["te1"], ["wr3"], basis="consensus",  lane="window")]
+    v2 = [_lane_card(["qb1"], ["wr3"], basis="divergence", lane="value"),
+          _lane_card(["rb1"], ["rb3"], basis="divergence", lane="window")]
+    order = ["current_divergence", "current_consensus", "gen_v2"]
+
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in order if p in parts]), \
+            patch.object(bo, "outlook_leads_for", lambda *a, **k: False):
+        capture, _job, eng = H.run_capture(
+            extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                           composed=True)
+            + _stub_arms([], cur, v2))
+
+    rows = capture["impressions"]
+    assert [(r["model_arm"], r["group_key"], r["group_rank"], r["lane_slot"])
+            for r in rows] == [
+        ("current", "current_divergence", 0, "value"),
+        ("current", "current_consensus",  0, "value"),
+        ("gen_v2",  "gen_v2",             0, "value"),
+        ("current", "current_divergence", 1, "outlook"),
+        ("current", "current_consensus",  1, "outlook"),
+        ("gen_v2",  "gen_v2",             1, "outlook"),
+    ]
+    # No group ever holds two consecutive deck slots.
+    seq = [r["group_key"] for r in rows]
+    assert all(a != b for a, b in zip(seq, seq[1:]))
+    # basis + lane are already on the F1 spine — no duplicate taxonomy needed.
+    feats = [json.loads(r["features_json"]) for r in rows]
+    assert [f["basis"] for f in feats] == [
+        "divergence", "consensus", "divergence"] * 2
+    assert [f["lane"] for f in feats] == ["value"] * 3 + ["window"] * 3
+
+
+def test_arm_baseline_never_reaches_a_served_deck():
+    """Arm A is out of the roster: it must not generate, must not be drafted,
+    and must not appear on any impression row."""
+    calls = []
+
+    def fake_generate(self, *a, **kw):
+        calls.append("engine")
+        return [_lane_card(["qb1"], ["rb2"], basis="divergence", lane="value")]
+
+    with patch("backend.trade_service.TradeService.generate_trades",
+               fake_generate), \
+            patch.object(bo, "gen_v2_cards", lambda svc, kw: []):
+        capture, _job, eng = H.run_capture(
+            extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                           composed=True))
+
+    assert len(calls) == 1, "the engine must run once, not twice"
+    assert all(r["model_arm"] != "baseline" for r in capture["impressions"])
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    assert set(json.loads(run.arms_json)) == {"current", "gen_v2"}
+
+
+def test_run_row_records_the_per_group_under_fill_through_the_real_path():
+    """Arm `gen_v2` produces only value-lane cards here — the case PLAN.md
+    §3.2 warns about. The outlook shortfall must land in groups_json, not be
+    quietly filled from the value lane."""
+    cur = [_lane_card(["qb1"], ["rb2"], basis="divergence", lane="value"),
+           _lane_card(["rb1"], ["wr1"], basis="divergence", lane="window")]
+    v2 = [_lane_card(["wr2"], ["rb3"], basis="divergence", lane="value"),
+          _lane_card(["te1"], ["wr3"], basis="divergence", lane="value")]
+
+    capture, _job, eng = H.run_capture(
+        extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                       composed=True)
+        + _stub_arms([], cur, v2))
+
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    groups = json.loads(run.groups_json)
+    assert groups["gen_v2"]["filled"] == {"value": 2, "outlook": 0, "fill": 0}
+    assert groups["gen_v2"]["short"] == {"value": 3, "outlook": 5}
+    assert groups["gen_v2"]["pool"] == {"value": 2, "window": 0, "(none)": 0}
+    # …and nothing was substituted into an outlook slot.
+    assert all(r["lane_slot"] != "fill" for r in capture["impressions"])
+    # The consensus group had no supply at all — recorded, not an error.
+    assert groups["current_consensus"]["composed"] == 0
+    assert groups["current_consensus"]["short"] == {"value": 5, "outlook": 5}
+
+
+def test_composition_is_bypassed_for_a_dark_mode_deck():
+    """Dark validation still serves arm B's own list through the untouched
+    presentation stack, so no group produced the served cards and the group
+    columns are honestly NULL."""
+    capture, _job, eng = H.run_capture(
+        extra_patches=_bakeoff_patches(enabled=True, interleaved=False,
+                                       composed=True))
+    assert capture["impressions"]
+    for row in capture["impressions"]:
+        assert row["model_arm"] == "current"
+        assert row["group_key"] is None and row["group_rank"] is None
+        assert row["lane_slot"] is None
+    # …but the composition IS still computed and its accounting written:
+    # measuring the per-(group, lane) under-fill before Phase 5 lights
+    # interleaved serving is exactly what dark validation is for.
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    groups = json.loads(run.groups_json)
+    assert set(groups) == {"current_divergence", "current_consensus", "gen_v2"}
+    for summary in groups.values():
+        assert set(summary["short"]) == {"value", "outlook"}
+
+
+# ---------------------------------------------------------------------------
+# trade_intent capture — the gate that APPLIED, not the one requested
+# ---------------------------------------------------------------------------
+
+def test_served_cards_record_the_effective_trade_intent():
+    capture, _job, eng = H.run_capture(
+        trade_intent="tier_up",
+        extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                       composed=True))
+    assert capture["impressions"]
+    for row in capture["impressions"]:
+        assert row["trade_intent"] == "tier_up"
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    arms = json.loads(run.arms_json)
+    for arm in arms:
+        assert arms[arm]["trade_intent"] == "tier_up"
+
+
+def test_intent_records_null_when_the_flag_did_not_actually_apply_it():
+    """The requested/effective divergence, and the reason this is recorded per
+    row rather than assumed from the request: `_generate_trades_impl` resolves
+    the intent to None whenever `trades.intent_modes` is off, so a client that
+    sent `tier_up` was served an unfiltered deck."""
+    with patch.object(bo, "is_enabled",
+                      lambda key: False if key == "trades.intent_modes" else True):
+        assert bo.effective_trade_intent("tier_up") is None
+    # …and a value outside the three modes is not an intent, however it arrives.
+    assert bo.effective_trade_intent("bogus") is None
+    assert bo.effective_trade_intent(None) is None
+    assert bo.effective_trade_intent("tier_up") == "tier_up"
+
+    capture, _job, _eng = H.run_capture(
+        extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                       composed=True))
+    assert capture["impressions"]
+    assert all(r["trade_intent"] is None for r in capture["impressions"]), \
+        "an unfiltered deck must record NULL, not a requested-but-unused mode"
+
+
+def test_arm_c_is_filtered_by_the_same_intent_lens_as_the_engine_arms():
+    """`_generate_trades_impl`'s v2 branch applies `_filter_by_trade_intent` to
+    gen-v2's output; calling the module directly skipped it, which would have
+    given groups 1/2 a filtered brief and group 3 an unfiltered one."""
+    seen = {}
+    real = bo.gen_v2_cards
+
+    def spy(svc, kw):
+        seen["intent"] = kw.get("trade_intent")
+        return real(svc, kw)
+
+    with patch.object(bo, "gen_v2_cards", spy):
+        H.run_capture(trade_intent="consolidate",
+                      extra_patches=_bakeoff_patches(enabled=True,
+                                                     interleaved=True,
+                                                     composed=True))
+    assert seen.get("intent") == "consolidate", \
+        "arm C must receive the job's intent, not a stripped kwarg set"
+
+
+def test_arm_c_cards_carry_a_lane_so_group_3_can_fill_an_outlook_quota():
+    """`classify_lane` runs after the v2 branch returns, so no gen-v2 card has
+    ever carried a lane. Without stamping it here group 3's outlook quota
+    would under-fill 100% of the time for a plumbing reason and read as "arm C
+    cannot produce outlook ideas" — a false finding."""
+    captured = {}
+    real = bo.gen_v2_cards
+
+    def spy(svc, kw):
+        cards = real(svc, kw)
+        captured["cards"] = cards
+        return cards
+
+    with patch.object(bo, "gen_v2_cards", spy):
+        H.run_capture(extra_patches=_bakeoff_patches(
+            enabled=True, interleaved=True, composed=True))
+
+    cards = captured.get("cards")
+    assert cards is not None, "arm C did not run"
+    # The harness's user has no declared outlook, so the honest label is None
+    # for every card — but the ATTRIBUTE must exist and be set deliberately,
+    # never left absent.
+    for c in cards:
+        assert hasattr(c, "lane") and hasattr(c, "lane_shift")
+
+
+def test_arm_c_lane_labels_match_the_engine_labeller_exactly():
+    """Same labeller, same inputs, same answer — that parity is what makes the
+    value/outlook comparison a comparison of generators rather than of which
+    post-generation steps each arm happened to receive."""
+    from backend.trade_service import classify_lane, elo_to_value
+
+    players = {p.id: p for p in H._players()}
+    svc_players = players
+    seed = dict(H.SEED)
+    vs = lambda pid: elo_to_value(seed.get(pid, 1500.0))
+
+    made = []
+
+    def fake_gen(**kw):
+        return [_lane_card(["qb1"], ["rb2"], basis="divergence", lane=None)]
+
+    with patch("backend.trade_gen_v2.generate_league_suggestions",
+               lambda **kw: (fake_gen(), {})):
+        from backend.trade_service import League, LeagueMember, TradeService
+        svc = TradeService(players=svc_players)
+        svc.add_league(League(
+            league_id="L", name="t", platform="demo",
+            members=[LeagueMember(user_id="opp", username="opp",
+                                  roster=["rb2"], elo_ratings={})]))
+        out = bo.gen_v2_cards(svc, {
+            "league_id": "L", "user_id": "me", "user_elo": {},
+            "user_roster": ["qb1"], "seed_elo": seed, "outlook": "contender",
+            "scoring_format": "1qb_ppr",
+        })
+    assert len(out) == 1
+    expected = classify_lane(["qb1"], ["rb2"], svc_players, "contender", vs)
+    assert out[0].lane == expected
+
+
+# ---------------------------------------------------------------------------
+# "Was this comparison clean?" — the documented query, executed
+# ---------------------------------------------------------------------------
+
+def test_comparison_clean_query_answers_itself_from_the_table():
+    """PLAN.md §6 asks per-arm comparisons to be threshold-clean; the trade
+    settings staying visible for the bake-off means they must be INTENT-clean
+    too. Both are one GROUP BY now, and this test IS the documented query
+    (docs/data-dictionary.md §bakeoff_runs) so it cannot rot into
+    documentation-only."""
+    from sqlalchemy import func
+    from backend.database import deck_impressions_table as di
+
+    _capture, _job, eng = H.run_capture(
+        trade_intent="tier_up",
+        extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
+                                       composed=True))
+    with eng.connect() as conn:
+        rows = conn.execute(
+            select(di.c.model_arm,
+                   di.c.group_key,
+                   func.count(func.distinct(di.c.fairness_threshold)),
+                   func.count(func.distinct(di.c.trade_intent)),
+                   func.count())
+            .where(di.c.model_arm.isnot(None))
+            .group_by(di.c.model_arm, di.c.group_key)
+        ).fetchall()
+    assert rows, "no attributed impressions to check"
+    for arm, group_key, thresholds, intents, n in rows:
+        assert thresholds <= 1, f"{arm}/{group_key} mixes fairness thresholds"
+        assert intents <= 1, f"{arm}/{group_key} mixes trade intents"
+        assert n > 0

@@ -506,9 +506,34 @@ _DEFAULT_CFG: dict[str, float] = {
     # 1 = Phase-5 interleaved serving (team-draft deck, post-generation
     # re-rankers bypassed per PLAN.md §3.4 Channel 2).
     "bakeoff_serve_interleaved":   0.0,
-    # Max cards in an interleaved deck. 0 = uncapped (the draft drains every
-    # arm) — the lever for 3x supply, PLAN.md §8.
-    "bakeoff_deck_limit":          0.0,
+    # Max cards in the served bake-off deck. Default 30 = the three-group
+    # composition (3 groups x bakeoff_group_size). 0 = uncapped, which with
+    # bakeoff_group_size = 0 restores Phase 3's plain drain-every-arm draft.
+    "bakeoff_deck_limit":         30.0,
+    # ---- deck composition (operator decision 2026-08-18; scope block
+    # docs/plans/three-model-bakeoff/scope-composition.md) ----------------
+    # Cards per GROUP. A group is (arm, basis): the engine arms contribute a
+    # divergence group and a consensus group each, arm gen_v2 one group (it
+    # is divergence by nature). 0 = kill the whole composition layer and fall
+    # back to Phase 3's plain per-ARM team draft.
+    "bakeoff_group_size":         10.0,
+    # Value-lane slots inside each group. The outlook-lane ("window") slots
+    # are the remainder, bakeoff_group_size - this, so the two can never sum
+    # to something other than the group size.
+    "bakeoff_group_value_slots":   5.0,
+    # Residual-slot fill policy when a lane cannot fill its quota (expected:
+    # `window` is ~19% of divergence supply, so the divergence groups will
+    # under-fill their outlook slots routinely). 0 = LEAVE SHORT — the group
+    # serves fewer cards and the shortfall is recorded per (group, lane);
+    # 1 = backfill from the same group's other lane / unlabelled remainder,
+    # every substituted card flagged deck_impressions.lane_slot = 'fill'.
+    "bakeoff_fill_policy":         0.0,
+    # Arm roster. 0 (default, operator decision 2026-08-18) = arm `baseline`
+    # is NOT in the served rotation and is not generated at all; Phase 2's
+    # MODEL_A_PROFILE / model_a() / golden / knob-inventory guard all stay
+    # live and passing, so flipping this to 1 restores arm A as a first-class
+    # arm (and its two groups) with no deploy.
+    "bakeoff_include_baseline":    0.0,
 
     # ------------------------------------------------------------------
     # trade_gen.v2 — divergence-driven staged pipeline (backend/

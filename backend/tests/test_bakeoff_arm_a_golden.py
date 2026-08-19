@@ -453,7 +453,8 @@ def test_r4_bypass_is_thread_local():
 #: move THIS fixture, whereas this catches it the moment it is declared.
 _PINNED_KNOBS = frozenset("""
 aggression_weight asset_floor_abs asset_ideas_group_cap
-bakeoff_deck_limit bakeoff_serve_interleaved
+bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
+bakeoff_group_value_slots bakeoff_fill_policy bakeoff_include_baseline
 asset_ideas_lateral_band audition_like_rate_frac audition_min_views
 audition_retire_days bench_credit_qb bench_credit_qb_sf bench_credit_rate
 bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr

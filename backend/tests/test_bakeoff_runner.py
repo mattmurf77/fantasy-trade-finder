@@ -59,6 +59,14 @@ def _knobs(**vals):
     return patch.object(bo, "_cfg", lambda key, default: float(vals.get(key, default)))
 
 
+#: Phase 3's behaviour expressed as knob KILL values — no group composition,
+#: no deck cap, arm A back in the roster. The tests below that predate the
+#: 2026-08-18 composition decision assert exactly this, which is the point:
+#: the kill values must still restore it.
+PHASE3_KNOBS = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0,
+                "bakeoff_include_baseline": 1.0}
+
+
 # ---------------------------------------------------------------------------
 # Flag off
 # ---------------------------------------------------------------------------
@@ -266,11 +274,14 @@ def _run(*, a_cards, b_cards, c_cards, interleave, order=None, seen=None,
         calls.append(("arm_c", r4_bypassed(), dict(ov)))
         return list(c_cards)
 
-    with patch.object(bo, "arm_order_for",
-                      lambda lid, wk=None: list(order or bo.ARMS)):
+    fixed = list(order or bo.ARMS)
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: [p for p in fixed if p in parts]), \
+            _knobs(**PHASE3_KNOBS):
         return bo.run_bakeoff(generate=generate, gen_v2=gen_v2,
                               league_id="league_x", interleave=interleave,
-                              fairness_threshold=thr, limit=None), calls
+                              fairness_threshold=thr, limit=None,
+                              roster=bo.ARMS), calls
 
 
 def test_fanout_produces_three_attributed_lists():
@@ -326,9 +337,12 @@ def test_a_raising_arm_is_recorded_not_fatal():
     def gen_v2(**ov):
         raise RuntimeError("divergence pipeline blew up")
 
-    with patch.object(bo, "arm_order_for", lambda lid, wk=None: list(bo.ARMS)):
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: list(parts)), \
+            _knobs(**PHASE3_KNOBS):
         run = bo.run_bakeoff(generate=generate, gen_v2=gen_v2,
-                             league_id="l", interleave=True, limit=None)
+                             league_id="l", interleave=True, limit=None,
+                             roster=bo.ARMS)
     assert run.arms["gen_v2"].error is not None
     assert run.arms["gen_v2"].cards == []
     assert run.deck, "the surviving arms still produce a deck"

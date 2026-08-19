@@ -10,6 +10,53 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18e — Bake-off deck composition (three groups of ten; arm A out of the roster)
+
+**Branch:** `feat/bakeoff-composition`, from `origin/main` `217a8e1`. **Not shipped** — not pushed, not merged. Flag `trade.bakeoff` stays **OFF**.
+Scope block: [docs/plans/three-model-bakeoff/scope-composition.md](../docs/plans/three-model-bakeoff/scope-composition.md). Decision: [D-078](DECISIONS.md#d-078--a-bake-off-deck-is-composed-of-groups-and-an-unfilled-quota-is-the-finding).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` (before) | **3363 passed, 1 skipped, 0 failed** — baseline at `217a8e1` |
+| `pytest backend/tests -q` (after) | **3404 passed, 1 skipped, 0 failed** — +41 tests, zero regressions |
+| `npx tsc --noEmit` (mobile) | n/a — zero mobile files changed |
+| `check-*.js` / `testid-lint.sh` | n/a — zero mobile files changed |
+| Maestro / simulator | n/a — retired by D-056; backend-only, nothing user-visible while the flag is off |
+| Sim gate | Tier 4 (backend-only); `FTF_SKIP_SIM_GATE=1` is the standing posture under D-056 |
+
+**New tests: 41.** `backend/tests/test_bakeoff_composition.py` (31 unit) + 10 integration added to `backend/tests/test_bakeoff_serving.py` (real `server._run_trade_job`).
+
+**Flag-off golden extended, not weakened.** `backend/tests/fixtures/bakeoff/flag_off_golden.json` is byte-for-byte unchanged and the flag-off test still asserts byte-identity against it. The four new columns (`group_key`, `group_rank`, `lane_slot`, `trade_intent`) joined Phase 3's admitted-additive list and are asserted **NULL on every row**, exactly as Phase 3's three were.
+
+**Phase 2 verified still intact.** The arm-A golden, the R4-bypass tests and the 189-key knob-inventory guard all still pass; the four new knobs were added to `_PINNED_KNOBS`. `test_bakeoff_composition.py::test_arm_a_leaves_serving_but_phase_2_stays_intact` asserts the profile, its entry point and its knob set directly, so "arm A left by configuration, not deletion" is a tested property rather than a claim.
+
+**Measured — three-group interleave, 500 decks (30 cards each):**
+
+| | group 1 `current_divergence` | group 2 `current_consensus` | group 3 `gen_v2` |
+|---|---|---|---|
+| mean served position (of 30) | 14.48 | 14.55 | 14.48 |
+| cards per deck | 10.0 | 10.0 | 10.0 |
+| decks led (of 500) | 164 | 160 | 176 |
+
+Per-lane mean served position: value 14.52, outlook (`window`) 14.48. Both distributions are flat, which is the whole point — a per-**arm** rotation instead puts arm `gen_v2` at mean position **24.5** (measured on identical inputs by `test_grouping_by_arm_would_bury_arm_c_and_the_group_draft_does_not`).
+
+**Measured — outlook-slot under-fill** (slots left empty of 5, at the live lane ratios: divergence 80.5% value / 19.5% window, consensus 73.2% / 26.8% / 6.1% unlabelled), sweeping per-deck supply:
+
+| surviving cards in the group's pool | divergence group | consensus group |
+|---|---|---|
+| 10 | 3.0 | 3.0 |
+| 15 | 2.0 | 1.0 |
+| 20 | 1.0 | **0.0** |
+| 25 | **0.0** | 0.0 |
+| 30 / 40 / 60 | 0.0 | 0.0 |
+
+A divergence group needs ~25 surviving cards before it can expect five outlook cards; a consensus group clears at ~20. That gap is why groups 1 and 3 are the ones expected to serve short, and why the default fill policy records the hole instead of topping it up from the value lane. Pinned by `test_measured_under_fill_across_realistic_divergence_supply`.
+
+**Two plumbing gaps closed** so the comparison is of generators, not of which post-generation steps each arm received: arm C now gets the same `_filter_by_trade_intent` and the same `classify_lane` the engine arms already get. Without the lane label, group 3's outlook quota would have under-filled **100% of the time** and read as "arm C cannot produce outlook ideas".
+
+**Not measured here, needs Phase 4:** real per-deck supply. Every under-fill number above is from the live lane *ratios* applied to swept supply sizes, because the 3,163-card total does not say how many cards one deck's arm produces. Phase 4 dark validation writes `groups_json` on every run, so the true rate is one query away once it runs.
+
+---
 ## 2026-08-18d — Three-model bake-off Phase 3 (the runner)
 
 **Branch:** `feat/bakeoff-runner`, rebased onto `origin/main` `9d24da3` (which carries bake-off Phase 2 and tier-bounded pins). **Not shipped** — not pushed, not merged. Flag `trade.bakeoff` ships **OFF**.

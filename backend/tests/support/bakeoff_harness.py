@@ -6,6 +6,10 @@ pre-bake-off `origin/main`, where that module does not exist. Keeping the
 harness portable is what makes the golden a real capture rather than a
 self-consistent assertion.
 
+`trade_intent` is passed through only when set, so the golden capture (which
+never sets it) calls `_run_trade_job` with exactly the argument list it had at
+the pre-bake-off SHA.
+
 `run_capture()` drives one complete trade job through the real engine with a
 fixed flag configuration and returns a canonical dict — served cards, every
 deck_impressions row, and the job's terminal fields — with the volatile bits
@@ -111,7 +115,7 @@ def _canonical_rows(engine):
     return out
 
 
-def run_capture(extra_patches=(), seed_like=True):
+def run_capture(extra_patches=(), seed_like=True, trade_intent=None):
     """Run one full trade job and return the canonical capture dict."""
     engine = create_engine("sqlite:///:memory:",
                            connect_args={"check_same_thread": False})
@@ -175,7 +179,8 @@ def run_capture(extra_patches=(), seed_like=True):
                 server._sessions[TOKEN] = sess
             with server._trade_jobs_lock:
                 server._trade_jobs[JOB_ID] = job
-            server._run_trade_job(JOB_ID, TOKEN, LEAGUE, 0.75, [])
+            _job_kw = {"trade_intent": trade_intent} if trade_intent else {}
+            server._run_trade_job(JOB_ID, TOKEN, LEAGUE, 0.75, [], **_job_kw)
         finally:
             for p in reversed(stack):
                 p.stop()

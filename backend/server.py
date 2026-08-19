@@ -3953,6 +3953,20 @@ def _log_deck_signal_impressions(
             # against the config ITS OWN arm ran under. Same every-row rule as
             # the two columns above, for the same executemany reason.
             row["fairness_threshold"] = bakeoff_run.fairness_threshold_for(card)
+            # Deck composition (operator decision 2026-08-18): which group's
+            # quota this card filled, its rank inside that group, and which
+            # lane slot it took. Same every-row rule and the same
+            # executemany reason as the columns above — a deck whose first
+            # card came from outside a group (a likes-you injection, or a
+            # dark-mode deck) would otherwise strip the group attribution
+            # off every row behind it.
+            _grp = bakeoff_run.group_for(card)
+            row["group_key"]  = _grp[0] if _grp else None
+            row["group_rank"] = _grp[1] if _grp else None
+            row["lane_slot"]  = _grp[2] if _grp else None
+            # The EFFECTIVE #172 intent lens the card's own arm ran under —
+            # the gate that applied, never the request the client sent.
+            row["trade_intent"] = bakeoff_run.trade_intent_for(card)
             # Same executemany rule for policy_version: assign on every row,
             # falling back to whatever the telemetry block already put there
             # (None when suggestion.telemetry is off).
@@ -5352,9 +5366,12 @@ def _run_trade_job(
                 gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
                     trade_service, {**_generate_kwargs, **ov}),
                 league_id = league_id,
-                # Recorded, not inferred: this arrives per-request from the
-                # client and is persisted nowhere else.
+                # Recorded, not inferred: both arrive per-request from the
+                # client and were persisted nowhere else. The trade settings
+                # stay visible to testers during the bake-off (operator
+                # decision 2026-08-18), so both can move mid-test.
                 fairness_threshold = fairness_threshold,
+                trade_intent       = trade_intent,
             )
             final_cards = bakeoff_run.served_deck()
         else:

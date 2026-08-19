@@ -371,6 +371,10 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `candidate_set_size` | int | denormalized `deck_candidate_sets.size` |
 | `assets_json` | JSON text | `{"give": [asset ids], "receive": [asset ids]}` — the first-class asset bundle (`trade_hash` can't be inverted); what the executed-trade matcher compares against `sleeper_trades` |
 | `model_arm` | str | **trade.bakeoff** (both columns below: stamped only while the flag is on; NULL on flag-off / pre-bake-off rows; `docs/plans/three-model-bakeoff/scope-phase3.md`) — the arm that PRODUCED this card: `baseline` \| `current` \| `gen_v2`. **Denormalized** from `policy_version` (which also carries it as `<policy>/bo:<arm>`) so no query has to parse a string. NULL on a served card no arm produced — a likes-you injection — which is the honest answer, not a gap. Written on **every** row of a bake-off deck (never conditionally): `save_deck_impressions` inserts the batch with `executemany`, which compiles the statement from the FIRST row's keys, so a deck led by an unattributed card would otherwise silently drop attribution for the whole deck |
+| `group_key` | str | **trade.bakeoff** (this and the two below: deck composition, operator decision 2026-08-18, `docs/plans/three-model-bakeoff/scope-composition.md`) — which **group**'s quota this card filled: `current_divergence` \| `current_consensus` \| `gen_v2` on the default roster. A group is (arm, basis), quota'd 5 value / 5 outlook, and the groups — not the arms — are what interleave. NULL when no group produced the served deck: a likes-you injection, a dark-mode deck (arm B's own list in arm B's own order, so those cards filled nobody's quota), or a run with `bakeoff_group_size` = 0 |
+| `group_rank` | int | **trade.bakeoff** — 0-based rank inside that group's composed list. Distinct from `arm_rank` (rank in the arm's own FULL ranked list — the generator's opinion) and from `card_index` (deck position). The three answer different questions and all three are recorded; none is derivable from the others |
+| `lane_slot` | str | **trade.bakeoff** — which quota slot the card took: `value` \| `outlook` \| `fill`. `fill` means it took a residual slot its own lane did not earn — only reachable under `bakeoff_fill_policy` = 1, or when the lane axis is undefined for the deck (`groups_json[key].lane_split_active: false`). The flag is what stops an analysis mistaking a value-lane backfill for a card that genuinely filled an outlook quota. The card's own `basis` and `lane` are already on `features_json` (and `lane` on the `archetype` column), so no field is duplicated here |
+| `trade_intent` | str | **trade.bakeoff** — the EFFECTIVE #172 intent lens this card was filtered under: `consolidate` \| `tier_up` \| `tier_down`, or NULL for an unfiltered deck. Like `fairness_threshold` this was persisted **nowhere** before, and like it the requested and effective values genuinely diverge: `_generate_trades_impl` resolves the request to `None` whenever `trades.intent_modes` is off (a client that sent `consolidate` was served an unfiltered deck), the route already drops anything outside the three modes, and `_filter_by_trade_intent` is a POST-generation filter. **Why it exists:** the user-facing trade settings stay visible during the bake-off (operator decision 2026-08-18 — testers are briefed verbally instead), so a tester can switch the intent chip mid-test and shift every group's basis/lane mix, and without this the shift would be invisible in the data. Same every-row write rule as the columns above |
 | `fairness_threshold` | float | **trade.bakeoff** — the consensus fairness bar this card ACTUALLY had to clear. The client sends a per-request value (0.75 fairness toggle on / 0.50 off) which the engine then composes **per card**: a `relaxed` card (#189, reachable on an organic deck via the user's acquire/trade-away preferences) rides `min(requested, relaxed_fairness_threshold)`; a `divergence` card rides `min(…, fairness_floor_divergence)` (both members have real boards, so the consensus check is an extreme-case veto only); a `consensus` card keeps the full bar. NULL on an arm `gen_v2` card — `trade_gen_v2` takes no `fairness_threshold` at all, its bar is the `gen2_*` dual-board ε stack — which is the honest answer, not missing data. **Why it exists:** before this the value was persisted nowhere (`docs/reviews/2026-08-18-trade-logic-archaeology.md`), so a per-arm comparison spanning sessions with different client settings compared arms AND thresholds at once with nothing in the data to separate them. Same every-row write rule as the two columns above |
 | `arm_rank` | int | the card's **0-based rank within its own arm's ranked list** — never its deck position (that is `card_index`). The pair `(model_arm, arm_rank, card_index)` is what separates model quality from deck-position effects: `arm_rank` is what the model thought, `card_index` is where the interleaver put it |
 
@@ -481,30 +485,51 @@ Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestio
 | `deck_job_id` | str | `_trade_jobs` job id — joins to `deck_impressions.deck_job_id` |
 | `user_id` | str | |
 | `league_id` | str | |
-| `arm_order` | JSON text | the team-draft rotation this deck used, e.g. `["current","gen_v2","baseline"]`. Randomised **per deck**, seeded on `league_id` + ISO week — stable for a league within a week (so a re-run reproduces the deck) and rotating between weeks (so no arm is permanently in slot 3) |
+| `arm_order` | JSON text | the team-draft rotation this deck used. Since the 2026-08-18 composition decision the participants are **groups**, e.g. `["gen_v2","current_divergence","current_consensus"]`; with `bakeoff_group_size` = 0 they are arms, e.g. `["current","gen_v2","baseline"]`. The column name is kept because that is what it has always stored. Randomised **per deck**, seeded on `league_id` + ISO week — stable for a league within a week (so a re-run reproduces the deck) and rotating between weeks (so no arm is permanently in slot 3) |
 | `served_arm` | str | `current` during Phase-4 dark validation (three arms generated and logged, ONE served); NULL once interleaved serving is lit |
-| `deck_size` | int | cards in the **interleaved** deck — computed and logged even in dark mode, where it is not what got served |
+| `deck_size` | int | cards in the **interleaved** deck (30 at the default composition: three groups of ten, less any group that served short) — computed and logged even in dark mode, where it is not what got served |
 | `total_ms` | int | wall clock for all three generations (they run sequentially on one thread) |
-| `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job |
+| `groups_json` | JSON text | `{group_key: {arm, basis, quota, filled, short, pool, composed, served, lane_split_active}}` — the deck-composition accounting (operator decision 2026-08-18, `scope-composition.md`). **`short` is why this column exists:** the per-(group, lane) UNDER-FILL, e.g. `{"value": 0, "outlook": 3}`. `window` is only ~19% of live divergence supply, so the divergence groups routinely cannot find five outlook cards, and arm `gen_v2`'s lane mix has never been observed at all — whether an arm can produce outlook-basis divergence ideas *at all* is one of the findings this test is for, and it is invisible if a backfill hides it. `pool` is the supply the group had to draw on (`{value, window, (none)}`); `filled` what it managed (`{value, outlook, fill}`); `composed` / `served` the list length before and after the draft's duplicate suppression. `lane_split_active` is **false** when no card in the pool carried a lane at all — the outlook axis is undefined for that deck (user has no window direction, or `trade.lanes` is off) so the split went inert rather than serving an empty group. `{}` when `bakeoff_group_size` = 0 kills composition. Written in dark mode too: measuring under-fill before Phase 5 lights interleaved serving is exactly what dark validation is for |
+| `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error, fairness_threshold, trade_intent}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job |
 | `config_json` | JSON text | `{"base": <arm `current`'s effective `trade_service` config>, "arm_delta": {arm: {keys that differ}}}`, snapshotted **inside each arm's own context** (so arm A's reflects `MODEL_A_PROFILE`). `model_config` has no `updated_at`, so a knob's change date is otherwise unknowable after the fact and the whole experiment rests on knowing which configuration produced each card. Stored whole rather than hashed — a fingerprint would say the config changed without saying to what. ~5 KB base plus a handful of delta keys; arm C's delta is empty. Deliberately **not** a config-versioning system: one snapshot per run, no history, no dedup |
 | `agreement_json` | JSON text | `{"armA+armB": n}` — served cards both arms proposed (first picker credited, the loser recorded). High `baseline+current` means the 2026-08-16 fixes changed little; `current+gen_v2` is the interesting number for a future blend |
 | `created_at` | str | ISO UTC |
 
 Indexes: `ix_bakeoff_runs_league` on `league_id`; `ix_bakeoff_runs_job` on `deck_job_id`.
 
-**"Was this comparison threshold-clean?"** — the question PLAN.md §6 needs answered before any per-arm rate is quoted. One `GROUP BY`, no archaeology:
+**"Was this comparison clean?"** — the question PLAN.md §6 needs answered before any per-arm rate is quoted. Two gates the client can move under you (the fairness toggle and the #172 intent chip) and both stay visible to testers, so both are checked. One `GROUP BY`, no archaeology:
 
 ```sql
 SELECT model_arm,
+       group_key,
        COUNT(DISTINCT fairness_threshold) AS thresholds,
-       MIN(fairness_threshold), MAX(fairness_threshold),
-       COUNT(*) AS impressions
+       COUNT(DISTINCT trade_intent)       AS intents,
+       COUNT(*)                           AS impressions
 FROM deck_impressions
 WHERE model_arm IS NOT NULL
-GROUP BY model_arm;
+GROUP BY model_arm, group_key;
 ```
 
-More than one distinct threshold within the population being compared means the arms differ in admission bar as well as in model, and the comparison must be sliced by `fairness_threshold` (or restricted to one value) before it means anything. Pinned by `test_bakeoff_serving.py::test_threshold_clean_query_answers_itself_from_the_table`.
+More than one distinct threshold — or intent — within the population being compared means the arms differ in admission bar as well as in model, and the comparison must be sliced by that column (or restricted to one value) before it means anything. Pinned by `test_bakeoff_serving.py::test_comparison_clean_query_answers_itself_from_the_table`, which executes exactly this query so it cannot rot into documentation-only.
+
+**Grouping by `(model_arm, group_key)`, not by `model_arm` alone, is deliberate.** The three groups are not three arms:
+
+- **Groups 1 vs 3 is the head-to-head.** `current_divergence` vs `gen_v2` — both divergence, both ten cards, both quota'd 5 value / 5 outlook, interleaved together in one rotation with position balanced across decks. This is the arm comparison. Pair within user; slice by threshold and intent.
+- **Group 2 is a consensus reference slice with no arm-C counterpart.** Arm `gen_v2` is divergence-only *by construction*, so no consensus arm-C card exists or ever will. `current_consensus` says how consensus supply performs against divergence supply **within arm `current`**, and it keeps the deck realistic. Reading `current` vs `gen_v2` across all three groups silently compares arm `current`'s consensus cards against arm `gen_v2`'s divergence cards and blames the difference on the model.
+
+**Per-(group, lane) under-fill** — the other first-class read, from `groups_json`:
+
+```sql
+SELECT json_extract(g.value, '$.arm')             AS arm,
+       g.key                                      AS group_key,
+       AVG(json_extract(g.value, '$.short.value'))   AS value_slots_missed,
+       AVG(json_extract(g.value, '$.short.outlook')) AS outlook_slots_missed,
+       COUNT(*)                                   AS runs
+FROM bakeoff_runs r, json_each(r.groups_json) g
+GROUP BY g.key;
+```
+
+(SQLite form; on Postgres use `jsonb_each` / `->>`.) A group that never fills its outlook quota is a finding about that arm's supply, not a bug — which is precisely why the default fill policy leaves the hole rather than topping it up.
 
 ---
 

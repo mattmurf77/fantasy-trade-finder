@@ -552,6 +552,43 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #     (trade_gen_v2 takes no fairness_threshold — its bar is the gen2_*
     #     stack), which is the honest answer, not missing data.
     Column("fairness_threshold", Float),
+    #   group_key / group_rank / lane_slot: the deck-composition half of the
+    #     attribution (operator decision 2026-08-18, scope block
+    #     docs/plans/three-model-bakeoff/scope-composition.md). The served
+    #     deck is built from GROUPS — (arm, basis) units quota'd 5 value /
+    #     5 outlook — and the groups, not the arms, are what interleave.
+    #     group_key: 'current_divergence' | 'current_consensus' | 'gen_v2'
+    #       on the default roster; which group's quota this card filled.
+    #     group_rank: 0-based rank inside that group's composed list. Distinct
+    #       from arm_rank (rank in the arm's own FULL ranked list) and from
+    #       card_index (deck position) — the three answer different questions
+    #       and all three are recorded.
+    #     lane_slot: 'value' | 'outlook' | 'fill'. 'fill' means the card took
+    #       a residual slot its own lane did not earn (only reachable under
+    #       model_config bakeoff_fill_policy = 1, or when the lane axis is
+    #       undefined for the deck), so no analysis can mistake a backfill for
+    #       a card that genuinely filled an outlook quota.
+    #     All three NULL on a card no group produced — a likes-you injection,
+    #     a dark-mode deck, or a run with composition killed.
+    #     The card's own `basis` and `lane` are already on features_json (and
+    #     `lane` additionally on the `archetype` column), so the arm / basis /
+    #     lane / group / rank slice PLAN.md §6 needs is complete without
+    #     duplicating either field here.
+    Column("group_key",          String),
+    Column("group_rank",         Integer),
+    Column("lane_slot",          String),
+    #   trade_intent: the EFFECTIVE #172 intent lens this card was filtered
+    #     under — 'consolidate' | 'tier_up' | 'tier_down', or NULL for an
+    #     unfiltered deck. Like fairness_threshold this was persisted NOWHERE
+    #     before, and like it the requested and effective values genuinely
+    #     diverge: `_generate_trades_impl` resolves the request to None
+    #     whenever `trades.intent_modes` is off, and the route already drops
+    #     values outside the three modes. The user-facing trade settings stay
+    #     visible during the bake-off (operator decision 2026-08-18 — testers
+    #     are briefed verbally), so a tester CAN switch the intent chip
+    #     mid-test; the resulting shift in each group's basis/lane mix would
+    #     otherwise be invisible in the data.
+    Column("trade_intent",       String),
 )
 
 Index(
@@ -643,6 +680,17 @@ Index(
 #                     an error). `error` is non-NULL only when an arm raised.
 #   agreement_json  — {"armA+armB": n} counts of served cards both arms
 #                     proposed (first picker credited; the duplicate ledger).
+#                     Per ARM, not per group: groups 1 and 2 are the same arm
+#                     on disjoint bases and can never collide.
+#   groups_json     — {group_key: {arm, basis, quota, filled, short, pool,
+#                     composed, served, lane_split_active}}. `short` is the
+#                     per-(group, lane) UNDER-FILL and is the reason this
+#                     column exists: `window` is ~19% of live divergence
+#                     supply, so the divergence groups are expected to miss
+#                     their outlook quota, and arm gen_v2's lane mix has never
+#                     been observed. Recording the hole is the finding;
+#                     backfilling it silently would erase it. `{}` when
+#                     model_config bakeoff_group_size = 0 kills composition.
 bakeoff_runs_table = Table("bakeoff_runs", metadata,
     Column("run_id",         String,  primary_key=True),   # uuid4 hex
     Column("deck_job_id",    String,  nullable=False),     # _trade_jobs job_id
@@ -654,6 +702,7 @@ bakeoff_runs_table = Table("bakeoff_runs", metadata,
     Column("total_ms",       Integer),
     Column("arms_json",      Text,    nullable=False),
     Column("agreement_json", Text),
+    Column("groups_json",    Text),
     #   config_json — {"base": <arm current's effective trade_service config>,
     #     "arm_delta": {arm: {changed keys}}}. `model_config` has no
     #     `updated_at`, so a knob's change date is otherwise unknowable after
@@ -2489,6 +2538,13 @@ def _migrate_db() -> None:
         ("deck_impressions",   "model_arm",             "VARCHAR"),
         ("deck_impressions",   "arm_rank",              "INTEGER"),
         ("deck_impressions",   "fairness_threshold",    "FLOAT"),
+        # trade.bakeoff deck composition — group attribution + the effective
+        # #172 intent lens. NULL on all pre-composition rows; no backfill.
+        ("deck_impressions",   "group_key",             "VARCHAR"),
+        ("deck_impressions",   "group_rank",            "INTEGER"),
+        ("deck_impressions",   "lane_slot",             "VARCHAR"),
+        ("deck_impressions",   "trade_intent",          "VARCHAR"),
+        ("bakeoff_runs",       "groups_json",           "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the

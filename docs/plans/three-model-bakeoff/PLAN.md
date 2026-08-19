@@ -147,6 +147,21 @@ a run must be discarded rather than caveated.
 
 ## 4. Interleaving policy
 
+> **Amended 2026-08-18 by operator decision — read
+> [scope-composition.md](scope-composition.md) with this section.** The served
+> deck is no longer drafted per ARM. It is composed of **three groups of ten**
+> — arm `current`/`divergence`, arm `current`/`consensus`, arm `gen_v2` — each
+> split five *value* / five *outlook* on the existing `basis` and `lane`
+> fields, and the **groups** are the team-draft participants (arm `current`
+> holds two of them, so a per-arm rotation would leave arm `gen_v2` in the
+> deck's tail — measured: mean position 24.5 of 30 vs 14.5). Arm `baseline`
+> is out of the roster by default, by configuration; §1's pinned profile and
+> its golden stay live and still pass. Everything below about the seeded
+> per-deck rotation, first-picker credit and forfeits still holds — it now
+> applies to groups. A lane quota a group cannot fill is left short and
+> recorded, never silently backfilled.
+
+
 Round-robin naively (A, B, C, A, B, C…) **confounds model with deck position** — the
 research is explicit that acceptance falls ~27% across a session from position alone, so a
 model permanently in slot 3 looks worse than it is.
