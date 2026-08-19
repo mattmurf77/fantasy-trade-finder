@@ -51,8 +51,6 @@ interface TileSpec {
   key: Layer1Code;
   name: string;
   sub: string;
-  /** Neither: free text only — no option list. */
-  freeOnly?: boolean;
   options: OptionSpec[];
   testID: string;
   placeholder: string;
@@ -84,14 +82,27 @@ const TILES: readonly TileSpec[] = [
       { code: 'fit_other', label: 'Other', free: true, testID: 'trades.pass-reason.l2.fit_other' },
     ],
   },
+  // "Neither" was free-text-ONLY until 2026-08-19. It was the largest bucket
+  // of the first production burst (9 of 19 passes, 47%), and its free text was
+  // overwhelmingly one reason: the tester did not want to trade a SPECIFIC
+  // PLAYER — "No need to move kelce", "Don't like Troy". That is neither a
+  // price judgement nor a roster-construction one, so it had nowhere to land.
+  // Two codes rather than one because the free text ran in both directions
+  // and each implies a different engine fix (SPEC §2 amendment, D-080):
+  // `keep` = stop building packages that send MY player; `avoid` = stop
+  // sourcing THEIR player for me. Order mirrors the Value tile — my side
+  // first, then theirs — and "Other" stays last, as on every tile.
   {
     key: 'other',
     name: 'Neither',
     sub: 'tell us',
-    freeOnly: true,
     testID: 'trades.pass-reason.other',
     placeholder: 'What was wrong with this trade?',
-    options: [],
+    options: [
+      { code: 'other_player_keep', label: "Won't trade one of my players", testID: 'trades.pass-reason.l2.other_player_keep' },
+      { code: 'other_player_avoid', label: "Don't want one of their players", testID: 'trades.pass-reason.l2.other_player_avoid' },
+      { code: 'other_text', label: 'Other', free: true, testID: 'trades.pass-reason.l2.other_text' },
+    ],
   },
 ];
 
@@ -212,7 +223,9 @@ export default function DeclineReasonPanel({
   function tapSend() {
     if (committedRef.current || !tile) return;
     committedRef.current = true;
-    // Neither has no option row, so its detail is the terminal free-text code.
+    // The composer only renders under an open "Other" row, so `openText` is
+    // always set here; the fallback is the type-safe backstop and names the
+    // terminal free-text code that the pre-2026-08-19 "Neither" flow wrote.
     const detail: Layer2Code = openText ?? 'other_text';
     onLayer2Send(tile.key, detail, text.trim());
   }
@@ -291,34 +304,32 @@ export default function DeclineReasonPanel({
             pointerEvents="none"
           />
           <Text scale="dense" style={styles.l2Label}>
-            {tile.freeOnly ? 'IN YOUR WORDS' : 'WHICH ONE?'}
+            WHICH ONE?
           </Text>
-          {tile.freeOnly
-            ? composer(tile.placeholder)
-            : tile.options.map((o) => {
-                const sel = openText === o.code;
-                return (
-                  <React.Fragment key={o.code}>
-                    <Pressable
-                      testID={o.testID}
-                      onPress={() => tapOption(o)}
-                      accessibilityRole="button"
-                      accessibilityLabel={o.label}
-                      accessibilityState={{ selected: sel }}
-                      style={({ pressed }) => [
-                        styles.option,
-                        (pressed || sel) && styles.optionSel,
-                      ]}
-                    >
-                      <View style={[styles.dot, sel && styles.dotSel]} />
-                      <Text scale="body" style={styles.optionLabel}>
-                        {o.label}
-                      </Text>
-                    </Pressable>
-                    {sel ? composer(tile.placeholder) : null}
-                  </React.Fragment>
-                );
-              })}
+          {tile.options.map((o) => {
+            const sel = openText === o.code;
+            return (
+              <React.Fragment key={o.code}>
+                <Pressable
+                  testID={o.testID}
+                  onPress={() => tapOption(o)}
+                  accessibilityRole="button"
+                  accessibilityLabel={o.label}
+                  accessibilityState={{ selected: sel }}
+                  style={({ pressed }) => [
+                    styles.option,
+                    (pressed || sel) && styles.optionSel,
+                  ]}
+                >
+                  <View style={[styles.dot, sel && styles.dotSel]} />
+                  <Text scale="body" style={styles.optionLabel}>
+                    {o.label}
+                  </Text>
+                </Pressable>
+                {sel ? composer(tile.placeholder) : null}
+              </React.Fragment>
+            );
+          })}
         </View>
       ) : null}
     </View>

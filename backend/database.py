@@ -876,9 +876,14 @@ archetype_auditions_table = Table("archetype_auditions", metadata,
 #                  layer-2-first write derives it from the detail prefix.
 #   detail         layer-2 code — value_giving | value_getting | value_other |
 #                  fit_outlook | fit_new_weakness | fit_duplicate | fit_other |
-#                  other_text. NULL = the user stopped at layer 1, which is
-#                  a first-class answer (SPEC §6: layer-1-without-layer-2 must
-#                  be directly measurable).
+#                  other_player_keep | other_player_avoid | other_text.
+#                  NULL = the user stopped at layer 1, which is a first-class
+#                  answer (SPEC §6: layer-1-without-layer-2 must be directly
+#                  measurable). The two `other_player_*` codes were added
+#                  2026-08-19 (SPEC §2 amendment): the "Neither" bucket was
+#                  47% of the first production burst and its free text was
+#                  overwhelmingly ONE reason — player-level preference — so it
+#                  gained structured options and stopped being a black box.
 #   free_text      the user's own words. STORED HERE AND NOWHERE ELSE — it
 #                  is never an analytics property (SPEC §3.4), so no free text
 #                  ever reaches user_events.props.
@@ -907,7 +912,7 @@ trade_pass_reasons_table = Table("trade_pass_reasons", metadata,
     Column("trade_id",      String),
     Column("key_source",    String),                     # impression | local
     Column("reason",        String),                     # value | fit | other
-    Column("detail",        String),                     # 8 layer-2 codes; NULL = layer-1 only
+    Column("detail",        String),                     # 10 layer-2 codes; NULL = layer-1 only
     Column("free_text",     Text),                       # never an analytics prop
     Column("switched_from", String),                     # prior layer-1 reason, or NULL
     Column("elo_signal_at", String),                     # ISO UTC, or NULL = suppressed
@@ -5448,13 +5453,35 @@ def save_deck_outcome(
 #: Layer-1 codes — the three tiles. Closed set; do not improvise labels.
 PASS_REASON_LAYER1: tuple[str, ...] = ("value", "fit", "other")
 
-#: layer-1 code → its legal layer-2 codes (SPEC §2, exact). `other` has no
-#: option list: "Neither" opens the free-text box directly and its only
-#: layer-2 code is `other_text`.
+#: layer-1 code → its legal layer-2 codes (SPEC §2, exact).
+#:
+#: `other` ("Neither") carried NO option list until 2026-08-19 — it opened the
+#: free-text box directly and its only code was `other_text`. The first
+#: production burst made that untenable: "Neither" was the single largest
+#: bucket (9 of 19 passes, 47%), all free text, and reading it showed one
+#: reason dominating — the tester did not want to trade a SPECIFIC PLAYER.
+#: That is neither a price judgement nor a roster-construction judgement, so
+#: it had nowhere structured to land.
+#:
+#: It is TWO codes, not one, because the free text points in two directions
+#: with two different engine fixes behind them (D-080):
+#:   other_player_keep   "won't trade one of my players"   → a give-side
+#:                       keep-list signal; the package builder should stop
+#:                       sourcing that player OUT of this user's roster.
+#:   other_player_avoid  "don't want one of their players" → a receive-side
+#:                       avoid-list signal; the candidate generator should
+#:                       stop offering that player TO this user.
+#: Collapsing them would force reading free text to route the fix, which is
+#: the exact failure that made "Neither" a black box in the first place.
+#:
+#: `other_text` keeps its meaning and its rows: free text under "Neither".
+#: Its POPULATION changed on 2026-08-19 — before, it was every Neither
+#: answer; after, it is the Neither answers the two player codes did not
+#: absorb. Cohort any before/after comparison on that date.
 PASS_REASON_LAYER2: dict[str, tuple[str, ...]] = {
     "value": ("value_giving", "value_getting", "value_other"),
     "fit":   ("fit_outlook", "fit_new_weakness", "fit_duplicate", "fit_other"),
-    "other": ("other_text",),
+    "other": ("other_player_keep", "other_player_avoid", "other_text"),
 }
 
 #: The layer-2 code → layer-1 code inverse, so a layer-2 write that arrives

@@ -1136,7 +1136,17 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   reason        ∈ value | fit | other                     (3 values)
     #   detail        ∈ value_giving | value_getting | value_other |
     #                   fit_outlook | fit_new_weakness | fit_duplicate |
-    #                   fit_other | other_text                  (8 values)
+    #                   fit_other | other_player_keep |
+    #                   other_player_avoid | other_text        (10 values)
+    #                 The two `other_player_*` codes joined the enum on
+    #                 2026-08-19 (SPEC §2 amendment, D-080) when the
+    #                 "Neither" tile gained structured options. NO NEW EVENT
+    #                 and no new property — this widens the `detail` enum of
+    #                 an event that already exists, so the emitter in
+    #                 TradesScreen is unchanged. `detail` is registered here
+    #                 as a prop NAME; the enum lives in this comment and in
+    #                 database.PASS_REASON_LAYER2, which is what the route
+    #                 validates against.
     #   switched_from ∈ the three `reason` values, or the LITERAL string
     #                   'none' when the user did not change tiles. 'none'
     #                   is a real value, not a placeholder: absence would be

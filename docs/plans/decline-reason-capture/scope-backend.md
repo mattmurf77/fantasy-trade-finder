@@ -28,7 +28,7 @@
   | `trade_pass_layer1` | `reason`, `switched_from`, `impression_id`, `trade_id`, `ms_since_render`, `platform` | the layer-1 tile tap — **carries the disposition**; there is no separate pass event, because there is no ✕ | mobile |
   | `trade_pass_layer2` | `reason`, `detail`, `has_free_text`, `switched_from`, `impression_id`, `trade_id`, `ms_since_render`, `platform` | the layer-2 option tap, or the free-text send | mobile |
 
-  Closed enums: `reason` ∈ `value`\|`fit`\|`other`; `detail` ∈ the 8 codes of SPEC §2; `switched_from` ∈ the three reasons or the literal `none`.
+  Closed enums: `reason` ∈ `value`\|`fit`\|`other`; `detail` ∈ the codes of SPEC §2 (8 at build time; 10 since the 2026-08-19 amendment); `switched_from` ∈ the three reasons or the literal `none`.
 
   **Both are CLIENT-fired, not server-fired**, and the split is deliberate. The durable truth of a reasoned pass is the `trade_pass_reasons` row plus the `deck_outcomes` `action='pass'` — neither forgeable, neither dependent on the allowlist (the `deck_card_viewed` precedent). These two names are the client-side receipt: they carry `ms_since_render`, which only the emitter knows. The server keeps firing `match_swiped` on the pass exactly as the ✕ did, so no existing funnel moves and no disposition double-counts.
 
@@ -105,7 +105,7 @@ On top of that, `impression_id` arrives in a client-supplied body. The 2026-08-1
   - **the `impression_id` fallback** — missing, unknown, foreign, and `deck.signal_v2`-off, each recorded under the surrogate with `key_source='local'`; `key_source` never rewritten,
   - **the mobile contract** — the sibling branch's exact payload accepted verbatim, the `text` alias, and a client-sent `switched_from` ignored,
   - **validation** — 6 parametrized bad payloads are 400s that write nothing; free text capped; the full SPEC §2 taxonomy accepted and nothing invented,
-  - **the Elo matrix, per code, knob ON and OFF** (8 codes × 2) plus layer-1-only under all three reasons, once-only across retries, no re-write after switching away, and the rule tested as a pure function,
+  - **the Elo matrix, per code, knob ON and OFF** (8 codes × 2 at build time, 10 × 2 since 2026-08-19) plus layer-1-only under all three reasons, once-only across retries, no re-write after switching away, and the rule tested as a pure function,
   - **analytics** — both names registered client-side and absent from `SERVER_FIRED_EVENTS`, props exactly the spec, no free-text prop anywhere in the family, and the route proven to emit no event containing the user's words.
   - Flag fixtures `release.json` / `onboarding-v2.json` / `profiles-on.json` updated so `test_seed_ui_test_db`'s mirror assertions stay exact; `all-on.json` gets the key ON so the mobile Maestro flows can execute (no parity test covers `all-on.json`, `release-300.json` or `release-espn-send-off.json` — the latter two are deliberately left alone, since a key absent from them reads false, which is what those pinned flows want).
 
@@ -140,7 +140,7 @@ Today every pass fires `record_trade_signal(winner=give_ids, loser=receive_ids, 
 |---|---|---|
 | `value_giving` | **keep** | the user did say their side is worth more |
 | `value_getting` | **suppress** | the user said the opposite; writing the usual signal inverts it |
-| `value_other`, all `fit_*`, `other_text`, and layer-1-only `value`/`fit`/`other` | **suppress** | no valuation claim was made |
+| `value_other`, all `fit_*`, all `other_*` (incl. the `other_player_*` pair added 2026-08-19), and layer-1-only `value`/`fit`/`other` | **suppress** | no valuation claim was made |
 
 Implementation notes:
 

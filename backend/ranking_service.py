@@ -215,6 +215,14 @@ def _parse_ts(raw: str | None) -> Optional[datetime]:
 #   fit_*, other*, and layer-1-only     -> SUPPRESS. No value claim was
 #   value / fit / other                            made at all.
 #
+# The `other_player_*` pair added 2026-08-19 is the near-miss worth naming:
+# `other_player_keep` ("won't trade one of my players") LOOKS adjacent to
+# `value_giving`, but it is attachment, not a market-value assertion — the
+# user is saying "not this player, at any price", which is the opposite of a
+# claim about price. Both player codes suppress, and they do so for free:
+# PASS_REASON_ELO_KEEP is an allow-list, so a new code suppresses unless
+# somebody deliberately adds it here.
+#
 # This is the only ranking-math change in the feature and it is knob-gated
 # both ways: `pass_reason_elo_suppression` = 0 restores today's behavior for
 # every code without a deploy.

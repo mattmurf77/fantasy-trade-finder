@@ -57,6 +57,30 @@ counted. Re-run that query after merge; the expected post-fix count is **0**, st
 **NOT run:** the manual TestFlight checklist (§3 of the scope block) — it needs the operator on a build.
 Nothing here is runtime evidence from a device.
 
+## 2026-08-19 — Decline reasons: player preference under "Neither" (branch only, NOT merged)
+
+**Branch:** `feat/decline-reason-player-pref`, from `origin/main` `02e27dd`. **Not shipped** — not pushed, not merged. Flag `feedback.decline_reasons` unchanged (already on for all users).
+Scope block: [docs/plans/decline-reason-capture/scope-player-preference.md](../docs/plans/decline-reason-capture/scope-player-preference.md). Decision: [D-079](DECISIONS.md#d-079). Contract: [SPEC §2a](../docs/plans/decline-reason-capture/SPEC.md).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` (before) | **3404 passed, 1 skipped** — baseline at `02e27dd` |
+| `pytest backend/tests -q` (after) | **3417 passed, 1 skipped, 0 failed** — +13 tests, zero regressions |
+| `npx tsc --noEmit` (mobile) | **clean**, exit 0 |
+| `mobile/tests/check-*.js` | **56 suites, 0 failing** (the CI `mobile-typecheck` job globs all of them) |
+| `mobile/scripts/testid-lint.sh` | **testid-lint OK** |
+| Maestro / simulator | n/a — retired by D-056. The two `mobile/.maestro/flows/decline-reasons-*.yaml` are historical artifacts and were **not** run or extended |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| Manual TestFlight checklist | **written, NOT run** — 8 steps in scope block §3b, awaiting the operator |
+
+**New tests: 13.** Nine `test_player_preference_*` in `backend/tests/test_decline_reasons.py` (both codes parent to `other` and not to `value`; a foreign layer-1 is a `detail_reason_mismatch` 400 that writes nothing; a layer-2-first write derives `reason='other'` from the prefix; the two directions plus the residual free text land as three distinguishable stored answers), plus four from the `_ELO_MATRIX` parametrisation growing 8 codes → 10 across both knob positions. The two existing enumerations — `test_every_specced_code_is_accepted` and `test_pass_reason_writes_elo_rule_is_pure` — were extended rather than left to pass vacuously.
+
+**Structural suite extended, not just kept green.** `mobile/tests/check-decline-reasons.js` gains a §6 that reads the `TILES` table through the **TypeScript AST** rather than by regex, so a re-order or re-wrap of the source cannot fake a pass. It fails on either of the two silent reversions: reverting "Neither" to free-text-only (the `freeOnly` shortcut is asserted gone), or collapsing the two player codes into one (they are asserted as a pair, each committing on tap rather than opening a text box, each carrying `trades.pass-reason.l2.<code>`, with `other_text` still free and still last).
+
+**A check that had never once executed now does.** The suite's "transcribed codes still match SPEC §2" cross-check was guarded on `fs.existsSync(SPEC.md)` — and **SPEC.md was untracked**, present only in the main checkout's working tree and committed to no branch in the repo. The guard had always taken its SKIP branch, so the transcription had never actually been compared to the spec. SPEC.md is committed on this branch and the cross-check runs and passes. Committing it also surfaced a real spec/implementation divergence: SPEC §2 wrote the free-text step as `value_other` → a second `value_other_text` code, which does not exist and which the route 400s as `invalid_detail`. Corrected in the same amendment.
+
+**What was NOT verified here:** runtime behaviour on a device. Under D-056 that is the manual TestFlight checklist and nothing else — it is written but unrun, so no runtime claim is made about this change. The code-walk proof in scope block §3a is a file:line trace, not evidence of execution.
+
 ---
 ## 2026-08-18e — Bake-off deck composition (three groups of ten; arm A out of the roster)
 

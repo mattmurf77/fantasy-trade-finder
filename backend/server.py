@@ -11625,8 +11625,12 @@ def trade_pass_reason():
         if not isinstance(text_raw, str):
             return jsonify({"error": "invalid_text", "field": "free_text"}), 400
         free_text = text_raw.strip()[:PASS_REASON_TEXT_MAX] or None
-    # Free text under "Neither" carries the taxonomy's own layer-2 code, so
-    # the row reads the same as every other free-text answer.
+    # Free text under "Neither" with no detail carries the taxonomy's own
+    # layer-2 code, so the row reads the same as every other free-text answer.
+    # Since 2026-08-19 the "Neither" tile has its own options and the client
+    # always banks `other_text` before opening the box, so this is now a
+    # backstop for older clients and out-of-order writes rather than the
+    # normal path — it must stay for exactly that reason.
     if free_text is not None and detail is None and reason == "other":
         detail = "other_text"
 
