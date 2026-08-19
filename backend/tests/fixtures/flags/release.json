@@ -143,6 +143,7 @@
   "account.data_export": true,
   "account.sleeper_disconnect": true,
   "account.settings_v2": true,
+  "account.settings_hub": false,
   "profiles.user_toggle": false,
   "auth.persistent_sessions": true,
   "league.rookie_board_entry": true,

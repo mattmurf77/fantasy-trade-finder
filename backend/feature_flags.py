@@ -327,6 +327,12 @@ FLAG_KEYS: tuple[str, ...] = (
     "account.data_export",       # 06-02: GET /api/account/export JSON archive
     "account.sleeper_disconnect",
     "account.settings_v2",
+    # Settings hub IA — a top-level Settings hub page plus second-level
+    # pages (Leagues, Ranking, Trade values, Notifications, Account & data,
+    # Help & about), replacing the single flat modal list. Default OFF.
+    # Graduation: one operator TestFlight pass. Rollback is PARTIAL — the
+    # sheet->page flip is on the route, outside this flag (D-089).
+    "account.settings_hub",
     "profiles.user_toggle",
     "auth.persistent_sessions",
     "league.rookie_board_entry",

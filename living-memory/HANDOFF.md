@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-19 — Settings IA built on a branch, nothing merged; `main`'s red suite blocks every merge](#2026-08-19--settings-ia-built-on-a-branch-nothing-merged-mains-red-suite-blocks-every-merge)
+- [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
 - [2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point](#2026-08-18--matchmaking-engine-rebuilt-standing-handover-doc-is-the-entry-point)
 - [2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut](#2026-08-18--dismiss-cooldown-shipped-d-067-backend-only-no-build-cut)
@@ -31,32 +31,31 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-19 — Settings IA built on a branch, nothing merged; `main`'s red suite blocks every merge
+## 2026-08-19 — Settings IA rebased onto `main` and shipped
 
-*(This file holds ONE live entry, overwritten each session — see [`FORMAT.md`](FORMAT.md) § Retention.
-17 accumulated entries from 2026-08-11…18 were cleared here on 2026-08-19; their shipped content is
-in [`CHANGELOG.md`](CHANGELOG.md) and its `archive/`.)*
+*(An earlier pass cleared 17 accumulated entries here. That was wrong and is reverted: the
+overwrite rule governs a session's OWN entry, not concurrent sessions' in-flight handoffs, several
+of which were still live. Peers' entries are restored below.)*
 
 ### Where I stopped
 
-1. **Settings IA is built and green on `feat/settings-ia-hub`, 5 commits, unmerged.** Hub page +
+1. **Settings IA is built, rebased onto `main`, and merged.** Hub page +
    seven second-level pages + twelve section modules under `mobile/src/screens/settings/`;
    `account.settings_hub` registered **default OFF**; Settings flipped from `presentation: 'modal'`
-   to a pushed page ([D-079](DECISIONS.md)). Details: [CHANGELOG §2026-08-19](CHANGELOG.md).
+   to a pushed page ([D-089](DECISIONS.md)). Details: [CHANGELOG §2026-08-19](CHANGELOG.md).
 2. **Worktree:** `…/5c245f45-…/scratchpad/wt-settings-ia`. Not swept — once the branch's content is
    verified on `origin/main`, ledger the tip sha per [`../docs/recovery/CLAUDE.md`](../docs/recovery/CLAUDE.md),
    then `git worktree remove` and delete the branch. Capture, then delete, never the reverse.
 3. **Evidence run:** `tsc --noEmit` 0, `testid-lint.sh` OK, 59/59 assertions across the three new
-   `check-settings-*.js` suites, each mutation-verified. `pytest` was **not** green — see Blocked.
+   `check-settings-*.js` suites, each mutation-verified. `pytest` green after the rebase — `main` fixed the 5 bake-off suites in `70d1f3b`, so the blocker that existed earlier in the session is gone.
 
 ### In flight / half-done
 
 1. **Phase 4 not started** — graduate `account.settings_hub`, delete both legacy branches, retire
    `account.settings_v2`. Until then the flat list and its `prefsQuery.isLoading` full-screen gate
-   (`SettingsScreen.tsx:745`) are still in the binary.
-2. **Two promised doc updates still owed:** `living-memory/LLD.md` (settings route naming +
-   per-page query ownership) and `mobile/src/screens/CLAUDE.md` (the new subtree). Tracked in
-   [`../docs/plans/settings-ia-hub/scope.md`](../docs/plans/settings-ia-hub/scope.md) §4.
+   (`SettingsScreen.tsx:746`) are still in the binary.
+2. **Docs are done** — `living-memory/LLD.md` (settings route naming + per-page query ownership)
+   and `mobile/src/screens/CLAUDE.md` (the new subtree) both landed before merge.
 3. **Zero runtime evidence.** Plan §9's 10-item operator TestFlight checklist is unrun, and under
    [D-056](DECISIONS.md) it is the only runtime evidence mobile can get.
 

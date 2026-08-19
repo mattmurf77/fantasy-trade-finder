@@ -506,7 +506,7 @@
 | D-065 | Calculator Pick Rows Carry Tier Badges at Discounted Value (Supersedes #263) | 2026-08-16 |
 | D-067 | A Dismiss Is a Hard 14-Day Exclusion, Not a Score Demotion; Accuracy Over Volume | 2026-08-17 |
 | D-068 | A Zero-Divergence Asset May Not Buy Ranking Score; One Player May Not Own a Deck | 2026-08-18 |
-| D-079 | Settings Is a Pushed Page, Not a Modal; #130's ✕ Is Removed Rather Than Reverted | 2026-08-19 |
+| D-089 | Settings Is a Pushed Page, Not a Modal; #130's ✕ Is Removed Rather Than Reverted | 2026-08-19 |
 
 ---
 
