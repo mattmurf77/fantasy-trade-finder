@@ -18,6 +18,7 @@ import DeclineReasonPanel, {
 } from './DeclineReasonPanel';
 import { LockGlyph } from './PlayerContextMenu';
 import { useFlag } from '../state/useFeatureFlags';
+import { consensusNote } from '../utils/consensusNote';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
 
 interface Props {
@@ -163,6 +164,10 @@ function TradeCardComp({
   // v2: consensus cards are fair-value ideas vs an opponent who hasn't
   // ranked yet (no real disagreement signal behind them).
   const isConsensus = data.basis === 'consensus';
+  // …and whether this particular one clears the app's own balanced bar
+  // (0.75). Computed unconditionally — it is a pure call on a number — and
+  // read only inside the `isConsensus` block below.
+  const note = consensusNote(data.fairness);
   // v2: the counterparty already liked the mirror of this trade.
   const likesYou = data.likesYou === true;
   // v2 sweetener — resolve the flagged player from whichever side it's
@@ -445,12 +450,23 @@ function TradeCardComp({
 
       {/* Consensus basis — subtle label so users know this card isn't
           built on real ranking disagreement. No tooltip pattern in the
-          app, so the hint renders inline as a muted sub-line. */}
+          app, so the hint renders inline as a muted sub-line.
+
+          The sub-line USED to assert "this is a balanced trade by consensus
+          value" on `isConsensus` alone, with no fairness check — and the
+          live generation floor is 0.50, not the app's own 0.75 bar, so 805
+          of 7,293 served consensus cards said "balanced" while sitting below
+          it. `consensusNote` now derives the copy from `data.fairness`:
+          below the bar the line TRUNCATES to its true half and stops. No
+          replacement wording (operator, 2026-08-19) — the TradeValueBar
+          below already shows direction and magnitude via favors/gap, so
+          prose about value would restate it. utils/consensusNote.ts carries
+          the reasoning; check-consensus-balance-claim.js pins it. */}
       {isConsensus && (
-        <View style={styles.consensusNote}>
-          <Text style={type.label}>Fair-value idea</Text>
-          <Text style={type.bodySm}>
-            This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.
+        <View style={styles.consensusNote} testID="trade-card.consensus-note">
+          <Text style={type.label}>{note.label}</Text>
+          <Text style={type.bodySm} testID="trade-card.consensus-note.body">
+            {note.body}
           </Text>
         </View>
       )}
