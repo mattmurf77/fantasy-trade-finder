@@ -384,6 +384,17 @@ FLAG_KEYS: tuple[str, ...] = (
     # Rung ids, pool membership and board Elo are untouched. Off ⇒ today's
     # year-less "Early 1st Round Pick" labels, byte-identical.
     "picks.rank_year_labels",
+    # D-090 — picks.slot_labels: label an OWNED pick by the slot it actually
+    # occupies once its league's CURRENT-season draft order is known, so a
+    # card reads "2026 1.08" instead of "2026 1st". Display only: no price,
+    # no seed, no tier band and no stored `pool_value` moves in either state
+    # (the slot is not a pricing input — see the D-090 note in
+    # backend/pick_slots.py and Q-023). Resolution is season-stamped, so a
+    # future year keeps its round ordinal, and it fails soft — an unset,
+    # unknown or unsupported order yields the generic label. Off ⇒ every
+    # owned-pick label is the pre-D-090 string, BYTE-IDENTICAL, at all five
+    # sites that build one.
+    "picks.slot_labels",
     # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
     # market.trade_capture: capture executed Sleeper league trades (public
     # v1 /league/<id>/transactions/<week>, type=trade + complete) into the

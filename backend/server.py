@@ -147,6 +147,8 @@ from .database import (
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
     load_pick_assignment_settings, save_pick_assignment_settings,
+    # D-090 — resolved current-season draft order, for real-slot pick labels
+    load_draft_slot_order, save_draft_slot_order,
     # draft-extensions W3 M-C — trade-math activation
     has_assigned_picks,
     PICK_SOURCE_USER, PICK_SOURCE_PLATFORM, PICK_SOURCE_ANY,
@@ -232,6 +234,7 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
+from . import pick_slots                          # D-090 — real-slot pick labels
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -1075,6 +1078,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     # is on (operator decision 4, residual risk accepted knowingly). Every
     # such row carries its provenance, and so does a combo containing one.
     tradeable = _asserted_picks_tradeable()
+    slot_order = _league_slot_order(league_id)          # D-090, once per call
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
@@ -1083,7 +1087,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
             continue
         assets.append({
             "id":       pid,
-            "name":     _owned_pick_label(pk),
+            "name":     _owned_pick_label(pk, slot_order),
             "position": "PICK",
             "team":     None,
             "value":    round(val, 1),
@@ -9874,7 +9878,8 @@ def get_league_picks():
                 return None
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
-        all_picks = [{**p, "label": _owned_pick_label(p),
+        slot_order = _league_slot_order(league_id)      # D-090, once per request
+        all_picks = [{**p, "label": _owned_pick_label(p, slot_order),
                       "tier": _pick_tier(p),
                       **_pick_wire_source(p, tradeable)} for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
@@ -9888,12 +9893,32 @@ def get_league_picks():
         return jsonify({"error": "internal_error"}), 500
 
 
-def _owned_pick_label(p: dict) -> str:
+def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
     """Display label for an owned pick, e.g. "2027 1st" or
-    "2026 2nd (from Jared)" when the pick was acquired via trade."""
+    "2026 2nd (from Jared)" when the pick was acquired via trade.
+
+    D-090 — when `slot_order` resolves this pick to a real draft slot, the
+    round ordinal is replaced by the slot: **"2026 1.08"**, and with the
+    acquired-from suffix, "2026 1.08 (from Jared)". Only the CURRENT season
+    ever resolves; a future year keeps its ordinal because nobody knows next
+    year's order (#273). `slot_order=None` — the default, every flag-off call,
+    and every league whose order we cannot resolve — reproduces the pre-D-090
+    string byte-for-byte.
+
+    The "(from …)" suffix is kept alongside a slot rather than replaced by it.
+    A slot names WHERE the pick picks; the suffix names WHOSE it was, and only
+    a leaguemate who has memorised the order can read the second off the first.
+
+    `slot_order` is passed in, never looked up here: this runs once per pick and
+    the lookup is once per league (see `_league_slot_order`).
+    """
     season = p.get("season")
-    ordinal = _PICK_ORDINALS.get(int(p.get("round") or 0), str(p.get("round")))
-    base = f"{season} {ordinal}"
+    rnd = int(p.get("round") or 0)
+    slot = pick_slots.slot_for(slot_order, season, rnd,
+                               p.get("original_roster_id"))
+    unit = (pick_slots.slot_suffix(rnd, slot) if slot
+            else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
+    base = f"{season} {unit}"
     if p.get("is_traded") and p.get("original_username"):
         return f"{base} (from {p['original_username']})"
     return base
@@ -9954,16 +9979,28 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                     draft_picks_table.c.round,
                     draft_picks_table.c.is_traded,
                     draft_picks_table.c.original_username,
+                    # D-090 — the two columns a real-slot label needs. The
+                    # payload is cross-league by design (a Matches list spans
+                    # leagues), so `league_id` rides each row rather than
+                    # being a parameter, and orders are resolved per DISTINCT
+                    # league below.
+                    draft_picks_table.c.league_id,
+                    draft_picks_table.c.original_roster_id,
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
+        orders: dict[str, dict | None] = {}
         for r in rows:
             m = r._mapping
+            lg = str(m["league_id"] or "")
+            if lg not in orders:
+                orders[lg] = _league_slot_order(lg)
             labels[m["pick_id"]] = _owned_pick_label({
-                "season":            m["season"],
-                "round":             m["round"],
-                "is_traded":         m["is_traded"],
-                "original_username": m["original_username"],
-            })
+                "season":             m["season"],
+                "round":              m["round"],
+                "is_traded":          m["is_traded"],
+                "original_username":  m["original_username"],
+                "original_roster_id": m["original_roster_id"],
+            }, orders[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
         # route; the caller falls back to the raw id exactly as before.
@@ -10097,6 +10134,98 @@ def _pick_wire_source(p: dict, tradeable: bool,
     return out
 
 
+# ── D-090 — real-slot labels for owned picks ──────────────────────────────
+# `_owned_pick_label` is the ONE formatter for an owned pick and has five call
+# sites; each resolves the league's order ONCE and passes it down, because the
+# label is built per pick and a 192-slot grid would otherwise do 192 lookups.
+#
+# The TTL cache exists for the same reason `_league_block_ids` has one: serving
+# a deck touches the label path per card, and the draft order changes about as
+# often as a commissioner opens the settings screen. It is a plain dict guarded
+# by a lock — the same shape the block-id cache uses — and it is never the
+# authority: `load_draft_slot_order` is, and a miss just costs one small read.
+
+_SLOT_ORDER_TTL_SECONDS = 300
+_slot_order_cache: dict[str, tuple[float, dict | None]] = {}
+_slot_order_lock = threading.Lock()
+
+
+def _slot_labels_enabled() -> bool:
+    """THE D-090 kill switch. Read live (not off the FLAGS snapshot) so the
+    operator can restore generic labels without a restart."""
+    return is_enabled("picks.slot_labels")
+
+
+def _league_slot_order(league_id: str) -> dict | None:
+    """The league's resolved current-season draft order, or None.
+
+    None — the answer for every league whose order is unset, unknown or on an
+    unsupported platform — makes `_owned_pick_label` emit exactly the string it
+    emitted before D-090.
+
+    Two stored sources, checked in that order:
+      1. `leagues.draft_slot_order`, written by the Sleeper owned-pick sync
+         from a payload it already fetches.
+      2. `leagues.pick_assignment_settings`, the order an ESPN league typed in
+         itself. Composed here rather than at write time because its
+         `original_user_id -> original_roster_id` map lives in `draft_picks`,
+         and the assignment routes must stay free to renumber without a
+         re-sync (D18).
+    """
+    if not league_id or league_id == "league_demo" or not _slot_labels_enabled():
+        return None
+    now = time.time()
+    with _slot_order_lock:
+        hit = _slot_order_cache.get(league_id)
+        if hit and now - hit[0] < _SLOT_ORDER_TTL_SECONDS:
+            return hit[1]
+    order = None
+    try:
+        order = load_draft_slot_order(league_id)
+        if order is None:
+            order = _assigned_slot_order(league_id)
+    except Exception as e:
+        # Display-only enrichment — never fail a route over a label.
+        log.warning("slot-order lookup failed for %s: %s", league_id, e)
+        order = None
+    with _slot_order_lock:
+        if len(_slot_order_cache) > 500:
+            _slot_order_cache.clear()
+        _slot_order_cache[league_id] = (now, order)
+    return order
+
+
+def _assigned_slot_order(league_id: str) -> dict | None:
+    """Source 2 — a user-assigned (ESPN) board's own numbering.
+
+    The season is the MINIMUM season with assigned rows, which is how every
+    other owned-pick site recovers "current season" from the grid
+    (`_power_picks_by_owner` does the same): the seeder writes forward from the
+    league's current season, so `min(season)` is it.
+    """
+    settings = load_pick_assignment_settings(league_id)
+    if not settings:
+        return None
+    rows = load_draft_picks(league_id=league_id, source=PICK_SOURCE_ANY)
+    seasons = [int(r["season"]) for r in rows if r.get("season") is not None]
+    if not seasons:
+        return None
+    season = min(seasons)
+    user_to_roster: dict[str, str] = {}
+    for r in rows:
+        uid, rid = r.get("original_user_id"), r.get("original_roster_id")
+        if uid and rid is not None:
+            user_to_roster.setdefault(str(uid), str(rid))
+    return pick_slots.order_from_assignment_settings(settings, season, user_to_roster)
+
+
+def _invalidate_slot_order(league_id: str) -> None:
+    """Drop one league's cached order — called wherever the order can change
+    (the sync that writes it, and the assignment route that renumbers)."""
+    with _slot_order_lock:
+        _slot_order_cache.pop(str(league_id), None)
+
+
 def _owned_picks_available(league_id: str, league) -> bool:
     """May this league's owned picks enter ENGINE math?
 
@@ -10166,6 +10295,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # both lenses on: generated recommendations may name a pick a leaguemate
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
+    slot_order = _league_slot_order(league_id)           # D-090, once per league
     for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
         owner = p.get("owner_user_id")
         if owner:
@@ -10186,7 +10316,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
             inv_pick_value = (v2e(pool_v) - 1200.0) / 6.0
             assets.append(Player(
                 id               = p["pick_id"],
-                name             = _owned_pick_label(p),
+                name             = _owned_pick_label(p, slot_order),
                 position         = "PICK",
                 team             = "PICK",
                 age              = 0,
@@ -10428,14 +10558,29 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     except (TypeError, ValueError):
         _lsize = len(_prosters) or 12
     # #228 — current season's draft already held ⇒ exclude that season.
+    _drafts = _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = set()
-    for d in _fetch_sleeper_drafts(league_id):
+    for d in _drafts:
         try:
             if (isinstance(d, dict) and d.get("status") == "complete"
                     and int(d.get("season") or 0) == _cur_season):
                 _exclude.add(_cur_season)
         except (TypeError, ValueError):
             continue
+    # D-090 — the SAME payload carries `draft_order`, so resolving the current
+    # season's slot order costs zero additional upstream calls. Written even
+    # when `picks.slot_labels` is off (it is inert data; only the label path is
+    # gated), and written as None when the order is unset or the season is
+    # excluded, so a stale order can never outlive the draft it described.
+    try:
+        _order = (None if _cur_season in _exclude else
+                  pick_slots.order_from_sleeper_drafts(
+                      _drafts, _rid_to_user, _cur_season, _lsize))
+        save_draft_slot_order(league_id, _order)
+        _invalidate_slot_order(league_id)
+    except Exception as e:
+        log.warning("  slot-order resolve failed for %s (continuing): %s",
+                    league_id, e)
     return sync_draft_picks(
         league_id         = league_id,
         roster_ids        = [r.get("roster_id") for r in _prosters
@@ -12736,6 +12881,9 @@ def pick_assignments_order_route():
         settings["order"] = order
 
     save_pick_assignment_settings(league_id, settings)
+    # D-090 — renumbering is exactly the event that changes every owned pick's
+    # slot label, so the cached order must not survive it.
+    _invalidate_slot_order(league_id)
 
     result = seed_pick_grid(
         league_id=league_id, member_user_ids=settings["order"],
@@ -22392,6 +22540,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     seasons = [int(r["season"]) for r in rows if r.get("season") is not None]
     cur_season = min(seasons) if seasons else 0
     tradeable = _asserted_picks_tradeable()
+    slot_order = _league_slot_order(league_id)           # D-090, once per league
     out: dict[str, list[dict]] = {}
     for p in rows:
         owner = str(p.get("owner_user_id") or "")
@@ -22406,7 +22555,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
             val = pick_pool_value(int(p.get("round") or 4), years_out, fmt)
         out.setdefault(owner, []).append({
-            "label": _owned_pick_label(p),
+            "label": _owned_pick_label(p, slot_order),
             "value": round(float(val), 1),
             # #285 — round for _pick_firsts_equivalent's literal pick-count
             # label math; never serialized on its own (see docstring above).

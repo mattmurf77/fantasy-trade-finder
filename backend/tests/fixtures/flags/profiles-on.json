@@ -49,6 +49,7 @@
   "trade.block_boost": true,
   "picks.owned_sync": true,
   "picks.rank_year_labels": true,
+  "picks.slot_labels": true,
   "market.trade_capture": true,
   "market.roster_history": true,
   "market.movers": true,

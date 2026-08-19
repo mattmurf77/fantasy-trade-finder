@@ -10,6 +10,76 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19g — Current-year pick slot labels (D-090); "2026 1.08", not "2026 1st"
+
+**Branch:** `feat/pick-slot-labels`, worktree off a freshly fetched `origin/main` **`7462c23`**.
+**Not pushed, not merged.** Flag `picks.slot_labels` ships **ON**.
+Scope: [docs/plans/pick-slot-labels/scope.md](../docs/plans/pick-slot-labels/scope.md) (code-walk proof is §7,
+TestFlight checklist §8).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` (branch) | **3508 passed, 1 skipped, 0 failed** |
+| `pytest backend/tests -q` (clean `origin/main` `7462c23`, pristine worktree) | **3480 passed, 1 skipped** — the baseline, re-measured rather than assumed |
+| Delta | **+28**, all in the new `backend/tests/test_pick_slot_labels.py`. No pre-existing test changed behaviour. |
+| `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
+| `npx tsc --noEmit` (mobile) | **NOT RUN — typescript is not installed in `mobile/node_modules` on this machine** (`node_modules/.bin/tsc` absent in the main checkout too, so this is an environment gap and not a worktree artefact). The diff touches **zero** `.ts`/`.tsx` files, so it cannot move the typecheck; CI runs it on the pushed sha. Stated rather than claimed. |
+| `mobile/tests/check-*.js` | not run and none added — the mobile diff is empty (see below) |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The scope §8 operator TestFlight checklist is UNRUN.** |
+
+**What the 28 new tests actually pin**, rather than "the label has a dot in it". Each of the two named
+sabotages has a trap:
+
+- **S1 — a slot invented where none exists.** Sleeper's pre-draft payload returns
+  `slot_to_roster_id = {"1":1 … "12":12}`, an identity map that reads as a real order and is not one
+  (the D5 rule in `draft_board_service`). `test_identity_slot_to_roster_is_never_read` hands the
+  resolver that perfect identity map next to a NULL `draft_order` and demands `None`. The fixture's
+  real order is deliberately **not** the identity — roster 1 drafts 8th — so anything falling back to
+  the roster id labels `1.01` and fails every `1.08` assertion in the file.
+- **S2 — a slot on a season that has no order.** `test_future_season_never_resolves_a_slot` pins `None`
+  for 2027/2028/2029 *and* 2025; `test_future_year_keeps_its_round_ordinal` pins the literal strings
+  `"2027 1st"` / `"2029 3rd"`.
+- **The bright line.** `test_no_price_moves_with_or_without_an_order` asserts `pool_value` is not
+  mutated and that every slot of a round still prices identically — the change must not creep into
+  pricing (that question is [Q-023](OPEN_QUESTIONS.md)).
+- **The kill switch.** `test_route_is_byte_identical_with_the_flag_off` pins a literal label map with
+  the flag off, and `test_flag_off_never_reads_the_order` patches `load_draft_slot_order` to raise —
+  a disabled feature must short-circuit **before** the read, not after.
+- Plus: snake even-round reversal matching `PickAssignmentScreen.draftPosition` exactly, refusal on
+  `reversal_round`, per-league caching (one lookup, not one per pick), degradation to generic labels on
+  a raising DB, and that a slot label introduces no `' + '` (which `TradesScreen.tsx:3804` splits on).
+
+**One pre-existing test was deliberately edited**, and it is the containment guard for this area:
+`test_pick_assignment.py::test_w3_02_ast_only_sanctioned_call_sites_name_source`. It AST-enumerates every
+`load_draft_picks` call site and fails on any unsanctioned `source=` opt-in — which is exactly how an
+eighth site is supposed to get **decided** rather than silently added (its own docstring says so). The new
+`_assigned_slot_order` is registered in `_SANCTIONED_SOURCE_CALLERS` (the assignment surface), **not** in
+the seven engine sites, with the reasoning inline: it prices nothing, and numbering must not follow a
+pricing flag or a trade card and the assignment screen would disagree about what "1.05" means.
+
+**Verified against real data, not only fixtures** (2026-08-19):
+- Live Sleeper read for league `1312140920132497408`: the resolver's `draft_order` × rosters composition
+  reproduces Sleeper's own `slot_to_roster_id` **exactly, 12/12** — and the D5-compliant path is the one
+  used, so agreement is corroboration rather than construction. The operator's own 2026 1st is the **1.08**.
+- Prod Postgres, **read-only** (`SET TRANSACTION READ ONLY`, SELECT only): current-year picks appear in
+  **469 of 2,651 served deck cards (17.7 %)**, 451 of them in that one league; only **3 of 12** leagues
+  hold 2026 picks at all, and all three are `draft_status = not_drafted` (#228 deletes the rows at draft
+  completion).
+
+**Measured but NOT built** — what pricing by slot would do, so [Q-023](OPEN_QUESTIONS.md) can be decided on
+evidence: against DynastyProcess's published 2026 curve a 1.01 is **+130 %** and a 1.12 **−61 %** versus our
+flat 2117 (**5.9×** inside one round); on the operator's league that moves **48 of 48** current-year pick
+values and **38 of 48** tier badges. Not shipped, not prototyped — computed with the shipped functions
+against the checked-in `dp_values_picks_2026-08-06.csv`.
+
+**Mobile evidence waived, with the reason:** the mobile diff is **empty** — `git status` shows zero files
+under `mobile/`, `web/` or `extension/`. Every client renders the server's `label`/`name` verbatim
+(`InLeagueCalculator.tsx:219`, `LeagueSummaryScreen.tsx:2148`, `MatchesScreen.tsx:1408/1414/1440/1446`,
+deck cards via `give_players[].name`), so there is no client-side owned-pick formatter to pin structurally.
+
+---
 ## 2026-08-19e — Settings IA: hub + second-level pages, sheet → page (SHIPPED to main + TestFlight)
 
 **Branch:** `feat/settings-ia-hub`, rebased from `ecdbcb3` onto `origin/main` `28c12a0` and merged.

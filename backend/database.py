@@ -288,6 +288,17 @@ leagues_table = Table("leagues", metadata,
     # pick sequence and the linear/snake shape, both of which change slot
     # NUMBERING and never who owns a pick. NULL = never configured.
     Column("pick_assignment_settings", Text),
+    # ── D-090 — resolved CURRENT-season draft order (backend/pick_slots.py) ─
+    # JSON {schema, season, teams, type, reversal_round, slots:{roster_id:slot},
+    # source}. Written by the Sleeper owned-pick sync from the `draft_order`
+    # already present on the /league/<id>/drafts payload it fetches, so it
+    # costs no extra upstream call. Same rule as the column above and for the
+    # same reason: the ORDER is stored, the SLOT never is — a commissioner
+    # reordering the draft must renumber every slot without touching a single
+    # owner, which a denormalized draft_picks.slot could not express (D18).
+    # Season-stamped, so a future season resolves nothing (#273).
+    # NULL = unresolved → owned picks keep today's generic round label.
+    Column("draft_slot_order", Text),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -2514,6 +2525,12 @@ def _migrate_db() -> None:
         ("draft_picks",        "assigned_by",           "VARCHAR"),
         ("draft_picks",        "assigned_at",           "VARCHAR"),
         ("leagues",            "pick_assignment_settings", "TEXT"),
+        # D-090 — the CURRENT season's resolved draft order, so an owned pick
+        # can be labelled by its real slot ("2026 1.08") instead of its round.
+        # NULL = unresolved, which is every pre-existing row and every league
+        # whose platform does not publish an order; the label path falls back
+        # to today's generic string, so there is no backfill.
+        ("leagues",            "draft_slot_order",      "TEXT"),
         # #207 — rookie class year from Sleeper's metadata.rookie_year, and
         # the per-league rookie-draft verdict cache (backend/draft_status.py).
         ("players",            "rookie_year",           "VARCHAR"),
@@ -9675,6 +9692,47 @@ def save_pick_assignment_settings(league_id: str, settings: dict) -> None:
             update(leagues_table)
             .where(leagues_table.c.sleeper_league_id == str(league_id))
             .values(pick_assignment_settings=json.dumps(settings))
+        )
+
+
+def load_draft_slot_order(league_id: str) -> dict | None:
+    """The league's resolved CURRENT-season draft order, or None (D-090).
+
+    Shape is ``backend/pick_slots``' blob; see the column comment. None means
+    "no slot is resolvable for this league" and every owned-pick label falls
+    back to its generic round, which is the pre-D-090 string exactly.
+    """
+    if not league_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.draft_slot_order)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .limit(1)
+        ).fetchone()
+    if not row or not row.draft_slot_order:
+        return None
+    try:
+        parsed = json.loads(row.draft_slot_order)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def save_draft_slot_order(league_id: str, order: dict | None) -> None:
+    """Persist (or clear, with None) the resolved current-season draft order.
+
+    Clearing is the honest write when the order was set and has since been
+    UNSET upstream — leaving a stale blob would keep labelling picks with an
+    order the league no longer uses.
+    """
+    if not league_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .values(draft_slot_order=(json.dumps(order) if order else None))
         )
 
 

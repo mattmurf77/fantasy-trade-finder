@@ -10,6 +10,7 @@
 - [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
 - [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
 
+- [2026-08-19 — Open Items (pick slot labels)](#2026-08-19--open-items-pick-slot-labels)
 - [2026-08-19 — Open Items (pick ladder, rounds 3-4)](#2026-08-19--open-items-pick-ladder-rounds-3-4)
 - [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
@@ -31,6 +32,30 @@
 - **Owner:** whoever next works the bake-off track; not blocking D-086.
 
 ## 2026-08-19 — Open Items (round-2 pick recalibration)
+
+## 2026-08-19 — Open Items (pick slot labels)
+
+### Q-023 — Now that a current-year pick's slot is resolvable, should the slot drive its VALUE?
+- **What changed to raise this:** [D-090](DECISIONS.md) established that a current-year pick's real draft slot **is** resolvable, from data we already fetch, for Sleeper and for user-assigned ESPN boards. That falsifies the stated premise of the **operator decision of 2026-07-18** quoted in `pick_values.pick_pool_value` — *"we can't yet resolve a pick's slot"* — for the current year only. D-090 deliberately changed the LABEL and nothing else; the pricing question is this one, and it is the operator's.
+- **Why it matters, measured (DynastyProcess 2026 slot curve, `1qb_ppr`, against our flat `pick_pool_value(1,0) = 2117`):**
+
+  | slot | value | vs ladder | slot | value | vs ladder |
+  |---|---|---|---|---|---|
+  | 1.01 | 4867 | **+130 %** | 1.07 | 1680 | −21 % |
+  | 1.02 | 4025 | +90 % | 1.08 | 1436 | −32 % |
+  | 1.03 | 3343 | +58 % | 1.09 | 1235 | −42 % |
+  | 1.04 | 2793 | +32 % | 1.10 | 1070 | −49 % |
+  | 1.05 | 2343 | +11 % | 1.11 | 934 | −56 % |
+  | 1.06 | 1979 | −7 % | 1.12 | 821 | **−61 %** |
+
+  A 1.01 is worth **5.9×** a 1.12 on the market curve; we price them identically. Rounds 2–4 spread too (a 2.01 is +20 % and a 2.12 −48 %).
+- **What it would cost, stated bluntly:** on the operator's own league, **48 of 48** current-year picks change value and **38 of 48** change **tier badge** — a 1.12 would badge `second` rather than `first_1`, a 1.01 `firsts_2`. Tier colour is a cross-client invariant mirrored across five clients ([G-051](GOTCHAS.md)), so this is not a display tweak; it moves engine values, deck composition, evener selection and the calculator.
+- **The argument for doing it:** users trade the 1.01 and the 1.12 at wildly different prices, and an engine that calls them equal is wrong in the direction users notice most — the highest-value asset class in the app (firsts are 80.9 % of pick mentions in served cards).
+- **The argument for waiting:** it only ever applies to the current year, which today means **3 of 12 leagues**; the other nine hold no current-year picks at all (#228). The whole benefit is seasonal and concentrated.
+- **Existing machinery it would use, not new code:** `pick_values._market_round_value` already has the documented extension point — *"NOT DONE, deliberately: pricing a pick at its TRUE slot when the Draft Room has resolved the order… the extension point is `_market_round_value`, which would take an optional `slot` and skip the tercile."* `trade.slot_pricing` / `pick_pricing_mode` (operator decision O2) is the per-user seam it would land behind, so the blast radius is already contained by design.
+- **The half-measure worth pricing first:** apply slot pricing only under `market_slots` mode (already per-user, already opt-in), leaving `tier_ladder` — the default everyone is on — untouched. That gets the accuracy for anyone who asks for it and moves nobody else's badges.
+- **Needed to close:** an operator ruling. Nothing is blocked on it; D-090 ships complete without it.
+- **Owner:** operator (pricing call), then a backend session.
 
 ## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
 
