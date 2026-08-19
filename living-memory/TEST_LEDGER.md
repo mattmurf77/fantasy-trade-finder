@@ -10,6 +10,52 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
+
+**Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+Operator override 2026-08-19 (*"Outlook odds should be visible. Forward PPG cut. I waive maestro"*) flipped
+`outlook.odds` `false` → **`true`**, reversing the same session's [D-093](DECISIONS.md) recommendation.
+Decision: [D-094](DECISIONS.md). Docs: [docs/feedback/items/357-team-review/](../docs/feedback/items/357-team-review/status.md).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `node mobile/tests/check-outlook-bands.js` (new) | **7 passed, 0 failed** against the real shipped sources |
+| Sabotage proof — all six | **6 of 6 turned the guard red**, then sources restored and `git diff` verified empty |
+| `config/features.json` JSON validity after the flip | parses; `outlook.odds == True` |
+| CI pickup | automatic — `ci.yml` `mobile-typecheck` globs `tests/check-*.js`; **no CI edit needed** |
+
+**The six sabotages, each with the assertion it was required to break:**
+
+| Sabotage | Assertion that went red |
+|---|---|
+| `PLAYOFF_BAND_LIKELY_MIN` 0.65 → 0.70 | 1. thresholds are 0.65 / 0.35 |
+| `likely: semantic.pos` → a raw hex literal | 2a. bands use the semantic tokens |
+| `playoffBand`'s `p >= LIKELY_MIN` → `p > LIKELY_MIN` | 3. boundaries belong to the higher band |
+| Add a `title_pct` read to the screen | 4. `title_pct` is never read |
+| `OUTLOOK_WEEK6_PERCENT_ENABLED` false → true | 5. the bare percentage stays off |
+| Strip the "unrenderable" warning from `api/league.ts` | 4b. league.ts warns title_pct is unrenderable |
+
+**Evidence posture under D-056.** The operator **waived** the Maestro flow this lighting owed
+(`NEXT.md` item 7) — it was already void when D-056 retired Maestro entirely. The guard above replaces it
+as the standing structural net. **No backend test was run for this change and none was needed:** the flip
+touches `config/features.json` only; the `/api/league/outlook` route, the pipeline and the serializer are
+unmodified and were already covered by `backend/tests/test_outlook_odds.py` and `test_outlook_calibration.py`.
+
+**What is NOT proven, and is owed.**
+
+- **Nobody has seen the lit surface on a device.** The League-Summary outlook strip and section have shipped
+  in every build since 2026-08-11 but have never rendered, because the flag was dark. The first TestFlight
+  look is owed before this reaches users, and the operator's own league is the first read.
+- **`meta.priced_slot_coverage` has never been rendered by any client.** In an IDP league (7 of 15 starting
+  slots priced in the operator's FFV3) the bands are an offensive-core estimate presented as a whole-lineup
+  one. Team Review's plan specs the caption; League Summary has none.
+- **A preseason band can be confidently wrong for an individual league** — 2 of 6 backtested league-seasons
+  lose to climatology outright, one with an ordering correlation of +0.022. Bands are immune to being
+  *precisely* wrong, not to being wrong.
+
+---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 
 **Branch:** `fix/pick-horizon`, branched from `origin/main` `7462c23`. **Not pushed, not merged.**
@@ -1364,6 +1410,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)
 - [2026-06-11](#2026-06-11)

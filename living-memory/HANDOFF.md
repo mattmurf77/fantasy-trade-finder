@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 - [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
@@ -31,6 +32,32 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override
+
+**Branch:** `claude/team-review-analysis-plan-1f91e3` (worktree `jolly-leakey-d20295`), forked from `origin/main` @ `50e0451`. **Nothing merged, nothing pushed.** Mostly documents — but **two real code changes now sit here**: `config/features.json` (`outlook.odds` → `true`) and `mobile/tests/check-outlook-bands.js` + its npm script. `trades.team_review` is still specced-only and does not exist in `config/features.json`.
+
+**What was done.** Three linked tester items (`jonbonjourvi`, v1.15.0) asking for an "AI GM" read of your team were planned full-path: [`docs/feedback/items/357-team-review/`](../docs/feedback/items/357-team-review/status.md) holds `scope.md`, `hld-delta.md`, `lld-delta.md`, `prd.md` (R-1…R-27 + the manual TestFlight checklist), `reconciliation-log.md` and `status.md`; the design lab is [`mockups/team-review-2026-08-19/`](../mockups/team-review-2026-08-19/README.md). Two decisions ([D-092](DECISIONS.md), [D-093](DECISIONS.md)) and two open questions ([Q-024](OPEN_QUESTIONS.md), [Q-025](OPEN_QUESTIONS.md)) were logged, and NEXT.md item 7 was rewritten.
+
+**The shape, in one line:** six stepped beats (`standing` · `window` · `depth` · `divergence` · `partners` · `plan`), each *one finding → one plain read → one action*, where four of the six actions write the `league_preferences` fields the trade engine **already** reads — so the flow's exit is a deck reshaped by what the user just agreed to, not a report. One new composer module + one new read route; **it computes no new number**.
+
+**The two rulings that matter most.**
+- **`outlook.odds` stays dark** and Team Review ships **odds-free** (D-093). The engine is Sleeper-only, `completed_weeks == 0` is its weakest window (preseason skill lower CI bound +2.9 %), and the evidence this lighting used to owe was written in Maestro terms that D-056 retired. Four lighting criteria L1–L4 are now written as a gate; beat `standing` is the recorded seam for a future band chip.
+- **Forward per-player PPG is CUT** — no license-clean ready-made source exists, and deriving a proxy would mean rendering `RosterValueStrength`'s self-described "documented heuristic, NOT an empirically fit model" as a number. #357 is answered instead by `starter_impact.slots[].before/after` (tier + positional rank), which is already ON.
+
+**Blocking, both operator calls:**
+1. **[Q-025] The three scope §6 waivers need a yes** — PPG cut, championship odds refused, PPG rank Sleeper-only-and-preseason-empty. CLAUDE.md's gates require waivers surfaced *before* build; building without the yes violates the gate.
+2. **[Q-024] Root `CLAUDE.md` §Stack is stale** — it says the `mobile/tests/check-*.js` suites "gate nothing yet", but `ci.yml`'s `mobile-typecheck` globs and runs them. Under D-056 these are the primary client-invariant evidence, so the doc understates the posture in the direction that costs coverage. Not fixed unilaterally because it is the operating contract.
+
+**One caveat on how this plan was made.** `plan-phase.md` prescribes a dual-agent loop; this session ran under a standing no-subagent instruction, so it was authored and adversarially reviewed in a **single context**. Seven objections were raised and two were blocking — including one real defect caught by reading source rather than the draft: a skip condition of `len(user_elo) < 10` that **can never fire**, because `RankingService._pool` returns *all* players unfiltered, so a user who has never ranked anything still gets a full `user_elo` map at the seed. Fixed to `RankSet.threshold_met` plus a `wins+losses > 0` per-player filter. The reconciliation log asks for an **independent read of the API contract before build** to compensate for the single-context review.
+
+**AMENDED SAME DAY — operator override.** *"Outlook odds should be visible. Forward PPG cut. I waive maestro"*. Three effects, all applied: (1) **`outlook.odds` is now `true`** in `config/features.json` ([D-094](DECISIONS.md) supersedes D-093) — the built-but-dark #169 League-Summary layer goes live on the next merge, and Team Review's `standing` beat gains a playoff band chip; because that seam was designed in, it cost one payload field and one chip, not a redesign. (2) **The forward-PPG cut is ratified** — waiver 1 closed. (3) **The Maestro debt is waived** (already void under D-056) and replaced by `mobile/tests/check-outlook-bands.js`, written this session: 7 assertions, **all six sabotage cases proven red**, gating CI via the glob. **Unchanged and now mechanically enforced:** `title_pct` is unrenderable at any week (Team Review does not even serialize it), `playoff_pct` renders only as the band chip, and `OUTLOOK_WEEK6_PERCENT_ENABLED` stays `false` — lighting the flag is not lighting the percentage. Waiver 3 (PPG rank Sleeper-only / preseason-empty) is **still open**.
+
+**Two things nobody has done yet, and both matter:** the lit surface has **never been seen on a device** — the operator's league is the first read; and `meta.priced_slot_coverage` has **never been rendered by any client**, so an IDP league's bands read as whole-lineup when they price 7 of 15 slots. Team Review specs the caption; League Summary does not have one.
+
+**Next step.** With waiver 3 signed: two parallel build agents on the disjoint file-ownership table in [`lld-delta.md` §1](../docs/feedback/items/357-team-review/lld-delta.md). Before that, a TestFlight look at the newly lit League-Summary outlook strip.
+
+**Worktree note.** `jolly-leakey-d20295` holds only untracked docs; it is safe to remove **after** this branch's content is on `origin/main`, per the recovery-ledger rule.
 
 ## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
 
