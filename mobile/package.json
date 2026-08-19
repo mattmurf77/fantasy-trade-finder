@@ -45,7 +45,8 @@
     "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",
     "test:picker-chip-alignment": "node tests/check-picker-chip-alignment.js",
     "test:offer-prefill-330": "node tests/check-offer-prefill-330.js",
-    "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js"
+    "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js",
+    "test:presentation-v2": "node tests/check-presentation-v2.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

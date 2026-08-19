@@ -1,0 +1,99 @@
+appId: com.fantasytradefinder.app
+# tc: TC-PRESV2-03 — the honest empty state and its price-feedback pivot
+#     (docs/plans/trade-presentation-v2/scope.md §3; approved lab
+#      mockups/trade-suggestion-redesign/07-honest-empty.html)
+# profile: empty-deck
+# flags: all-on
+#
+# ⚠ AUTHORED UNDER PROTEST OF D-056 — see the banner in
+#   presentation-v2-hero.yaml. Not executed; execution is the operator's call.
+#
+# REQUIRES `trades.presentation_v2: true` AND a seeded profile whose deck
+# yields no ENDORSABLE card. `empty-deck` is a profile name this flow
+# declares; no such fixture exists under backend/tests/fixtures/ yet, and
+# creating one is out of scope for a branch that ships flag-off. Recorded as
+# an open item in scope.md §3 rather than silently pointing at `standard`,
+# which would make this flow pass for the wrong reason.
+#
+# What this proves: with nothing clearing the bar for both sides we render a
+# refusal, NOT a degraded suggestion — no hero, no endorsement badge — and we
+# convert the no-supply into a price conversation with three first-class
+# choices, one of which is keeping your price unchanged.
+tags: [trades, presentation-v2]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_empty_deck"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.finder-mode.today"
+    timeout: 20000
+- tapOn:
+    id: "trades.finder-mode.today"
+
+# ── The refusal, not a degraded suggestion ───────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "presentation.empty"
+    timeout: 60000
+- assertVisible:
+    id: "presentation.empty-heading"
+# The refusal is the feature — nothing is promoted into the hero slot.
+- assertNotVisible:
+    id: "presentation.hero"
+- assertNotVisible:
+    id: "presentation.confidence.strong"
+- takeScreenshot: presentation-v2-honest-empty
+
+# ── The price-feedback pivot, with "keep my price" first-class ───────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.empty-keep-price"
+    direction: DOWN
+    visibilityPercentage: 100
+- assertVisible:
+    id: "presentation.empty-review-board"
+- assertVisible:
+    id: "presentation.empty-keep-price"
+- tapOn:
+    id: "presentation.empty-keep-price"
+# Holding the price is acknowledged in place — never a nag, never a dead end.
+- extendedWaitUntil:
+    visible:
+      id: "presentation.price-kept"
+    timeout: 5000
+- takeScreenshot: presentation-v2-price-kept

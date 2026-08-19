@@ -14,6 +14,7 @@ rejected — read it for reasoning, never for current UI.
 
 | Lab | Item(s) | Last touched | Status | Question it answers |
 |---|---|---|---|---|
+| `trade-suggestion-redesign/` | — | 2026-08-16 | **partially built** | The presentation rebuild: hero → Featured → uncapped browse, asymmetric explanations, banded confidence, honest empty state. States 01/03/04/07/09 are BUILT behind `trades.presentation_v2` (`docs/plans/trade-presentation-v2/scope.md`); 02 (MESO variants) and 05 (turn states) are blocked on backend that does not exist — `trade_gen.v2` is dark and there is no trade-thread state machine |
 | [`candidates-300-v2/`](candidates-300-v2/README.md) | #300 r2 | 2026-08-12 | most recent | League rankings → trade candidates, round 2, drawn against #299 as shipped. Verdict: one list + one median divider |
 | [`candidates-300/`](candidates-300/README.md) | #300 r1 | 2026-08-12 | superseded by v2 | Round 1 of the same question; the trailing-affordance geometry contest |
 | [`mock-draft-2026-08-13/`](mock-draft-2026-08-13/README.md) | #295 #296 #305 | 2026-08-13 | historical | Mock-draft repair + manual drafting for all teams. Master viewer `index.html` is link-only (no iframes, works over `file://`). Binding docs: `docs/feedback/items/295-mock-user-not-in-draft/` |

@@ -1,0 +1,139 @@
+appId: com.fantasytradefinder.app
+# tc: TC-PRESV2-02 — browse-all scrolls, and a per-row dismiss registers
+#     (docs/plans/trade-presentation-v2/scope.md §3; approved lab
+#      mockups/trade-suggestion-redesign/09-browse-all.html)
+# profile: standard
+# flags: all-on
+#
+# ⚠ AUTHORED UNDER PROTEST OF D-056 — see the banner in
+#   presentation-v2-hero.yaml. Not executed; execution is the operator's call.
+#
+# REQUIRES `trades.presentation_v2: true` in the resolved flag fixture.
+#
+# What this proves: the "All trades" list is UNCAPPED and scrolls past the
+# Featured band into the tail; a row's dismiss control registers; the
+# dismissed row STAYS IN PLACE carrying its acknowledgement ("we'll rank
+# ideas like this lower") and an Undo; and Undo restores the row's live
+# state. The dismiss also writes the pass disposition + decline reason
+# through the same spine as the deck — that half is proven by
+# mobile/tests/check-presentation-v2.js §4, because no UI flow can observe an
+# analytics row.
+#
+# Law 2: the list is a FlatList, so off-screen children genuinely do not
+# exist in the hierarchy — the tail rows need real scrolling, which is what
+# scrollUntilVisible does here.
+tags: [trades, presentation-v2]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.finder-mode.today"
+    timeout: 20000
+- tapOn:
+    id: "trades.finder-mode.today"
+- extendedWaitUntil:
+    visible:
+      id: "presentation.hero"
+    timeout: 60000
+
+# ── Into the uncapped list ───────────────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.browse-all"
+    direction: DOWN
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "presentation.browse-all"
+- extendedWaitUntil:
+    visible:
+      id: "presentation.browse-list"
+    timeout: 20000
+- assertVisible:
+    id: "presentation.browse-count"
+- assertVisible:
+    id: "presentation.row.1"
+
+# ── It genuinely scrolls past the Featured band into the tail ────────────
+# Rank 7 is the first row below the Featured cap (hero + 5), so reaching it
+# proves the list is not sliced at the endorsement tier.
+- scrollUntilVisible:
+    element:
+      id: "presentation.row.7"
+    direction: DOWN
+    visibilityPercentage: 100
+- assertVisible:
+    id: "presentation.row.7"
+- takeScreenshot: presentation-v2-browse-tail
+
+# ── A row dismiss registers, in place ────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.row-dismiss.3"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "presentation.row-dismiss.3"
+# The row does NOT disappear — it stays, dimmed, with the acknowledgement.
+- extendedWaitUntil:
+    visible:
+      id: "presentation.row-ack.3"
+    timeout: 5000
+- assertVisible:
+    id: "presentation.row.3"
+- assertVisible:
+    id: "presentation.row-undo-link.3"
+# The dismiss control has flipped to its undo state on the same row.
+- assertVisible:
+    id: "presentation.row-undo.3"
+- assertNotVisible:
+    id: "presentation.row-dismiss.3"
+- takeScreenshot: presentation-v2-row-dismissed
+
+# ── Undo restores the live state ─────────────────────────────────────────
+- tapOn:
+    id: "presentation.row-undo-link.3"
+- extendedWaitUntil:
+    notVisible:
+      id: "presentation.row-ack.3"
+    timeout: 5000
+- assertVisible:
+    id: "presentation.row-dismiss.3"
+- takeScreenshot: presentation-v2-row-undone
