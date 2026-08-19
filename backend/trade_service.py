@@ -713,6 +713,33 @@ _DEFAULT_CFG: dict[str, float] = {
     "mismatch_confidence_damp":   1.0,
 
     # ------------------------------------------------------------------
+    # D-085 (2026-08-19) — placement tier clamp.
+    #
+    # Confidence shrinkage blends a personal Elo toward consensus with
+    # w = n/(n+shrink_pseudocount), and `n` counts COMPARISONS only. A tier
+    # save / drag-reorder is an ASSERTION, not a sample, so a deliberately
+    # placed player the user never voted on (n=0 ⇒ w=0) was priced at pure
+    # consensus — a full tier away from where the user put him, then offered
+    # for assets of that other tier.
+    #
+    # At 1.0 the shrunk Elo of a PLACED player is clamped to the band of the
+    # tier he was placed in (RankingService.placement_bands, i.e.
+    # tier_config.json): consensus still re-prices him INSIDE his tier, never
+    # out of it. This is `pin_tier_bounded` — the operator's own rule for how
+    # votes move a placement — applied to how the engine PRICES the result.
+    # Unplaced players are never clamped (that would freeze the board at
+    # consensus), and neither are pins below the lowest band, which have no
+    # tier at all.
+    #
+    # Personal-valuation path ONLY. Every fairness/surplus GATE keeps pricing
+    # the real package on real consensus values (see the ranking-vs-gate
+    # separation note below), and `_value_uncertainty` is deliberately
+    # untouched. 0 disables — byte-identical to the pre-D-085 blend, and the
+    # value this knob carries in MODEL_A_PROFILE.
+    # ------------------------------------------------------------------
+    "placement_tier_clamp":       1.0,
+
+    # ------------------------------------------------------------------
     # D-079 (2026-08-19) — per-round draft-pick year decay. Read ONLY
     # through pick_values.year_decay(round); trade_service itself never
     # uses them. They live here because _c() is the live-config accessor
@@ -1195,6 +1222,7 @@ def _shrink_user_elo(
     user_elo: dict[str, float],
     seed_elo: dict[str, float],
     confidence: dict[str, int] | None,
+    placements: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, float]:
     """
     Confidence shrinkage (Change 4): shrink each personal Elo toward the
@@ -1202,15 +1230,41 @@ def _shrink_user_elo(
     w = n / (n + shrink_pseudocount). A player the user never compared
     sits at consensus (no fake divergence); a heavily-ranked player keeps
     full personal value. confidence=None → no information → no shrinkage.
+
+    `placements` (D-085, knob `placement_tier_clamp`) — {pid: (lo, hi)} from
+    `RankingService.placement_bands()`: the Elo band of the tier the user
+    explicitly PLACED that player in. The blend above is direction-blind and
+    sample-count-driven, and a placement is not a sample — it is the strongest
+    statement of value the product accepts. So for a placed player the blend is
+    clamped to his band: consensus may still re-price him *inside* the tier the
+    user chose, and may never carry him out of it. The clamp is applied AFTER
+    the blend rather than replacing it, which is what keeps a mis-placement
+    correctable — a user who keeps voting a placed player down still moves him
+    within the band, and re-placing him is the way to leave it.
+
+    Nothing else changes: only pids present in `placements` are touched, so an
+    unplaced player is priced exactly as before (clamping those would freeze
+    the whole board). Players placed BELOW the lowest band — the #161 demotion
+    Elo and the anchor "no value" answer — carry no band and are absent from
+    the map by construction; see `RankingService.placement_bands`.
+
+    placements=None, an empty map, or `placement_tier_clamp` at 0 ⇒ the
+    pre-D-085 blend, byte for byte.
     """
     if confidence is None:
         return dict(user_elo)
     n0 = _c("shrink_pseudocount")
+    bands = placements if (placements and _c("placement_tier_clamp") > 0) else None
     out: dict[str, float] = {}
     for pid, elo in user_elo.items():
         n = max(confidence.get(pid, 0), 0)
         w = n / (n + n0)
-        out[pid] = w * elo + (1.0 - w) * seed_elo.get(pid, 1500.0)
+        blended = w * elo + (1.0 - w) * seed_elo.get(pid, 1500.0)
+        if bands is not None:
+            band = bands.get(pid)
+            if band is not None:
+                blended = min(max(blended, band[0]), band[1])
+        out[pid] = blended
     return out
 
 
@@ -1219,6 +1273,19 @@ def _value_uncertainty(pid: str, confidence: dict[str, int] | None) -> float:
     Per-player value half-width as a FRACTION of value (amendment A4):
     unc = range_base / sqrt(1 + n). confidence=None → 0 (point values),
     which degrades the range-overlap fairness gate to the point gate.
+
+    Deliberately NOT placement-aware (D-085). Two reasons, decided rather than
+    defaulted. (1) This half-width is read by a GATE — the range-overlap
+    fairness check prices `g_unc`/`r_unc` from it — and gates judge the real
+    package, so narrowing the range for placed players would silently change
+    what the gate lets through. That is the one thing the ranking-vs-gate
+    separation below forbids without an operator call. (2) A placement bounds
+    WHERE the point estimate may sit; it says nothing about how precisely the
+    user knows the value inside that tier — the bands run 45-205 Elo wide,
+    which is exactly the room a placement leaves undetermined. `comparison_
+    counts` still feeds both consumers off one map (`pin_exclude_comparisons`
+    remains the single knob for that); D-085 adds a bound on the blend, not a
+    second confidence source.
     """
     if confidence is None:
         return 0.0
@@ -3054,6 +3121,12 @@ class TradeService:
         on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
         confidence: dict[str, int] | None = None,  # pid → comparison count for the
                                                    # requesting user (v2 shrinkage; A4 ranges)
+        placements: dict[str, tuple[float, float]] | None = None,
+                                             # D-085: pid → (lo, hi) Elo band of
+                                             # the tier the user PLACED him in
+                                             # (RankingService.placement_bands).
+                                             # Clamps the shrunk personal Elo;
+                                             # every gate is untouched.
         outlook: str | None = None,          # championship | contender | not_sure |
                                              # rebuilder | jets | None — Tier 2 (2.2)
                                              # now/future blend; v2-only, legacy ignores it
@@ -3131,6 +3204,7 @@ class TradeService:
                 user_roster=user_roster,
                 seed_elo=seed_elo,
                 confidence=confidence,
+                placements=placements,
                 # Operator decision 2026-08-16 — no engine truncation: the
                 # pipeline returns the FULL ranked survivor set; scarcity
                 # rides the per-card `tier` field, and any deck-size
@@ -3192,6 +3266,7 @@ class TradeService:
                 is_dynasty           = is_dynasty,
                 on_opponent_done     = on_opponent_done,
                 confidence           = confidence,
+                placements           = placements,
                 outlook              = outlook,
                 opponent_outlooks    = opponent_outlooks,
                 opponent_pick_shares = opponent_pick_shares,
@@ -3888,6 +3963,7 @@ class TradeService:
         is_dynasty: bool = False,
         on_opponent_done = None,
         confidence: dict[str, int] | None = None,
+        placements: dict[str, tuple[float, float]] | None = None,
         outlook: str | None = None,
         opponent_outlooks: dict[str, str] | None = None,
         opponent_pick_shares: dict[str, float] | None = None,
@@ -3929,8 +4005,11 @@ class TradeService:
                 if pos and pos not in sell_targets:
                     sell_targets.append(pos)
 
-        # Confidence shrinkage BEFORE the value transform (Change 4).
-        shrunk_elo = _shrink_user_elo(user_elo, seed_elo, confidence)
+        # Confidence shrinkage BEFORE the value transform (Change 4), then
+        # the D-085 placement clamp — a player the user PLACED is priced
+        # inside the tier he was placed in, never out of it.
+        shrunk_elo = _shrink_user_elo(user_elo, seed_elo, confidence,
+                                      placements)
         user_value = {pid: elo_to_value(e) for pid, e in shrunk_elo.items()}
 
         # Tier 2 (2.2) — outlook blend applied to the USER's value map only:

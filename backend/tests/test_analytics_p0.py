@@ -296,6 +296,12 @@ class _FakeService:
     def comparison_counts(self):
         return {}
 
+    def placement_bands(self):
+        # D-085 — this double stands in for RankingService in _run_trade_job,
+        # which reads the user's tier placements alongside the comparison
+        # counts. No pins on this fake board.
+        return {}
+
 
 class _FalseFlags:
     def __getattr__(self, name):

@@ -762,6 +762,7 @@ def generate_league_suggestions(
     user_roster: list[str],
     seed_elo: dict[str, float],
     confidence: dict[str, int] | None = None,
+    placements: dict[str, tuple[float, float]] | None = None,
     max_per_opponent: int | None = None,
     scoring_format: str = "1qb_ppr",
     untouchable_ids: set | None = None,
@@ -806,9 +807,11 @@ def generate_league_suggestions(
 
     report = GenerationReport(league_id=league.league_id, user_id=user_id)
 
-    # User board: confidence shrinkage toward consensus (same convention as
-    # the v2 engine) then the value transform.
-    shrunk = _shrink_user_elo(user_elo, seed_elo, confidence)
+    # User board: confidence shrinkage toward consensus, then the D-085
+    # placement clamp, then the value transform — same convention AND the same
+    # call as the v2 engine, so the two arms cannot price a deliberately
+    # placed player differently.
+    shrunk = _shrink_user_elo(user_elo, seed_elo, confidence, placements)
     user_value = {pid: elo_to_value(e) for pid, e in shrunk.items()}
     _def_val = elo_to_value(1500.0)
 

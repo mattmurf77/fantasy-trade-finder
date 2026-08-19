@@ -571,6 +571,24 @@ class RankingService:
         """
         if not self._elo_overrides or _c("pin_tier_bounded") != 1.0:
             return {}
+        return self._placement_bands(pool_ids, released)
+
+    def _placement_bands(
+        self,
+        pool_ids: set[str],
+        released: dict[str, datetime],
+    ) -> dict[str, tuple[float, float]]:
+        """The band derivation itself, with no knob attached — {pid: (lo, hi)}.
+
+        Split out of `_pin_bounds` (2026-08-19, D-085) because a SECOND
+        consumer needs the same answer under a different knob: the trade engine
+        clamps a placed player's *priced* Elo to this band
+        (`trade_service.placement_tier_clamp`), which is the voting rule above
+        applied one layer further out. Both consumers must agree on what "the
+        tier the user placed him in" means, so exactly one function computes
+        it. Every rule documented on `_pin_bounds` — the tier lookup, the
+        no-band skip, the widening to contain the pin — lives here.
+        """
         bounds: dict[str, tuple[float, float]] = {}
         bands_by_pos: dict[Optional[str], dict[str, tuple[float, float]]] = {}
         for pid, pin in self._elo_overrides.items():
@@ -588,6 +606,46 @@ class RankingService:
             lo, hi = bands[tier]
             bounds[pid] = (min(lo, pin), max(hi, pin))
         return bounds
+
+    def placement_bands(self) -> dict[str, tuple[float, float]]:
+        """Per-player Elo band for every player this user actually PLACED.
+
+        {pid: (lo, hi)} over the whole player pool, for pins still in force
+        that sit in a tier band — the public read of `_placement_bands`,
+        consumed by the trade layer as `placements` (see
+        `trade_service._shrink_user_elo` and the `placement_tier_clamp` knob).
+
+        A manual tier save or drag-reorder is the strongest signal the product
+        accepts: an explicit ASSERTION of value, not a sample. The shrinkage
+        weight `w = n/(n+n0)` cannot see assertions — it counts comparisons —
+        so a deliberately placed player with few head-to-head votes was priced
+        toward consensus regardless of where the user put him. This map is what
+        lets the trade engine honour the placement while keeping the shrinkage
+        that protects against fake divergence.
+
+        Deliberately NOT gated on `pin_tier_bounded`: that knob governs how
+        VOTES move a pin, and the two questions are independent. With
+        tier-bounded voting off a pin is a total freeze, so `user_elo` equals
+        the pin exactly and the blend still drags the priced value clean across
+        tiers — precisely the case the clamp exists for. The trade-side kill
+        switch is `placement_tier_clamp`.
+
+        Two populations are absent, exactly as in `_pin_bounds`: pins F2
+        (`pin_unpin_on_newer_swipe`) has released, which are no longer
+        placements in force; and pins below the lowest band (the #161 demotion
+        Elo and the anchor "no value" answer at 1100), which `tier_for_elo`
+        maps to None. The latter are "unranked, pending placement" markers
+        rather than tier placements — clamping a player's trade value into a
+        sub-1150 non-band would price him at ~nothing on the strength of a
+        marker the user never meant as a valuation.
+
+        Empty dict when the user has placed nobody, which is the whole
+        population of boards built purely by swiping.
+        """
+        if not self._elo_overrides:
+            return {}
+        pool_ids = set(self._players)
+        return self._placement_bands(pool_ids, self._pin_release(pool_ids))
 
     # ------------------------------------------------------------------
     # Public API

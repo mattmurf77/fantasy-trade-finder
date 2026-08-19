@@ -5266,6 +5266,13 @@ def _run_trade_job(
         # session has no ranking service for this format.
         confidence_counts = service.comparison_counts() if service else None
 
+        # D-085 — {pid: (lo, hi)} Elo band of the tier the user explicitly
+        # PLACED each player in (tier save / drag-reorder). Feeds the placement
+        # clamp on the shrunk personal Elo, so a deliberately placed player is
+        # never PRICED into a neighbouring tier. Empty for a board built purely
+        # by swiping; None when there is no service for this format.
+        placement_bands = service.placement_bands() if service else None
+
         # #170/#171 — inject each team's owned draft picks as priced PICK
         # pseudo-assets so a suggestion can send OR receive a pick, and (#185)
         # prime every Elo map the engine reads with each pick's bridged Elo so
@@ -5333,6 +5340,7 @@ def _run_trade_job(
             league_id            = league_id,
             seed_elo             = seed_map,
             confidence           = confidence_counts,
+            placements           = placement_bands,
             outlook              = outlook_value,
             fairness_threshold   = fairness_threshold,
             acquire_positions    = acquire_positions,

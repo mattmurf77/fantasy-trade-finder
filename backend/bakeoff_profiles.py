@@ -61,6 +61,11 @@ MODEL_A_PROFILE: dict[str, float] = {
     "deck_headliner_cap":        0.0,   # C4 off
     "deck_give_headliner_cap":   0.0,   # C4b off
     "mismatch_confidence_damp":  0.0,   # C5 off
+    # D-085 placement tier clamp — 2026-08-19. Post-reference-SHA, and it
+    # changes the personal value map, so arm A must pin it off. (Belt and
+    # braces: bakeoff_runner does not pass `placements`, so the clamp is
+    # already inert on every arm — see the D-085 note in living-memory.)
+    "placement_tier_clamp":      0.0,   # D-085 off
 }
 
 

@@ -647,6 +647,7 @@ Both knobs shape the **baseline consensus seed values** (the DP→Elo pool seeds
 | `mutual_gain_cap` | 1500.0 | Normalization ceiling for the harmonic-mean term in the composite score |
 | `waiver_slot_cost` | 425.0 | Value cost per extra player received (FantasyCalc-derived ≈ rank-300 value) |
 | `shrink_pseudocount` | 4.0 | n₀ in confidence shrinkage `w = n / (n + n₀)` toward seed Elo |
+| `placement_tier_clamp` | 1.0 | **D-085** — clamps the shrunk personal Elo of a player the user explicitly **PLACED** (a tier save / drag-reorder, i.e. an `_elo_overrides` pin) to the Elo band of the tier he was placed in (`RankingService.placement_bands()` → `tier_config.json`). Confidence shrinkage counts **comparisons**; a placement is an **assertion**, which `w` cannot see — so a placed player with few head-to-head votes was priced wherever consensus wanted him, up to a full tier away. Consensus still re-prices him *inside* his band, never out of it. Applied AFTER the blend, so a mis-placement stays correctable and the clamp's displacement decays to zero as `n` rises. **Never** clamps an unplaced player (that would freeze the board at consensus) or a pin below the lowest band (the #161 demotion Elo / anchor "no value" at 1100 — `tier_for_elo` returns `None`, and those are "unranked, pending placement" markers, not valuations). Personal-valuation path only: every fairness/surplus **gate** still prices the real package on `seed_value`, and `_value_uncertainty` is deliberately untouched. **0 disables** — byte-identical to the pre-D-085 blend. |
 | `range_base` | 0.35 | Value half-width fraction at n=0 comparisons (range-overlap fairness) |
 
 > **Tuning gotcha (TC-CFG-001, amended by #108):** the surplus floors (`min_side_surplus` / `min_side_surplus_marginal`) gate **divergence-basis** cards only. **Consensus-basis** cards (for opponents with no saved rankings — which dominate cold / low-coverage leagues) carry no surplus signal and are gated by **fairness plus the #108 user-gain rule** (`user_gain_epsilon`): the user's side must receive at least as much consensus package value as it gives, and a 1-for-1 must also respect the user's own raw-board ordering. (Before #108 they were gated by fairness alone, which let a card ask the user to pay up to `1 − fairness_threshold` more consensus value.) To throttle a consensus-heavy deck, tune `fairness_threshold` (per-request) or `consensus_score_scale`, not the surplus floors. And remember `trade.marginal_value` (on by default) makes `min_side_surplus_marginal` the live floor — tuning `min_side_surplus` alone is then a no-op.
@@ -894,7 +895,7 @@ every knob included *and every knob deliberately excluded*:
 
 | Item | Value |
 |---|---|
-| `MODEL_A_PROFILE` | `max_overpay_frac`, `pos_net_cap`, `pick_gap_frac`, `need_gate_min_value`, `rank_div_min_frac`, `min_package_band`, `pick_pair_strip_frac`, `deck_headliner_cap`, `deck_give_headliner_cap`, `mismatch_confidence_damp` — **all 0.0** |
+| `MODEL_A_PROFILE` | `max_overpay_frac`, `pos_net_cap`, `pick_gap_frac`, `need_gate_min_value`, `rank_div_min_frac`, `min_package_band`, `pick_pair_strip_frac`, `deck_headliner_cap`, `deck_give_headliner_cap`, `mismatch_confidence_damp`, `placement_tier_clamp` — **all 0.0** |
 | `MODEL_A_REFERENCE_SHA` | `92c31d5` |
 | Entry point | `with backend.bakeoff_profiles.model_a(): …` |
 

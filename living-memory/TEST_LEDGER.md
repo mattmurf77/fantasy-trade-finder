@@ -10,6 +10,71 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19d — Placement tier clamp (D-085); a placement now bounds PRICING, not just voting
+
+**Branch:** `feat/placement-tier-clamp`, from `origin/main` `a130dfc`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/placement-tier-clamp/scope.md](../docs/plans/placement-tier-clamp/scope.md). Code-walk: [code-walk.md](../docs/plans/placement-tier-clamp/code-walk.md). Decision: [D-085](DECISIONS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3441 passed, 1 skipped (baseline at `a130dfc`) | **3463 passed, 1 skipped, 0 failed** (+22 new, all in `test_placement_tier_clamp.py`) |
+| `tsc --noEmit` / `testid-lint` | n/a — **zero files under `mobile/` changed** | unaffected |
+| Bake-off arm-A golden + knob-inventory guard | 34 passed | 34 passed; new knob pinned to 0 in `MODEL_A_PROFILE`, **no golden re-capture needed** (kill value is an identity on the valuation) |
+| Kill-switch identity | — | `placement_tier_clamp = 0` reproduces the pre-D-085 blend for a whole populated board (`test_knob_at_zero_is_byte_identical`) |
+
+**Evidence under D-056** (no Maestro, no simulator, no captures): 22 new unit tests plus a
+written code-walk citing file:line for every hop of the path, including a
+**gate-isolation proof by what the gate reads** — the range-overlap fairness gate
+prices `gvals`/`rvals` from `seed_value` (consensus), so `user_value` never reaches
+it and the clamp is structurally invisible to every gate. `_value_uncertainty`'s
+placement-blindness is asserted via `inspect.signature`, so a future edit that adds
+the parameter fails CI rather than sliding through.
+
+**Band constants are read live from `tier_config.json`, not hardcoded.** D-084 moved
+`second`.min 1400 → 1370 and `third`.max 1395 → 1365 while this work was in flight;
+an earlier draft had hardcoded the old numbers and would have asserted the wrong
+thing silently. `test_band_constants_match_the_shipped_config` guards the guard.
+
+**What was measured, on prod, read-only (`SET TRANSACTION READ ONLY`, SELECT only).**
+The operator's real board was rebuilt through the actual `RankingService` — 625-player
+pool seeded from the latest `player_value_history` snapshot, all 624 stored
+`tier_overrides` pins re-applied with stamps, all 1,679 in-pool `swipe_decisions`
+replayed via `replay_from_db` — then `comparison_counts()` and `_shrink_user_elo` were
+run with and without the clamp under the live configuration (`pin_tier_bounded=1.0`,
+`pin_exclude_comparisons=1.0`, `shrink_pseudocount=4.0`).
+
+- **Davante Adams, the driving case: priced 1490.8 (`second`) → 1365.0 (`third`)**, back
+  into the tier he was placed in. Band [1280, 1365], consensus 1526.
+- **The mechanism is not "he was barely compared".** Adams has **36 distinct comparison
+  opponents** and is among the most-voted players on that board, but his live
+  `comparison_counts` is **1**, because `pin_exclude_comparisons` (F1) correctly discards
+  votes a tier-bounded player's band edge swallowed. `w = 0.2` ⇒ the engine priced him
+  **80 % consensus** despite 36 votes and an explicit placement. An estimate from raw
+  distinct-opponent counts gives `n = 36`, `w = 0.9`, and wrongly concludes the clamp is
+  a no-op here. **Only the replay reveals this** — recorded so the shortcut is not retried.
+- **Whole board: 162 of 615 banded placements (26 %) move**, median 32 Elo, max 343
+  (Travis Hunter). Largest movers are `n = 0` players whose blend was pure consensus.
+- **Placements are not rare:** 5 of 18 users have them; the three active boards carry
+  547 / 644 / 737 each.
+
+**Negative finding — the `basis: consensus` framing does not hold.** The work was
+motivated by "every one of the 40 most recently served cards came back `basis:
+consensus`". Prod on 2026-08-19: last 40 impressions = **30 consensus / 10 divergence
+(25 %)**; last 400 = 7.8 %; all time = 12 % (1,263 of 10,550). Divergence *is* being
+found. Further, `basis` is decided at `trade_service.py:4105` by
+`member.has_rankings and member.elo_ratings` — a property of the **opponent's** board,
+evaluated before any user value is read — or by the zero-divergence fallback at `:4175`.
+The clamp can only influence the second, and the impressions table does not record which
+branch fired. **This clamp must not be reported as the cause of the consensus share.**
+Recommended follow-up: instrument the fallback to distinguish "opponent unboarded" from
+"divergence path came back empty".
+
+**Not covered:** `bakeoff_runner.gen_v2_cards` never passes `placements`, so the clamp is
+inert on every bake-off arm and the bake-off cannot currently measure this feature.
+Left that way deliberately — two sibling agents were editing `bakeoff_runner.py`
+concurrently. `MODEL_A_PROFILE` pins the knob to 0 regardless.
+
+---
 ## 2026-08-19b — Give-side headliner cap (D-082); the flood C4 could not see
 
 **Branch:** `fix/deck-give-headliner-cap`, from `origin/main` `8b7689a`. **Not shipped** — not pushed, not merged.
