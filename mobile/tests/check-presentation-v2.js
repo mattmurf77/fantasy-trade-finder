@@ -513,9 +513,9 @@ assert(
   'trades.presentation_v2 exists in config/features.json',
 );
 assert(
-  featuresJson['trades.presentation_v2'] === false,
-  'trades.presentation_v2 ships OFF',
-  'this branch is explicitly a default-OFF build',
+  featuresJson['trades.presentation_v2'] === true,
+  'trades.presentation_v2 ships ON',
+  'operator lit it 2026-08-19 for the 1.15.0 TestFlight build; set false to go dark again',
 );
 assert(
   /"trades\.presentation_v2",/.test(read('backend/feature_flags.py', REPO)),
