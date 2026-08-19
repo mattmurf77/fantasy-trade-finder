@@ -197,5 +197,5 @@
   "_comment_feedback_decline_reasons": "2026-08-17 decline-reason capture (docs/plans/decline-reason-capture/SPEC.md). Mirrors config/features.json — see the note there. Ships ON for all users; this key is the one-line kill switch.",
   "feedback.decline_reasons": true,
   "_comment_trade_bakeoff": "2026-08-18 three-model bake-off Phase 3 (docs/plans/three-model-bakeoff/PLAN.md). Mirrors config/features.json — see the note there. Ships OFF: the runner fans an organic trade job out into three arms, interleaves them team-draft and attributes every card, but nothing generates or serves differently until this key is flipped.",
-  "trade.bakeoff": false
+  "trade.bakeoff": true
 }

@@ -69,6 +69,16 @@ def _telemetry(on: bool):
     return patch.object(server, "_suggestion_telemetry_enabled", lambda: on)
 
 
+def _no_bakeoff():
+    """Pin the bake-off OFF. These tests assert the UNSUFFIXED policy version
+    and the normal presentation stack; `trade.bakeoff` (live true since
+    2026-08-18) stamps `/bo:<arm>` onto every impression and hands deck order
+    to the interleaver. Neither is what this file measures — the bake-off's
+    own telemetry is covered in test_bakeoff_runner.py."""
+    import backend.bakeoff_runner as _bo
+    return patch.object(_bo, "bakeoff_enabled", lambda: False)
+
+
 def _ghost_rate(one_in: int):
     """Patch the module-level rate read (server + matcher both resolve
     st.ghost_one_in at call time)."""
@@ -178,7 +188,7 @@ def _candidate_sets(eng):
 
 def test_flag_off_leaves_columns_null_and_no_candidate_sets(harness):
     client, job, trade_svc, eng = harness
-    with _signal(True), _telemetry(False):
+    with _no_bakeoff(), _signal(True), _telemetry(False):
         cards = _run_job(eng, job)
     rows = _impressions(eng)
     assert len(rows) == len(cards) >= 1
@@ -193,7 +203,7 @@ def test_flag_off_leaves_columns_null_and_no_candidate_sets(harness):
 
 def test_flag_on_round_trip_stamps_and_persists(harness):
     client, job, trade_svc, eng = harness
-    with _signal(True), _telemetry(True), _ghost_rate(0):
+    with _no_bakeoff(), _signal(True), _telemetry(True), _ghost_rate(0):
         cards = _run_job(eng, job)
     rows = _impressions(eng)
     assert len(rows) == len(cards) >= 1
@@ -257,7 +267,7 @@ def test_ghost_predicate_rate_and_disable():
 def test_ghosts_logged_but_never_rendered(harness):
     client, job, trade_svc, eng = harness
     # one_in=1 ⇒ every ELIGIBLE (non-likes-you) organic card is withheld.
-    with _signal(True), _telemetry(True), _ghost_rate(1):
+    with _no_bakeoff(), _signal(True), _telemetry(True), _ghost_rate(1):
         cards = _run_job(eng, job)
 
     rows = _impressions(eng)

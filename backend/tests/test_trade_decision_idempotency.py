@@ -452,8 +452,14 @@ def test_re_posted_swipe_writes_exactly_one_set_of_swipe_decisions(route):
     """
     client, token, _service, _matcher = route
 
-    assert _post_swipe(client, token, "pass").status_code == 200
-    assert _post_swipe(client, token, "pass").status_code == 200
+    # The bake-off's Elo freeze (`elo_freeze_mult` -> 0.0 while
+    # `trade.bakeoff` is live) zeroes the stored k_factor, which is the very
+    # quantity this test measures a double-write with. Pin it off so the
+    # instrument reads.
+    import backend.bakeoff_runner as _bo
+    with patch.object(_bo, "bakeoff_enabled", lambda: False):
+        assert _post_swipe(client, token, "pass").status_code == 200
+        assert _post_swipe(client, token, "pass").status_code == 200
 
     swipes = load_swipe_decisions(user_id=ME, scoring_format="1qb_ppr")
     assert len(swipes) == 1, (
