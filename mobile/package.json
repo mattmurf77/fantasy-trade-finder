@@ -50,7 +50,7 @@
     "test:settings-ia": "node tests/check-settings-ia.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",
-    "test:outlook-bands": "node tests/check-outlook-bands.js"
+    "test:outlook-bands": "node tests/check-outlook-bands.js",
     "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js"
   },
   "dependencies": {

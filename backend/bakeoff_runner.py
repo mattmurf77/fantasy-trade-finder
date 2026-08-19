@@ -233,7 +233,7 @@ def serve_interleaved() -> bool:
     arm C), only arm B is served, and the normal presentation stack runs
     untouched. Re-light with 1.0 once arm C stops forfeiting AND the outlook
     lane fills — both are visible in `bakeoff_runs.groups_json`."""
-    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 0.0) >= 1.0
+    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 1.0) >= 1.0
 
 
 def deck_limit() -> int | None:
