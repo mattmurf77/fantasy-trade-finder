@@ -998,10 +998,10 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     them, so arm C gets them, and the bake-off compares generation.
     """
     from .trade_gen_v2 import generate_league_suggestions
-    from .trade_service import (_filter_by_trade_intent, classify_lane,
-                                elo_to_value, pinned_stud_tax_mode,
-                                signed_lane_shift, stud_tax_mode_for_user,
-                                stud_tax_override)
+    from .trade_service import (_c, _filter_by_trade_intent, cap_give_headliners,
+                                classify_lane, elo_to_value,
+                                pinned_stud_tax_mode, signed_lane_shift,
+                                stud_tax_mode_for_user, stud_tax_override)
     from .feature_flags import FLAGS
 
     league = trade_service._leagues.get(kwargs["league_id"])
@@ -1039,6 +1039,17 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     cards = _filter_by_trade_intent(
         cards, effective_trade_intent(kwargs.get("trade_intent")),
         seed_elo, trade_service._players, scoring_format)
+
+    # C4b give-side headliner cap — the third post-generation step arms A/B get
+    # and arm C would otherwise miss. `_dedup_and_sort` applies it on the v1/v3
+    # path and `_generate_trades_impl`'s v2 branch applies it on the flag-on
+    # serving path; calling `generate_league_suggestions` directly skips both,
+    # so without this line group 3 would be the only group allowed to flood one
+    # give-side headliner and the bake-off would compare arms under different
+    # deck-assembly rules. Arm A disables it through MODEL_A_PROFILE, which is
+    # a deliberate arm difference, not an accidental one.
+    cards = cap_give_headliners(cards, seed_elo, trade_service._players,
+                                int(_c("deck_give_headliner_cap")))
 
     # `_vs` — the consensus (seed) value function `_generate_trades_impl`
     # builds for exactly this call. Lanes describe the trade's shape against

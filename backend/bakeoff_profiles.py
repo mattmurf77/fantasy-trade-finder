@@ -59,6 +59,7 @@ MODEL_A_PROFILE: dict[str, float] = {
     "min_package_band":          0.0,   # C2 off
     "pick_pair_strip_frac":      0.0,   # C3 off
     "deck_headliner_cap":        0.0,   # C4 off
+    "deck_give_headliner_cap":   0.0,   # C4b off
     "mismatch_confidence_damp":  0.0,   # C5 off
 }
 
