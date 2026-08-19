@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point](#2026-08-18--matchmaking-engine-rebuilt-standing-handover-doc-is-the-entry-point)
 - [2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut](#2026-08-18--dismiss-cooldown-shipped-d-067-backend-only-no-build-cut)
 - [2026-08-17 — Feedback wave merged to main, push + TestFlight owed](#2026-08-17--feedback-wave-merged-to-main-push--testflight-owed)
 - [2026-08-16 — Matchmaking engine phase 1 shipped dark; mobile pyramid UI is the open half](#2026-08-16--matchmaking-engine-phase-1-shipped-dark-mobile-pyramid-ui-is-the-open-half)
@@ -94,6 +95,42 @@ in 12 days.
 ---
 
 ---
+
+## 2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point
+
+**Read [`../docs/plans/matchmaking-engine/HANDOVER.md`](../docs/plans/matchmaking-engine/HANDOVER.md) first.**
+It is the durable reference for this whole area — what is live, what is dark, what was
+deliberately NOT done, the open decisions, and ten traps that already cost real time
+(`eas build` archiving the local dir; verifying merges by content marker not whole-file diff;
+`executemany` silently dropping a column for a whole deck; recording the gate a row *passed*
+rather than the one requested; post-generation re-rankers voiding the bake-off).
+
+### Where things are
+
+**Live:** suggestion telemetry, decline-reason capture (all users), G6 presentment rules,
+engine-quality fixes (pick spam + deck flooding), Phase 0 (vote inversion, `force` supersede),
+tier-bounded voting (boards thawed: effective comparisons 32% → 98%), G-049 replay guard.
+Backend suite 3363 at last full run; main `217a8e1`+.
+
+**Dark:** `trade_gen.v2` (bake-off arm C, never served), `trade.bakeoff` (runner + interleaver
++ attribution built; Phase-4 dark mode is the default when lit), arm-A profile and golden.
+
+**Unbuilt, and the biggest piece of unrealised value:** the mobile presentation redesign —
+nine approved Chalkline states in `mockups/trade-suggestion-redesign/`. The engine work
+shipped; the presentation did not.
+
+### Next moves
+
+1. Bake-off Phase 4 (dark run: all arms generate, only arm B serves) — measures p95 job
+   duration against the 60 s hard timeout, and the arm-C empty rate. Nothing user-visible.
+2. Re-measure consensus vs divergence quality on post-fix data before trusting the deck skew
+   (the 2.5× gap was measured on the broken engine; divergence cards were 81% picks).
+3. The mobile pyramid UI, when there's appetite for a user-visible change with full gates.
+
+### Blocking nothing, but owed
+
+Maestro flows for decline-reasons were authored and never executed (sim gate waived by the
+operator 2026-08-17); TestFlight is the only runtime evidence that feature has.
 
 ## 2026-08-17 — Feedback wave merged to main, push + TestFlight owed
 
