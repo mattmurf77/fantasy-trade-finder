@@ -195,5 +195,5 @@
   "_comment_feedback_decline_reasons": "2026-08-17 decline-reason capture (docs/plans/decline-reason-capture/SPEC.md). Mirrors config/features.json — see the note there. Ships ON for all users; this key is the one-line kill switch.",
   "feedback.decline_reasons": true,
   "trade.bakeoff": true,
-  "trades.presentation_v2": true
+  "trades.presentation_v2": false
 }

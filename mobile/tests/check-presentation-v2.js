@@ -513,9 +513,11 @@ assert(
   'trades.presentation_v2 exists in config/features.json',
 );
 assert(
-  featuresJson['trades.presentation_v2'] === true,
-  'trades.presentation_v2 ships ON',
-  'operator lit it 2026-08-19 for the 1.15.0 TestFlight build; set false to go dark again',
+  featuresJson['trades.presentation_v2'] === false,
+  'trades.presentation_v2 ships OFF',
+  'operator disabled it 2026-08-19: the endorsement bar is unreachable — every '
+    + 'served card is basis=consensus, so confidenceBand() can never return '
+    + 'strong and TodaysTrade renders its empty state 100% of the time',
 );
 assert(
   /"trades\.presentation_v2",/.test(read('backend/feature_flags.py', REPO)),
