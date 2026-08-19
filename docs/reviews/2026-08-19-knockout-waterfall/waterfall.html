@@ -1,0 +1,205 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Knockout Waterfall</title>
+<style>
+:root {
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--ink-0); color:var(--chalk);
+  font-family:Archivo,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:14px; line-height:1.5; padding:24px; }
+.wrap { max-width:1180px; margin:0 auto; }
+h1 { font-family:"Barlow Condensed",Archivo,sans-serif; font-weight:700;
+  font-size:32px; line-height:34px; text-transform:uppercase;
+  letter-spacing:.02em; margin:0 0 4px; }
+h2 { font-family:"Barlow Condensed",Archivo,sans-serif; font-weight:600;
+  font-size:22px; line-height:26px; text-transform:uppercase;
+  letter-spacing:.03em; margin:32px 0 4px; border-left:3px solid var(--ice);
+  padding-left:10px; }
+h3 { font-family:Archivo,sans-serif; font-weight:600; font-size:11px;
+  text-transform:uppercase; letter-spacing:.08em; color:var(--chalk-dim);
+  margin:24px 0 8px; }
+p.sub, p.note { color:var(--chalk-dim); font-size:13px; margin:0 0 12px; }
+section { background:var(--ink-1); border:1px solid var(--line);
+  border-radius:8px; padding:16px; margin:16px 0; }
+.tablewrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; margin:0 0 4px; }
+th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line);
+  vertical-align:baseline; }
+th { font-family:Archivo,sans-serif; font-weight:600; font-size:11px;
+  text-transform:uppercase; letter-spacing:.08em; color:var(--chalk-dim);
+  border-bottom:1px solid var(--line-strong); }
+td.num, th.num { text-align:right; font-family:"IBM Plex Mono",ui-monospace,
+  SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums;
+  font-size:13px; }
+td.dim { color:var(--chalk-faint); }
+tr.head td { background:var(--ink-2); font-weight:600; }
+.mono { font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  font-variant-numeric:tabular-nums; }
+.rid { display:inline-block; min-width:150px; color:var(--chalk-faint);
+  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-size:12px;
+  margin-right:8px; }
+.bar { display:inline-block; width:90px; height:7px; background:var(--ink-3);
+  border-radius:2px; overflow:hidden; margin-right:8px; vertical-align:middle; }
+.fill { display:block; height:100%; background:var(--ice); }
+.pctnum { display:inline-block; min-width:52px; }
+td.uniq { color:var(--flare); font-weight:600; }
+b.ok { color:var(--pos); } b.bad { color:var(--neg); }
+.kv { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
+  gap:4px 16px; }
+.kv div { font-size:13px; color:var(--chalk-dim); }
+.kv b { color:var(--chalk); font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; }
+.callout { border:1px solid var(--flare); border-radius:8px; padding:12px 16px;
+  background:var(--ink-2); margin:12px 0; }
+.callout h3 { color:var(--flare); margin-top:0; }
+.cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+</style>
+<div class="wrap">
+<h1>Knockout waterfall</h1>
+<p class="sub">Every candidate trade in league <span class="mono">1312140920132497408</span>,
+and the rule that killed it. Replay of 2026-08-19 production data through the real
+engine. Boarded: mattmurf77, Bcork, gdubs10, jonbonjourvi, johnstanfield, MangoPatti.
+Fairness threshold 0.5.</p>
+
+<section>
+<h3>How to read this</h3>
+<p class="note"><b>First-kill</b> is the waterfall: the rule that actually rejected the
+candidate, in real execution order — each rule only sees what earlier rules let through.
+<b>Would also fail</b> ignores order: how many of the whole universe that rule rejects
+when asked independently. <b>Unique kills</b> is the number this exercise exists for —
+candidates <em>no other rule</em> would have rejected. A rule with a big first-kill count
+and a small unique count is mostly doing work something else would have done anyway; a
+rule with unique kills is the only thing standing between the user and those trades.</p>
+</section>
+
+<div class="callout">
+<h3>The only rules that exclude trades nothing else would</h3>
+<div class="tablewrap"><table class="compact"><thead><tr><th>Rule</th><th>Arm</th>
+<th class="num">Trades killed uniquely</th><th class="num">Share of that arm's universe</th>
+</tr></thead><tbody>
+<tr><td>#141 junk-filler gate</td><td class="mono">B divergence</td><td class="num uniq">44,529</td><td class="num dim">1.777%</td></tr><tr><td>#141 junk-filler gate</td><td class="mono">B consensus</td><td class="num uniq">8,348</td><td class="num dim">2.308%</td></tr><tr><td>Dual-surplus floor (min_side_surplus_marginal = 60)</td><td class="mono">B divergence</td><td class="num uniq">5,429</td><td class="num dim">0.217%</td></tr><tr><td>#141 junk-filler gate</td><td class="mono">C gen v2</td><td class="num uniq">4,938</td><td class="num dim">2.401%</td></tr><tr><td>G6 R1 — overpay_ok</td><td class="mono">B consensus</td><td class="num uniq">2,599</td><td class="num dim">0.719%</td></tr><tr><td>G6 R5 — need_gate_ok (positional need)</td><td class="mono">B consensus</td><td class="num uniq">1,919</td><td class="num dim">0.531%</td></tr><tr><td>Consensus one-way gate (rv − gv &lt; user_gain_epsilon = 0)</td><td class="mono">B consensus</td><td class="num uniq">1,156</td><td class="num dim">0.320%</td></tr><tr><td>#108 raw-board 1-for-1 veto (via fit_premium_1for1)</td><td class="mono">B consensus</td><td class="num uniq">913</td><td class="num dim">0.252%</td></tr><tr><td>G6 R5 — need_gate_ok (positional need)</td><td class="mono">B divergence</td><td class="num uniq">827</td><td class="num dim">0.033%</td></tr><tr><td>G6 R1 — overpay_ok</td><td class="mono">B divergence</td><td class="num uniq">697</td><td class="num dim">0.028%</td></tr><tr><td>Consensus fairness + range-overlap escape</td><td class="mono">B consensus</td><td class="num uniq">662</td><td class="num dim">0.183%</td></tr><tr><td>Roster feasibility, both sides</td><td class="mono">B divergence</td><td class="num uniq">557</td><td class="num dim">0.022%</td></tr><tr><td>G6 R2 — pos_net_ok (net-position cap)</td><td class="mono">B divergence</td><td class="num uniq">412</td><td class="num dim">0.016%</td></tr><tr><td>G6 R2 — pos_net_ok (net-position cap)</td><td class="mono">B consensus</td><td class="num uniq">271</td><td class="num dim">0.075%</td></tr><tr><td>Consensus fairness band (gen2_band = 0.15)</td><td class="mono">C gen v2</td><td class="num uniq">269</td><td class="num dim">0.131%</td></tr><tr><td>#227 pick-for-pick churn ban</td><td class="mono">B consensus</td><td class="num uniq">255</td><td class="num dim">0.071%</td></tr><tr><td>Dual-board ε-gain — user side (gen2_epsilon = 100)</td><td class="mono">C gen v2</td><td class="num uniq">253</td><td class="num dim">0.123%</td></tr><tr><td>Roster feasibility, both sides</td><td class="mono">C gen v2</td><td class="num uniq">134</td><td class="num dim">0.065%</td></tr><tr><td>G6 #341 net-position cap</td><td class="mono">C gen v2</td><td class="num uniq">92</td><td class="num dim">0.045%</td></tr><tr><td>Dual-board ε-gain — partner side (gen2_epsilon = 100)</td><td class="mono">C gen v2</td><td class="num uniq">31</td><td class="num dim">0.015%</td></tr><tr><td>G6 R3 — pick_gap_ok (pick-not-the-gap band)</td><td class="mono">B divergence</td><td class="num uniq">20</td><td class="num dim">0.001%</td></tr><tr><td>#108 raw-board 1-for-1 veto (via fit_premium_1for1)</td><td class="mono">B divergence</td><td class="num uniq">13</td><td class="num dim">0.001%</td></tr><tr><td>Consensus fairness + range-overlap escape</td><td class="mono">B divergence</td><td class="num uniq">4</td><td class="num dim">0.000%</td></tr><tr><td>G6 #339 pick-gap band</td><td class="mono">C gen v2</td><td class="num uniq">2</td><td class="num dim">0.001%</td></tr>
+</tbody></table></div>
+</div>
+
+<section><h2>Arm B · divergence (v3 optimizer)</h2>
+<p class="sub">30 ordered boarded pairs · <span class="mono">2,505,720</span> candidates · <span class="mono">1,827</span> survive every rule · counters validated: <b class="ok">YES</b></p>
+<div class="tablewrap"><table><thead><tr><th>Rule (execution order)</th><th class="num">First-kill</th><th class="num">% of universe</th><th class="num">Would also fail</th><th class="num">Unique kills</th><th class="num">Left</th></tr></thead><tbody>
+<tr class="head"><td>Candidates admitted on ranking diff alone</td><td class="num">—</td><td class="num">100.00%</td><td class="num">—</td><td class="num">—</td><td class="num">2,505,720</td></tr>
+<tr><td><span class="rid">gap_max</span>Elo-gap guard (trade_elo_gap_max = 250)</td><td class="num">1,250,720</td><td class="num"><span class="bar"><span class="fill kill" style="width:49.9146%"></span></span><span class="pctnum">49.91%</span></td><td class="num dim">1,250,720</td><td class="num">0</td><td class="num">1,255,000</td></tr>
+<tr><td><span class="rid">R0_108_1for1</span>#108 raw-board 1-for-1 veto (via fit_premium_1for1)</td><td class="num">981</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.04%</span></td><td class="num dim">2,635</td><td class="num" class="uniq">13</td><td class="num">1,254,019</td></tr>
+<tr><td><span class="rid">R0_227_pickswap</span>#227 pick-for-pick churn ban</td><td class="num">3,373</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.13%</span></td><td class="num dim">3,489</td><td class="num">0</td><td class="num">1,250,646</td></tr>
+<tr><td><span class="rid">R0_141_filler</span>#141 junk-filler gate</td><td class="num">1,200,451</td><td class="num"><span class="bar"><span class="fill kill" style="width:47.9084%"></span></span><span class="pctnum">47.91%</span></td><td class="num dim">2,434,743</td><td class="num" class="uniq">44,529</td><td class="num">50,195</td></tr>
+<tr><td><span class="rid">G6_R1_overpay</span>G6 R1 — overpay_ok</td><td class="num">35,014</td><td class="num"><span class="bar"><span class="fill kill" style="width:1.3974%"></span></span><span class="pctnum">1.40%</span></td><td class="num dim">2,078,626</td><td class="num" class="uniq">697</td><td class="num">15,181</td></tr>
+<tr><td><span class="rid">G6_R2_posnet</span>G6 R2 — pos_net_ok (net-position cap)</td><td class="num">2,454</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.10%</span></td><td class="num dim">1,066,206</td><td class="num" class="uniq">412</td><td class="num">12,727</td></tr>
+<tr><td><span class="rid">G6_R3_pickgap</span>G6 R3 — pick_gap_ok (pick-not-the-gap band)</td><td class="num">548</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.02%</span></td><td class="num dim">166,455</td><td class="num" class="uniq">20</td><td class="num">12,179</td></tr>
+<tr><td><span class="rid">G6_R5_need</span>G6 R5 — need_gate_ok (positional need)</td><td class="num">3,058</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.12%</span></td><td class="num dim">451,963</td><td class="num" class="uniq">827</td><td class="num">9,121</td></tr>
+<tr><td><span class="rid">feasibility</span>Roster feasibility, both sides</td><td class="num">1,711</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.07%</span></td><td class="num dim">209,570</td><td class="num" class="uniq">557</td><td class="num">7,410</td></tr>
+<tr><td><span class="rid">min_side_surplus</span>Dual-surplus floor (min_side_surplus_marginal = 60)</td><td class="num">5,579</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.22%</span></td><td class="num dim">2,181,490</td><td class="num" class="uniq">5,429</td><td class="num">1,831</td></tr>
+<tr><td><span class="rid">fairness</span>Consensus fairness + range-overlap escape</td><td class="num">4</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.00%</span></td><td class="num dim">1,640,957</td><td class="num" class="uniq">4</td><td class="num">1,827</td></tr>
+</tbody></table></div>
+<h3>By package shape</h3><div class="tablewrap"><table class="compact"><thead><tr><th>Shape</th><th class="num">Candidates</th><th class="num">Survive</th><th class="num">Dominant first-killer</th></tr></thead><tbody>
+<tr><td class="mono">3x3</td><td class="num">1,452,000</td><td class="num">595</td><td class="num dim">R0_141_filler (740,464)</td></tr>
+<tr><td class="mono">2x3</td><td class="num">435,600</td><td class="num">178</td><td class="num dim">gap_max (220,143)</td></tr>
+<tr><td class="mono">3x2</td><td class="num">435,600</td><td class="num">545</td><td class="num dim">gap_max (235,973)</td></tr>
+<tr><td class="mono">2x2</td><td class="num">130,680</td><td class="num">255</td><td class="num dim">gap_max (71,001)</td></tr>
+<tr><td class="mono">1x2</td><td class="num">23,760</td><td class="num">43</td><td class="num dim">gap_max (13,000)</td></tr>
+<tr><td class="mono">2x1</td><td class="num">23,760</td><td class="num">176</td><td class="num dim">gap_max (14,534)</td></tr>
+<tr><td class="mono">1x1</td><td class="num">4,320</td><td class="num">35</td><td class="num dim">gap_max (2,366)</td></tr>
+</tbody></table></div></section><section><h2>Arm B · consensus (84.5% of served traffic)</h2>
+<p class="sub">36 boarded-user × unboarded-partner pairs · <span class="mono">361,674</span> candidates · <span class="mono">4,659</span> survive every rule · counters validated: <b class="ok">YES</b></p>
+<div class="tablewrap"><table><thead><tr><th>Rule (execution order)</th><th class="num">First-kill</th><th class="num">% of universe</th><th class="num">Would also fail</th><th class="num">Unique kills</th><th class="num">Left</th></tr></thead><tbody>
+<tr class="head"><td>Candidates admitted on ranking diff alone</td><td class="num">—</td><td class="num">100.00%</td><td class="num">—</td><td class="num">—</td><td class="num">361,674</td></tr>
+<tr><td><span class="rid">consensus_eps</span>Consensus one-way gate (rv − gv &lt; user_gain_epsilon = 0)</td><td class="num">259,179</td><td class="num"><span class="bar"><span class="fill kill" style="width:71.6609%"></span></span><span class="pctnum">71.66%</span></td><td class="num dim">259,179</td><td class="num" class="uniq">1,156</td><td class="num">102,495</td></tr>
+<tr><td><span class="rid">consolidation_loss</span>consolidation_raw_loss_frac = 0.15</td><td class="num">0</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.00%</span></td><td class="num dim">236,441</td><td class="num">0</td><td class="num">102,495</td></tr>
+<tr><td><span class="rid">R0_108_1for1</span>#108 raw-board 1-for-1 veto (via fit_premium_1for1)</td><td class="num">1,805</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.4991%"></span></span><span class="pctnum">0.50%</span></td><td class="num dim">11,888</td><td class="num" class="uniq">913</td><td class="num">100,690</td></tr>
+<tr><td><span class="rid">R0_227_pickswap</span>#227 pick-for-pick churn ban</td><td class="num">452</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.12%</span></td><td class="num dim">6,309</td><td class="num" class="uniq">255</td><td class="num">100,238</td></tr>
+<tr><td><span class="rid">R0_141_filler</span>#141 junk-filler gate</td><td class="num">77,128</td><td class="num"><span class="bar"><span class="fill kill" style="width:21.3253%"></span></span><span class="pctnum">21.33%</span></td><td class="num dim">258,408</td><td class="num" class="uniq">8,348</td><td class="num">23,110</td></tr>
+<tr><td><span class="rid">G6_R1_overpay</span>G6 R1 — overpay_ok</td><td class="num">14,888</td><td class="num"><span class="bar"><span class="fill kill" style="width:4.1164%"></span></span><span class="pctnum">4.12%</span></td><td class="num dim">263,980</td><td class="num" class="uniq">2,599</td><td class="num">8,222</td></tr>
+<tr><td><span class="rid">G6_R2_posnet</span>G6 R2 — pos_net_ok (net-position cap)</td><td class="num">559</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.15%</span></td><td class="num dim">57,269</td><td class="num" class="uniq">271</td><td class="num">7,663</td></tr>
+<tr><td><span class="rid">G6_R3_pickgap</span>G6 R3 — pick_gap_ok (pick-not-the-gap band)</td><td class="num">0</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.00%</span></td><td class="num dim">26,706</td><td class="num">0</td><td class="num">7,663</td></tr>
+<tr><td><span class="rid">G6_R5_need</span>G6 R5 — need_gate_ok (positional need)</td><td class="num">2,342</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.6475%"></span></span><span class="pctnum">0.65%</span></td><td class="num dim">92,690</td><td class="num" class="uniq">1,919</td><td class="num">5,321</td></tr>
+<tr><td><span class="rid">fairness</span>Consensus fairness + range-overlap escape</td><td class="num">662</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.18%</span></td><td class="num dim">251,377</td><td class="num" class="uniq">662</td><td class="num">4,659</td></tr>
+</tbody></table></div>
+<h3>By package shape</h3><div class="tablewrap"><table class="compact"><thead><tr><th>Shape</th><th class="num">Candidates</th><th class="num">Survive</th><th class="num">Dominant first-killer</th></tr></thead><tbody>
+<tr><td class="mono">2x1</td><td class="num">339,015</td><td class="num">2,036</td><td class="num dim">consensus_eps (248,738)</td></tr>
+<tr><td class="mono">1x1</td><td class="num">22,659</td><td class="num">2,623</td><td class="num dim">consensus_eps (10,441)</td></tr>
+</tbody></table></div></section><section><h2>Arm C · trade_gen_v2 staged pipeline</h2>
+<p class="sub">30 ordered boarded pairs · <span class="mono">205,625</span> candidates · <span class="mono">118</span> survive every rule · counters validated: <b class="ok">YES</b></p>
+<div class="tablewrap"><table><thead><tr><th>Rule (execution order)</th><th class="num">First-kill</th><th class="num">% of universe</th><th class="num">Would also fail</th><th class="num">Unique kills</th><th class="num">Left</th></tr></thead><tbody>
+<tr class="head"><td>Candidates admitted on ranking diff alone</td><td class="num">—</td><td class="num">100.00%</td><td class="num">—</td><td class="num">—</td><td class="num">205,625</td></tr>
+<tr><td><span class="rid">S3a_141_filler</span>#141 junk-filler gate</td><td class="num">192,827</td><td class="num"><span class="bar"><span class="fill kill" style="width:93.7760%"></span></span><span class="pctnum">93.78%</span></td><td class="num dim">192,827</td><td class="num" class="uniq">4,938</td><td class="num">12,798</td></tr>
+<tr><td><span class="rid">S3a_227_pickswap</span>#227 pick-for-pick churn ban</td><td class="num">0</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.00%</span></td><td class="num dim">0</td><td class="num">0</td><td class="num">12,798</td></tr>
+<tr><td><span class="rid">S3a_net_cap</span>G6 #341 net-position cap</td><td class="num">3,881</td><td class="num"><span class="bar"><span class="fill kill" style="width:1.8874%"></span></span><span class="pctnum">1.89%</span></td><td class="num dim">82,507</td><td class="num" class="uniq">92</td><td class="num">8,917</td></tr>
+<tr><td><span class="rid">S3a_pick_band</span>G6 #339 pick-gap band</td><td class="num">241</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.12%</span></td><td class="num dim">4,283</td><td class="num" class="uniq">2</td><td class="num">8,676</td></tr>
+<tr><td><span class="rid">S3b_feasibility</span>Roster feasibility, both sides</td><td class="num">1,294</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.6293%"></span></span><span class="pctnum">0.63%</span></td><td class="num dim">30,353</td><td class="num" class="uniq">134</td><td class="num">7,382</td></tr>
+<tr><td><span class="rid">S3c_dual_eps_user</span>Dual-board ε-gain — user side (gen2_epsilon = 100)</td><td class="num">2,467</td><td class="num"><span class="bar"><span class="fill kill" style="width:1.1998%"></span></span><span class="pctnum">1.20%</span></td><td class="num dim">68,009</td><td class="num" class="uniq">253</td><td class="num">4,915</td></tr>
+<tr><td><span class="rid">S3c_dual_eps_opp</span>Dual-board ε-gain — partner side (gen2_epsilon = 100)</td><td class="num">4,459</td><td class="num"><span class="bar"><span class="fill kill" style="width:2.1685%"></span></span><span class="pctnum">2.17%</span></td><td class="num dim">112,938</td><td class="num" class="uniq">31</td><td class="num">456</td></tr>
+<tr><td><span class="rid">S3d_fairness_band</span>Consensus fairness band (gen2_band = 0.15)</td><td class="num">269</td><td class="num"><span class="bar"><span class="fill kill" style="width:0.3500%"></span></span><span class="pctnum">0.13%</span></td><td class="num dim">183,467</td><td class="num" class="uniq">269</td><td class="num">187</td></tr>
+</tbody></table></div>
+<h3>By package shape</h3><div class="tablewrap"><table class="compact"><thead><tr><th>Shape</th><th class="num">Candidates</th><th class="num">Survive</th><th class="num">Dominant first-killer</th></tr></thead><tbody>
+<tr><td class="mono">3x3</td><td class="num">73,800</td><td class="num">6</td><td class="num dim">S3a_141_filler (72,825)</td></tr>
+<tr><td class="mono">3x2</td><td class="num">52,560</td><td class="num">20</td><td class="num dim">S3a_141_filler (50,912)</td></tr>
+<tr><td class="mono">2x3</td><td class="num">27,675</td><td class="num">30</td><td class="num dim">S3a_141_filler (26,487)</td></tr>
+<tr><td class="mono">2x2</td><td class="num">19,710</td><td class="num">24</td><td class="num dim">S3a_141_filler (17,982)</td></tr>
+<tr><td class="mono">3x1</td><td class="num">14,640</td><td class="num">16</td><td class="num dim">S3a_141_filler (13,142)</td></tr>
+<tr><td class="mono">1x3</td><td class="num">6,150</td><td class="num">9</td><td class="num dim">S3a_141_filler (4,740)</td></tr>
+<tr><td class="mono">2x1</td><td class="num">5,490</td><td class="num">32</td><td class="num dim">S3a_141_filler (4,099)</td></tr>
+<tr><td class="mono">1x2</td><td class="num">4,380</td><td class="num">34</td><td class="num dim">S3a_141_filler (2,640)</td></tr>
+<tr><td class="mono">1x1</td><td class="num">1,220</td><td class="num">16</td><td class="num dim">S3c_dual_eps_opp (602)</td></tr>
+</tbody></table></div></section>
+
+<section>
+<h2>Before the first bar — what never gets enumerated</h2>
+<p class="note">The divergence arm never sees a whole roster. Each side is pruned to the
+top <b class="mono">12</b> assets by valuation divergence, so the universe
+below is <em>already</em> a ranking-diff selection — that is exactly what makes it the
+honest first bar, and also what the waterfall cannot see past.</p>
+<div class="kv">
+<div>Mean user roster (assets incl. picks): <b>29.0</b></div>
+<div>Mean partner roster: <b>29.0</b></div>
+<div>Pool per side: <b>12</b></div>
+<div>Subsets per side (1–3 assets): <b>298</b></div>
+<div>Full cross product / pair: <b>88,804</b></div>
+<div>Shape-valid (|give−receive| ≤ 1): <b>83,524</b></div>
+<div>Shape rule kills, all pairs: <b>158,400</b></div>
+<div>Ordered pairs: <b>30</b></div>
+</div>
+</section>
+
+<section>
+<h2>After the last bar — selection, not gating</h2>
+<p class="note">Everything below acts on cards that already cleared every rule. These are
+not knockout rules; they are budget and diversity caps. They are listed because they remove
+more surviving trades than most of the gates do.</p>
+<div class="cols">
+<div><h3>Divergence path</h3><div class="tablewrap"><table class="compact"><thead><tr><th>Stage</th><th class="num">Cards left</th><th class="num">Dropped</th></tr></thead><tbody>
+<tr><td>gates only</td><td class="num">1,827</td><td class="num dim"></td></tr>
+<tr><td>+ v3 diversity</td><td class="num">161</td><td class="num dim">1,666</td></tr>
+<tr><td>+ max_per_opponent=5</td><td class="num">79</td><td class="num dim">82</td></tr>
+<tr><td>+ past-decision &amp; R4</td><td class="num">72</td><td class="num dim">7</td></tr>
+<tr><td>+ C4 headliner cap</td><td class="num">65</td><td class="num dim">7</td></tr>
+<tr><td>+ C4b give-headliner cap</td><td class="num">63</td><td class="num dim">2</td></tr></tbody></table></div></div>
+<div><h3>Consensus path</h3><div class="tablewrap"><table class="compact"><thead><tr><th>Stage</th><th class="num">Cards left</th><th class="num">Dropped</th></tr></thead><tbody>
+<tr><td>gates only</td><td class="num">4,659</td><td class="num dim"></td></tr>
+<tr><td>+ v3 diversity</td><td class="num">4,659</td><td class="num dim">0</td></tr>
+<tr><td>+ max_per_opponent=5</td><td class="num">180</td><td class="num dim">4,479</td></tr>
+<tr><td>+ past-decision &amp; R4</td><td class="num">158</td><td class="num dim">22</td></tr>
+<tr><td>+ C4 headliner cap</td><td class="num">128</td><td class="num dim">30</td></tr>
+<tr><td>+ C4b give-headliner cap</td><td class="num">124</td><td class="num dim">4</td></tr></tbody></table></div></div>
+</div>
+</section>
+
+<section>
+<h2>Live knob values used</h2>
+<div class="kv">
+<div>asset_floor_abs: <b>450.0</b></div><div>consolidation_raw_loss_frac: <b>0.15</b></div><div>deck_give_headliner_cap: <b>3.0</b></div><div>deck_headliner_cap: <b>2.0</b></div><div>fairness_floor_divergence: <b>0.55</b></div><div>filler_min_frac: <b>0.25</b></div><div>gen2_band: <b>0.15</b></div><div>gen2_centerpiece_top_k: <b>5.0</b></div><div>gen2_epsilon: <b>100.0</b></div><div>gen2_give_pool: <b>10.0</b></div><div>gen2_min_divergence: <b>0.0</b></div><div>gen2_recv_extra_pool: <b>4.0</b></div><div>min_side_surplus: <b>150.0</b></div><div>min_side_surplus_marginal: <b>60.0</b></div><div>need_gate_min_value: <b>500.0</b></div><div>pick_gap_frac: <b>0.8</b></div><div>picks_pool_cap: <b>6.0</b></div><div>pos_net_cap: <b>1.0</b></div><div>trade_elo_gap_max: <b>250.0</b></div><div>user_gain_epsilon: <b>0.0</b></div><div>v3_diversity_max_overlap: <b>0.4</b></div><div>v3_pool_size: <b>12.0</b></div>
+</div>
+</section>
+
+<p class="note">Resolution limit: one league, six boards, 30 ordered divergence
+pairs. These are replay counts, not production counts.</p>
+</div>
