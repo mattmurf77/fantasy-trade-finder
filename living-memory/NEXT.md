@@ -235,6 +235,26 @@ Phase 1 is built on `feat/notif-inbox-growth` and unmerged (see [`HANDOFF.md`](H
 
 ---
 
+## Backlog — ranking-UI feedback (operator, 2026-08-18; not now)
+
+**Tell the user when their votes can't do anything.** Two related gaps, both surfaced by the
+override-pin work (see [`../docs/reviews/2026-08-18-valuation-age-audit.md`](../docs/reviews/2026-08-18-valuation-age-audit.md)
+and D-069/D-070). Neither is urgent; both are the durable fix for the class of bug that
+produced the Adams inversion.
+
+1. **Analyst-driven "this vote can't move him" cue.** Under tier-bounded voting a player
+   clamped at his tier floor cannot go lower — so a user who keeps passing on him gets no
+   effect and no explanation. Surface it: *"You keep passing on X. He's at the bottom of
+   his tier — re-tier him to move him lower."* Operator's framing: analyst-driven, reacting
+   to a consistent pass pattern rather than a one-off.
+2. **Show that a player is pinned at all.** Nothing on screen indicates a tier placement is
+   constraining a player's value. The mechanism that let 17 down-votes do nothing is fixed;
+   the *invisibility* that let it go unnoticed for weeks is not.
+
+*Why it's backlog, not now:* the correctness bug is shipped-fixed (tier-bounded voting).
+This is the affordance that stops it recurring silently — worth doing the next time anyone
+is in the ranking UI, not as its own errand.
+
 ## Queue Hygiene Rules
 - **Cap at 7 active items.** If you'd be adding an 8th, archive an old one or move it to "Reserved."
 - **Each item has a clear *why now*.** Not a wish-list; an actionable next step.
