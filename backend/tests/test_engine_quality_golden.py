@@ -38,6 +38,7 @@ _KILL_ALL = {
     "min_package_band": 0.0,
     "pick_pair_strip_frac": 0.0,
     "deck_headliner_cap": 0.0,
+    "deck_give_headliner_cap": 0.0,
     "mismatch_confidence_damp": 0.0,
 }
 

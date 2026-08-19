@@ -379,7 +379,7 @@ def test_every_pinned_rule_actually_bites_on_this_fixture():
     # asset-ideas ranker (the only place `_emit_best` runs).
     _, arm_b = _deck(presentment=True, exclusion_keys=set())
     for knob in ("rank_div_min_frac", "deck_headliner_cap",
-                 "mismatch_confidence_damp"):
+                 "deck_give_headliner_cap", "mismatch_confidence_damp"):
         _, one_off = _deck({knob: 0.0}, presentment=True, exclusion_keys=set())
         assert one_off != arm_b, f"fixture no longer exercises {knob}"
     assert _ideas({"min_package_band": 0.0}) != _ideas(), \
@@ -461,7 +461,8 @@ bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr
 block_boost_weight boost_moderate boost_strong consensus_score_scale
 consolidation_raw_loss_frac crown_elite_value crown_rate crown_rate_market
 crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net
-deck_headliner_cap deck_max_per_target diversity_penalty diversity_user_cap
+deck_give_headliner_cap deck_headliner_cap deck_max_per_target
+diversity_penalty diversity_user_cap
 diversity_window_days elo_value_base elo_value_k elo_value_ref
 exploration_min_deck exploration_overgen exploration_rate
 exploration_slot_position fairness_floor_divergence fairness_weight fatigue_a

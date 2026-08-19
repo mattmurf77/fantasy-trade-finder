@@ -693,6 +693,16 @@ _DEFAULT_CFG: dict[str, float] = {
     # Applied after the composite sort, so each headliner keeps its best
     # cards. 0 disables (uncapped, as before).
     "deck_headliner_cap":         2.0,
+    # C4b (2026-08-19, docs/plans/deck-give-headliner-cap/scope.md) — GIVE-side
+    # headliner cap: at most this many cards in one served deck may ask the
+    # user to send the same headliner (the highest-consensus PLAYER on the
+    # give side). Sits alongside deck_headliner_cap, not in place of it:
+    # `deck_centerpiece` maxes over give+receive, so a card that gives a
+    # player for a draft pick is keyed on the PICK, every card offers a
+    # different pick slot, and the centerpiece cap never fires — one live deck
+    # had 22 cards with 20 distinct centerpieces while three players supplied
+    # 17 of the 22 give sides. 0 disables (uncapped, byte-identical to pre-C4b).
+    "deck_give_headliner_cap":    3.0,
     # C5 — confidence damping of the RANKING mismatch term: the term is
     # scaled by max(0, 1 − damp × unc), where unc is the package's
     # value-weighted mean _value_uncertainty (range_base / sqrt(1+n)).
@@ -1329,6 +1339,71 @@ def deck_centerpiece(give_ids, recv_ids, seed_elo: dict) -> str | None:
     if not pids:
         return None
     return max(pids, key=lambda p: (float(seed_elo.get(p, 1500.0)), p))
+
+
+def deck_give_headliner(give_ids, seed_elo: dict,
+                        players: dict | None = None) -> str | None:
+    """C4b — the GIVE side's headliner: the asset this card asks the user to
+    send that a user would name the trade after.
+
+    Deliberately NOT `deck_centerpiece(give, [], ...)`, and deliberately a
+    SECOND function rather than a change to `deck_centerpiece`: that one is
+    THE shared definition behind `deck_impressions.centerpiece_id` and the
+    decline-time fatigue key (`server._fatigue_centerpiece` delegates to it),
+    so re-keying it would silently re-key fatigue matching against every row
+    already written. Two questions, two functions.
+
+    Two differences from `deck_centerpiece`:
+
+      * give side only — "what am I being asked to trade away" is the
+        repetition the user actually feels;
+      * players outrank picks. A pick only headlines an all-pick give side.
+        Unknown assets default to 1500.0 and D-079 lifted every 1st to ~1650,
+        so a pick routinely out-Elos the player it is being traded for; since
+        each card offers a DIFFERENT pick slot, letting a pick headline is
+        exactly what made the centerpiece cap inert here.
+
+    Deterministic id tie-break, same as `deck_centerpiece`, so serve-time and
+    any later re-derivation agree even on a cold seed map.
+    """
+    pids = [str(p) for p in list(give_ids or [])]
+    if not pids:
+        return None
+    if players is not None:
+        real = [p for p in pids if not is_pick_asset(players.get(p))]
+        if real:
+            pids = real
+    return max(pids, key=lambda p: (float(seed_elo.get(p, 1500.0)), p))
+
+
+def cap_give_headliners(cards: list, seed_elo: dict, players: dict | None,
+                        cap: int) -> list:
+    """C4b — keep at most `cap` cards per give-side headliner, in the order
+    given. The caller sorts first, so each headliner keeps its BEST cards.
+
+    LEAVE-SHORT, never backfill: a dropped card is not replaced, exactly like
+    `compose_group`'s lane quotas (bakeoff_runner). A thinner deck of distinct
+    asks is the product decision; silently topping it back up with more of the
+    same headliner would restore the defect and hide it from the group
+    shortfall accounting.
+
+    `cap <= 0` or an empty seed map ⇒ the input list unchanged (an empty seed
+    map carries no consensus, so every asset ties at 1500 and "headliner"
+    degenerates to "largest player id" — capping on that drops cards for no
+    reason). Same inertness rule as the centerpiece cap.
+    """
+    if cap <= 0 or not seed_elo:
+        return cards
+    seen: dict[str, int] = {}
+    kept: list = []
+    for c in cards:
+        head = deck_give_headliner(c.give_player_ids, seed_elo, players)
+        if head is not None:
+            if seen.get(head, 0) >= cap:
+                continue
+            seen[head] = seen.get(head, 0) + 1
+        kept.append(c)
+    return kept
 
 
 def user_gain_ok_1for1(
@@ -3082,6 +3157,15 @@ class TradeService:
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
                                             self._players, scoring_format)
+            # C4b — this branch returns WITHOUT calling _dedup_and_sort, so it
+            # would otherwise be the one serving path with no give-side cap.
+            # gen-v2 returns its own ranked survivor set, so the list is
+            # already best-first and the cap keeps each headliner's best cards
+            # exactly as it does on the v1/v3 path. (Arm C of the bake-off
+            # bypasses this method entirely — bakeoff_runner.gen_v2_cards
+            # applies the same call for the same reason.)
+            cards = cap_give_headliners(cards, seed_elo, self._players,
+                                        int(_c("deck_give_headliner_cap")))
             for card in cards:
                 self._trade_cards[card.trade_id] = card
             return cards
@@ -3274,6 +3358,24 @@ class TradeService:
                     seen_heads[head] = seen_heads.get(head, 0) + 1
                 capped.append(c)
             cards = capped
+        # C4b (2026-08-19) — GIVE-side headliner cap, alongside C4 rather than
+        # instead of it. C4 keys on `deck_centerpiece`, which maxes over give
+        # AND receive; a card that gives one player for one draft pick is
+        # therefore keyed on the PICK, and since every such card offers a
+        # different pick slot every card gets a unique key and C4 never fires.
+        # Measured on the live deck that prompted this (job 2740a7fc, 22
+        # cards): 20 distinct centerpieces, C4 dropped nothing, and three
+        # players supplied 17 of the 22 GIVE sides — 6/6/5. D-079's per-round
+        # pick decay made it worse by lifting every 1st to ~1650, so picks now
+        # out-Elo more players and headline more often.
+        #
+        # Same placement discipline as C4: after the composite sort (each
+        # headliner keeps its best cards) and at deck assembly (bounds the
+        # FINAL served set; streaming snapshots re-derive it from the same
+        # accumulating list). Leave-short — a dropped card is never backfilled.
+        # 0 disables, byte-identical to pre-C4b.
+        cards = cap_give_headliners(cards, self._job_seed_elo, self._players,
+                                    int(_c("deck_give_headliner_cap")))
         return cards
 
     def presentment_kill_counts(self) -> dict[str, int]:

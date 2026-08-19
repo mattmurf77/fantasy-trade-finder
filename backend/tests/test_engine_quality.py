@@ -224,8 +224,10 @@ _ORTHOGONAL_GATES_OPEN = {
     # C4's headliner cap is off here too: the two cards this fixture compares
     # are the same trade with and without a pick, so they share a centerpiece
     # by construction and the cap would remove one of them. C4 has its own
-    # fixture below.
+    # fixture below. C4b's give-side cap is off for the same reason — the two
+    # cards give the SAME side, so they share a give headliner by construction.
     "deck_headliner_cap": 0.0,
+    "deck_give_headliner_cap": 0.0,
 }
 
 
@@ -549,6 +551,10 @@ def _flood_deck(**cfg):
     _set_flags(**{"trade_engine.v2": True})
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
+    # C4b off unless a case asks for it: every card in this fixture gives
+    # `hub`, so the give-side cap would bind first and the C4 cases below
+    # could not tell which cap trimmed the deck. C4b has its own fixture.
+    ts._cfg["deck_give_headliner_cap"] = 0.0
     ts._cfg.update(cfg)
     svc, ue, ur, seed = _flood_fixture()
     return svc.generate_trades(user_id="user", user_elo=ue, user_roster=ur,
@@ -640,6 +646,190 @@ def test_deck_centerpiece_is_the_impression_metric_definition():
     assert server._fatigue_centerpiece(give, recv, seed) == \
         ts.deck_centerpiece(give, recv, seed)
     assert ts.deck_centerpiece([], [], seed) is None
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# C4b — GIVE-side headliner cap (2026-08-19,
+#       docs/plans/deck-give-headliner-cap/scope.md)
+#
+# The measured defect C4 could not see. `deck_centerpiece` maxes over give AND
+# receive and defaults unknown assets to 1500, so on a "give one player, get
+# one draft pick" card the PICK is the centerpiece — and every such card offers
+# a DIFFERENT pick slot, so every card gets a unique centerpiece and a cap of 2
+# never fires. Live deck 2740a7fc: 22 cards, 20 distinct centerpieces, C4 kills
+# 0, and three players supplied 17 of the 22 GIVE sides (6 / 6 / 5).
+# ───────────────────────────────────────────────────────────────────────────
+
+def _c4b_players():
+    """Two players + a family of owned-pick pseudo-assets, all distinct ids."""
+    players = {"adams": _Player("adams", "WR"), "mayfield": _Player("mayfield", "QB")}
+    for n in range(1, 8):
+        players[f"L_2028_1_{n}"] = _Pick(f"L_2028_1_{n}", pick_value=60.0)
+    return players
+
+
+def _c4b_seed():
+    """D-079 pricing, in miniature: every 1st sits ABOVE the player being sent,
+    which is what hands the centerpiece to the pick."""
+    seed = {"adams": 1600.0, "mayfield": 1580.0}
+    seed.update({f"L_2028_1_{n}": 1650.0 + n for n in range(1, 8)})
+    return seed
+
+
+def _c4b_cards():
+    """Six 'give one player for one pick' cards — the live shape, best-first."""
+    cards = []
+    for i, n in enumerate(range(1, 7)):
+        cards.append(ts.TradeCard(
+            trade_id=f"t{n}", league_id="L1", proposing_user_id="u1",
+            target_user_id="u2", target_username="opp",
+            give_player_ids=["adams"], receive_player_ids=[f"L_2028_1_{n}"],
+            mismatch_score=50.0, fairness_score=0.9,
+            composite_score=100.0 - i))
+    return cards
+
+
+def _c4b_svc(**cfg):
+    ts._cfg.clear()
+    ts._cfg.update(ts._DEFAULT_CFG)
+    ts._cfg.update(cfg)
+    svc = TradeService(players=_c4b_players())
+    svc._job_seed_elo = _c4b_seed()
+    return svc
+
+
+def test_centerpiece_cap_is_blind_to_the_measured_flood():
+    """The root cause, pinned. Six cards that all ask for the same player are
+    six DISTINCT centerpieces, so C4 at its default of 2 removes nothing."""
+    seed = _c4b_seed()
+    heads = {ts.deck_centerpiece(c.give_player_ids, c.receive_player_ids, seed)
+             for c in _c4b_cards()}
+    assert len(heads) == 6, "fixture no longer reproduces the unique-key flood"
+    assert all(h.startswith("L_2028_1_") for h in heads), \
+        "the PICK must win the centerpiece — that is the defect"
+
+    svc = _c4b_svc(deck_give_headliner_cap=0.0)
+    assert len(svc._dedup_and_sort(_c4b_cards())) == 6, \
+        "C4 alone should not trim this deck (that is why C4b exists)"
+
+
+def test_give_headliner_cap_bounds_the_flood_c4_cannot():
+    """C4b at its default keeps the best `cap` cards per give headliner and
+    drops the rest."""
+    svc = _c4b_svc()
+    kept = svc._dedup_and_sort(_c4b_cards())
+    assert len(kept) == 3
+    assert [c.trade_id for c in kept] == ["t1", "t2", "t3"], \
+        "the cap must keep each headliner's BEST cards (applied after the sort)"
+    assert [c.composite_score for c in kept] == sorted(
+        (c.composite_score for c in kept), reverse=True)
+
+
+def test_give_headliner_cap_is_per_headliner_not_per_deck():
+    """A second give-side player gets its own allowance — the cap bounds
+    repetition, it does not bound deck size."""
+    cards = _c4b_cards()
+    for i, n in enumerate(range(1, 5)):
+        cards.append(ts.TradeCard(
+            trade_id=f"m{n}", league_id="L1", proposing_user_id="u1",
+            target_user_id="u3", target_username="opp3",
+            give_player_ids=["mayfield"], receive_player_ids=[f"L_2028_1_{n}"],
+            mismatch_score=50.0, fairness_score=0.9,
+            composite_score=50.0 - i))
+    kept = _c4b_svc()._dedup_and_sort(cards)
+    counts = {}
+    for c in kept:
+        counts[c.give_player_ids[0]] = counts.get(c.give_player_ids[0], 0) + 1
+    assert counts == {"adams": 3, "mayfield": 3}
+
+
+def test_give_headliner_cap_leaves_short_and_never_backfills():
+    """Leave-short, like compose_group's lane quotas: the dropped slots stay
+    empty. Backfilling would put the same headliner straight back."""
+    kept = _c4b_svc()._dedup_and_sort(_c4b_cards())
+    assert len(kept) == 3, "6 cards in, 3 out — the deck is allowed to shrink"
+    assert {c.trade_id for c in kept} <= {f"t{n}" for n in range(1, 7)}, \
+        "the cap only ever REMOVES; it must not invent or reorder cards"
+
+
+def test_give_headliner_cap_kill_value_leaves_every_card():
+    """Kill value: 0 ⇒ every card survives in plain composite order,
+    byte-identical to pre-C4b."""
+    cards = _c4b_cards()
+    kept = _c4b_svc(deck_give_headliner_cap=0.0)._dedup_and_sort(cards)
+    assert [c.trade_id for c in kept] == [c.trade_id for c in cards]
+
+
+def test_give_headliner_cap_is_inert_without_a_seed_map():
+    """No consensus values ⇒ every asset ties at 1500 and 'headliner' would
+    degenerate to 'largest player id'. Same inertness rule as C4."""
+    ts._cfg.clear()
+    ts._cfg.update(ts._DEFAULT_CFG)
+    svc = TradeService(players=_c4b_players())
+    svc._job_seed_elo = {}
+    assert len(svc._dedup_and_sort(_c4b_cards())) == 6
+
+
+def test_give_headliner_prefers_the_player_over_the_pick():
+    """The definition that fixes the root cause: on a mixed give side the
+    PLAYER headlines even though D-079 prices the pick higher."""
+    seed = _c4b_seed()
+    players = _c4b_players()
+    assert seed["L_2028_1_1"] > seed["adams"]          # the pick is worth more
+    assert ts.deck_give_headliner(["adams", "L_2028_1_1"], seed, players) == "adams"
+    # all-pick give side: the pick may headline, there is nothing else
+    assert ts.deck_give_headliner(["L_2028_1_1", "L_2028_1_2"], seed,
+                                  players) == "L_2028_1_2"
+    # no players map ⇒ plain highest-Elo, id tie-break
+    assert ts.deck_give_headliner(["adams", "L_2028_1_1"], seed, None) == "L_2028_1_1"
+    assert ts.deck_give_headliner([], seed, players) is None
+
+
+def test_give_headliner_ignores_the_receive_side():
+    """The whole point: what the user is ASKED TO SEND, never what comes back.
+    A monster on the receive side must not become the key."""
+    seed = dict(_c4b_seed())
+    seed["monster"] = 2000.0
+    assert ts.deck_give_headliner(["adams"], seed, _c4b_players()) == "adams"
+    assert ts.deck_centerpiece(["adams"], ["monster"], seed) == "monster"
+
+
+def test_deck_centerpiece_definition_is_untouched_by_c4b():
+    """C4b must NOT re-key `deck_centerpiece`: that is the shared definition
+    behind deck_impressions.centerpiece_id AND the decline-time fatigue key,
+    so changing it would silently re-key fatigue matching against every row
+    already written."""
+    import backend.server as server
+    seed = {"a": 1500.0, "b": 1700.0}
+    give, recv = ["a"], ["b"]
+    assert ts.deck_centerpiece(give, recv, seed) == "b"
+    assert server._fatigue_centerpiece(give, recv, seed) == "b"
+    assert ts.deck_give_headliner(give, seed, None) == "a"
+
+
+def test_both_generation_paths_apply_the_give_cap():
+    """Bake-off consistency. The v1/v3 engine applies C4b in `_dedup_and_sort`;
+    the `trade_gen.v2` branch of `_generate_trades_impl` returns BEFORE that
+    call, and `bakeoff_runner.gen_v2_cards` (arm C) bypasses the method
+    entirely. All three must call the one helper, or the bake-off compares
+    arms under different deck-assembly rules."""
+    import inspect
+    import backend.bakeoff_runner as br
+    impl = inspect.getsource(ts.TradeService._generate_trades_impl)
+    v2_branch = impl.split("if FLAGS.trade_gen_v2:", 1)[1].split("return cards", 1)[0]
+    assert "cap_give_headliners" in v2_branch, \
+        "the trade_gen.v2 serving branch lost its give-side cap"
+    assert "cap_give_headliners" in inspect.getsource(
+        ts.TradeService._dedup_and_sort)
+    assert "cap_give_headliners" in inspect.getsource(br.gen_v2_cards), \
+        "arm C would flood one give headliner while arms A/B could not"
+
+
+def test_arm_a_disables_the_give_cap():
+    """Arm A is the pre-wave engine, so a knob that post-dates the reference
+    sha must be pinned to its kill value in MODEL_A_PROFILE."""
+    from backend.bakeoff_profiles import MODEL_A_PROFILE
+    assert MODEL_A_PROFILE["deck_give_headliner_cap"] == 0.0
 
 
 # ───────────────────────────────────────────────────────────────────────────

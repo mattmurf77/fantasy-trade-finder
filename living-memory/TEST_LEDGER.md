@@ -10,6 +10,52 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19b — Give-side headliner cap (D-080); the flood C4 could not see
+
+**Branch:** `fix/deck-give-headliner-cap`, from `origin/main` `8b7689a`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/deck-give-headliner-cap/scope.md](../docs/plans/deck-give-headliner-cap/scope.md). Decision: [D-080](DECISIONS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3416 passed, 1 skipped (baseline at `8b7689a`) | **3427 passed, 1 skipped, 0 failed** (+11 new) |
+| `tsc --noEmit` / `testid-lint` | n/a — **zero files under `mobile/` changed** | unaffected |
+| Bake-off arm-A golden + knob-inventory guard | 10 passed | 10 passed; new knob pinned to 0 in `MODEL_A_PROFILE`, **no golden re-capture needed** (kill value returns the list unchanged) |
+| `test_engine_quality_golden` byte-identity vs `origin/main` | 5 knobs killed | 6 knobs killed, still byte-identical |
+
+**What was measured, on prod, read-only (`SET TRANSACTION READ ONLY`, SELECT only).** The defect,
+on the operator's own deck `deck_job_id` 2740a7fc — 22 cards, **20 distinct `centerpiece_id`s**,
+C4 killed 0, and three players supplied **17 of the 22 give sides** (6 Adams / 6 `1466` / 5
+Mayfield). Then the fix, replayed over **66 `deck_candidate_sets` pools of ≥20 candidates**
+(1,925 served cards) in `base_score` order:
+
+| Cap | Cards lost | Median deck size | Per-deck max repeat (median) | Decks under `_DECK_MIN_CARDS` (5) |
+|---|---|---|---|---|
+| 2 | 458 (23.8 %) | 29 → 24 | 6 → 2 | 0 |
+| **3 (shipped)** | **194 (10.1 %)** | **29 → 26.5** | **6 → 3** | **0** |
+| 4 | 62 (3.2 %) | 29 → 28 | 6 → 4 | 0 |
+
+At the shipped default: 19 of 66 decks unchanged, worst single deck 36 → 24, 3 decks under 20
+cards, per-deck worst repeat `{3:1,4:13,5:16,6:14,7:7,8:1,9:4,10:2,11:3,12:2,13:3}` → `{3:66}`.
+
+**Evidence per D-056 (no simulator, no Maestro):** 11 new pytest cases in
+`backend/tests/test_engine_quality.py` + a file:line code-walk proof in the scope block §3.1 +
+a manual TestFlight checklist for the operator (§3.2), since "how the deck reads" is the one
+claim no unit test can settle.
+
+**Proven-to-fail, both applied → observed RED → reverted.** (a) default `3.0 → 0.0`: 3 behaviour
+tests fail. (b) delete the `cap_give_headliners` call from `_dedup_and_sort`: 4 fail — the three
+above plus `test_both_generation_paths_apply_the_give_cap`, which is the guard that arm C
+(`bakeoff_runner.gen_v2_cards`) and the `trade_gen.v2` serving branch keep their own calls; both
+bypass `_dedup_and_sort` entirely, so without them the bake-off would compare arms under
+different deck-assembly rules.
+
+**One pre-existing test-fixture interaction, resolved deliberately rather than by loosening an
+assertion.** Every card in the C4 flood fixture gives `hub`, so C4b bound first and 4 C4 cases
+went red. `_flood_deck` and `_ORTHOGONAL_GATES_OPEN` now pin `deck_give_headliner_cap = 0`, the
+same isolation technique those fixtures already used for `deck_headliner_cap` — C4b has its own
+fixture (`_c4b_*`) built from the real defect shape (one player for one pick, six distinct picks).
+
+---
 ## 2026-08-19 — Per-round draft-pick year decay (D-079); firsts stop decaying
 
 **Branch:** `feat/pick-year-decay`, from `origin/main` `02e27dd`. **Not shipped** — not pushed, not merged.

@@ -50,7 +50,7 @@ over the `model_config` seed rows and `trade_service._DEFAULT_CFG`, plus
 that range and two (`gen2_g6_net_position_cap`, `gen2_pick_band_frac`) were
 removed. No pre-existing knob's default was re-tuned.
 
-**Included — nine keys, every post-reference-SHA v1-generation knob:**
+**Included — ten keys, every post-reference-SHA v1-generation knob:**
 
 | Knob | Wave | Rule | Disable value verified at |
 |---|---|---|---|
@@ -62,6 +62,7 @@ removed. No pre-existing knob's default was re-tuned.
 | `min_package_band` | engine-quality | C2 minimal-package preference | `0` ⇒ closest-gap-wins |
 | `pick_pair_strip_frac` | engine-quality | C3 matched-pick-pair strip | `<= 0` ⇒ literal 1-for-1 ban only |
 | `deck_headliner_cap` | engine-quality | C4 headliner diversity cap | `0` ⇒ uncapped |
+| `deck_give_headliner_cap` | give-headliner cap, 2026-08-19 | C4b give-side headliner cap | `0` ⇒ uncapped |
 | `mismatch_confidence_damp` | engine-quality | C5 confidence damping | `<= 0` ⇒ undamped |
 
 **Excluded — each with its reason** (per the mission's requirement that every
