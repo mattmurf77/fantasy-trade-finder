@@ -10,6 +10,27 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — Web audit + Phase 0 breakage fixes (`fix/web-phase0`, NOT merged)
+
+**Four-auditor audit of the live site** → [`docs/reviews/2026-08-19-web-parity-audit.md`](../docs/reviews/2026-08-19-web-parity-audit.md).
+Verdict: the web is a stale fork of a mid-2026 build at ~35-40% of mobile's capability.
+Plan + scope: [`docs/plans/web-parity/`](../docs/plans/web-parity/).
+
+**Phase 0 built on `fix/web-phase0` (from `origin/main` `50e0451`). Not merged, not deployed.**
+Fixed: the demo path that trapped users permanently (synthetic id → 503 *and* an exit-less
+overlay; the demo marker also moved from `sessionStorage` to the saved user so it survives a
+tab close); web analytics emitting **zero** events (`track()` dropped everything fired before
+`/api/feature-flags` resolved — including `app_opened`, on every session); the primary CTA
+clipped at 375px; `profile.html`'s handle parser; no HTML 404 page; design-lab pages served
+in prod. Added `web/contact.html` — the first route a web visitor has to a deletion request.
+
+**Two audit claims were wrong and are corrected in the scope block:** `ranking-method.html`
+is not an orphan (mobile opens it as a read-more explainer — kept, fake controls stripped),
+and the `league-rankings` nav link was already correctly flag-gated.
+
+**Open:** `[STATE]` in `terms.html` and 3 waivers need the operator ([`scope.md`](../docs/plans/web-parity/scope.md) §6).
+
+---
 ## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers
 
 **Flag flip only — no code, no build.** `account.settings_hub` false → **true** in

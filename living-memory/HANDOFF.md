@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Web audited; Phase 0 breakage fixes built on `fix/web-phase0`, unmerged](#2026-08-19--web-audited-phase-0-breakage-fixes-built-on-fixweb-phase0-unmerged)
 - [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
@@ -31,6 +32,46 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — Web audited; Phase 0 breakage fixes built on `fix/web-phase0`, unmerged
+
+### Where I am right now
+
+`fix/web-phase0`, cut from `origin/main` `50e0451`, in a worktree at
+`…/5f1ac8ee-…/scratchpad/web-phase0`. **Nothing committed, pushed, or deployed.**
+Backend suite green (3524 passed, 1 skipped). Every fix verified in a real browser against a
+local server running this branch — evidence in [`TEST_LEDGER.md`](TEST_LEDGER.md) `2026-08-19h`.
+
+Audit: [`../docs/reviews/2026-08-19-web-parity-audit.md`](../docs/reviews/2026-08-19-web-parity-audit.md).
+Plan + scope: [`../docs/plans/web-parity/`](../docs/plans/web-parity/).
+
+### What's done
+
+7 of 8 Phase 0 items: the self-trapping demo path (two independent causes), the analytics race
+that dropped **every** web event including `app_opened` ([G-053](GOTCHAS.md)), the clipped 375px
+CTA, `profile.html`'s handle parser, the missing HTML 404, design-lab pages served in prod, and
+a new `web/contact.html` — the first route a web visitor has to a deletion request.
+
+`ranking-method.html` was **kept, not deleted** as the plan said: mobile opens it as a read-more
+explainer (`TradesScreen.tsx` `readMoreUrl`), so deleting it would 404 for installed TestFlight
+builds. Its fake controls were stripped instead.
+
+### What's blocking
+
+**Operator input, 4 items.** `[STATE]` in `web/terms.html:157` (governing law — a legal choice);
+whether to add a support email alongside `contact.html`; whether to block
+`web/admin/analytics.html` in prod (it is the live operator dashboard — left reachable
+deliberately); and the **posture decision** (front door / companion / full parity) that sets how
+far Phase 3 runs. All enumerated in [`scope.md`](../docs/plans/web-parity/scope.md) §6.
+
+### Next
+
+Merge decision on `fix/web-phase0`, then Phase 1 — the shared-token extraction (one stylesheet is
+linked by exactly one page; twelve others inline ~2,500 duplicated lines, which is why a 2.03:1
+contrast failure still ships in 12 files) and **a web test harness, which does not exist at all
+today** — CI runs pytest/tsc/testid-lint and none of them touch `web/`.
+
+---
 
 ## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
 

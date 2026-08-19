@@ -8958,6 +8958,45 @@ def rankings_import_apply():
         return jsonify({"error": "bad_request"}), 400
 
 
+# web/ is served at the site root (static_url_path=""), so every file in it is
+# reachable by guessing its path. These are build-time design artifacts with no
+# user or operator value in production.
+# NOTE: web/admin/analytics.html is deliberately NOT in this set — the operator
+# uses it against production data. Its data is CRON_SECRET-gated; only the page
+# shell is public. Blocking it is an operator decision, not an engineering one.
+_PROD_BLOCKED_STATIC = frozenset({
+    "/style-guide.html",
+    "/color-lab.html",
+    "/color-lab-2.html",
+})
+
+
+@app.before_request
+def _block_dev_surfaces_in_prod():
+    """404 the design-lab pages in deployed environments; keep them in dev."""
+    if _IS_PROD_ENV and request.path in _PROD_BLOCKED_STATIC:
+        return send_from_directory(app.static_folder, "404.html"), 404
+    return None
+
+
+@app.errorhandler(404)
+def _not_found(_e):
+    """Browsers get an HTML page; API clients keep the JSON contract.
+
+    Previously every unknown path returned raw ``{"error": "not_found"}``,
+    including ordinary browser navigation to a mistyped URL.
+    """
+    path = request.path or ""
+    if path.startswith("/api/") or path.startswith("/og/"):
+        return jsonify({"error": "not_found"}), 404
+    if "text/html" in (request.headers.get("Accept") or ""):
+        try:
+            return send_from_directory(app.static_folder, "404.html"), 404
+        except Exception:  # pragma: no cover — 404.html missing
+            pass
+    return jsonify({"error": "not_found"}), 404
+
+
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")

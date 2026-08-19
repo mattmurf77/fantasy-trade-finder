@@ -333,9 +333,20 @@
       }
 
       function extractUsername() {
-        // Path is /u/<username> — strip leading /u/ and any trailing slash.
-        const p = window.location.pathname.replace(/^\/u\//, '').replace(/\/$/, '');
-        return decodeURIComponent(p || '');
+        // ONLY /u/<username> carries a handle. The previous version stripped a
+        // leading /u/ and treated whatever remained as the username, so loading
+        // this file directly at /profile.html yielded the handle "/profile.html"
+        // — a title of "@/profile.html" and a 404 on /api/profile/%2Fprofile.html.
+        const m = window.location.pathname.match(/^\/u\/([^/]+)\/?$/);
+        if (m) {
+          try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
+        }
+        // Direct loads can still pass ?u=<username>.
+        try {
+          const q = new URLSearchParams(window.location.search).get('u');
+          if (q) return q;
+        } catch (_) { /* older browsers — fall through to no-username */ }
+        return '';
       }
 
       function avatarInitials(name) {
@@ -441,7 +452,7 @@
       async function load() {
         const uname = extractUsername();
         if (!uname) {
-          renderError('No username in URL.');
+          renderError('No profile in this URL. Profiles live at /u/<username>.');
           return;
         }
         document.title = `@${uname} — Fantasy Trade Finder`;

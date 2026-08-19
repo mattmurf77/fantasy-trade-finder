@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-053 | Web analytics emitted zero events for months: a fire-and-forget flag fetch vs a synchronous `boot()` | Web analytics / flag races |
 | G-052 | A pick badges one tier too high: the wrong value→Elo inverse, silent near a 1st, worse downward | Pick badges / value scales |
 | G-051 | A tier-band edit that looks backend-only silently drifts `web/js/app.js`, which fetches nothing | Tier bands / client mirrors |
 | G-048 | Next living-memory ID computed from a stale checkout collides on main | Living-memory / concurrent sessions |
@@ -397,6 +398,14 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 ---
 
 ## 2026-08-19
+
+### G-053 — a flag map that "resolves before most UI code runs" doesn't, and the events it gates vanish
+- **Symptom:** `analytics.client_events` is **true**, `events.js` loads, `window.FTFTrack` exists, `app.js` calls `FTFTrack('app_opened', …)` unconditionally in `boot()` — and yet after a full page visit `localStorage['ftf.deviceId']` is **null**, `ftf.events.queue.v1` is empty, and **no `POST /api/events` ever fires**. Nothing errors. The console is clean. Checking the flag by hand *after* load returns `true`, which makes the whole thing look impossible.
+- **Cause:** `_loadFeatureFlags()` was fire-and-forget at `web/js/app.js:34` — an `async` function whose promise nobody awaited — while `boot()` ran **synchronously** at the bottom of the same file. `window.FTF_FLAGS` starts as `{}` and is only replaced when the fetch resolves, so `FTF_FLAG(k)` returns `false` for the entire boot tick. `track()` opened with `if (!flagOn()) return;`, so every event fired during boot was **silently discarded** — and `app_opened` is by definition always one of them. The source comment said *"it resolves before most UI code runs"*, which was an assumption stated as a fact and read like a guarantee for months. An empty flag map is indistinguishable from "every flag is off", so there was no state to assert on.
+- **Fix:** don't drop, **buffer**. `track()` now pushes into a capped `pending[]` while flags are unsettled; `app.js` sets `window.FTF_FLAGS_READY` and dispatches `ftf:flags-ready` on **both** the success and failure paths of the fetch; `events.js` drains on that signal, on a 5s safety timeout (pages like `positional-tiers.html` carry their own flag shim and never load `app.js`, so they would otherwise buffer forever), and re-checks the readiness flag at init in case the signal beat its own listener. Buffered events keep their **original** `client_ts`, not the drain time.
+- **Prevention:** a boolean flag map cannot express "not loaded yet" — if a gate reads one, it needs a separate settled/unsettled signal, or it silently means "off" during startup. Verify instrumentation by **observing the wire** (`ftf.deviceId` minted, a `POST /api/events` in the network log), never by reading the flag back after load — that always looks correct. The same shape is latent anywhere `window.FTF_FLAG` is consulted during module init.
+
+---
 
 ### G-052 — two value→Elo maps exist; using the wrong inverse is silent near a 1st and grows downward
 - **Symptom:** a draft pick badges one tier too high on the picks screen / in-league calculator, and the error looks band-shaped rather than arithmetic — a current-year 3rd reads `second`, a current-year 4th reads `third`. Round-1 picks look fine, which is what makes it read as "the cheap end of the ladder is mispriced" rather than "the conversion is wrong".

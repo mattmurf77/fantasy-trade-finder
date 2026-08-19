@@ -10,6 +10,31 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19h — Web Phase 0 breakage fixes (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0` from `origin/main` `50e0451`. **Not pushed, not merged.** No flags added or flipped.
+Scope + full evidence matrix: [`docs/plans/web-parity/scope.md`](../docs/plans/web-parity/scope.md) §3.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3524 passed, 1 skipped, 0 failed** |
+| `npx tsc --noEmit` / `testid-lint.sh` | **n/a — zero mobile files touched.** Not run, not claimed. |
+| Maestro / simulator / `screens/` | n/a — retired by [D-056](DECISIONS.md) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under D-056 |
+| **Web automated tests** | **NONE EXIST.** CI never touches `web/` — no Playwright, no axe, no Lighthouse, no root `package.json`. Building one is plan item P1-2. |
+| **Runtime evidence** | **Real browser against a local server running this branch.** Not a code-walk. |
+
+Verified in-browser: `app_opened` now queues (`seq:1`) and `POST /api/events` → 200 (previously
+**zero** ingest requests, `ftf.deviceId` null); CTA at 375px sits `x 155→355` inside the viewport
+(was `20→400`, clipped); the demo trap shows honest copy + a working "Start over" and fires
+**zero** `/api/sleeper/leagues` requests; `/nope` → HTML 404 while `/api/*` and `/og/*` stay JSON;
+`_IS_PROD_ENV=True` 404s the 3 design-lab pages and leaves real pages untouched; the contact form
+landed a note as `web-contact-data-request` with a `[DATA REQUEST]` prefix, anonymous. Plus an
+8-case table test of the rewritten `extractUsername()` (8/8) and `node --check` on all touched JS.
+
+**Not verified:** anything on the deployed host — this never left the branch.
+
+---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 
 **Branch:** `fix/pick-horizon`, branched from `origin/main` `7462c23`. **Not pushed, not merged.**

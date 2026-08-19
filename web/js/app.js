@@ -29,8 +29,15 @@
       } catch (_) { /* ignore */ }
       _applyMobilePolishFlags();
       _applyPowerRankingsFlag();
+      // Tell events.js the flag map has settled (success OR failure) so it can
+      // drain the events buffered during boot. Without this, everything fired
+      // before this fetch resolved — app_opened included — was dropped.
+      window.FTF_FLAGS_READY = true;
+      try { document.dispatchEvent(new Event('ftf:flags-ready')); } catch (_) {}
     }
-    // Kick the fetch immediately; it resolves before most UI code runs.
+    // Kick the fetch immediately. It does NOT reliably resolve before boot() —
+    // boot() runs synchronously below while this is still in flight, which is why
+    // flag-dependent work must wait on the 'ftf:flags-ready' signal above.
     _loadFeatureFlags();
 
     // ═══════════════════════════════════════════════════════════════
@@ -386,7 +393,10 @@
         // Tiers→Manual cross-page link lands on the correct sub-view.
         _enterMainApp();
         // Populate the league switcher — _cachedLeagues is empty on a fresh page load
-        // so we fetch leagues in the background without blocking the UI
+        // so we fetch leagues in the background without blocking the UI.
+        // Demo users are skipped: their synthetic id 503s, which surfaced as a
+        // console error on every demo boot.
+        if (!_isDemoUser(user)) {
         apiFetch(`/api/sleeper/leagues/${user.user_id}`)
           .then(r => r.json())
           .then(leagues => {
@@ -397,6 +407,7 @@
             }
           })
           .catch(e => logDrawer.error(`Could not populate league switcher on reload: ${e.message}`));
+        }
       }
     }
 
@@ -424,6 +435,31 @@
       _updateNotifBadge(0);
       document.getElementById('account-chip-container').innerHTML = '';
       showAuthScreen();
+    }
+
+    // Hard reset out of any stuck state. logout() leaves demo markers and the
+    // ?demo=1 query param behind, both of which can re-enter the same dead end
+    // on the next boot, so this clears everything and reloads a clean landing.
+    function startOver() {
+      logDrawer.action('Start over — clearing all stored session state');
+      try {
+        localStorage.removeItem(LS_USER);
+        localStorage.removeItem(LS_LEAGUE);
+        localStorage.removeItem(LS_TOKEN);
+        localStorage.removeItem('ftf_invited_by');
+        localStorage.removeItem('ftf_invited_league');
+        sessionStorage.removeItem('ftf_demo_mode');
+        sessionStorage.removeItem('ftf_session_token');
+      } catch (_) { /* private mode — the reload below still recovers */ }
+      window.location.href = '/';
+    }
+
+    // Demo users carry a synthetic, non-numeric user_id that the real Sleeper
+    // endpoints reject. The marker lives on the saved user in localStorage —
+    // NOT in sessionStorage — so it survives a tab close alongside the user
+    // record it describes.
+    function _isDemoUser(u) {
+      return !!(u && (u.is_demo === true || String(u.user_id || '').startsWith('demo_user')));
     }
 
     // ── Auth Screen ─────────────────────────────────────────────────
@@ -560,6 +596,17 @@
       sub.textContent = `Leagues for ${user.display_name}`;
       list.innerHTML  = '<div class="league-loading">Loading your leagues…</div>';
       screen.classList.remove('hidden');
+
+      // A demo user_id is synthetic — /api/sleeper/leagues/<id> always 503s for
+      // it. Asking anyway produced a "Couldn't reach Sleeper" dead end that
+      // blamed an outage for what is really "the sample league ended".
+      if (_isDemoUser(user)) {
+        logDrawer.info('Demo user at the league picker — skipping the Sleeper lookup');
+        list.innerHTML =
+          '<div class="league-empty">The sample league session has ended.<br>' +
+          'Start over to connect your own Sleeper account.</div>';
+        return;
+      }
 
       try {
         const res     = await apiFetch(`/api/sleeper/leagues/${user.user_id}`);
@@ -1354,6 +1401,7 @@
           user_id:      body.user_id || 'demo_user',
           display_name: body.display_name || 'Demo User',
           avatar_id:    null,
+          is_demo:      true,   // persists in localStorage; see _isDemoUser()
         };
         try {
           if (typeof saveUser === 'function') saveUser(demoUser);

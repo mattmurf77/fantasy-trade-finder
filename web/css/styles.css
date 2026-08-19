@@ -294,6 +294,28 @@
       line-height: 1.6;
     }
 
+    /* Escape hatch out of the league screen (see index.html #league-screen).
+       44px min-height per the design-system touch target. */
+    .league-escape {
+      display: flex;
+      justify-content: center;
+      padding-top: 4px;
+    }
+
+    .league-escape-btn {
+      background: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--chalk-dim);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      min-height: 44px;
+      padding: 0 20px;
+    }
+
+    .league-escape-btn:hover { color: var(--chalk); border-color: var(--chalk-dim); }
+
     /* ── Loading Overlay ── */
     .init-overlay {
       position: fixed;
@@ -2805,7 +2827,11 @@
       max-width: 420px;
     }
 
-    .cb-connect-wrap { max-width: 380px; }
+    /* width:100% makes this fill the available column instead of sizing to its
+       own content. Without it the row's max-content width (a nowrap button +
+       an unshrinkable input) pinned this at 380px inside a 335px parent at
+       375px viewport, clipping the primary CTA off the right edge. */
+    .cb-connect-wrap { width: 100%; max-width: 380px; }
 
     .cb-input-row {
       display: flex;
@@ -2814,6 +2840,7 @@
     }
     .cb-input {
       flex: 1;
+      min-width: 0;   /* allow shrink below intrinsic width; see .cb-connect-wrap */
       background: var(--ink-2);
       border: 1px solid var(--border);
       border-radius: var(--r-sm);
@@ -2828,6 +2855,7 @@
     .cb-go-btn {
       background: var(--accent);
       border: none;
+      min-height: 44px;   /* design-system touch target; measured 42px */
       border-radius: var(--r-sm);
       color: var(--on-ice);
       font-size: 14px;

@@ -4,7 +4,16 @@
 
 All routes live in `backend/server.py`. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
-Auth: session cookie via `/api/session/init`. Extension uses a bearer token from `/api/extension/auth`.
+Auth: an opaque bearer token from `/api/session/init`, sent as the **`X-Session-Token` header**.
+There is no cookie and no Flask session — earlier versions of this line said "session cookie",
+which was never true. Web stores the token in `localStorage`, mobile in `expo-secure-store`.
+The extension uses its own token from `/api/extension/auth`.
+
+**404 content type (2026-08-19).** A `404` errorhandler in `backend/server.py` splits by path:
+`/api/*` and `/og/*` always return JSON `{"error": "not_found"}` — the contract clients parse —
+while any other path with `text/html` in `Accept` gets `web/404.html`. Browser navigation to a
+mistyped URL previously rendered raw JSON. Additionally `_PROD_BLOCKED_STATIC` 404s the design-lab
+pages (`/style-guide.html`, `/color-lab*.html`) in deployed environments only.
 
 
 ## Table of Contents

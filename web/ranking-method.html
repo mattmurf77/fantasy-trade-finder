@@ -101,8 +101,6 @@
       border: 1px solid var(--border);
       border-radius: var(--r-md);
       padding: 22px 24px;
-      cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
       display: flex;
       align-items: flex-start;
       gap: 18px;
@@ -110,10 +108,6 @@
       color: inherit;
     }
 
-    .tile:hover {
-      border-color: var(--accent);
-      background: var(--ink-3);
-    }
 
     .tile-icon {
       width: 48px;
@@ -145,18 +139,6 @@
       font-size: 13px;
       color: var(--muted);
       line-height: 1.5;
-    }
-
-    .tile-arrow {
-      color: var(--muted);
-      font-size: 18px;
-      flex-shrink: 0;
-      align-self: center;
-      transition: color 0.2s, transform 0.2s;
-    }
-
-    .tile:hover .tile-arrow {
-      color: var(--accent);
     }
 
     /* ── Recommended badge ── */
@@ -195,7 +177,7 @@
   <div class="tile-wrapper">
 
     <!-- Option 1: Guided Journey -->
-    <a class="tile" href="#trio-ranking" onclick="navigateTo('trio')">
+    <div class="tile">
       <div class="tile-icon guided"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">
@@ -204,50 +186,32 @@
         </div>
         <div class="tile-desc">Rank players through quick 3-player matchups. We'll walk you through it position by position — no dynasty knowledge required.</div>
       </div>
-      <div class="tile-arrow">&#8250;</div>
-    </a>
+    </div>
 
     <!-- Option 2: Manual Rankings -->
-    <a class="tile" href="#manual-rankings" onclick="navigateTo('rankings')">
+    <div class="tile">
       <div class="tile-icon manual"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">Let me set the rankings myself</div>
         <div class="tile-desc">Jump straight into the full rankings list and drag players into your preferred order. Best if you already know your valuations.</div>
       </div>
-      <div class="tile-arrow">&#8250;</div>
-    </a>
+    </div>
 
     <!-- Option 3: Positional Tiers -->
-    <a class="tile" href="#positional-tiers" onclick="navigateTo('tiers')">
+    <div class="tile">
       <div class="tile-icon tiers"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">Let me set positional tiers</div>
         <div class="tile-desc">Group players into tiers within each position — worth 4+ 1sts, 2 1sts, a 1st, etc. A fast way to express your rankings at a high level.</div>
       </div>
-      <div class="tile-arrow">&#8250;</div>
-    </a>
+    </div>
 
   </div>
 
   <div class="footer-note">
-    You can always change your method later or refine rankings from the Rankings tab.
+    You can pick or change your method any time from the Rank tab in the app.
   </div>
 
-  <script>
-    function navigateTo(destination) {
-      // Placeholder navigation — wire up to your actual routing
-      const routes = {
-        trio:     '/rank',       // trio ranking experience
-        rankings: '/rankings',   // rankings tab
-        tiers:    '/tiers'       // positional tiers (new page)
-      };
-
-      console.log(`Navigating to: ${routes[destination]}`);
-
-      // Uncomment when integrating into the main app:
-      // window.location.href = routes[destination];
-    }
-  </script>
 
 </body>
 </html>

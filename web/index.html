@@ -124,6 +124,7 @@
           </div>
           <div class="legal-links-row">
             <a href="/faq.html" class="faq-link">FAQ</a>
+            <a href="/contact.html" class="faq-link">Contact</a>
             <a href="/privacy" class="faq-link">Privacy</a>
             <a href="/terms" class="faq-link">Terms</a>
           </div>
@@ -144,6 +145,13 @@
       </div>
       <div class="league-list" id="league-list">
         <div class="league-loading">Loading your leagues…</div>
+      </div>
+      <!-- Escape hatch. The league screen is a full-screen overlay with no
+           other exit; without this, any failure to list leagues (Sleeper
+           outage, wrong account, demo session) traps the user permanently
+           because the saved user persists in localStorage across visits. -->
+      <div class="league-escape">
+        <button type="button" class="league-escape-btn" onclick="startOver()">Start over</button>
       </div>
     </div>
   </div>

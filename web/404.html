@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page not found — Fantasy Trade Finder</title>
+  <meta name="description" content="That page doesn't exist. Head back to Fantasy Trade Finder to rank players and find dynasty trades." />
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Chalkline tokens (docs/design/design-system.md).
+         --line-strong is the CORRECTED value; the 12 other web files still
+         carry the pre-2026-07-19 #3D4654, which measures 2.03:1 and fails the
+         non-text contrast floor. Consolidating those is plan item P1-1. */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #59647A;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6;
+      --r-sm: 4px; --r-md: 8px;
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { max-width: 100vw; overflow-x: hidden; }
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    body {
+      background: var(--ink-0);
+      color: var(--chalk);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+      line-height: 1.5;
+    }
+    main { max-width: 460px; text-align: center; }
+    .code {
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--chalk-faint);
+      margin-bottom: 10px;
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(30px, 7vw, 42px);
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    p { color: var(--chalk-dim); font-size: 15px; margin-bottom: 24px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 22px;
+      border-radius: var(--r-sm);
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--ice); color: var(--ink-0); }
+    .btn-primary:hover { background: var(--ice-press); }
+    .btn-secondary { border-color: var(--line-strong); color: var(--chalk-dim); }
+    .btn-secondary:hover { color: var(--chalk); border-color: var(--chalk-dim); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="code">Error 404</div>
+    <h1>Page not found</h1>
+    <p>That link doesn't lead anywhere. It may have moved, or it may never have existed.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/">Go to the app</a>
+      <a class="btn btn-secondary" href="/faq.html">Read the FAQ</a>
+    </div>
+  </main>
+</body>
+</html>
