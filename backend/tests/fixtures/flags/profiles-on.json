@@ -61,7 +61,7 @@
   "trade.divergence_fallback": true,
   "trade_gen.v2": false,
   "trade.presentment_rules": true,
-  "outlook.odds": false,
+  "outlook.odds": true,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,

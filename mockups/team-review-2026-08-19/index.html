@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Review — design lab (#357 / #358 / #359)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, mobile/src/theme/chalkline.ts) ── */
+  :root{
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+    --line:#262C35; --lineStrong:#3D4654; --lineA11y:#59647A;
+    --base:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --icePress:#3FC2D6; --iceOn:#071013;
+    --flare:#F0508C; --flareOn:#170610;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#EF4444; --rb:#22C55E; --wr:#3B82F6; --te:#F59E0B;
+    --xs:4px; --sm:8px; --md:12px; --lg:16px; --xl:24px; --xxl:32px; --xxxl:48px;
+    --rxs:2px; --rsm:4px; --rmd:8px; --rpill:999px;
+    --display:"Barlow Condensed",Impact,sans-serif;
+    --ui:"Archivo","Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink0);color:var(--base);font-family:var(--ui);
+       font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:var(--xxl) var(--lg) 96px}
+  h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:.01em;margin:0}
+  h1{font-size:40px;text-transform:uppercase}
+  h2{font-size:26px;text-transform:uppercase;margin:var(--xxxl) 0 var(--sm)}
+  h3{font-size:19px;margin:var(--xl) 0 var(--sm)}
+  p{margin:0 0 var(--md)}
+  a{color:var(--ice)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+       background:var(--ink2);border:1px solid var(--line);border-radius:var(--rxs);padding:1px 5px}
+  .lede{color:var(--dim);max-width:74ch}
+  .rule{height:1px;background:var(--line);border:0;margin:var(--xl) 0}
+
+  .meta{display:flex;flex-wrap:wrap;gap:var(--sm);margin:var(--lg) 0 var(--xl)}
+  .tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+       border:1px solid var(--lineStrong);border-radius:var(--rxs);
+       padding:3px 8px;color:var(--dim)}
+  .tag.ice{border-color:var(--ice);color:var(--ice)}
+  .tag.warn{border-color:var(--warn);color:var(--warn)}
+
+  .note{border:1px solid var(--line);border-left:3px solid var(--warn);
+        background:var(--ink1);border-radius:var(--rmd);padding:var(--lg);margin:var(--lg) 0}
+  .note.ice{border-left-color:var(--ice)}
+  .note.neg{border-left-color:var(--neg)}
+  .note h4{font-family:var(--ui);font-size:13px;letter-spacing:.08em;text-transform:uppercase;
+           color:var(--dim);margin:0 0 var(--sm)}
+  .note p:last-child{margin:0}
+
+  table{width:100%;border-collapse:collapse;margin:var(--lg) 0;font-size:13.5px}
+  th,td{text-align:left;padding:var(--sm) var(--md);border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  td.ok{color:var(--pos)} td.no{color:var(--neg)} td.part{color:var(--warn)}
+
+  /* ── phone frames ── */
+  .frames{display:flex;flex-wrap:wrap;gap:var(--xl);margin:var(--lg) 0}
+  .frame{width:330px}
+  .frame > figcaption{font-size:12px;color:var(--dim);margin-top:var(--sm);line-height:1.45}
+  .frame > figcaption b{color:var(--base);font-weight:600}
+  .phone{width:330px;height:640px;background:var(--ink0);border:1px solid var(--lineStrong);
+         border-radius:var(--rmd);overflow:hidden;display:flex;flex-direction:column;position:relative}
+  .phone img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+  .statusbar{height:26px;flex:0 0 26px;display:flex;align-items:center;justify-content:space-between;
+             padding:0 var(--md);font-size:10px;color:var(--faint);border-bottom:1px solid var(--line)}
+  .scr{flex:1;overflow:hidden;padding:var(--md);display:flex;flex-direction:column;gap:var(--md)}
+
+  .navbar{display:flex;align-items:center;gap:var(--sm);padding-bottom:var(--sm);
+          border-bottom:1px solid var(--line);margin:calc(var(--md) * -1) calc(var(--md) * -1) 0;
+          padding:var(--sm) var(--md)}
+  .navbar .back{color:var(--ice);font-size:13px}
+  .navbar .ttl{font-family:var(--display);font-size:17px;text-transform:uppercase;letter-spacing:.02em}
+  .navbar .step{margin-left:auto;font-size:11px;color:var(--faint)}
+
+  .progress{display:flex;gap:3px;margin:var(--xs) 0 var(--sm)}
+  .progress i{height:2px;flex:1;background:var(--ink3);border-radius:var(--rxs)}
+  .progress i.on{background:var(--ice)}
+  .progress i.done{background:var(--lineA11y)}
+
+  .card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--rmd);padding:var(--md)}
+  .card.tight{padding:var(--sm) var(--md)}
+  .kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:var(--xs)}
+  .headline{font-family:var(--display);font-size:21px;line-height:1.15;text-transform:uppercase;margin-bottom:var(--xs)}
+  .read{font-size:13px;color:var(--base);line-height:1.5}
+  .sub{font-size:12px;color:var(--dim);line-height:1.45}
+
+  .chiprow{display:flex;flex-wrap:wrap;gap:var(--sm)}
+  .chip{font-size:11.5px;padding:5px 10px;border:1px solid var(--lineA11y);border-radius:var(--rsm);color:var(--dim)}
+  .chip.sel{border-color:var(--ice);color:var(--ice);background:rgba(86,217,236,.08)}
+  .chip.need{border-style:dashed;border-color:var(--warn);color:var(--warn)}
+  .chip.deep{border-style:dashed;border-color:var(--pos);color:var(--pos)}
+  .chip.flare{border-color:var(--flare);color:var(--flare)}
+
+  .btn{display:block;text-align:center;background:var(--ice);color:var(--iceOn);font-weight:700;
+       font-size:14px;padding:11px;border-radius:var(--rsm);border:0}
+  .btn.ghost{background:transparent;color:var(--ice);border:1px solid var(--ice);font-weight:600}
+  .btn.quiet{background:transparent;color:var(--dim);border:1px solid var(--line);font-weight:500}
+
+  .rowline{display:flex;align-items:center;gap:var(--sm);font-size:12.5px;padding:6px 0;
+           border-bottom:1px solid var(--line)}
+  .rowline:last-child{border-bottom:0}
+  .rowline .rk{width:22px;color:var(--faint);font-size:11px}
+  .rowline .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rowline .vv{color:var(--dim);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .rowline.you{background:rgba(86,217,236,.06);margin:0 -6px;padding-left:6px;padding-right:6px;border-radius:var(--rxs)}
+  .rowline.you .nm{color:var(--ice);font-weight:600}
+
+  .pos{display:inline-block;width:26px;text-align:center;font-size:10px;font-weight:700;
+       border-radius:var(--rxs);padding:1px 0;color:var(--iceOn)}
+  .pos.QB{background:var(--qb)} .pos.RB{background:var(--rb)}
+  .pos.WR{background:var(--wr)} .pos.TE{background:var(--te)}
+
+  .bar{height:8px;background:var(--ink3);border-radius:var(--rxs);overflow:hidden;display:flex}
+  .bar span{height:100%}
+
+  .avatarline{display:flex;gap:var(--sm);align-items:flex-start}
+  .avatarline .av{flex:0 0 44px;height:44px;border-radius:var(--rpill);
+                  border:1px solid var(--lineStrong);background:var(--ink2);
+                  display:flex;align-items:center;justify-content:center;
+                  font-family:var(--display);font-size:11px;color:var(--dim);text-align:center;line-height:1.05}
+  .bubble{flex:1;background:var(--ink2);border:1px solid var(--line);border-radius:var(--rmd);
+          padding:var(--sm) var(--md);font-size:13px;line-height:1.5}
+
+  .stat{display:flex;align-items:baseline;gap:var(--sm)}
+  .stat .big{font-family:var(--display);font-size:38px;line-height:1}
+  .stat .of{font-size:13px;color:var(--dim)}
+
+  .verdict{border:1px solid var(--line);border-radius:var(--rmd);padding:var(--md);background:var(--ink1)}
+  .verdict.win{border-color:var(--pos)}
+  .verdict.lose{border-color:var(--neg)}
+  .badge{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+         padding:2px 7px;border-radius:var(--rxs);border:1px solid currentColor}
+  .badge.win{color:var(--pos)} .badge.lose{color:var(--neg)} .badge.warn{color:var(--warn)}
+
+  .cut{opacity:.42;position:relative}
+  .cut::after{content:"CUT";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+              font-family:var(--display);font-size:44px;color:var(--neg);letter-spacing:.1em;
+              background:rgba(12,14,17,.55);border-radius:var(--rmd)}
+
+  .toc{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--sm);margin:var(--lg) 0}
+  .toc a{display:block;border:1px solid var(--line);border-radius:var(--rmd);padding:var(--sm) var(--md);
+         text-decoration:none;background:var(--ink1)}
+  .toc a b{display:block;color:var(--base);font-size:13px}
+  .toc a span{color:var(--dim);font-size:11.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Team Review — design lab</h1>
+<p class="lede">One question: <b>what does “analyst-guided” actually mean for a team read, and where does it live inside the find-a-trade experience?</b> Feedback #357 / #358 / #359 (tester <code>jonbonjourvi</code>, 2026-08-19, v1.15.0). Binding docs: <code>docs/feedback/items/357-team-review/</code>.</p>
+
+<div class="meta">
+  <span class="tag">Lab opened 2026-08-19</span>
+  <span class="tag ice">Status: in flight</span>
+  <span class="tag">Chalkline only</span>
+  <span class="tag warn">Contains one labelled reconstruction</span>
+  <span class="tag ice">Rev 2 · 2026-08-19 — odds LIT (D-094)</span>
+</div>
+
+<div class="note neg">
+  <h4>Not shipped code</h4>
+  <p>Per <a href="../CLAUDE.md">mockups/CLAUDE.md</a>: nothing here is current app behavior and nothing here may be imported. Live design truth is <code>docs/design/</code>; current app behavior is <code>screens/</code>.</p>
+</div>
+
+<div class="toc">
+  <a href="#q0"><b>§0 · Capture provenance</b><span>What is real, what is reconstructed</span></a>
+  <a href="#q1"><b>§1 · What the data can actually say</b><span>Every ask, sourced or cut</span></a>
+  <a href="#q2"><b>§2 · The form contest</b><span>Stepped vs scroll vs Q&amp;A</span></a>
+  <a href="#q3"><b>§3 · The entry point</b><span>Why not a seventh chip</span></a>
+  <a href="#q4"><b>§4 · The six beats</b><span>Frames B1–B6</span></a>
+  <a href="#q5"><b>§5 · Honest degradation</b><span>Preseason, ESPN/MFL, thin board</span></a>
+  <a href="#q6"><b>§6 · What #357 gets instead</b><span>Lineup movement, not PPG</span></a>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q0">§0 — Capture provenance</h2>
+<p class="lede">The hard rule in <code>mockups/CLAUDE.md</code> is that a mockup revising an existing screen embeds that screen’s real capture as its “current” pane. That rule is in conflict with the D-056 capture freeze; this lab follows the documented interim posture — embed the real capture where one exists, label what has moved since, and never present a reconstruction as a capture.</p>
+
+<div class="frames">
+  <figure class="frame">
+    <div class="phone"><img src="../../screens/mobile/trades/populated.png" alt="Real capture: TradesHome populated, 2026-08-10"></div>
+    <figcaption><b>REAL CAPTURE</b> — <code>screens/mobile/trades/populated.png</code>, captured 2026-08-10T23:42Z, manifest sha <code>106c8e38…</code>. Exact ground truth <em>for that build</em>.</figcaption>
+  </figure>
+  <figure class="frame">
+    <div class="phone"><img src="../../screens/mobile/trades/empty.png" alt="Real capture: TradesHome empty, 2026-08-10"></div>
+    <figcaption><b>REAL CAPTURE</b> — <code>screens/mobile/trades/empty.png</code>. The exhausted/empty deck is the lab’s second entry-point candidate (§3).</figcaption>
+  </figure>
+  <figure class="frame">
+    <div class="phone"><img src="../../screens/mobile/league-summary/populated.png" alt="Real capture: League Summary populated, 2026-08-11"></div>
+    <figcaption><b>REAL CAPTURE</b> — <code>screens/mobile/league-summary/populated.png</code>, 2026-08-11T00:29Z. The stacked value bar Team Review’s beat B1 reuses rather than reinvents.</figcaption>
+  </figure>
+</div>
+
+<div class="note warn">
+  <h4>Staleness disclosure — the TradesHome captures predate 11 commits</h4>
+  <p><code>mobile/src/screens/TradesScreen.tsx</code> has moved eleven times since the capture: <code>586dbba</code> (08-11), <code>7057d86</code> (08-14), <code>6158e65</code> · <code>c2e44b5</code> · <code>8827810</code> (08-15), <code>154c211</code> · <code>a490281</code> (08-16), <code>00b2a2c</code> (08-17), <code>60105ca</code> · <code>5ac4e35</code> (08-18), <code>045c020</code> (08-19). Notably the guided-first landing and the <code>TradeFinderModeBar</code> chip strip are <em>not</em> in the capture above. <b>There is no way to refresh it</b> — D-056 retired the simulator and <code>screens/</code> is frozen at 2026-08-11. Every frame below marked <span class="badge warn">RECONSTRUCTION</span> is drawn from source, not from a capture, and is labelled as such.</p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q1">§1 — What the data can actually say</h2>
+<p class="lede">Every clause of Jon’s three items, against what exists in the repo today. Nothing below is designed until it appears in this table with a source.</p>
+
+<table>
+  <thead><tr><th>The ask (verbatim)</th><th>Source that exists</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td>“you’re sitting 6th in value”</td><td><code>GET /api/league/power-rankings</code> — <code>server.py:22709</code>, per-team summed roster value + per-position split</td><td class="ok">IN — all platforms, all weeks</td></tr>
+    <tr><td>“…and 11th in PPG this year”</td><td><code>LeagueState.points_for</code> / <code>weekly_scores</code> — <code>backend/outlook/league_state.py:66,93</code></td><td class="part">IN, DEGRADED — Sleeper only (<code>league_state.py:295–320</code> raises for ESPN/MFL/Fleaflicker) and <b>empty in preseason</b></td></tr>
+    <tr><td>“We recommend a 1 year tank”</td><td><code>trade_service.infer_team_outlook</code> — <code>trade_service.py</code>, returns contender/not_sure/rebuilder + vet_share / youth_share / pick_share / score</td><td class="ok">IN — pure function, no I/O, already feeds <code>/api/league/preferences</code></td></tr>
+    <tr><td>“best ways to do that are sell players X,Y,Z”</td><td><code>POST /api/trades/asset-ideas</code> — <code>server.py:10944</code> (upgrade / lateral / downgrade per pinned asset)</td><td class="ok">IN — flag <code>trade.asset_ideas</code> already ON</td></tr>
+    <tr><td>“Here’s good targets (picks from other bad teams)”</td><td>power-rankings value rank + <code>_power_picks_by_owner</code> — <code>server.py:22513</code></td><td class="ok">IN — derivable, no new modeling</td></tr>
+    <tr><td>“(…players who could gain value)”</td><td>nothing — a forward projection</td><td class="no">CUT — no source. See §6.</td></tr>
+    <tr><td>“you’re missing depth, consider tiering down from Loveland and Bijan”</td><td><code>analyze_roster_strengths</code> → <code>tier_depth</code> {elite/starter/bench} + <code>position_needs</code>/<code>position_surplus</code> — <code>trade_service.py:1826</code>; <code>optimal_starter_slots</code> — <code>power_rankings.py:120</code></td><td class="ok">IN — <code>tier_depth</code> is computed today but never surfaced</td></tr>
+    <tr><td>“based on your rankings you’re higher on X and lower on Y to consensus. Target these”</td><td><code>GET /api/trends/consensus-gap</code> — <code>server.py:19342</code> (easiest_sells / easiest_buys); board Elo vs the universal DP seed as the always-available fallback</td><td class="part">IN, WITH FALLBACK — the league-community layer needs ≥3 other rankers (<code>trends_service.py:180</code>)</td></tr>
+    <tr><td>“6 extra PPG this year”</td><td>nothing — no per-player weekly projection exists anywhere in the backend</td><td class="no">CUT — see §6</td></tr>
+    <tr><td>“raises your playoff odds to X”</td><td><code>GET /api/league/outlook</code> — <code>server.py:23185</code>, <b>flag LIT 2026-08-19</b></td><td class="part">IN, AS A BAND — operator override (D-094). Three-band chip on B1, Sleeper-only, “Projected” ribbon. <b>Never the number X.</b></td></tr>
+    <tr><td>“and championship odds to Y”</td><td><code>odds.title_pct</code> is served</td><td class="no">CANNOT BE HONORED — unrenderable at any week, in any form (<code>docs/cross-client-invariants.md</code> § Playoff outlook bands; skill CI spans zero)</td></tr>
+    <tr><td>“an idiot version of wtf do I do next with this team” (#359)</td><td>the whole flow — this is the framing, not a data ask</td><td class="ok">IN — it is the acceptance test for the copy</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q2">§2 — The form contest</h2>
+<p class="lede">The operator asked for “analyst-guided: a walked-through read of the team rather than a static dashboard,” and gave the feature two jobs — help the user <b>set their trade preferences</b>, and <b>determine team strategy</b>. Three candidate forms; the second job is what decides it.</p>
+
+<div class="frames">
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="ttl">Team review</span></div>
+        <div class="card"><div class="kicker">Where you stand</div><div class="stat"><span class="big">6th</span><span class="of">of 12 by roster value</span></div></div>
+        <div class="card"><div class="kicker">Your window</div><div class="read">Your roster leans veteran (61% of value age 27+) and you hold below-average pick capital. That reads <b>contender</b>.</div></div>
+        <div class="card"><div class="kicker">Depth</div><div class="read">Thin at TE (0 startable). Deep at RB (4 startable).</div></div>
+        <div class="card"><div class="kicker">Your board vs the market</div><div class="read">You’re high on 3 players, low on 4.</div></div>
+        <div class="card" style="opacity:.5"><div class="kicker">Who to deal with</div><div class="read">…</div></div>
+        <div class="sub" style="text-align:center;color:var(--faint)">scrolls · scrolls · scrolls</div>
+      </div>
+    </div>
+    <figcaption><b>FORM A — narrated scroll.</b> <span class="badge lose">REJECTED</span> Cheapest to build and no step state. But it <em>is</em> a dashboard with prose on top, which is the thing the operator ruled out — and it has nowhere to put a decision. A user scrolls past a preference control exactly as fast as past a chart, so job (a) never happens.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="ttl">Ask the analyst</span></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Ask me anything about this roster.</div></div>
+        <div class="chiprow">
+          <span class="chip">Should I rebuild?</span>
+          <span class="chip">Who should I sell?</span>
+          <span class="chip">Am I deep enough at RB?</span>
+          <span class="chip">Who’s overrated on my board?</span>
+        </div>
+        <div class="sub" style="margin-top:auto">A fixed menu of canned questions is just a navigation list wearing a chat costume. An open text box needs an intent parser or an LLM call.</div>
+      </div>
+    </div>
+    <figcaption><b>FORM B — Q&amp;A / conversational.</b> <span class="badge lose">REJECTED</span> Canned questions are a worse menu. Open input needs an LLM per request — which contradicts “pull from what already exists rather than inventing new modeling,” adds per-user API cost on a TestFlight build, and breaks the house precedent that trade copy is deterministic (<code>backend/trade_narrative.py</code>, templates, no LLM).</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">2 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">You’re built to win now — but you’re not built deep.</div></div>
+        <div class="card">
+          <div class="kicker">Your window · inferred</div>
+          <div class="headline">Contender</div>
+          <div class="sub">61% of your roster value is age 27+ · 12% is age 23 and under · you hold 0.6× an average share of pick capital.</div>
+        </div>
+        <div class="sub">Is that right?</div>
+        <div class="chiprow">
+          <span class="chip">Championship</span><span class="chip sel">Contender</span>
+          <span class="chip">Rebuilder</span><span class="chip">Jets</span><span class="chip">Not sure</span>
+        </div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+          <span class="btn">Yes — that’s my window</span>
+          <span class="btn quiet">Skip this</span>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>FORM C — stepped beats.</b> <span class="badge win">CHOSEN</span> One finding → one plain read → one action, per screen. It is the only form where job (a) and job (b) are the <em>same</em> gesture: the strategy read and the preference write sit on the same beat, so agreeing with the analyst <em>is</em> configuring the engine. <span class="badge warn">RECONSTRUCTION</span></figcaption>
+  </figure>
+</div>
+
+<div class="note ice">
+  <h4>The decisive argument for Form C, stated plainly</h4>
+  <p>Team Review’s exit is not a paragraph — it is <b>a deck that has been reshaped by what the user just agreed to</b>. <code>league_preferences.team_outlook</code>, <code>acquire_positions</code> and <code>trade_away_positions</code> already steer generation (<code>trade.outlook_direction</code>, <code>trade.lanes</code>, the G6 R5 need gate, <code>_filter_by_trade_intent</code>). A stepped flow is the only one of the three forms with a natural slot for a write on every beat. That is what turns #359’s “wtf do I do next” from a read into an answer.</p>
+</div>
+
+<h3>Reuse the Analyst, do not reuse <code>AnalystGuide</code></h3>
+<p>The repo already has the persona — six mascot poses in <code>mobile/src/components/analyst/</code>, a voice spec in <code>docs/plans/onboarding-conversion/guided-avatar-script.md</code>, and a beat engine in <code>mobile/src/state/useGuide.ts</code>. Team Review takes the <b>persona and the beat concept</b> and leaves the <b>overlay</b>:</p>
+<table>
+  <thead><tr><th>Piece</th><th>Reused?</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>AnalystAvatar</code> poses (<code>analyst/index.tsx</code>)</td><td class="ok">YES</td><td>Same character the user already met in onboarding. Thinking / Point / Computing map cleanly onto beats.</td></tr>
+    <tr><td>The voice rules in <code>guided-avatar-script.md</code></td><td class="ok">YES</td><td>One idea per bubble, never traps the user, ✕ always skips.</td></tr>
+    <tr><td><code>AnalystGuide.tsx</code> spotlight overlay</td><td class="no">NO</td><td>That overlay exists to <b>teach a control</b> by cutting a hole over it. Team Review <b>presents data</b> — there is no control to spotlight, so a cutout over a chart is theatre. It also mounts once in <code>RootNav</code> above the whole nav tree; a data surface must be a routed screen with real back behavior.</td></tr>
+    <tr><td><code>useGuide</code> step store</td><td class="no">NO</td><td>It is coupled to the onboarding tour’s lifecycle (dismissTour, per-tour persistence, <code>onboarding.guide_v2</code>). Team Review needs local, disposable step state.</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q3">§3 — The entry point: why not a seventh chip</h2>
+<p class="lede">The operator’s framing is “a Team Review button inside the find-a-trade experience — not a separate tab.” The obvious slot is the mode chip strip. It is measurably full.</p>
+
+<div class="note warn">
+  <h4>The chip strip is already over capacity — this is measured, not asserted</h4>
+  <p><code>mobile/src/components/TradeFinderModeBar.tsx:50–58</code>, verbatim in the source comment: the five shipped chips “already measure ≈402pt against ≈361pt of usable width, so the strip is genuinely scrolled — an <b>APPENDED</b> sixth chip would sit off-screen and never be seen.” A sixth (Draft) was already added and had to <b>lead</b> the strip for exactly that reason. A seventh Team Review chip would either be invisible or would displace the operator’s 2026-08-06 decision that the draft chip leads.</p>
+</div>
+
+<div class="frames">
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="ttl">Acquire</span></div>
+        <div class="chiprow" style="flex-wrap:nowrap;overflow:hidden">
+          <span class="chip">Draft</span><span class="chip sel">Guided</span><span class="chip">Team</span>
+          <span class="chip">Player</span><span class="chip">Calc</span><span class="chip" style="opacity:.35">Free ag…</span>
+        </div>
+        <div class="card" style="border-color:var(--lineA11y)">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div class="av" style="flex:0 0 38px;height:38px">THE<br>ANALYST</div>
+            <div style="flex:1">
+              <div class="kicker">Not sure what to do with this team?</div>
+              <div class="read" style="margin:2px 0 8px">I’ll walk your roster in about a minute and set your trade preferences as we go.</div>
+              <span class="btn" style="padding:9px">Start team review</span>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="kicker">Suggested trade · 1 of 34</div>
+          <div class="rowline"><span class="pos RB">RB</span><span class="nm">Bijan Robinson</span><span class="vv">→ out</span></div>
+          <div class="rowline"><span class="pos TE">TE</span><span class="nm">Brock Bowers</span><span class="vv">← in</span></div>
+          <div class="rowline"><span class="pos WR">WR</span><span class="nm">Ladd McConkey</span><span class="vv">← in</span></div>
+          <div class="bar" style="margin-top:10px"><span style="width:52%;background:var(--pos)"></span><span style="width:48%;background:var(--ink3)"></span></div>
+        </div>
+        <div style="display:flex;gap:8px"><span class="btn quiet" style="flex:1">Pass</span><span class="btn" style="flex:1">Like</span></div>
+      </div>
+    </div>
+    <figcaption><b>ENTRY A — the review card above the deck.</b> <span class="badge win">CHOSEN</span> <span class="badge warn">RECONSTRUCTION</span> One dismissible card at the top of <code>TradesHome</code>, which is <em>exactly where #359 was filed</em>. Dismiss is per-league and persisted; the entry survives in the overflow row so it is never lost.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="ttl">Acquire</span></div>
+        <div class="chiprow" style="flex-wrap:nowrap;overflow:hidden">
+          <span class="chip">Draft</span><span class="chip sel">Guided</span><span class="chip">Team</span>
+          <span class="chip">Player</span><span class="chip" style="opacity:.5">Calc</span><span class="chip" style="opacity:.2">Fre…</span><span class="chip" style="opacity:.06">Rev…</span>
+        </div>
+        <div class="note neg" style="margin-top:20px"><h4>Off-screen at 361pt</h4><p>“Review” lands past the fold of a strip that is already scrolled. The one user who most needs this — the one who does not know what to do — is the least likely to scroll a chip rail to find out.</p></div>
+      </div>
+    </div>
+    <figcaption><b>ENTRY B — a seventh mode chip.</b> <span class="badge lose">REJECTED</span> on the source’s own measurement.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone"><img src="../../screens/mobile/trades/empty.png" alt="Real capture: TradesHome empty"></div>
+    <figcaption><b>ENTRY C — the exhausted/empty deck.</b> <span class="badge win">CHOSEN AS SECONDARY</span> <b>REAL CAPTURE.</b> “No more trades right now” is the highest-intent moment for “so what <em>do</em> I do?”. Additive to Entry A, not instead of it.</figcaption>
+  </figure>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q4">§4 — The six beats</h2>
+<p class="lede">Each beat is one finding, one plain-language read, one action. Every number below traces to §1. All frames <span class="badge warn">RECONSTRUCTION</span>.</p>
+
+<div class="frames">
+
+  <!-- B1 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">1 of 6</span></div>
+        <div class="progress"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Here’s where you actually sit.</div></div>
+        <div class="card">
+          <div class="kicker">Roster value · league rank</div>
+          <div class="stat"><span class="big">6th</span><span class="of">of 12</span></div>
+          <div class="bar" style="margin-top:10px">
+            <span style="width:22%;background:var(--qb)"></span><span style="width:31%;background:var(--rb)"></span>
+            <span style="width:39%;background:var(--wr)"></span><span style="width:8%;background:var(--te)"></span>
+          </div>
+          <div class="chiprow" style="margin-top:8px">
+            <span class="chip">QB 22%</span><span class="chip">RB 31%</span><span class="chip">WR 39%</span><span class="chip need">TE 8%</span>
+          </div>
+        </div>
+        <div class="card tight">
+          <div class="kicker">Playoff outlook <span style="color:var(--warn);font-size:9px;border:1px solid var(--warn);border-radius:2px;padding:1px 5px;margin-left:4px">PROJECTED · PRESEASON · BETA</span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+            <span class="badge warn" style="font-size:12px;padding:3px 10px">Toss-up</span>
+            <span class="sub">projected 6th seed</span>
+          </div>
+          <div class="sub" style="margin-top:6px;font-size:11px">Based on your offensive starters — we can price 7 of your 15 starting slots.</div>
+        </div>
+        <div class="card tight">
+          <div class="kicker">Points per game</div>
+          <div class="sub">No games played yet — 2026 hasn’t started. This fills in from week 1.</div>
+        </div>
+        <div style="margin-top:auto"><span class="btn">Next</span></div>
+      </div>
+    </div>
+    <figcaption><b>B1 · Where you stand.</b> Sources: <code>/api/league/power-rankings</code>, plus <code>/api/league/outlook</code> for the band. <b>Rev 2, 2026-08-19 — the operator lit <code>outlook.odds</code> (D-094)</b>, so the seam designed here is now live: a three-band chip, never a percentage, never championship odds, carrying the “Projected · preseason · beta” ribbon. The IDP line is <code>meta.priced_slot_coverage</code> — <b>its first render in any client</b>. The PPG card stays the honest preseason state. No action; orientation only.</figcaption>
+  </figure>
+
+  <!-- B2 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">2 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">You’re built to win now — but you’re not built deep.</div></div>
+        <div class="card">
+          <div class="kicker">Your window · inferred from roster shape</div>
+          <div class="headline">Contender</div>
+          <div class="rowline"><span class="nm">Value age 27+</span><span class="vv">61%</span></div>
+          <div class="rowline"><span class="nm">Value age 23 and under</span><span class="vv">12%</span></div>
+          <div class="rowline"><span class="nm">Pick capital vs an even split</span><span class="vv">0.6×</span></div>
+        </div>
+        <div class="sub">Is that right? This steers every trade we show you.</div>
+        <div class="chiprow">
+          <span class="chip">Championship</span><span class="chip sel">Contender</span>
+          <span class="chip">Rebuilder</span><span class="chip">Jets</span><span class="chip">Not sure</span>
+        </div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+          <span class="btn">Confirm</span><span class="btn quiet">Skip</span>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>B2 · Your window.</b> Source: <code>infer_team_outlook</code> (the same function <code>/api/league/preferences</code> already calls for its one-tap confirm). <b>Action: writes <code>league_preferences.team_outlook</code>.</b> This is the single highest-value write in the feature and it is Jon’s “we recommend a 1 year tank”, phrased as a question rather than an instruction. The two extreme labels are offered but never <em>inferred</em> — inference confidence does not justify α=1.00.</figcaption>
+  </figure>
+
+  <!-- B3 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">3 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="done"></i><i class="on"></i><i></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Two studs and a hole isn’t a starting lineup.</div></div>
+        <div class="card">
+          <div class="kicker">Startable bodies by position</div>
+          <div class="rowline"><span class="pos QB">QB</span><span class="nm">1 elite · 0 starter</span><span class="vv">ok</span></div>
+          <div class="rowline"><span class="pos RB">RB</span><span class="nm">1 elite · 3 starter</span><span class="vv" style="color:var(--pos)">deep</span></div>
+          <div class="rowline"><span class="pos WR">WR</span><span class="nm">0 elite · 2 starter</span><span class="vv">ok</span></div>
+          <div class="rowline"><span class="pos TE">TE</span><span class="nm">0 elite · 0 starter</span><span class="vv" style="color:var(--warn)">thin</span></div>
+        </div>
+        <div class="card tight">
+          <div class="kicker">Your weakest starting slot</div>
+          <div class="read">TE — currently filled by your <b>TE3</b>, a tier below every other slot you start.</div>
+        </div>
+        <div class="sub">Chase</div><div class="chiprow"><span class="chip sel">TE</span><span class="chip">QB</span><span class="chip">WR</span><span class="chip">RB</span></div>
+        <div class="sub">Shop</div><div class="chiprow"><span class="chip">TE</span><span class="chip">QB</span><span class="chip">WR</span><span class="chip sel">RB</span></div>
+        <div style="margin-top:auto"><span class="btn">Save &amp; continue</span></div>
+      </div>
+    </div>
+    <figcaption><b>B3 · Thin and stacked.</b> Sources: <code>analyze_roster_strengths.tier_depth</code> (computed today, never surfaced) + <code>optimal_starter_slots</code>. This is Jon’s “you’re missing depth, consider tiering down from Loveland and Bijan” — expressed as the general rule (deep at RB, thin at TE) rather than as two hardcoded names. <b>Action: writes <code>acquire_positions</code> / <code>trade_away_positions</code></b> — the Chasing/Shopping surface.</figcaption>
+  </figure>
+
+  <!-- B4 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">4 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="done"></i><i class="done"></i><i class="on"></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Your board disagrees with the market. That’s where trades come from.</div></div>
+        <div class="card">
+          <div class="kicker">You’re higher than the market on</div>
+          <div class="rowline"><span class="pos RB">RB</span><span class="nm">Bijan Robinson</span><span class="vv" style="color:var(--pos)">+2 tiers</span></div>
+          <div class="rowline"><span class="pos WR">WR</span><span class="nm">Rome Odunze</span><span class="vv" style="color:var(--pos)">+1 tier</span></div>
+          <div class="sub" style="margin-top:6px">These are your easiest <b>sells</b> — someone pays you more than you think they’re worth.</div>
+        </div>
+        <div class="card">
+          <div class="kicker">You’re lower than the market on</div>
+          <div class="rowline"><span class="pos TE">TE</span><span class="nm">Colston Loveland</span><span class="vv" style="color:var(--neg)">−2 tiers</span></div>
+          <div class="rowline"><span class="pos QB">QB</span><span class="nm">Caleb Williams</span><span class="vv" style="color:var(--neg)">−1 tier</span></div>
+          <div class="sub" style="margin-top:6px">Skip these — you’d be buying at a price you don’t believe.</div>
+        </div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+          <span class="btn ghost">Shop Bijan</span><span class="btn">Next</span>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>B4 · Your board vs the market.</b> Sources: <code>/api/trends/consensus-gap</code> when <code>has_baseline</code>, else board Elo vs the universal DP seed. Jon’s “you’re higher on X and lower on Y to consensus. Target these in trades” — and note the <b>inversion</b>: being high on a player makes him a sell, not a target. <b>Action: pins an asset into the finder</b> (<code>/api/trades/asset-ideas</code>).</figcaption>
+  </figure>
+
+  <!-- B5 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">5 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="on"></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Deal with the teams pointed the other way.</div></div>
+        <div class="card">
+          <div class="kicker">Rebuilding — they want your vets</div>
+          <div class="rowline"><span class="rk">11</span><span class="nm">MangoPatti</span><span class="vv">3 firsts</span></div>
+          <div class="rowline"><span class="rk">12</span><span class="nm">Bcork</span><span class="vv">4 firsts</span></div>
+          <div class="sub" style="margin-top:6px">Both hold above-average pick capital and sit bottom-two in roster value.</div>
+        </div>
+        <div class="card">
+          <div class="kicker">Deep where you’re thin</div>
+          <div class="rowline"><span class="rk">4</span><span class="nm">gdubs10</span><span class="vv">3 startable TE</span></div>
+        </div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+          <span class="btn ghost">Scope the deck to MangoPatti</span><span class="btn">Next</span>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>B5 · Who to deal with.</b> Sources: <code>infer_team_outlook</code> run over each league-mate’s roster (the same pure function — no new modeling), power-rankings value rank, and <code>_power_picks_by_owner</code>. This is Jon’s “good targets (picks from other bad teams)”. <b>Action: scopes the deck to one team</b> — the existing <code>opponent_user_id</code> path.</figcaption>
+  </figure>
+
+  <!-- B6 -->
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">6 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="on"></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">Here’s the plan. I’ve already pointed the finder at it.</div></div>
+        <div class="card">
+          <div class="kicker">Your plan</div>
+          <div class="rowline"><span class="nm">Window</span><span class="vv" style="color:var(--ice)">Contender</span></div>
+          <div class="rowline"><span class="nm">Chasing</span><span class="vv" style="color:var(--ice)">TE</span></div>
+          <div class="rowline"><span class="nm">Shopping</span><span class="vv" style="color:var(--ice)">RB</span></div>
+          <div class="rowline"><span class="nm">Pinned</span><span class="vv" style="color:var(--ice)">Bijan Robinson</span></div>
+          <div class="rowline"><span class="nm">Best partners</span><span class="vv" style="color:var(--ice)">MangoPatti · gdubs10</span></div>
+        </div>
+        <div class="sub">You can change any of this later in Trade DNA.</div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+          <span class="btn">Find my trades</span>
+          <span class="btn quiet">Back to the deck</span>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>B6 · The plan.</b> No new data — a recap of the writes from B2/B3/B4/B5 and a single CTA into a deck that is <b>already shaped by them</b>. This beat is the answer to #359: the exit is a configured deck, not a paragraph.</figcaption>
+  </figure>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q5">§5 — Honest degradation</h2>
+<p class="lede">Three states will be common in the real world and each must read as a fact, not a failure.</p>
+
+<div class="frames">
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">1 of 6</span></div>
+        <div class="progress"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="card"><div class="kicker">Roster value · league rank</div><div class="stat"><span class="big">6th</span><span class="of">of 12</span></div></div>
+        <div class="card tight"><div class="kicker">Points per game</div><div class="sub">No games played yet — 2026 hasn’t started. This fills in from week 1.</div></div>
+        <div class="note ice" style="margin:0"><h4>Preseason</h4><p>Every beat except the PPG line works at week 0. The flow does not gate itself off — it degrades one card.</p></div>
+      </div>
+    </div>
+    <figcaption><b>D1 · Preseason (today).</b> Value, window, depth, board-divergence and partners are all week-independent. Only PPG is empty, and it says so.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">1 of 6</span></div>
+        <div class="progress"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="card"><div class="kicker">Roster value · league rank</div><div class="stat"><span class="big">6th</span><span class="of">of 12</span></div></div>
+        <div class="card tight"><div class="kicker">Points per game</div><div class="sub">Not available for ESPN leagues yet — we can’t read weekly scores there. Everything else in this review works.</div></div>
+      </div>
+    </div>
+    <figcaption><b>D2 · ESPN / MFL.</b> <code>backend/outlook/league_state.py:295–320</code> — only Sleeper has a <code>LeagueState</code> provider. The PPG card names the platform limit; the other five beats are platform-independent.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="back">‹</span><span class="ttl">Team review</span><span class="step">4 of 6</span></div>
+        <div class="progress"><i class="done"></i><i class="done"></i><i class="done"></i><i class="on"></i><i></i><i></i></div>
+        <div class="avatarline"><div class="av">THE<br>ANALYST</div><div class="bubble">I need your opinions before I can compare them to anyone’s.</div></div>
+        <div class="card"><div class="kicker">Your board vs the market</div>
+          <div class="sub">You’ve ranked 11 players. Rank about 30 and I can tell you who you’re high and low on.</div></div>
+        <div style="margin-top:auto"><span class="btn ghost">Rank some players</span><span class="btn quiet" style="margin-top:8px">Skip this step</span></div>
+      </div>
+    </div>
+    <figcaption><b>D3 · Thin board.</b> The league-community layer needs ≥3 other rankers (<code>trends_service.py:180</code>); the DP-seed fallback needs the user to have ranked anything at all. Beat B4 skips itself rather than showing an empty comparison — and routes to the fix.</figcaption>
+  </figure>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<h2 id="q6">§6 — What #357 gets instead of PPG</h2>
+<p class="lede">Jon asked for “here’s 6 extra PPG this year, which raises your playoff odds to X and championship odds to Y.” All three halves fail for different, documented reasons. What replaces them is already built and already ON.</p>
+
+<div class="frames">
+  <figure class="frame">
+    <div class="phone cut">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="card"><div class="kicker">This trade</div>
+          <div class="stat"><span class="big">+6.0</span><span class="of">PPG this year</span></div>
+          <div class="rowline"><span class="nm">Playoff odds</span><span class="vv">64% → 78%</span></div>
+          <div class="rowline"><span class="nm">Championship odds</span><span class="vv">9% → 14%</span></div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>What was asked for.</b> Three separate impossibilities: <b>+6.0 PPG</b> has no source (no per-player projection exists; the three candidate feeds are ToS-blocked or are build-your-own — <code>projection-source-research.md</code>). <b>64% → 78%</b> is a bare authoritative percentage, forbidden by the band invariant. <b>9% → 14%</b> is <code>title_pct</code>, unrenderable at any week because the model has no demonstrated skill.</figcaption>
+  </figure>
+
+  <figure class="frame">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>Fleeced</span></div>
+      <div class="scr">
+        <div class="navbar"><span class="ttl">What this does to you</span></div>
+        <div class="card">
+          <div class="kicker">Your starting lineup, slot by slot</div>
+          <div class="rowline"><span class="pos TE">TE</span><span class="nm">Hunter Henry → <b>Brock Bowers</b></span><span class="vv" style="color:var(--pos)">TE31 → TE2</span></div>
+          <div class="rowline"><span class="pos RB">RB</span><span class="nm">Bijan Robinson → <b>Bucky Irving</b></span><span class="vv" style="color:var(--neg)">RB3 → RB19</span></div>
+          <div class="rowline"><span class="pos WR">WR</span><span class="nm">unchanged</span><span class="vv">—</span></div>
+        </div>
+        <div class="verdict win" style="margin-top:4px">
+          <span class="badge win">Lineup gets stronger</span>
+          <div class="read" style="margin-top:6px">You give up your best back and fix your worst slot. Net, your starting eleven goes up.</div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>What ships instead.</b> <code>starter_impact.slots[].before/after</code> — <code>server.py</code> <code>_starter_impact</code>, carrying tier <em>and</em> positional rank behind <code>trade.position_impact</code>, <b>already ON</b>. It answers Jon’s real question — “what does adding this player to my team do?” — in units FTF can defend, and it is more specific than a single PPG scalar, not less.</figcaption>
+  </figure>
+</div>
+
+<div class="note ice">
+  <h4>The rule this lab holds to</h4>
+  <p>Every figure shown is a measured or computed <b>value</b>, with exactly one forecast: the playoff <b>band</b>, which renders as a three-band chip with a “Projected” ribbon and is labelled a projection everywhere it appears — never a bare percentage. <b>Championship odds are never rendered in any form</b>, and that is the one rule here that is not a preference: the model has no demonstrated skill, so there is nothing honest to show. No number in this design is invented to fill a slot.</p>
+</div>
+
+<hr class="rule">
+<p class="sub">Lab: <code>mockups/team-review-2026-08-19/</code> · Binding docs: <code>docs/feedback/items/357-team-review/</code> · Opened 2026-08-19.</p>
+
+</div>
+</body>
+</html>

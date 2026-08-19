@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
 - [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
 - [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
 
@@ -22,6 +23,23 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-19 — Open Items (team review)
+
+### Q-024 — Root `CLAUDE.md` says the `check-*.js` suites "gate nothing yet". `ci.yml` says they do. Which is the contract?
+- **Why it matters:** root `CLAUDE.md` §Stack states *"The `mobile/tests/check-*.js` structural suites are `npm run`-only and **gate nothing yet** (open item in NEXT.md)."* But [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)'s `mobile-typecheck` job runs `for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done` — a glob — and its own comment says *"a guard is live in CI the moment the file exists — no npm script needed."* The 42 existing suites therefore **do** gate `main`.
+- **Why it is not just a typo to fix in passing:** under [D-056](DECISIONS.md) these suites are the **primary regression evidence for client invariants** — Maestro and the simulator are gone. An agent that believes CLAUDE.md will treat its structural guard as decorative, will not bother proving it fails under sabotage, and may skip writing one at all. It understates the repo's real evidence posture in the one direction that costs coverage.
+- **What is unclear (and why an agent should not just edit it):** whether CLAUDE.md is simply stale, or whether the operator considers the glob *incidental* and wants the suites formally declared as a gate (branch-ruleset required check) before the doc claims it. Those lead to different edits. `CLAUDE.md` is the operating contract, so a session should not silently rewrite its own rules.
+- **Action to unblock:** operator confirms which is true, then either (a) correct the CLAUDE.md §Stack sentence and close the NEXT.md open item, or (b) make `mobile-typecheck` a required check via the branch ruleset and *then* correct the sentence.
+- **Discovered by:** the Team Review planning session, while writing [`scope.md` §3](../docs/feedback/items/357-team-review/scope.md) — see [reconciliation-log.md](../docs/feedback/items/357-team-review/reconciliation-log.md) O-4.
+- **Owner:** operator.
+
+### Q-025 — Team Review waivers — **2 of 3 RESOLVED 2026-08-19; waiver 3 still open**
+- **Why it matters:** [`docs/feedback/items/357-team-review/scope.md` §6](../docs/feedback/items/357-team-review/scope.md) carries three waivers, and CLAUDE.md's feature gates require waivers to be **surfaced to the operator before build starts** — silence is not a waiver. Building without the yes would violate the gate the scope block exists to enforce.
+- **The three:** (1) **forward per-player PPG is CUT** — #357's "here's 6 extra PPG this year" has no license-clean, ready-made source, and the substitute is `starter_impact` slot movement (already ON); (2) **championship odds are refused** — `title_pct` is unrenderable at any week by cross-client invariant, so no waiver can license it and this row exists so the refusal is seen rather than discovered; (3) **retrospective PPG rank ships degraded** — Sleeper-only and empty until week 1, so most users will not see it for their first six weeks with the feature.
+- **Resolution so far (operator, 2026-08-19, verbatim *"Forward PPG cut"*):** waiver **(1) RATIFIED** — forward per-player PPG is cut, and #357 is answered by `starter_impact` slot movement instead. Waiver **(2) STANDS** — it was always a notification rather than a choice, and the same day's [D-094](DECISIONS.md) lighting of `outlook.odds` does **not** touch it: `title_pct` remains unrenderable at any week because the model has no demonstrated skill, and Team Review no longer even serializes it.
+- **Still open — waiver (3):** retrospective PPG rank is Sleeper-only (`backend/outlook/league_state.py:295–320`) and empty until week 1. The plan ships the card in a degraded state that names the actual reason. This is the one genuine choice left, and it is small: the alternative is hiding the row entirely until it has data.
+- **Owner:** operator.
 
 ## 2026-08-19 — Open Items (bake-off outlook lane)
 

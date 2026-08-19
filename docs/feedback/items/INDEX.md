@@ -246,6 +246,9 @@
 | 339 | pick-not-the-gap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/`; `pick_gap_frac` band still untuned |
 | 340 | max-overpay-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
 | 341 | package-position-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
+| 357 | team-review | planned | 2026-08-19 | **canonical** for #357/#358/#359 — full doc set, build not started; blocked on Q-025 waivers. `trades.team_review` specced, not yet in features.json |
+| 358 | team-review-link | planned | 2026-08-19 | canonical `357-team-review/` |
+| 359 | team-review-link | planned | 2026-08-19 | canonical `357-team-review/` |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |
