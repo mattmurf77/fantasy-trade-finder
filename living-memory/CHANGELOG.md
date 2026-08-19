@@ -10,6 +10,19 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19f (bake-off: the outlook lane that filled zero — NOT SHIPPED, on `fix/bakeoff-outlook-lane`)
+
+- **Reported:** the bake-off's outlook lane filling **0 of 5** slots and 10-card decks arriving from an arm that generated 37–40 candidates — the pair of symptoms that put `bakeoff_serve_interleaved` back to dark. ([D-086](DECISIONS.md), [scope](../docs/plans/three-model-bakeoff/scope-outlook-lane.md))
+- **The number that settled it, read-only from prod across all 18 runs (54 group-runs, 527 cards):** the `(none)` bucket is **0 in every single group-run**. Every pooled card carried a `lane`, so the label plumbing is healthy and `window` is **24.7 %** of live supply — not ~0 %. Not a plumbing bug.
+- **What it actually was:** a 5/5 quota asks each group for 50 % outlook from a 24.7 %-outlook supply, and the value lane was capped at 5 and **forbidden to use the slots the outlook lane could not fill**. Per run: target 30, supply 29.3, within-group capacity 16.0, **served 13.8** — 40 of 288 fillable slots destroyed by the lane split alone.
+- **Fix: lane reallocation (`bakeoff_lane_reallocate`, default on).** A lane extends into the other lane's unfillable slots **drawing only from its own bucket**, so no card ever occupies the other lane's slot and `lane_slot` stays literally true — the distinction from `bakeoff_fill_policy` = 1, which substitutes *across* lanes and flags it. **13.8 → 16.0 cards/deck.**
+- **D-078's finding is fully preserved, and that was the constraint.** `short` is computed against the nominal 5/5 ask *before* reallocation and never rewritten; `pool` is untouched; the spill is recorded in a new `groups_json[key].realloc`. Asserted directly: `on[G1]["short"] == off[G1]["short"]`.
+- **A re-tuned split was the obvious move and lost on its own arithmetic.** Replaying the 54 real pools: fixed 7/3 reaches 15.6/run, reallocation reaches **16.0 at every split from 5/5 to 10/0** — no magic number to maintain against drifting supply.
+- **The remaining 16.0 → 30 gap is a different defect and is named, not absorbed:** the group partition strands surplus (one run held 37 cards in one group and zero in the other two). That is the concurrent arm-C forfeit work.
+- **Open:** `current_divergence` produced **0 `window` cards out of 23** while `gen_v2` — also divergence-basis, same user and week — produced 16.2 %. Suggestive at p ≈ 1.4 %, too small to call ([Q-020](OPEN_QUESTIONS.md)).
+- **Gates:** pytest **3441 → 3448 passed, 1 skipped, 0 failed** (+7). Zero files under `mobile/` changed. `bakeoff_serve_interleaved` deliberately **not** touched. Not pushed, not merged.
+
+---
 ## 2026-08-19b (give-side headliner cap — the flood the existing cap could not see; NOT SHIPPED, on `fix/deck-give-headliner-cap`)
 
 - **The cap that was supposed to stop this was on, and killed nothing.** Operator: *"the model will spit out 4 or 5 varieties of offers with Davante included."* His deck `2740a7fc` — 22 cards — had Adams on the give side of **6**, `1466` on **6**, Mayfield on **5**: **17 of 22 cards were three players**, with `deck_headliner_cap` = 2 in force. ([D-082](DECISIONS.md), [scope](../docs/plans/deck-give-headliner-cap/scope.md))

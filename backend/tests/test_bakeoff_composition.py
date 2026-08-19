@@ -184,19 +184,82 @@ def test_quota_knobs_move_the_split():
 # ---------------------------------------------------------------------------
 
 def test_outlook_shortfall_is_recorded_and_not_backfilled():
-    """The expected case: `window` is ~19% of divergence supply, so a
-    divergence group routinely cannot find five outlook cards. It must serve
-    short and SAY so — a silent value-lane backfill would hide whether the arm
-    can produce outlook-basis divergence ideas at all."""
+    """The expected case: `window` is ~25% of live supply, so a group
+    routinely cannot find five outlook cards. It must SAY so — a silent
+    cross-lane substitution would hide whether the arm can produce
+    outlook-basis ideas at all.
+
+    `reallocate=False` is the pre-D-086 composition: the slots the outlook
+    lane could not fill are simply dropped."""
     arm = _cards([("divergence", "value", 20), ("divergence", "window", 2)])
     res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
-                           size=10, value_slots=5, backfill=False)
+                           size=10, value_slots=5, backfill=False,
+                           reallocate=False)
     assert res.filled == {"value": 5, "outlook": 2, "fill": 0}
     assert res.short == {"value": 0, "outlook": 3}
+    assert res.realloc == {"value": 0, "outlook": 0}
     assert len(res.cards) == 7, "the group serves short rather than backfilling"
     assert Counter(c.lane for c in res.cards)["value"] == 5, \
         "the value lane must not overflow into outlook slots"
     assert res.pool == {"value": 20, "window": 2, "(none)": 0}
+
+
+def test_lane_reallocation_fills_the_group_without_softening_the_shortfall():
+    """D-086 — the same group, with reallocation ON (the default).
+
+    The three slots the outlook lane could not fill go to the value lane,
+    which has its own cards to spare. The deck stops shrinking; `short` still
+    reads {"outlook": 3} because it is measured against the NOMINAL 5/5 ask,
+    and `realloc` names the spill so nothing is inferred."""
+    arm = _cards([("divergence", "value", 20), ("divergence", "window", 2)])
+    res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
+                           size=10, value_slots=5, backfill=False)
+    assert len(res.cards) == 10, "reallocation fills the group"
+    assert res.filled == {"value": 8, "outlook": 2, "fill": 0}
+    assert res.short == {"value": 0, "outlook": 3}, \
+        "the under-fill finding survives reallocation untouched"
+    assert res.realloc == {"value": 3, "outlook": 0}
+    assert res.pool == {"value": 20, "window": 2, "(none)": 0}
+    # The distinction from bakeoff_fill_policy = 1: no card takes the OTHER
+    # lane's slot, so every lane_slot stamp is still literally true.
+    assert not [c for c in res.cards if res.slots[id(c)] == bo.SLOT_FILL]
+    for c in res.cards:
+        want = bo.SLOT_VALUE if c.lane == "value" else bo.SLOT_OUTLOOK
+        assert res.slots[id(c)] == want
+
+
+def test_lane_reallocation_is_a_no_op_when_both_lanes_meet_their_quota():
+    """The rich case must be byte-identical to pre-D-086: reallocation only
+    ever consumes slots a lane could not fill."""
+    arm = _cards([("divergence", "value", 20), ("divergence", "window", 20)])
+    res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
+                           size=10, value_slots=5, backfill=False)
+    assert res.filled == {"value": 5, "outlook": 5, "fill": 0}
+    assert res.short == {"value": 0, "outlook": 0}
+    assert res.realloc == {"value": 0, "outlook": 0}
+
+
+def test_lane_reallocation_runs_in_both_directions():
+    """A value shortfall is reallocated to the outlook lane too — the rule is
+    "slots follow supply", not "the value lane wins"."""
+    arm = _cards([("divergence", "value", 2), ("divergence", "window", 20)])
+    res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
+                           size=10, value_slots=5, backfill=False)
+    assert res.filled == {"value": 2, "outlook": 8, "fill": 0}
+    assert res.short == {"value": 3, "outlook": 0}
+    assert res.realloc == {"value": 0, "outlook": 3}
+
+
+def test_lane_reallocation_cannot_invent_supply():
+    """A group that is genuinely short of CARDS still serves short — the
+    D-086 ceiling is the group's own pool, never more."""
+    arm = _cards([("divergence", "value", 3), ("divergence", "window", 1)])
+    res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
+                           size=10, value_slots=5, backfill=False)
+    assert len(res.cards) == 4
+    assert res.filled == {"value": 3, "outlook": 1, "fill": 0}
+    assert res.short == {"value": 2, "outlook": 4}
+    assert res.realloc == {"value": 0, "outlook": 0}
 
 
 def test_empty_group_is_data_not_an_error():
@@ -208,9 +271,14 @@ def test_empty_group_is_data_not_an_error():
 
 
 def test_backfill_policy_fills_residual_slots_and_flags_every_substitute():
+    """bakeoff_fill_policy = 1 substitutes ACROSS lanes: a value card takes an
+    outlook slot and is flagged so no analysis mistakes it for a card that
+    earned one. Asserted with reallocation off, which is when the cross-lane
+    substitution is actually reachable."""
     arm = _cards([("divergence", "value", 20), ("divergence", "window", 2)])
     res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
-                           size=10, value_slots=5, backfill=True)
+                           size=10, value_slots=5, backfill=True,
+                           reallocate=False)
     assert len(res.cards) == 10
     assert res.filled == {"value": 5, "outlook": 2, "fill": 3}
     # The shortfall is STILL recorded — the backfill hides nothing.
@@ -219,6 +287,22 @@ def test_backfill_policy_fills_residual_slots_and_flags_every_substitute():
     assert len(fills) == 3
     assert all(c.lane == "value" for c in fills), \
         "a fill came from the group's own other lane"
+
+
+def test_reallocation_leaves_backfill_only_the_unlabelled_remainder():
+    """The two policies compose without double-counting: reallocation drains
+    both lane buckets first, so a `fill` under D-086 can only be a card that
+    carried no lane at all — exactly the bucket that has no quota to earn."""
+    arm = _cards([("divergence", "value", 6), ("divergence", "window", 1),
+                  ("divergence", None, 8)])
+    res = bo.compose_group(bo.Group(G1, "current", "divergence"), arm,
+                           size=10, value_slots=5, backfill=True)
+    assert res.filled == {"value": 6, "outlook": 1, "fill": 3}
+    assert res.short == {"value": 0, "outlook": 4}
+    assert res.realloc == {"value": 1, "outlook": 0}
+    fills = [c for c in res.cards if res.slots[id(c)] == bo.SLOT_FILL]
+    assert all(c.lane is None for c in fills), \
+        "both lane buckets were already exhausted by reallocation"
 
 
 def test_backfill_never_crosses_the_groups_basis():
@@ -468,6 +552,51 @@ def _run(cur, v2, **knobs):
             league_id="league_x", iso_week="2026-W34", interleave=True)
 
 
+def test_lane_reallocation_is_wired_to_its_knob_end_to_end():
+    """The D-086 revert lever must be real: `bakeoff_lane_reallocate` = 0 has
+    to reach `compose_group` through `compose_deck`, not just exist."""
+    import json
+    cur = _cards([("divergence", "value", 20), ("divergence", "window", 2),
+                  ("consensus", "value", 20), ("consensus", "window", 20)])
+    v2 = _cards([("divergence", "value", 20)])
+
+    on = json.loads(_run(cur, v2).run_row(job_id="j", user_id="u",
+                                          league_id="l")["groups_json"])
+    off = json.loads(_run(cur, v2, bakeoff_lane_reallocate=0.0)
+                     .run_row(job_id="j", user_id="u",
+                              league_id="l")["groups_json"])
+
+    assert on[G1]["filled"]["value"] == 8 and on[G3]["composed"] == 10
+    assert off[G1]["filled"]["value"] == 5 and off[G3]["composed"] == 5
+    # The finding the deck size used to carry is on the record either way.
+    assert on[G1]["short"] == off[G1]["short"] == {"value": 0, "outlook": 3}
+    assert on[G3]["short"] == off[G3]["short"] == {"value": 0, "outlook": 5}
+    assert off[G1]["realloc"] == {"value": 0, "outlook": 0}
+
+
+def test_measured_prod_shape_reaches_the_group_size():
+    """Regression on the actual 2026-08-19 defect (D-086).
+
+    The two 10:33 runs recorded pools of value 7 / window 0 (group 1),
+    value 10 / window 0 (group 2) and value 13 / window 3 (group 3) and served
+    an 18-card deck: every group's outlook quota went unfilled AND the value
+    cards that could have taken those slots were dropped. Same pools, D-086
+    on: 27 cards, the ceiling this supply allows against a 30-card target."""
+    cur = (_cards([("divergence", "value", 7)])
+           + _cards([("consensus", "value", 10)]))
+    v2 = _cards([("divergence", "value", 13), ("divergence", "window", 3)])
+    import json
+    row = _run(cur, v2).run_row(job_id="j", user_id="u", league_id="l")
+    groups = json.loads(row["groups_json"])
+
+    assert [groups[k]["composed"] for k in (G1, G2, G3)] == [7, 10, 10]
+    assert row["deck_size"] == 27
+    # Group 1 could not reach ten — it had seven cards. That is supply, and it
+    # is still reported as such.
+    assert groups[G1]["short"] == {"value": 0, "outlook": 5}
+    assert groups[G1]["realloc"] == {"value": 2, "outlook": 0}
+
+
 def test_default_run_generates_only_the_rostered_arms():
     seen = []
 
@@ -495,14 +624,17 @@ def test_run_row_records_the_per_group_under_fill():
 
     assert set(groups) == {G1, G2, G3}
     assert groups[G1]["short"] == {"value": 0, "outlook": 3}
-    assert groups[G1]["filled"] == {"value": 5, "outlook": 2, "fill": 0}
+    assert groups[G1]["filled"] == {"value": 8, "outlook": 2, "fill": 0}
+    assert groups[G1]["realloc"] == {"value": 3, "outlook": 0}
     assert groups[G1]["pool"] == {"value": 20, "window": 2, "(none)": 0}
     assert groups[G2]["short"] == {"value": 0, "outlook": 0}
-    # Arm C produced no outlook cards at all — recorded, never substituted.
+    # Arm C produced no outlook cards at all — the shortfall is recorded in
+    # full even though the value lane went on to use the slots (D-086).
     assert groups[G3]["short"] == {"value": 0, "outlook": 5}
-    assert groups[G3]["composed"] == 5 and groups[G3]["served"] == 5
+    assert groups[G3]["realloc"] == {"value": 5, "outlook": 0}
+    assert groups[G3]["composed"] == 10 and groups[G3]["served"] == 10
     assert groups[G3]["arm"] == "gen_v2" and groups[G3]["basis"] is None
-    assert row["deck_size"] == 7 + 10 + 5
+    assert row["deck_size"] == 10 + 10 + 10
 
 
 def test_run_row_group_summary_is_empty_when_composition_is_killed():

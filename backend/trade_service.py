@@ -528,6 +528,16 @@ _DEFAULT_CFG: dict[str, float] = {
     # 1 = backfill from the same group's other lane / unlabelled remainder,
     # every substituted card flagged deck_impressions.lane_slot = 'fill'.
     "bakeoff_fill_policy":         0.0,
+    # Lane reallocation (D-086, 2026-08-19). 1 = DEFAULT: a lane that met its
+    # quota may extend into slots the OTHER lane could not fill, drawing only
+    # from its own bucket, so no card ever occupies the other lane's slot and
+    # `lane_slot` stays literally true. Orthogonal to bakeoff_fill_policy,
+    # which substitutes ACROSS lanes and flags the substitute. `short` is
+    # still computed against the nominal quota before reallocation and the
+    # spill is recorded in groups_json[key].realloc, so the under-fill finding
+    # D-078 protects is fully preserved — the deck just stops shrinking to
+    # restate it. 0 restores the pre-D-086 composition exactly.
+    "bakeoff_lane_reallocate":     1.0,
     # Arm roster. 0 (default, operator decision 2026-08-18) = arm `baseline`
     # is NOT in the served rotation and is not generated at all; Phase 2's
     # MODEL_A_PROFILE / model_a() / golden / knob-inventory guard all stay

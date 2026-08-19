@@ -74,6 +74,65 @@ inert on every bake-off arm and the bake-off cannot currently measure this featu
 Left that way deliberately — two sibling agents were editing `bakeoff_runner.py`
 concurrently. `MODEL_A_PROFILE` pins the knob to 0 regardless.
 
+## 2026-08-19f — Bake-off lane reallocation (D-086); the outlook lane that filled zero
+
+**Branch:** `fix/bakeoff-outlook-lane`, from `origin/main` `a130dfc`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/three-model-bakeoff/scope-outlook-lane.md](../docs/plans/three-model-bakeoff/scope-outlook-lane.md). Decision: [D-086](DECISIONS.md). Follow-up: [Q-020](OPEN_QUESTIONS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3441 passed, 1 skipped (baseline at `a130dfc`) | **3448 passed, 1 skipped, 0 failed** (+7 new) |
+| `tsc --noEmit` / `testid-lint` | n/a — **zero files under `mobile/` changed** | unaffected |
+| Bake-off arm-A golden + knob-inventory guard | 10 passed | 10 passed; new knob added to `_PINNED_KNOBS` and excluded from `MODEL_A_PROFILE` (composition, not generation — row added to `scope-phase2.md`), **no golden re-capture needed** |
+| `test_bakeoff_composition.py` | 35 passed | **38 passed** (7 added, 3 rewritten to pin the pre-D-086 path under `reallocate=False`) |
+
+**What was measured, on prod, read-only (`SET TRANSACTION READ ONLY`, SELECT only).** All 18
+`bakeoff_runs` rows of 2026-08-19 — 54 group-runs, 527 pooled cards, 3 leagues.
+
+| Group | cards/run | `value` | `window` | `(none)` | window share | outlook slots filled |
+|---|---:|---:|---:|---:|---:|---:|
+| `current_divergence` | 1.3 | 23 | **0** | 0 | **0.0 %** | 0 / 90 |
+| `current_consensus` | 22.5 | 291 | 114 | 0 | 28.1 % | 63 / 90 |
+| `gen_v2` | 5.5 | 83 | 16 | 0 | 16.2 % | 16 / 90 |
+| **all** | 29.3 | 397 | **130** | **0** | **24.7 %** | 79 / 270 |
+
+The single number that decides the diagnosis: **`(none)` is 0 in all 54 group-runs**, so every
+pooled card carried a lane and the label plumbing is healthy — `window` is 24.7 % of live supply,
+not ~0 %. The zero-fill is a quota/supply result, not a missing field. Deck arithmetic per run:
+
+| | cards/run |
+|---|---:|
+| target (`bakeoff_deck_limit`) | 30.0 |
+| supply generated | 29.3 |
+| within-group capacity `Σ min(pool, 10)` | 16.0 |
+| **served (before)** | **13.8** |
+| **served (after D-086)** | **16.0** |
+
+Counterfactual replay of the same 54 pools through candidate quotas — the arithmetic that
+rejected a re-tuned split in favour of reallocation:
+
+| `bakeoff_group_value_slots` | fixed quota | with reallocation |
+|---|---:|---:|
+| 5 (today) | 13.8 /run | **16.0** /run |
+| 6 | 14.9 | 16.0 |
+| 7 | 15.6 | 16.0 |
+| 8 | 15.7 | 16.0 |
+| 10 | 15.0 | 16.0 |
+
+**Evidence per D-056 (no simulator, no Maestro):** 7 new pytest cases in
+`backend/tests/test_bakeoff_composition.py` — the core claim, the no-op case, both reallocation
+directions, the supply ceiling, composition with `bakeoff_fill_policy`, end-to-end knob wiring,
+and a regression pinned to the **real measured 10:33 pools** (7/0, 10/0, 13/3 → 18 cards before,
+27 after). Plus a file:line-cited code-walk proof in §6 of the scope block, covering the two
+properties no unit test can state directly: that `res.short` is written before any reallocation
+statement and never rewritten, and that reallocation slices only from the receiving lane's own
+bucket, so every `lane_slot` stamp remains a true statement about its card.
+
+**Not verified at runtime, and it does not need to be:** the bake-off is dark
+(`bakeoff_serve_interleaved` 0.0, **not changed by this work**), so no served deck moves for any
+user. The next organic deck writes the proof itself — `filled.value + filled.outlook` should equal
+`min(pool total, 10)` per group in `bakeoff_runs.groups_json`, with `short` unchanged in character.
+
 ---
 ## 2026-08-19b — Give-side headliner cap (D-082); the flood C4 could not see
 
