@@ -10921,6 +10921,16 @@ def swipe_trade():
         # (fit_k_explained_mult = 1.0); no feature flag.
         fit_mult = _trade_service_mod.fit_congruence_mult(
             getattr(card, "lane_shift", None), decision)
+        # G-049 / D-073 — these record_trade_signal calls run BEFORE the DB
+        # write and are deliberately NOT gated on its replay verdict, unlike
+        # save_trade_swipes below. _trade_swipes is derived state that
+        # replay_from_db rebuilds from swipe_decisions at every session_init,
+        # so a replay's doubled signal is bounded by this session and heals
+        # itself. Gating it would tie in-session board movement to the DB
+        # being reachable, when the persist block below is best-effort by
+        # design — a bounded 2x overcount traded for an unbounded 0x
+        # undercount on a DB blip. Pinned by
+        # test_trade_decision_idempotency.py::test_route_replay_leaves_the_in_session_signal_doubled.
         if decision == "like":
             service.record_trade_signal(
                 winner_ids = card.receive_player_ids,
@@ -11300,6 +11310,8 @@ def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
     fit_mult = _trade_service_mod.fit_congruence_mult(
         getattr(card, "lane_shift", None), "pass")
 
+    # Not gated on the replay verdict, same as swipe_trade — see the G-049 /
+    # D-073 note there. `elo` is SPEC §4's suppression, a different question.
     if elo:
         service.record_trade_signal(
             winner_ids = card.give_player_ids,

@@ -10,6 +10,45 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18c — G-049 caller-side finish: route-level proof + the ungated-signal decision
+
+**Branch:** `feat/sweep-followups-2026-08-18` (continues the 2026-08-18b entry below). **Not shipped.**
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3216 passed, 1 skipped | **3219 passed, 1 skipped** |
+
+Both `save_trade_swipes` gates (`swipe_trade`, `_apply_reasoned_pass`) were already in place from
+2026-08-18b; this pass added the **runtime** evidence they lacked and settled the one open design
+question.
+
+**New coverage — 3 route-level tests** in `test_trade_decision_idempotency.py`. They POST
+`/api/trades/swipe` twice through the Flask test client against an in-memory DB with the **real**
+`save_trade_swipes` (only `record_event` / `create_notification` / `check_for_match` stubbed), so the
+count is of rows the route actually wrote:
+1. `test_re_posted_swipe_writes_exactly_one_set_of_swipe_decisions` — one `swipe_decisions` row, one
+   `trade_decisions` row, and a `replay_from_db` + `_compute_elo` check that a restart sees exactly
+   one application of `trade_k_pass`.
+2. `test_route_replay_leaves_the_in_session_signal_doubled` — pins the accepted residual.
+3. `test_route_replayed_like_still_runs_match_detection` — `check_for_match` called twice.
+
+**Sabotage:** deleting the `if wrote_decision:` gate in `swipe_trade` turns tests 1 and 3 RED
+(`assert 2 == 1` on real rows), alongside the existing source pin. The `inspect.getsource` pins alone
+could not have caught a gate that was present but ineffective.
+
+**Design question closed:** `RankingService.record_trade_signal` stays **before** the DB write and
+**ungated** (D-073). `_trade_swipes` is derived state that `replay_from_db` rebuilds from
+`swipe_decisions` at every `session_init`, and the persist block around it is best-effort by design —
+gating it would trade a bounded, self-healing 2x overcount for an unbounded 0x undercount whenever
+the DB is unreachable. `backend/database.py`'s docstring and `docs/data-dictionary.md` both said
+callers "must skip both", which the shipped code never did; corrected to match.
+
+**Not run:** `tsc --noEmit` / `check-*.js` / testid-lint — this pass touched backend and docs only.
+**Count note:** the 2026-08-18b entry recorded 3191; the branch was rebased onto a newer `main`
+mid-session (engine-quality wave + navdoc refresh), which brings `test_engine_quality.py` and
+`test_engine_quality_golden.py` — hence 3216 as the real pre-change baseline. Nothing was lost.
+
+---
 ## 2026-08-18b — Bug-sweep follow-ons (items 3/4/5) + research 6/7
 
 **Branch:** `feat/sweep-followups-2026-08-18` (off `origin/main` `90fb19a`). **Not shipped** — awaiting operator go.

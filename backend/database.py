@@ -4930,12 +4930,19 @@ def save_trade_decision(
     recognised as a REPLAY of the row immediately preceding it and skipped
     (G-049).
 
-    Callers that also apply an Elo signal — `save_trade_swipes()` and
-    `RankingService.record_trade_signal()` — MUST skip both on a False
-    return. The duplicated row here is only the fingerprint; the actual harm
-    is the doubled `trade_k_pass` those two apply, and `swipe_decisions`
-    carries no trade/league identity of its own, so this is the single point
-    in the write path where a replay can still be recognised.
+    `save_trade_swipes()` MUST be skipped on a False return. The duplicated
+    row here is only the fingerprint; the actual harm is the doubled
+    `trade_k_pass`, and `swipe_decisions` carries no trade/league identity
+    of its own, so this return value is the single point in the write path
+    where a replay can still be recognised.
+
+    `RankingService.record_trade_signal()` is deliberately NOT gated on it
+    (D-073). It fires before this call in both routes and appends to an
+    in-memory list that `replay_from_db` rebuilds from `swipe_decisions` at
+    every session_init — derived state, never persisted, so the doubling it
+    keeps is bounded by one session and self-heals. Gating it would make an
+    in-session board movement depend on the DB being reachable, trading a
+    bounded 2x overcount for an unbounded 0x undercount on a DB blip.
 
     Why a *window* and not a unique constraint
     ------------------------------------------

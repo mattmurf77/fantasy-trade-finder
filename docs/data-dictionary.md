@@ -214,7 +214,11 @@ Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)`
 
 **Write-time replay guard (G-049).** `save_trade_decision()` is idempotent over a short window and returns `True` when it wrote a row, `False` when it recognised a replay and skipped one. It suppresses only the narrow signature of a double-POST: a still-**live** row for the same `(user_id, league_id, trade_id, decision)` with a byte-identical give/receive payload, written less than `database.TRADE_DECISION_DEDUPE_SECONDS` (10 s) ago. Everything else is written, so no decision the user made is dropped; an unparseable `created_at` fails **open**. The window is sized from prod (2026-08-18): true double-writes were at most 0.200 s apart, the closest legitimate re-decision 147.7 s — nothing in between.
 
-Callers that also apply an Elo signal (`save_trade_swipes()`, `RankingService.record_trade_signal()`) **must skip both on a `False` return**. `swipe_decisions` stores no trade or league identity, so this return value is the only place downstream writers can learn that a swipe was a replay; ignoring it re-applies `trade_k_pass` twice. The guard is not a distributed lock — two genuinely simultaneous requests on separate workers can still both write.
+`save_trade_swipes()` **must be skipped on a `False` return** — both route call sites (`swipe_trade`, `_apply_reasoned_pass`) do. `swipe_decisions` stores no trade or league identity, so this return value is the only place a downstream writer can learn that a swipe was a replay; ignoring it re-applies `trade_k_pass` twice.
+
+`RankingService.record_trade_signal()` is **deliberately not gated** on it (D-073). It fires before the DB write in both routes and appends to an in-memory list that `replay_from_db` rebuilds from `swipe_decisions` at every `session_init` — derived state, never persisted — so a replay's doubled signal lasts one session and then heals. Gating it would tie in-session board movement to DB reachability, trading a bounded 2x overcount for an unbounded 0x undercount whenever the persist block (best-effort by design) fails. `check_for_match` is likewise ungated: a replayed like must still surface a mutual match.
+
+The guard is not a distributed lock — two genuinely simultaneous requests on separate workers can still both write.
 
 ---
 

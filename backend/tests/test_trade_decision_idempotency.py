@@ -348,3 +348,158 @@ def test_check_for_match_is_not_gated_on_the_replay_verdict():
         if "check_for_match" in line and "def " not in line:
             assert "wrote_decision" not in line, \
                 "check_for_match must not be gated on the replay verdict"
+
+
+# ---------------------------------------------------------------------------
+# Route level — the real POST, twice, against a real database
+# ---------------------------------------------------------------------------
+# The pins above match source text and the Elo test defines its own caller.
+# Neither actually POSTs. This section drives `/api/trades/swipe` through the
+# Flask test client with the REAL `save_trade_swipes` (only the notification
+# side effects are stubbed), so the thing being counted is rows the route
+# genuinely wrote — the same rows `_compute_elo` replays.
+
+ROUTE_LEAGUE = "league_idem_route"
+ROUTE_TRADE  = "card_route_replay"
+
+
+@pytest.fixture()
+def route():
+    """Flask test client with one session wired to an in-memory DB.
+
+    `save_trade_swipes` is deliberately NOT mocked — the assertion is on
+    `swipe_decisions` rows, and mocking the writer would only re-test the
+    call count the source pins already cover.
+    """
+    from unittest.mock import MagicMock
+
+    import backend.server as server
+    from backend.trade_service import League, LeagueMember, TradeCard, TradeService
+
+    engine = create_engine("sqlite:///:memory:",
+                           connect_args={"check_same_thread": False})
+    metadata.create_all(engine)
+
+    players = [
+        Player(id=GIVE[0], name="Give", position="RB", team="AAA", age=25),
+        Player(id=RECEIVE[0], name="Recv", position="RB", team="BBB", age=25),
+    ]
+    service   = RankingService(players=players)
+    trade_svc = TradeService(players={p.id: p for p in players})
+    trade_svc._trade_cards[ROUTE_TRADE] = TradeCard(
+        trade_id           = ROUTE_TRADE,
+        league_id          = ROUTE_LEAGUE,
+        proposing_user_id  = ME,
+        target_user_id     = PARTNER,
+        target_username    = "partner",
+        give_player_ids    = list(GIVE),
+        receive_player_ids = list(RECEIVE),
+        mismatch_score     = 0.0,
+        fairness_score     = 0.0,
+        composite_score    = 0.0,
+    )
+
+    token = "test-token-g049-route"
+    sess = {
+        "user_id":       ME,
+        "league":        League(league_id=ROUTE_LEAGUE, name="Idem Route",
+                                platform="sleeper", members=[
+                                    LeagueMember(user_id=ME, username="me",
+                                                 roster=[], elo_ratings={}),
+                                    LeagueMember(user_id=PARTNER, username="partner",
+                                                 roster=[], elo_ratings={}),
+                                ]),
+        "players":       players,
+        "services":      {"1qb_ppr": service},
+        "service":       service,
+        "trade_svcs":    {"1qb_ppr": trade_svc},
+        "trade_svc":     trade_svc,
+        "active_format": "1qb_ppr",
+        "last_active":   0.0,
+    }
+    server.app.config["TESTING"] = True
+    client  = server.app.test_client()
+    matcher = MagicMock(return_value=False)
+
+    with patch.object(db_module, "engine", engine), \
+         patch.object(server, "record_event", MagicMock()), \
+         patch.object(server, "create_notification", MagicMock()), \
+         patch.object(server, "check_for_match", matcher):
+        with server._sessions_lock:
+            server._sessions[token] = sess
+        try:
+            yield client, token, service, matcher
+        finally:
+            with server._sessions_lock:
+                server._sessions.pop(token, None)
+
+
+def _post_swipe(client, token, decision, trade_id=ROUTE_TRADE):
+    return client.post(
+        "/api/trades/swipe",
+        data=json.dumps({"trade_id": trade_id, "decision": decision}),
+        content_type="application/json",
+        headers={"X-Session-Token": token},
+    )
+
+
+def test_re_posted_swipe_writes_exactly_one_set_of_swipe_decisions(route):
+    """THE regression test for G-049: the same pass POSTed twice.
+
+    One give x one receive = exactly one `swipe_decisions` row per accepted
+    swipe, so "one set" is countable: two rows here means `trade_k_pass`
+    lands twice on the next `replay_from_db`.
+    """
+    client, token, _service, _matcher = route
+
+    assert _post_swipe(client, token, "pass").status_code == 200
+    assert _post_swipe(client, token, "pass").status_code == 200
+
+    swipes = load_swipe_decisions(user_id=ME, scoring_format="1qb_ppr")
+    assert len(swipes) == 1, (
+        f"the replayed POST leaked an Elo row: {len(swipes)} swipe_decisions "
+        f"rows for one card")
+    assert len(load_trade_decisions(user_id=ME, league_id=ROUTE_LEAGUE)) == 1
+
+    # And the persisted state a restart would reload is single-counted.
+    svc = RankingService(players=[
+        Player(id=GIVE[0], name="Give", position="RB", team="AAA", age=25),
+        Player(id=RECEIVE[0], name="Recv", position="RB", team="BBB", age=25),
+    ])
+    svc.replay_from_db(swipes)
+    elo = svc._compute_elo(svc._pool(None))
+    assert elo[GIVE[0]] == pytest.approx(1500.0 + TRADE_K_PASS * 0.5), \
+        "restart replay should show one application of trade_k_pass"
+
+
+def test_route_replay_leaves_the_in_session_signal_doubled(route):
+    """D-073's accepted residual, pinned so it is a decision and not a leak.
+
+    `record_trade_signal` fires BEFORE the DB write and is deliberately not
+    gated on the replay verdict: the in-memory list is derived state,
+    rebuilt from `swipe_decisions` by `replay_from_db` at every
+    session_init, while gating it would make an in-session board movement
+    depend on the DB being reachable. If this ever changes to 1, the
+    residual documented in D-073 / G-049 is gone and both should be updated.
+    """
+    client, token, service, _matcher = route
+
+    _post_swipe(client, token, "pass")
+    _post_swipe(client, token, "pass")
+
+    assert len(service._trade_swipes) == 2, (
+        "in-memory signal is expected to double on a replay; see D-073")
+
+
+def test_route_replayed_like_still_runs_match_detection(route):
+    """Suppressing match detection on a re-sent like would be a worse bug
+    than the doubled Elo. Both POSTs must reach `check_for_match`."""
+    client, token, _service, matcher = route
+
+    assert _post_swipe(client, token, "like").status_code == 200
+    assert _post_swipe(client, token, "like").status_code == 200
+
+    assert len(load_swipe_decisions(user_id=ME, scoring_format="1qb_ppr")) == 1
+    assert matcher.call_count == 2, (
+        "check_for_match must run on the replay too — the guard suppresses a "
+        "redundant write, never match detection")

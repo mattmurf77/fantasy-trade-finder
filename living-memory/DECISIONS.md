@@ -717,8 +717,13 @@ still-live row (`retracted_at IS NULL`), same `(user, league, trade_id, decision
 payload, inside `TRADE_DECISION_DEDUPE_SECONDS = 10.0` — and returns `bool`. **Both** route call
 sites (`swipe_trade`, `_apply_reasoned_pass`) gate `save_trade_swipes` on that verdict, which is what
 actually single-counts the Elo. `check_for_match` is **not** gated: a replayed like must still
-surface a match. The guard fails **open** on an unparseable timestamp — losing a real decision is
-worse than keeping a duplicate row. No migration, no DDL.
+surface a match. **`RankingService.record_trade_signal` is not gated either** — it fires before the
+DB write and appends to `_trade_swipes`, derived state that `replay_from_db` rebuilds from
+`swipe_decisions` at every `session_init`. Gating it would make an in-session board movement depend
+on the DB being reachable, when the persist block around it is best-effort by design: that trades a
+bounded 2x overcount for an unbounded 0x undercount on a DB blip. The guard fails **open** on an
+unparseable timestamp — losing a real decision is worse than keeping a duplicate row. No migration,
+no DDL.
 **Alternatives considered:** unique/partial index (rejected above); dedupe inside `_compute_elo` or
 `save_trade_swipes` (**not implementable** — `swipe_decisions` carries no trade or league identity,
 and prod has 661 legitimate repeats of the same `(winner, loser, k)` triple within an hour, so a
@@ -727,7 +732,14 @@ should change no state).
 **Consequences:** read-then-write in one transaction, not a distributed lock — two simultaneous
 requests on separate workers could still both write. All 40 observed prod duplicates were sequential.
 The contract test defines its own caller, so **route pins** (`inspect.getsource`) were added after
-sabotage showed both call-site gates could be deleted with every test still green.
+sabotage showed both call-site gates could be deleted with every test still green; a **route-level
+test** now POSTs `/api/trades/swipe` twice against a real DB with the real `save_trade_swipes` and
+counts `swipe_decisions` rows, which the source pins alone could not do.
+**Accepted residual:** a replay still doubles the *in-memory* signal for the life of that session
+(~2 Elo points at `trade_k_pass = 4.0`, on the affected pair only). It clears at the next
+`session_init` because the persisted rows — now correct — are what `replay_from_db` reloads. Pinned
+by `test_route_replay_leaves_the_in_session_signal_doubled` so that it stays a decision rather than
+drifting into a leak.
 **Status:** Active.
 
 ---

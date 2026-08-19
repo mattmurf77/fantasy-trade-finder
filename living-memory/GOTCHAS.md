@@ -288,6 +288,9 @@ is what makes a time-window guard safe rather than a guess.
 identical payload, same decision) returning `bool`, plus **both** route call sites
 (`swipe_trade`, `_apply_reasoned_pass`) gating `save_trade_swipes` on that verdict.
 `check_for_match` is deliberately NOT gated — a replayed like must still surface a match.
+Neither is `record_trade_signal`: it writes derived in-memory state that `replay_from_db`
+rebuilds from `swipe_decisions` each `session_init`, and gating it would tie in-session
+board movement to DB reachability (D-073).
 **Lesson:** name the table that actually carries the harm. Two tables were written by one
 action and the entry blamed the one with the obvious missing constraint. Also: the contract
 test defined its own caller and so proved the *contract* while leaving the *call sites*
@@ -295,7 +298,10 @@ unpinned — sabotage showed both gates could be deleted with every test green. 
 (`inspect.getsource`) now cover them.
 **Residual:** the guard is read-then-write in one transaction, not a distributed lock — two
 simultaneous requests on separate workers could still both write. All 40 observed prod
-duplicates were sequential.
+duplicates were sequential. Second residual, accepted: a replay still doubles the in-memory
+signal until the session is re-initialised (~2 Elo points on the affected pair at
+`trade_k_pass = 4.0`); the persisted rows are correct, so it heals on the next
+`session_init`.
 
 ### G-028 — six rookie-scope tests fail only in checkouts that carry real data
 - **Symptom:** `backend/tests/test_rookie_scope.py` fails 6 tests (`KeyError: 'player_a'` from `/api/trio?scope=rookie`) in the main checkout, while the same commit passes 34/34 in a fresh worktree and CI. Looks like your diff broke it; it didn't.
