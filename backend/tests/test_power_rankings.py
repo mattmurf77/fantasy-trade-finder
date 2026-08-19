@@ -895,6 +895,17 @@ _PICKS_306 = [
      "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
      "is_traded": 1, "original_username": "bob",
      "pool_value": pick_pool_value(2, 0)},
+    # D-084 (2026-08-19): u_a also holds a 3rd. It is what keeps the
+    # dollar-space sabotage trap below sharp — the literal scale prices a
+    # 3rd at exactly 0, the dollar scale at 406.6, so the two answers
+    # diverge. Before D-084 two 2nds alone were enough to split them; the
+    # round-2 deflation moved the engine's 2nd:1st ratio to 0.287, which is
+    # within 0.001 of the #285 literal weight of 1/3.5 = 0.286, so two 2nds
+    # now agree in BOTH scales and no longer trap anything.
+    {"pick_id": f"{LEAGUE}_2026_3_1", "league_id": LEAGUE, "season": 2026,
+     "round": 3, "owner_user_id": "u_a", "owner_username": "alice",
+     "is_traded": 0, "original_username": "alice",
+     "pool_value": pick_pool_value(3, 0)},
     {"pick_id": f"{LEAGUE}_2026_3_2", "league_id": LEAGUE, "season": 2026,
      "round": 3, "owner_user_id": "u_b", "owner_username": "bob",
      "is_traded": 0, "original_username": "bob",
@@ -907,7 +918,9 @@ def test_picks_value_label_literal_count(client):
     pick count expressed alone (1st = 1.0, 2nd = 1/3.5, 3rd+ = 0; value
     base 0.0) — never a conversion of the dollar-priced `picks.value`.
     Dollar-space sabotage trap: computing the label from `picks.value`
-    yields "≈1 firsts" for u_a here, not the literal "≈0.5 firsts"."""
+    yields "≈1 firsts" for u_a here, not the literal "≈0.5 firsts" — the
+    divergence is carried by his 3rd, which the literal scale prices at 0
+    and the dollar scale at 406.6 (see the fixture note on _PICKS_306)."""
     with patch.object(server, "load_draft_picks",
                       lambda league_id=None, **kw:
                       [dict(p) for p in _PICKS_306]
@@ -929,7 +942,8 @@ def test_picks_value_label_literal_count(client):
     assert b["picks"]["value_label"] == "≈0 firsts"
 
     # And the dollar-priced `picks.value` itself is untouched.
-    assert a["picks"]["value"] == round(2 * pick_pool_value(2, 0), 1)
+    assert a["picks"]["value"] == round(
+        2 * pick_pool_value(2, 0) + pick_pool_value(3, 0), 1)
 
 
 def test_picks_value_label_present_with_default_fixture(client):

@@ -93,7 +93,9 @@ def _set_v2_flag(key: str, enabled: bool) -> bool:
 
 _PICK_SEEDS = {
     (1, "Early"): 1720, (1, "Mid"): 1650, (1, "Late"): 1580,
-    (2, "Early"): 1520, (2, "Mid"): 1460, (2, "Late"): 1400,
+    # D-084 (2026-08-19): round 2 deflated toward market. Mirrors
+    # pick_values.GENERIC_PICK_SEEDS — keep the two in step.
+    (2, "Early"): 1470, (2, "Mid"): 1400, (2, "Late"): 1370,
     (3, "Early"): 1360, (3, "Mid"): 1320, (3, "Late"): 1280,
     (4, "Early"): 1260, (4, "Mid"): 1240, (4, "Late"): 1220,
 }

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
 - [2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point](#2026-08-18--matchmaking-engine-rebuilt-standing-handover-doc-is-the-entry-point)
 - [2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut](#2026-08-18--dismiss-cooldown-shipped-d-067-backend-only-no-build-cut)
 - [2026-08-17 — Feedback wave merged to main, push + TestFlight owed](#2026-08-17--feedback-wave-merged-to-main-push--testflight-owed)
@@ -93,6 +94,24 @@ in 12 days.
   weaken a correctness rule to protect deck size.
 
 ---
+
+---
+
+## 2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed
+
+**State:** complete and committed, **not pushed and not merged**. Branch `feat/round2-pick-recalibration` off `origin/main` `93ac695`. Built in a scratchpad worktree, not the main checkout.
+
+**What it is:** [D-084](DECISIONS.md) — round 2 of `GENERIC_PICK_SEEDS` deflated 1520/1460/1400 → **1470/1400/1370**, with `tier_config.json`'s `second.min` 1400 → **1370** and `third.max` 1395 → **1365** in the same commit across all 8 (format, position) blocks, plus all five client mirrors. Rounds 1, 3 and 4 deliberately untouched. Full rationale: [the memo](../docs/reviews/2026-08-19-ktc-pick-value-comparison.md), which **rides on this branch and is not on main** — it is the justification, so do not merge the code without it. Scope block: [docs/plans/round2-pick-recalibration/scope.md](../docs/plans/round2-pick-recalibration/scope.md).
+
+**The one thing owed:** the **manual TestFlight checklist** (scope §8, 10 steps) has not been run. Under D-056 it is the only runtime evidence this change gets, and the bands it moves are visible on every user's board. **Step 9 matters most** — it points at the one odd-looking consequence so it is expected rather than reported as a bug: **a current-year 3rd-round pick now badges "2nd."** That is the pre-existing round-3 overprice becoming visible (2027+ 3rds and every 4th still badge `third`), it is pinned with an explanatory note in `test_league_picks_tier.py`, and the underlying issue is [Q-019](OPEN_QUESTIONS.md).
+
+**Two things a merging session must know:**
+1. **This branch confounds with D-079**, which shipped hours earlier the same day. Any pre/post read of deck composition across 2026-08-19 straddles both. An arm split would disambiguate, but `model_arm` is currently 97.5 % NULL with **zero `gen_v2` rows**, so it is unavailable.
+2. **Do not expect an acceptance-rate lift, and do not justify the change with one.** Read-only prod queries put cards containing a 2nd at 34.8 % liked (n=46) against 35.2 % for cards with no pick at all (Fisher p = 1.00). The change is justified on rank measurement against four independent sources, not on conversion.
+
+**Two incidental findings raised but not fixed** (both worth their own item): `backend/database.py` on `main` is **stale against prod** — 26 vs 13 `deck_impressions` columns, and `trade_pass_reasons` exists in prod but not in `database.py` (it shipped from `chore/bakeoff-serve-interleaved`), a live footgun for anyone writing queries or a migration; and the bake-off is **not producing labelled data** (`model_arm` as above).
+
+**Gates all green:** pytest **3429 passed, 1 skipped** — byte-identical to the `93ac695` baseline; `tsc --noEmit` clean; `testid-lint OK`; `test_tier_occupancy` 47 passed. The pre-retarget run failed **exactly the eleven** tests the memo predicted. Details in [TEST_LEDGER](TEST_LEDGER.md).
 
 ---
 

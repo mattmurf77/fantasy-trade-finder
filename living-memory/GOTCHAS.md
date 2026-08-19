@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-051 | A tier-band edit that looks backend-only silently drifts `web/js/app.js`, which fetches nothing | Tier bands / client mirrors |
 | G-048 | Next living-memory ID computed from a stale checkout collides on main | Living-memory / concurrent sessions |
 | G-047 | "no checks reported" on a PR reads as a pass to a naive poller | CI / gh / merge gating |
 | G-046 | A follow-up PR off a squash-merged branch is born CONFLICTING | Git / squash-merge / branch hygiene |
@@ -391,6 +392,16 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 - **Prevention:** the asymmetry is **unique-indexes only**: CHECK constraint names and NOT-NULL column names ARE reported by both dialects, so a startup assertion or handler keyed on a CHECK name is portable. Named CHECK constraints are therefore the more testable choice where either would do.
 
 ---
+
+---
+
+## 2026-08-19
+
+### G-051 — a tier-band edit drifts `web/js/app.js`, the one mirror that never fetches
+- **Symptom:** you move a tier floor in `backend/tier_config.json`, confirm mobile and the web tiers page pick it up after a reload, and the **rankings table on the web app keeps showing the old tier labels forever** — no reload, no cache clear, and no redeploy fixes it.
+- **Cause:** the tier bands are mirrored across five clients, and they are **not all the same kind of mirror**. `mobile/src/utils/tierBands.ts` and `web/positional-tiers.html` hold *pre-fetch fallbacks* that `GET /api/tier-config` overwrites at boot, so they self-heal. `web/js/app.js`'s `_eloToTierLabel` is a **pure hardcode that never calls the endpoint at all** — the Elo cutoffs are inline `if (elo >= 1400) return '2nd';` literals. It can only be fixed by hand.
+- **Fix:** treat `docs/cross-client-invariants.md` → "Tier band Elo cutoffs" → **Locations** as the checklist; it is accurate and it names all five. `git grep -nE "1927|1869|1788|1580|1280|1220|1150"` across `mobile web extension docs` finds the rest. The extension is genuinely clean — it consumes the backend walk and hardcodes no numbers.
+- **Prevention:** the mirrors now carry comments saying which kind they are; `web/js/app.js`'s function head says outright that it does not fetch and must be hand-edited. **The deeper trap is the coupling**, worth stating separately: `tier_config.json`'s `_calibration` makes each tier floor a *rung of the pick ladder*, so editing `GENERIC_PICK_SEEDS` in `backend/pick_values.py` is silently also a tier-band edit. A seed change that skips `tier_config.json` (or vice versa) leaves the ladder internally inconsistent with nothing failing loudly — `test_tier_occupancy.py` checks occupancy bounds, not that the two files agree. Both directions were hit while shipping [D-084](DECISIONS.md).
 
 ---
 

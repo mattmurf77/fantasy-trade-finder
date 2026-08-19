@@ -69,9 +69,13 @@ def _row(season, rnd, pool_value=None, pick_id=None):
 
 # The exact shipped ladder, spelled out rather than compared to itself, so a
 # future edit to pick_values.py has to change this literal on purpose.
+# Round 2 was deliberately repriced on 2026-08-19 (D-084) — 1520/1460/1400
+# → 1470/1400/1370 — together with tier_config.json's `second.min`. Rounds 1,
+# 3 and 4 have never moved. This literal is the tripwire: changing it is how
+# you declare a repricing was intended.
 SHIPPED_SEEDS = {
     (1, "Early"): 1720, (1, "Mid"): 1650, (1, "Late"): 1580,
-    (2, "Early"): 1520, (2, "Mid"): 1460, (2, "Late"): 1400,
+    (2, "Early"): 1470, (2, "Mid"): 1400, (2, "Late"): 1370,
     (3, "Early"): 1360, (3, "Mid"): 1320, (3, "Late"): 1280,
     (4, "Early"): 1260, (4, "Mid"): 1240, (4, "Late"): 1220,
 }
@@ -248,17 +252,46 @@ def test_the_measured_reshaping_direction_is_deflation_not_inflation():
     """The plan's premise ('DP's curve is much steeper, so adoption inflates
     pick values') is WRONG for owned picks and is pinned as wrong here, so a
     later wave cannot quietly re-adopt it. In 1QB every representative owned
-    pick DEFLATES, 2nds hardest (~-40%); the 1.01 inflation exists only for
-    the literal 1.01 SLOT, which an unknown-slot owned pick never gets."""
+    pick DEFLATES; the 1.01 inflation exists only for the literal 1.01 SLOT,
+    which an unknown-slot owned pick never gets.
+
+    THIS TEST IS THE HONEST SCORECARD FOR D-084, and its numbers were moved
+    on purpose (2026-08-19). Before the round-2 recalibration a 2026 2nd
+    priced from DynastyProcess's real market slots was **more than 40 %**
+    cheaper than our ladder's price for it, and 2nds collapsed hardest of any
+    round. Deflating the round-2 seeds closed most of that: the 2026 gap is
+    now **-0.284** and the 2027 gap **-0.244**.
+
+    THE REMAINING GAP IS INTENTIONAL, NOT UNFINISHED WORK. Option B in
+    docs/reviews/2026-08-19-ktc-pick-value-comparison.md — pushing every rung
+    to its market-median rank — was measured and rejected: it breaks
+    test_tier_occupancy.py in three places and buckets the Mid 3rd seed as
+    `second`. DynastyProcess's pick curve is also the most convex and most
+    near-zero-anchored of the four sources surveyed, so full convergence on
+    it was never the target; it is one vote, not the goal. Closing to ~28 %
+    is the deliberate stopping point.
+
+    NOTE THE RANKING FLIPPED. 2nds are no longer the biggest outlier — a
+    2026 3rd now deflates hardest of the round-2/3 pair (-0.355 vs -0.284).
+    That is the residue the memo predicted and explicitly declined to chase
+    here: rounds 3-4 diverge because `seed_elo_for_value` compresses ranks
+    ~200-300 into 32 Elo points, which no seed edit can fix (Q-019)."""
     _flag_on()
     def delta(season, rnd, fmt="1qb_ppr"):
         lad = pv.pick_pool_value(rnd, season - 2026, fmt)
         return (pv.market_pick_pool_value(season, rnd, fmt) - lad) / lad
 
     assert delta(2026, 1) < -0.10          # a 2026 1st gets CHEAPER, not dearer
-    assert delta(2026, 2) < -0.40          # 2nds collapse hardest
-    assert delta(2027, 2) < -0.40
+    # Round 2, post-D-084: pinned to the VALUE, not to a loose bound, so that
+    # any future drift in either direction has to be acknowledged here.
+    assert delta(2026, 2) == pytest.approx(-0.284, abs=0.01)
+    assert delta(2027, 2) == pytest.approx(-0.244, abs=0.01)
+    # Still deflation everywhere, and still nowhere near parity with DP.
+    assert delta(2026, 2) < -0.20
+    assert delta(2027, 2) < -0.20
     assert delta(2028, 1) < -0.15
+    # The round-3 residue D-084 deliberately did not chase (Q-019).
+    assert delta(2026, 3) < delta(2026, 2)
     # ... but the literal top slot really is above our Early-1st rung.
     m = data_loader.load_pick_slot_values("1qb_ppr")
     assert m["2026 Pick 1.01"] > pv.GENERIC_PICK_SEEDS[(1, "Early")]

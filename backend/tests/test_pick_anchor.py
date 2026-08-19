@@ -51,7 +51,8 @@ def _mid_first_value() -> float:
 
 def test_single_pick_anchors_pin_to_generic_pick_seeds():
     assert server._anchor_target_elo("1_first") == 1650
-    assert server._anchor_target_elo("1_second") == 1460
+    # D-084 (2026-08-19): Mid 2nd seed 1460 → 1400 (round-2 deflation).
+    assert server._anchor_target_elo("1_second") == 1400
     assert server._anchor_target_elo("1_third") == 1320
     assert server._anchor_target_elo("1_fourth") == 1240
 
@@ -81,7 +82,7 @@ def test_unknown_anchor_maps_to_none():
 
 
 def test_value_to_elo_inverts_elo_to_value():
-    for elo in (1220.0, 1460.0, 1650.0, 1790.0):
+    for elo in (1220.0, 1400.0, 1650.0, 1790.0):
         assert ts.value_to_elo(ts.elo_to_value(elo)) == pytest.approx(elo)
 
 
@@ -152,7 +153,7 @@ def test_anchor_value_and_tier_are_position_uniform(harness):
     rb = _post(client, token, {"player_id": "rb1", "anchor": "1_second"}).get_json()
     qb = _post(client, token, {"player_id": "qb1", "anchor": "1_second"}).get_json()
     # Same anchor → same Elo/value regardless of position…
-    assert rb["elo"] == qb["elo"] == 1460
+    assert rb["elo"] == qb["elo"] == 1400          # D-084: Mid 2nd seed
     assert rb["value"] == qb["value"]
     # …and, with the position-uniform pick-value ladder, the same tier —
     # the one that carries the anchor's name ("worth a 2nd" → second).

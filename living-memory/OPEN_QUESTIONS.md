@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
 - [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
 - [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
@@ -16,6 +17,16 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-19 — Open Items (round-2 pick recalibration)
+
+### Q-019 — Rounds 3 and 4 price 50–70 ranks above market, and no pick-seed edit can fix it. Do we open the seed map?
+- **Why it matters:** [D-084](DECISIONS.md) corrected round 2 (Mid 2nd: rank 119 → 136 against a market median of 140.5) and deliberately stopped there. The same measurement puts our **Mid 3rd at rank 165 against a market median of 231.5** and our **Mid 4th at 228 against 296** — errors of 67 and 68 ranks, three times round 2's. They were left alone because they are **not reachable from `GENERIC_PICK_SEEDS`**.
+- **The structural reason (this is the part that matters):** `data_loader.seed_elo_for_value` maps DP value 0 → Elo 1200 affinely, so the board has almost no resolution below rank ~200 — rank 230 sits at Elo 1238.8 and rank 300 at 1206.6, i.e. **70 ranks compressed into 32 Elo points**. The market-implied Elo for a Mid 4th is **1207, which is inside the current `waivers` band**. Pushing 3rd/4th seeds down cannot buy rank movement the scale does not have room for; the memo measured the attempt (Option B) breaking `test_tier_occupancy.py` in three places and bucketing the Mid 3rd seed as `second`.
+- **It is now user-visible, in one place.** With `second`'s floor at 1370, a **current-year 3rd badges "2nd"** (Elo 1383.5 through the same seed map). Pinned with an explanatory note in `backend/tests/test_league_picks_tier.py` and step 9 of the D-084 TestFlight checklist, so it is expected rather than reported as a surprise — but it is the visible edge of this question.
+- **Unresolved sub-question:** is the floor compression a **defect or a deliberate choice**? `seed_elo_for_value`'s docstring explains the *top* of the affine map (DP 10000 → the 4-firsts rung) and says nothing about the bottom. Nobody currently knows whether anyone intended it.
+- **Needed to close:** an operator call on whether deep-pick accuracy is worth touching the seed map — which reprices **every low-value asset on every board**, not just picks, and is therefore a materially larger blast radius than D-084. Cheaper middle option worth pricing first: leave the seed map alone and give the `third`/`fourth` bands their own floors decoupled from the pick rungs, accepting that the `_calibration` "floor = a rung of the ladder" invariant then holds only for rounds 1–2.
+- **Owner:** operator (scope call), then a backend session.
 
 ## 2026-08-19 — Open Items (pick-year valuation)
 
