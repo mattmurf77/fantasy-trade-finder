@@ -10,9 +10,9 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
-## 2026-08-19e — Settings IA: hub + second-level pages, sheet → page (branch only, NOT merged)
+## 2026-08-19e — Settings IA: hub + second-level pages, sheet → page (SHIPPED to main + TestFlight)
 
-**Branch:** `feat/settings-ia-hub`, from `origin/main` `ecdbcb3`. **Not shipped** — not pushed, not merged.
+**Branch:** `feat/settings-ia-hub`, rebased from `ecdbcb3` onto `origin/main` `28c12a0` and merged.
 Flag `account.settings_hub` stays **OFF** (default false).
 Plan + scope: [docs/plans/settings-ia-hub/](../docs/plans/settings-ia-hub/). Code-walk proof:
 [code-walk-proof.md](../docs/plans/settings-ia-hub/code-walk-proof.md).
@@ -21,8 +21,8 @@ Plan + scope: [docs/plans/settings-ia-hub/](../docs/plans/settings-ia-hub/). Cod
 |---|---|
 | `npx tsc --noEmit` (mobile) | **exit 0** |
 | `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
-| `mobile/tests/check-*.js` (whole suite) | **59 passed, 0 failed** — includes the 3 new settings checks |
-| `pytest backend/tests -q` | **3399 passed, 1 skipped, 5 failed** — all 5 reproduce on a clean `origin/main` with zero local changes. **Pre-existing, not from this branch.** See below. Final run after the fixture fix in the paragraph below; an intermediate run was 7 failed. |
+| `mobile/tests/check-*.js` (whole suite) | **60 passed, 0 failed** post-rebase (59 pre-rebase; main added one) — includes the 3 new settings checks |
+| `pytest backend/tests -q` | **3480 passed, 1 skipped, 0 failed** (post-rebase, final). Earlier in the session the same branch ran 3399/5-failed on base `ecdbcb3`; all 5 were pre-existing and `main` repaired them in `70d1f3b`, so the pre-ship gate is clear. |
 | Maestro / simulator | n/a — retired by D-056. Replaced by the 3 structural checks + the code-walk proof. |
 | Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
 | **Runtime evidence** | **NONE. The plan §9 operator TestFlight checklist is UNRUN.** |
@@ -58,6 +58,16 @@ three in `test_suggestion_telemetry.py`, and
 (expects Elo 1502.0 ± 0.001502, obtains 1500.0 — a re-posted swipe not applying its rating update).
 Confirmed pre-existing by stashing this branch's flag change and re-running. This branch DID add the
 one missing mirror entry its own flag required.
+
+**The rebase onto `28c12a0` silently dropped phase 0, and the gate is what caught it.** `git rebase`
+reported the commit as empty mid-run; it carried all 15 mobile source files plus the flag
+registration. `tsc` then failed with 22 `TS2307` module-not-found errors, and the flag was left
+HALF-registered — in `onboarding-v2.json`, `profiles-on.json` and `config-reference.md`, absent from
+`features.json`, `FLAG_KEYS` and `release.json`. That combination would have shipped a dead flag and a
+red mirror test. Recovered in `9a04ebc`: the mobile tree restored byte-identical from `4ea6895`, the
+three flag files re-applied surgically (main changed them in the same window, so a wholesale restore
+would have reverted 1.15.0's flag work). Parity re-checked by file set — 54 files before, 54 after,
+no drops, no extras.
 
 **A regression this branch caused, caught by running the full suite rather than trusting an earlier
 run.** Registering `account.settings_hub` initially mirrored it into `backend/tests/fixtures/flags/release.json`
