@@ -10,6 +10,52 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
+
+**Branch:** `fix/pick-horizon`, branched from `origin/main` `7462c23`. **Not pushed, not merged.**
+Flag `picks.league_horizon` default **ON** (its OFF state is the defect, so shipping it off ships nothing).
+Scope + evidence + code-walk + checklist: [docs/feedback/items/355-phantom-pick-years/](../docs/feedback/items/355-phantom-pick-years/).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3496 passed, 1 skipped, 0 failed** |
+| Baseline on the same branch point, before any edit | **3480 passed, 1 skipped** — reproduced exactly |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The 10-step operator TestFlight checklist is UNRUN.** |
+
+**Net +16 tests, all new** (`backend/tests/test_pick_horizon.py`). Two layers: the pure helper
+`draft_status.pick_horizon` (pre-draft window, post-draft roll-forward, the always-3-classes
+invariant, existence-proof widening, the widening cap, garbage-input tolerance, unknown-horizon
+degradation) and the grid builder `sync_draft_picks` (the operator's exact case, the post-draft case
+where 2029 is *kept* because it is real, the kill switch restoring the old window, a reported far
+pick pulling its whole class in, a "never widens past the legacy ceiling" safety bound, and the
+#220 empty-roster guard surviving the change).
+
+**5 pre-existing tests updated, each a deliberate encoding of the OLD 4-class window** — not
+loosened to make the change pass:
+- `test_owned_picks.py` ×4 — grid sizes written as `2 rosters × 4 seasons × 4 rounds = 32`. Now
+  derived from `PICK_HORIZON_CLASSES` (`_GRID = 2 * PICK_HORIZON_CLASSES * 4` = 24) so the rule has
+  exactly one home, plus an added explicit assertion that the classes are 2026/2027/2028.
+- `test_seed_ui_test_db.py` ×1 (3 fixtures) — the flag-map mirrors. `release.json` must equal
+  `config/features.json` key-for-key, and `onboarding-v2.json` / `profiles-on.json` are asserted to
+  be "release plus exactly one differing key", so all three needed the new flag.
+
+**Prod measurement (read-only, `SET TRANSACTION READ ONLY`, SELECT only)** — the numbers in
+[evidence.md](../docs/feedback/items/355-phantom-pick-years/evidence.md): **339 of 2,651 served
+cards (12.8 %; 23.2 % of pick-bearing cards)** carried an out-of-horizon pick, 360 mentions, all
+2029, all in the operator's league. **12.9 % of the 845 recorded like/pass outcomes** landed on one,
+skewed 6.7 % of likes vs 15.8 % of passes vs 21.4 % of not-interested. **The 2026-08-16 → 08-19
+preference data is contaminated** and must not be cited as a clean propensity or bake-off baseline.
+
+**What this does NOT prove.** The tests stub the Sleeper reads, so nothing here demonstrates the
+horizon against live platform data — that is exactly what the TestFlight checklist is for, and it
+is unrun. The rule itself was validated out-of-band by direct probes of the public Sleeper API
+across every league in prod, recorded in `evidence.md`, including a positive 2029 reading on a
+post-draft league so the rule is pinned at both ends rather than inferred from an absence.
+
+---
 ## 2026-08-19e — Settings IA: hub + second-level pages, sheet → page (SHIPPED to main + TestFlight)
 
 **Branch:** `feat/settings-ia-hub`, rebased from `ecdbcb3` onto `origin/main` `28c12a0` and merged.

@@ -28,6 +28,7 @@
 - [Presentation surfaces: parity-by-reuse, and the entry-by-optional-prop flag gate (2026-08-18, trades.presentation_v2)](#presentation-surfaces-parity-by-reuse-and-the-entry-by-optional-prop-flag-gate-2026-08-18-tradespresentation_v2)
 - [Placements vs comparisons: assertion and sample are different inputs (2026-08-19, D-085)](#placements-vs-comparisons-assertion-and-sample-are-different-inputs-2026-08-19-d-085)
 - [Settings tree: one route, two components, per-page query ownership (2026-08-19, account.settings_hub)](#settings-tree-one-route-two-components-per-page-query-ownership-2026-08-19-accountsettings_hub)
+- [Derived league state belongs to the writer, not the reader (2026-08-19, D-091)](#derived-league-state-belongs-to-the-writer-not-the-reader-2026-08-19-d-091)
 
 ---
 
@@ -338,3 +339,30 @@ Route naming: `Settings` is the hub/root; second-level routes are `Settings<Grou
 (`SettingsLeagues`, `SettingsRanking`, `SettingsTradeValues`, `SettingsNotifications`, `SettingsAccount`,
 `SettingsAbout`, `SettingsTesting`), each URL-addressable at `settings/<kebab-slug>` in
 `utils/deepLinks.ts`. All register unconditionally — the flag gates the entry row, not the route.
+
+---
+
+## Derived league state belongs to the writer, not the reader (2026-08-19, D-091)
+
+#355 (phantom 2029 picks) turned up a convention that was never written down. Three parts:
+
+- **A row that should not exist is a WRITER bug, and is fixed at the writer.** The serving path for
+  draft picks has no season predicate anywhere — `load_draft_picks` (`backend/database.py`) selects
+  every row for a league and uses `season` only as a sort key, and `_inject_owned_picks`
+  (`backend/server.py`) puts each pick onto team rosters, after which all three engines pick it up
+  implicitly because they build their pools *off rosters*. So a filter added at presentation would
+  have hidden the pick while still letting it consume generation work and distort every score
+  computed over the pool. **New invariant:** a `draft_picks` row's `season` must lie inside the
+  league's derived horizon (`draft_status.pick_horizon`), and that is enforced in
+  `sync_draft_picks`, not in any reader.
+- **A window over league state is anchored to the state, not measured from "now".** The defect was a
+  constant (`seasons_ahead = 3` from `current_season`) standing in for a fact that rolls: how many
+  draft classes a league carries depends on whether its current class has been drafted. Prefer a
+  derived anchor over an offset whenever the underlying thing advances on its own schedule. The
+  same bug shape is latent anywhere a "next N seasons" constant exists.
+- **Replace-syncs make write-side fixes self-healing in BOTH directions, which is what lets one flag
+  be a complete rollback.** `sync_draft_picks` ends in `replace_draft_picks` (delete + bulk-insert
+  per league), so stale rows vanish on the next sync and flipping `picks.league_horizon` off
+  rebuilds them. A write-side fix behind a flag on a replace-sync needs **no migration and no
+  backfill**; a flag on an append-only writer would have needed both, and its "off" state would not
+  have been a true restore. Check which of the two you have before calling a flag a kill switch.

@@ -384,6 +384,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # Rung ids, pool membership and board Elo are untouched. Off ⇒ today's
     # year-less "Early 1st Round Pick" labels, byte-identical.
     "picks.rank_year_labels",
+    # #355 — picks.league_horizon: build a Sleeper league's pristine pick grid
+    # over the classes the league REALLY carries (three consecutive rookie
+    # classes anchored to the first UNDRAFTED class, per
+    # `draft_status.pick_horizon`) instead of a fixed `current_season + 3`.
+    # The old constant over-reached by exactly one class for every pre-draft
+    # league, so 12.8% of served cards offered a 2029 pick that does not exist
+    # — an offer the user cannot execute. Off ⇒ `sync_draft_picks` takes the
+    # historical `seasons_ahead` window and the grid is byte-identical to
+    # today. WRITE-side only: no read path, route or payload shape changes,
+    # and the next replace-sync repairs (or, flag off, restores) the rows
+    # either way.
+    "picks.league_horizon",
     # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
     # market.trade_capture: capture executed Sleeper league trades (public
     # v1 /league/<id>/transactions/<week>, type=trade + complete) into the

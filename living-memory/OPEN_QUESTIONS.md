@@ -12,6 +12,7 @@
 
 - [2026-08-19 — Open Items (pick ladder, rounds 3-4)](#2026-08-19--open-items-pick-ladder-rounds-3-4)
 - [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
+- [2026-08-19 — Open Items (pick horizon)](#2026-08-19--open-items-pick-horizon)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
 - [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
 - [2026-06-07 — Open Items (perf-optimization)](#2026-06-07--open-items-perf-optimization)
@@ -31,6 +32,15 @@
 - **Owner:** whoever next works the bake-off track; not blocking D-086.
 
 ## 2026-08-19 — Open Items (round-2 pick recalibration)
+
+## 2026-08-19 — Open Items (pick horizon)
+
+### Q-022 — Should the manual pick-assignment grid adopt the derived horizon, or is `current + 3` the operator's intent?
+- **Why it matters:** [D-091](DECISIONS.md) fixed the Sleeper sync so a league's pristine pick grid spans only the classes it really carries. The **manual assignment grid** (`database.seed_pick_grid`, driven by `_ASSIGNMENT_SEASONS_AHEAD = 3` at `backend/server.py:12202`) still seeds `current_season … current_season + 3` — **four** classes. If a real dynasty league never carries four, then an ESPN league that assigns its picks by hand gets the same unactionable 4th class the Sleeper path just stopped producing, and it reaches the engine through the identical `load_draft_picks` → `_inject_owned_picks` path.
+- **Why it was NOT changed unilaterally:** three reasons, and each alone would have been enough. (1) The constant is annotated **"operator decision 3: current + 3"** — overturning a recorded decision needs the operator, per CLAUDE.md. (2) It is wired into the assignment **progress denominator** (`total = rounds × members × (_ASSIGNMENT_SEASONS_AHEAD + 1)`, `backend/server.py:12447`), so changing the seeded span without that line would silently make every league's progress read wrong. (3) These rows are **user-asserted** (`source='user'`, surfaced as "Member-entered — not verified with ESPN"), so a 4th class there is a league's own claim rather than an asset we invented — a different thing from the Sleeper defect.
+- **Why it is not urgent:** zero exposure today. Prod holds **no ESPN rows at all** in `draft_picks` (only `sleeper` and `mfl`), so no user is currently seeing an assignment-grid phantom.
+- **What would close it:** an operator ruling on one question — *does an off-platform ESPN dynasty rookie draft carry three classes like Sleeper, or four?* If three, the change is `seed_pick_grid` adopting `draft_status.pick_horizon` **plus** the progress-total line, in one commit. If four, record why the platforms differ so the next reader does not "fix" it.
+- **Owner:** unassigned; not blocking D-091.
 
 ## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
 

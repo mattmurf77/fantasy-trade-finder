@@ -411,6 +411,33 @@ when they filter to QB. Any rank printed for the other basis is denominated by
 
 ---
 
+## Pick horizon — which draft years exist (#355, flag `picks.league_horizon`)
+
+**No client may assume a league carries `current_season + 3` draft classes, or hardcode a year range for picks at all.** Which pick-years exist is *league state*, derived on the backend and expressed only by the rows the server actually returns.
+
+**The rule.** A league carries exactly **`PICK_HORIZON_CLASSES` = 3 consecutive rookie classes, anchored to the first class that has not yet been drafted** (`backend/draft_status.py` `pick_horizon`). The window **rolls**: it is not an offset from the current season.
+
+| League state | Classes carried | 2029? |
+|---|---|---|
+| 2026 season, rookie draft `pre_draft` / not yet held | 2026, 2027, 2028 | **no — phantom** |
+| 2026 season, rookie draft `complete` | 2027, 2028, 2029 | **yes — real** |
+
+Verified live against every prod league on 2026-08-19 ([evidence](feedback/items/355-phantom-pick-years/evidence.md)), including a positive reading — a post-draft league that genuinely holds 2029 traded picks — so both ends of the rule are pinned rather than inferred from an absence.
+
+| Rule | |
+|---|---|
+| **Authoritative** | the set of pick rows the server returns (`GET /api/league/picks`, the deck payload). A client renders the years it is given |
+| **Enforced** | where the grid is **WRITTEN** (`database.sync_draft_picks`), never at presentation — a pick outside the horizon that reached the candidate pool would still consume generation work and distort every score computed over that pool |
+| **Widening** | a season the platform itself reports a traded pick for is existence proof and extends the window, bounded by `PICK_HORIZON_MAX_CLASSES` |
+| **Unknown horizon** | degrades to the **narrowest plausible** window (reads as pre-draft), never to "no picks" — picks appear in ~55% of served cards |
+| **Never** | a client-side year list, a `season <= currentYear + 3` filter, or a UI that assumes four classes |
+
+**Per platform.** Sleeper derives the horizon as above from data already fetched (league meta + drafts + traded picks — no new network call). **MFL** enumerates the real `futureDraftPicks` export and has no phantom exposure. **ESPN** has no platform pick source at all; its picks come only from the manual assignment grid, which is `current_season + 3` by recorded operator decision and is deliberately **not** covered by this rule — see [Q-022](../living-memory/OPEN_QUESTIONS.md).
+
+**Backend pin:** `backend/tests/test_pick_horizon.py`.
+
+---
+
 ## Progress gating thresholds
 
 Minimum rank decisions per position before Trade Finder unlocks. Tracked per scoring format; result lands in `users.unlocked_formats`.

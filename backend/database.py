@@ -9291,7 +9291,10 @@ def sync_draft_picks(
     Algorithm
     ---------
     1. Generate the "pristine" grid: every (season, round, roster_id) tuple
-       for [current_season … current_season + seasons_ahead].
+       for the league's REAL pick horizon (`draft_status.pick_horizon`) —
+       three consecutive rookie classes anchored to the first class that has
+       not yet been drafted. Under `picks.league_horizon` OFF this falls back
+       to the historical [current_season … current_season + seasons_ahead].
     2. Overlay the traded_picks list (from Sleeper) to update ownership for
        any pick that changed hands.
     3. Compute pick_value for each pick, upsert into draft_picks_table.
@@ -9305,7 +9308,12 @@ def sync_draft_picks(
     user_id_to_name    : {user_id: display_name} mapping
     current_season     : current NFL year (default 2026)
     rounds             : number of draft rounds (default 3)
-    seasons_ahead      : how many future seasons to include (default 3)
+    seasons_ahead      : LEGACY window width, used only when the kill switch
+                         `picks.league_horizon` is OFF. With the flag ON the
+                         window comes from `draft_status.pick_horizon` instead
+                         (#355: a fixed current_season+3 invented a 4th class
+                         that pre-draft Sleeper leagues do not have, so cards
+                         offered picks the user could never execute)
     exclude_seasons    : seasons whose picks must NOT be synced (#228 —
                          the caller passes the current season when that
                          season's rookie draft is already complete; the
@@ -9324,13 +9332,34 @@ def sync_draft_picks(
     now = _now()
     exclude = {int(s) for s in exclude_seasons}
 
+    # Step 0 (#355): the league's REAL pick horizon. A fixed `seasons_ahead`
+    # measured from `current_season` over-reached by exactly one class for
+    # every pre-draft league — the source of the phantom 2029 picks. Kill
+    # switch `picks.league_horizon` restores the historical window verbatim.
+    try:
+        from .feature_flags import is_enabled
+        _horizon_on = is_enabled("picks.league_horizon")
+    except Exception:                       # pragma: no cover - config optional
+        _horizon_on = False
+    if _horizon_on:
+        from . import draft_status as _ds
+        first_season, last_season = _ds.pick_horizon(
+            current_season,
+            exclude_seasons=exclude,
+            observed_seasons=[tp.get("season") for tp in (traded_picks or [])
+                              if isinstance(tp, dict)],
+        )
+    else:
+        first_season = int(current_season)
+        last_season = int(current_season) + int(seasons_ahead)
+
     # Step 1: build the pristine pick grid (everyone keeps their own picks)
     picks: dict[str, dict] = {}
     for rid in roster_ids:
         rid_str  = str(rid)
         user_id  = roster_id_to_user.get(rid_str, "")
         username = user_id_to_name.get(user_id, f"Roster {rid_str}")
-        for season in range(current_season, current_season + seasons_ahead + 1):
+        for season in range(first_season, last_season + 1):
             if season in exclude:               # #228 — draft already held
                 continue
             for rnd in range(1, rounds + 1):
@@ -9361,7 +9390,12 @@ def sync_draft_picks(
         except (TypeError, ValueError):
             continue
 
-        if not orig_rid or not new_rid or rnd < 1 or season < current_season:
+        # #355 — floor at the horizon ANCHOR, not `current_season`: once a
+        # class is drafted its picks are spent, so a stale traded row for it
+        # must not resurrect a grid slot. Deliberately NO upper bound here —
+        # a pick the platform actually reports is existence proof, and
+        # `pick_horizon` has already widened `last_season` to cover it.
+        if not orig_rid or not new_rid or rnd < 1 or season < first_season:
             continue
         if season in exclude:                   # #228 — draft already held
             continue

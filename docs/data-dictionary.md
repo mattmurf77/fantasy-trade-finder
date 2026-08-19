@@ -670,7 +670,7 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `id` | int PK | |
 | `pick_id` | str, unique | |
 | `league_id` | str | |
-| `season`, `round` | int | |
+| `season`, `round` | int | **`season` is BOUNDED by the league's pick horizon (#355, flag `picks.league_horizon`).** It is *not* `current_season … current_season + 3`: a league carries exactly `draft_status.PICK_HORIZON_CLASSES` (3) consecutive rookie classes **anchored to the first class that has not yet been drafted**, so the window ROLLS when a draft completes (pre-draft 2026 league ⇒ 2026-2028; once its draft reads `complete` ⇒ 2027-2029). Derived by `draft_status.pick_horizon()`. A season the platform itself reports a traded pick for widens the window (existence proof, capped at `PICK_HORIZON_MAX_CLASSES`). Flag off ⇒ the historical fixed `seasons_ahead` window. |
 | `owner_user_id`, `owner_username` | str | current owner |
 | `original_roster_id`, `original_user_id`, `original_username` | str | |
 | `is_traded` | int | 1 if ownership changed |
@@ -683,6 +683,8 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `synced_at` | str | |
 
 **Sync (revived #158):** `sync_draft_picks()` (Sleeper: pristine grid × traded-picks overlay) runs on the **session_init background daemon** per league; MFL picks normalize into the same table via `server._sync_mfl_owned_picks()` at link/import. Both gated on `picks.owned_sync` (default off). Delete+bulk-insert per league via `replace_draft_picks()`. `rounds` comes from Sleeper `settings.draft_rounds` (was hard-coded 3, which dropped 4th-round picks in 4-round leagues).
+
+**Pick horizon (#355, 2026-08-19, flag `picks.league_horizon`).** The pristine grid spans the league's REAL horizon, not a fixed offset from `current_season` — see the `season` row above. The old fixed window invented a 4th class for exactly the **pre-draft** leagues (post-draft ones were already correct, because #228's current-season exclusion shifted their anchor by one), and 12.8% of served cards ended up offering a 2029 pick that did not exist. Because this is a **replace**-sync, no migration is needed in either direction: stale out-of-horizon rows are deleted on the league's next sync, and flipping the flag off rebuilds them. MFL is unaffected — it enumerates the real `futureDraftPicks` export rather than synthesising a grid.
 
 ### The containment rule (W3 M-A, ADR-010) — read this before adding a reader
 

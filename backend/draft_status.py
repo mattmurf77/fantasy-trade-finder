@@ -65,6 +65,78 @@ SRC_NONE = "none"
 ROOKIE_MAX_ROUNDS = 8
 STARTUP_MIN_ROUNDS = 15
 
+# ── Draft-pick horizon (#355 / D-089) ──────────────────────────────────────
+# How many future draft CLASSES a dynasty league actually carries. Verified
+# against the live Sleeper API on 2026-08-19 across every league in prod
+# (docs/feedback/items/355-phantom-pick-years/evidence.md): a league offers
+# exactly THREE consecutive rookie classes, beginning at the first class that
+# has not yet been drafted. Two positive readings pin both ends of that rule:
+#
+#   * 1312140920132497408 (2026 draft `pre_draft`)  → traded picks in 2026,
+#     2027, 2028 and NONE in 2029.
+#   * 1312583962966650880 (2026 draft `complete`)   → traded picks in 2029.
+#
+# So the window ROLLS: it is not `current_season + N`, it is three classes
+# anchored to the first undrafted class. That is why a fixed `seasons_ahead=3`
+# measured from `current_season` produced a phantom 4th class for exactly the
+# pre-draft leagues (the post-draft ones were already correct, because #228's
+# exclusion happened to shift their anchor by one).
+PICK_HORIZON_CLASSES = 3
+
+# A platform-reported pick is PROOF that its class exists, so an observed
+# season widens the window (see `pick_horizon`). This bounds that widening so
+# one malformed feed cannot re-open the defect it closes.
+PICK_HORIZON_MAX_CLASSES = 5
+
+
+def pick_horizon(current_season: int,
+                 exclude_seasons=(),
+                 observed_seasons=(),
+                 classes: int = PICK_HORIZON_CLASSES) -> tuple[int, int]:
+    """The `[first, last]` draft classes a league REALLY carries, inclusive.
+
+    * `current_season`   — the league's season per the platform.
+    * `exclude_seasons`  — classes already drafted (#228 passes the current
+      season once its rookie draft reads `complete`). The anchor is the first
+      season at or after `current_season` that is NOT excluded.
+    * `observed_seasons` — seasons the PLATFORM itself reported a real pick
+      for (Sleeper's `traded_picks`). Existence proof: these widen the window
+      up to `PICK_HORIZON_MAX_CLASSES`, so if a platform ever lengthens its
+      window the grid follows the data instead of a constant.
+    * `classes`          — window length; `PICK_HORIZON_CLASSES` (3).
+
+    **Unknown horizon degrades to the NARROWEST PLAUSIBLE window, not to
+    nothing and not to today's default.** When the drafts read flakes,
+    `exclude_seasons` arrives empty and the league reads as pre-draft, so the
+    anchor is `current_season` and the window is the 3 classes starting there.
+    Rationale: picks appear in ~55% of served cards, so "allow nothing" would
+    empty most of the deck on one flaky HTTP read, while "allow the old
+    default" is the very defect being fixed. Under-reaching by one far class
+    costs a rarely-traded asset for one sync cycle and self-heals on the next
+    (the sync is a replace-sync); over-reaching serves an offer the user
+    cannot execute. This is the same asymmetry #228 chose, pointed the other
+    way, and `observed_seasons` recovers the far class the moment the platform
+    proves it exists.
+    """
+    current_season = int(current_season)
+    classes = max(1, int(classes))
+    exclude = {int(s) for s in (exclude_seasons or ())}
+
+    first = current_season
+    while first in exclude:
+        first += 1
+
+    last = first + classes - 1
+    ceiling = first + PICK_HORIZON_MAX_CLASSES - 1
+    for season in (observed_seasons or ()):
+        try:
+            season = int(season)
+        except (TypeError, ValueError):
+            continue
+        if first <= season <= ceiling:
+            last = max(last, season)
+    return first, last
+
 
 @dataclass(frozen=True)
 class DraftStatus:

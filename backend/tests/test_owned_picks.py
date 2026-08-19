@@ -14,6 +14,14 @@ import backend.server as srv
 import backend.database as db
 import backend.trade_service as ts
 from backend.pick_values import pick_pool_value, GENERIC_PICK_SEEDS, YEAR_DISCOUNT
+from backend.draft_status import PICK_HORIZON_CLASSES
+
+# #355 — a league carries PICK_HORIZON_CLASSES (3) rookie classes anchored to
+# the first UNDRAFTED class, not a fixed current_season+3. These grid sizes were
+# written as 2 rosters x 4 seasons x 4 rounds = 32 back when the sync invented a
+# 4th class; they are derived now so the horizon rule has ONE home
+# (backend/tests/test_pick_horizon.py owns asserting the rule itself).
+_GRID = 2 * PICK_HORIZON_CLASSES * 4
 
 
 # ── Value-scale reconciliation (FR-4) ──────────────────────────────────────
@@ -84,8 +92,9 @@ def test_sync_builds_full_grid_with_pool_value_and_platform(_clean_league):
         seasons_ahead=3,
         league_size=12,
     )
-    # 2 rosters × 4 seasons (2026..2029) × 4 rounds = 32 picks
-    assert len(rows) == 2 * 4 * 4
+    # 2 rosters × 3 classes (2026..2028, the league's real horizon) × 4 rounds
+    assert len(rows) == _GRID
+    assert sorted({r["season"] for r in rows}) == [2026, 2027, 2028]
     # 4th-round picks are NOT dropped
     assert any(r["round"] == 4 for r in rows)
     # every row carries the new fields
@@ -156,7 +165,7 @@ def _seed_grid(league_id):
 
 def test_sync_empty_roster_ids_keeps_prior_snapshot(_clean_league):
     before = _seed_grid(_LEAGUE)
-    assert len(before) == 32
+    assert len(before) == _GRID
     # The pre-#220 behavior: an empty roster list replace-synced to nothing.
     out = db.sync_draft_picks(
         league_id=_LEAGUE, roster_ids=[], traded_picks=[],
@@ -164,7 +173,7 @@ def test_sync_empty_roster_ids_keeps_prior_snapshot(_clean_league):
         current_season=2026, rounds=4, seasons_ahead=3,
     )
     assert out == []
-    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+    assert len(db.load_draft_picks(_LEAGUE)) == _GRID   # snapshot preserved
 
 
 def test_daemon_step_skips_when_sleeper_rosters_unavailable(
@@ -176,7 +185,7 @@ def test_daemon_step_skips_when_sleeper_rosters_unavailable(
                         lambda lid: {"season": "2026", "total_rosters": 2,
                                      "settings": {"draft_rounds": 4}})
     assert srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr") is None
-    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+    assert len(db.load_draft_picks(_LEAGUE)) == _GRID   # snapshot preserved
 
 
 def test_daemon_step_skips_when_league_meta_unavailable(
@@ -189,7 +198,7 @@ def test_daemon_step_skips_when_league_meta_unavailable(
                      {"roster_id": 2, "owner_id": "u2"}])
     monkeypatch.setattr(srv, "_fetch_sleeper_league_meta", lambda lid: None)
     assert srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr") is None
-    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+    assert len(db.load_draft_picks(_LEAGUE)) == _GRID   # snapshot preserved
 
 
 # ── #228 — completed rookie draft hides that season's picks ────────────────
