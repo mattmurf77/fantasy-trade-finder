@@ -10,6 +10,87 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19h — The "balanced trade" claim gets a fairness gate (audit bug 2, NOT SHIPPED, on `fix/balanced-claim-fairness-gate`)
+
+**Branch:** `fix/balanced-claim-fairness-gate`, worktree off a freshly fetched `origin/main` **`50e0451`**.
+**Not pushed, not merged.** Ships **unflagged** — a flag's OFF state here would re-enable a false
+statement (see [D-097](DECISIONS.md)).
+Scope: [docs/plans/consensus-balance-claim/scope.md](../docs/plans/consensus-balance-claim/scope.md)
+(code-walk proof §7, TestFlight checklist §8).
+
+| Gate | Result |
+|---|---|
+| `mobile/tests/check-*.js` (all) | **61 / 61 passed, 0 failed** (60 pre-existing + 1 new) |
+| `mobile/tests/check-consensus-balance-claim.js` (new) | **36 / 36 assertions passed** |
+| `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
+| `npx tsc --noEmit` (mobile) | **1 error, pre-existing + environmental, NOT from this diff** — `ImportRankingsSheet.tsx(11,33): TS2307 Cannot find module 'expo-document-picker'`. `mobile/node_modules` is **empty in the main checkout**, so it was symlinked from `ftf-test-clone`, whose install predates that dependency. **Proven, not assumed:** stashing this branch's `.tsx` + `package.json` edits and re-running produced byte-identical output. My diff adds **zero** type errors. |
+| `pytest backend/tests -q` | **3524 passed, 1 skipped, 0 failed** — insurance only; **zero backend files touched** (`git status -- backend/` empty). No route, schema, migration, or engine line moves. |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md). No flow authored, none run, no `screens/` capture. |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The scope §8 operator TestFlight checklist is UNRUN.** |
+
+**Prod measurement (read-only, `SET TRANSACTION READ ONLY`, SELECT only, `deck_impressions`).**
+Reproduces the audit's 805 / 7,282 exactly; the denominator moved to 7,293 because eleven more cards
+were served between the audit snapshot and this run.
+
+| Metric | Value |
+|---|---|
+| Consensus cards served | **7,293** |
+| …carrying a non-NULL `fairness_score` | **7,293 (100%)** — this is the proof the field reaches the clients, not an inference |
+| …**below the app's own 0.75 bar** while claiming "balanced" | **805 (11.04%)** |
+| …below the 0.50 generation floor | **0** |
+| Fairness distribution | min **0.5010**, p10 **0.7302**, p25 0.7890, p50 **0.8590**, p90 0.9750, max 1.0000 |
+
+**Sabotage test — the check is only evidence if it goes red without the fix.** Four independent
+reverts, each applied, measured, restored; final `git diff --stat` byte-identical to pre-sabotage:
+
+| # | Sabotage | Result |
+|---|---|---|
+| S1 | Revert the gate — `balanced` forced `true`, i.e. always claim balanced | **RED, 14 failures**, exit 1 |
+| S2 | Flip the fail-safe — unknown fairness returns the balanced claim | **RED, 7 failures**, exit 1 |
+| S3a | Fix mobile, leave web stale — web ternary collapsed to the unconditional string | **RED, 5 failures**, exit 1 |
+| S3b | **The subtle one** — web keeps its gate but *drifts the wording* (`— no rankings on file.`) | **RED, 2 failures**, exit 1 |
+| S4 | Re-inline the literal into `TradeCard.tsx` JSX, bypassing `consensusNote` | **RED, 2 failures**, exit 1 |
+| S5 | Re-add value prose below the bar (the copy the operator struck) | **RED, 12 failures**, exit 1 |
+| — | Restore all | **GREEN, exit 0**, diff byte-identical to pre-sabotage |
+
+**What the 36 assertions pin**, rather than "the string changed": the gate at the real band edges
+(0.75 → balanced; 0.7499, 0.7302 = prod p10, 0.55, 0.501 = prod min → **truncated**); the fail-safe
+direction for `undefined`/`null`/`NaN`/`±Infinity`; that the function yields **exactly two** distinct
+strings and only the at-or-above-bar one contains the word "balanced"; that **every** state keeps the
+`hasn't ranked players yet` explanation (the fix removes the claim — it does **not** hide the line);
+that **no value prose is re-added** below the bar (`priced from public values` / `even split` /
+`leans` must appear nowhere — this is the assertion that holds the operator's 2026-08-19 amendment in
+place); that **no** state names a winner; that all **four** spellings of 0.75 agree (`NORMAL_LOW`,
+`FAIRNESS_ON_THRESHOLD`, `CONSENSUS_BALANCED_MIN`, and web's `FAIRNESS_BALANCED_MIN` parsed back out
+of `web/js/app.js`).
+
+**The cross-client half is the most valuable part and is built to survive rewording.** §3 does not
+look for remembered strings: it **extracts** web's `prefix` literal and both tooltip templates from
+`web/js/app.js`, expands them, and compares the results **byte for byte against the mobile module's
+own output**. That is why S3b — web still gating correctly but saying something different — goes red
+at all. Those assertions are deliberately **not** wrapped in an `if (extraction succeeded)` guard: a
+failed extraction means web no longer has the shape the parity depends on, which is itself the
+divergence being guarded against, so it must fail rather than skip.
+
+**Note on `mobile/package.json`:** the only edit is registering
+`"test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js"`. No dependency added,
+removed, or bumped — `living-memory/DEPENDENCIES.md` needs no entry.
+
+**Operator amendment, same day.** The first revision of this fix put replacement copy below the bar
+(*"priced from public values, not an even split"*). The operator struck it — *"We don't need to add
+the copy suggested.. We already have already features that provide the value summary/snap assessment
+on trade valuation"* — and is right: `TradeValueBar` already renders `favors`/`gap` on these cards.
+The sub-threshold line now **truncates** to `This league-mate hasn't ranked players yet.` and stops.
+The gate, the fail-safe, the constant and the cross-client parity are unchanged; the replacement prose
+is gone from both clients and from the module, and S5 exists to keep it gone. Directional wording
+("leans your way"/"leans theirs") is settled as duplication and should not be re-opened.
+
+**Not tested, and deliberately so:** `tradePresentation.counterpartyStatement()` asserts partner
+interest unconditionally (same defect class) but is dark behind `trades.presentation_v2: false` and
+belongs to a surface under separate review. Recorded in D-097 and scope §9; **not** touched.
+
+---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 
 **Branch:** `fix/pick-horizon`, branched from `origin/main` `7462c23`. **Not pushed, not merged.**
