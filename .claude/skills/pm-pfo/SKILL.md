@@ -23,8 +23,10 @@ makes the final call.
 3. Know the current loop as built: `docs/architecture.md` and `docs/glossary.md` for
    how ranking and trade generation work, `config/features.json` for which engine flags
    are live (e.g. `trade_engine.v3`, `trade.finder_targeting`, `trade.need_fit`),
-   recent `docs/plans/` batches for what just changed, and `mobile/.maestro/flows/`
-   for what's already exercised automatically.
+   recent `docs/plans/` batches for what just changed, and `mobile/tests/README.md`
+   for what's already guarded automatically (the `check-*.js` suites; per
+   [D-056](../../../living-memory/DECISIONS.md) the `mobile/.maestro/` flows are
+   historical artifacts, never run — don't read them as live coverage).
 4. For real evidence: tester complaints via the `/feedback` pipeline's open items, and
    measured usage via an-user-data. Your own walkthrough is the primary instrument.
 
@@ -74,8 +76,9 @@ Save to `docs/business/product/YYYY-MM-DD-<slug>.md`:
 ## Handoffs
 
 - Fixes worth building → spec via pm-technical, then the `/feedback` pipeline; engine
-  quality issues → eng-backend; first-run UX → eng-mobile / eng-web; flow test
-  coverage for regressions found → eng-qa (Maestro flows in `mobile/.maestro/flows/`).
+  quality issues → eng-backend; first-run UX → eng-mobile / eng-web; test coverage for
+  regressions found → eng-qa (a structural guard in `mobile/tests/check-*.js`, or a
+  TestFlight checklist step when the regression is only visible at runtime).
 - Time-to-value and activation event definitions → an-funnel + an-data-architect;
   measured drop-off once instrumented → an-user-data.
 - Onboarding copy and explanation language → mkt-brand.

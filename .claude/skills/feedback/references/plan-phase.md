@@ -12,20 +12,28 @@ precedent (it came out of the same dual-agent process).
 | Feature | `hld-delta.md` | What changes in the architecture: components touched, data flow, decisions + alternatives rejected. Written as a **delta against `docs/architecture.md`**, not a rewrite. |
 | Feature | `lld-delta.md` | Exact interfaces: endpoint signatures (method, path, request/response JSON with field types and error shapes), DB schema changes, client state changes, function-level touch points with file paths. |
 | All | `prd.md` | Requirements (numbered R-1…), success criteria, out-of-scope, guardrails, **and the test plan** (below). |
-| All | `scope.md` | Copy of `docs/templates/feature-scope.md`, filled: analytics events (specced / covered / **written** waiver — silence is not a waiver), schema+flags, Maestro delta, the row-by-row docs table (api-reference / LLD / architecture / HLD / invariants / glossary / ADR), sim-gate tier. Waivers surface to the operator before build. Per CLAUDE.md §Conventions "Feature gates". |
+| All | `scope.md` | Copy of `docs/templates/feature-scope.md`, filled: analytics events (specced / covered / **written** waiver — silence is not a waiver), schema+flags, the §3 evidence scope (structural `mobile/tests/check-*.js` guards, unit tests, code-walk proof, TestFlight checklist — **not** a Maestro delta, retired by D-056), the row-by-row docs table (api-reference / LLD / architecture / HLD / invariants / glossary / ADR), and the §5 ship-gate declaration (CI green + TEST_LEDGER entry — there is no sim-gate tier). Waivers surface to the operator before build. Per CLAUDE.md §Conventions "Feature gates". |
 | All | `reconciliation-log.md` | Each review round: objections raised, resolution, anything orchestrator-arbitrated. |
 
 ### PRD test plan requirements
 
-- Concrete Maestro flows: new/updated YAML under `mobile/.maestro/`, following
-  the existing numbered-file convention and `mobile/.maestro/README.md` setup.
-- Selectors: prefer `testID` (have the build agent add them — see the testID
-  registry in `docs/plans/mobile-testing/lld.md`); text matchers only as
-  fallback, and note the exact copy they depend on.
+**(Rewritten 2026-08-16 per D-056 — Maestro/simulator retired entirely. No
+flow authoring, no sim runs, in any pipeline.)**
+
+- Automated evidence: unit tests (pytest / mobile test runner) plus structural
+  `mobile/tests/check-*.js` AST suites for UI wiring. Every new behavioral
+  test must be **proven to fail on a deliberately sabotaged build** before it
+  counts (2026-08-10 lesson); distributional bars must be two-sided.
+- Behavior that would previously have earned a sim capture gets a **written
+  code-walk proof**: a file:line-cited commit-sequence trace.
+- Runtime proof: a **concrete manual TestFlight checklist for the operator**,
+  per group — specific enough to catch the regression it guards (screen,
+  steps, expected result). This is the only runtime net; write it like a
+  regression suite, because it is.
 - Per requirement R-n: at least one pass criterion QA can verify mechanically
-  (screenshot checkpoint, visible text, absence of crash).
+  (test name, check-suite assertion, or TestFlight checklist step).
 - Web-touching groups: a web test section (URLs, user actions, expected DOM
-  text) since Maestro only covers the app.
+  text).
 - **UI-touching items name their captures.** List the affected
   `screens/mobile/<screen>/` captures as explicit PRD inputs — they are the exact
   ground truth for "current". Every mockup round starts from them, never from

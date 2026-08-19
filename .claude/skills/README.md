@@ -13,7 +13,7 @@ a move, not a copy.
 | Skill | What it runs |
 |---|---|
 | `feedback` | The full in-app-feedback delivery pipeline: triage → operator selection → dual-agent planning → parallel build agents → QA → ship. Largest skill here: `references/{plan,build,qa,ship}-phase.md` + `lessons.md` |
-| `maestro-test` | Runs Maestro UI flows on the simulator. **See the D-056 warning below — this skill is superseded and should not be run** |
+| `maestro-test` | **RETIRED (D-056) — do not invoke.** Ran Maestro UI flows on the simulator; carries a retirement banner and is kept only as a historical record. See the sweep table below |
 | `living-memory-format-check` | Audits `living-memory/` against `FORMAT.md`; reports drift, offers per-file fixes, never auto-edits |
 | `feature-evaluator` | Reviews a feature area and emits a structured improvement report. Has `references/code-quality-principles.md` + evals |
 | `project-architect` | Generates/maintains the `docs/` reference layer. Carries the `root-CLAUDE.md`, `docs-CLAUDE.md`, `docs-README.md` templates and a `doc-inventory.md` reference |
@@ -38,26 +38,30 @@ Five more role skills (`legal-privacy`, `ux-design`, `ux-research`, `fin-budget`
 `fin-forecast`) were retired 2026-08-08 for producing zero deliverables in a month —
 see [`archive/skill-workspaces/retired-2026-08-08/README.md`](../../archive/skill-workspaces/retired-2026-08-08/README.md).
 
-## ⚠ Known drift: D-056 vs the QA-shaped skills
+## D-056 sweep — the QA-shaped skills (completed 2026-08-18)
 
-Operator decision **D-056** (2026-08-15, Active — `living-memory/DECISIONS.md`) retired
-Maestro and the simulator **entirely**: no flow authoring, no execution, no screen captures,
-in any pipeline. Several skills still instruct otherwise. Status as of **2026-08-18**:
+Operator decision **D-056** (2026-08-15, Active — [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md))
+retired Maestro and the simulator **entirely**: no flow authoring, no execution, no screen
+captures, in any pipeline. Every skill that still instructed otherwise was rewritten on
+**2026-08-18**:
 
-| Skill / file | D-056 aware? |
+| Skill / file | State |
 |---|---|
-| `feedback/lessons.md`, `feedback/references/plan-phase.md`, `feedback/references/build-phase.md` | yes — rewritten 2026-08-16 |
-| `feedback/references/ship-phase.md` | fine — only references the `maestro-testid-lint` CI job, which D-056 explicitly keeps |
-| `feedback/references/qa-phase.md` | **no** — still opens with "boot a simulator, install the build, run flows" |
-| `maestro-test` | **no** — the skill's entire purpose is superseded |
-| `eng-mobile` | **no** — step 4 is "verify on the simulator" via `sim-build.sh` / `sim-run.sh` |
-| `eng-qa` | **no** — names Maestro smoke flows as the mobile E2E lane |
-| `pm-pfo`, `pm-technical` | **partly** — treat `mobile/.maestro/flows/` as live inputs and seed test plans as Maestro flow sketches |
+| `maestro-test` | **RETIRED banner** at the top + `description:` leads with `RETIRED (D-056)`. Not deleted — that's the operator's call; the body is kept as a historical record of how the harness worked |
+| `feedback/references/qa-phase.md` | rewritten — sim/Maestro prep replaced by `tsc` + `check-*.js` + pytest, code-walk proofs per requirement, the proven-to-fail sabotage rule, and an operator TestFlight checklist as the batch's only runtime evidence |
+| `feedback/SKILL.md` (body) | Phase 3/5 descriptions, work-type table, scope-block row, and express lane no longer name Maestro or `FTF_SKIP_SIM_GATE`. Frontmatter `description:` deliberately untouched — it still says "Maestro test plan" / "redundant Maestro QA" |
+| `feedback/references/ship-phase.md` | corrected — it was **not** clean: it required fresh `qa/sim-runs/last-sim-run.json` evidence and claimed `githooks/pre-push` enforces it. That hook is now a deliberate no-op. The `maestro-testid-lint` CI reference stays (D-056 keeps it) |
+| `eng-mobile` | "verify on the simulator" → guards + code-walk proof + TestFlight checklist; test-hooks and handoff bullets repointed at `mobile/tests/` |
+| `eng-qa` | the mobile E2E lane is now the `check-*.js` guard set; runtime evidence is the operator's TestFlight pass. Frontmatter trigger phrase still reads "Maestro flow" |
+| `pm-pfo`, `pm-technical` | `mobile/.maestro/flows/` no longer cited as live coverage; test-plan seeds are guards + code-walk + checklist, not flow sketches |
+| `feedback/lessons.md`, `feedback/references/plan-phase.md`, `feedback/references/build-phase.md` | already D-056-correct — verified, left untouched. **But:** those rewrites exist only as *uncommitted* edits in the operator's main checkout; a fresh clone of `origin/main` still shows the pre-D-056 text |
 
-If a skill tells you to run Maestro or take a simulator capture, **D-056 wins**. Substitute:
-structural `mobile/tests/check-*.js` suites + unit tests, a file:line code-walk proof, and a
-manual TestFlight checklist for the operator. Current QA regime:
-[`qa/README.md`](../../qa/README.md).
+If any skill still tells you to run Maestro or take a simulator capture, **D-056 wins**.
+Substitute: structural `mobile/tests/check-*.js` suites + unit tests
+([`mobile/tests/README.md`](../../mobile/tests/README.md)), a file:line code-walk proof, and
+a manual TestFlight checklist for the operator. The live evidence contract is
+[`docs/templates/feature-scope.md`](../../docs/templates/feature-scope.md) §3 and §5; the
+backend QA charter is [`qa/README.md`](../../qa/README.md).
 
 ## Other `.claude/` contents
 

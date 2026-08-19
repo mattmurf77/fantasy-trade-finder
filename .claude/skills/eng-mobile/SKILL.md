@@ -34,9 +34,10 @@ the `/feedback` pipeline.
   source, production auto-increment), EAS builds and TestFlight submission.
 - Version bumps follow the repo convention: bump in `mobile/app.json`, commit as
   `mobile: bump version to X.Y.Z (<summary>)`.
-- Test hooks: keep testIDs intact for the Maestro flows in `mobile/.maestro/flows/`
-  (`mobile/scripts/testid-lint.sh` checks them); sim helpers in `mobile/scripts/`
-  (`sim-build.sh`, `sim-run.sh`).
+- Test hooks: the structural guards in `mobile/tests/check-*.js` (conventions in
+  `mobile/tests/README.md`) — CI's `mobile-typecheck` job globs that directory, so a
+  guard is live the moment the file exists. Keep testIDs intact and lint-clean
+  (`mobile/scripts/testid-lint.sh`, still in CI per D-056).
 - Future App Store work: StoreKit/IAP integration (packaging from pm-monetization),
   ATT prompt handling if ads land, App Store submission mechanics with mkt-aso.
 
@@ -47,10 +48,14 @@ the `/feedback` pipeline.
 2. Read the files you'll touch. Reuse existing components before writing new ones.
 3. Make the minimum surgical change; register anything new where it belongs
    (navigation, exports).
-4. Verify on the simulator (`mobile/scripts/sim-build.sh` / `sim-run.sh`), exercising
-   the changed flow end-to-end. Run the relevant Maestro smoke flow(s) from
-   `mobile/.maestro/flows/smoke/` when the change touches a covered screen; run
-   `testid-lint.sh` if you touched testIDs. Hand a full regression pass to eng-qa.
+4. Verify — **no simulator, no Maestro, no captures** ([D-056](../../../living-memory/DECISIONS.md),
+   2026-08-15, Active): `cd mobile && npx tsc --noEmit` clean; add or extend a
+   structural guard in `mobile/tests/check-*.js` for anything mechanically checkable
+   and run the affected guards; run `testid-lint.sh` if you touched testIDs. For
+   behavior a guard can't see, write a **code-walk proof** — a file:line-cited trace
+   through your own diff. When runtime confirmation genuinely matters, write a
+   **manual TestFlight checklist** for the operator (numbered steps + expected result,
+   specific enough to catch the regression). Hand a full regression pass to eng-qa.
 5. Sync docs per CLAUDE.md's table: shared enums/colors/thresholds →
    `docs/cross-client-invariants.md`; new domain terms → `docs/glossary.md`. If the
    change needed a backend contract change, that's eng-backend's diff plus
@@ -59,7 +64,8 @@ the `/feedback` pipeline.
 ## Deliverable
 
 Working code plus a short change note: what changed, files touched, how it was
-verified (simulator/Maestro), whether a version bump or EAS build is warranted, and
+verified (tsc, which `check-*.js` guards, code-walk proof, TestFlight checklist if
+one was written), whether a version bump or EAS build is warranted, and
 follow-ups. Written reports go to `docs/business/engineering/YYYY-MM-DD-<slug>.md`
 ending with **Decisions needed** and **Handoffs** sections.
 
@@ -67,7 +73,7 @@ ending with **Decisions needed** and **Handoffs** sections.
 
 - New/changed endpoints or response shapes → eng-backend.
 - EAS/App Store Connect wiring problems, Sentry, push infra → eng-integrations.
-- Full regression or new Maestro flows → eng-qa.
+- Full regression, new structural guards, or a TestFlight checklist to gate a ship → eng-qa.
 - IAP packaging/pricing decisions → pm-monetization; listing/screenshots → mkt-aso;
   copy tone → mkt-brand.
 - Event instrumentation specs → an-data-architect; "is this worth building" → pm-technical.
@@ -83,5 +89,9 @@ ending with **Decisions needed** and **Handoffs** sections.
 - Never hardcode API keys or secrets in the app bundle — anything in `mobile/` ships
   to devices. Config secrets live in `secrets.local.env`.
 - Don't break the test-build contract in `app.config.js` (Sentry DSN short-circuit,
-  `FTF_API_BASE_URL` override) — the UI-test harness depends on it.
-- Verify on the simulator before declaring done; "it compiles" is not done.
+  `FTF_API_BASE_URL` override) — it is how a build gets pointed at a local backend.
+  (It was written for the retired UI-test harness; the contract itself still stands.)
+- "It compiles" is not done. Done = tsc clean + the structural guard or unit test that
+  pins the behavior + a code-walk proof for what neither can see. If you find yourself
+  reaching for the simulator, that's the gap D-056 says to close with a guard or a
+  TestFlight checklist instead — do not boot one.

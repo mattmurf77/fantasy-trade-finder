@@ -33,13 +33,19 @@ group enters this phase.
   ice=actions flare=info-highlights only), invariants in
   `docs/cross-client-invariants.md` (tier colors/labels from
   `mobile/src/utils/tierBands.ts` — never hardcode).
-- Required self-verification before returning:
-  - mobile → `cd mobile && npx tsc --noEmit` clean; add `testID`s the PRD's
-    Maestro flows need; write/update the Maestro YAML named in the PRD.
-  - backend → targeted `pytest` for touched modules + a route smoke against a
-    local server if endpoints changed.
+- Required self-verification before returning **(rewritten 2026-08-16 per
+  D-056 — Maestro/simulator retired; static evidence only from build agents)**:
+  - mobile → `cd mobile && npm ci` (NEVER symlink node_modules — 2026-08-10
+    lesson), then `npx tsc --noEmit` clean; run/extend the structural
+    `mobile/tests/check-*.js` suites the PRD names; every new behavioral test
+    proven-to-fail on its named sabotage (apply sabotage → RED → revert →
+    green), evidence in the report.
+  - backend → targeted `pytest` for touched modules, sabotage-proven per the
+    PRD's matrix + a route smoke against a local server if endpoints changed.
   - web → load the page on the local Flask server (`python run.py`), confirm
     no console errors, exercise the changed interaction.
+  - No simulator, no Maestro, no captures. Runtime proof is the operator
+    TestFlight checklist already in the PRD — do not attempt it yourself.
 - Known hazards from `lessons.md` relevant to its area (e.g. the Tiers
   gesture-conflict rule: nothing may capture touches from
   `react-native-draggable-flatlist` — that's what broke builds #11/#12).

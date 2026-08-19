@@ -1,18 +1,46 @@
 ---
 name: maestro-test
 description: >
-  Run Maestro UI tests against the FTF iOS app on the simulator, hermetically
-  (seeded backend, zero live calls). Three scopes: a single FEATURE ("test the
-  trade calculator", "test send-in-sleeper"), a whole PAGE/SCREEN ("test the
-  Tiers screen"), or a WHOLE-APP session ("smoke the app", "full regression",
-  "test everything"). Use whenever the user says /maestro-test, "test <feature
-  or screen> in the app", "run the smoke set", "run maestro", "UI-test this
-  change", or after mobile changes that need end-to-end verification. Authors
-  missing flows on demand (id-selectors only, per the harness conventions) and
-  reports pass/fail + rails audit + screenshots.
+  RETIRED (D-056, 2026-08-15) — DO NOT INVOKE. This skill ran Maestro UI flows
+  against the FTF iOS app on the simulator. Maestro and the simulator are
+  retired entirely: no flow authoring, no flow execution, no captures, for any
+  change in any pipeline. It is kept only as a historical record of how the
+  harness worked. For mobile verification use the structural
+  `mobile/tests/check-*.js` suites + unit tests, a written code-walk proof, and
+  a manual TestFlight checklist for the operator — never this skill.
 ---
 
-# Maestro app testing (FTF iOS, hermetic harness)
+# ⚠ RETIRED — do not run this skill (2026-08-18)
+
+**[D-056](../../../living-memory/DECISIONS.md) (2026-08-15, operator, Active) retired
+Maestro and the simulator entirely** — not just as a ship gate. No flow authoring, no
+flow extension, no flow execution, no simulator captures, for any change, in any
+pipeline. Operator's ruling: *"It's unreliable and a waste of tokens."*
+
+**If you were routed here, stop and do this instead:**
+
+| Instead of… | Do this |
+|---|---|
+| Authoring or running a flow to prove behavior | Add/extend a structural guard in `mobile/tests/check-*.js` (conventions: `mobile/tests/README.md`) and/or a unit test. CI's `mobile-typecheck` job globs the directory, so a guard is live the moment the file exists |
+| A simulator capture as evidence | A written **code-walk proof** — a file:line-cited trace through the actual commit sequence |
+| A sim run for runtime confidence | A concrete **manual TestFlight checklist** for the operator: numbered steps + expected result, specific enough to catch the regression it guards. This is the only runtime evidence mobile now gets |
+| Writing `qa/sim-runs/last-sim-run.json` | Nothing — the pre-ship sim gate is retired and `githooks/pre-push` is a deliberate no-op. Record what you ran in `living-memory/TEST_LEDGER.md` |
+
+What survives D-056: `mobile/scripts/testid-lint.sh` still runs in CI (the
+`maestro-testid-lint` job keeps its name), so `testID`s still matter. The flows under
+`mobile/.maestro/` are kept as historical artifacts — they document intended behavior;
+they are never run.
+
+Current evidence contract: `docs/templates/feature-scope.md` §3 and §5, and CLAUDE.md
+§Conventions "Feature gates". Everything below this banner is **historical record only**.
+
+---
+
+# Maestro app testing (FTF iOS, hermetic harness) — HISTORICAL
+
+> Superseded by D-056 on 2026-08-15. Retained to document how the harness worked, the
+> traps it hit, and why the flows in `mobile/.maestro/` look the way they do. Do not
+> execute any of it.
 
 You are operating the mobile UI-test harness specced in
 `docs/plans/mobile-testing/` (plan/prd/hld/lld/test-cases). All three gating
