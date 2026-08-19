@@ -37,6 +37,29 @@ Decision: [D-094](DECISIONS.md). Docs: [docs/feedback/items/357-team-review/](..
 | `OUTLOOK_WEEK6_PERCENT_ENABLED` false → true | 5. the bare percentage stays off |
 | Strip the "unrenderable" warning from `api/league.ts` | 4b. league.ts warns title_pct is unrenderable |
 
+**MERGED 2026-08-19 (PR #142, `6a3eab3`) — the gate set completed after this entry was first written.**
+The original entry recorded pytest as *not run for this change*; that was true of the flag flip alone but
+became false once the flip broke three tests. Corrected, final numbers on the merged sha:
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3525 passed, 1 skipped, 0 failed** |
+| `npx tsc --noEmit` | **clean (exit 0)** — run after `npm ci`, which this worktree had been missing |
+| Full structural glob, `for f in tests/check-*.js` | **61 passed, 0 failed** |
+| `bash mobile/scripts/testid-lint.sh` | **OK** |
+| Live verification | `/api/feature-flags` on Render serves `outlook.odds: true` |
+
+**Three tests failed on the first attempt and all three were mine** — the flip is five touches, not one:
+`test_flag_is_registered_and_defaults_off_everywhere`, `test_ships_off_route_is_unreachable_and_makes_no_sleeper_call`,
+and `test_release_flags_mirror_features_json`. A peer session independently hit the same wall and flagged a
+fourth trap I had not yet reached and verified myself before acting: `onboarding-v2.json` and `profiles-on.json`
+are each asserted to differ from `release.json` by **exactly one key**, so moving `release` alone breaks both —
+a failure that only surfaces on a full suite run, one cycle after the obvious fix.
+
+**Sabotage proof for the rewritten kill-switch test:** removing the `is_enabled("outlook.odds")` guard from
+`/api/league/outlook` made `test_flag_off_still_closes_the_route` fail (200 instead of 404); `backend/server.py`
+restored and `git diff` verified empty.
+
 **Evidence posture under D-056.** The operator **waived** the Maestro flow this lighting owed
 (`NEXT.md` item 7) — it was already void when D-056 retired Maestro entirely. The guard above replaces it
 as the standing structural net. **No backend test was run for this change and none was needed:** the flip
