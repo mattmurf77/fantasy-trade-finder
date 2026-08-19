@@ -398,6 +398,17 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 
 ## 2026-08-19
 
+### G-053 — Flipping one flag in `config/features.json` breaks three test fixtures, and the trap is invisible until you fix the obvious one
+**Hit:** 2026-08-19 (lighting `outlook.odds`; re-confirmed independently by a parallel session)
+**Symptom:** you flip a single boolean in `config/features.json`, run `pytest backend/tests`, and get failures in files that have nothing to do with your feature — `test_seed_ui_test_db.py::test_onboarding_v2_flags_are_release_plus_the_onboarding_surface` and `::test_profiles_on_flags_turn_on_public_pages_only`.
+**Cause:** there is a **chain** of three assertions, and it only reveals itself one link at a time.
+1. `test_release_flags_mirror_features_json` asserts `backend/tests/fixtures/flags/release.json` mirrors `config/features.json` **wholesale**. You fix this one first because it is the obvious one.
+2. Only then do the next two appear: `onboarding-v2.json` and `profiles-on.json` each assert they differ from `release.json` by **exactly one key**. Moving `release.json` alone adds your flag to both diffs and breaks both.
+**Why it stays hidden:** the set-equality check in step 1 fails *before* the two profile fixtures ever diverge, so a first run shows a small, misleading failure count. Fixing the obvious thing is what exposes the real trap.
+**Fix:** flip the flag in **four** files together — `config/features.json`, `release.json`, `onboarding-v2.json`, `profiles-on.json`. Deliberately **not** `all-on.json`: that is release + the 13 inventory-gated *client* flags, and a per-flag test asserts the absence of anything that is not one of those. `release-300.json` and `release-espn-send-off.json` are partial scenario snapshots (186 and 163 keys vs release's 200) that nothing asserts — leave them.
+**Cost:** a full ~10-minute suite cycle if you fix only the obvious failure and re-run. Two sessions hit this on the same day.
+**Corollary:** never validate a flag flip with a targeted `pytest -k`. Run the whole suite.
+
 ### G-052 — two value→Elo maps exist; using the wrong inverse is silent near a 1st and grows downward
 - **Symptom:** a draft pick badges one tier too high on the picks screen / in-league calculator, and the error looks band-shaped rather than arithmetic — a current-year 3rd reads `second`, a current-year 4th reads `third`. Round-1 picks look fine, which is what makes it read as "the cheap end of the ladder is mispriced" rather than "the conversion is wrong".
 - **Cause:** the codebase has **two** maps onto the tier-band Elo scale and they are not inverses of each other. `trade_service.elo_to_value` ↔ `value_to_elo` moves between band Elo and **engine value** (what `draft_picks.pool_value`, every `/api/trade/evaluate` value and `pick_pool_value` are in). `data_loader.seed_value_for_elo` ↔ `seed_elo_for_value` moves between band Elo and **DynastyProcess's raw 0–10000 consensus scale**. Feeding an engine value to `seed_elo_for_value` applies DP's affine rescale (× 0.824487, + 223.130) to a number that never lived on the DP scale. **The two agree at exactly one point, Elo 1548.0** — solve `223.130 + 0.824487·v = v` — so the mistake is invisible around a mid-1st and grows the cheaper the asset: +35.2 Elo at a Mid 2nd, +63.4 at a Mid 3rd, +99.3 at a Mid 4th, +109.5 at a Late 4th.

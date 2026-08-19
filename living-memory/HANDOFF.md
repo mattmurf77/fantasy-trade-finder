@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — #360/#361 + #362 built and green on a branch; two operator calls block merge](#2026-08-19--360361--362-built-and-green-on-a-branch-two-operator-calls-block-merge)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
 - [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
@@ -115,6 +116,69 @@ raw-vs-package sign-divergence corner. A fairness bar was rejected on the same m
   generator reads; reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
 
 ---
+
+## 2026-08-19 — #360/#361 + #362 built and green on a branch; two operator calls block merge
+
+### Where I am right now
+
+**`feat/jon-360-362`** (base `origin/main` `2a492b6`) carries two commits — backend
+`f488616`, mobile `705ab2c` — for **Avoiding positions (#360/#361)** and **standing offers
+(#362)**. Built through the full feedback pipeline: dual planning agents → contract docs →
+one backend build agent → one mobile build agent (sole owner of `TradesScreen.tsx`, because
+both features touch it). **All gates green on the merged tree**, run by me and not taken from
+the agents' reports: pytest **3631 passed / 1 skipped**, `tsc --noEmit` clean, testid-lint OK,
+**64** `check-*.js` suites passing. Evidence in [TEST_LEDGER 2026-08-19i](TEST_LEDGER.md).
+
+**Nothing is pushed and nothing is merged.**
+
+### What blocks the merge
+
+Two operator decisions, both logged:
+- **[Q-027](OPEN_QUESTIONS.md)** — `trade.avoid_positions` currently ships **`true`**, so #360
+  goes live to every TestFlight tester on merge, with zero runtime evidence behind it. The
+  scope block argues kill-switch-not-dark-launch (precedent: `ranks.import`). Shipping dark
+  costs nothing but visibility — persistence is deliberately not flag-gated.
+- **[Q-028](OPEN_QUESTIONS.md)** — the one-tap outlook confirm clears `avoid_positions`
+  (inherited: it already clears Chasing and Shopping). ~3-line fix if wanted; the backend
+  leaves omitted keys unchanged.
+
+### What is NOT owed, and why
+
+No Maestro, no simulator, no captures — [D-056](DECISIONS.md). The runtime net is the two
+manual TestFlight checklists in the item folders, and **both are unrun**. That is the honest
+state: nothing proves either feature behaves on a device.
+
+### What happened to #357
+
+**Handed off and shipped by someone else.** This session was told "re-enable 357" and lit
+`outlook.odds` end to end before discovering a parallel session
+(`claude/team-review-analysis-plan-1f91e3`) had already done it under a direct operator
+override — D-093 → D-094. That session shipped it (PR #142, `6a3eab3`); prod serves
+`outlook.odds: true` and EAS build 121 is out. My work was **fully reverted**; the mechanical
+half it was missing (release-fixture chain, three rewritten guard tests, four stale doc
+corrections) was handed over and taken. Post-mortem: [M-005](MISTAKES.md). The commits
+`f68eddd`/`56f913b` on the abandoned `feat/jon-357-360-362` are deliberately preserved because
+that session was told to pull from them.
+
+### Next actions, in order
+
+1. Answer **Q-027** and **Q-028**; apply the Q-028 fix if wanted (~3 lines).
+2. Merge `feat/jon-360-362` → `main`. Render auto-deploys the backend; #362 stays dark.
+3. Run both TestFlight checklists on the next build. **`trade.standing_offers` is dark**, so
+   #362 needs the flag lit on a test device before its checklist means anything.
+4. **[Q-026](OPEN_QUESTIONS.md) is the sleeper** — `trade_gen_v2` honors no positional
+   preferences at all, so Chasing and Shopping are **already** broken there. It is only
+   masked because `bakeoff_serve_interleaved = 0.0`, a `model_config` knob rather than a
+   flag. One edit away from a silent regression with nothing to audit.
+5. `living-memory-format-check` pass — `DECISIONS.md`'s index table is missing rows for
+   D-095 and D-097 (concurrent-session drift, not from this work).
+
+### Worktrees to sweep
+
+`wt-jon` (abandoned 357 branch, keep until the Team Review session confirms it is done with
+`f68eddd`) and `wt-jon2` (the live branch). Both under the session scratchpad; ledger per
+[docs/recovery/CLAUDE.md](../docs/recovery/CLAUDE.md) before removing.
+
 
 ## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
 

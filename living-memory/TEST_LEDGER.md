@@ -10,6 +10,49 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19i — Avoiding positions (#360/#361) + standing offers (#362), NOT SHIPPED, on `feat/jon-360-362`
+
+**Branch:** `feat/jon-360-362`, based on `origin/main` `2a492b6`. **Not pushed, not merged.**
+Flags: `trade.avoid_positions` **true** (kill switch, pending [Q-027](OPEN_QUESTIONS.md)),
+`trade.standing_offers` **false** (dark).
+Records: [360-avoiding-positions/](../docs/feedback/items/360-avoiding-positions/) ·
+[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-098](DECISIONS.md).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3631 passed, 1 skipped, 0 failed** (280s) — run by the orchestrator on the merged tree, not taken from the build agent's report |
+| `npx tsc --noEmit` | **exit 0, zero output** |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK** |
+| `for f in tests/check-*.js; do node "$f"; done` | **64 passed, 0 failed** (62 pre-existing + 2 new) — run the way CI runs it |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under D-056 |
+| **Runtime evidence** | **NONE. Both TestFlight checklists are UNRUN.** |
+
+**Net +60 backend tests** (`test_avoid_positions.py` 29, `test_standing_offers.py` 31) and
+**+2 structural suites** (`check-avoid-positions.js`, `check-standing-offer-362.js`).
+
+**Sabotage discipline: 29 backend + 30+ mobile proofs, each applied → RED → reverted →
+green re-confirmed, with the actual failure text captured in the agents' reports.** A test
+that has never failed proves nothing (2026-08-10 lesson). Representative backend reds:
+`_pos_for_avoid` → raw `p.position` breaks `test_avoid_qb_keeps_pick_rungs`; dropping the
+avoid filter from any one of the v3 / v2 / consensus / sweetener pools reds its own case;
+making Shopping⊕Avoiding exclusive reds `test_shop_and_avoid_same_position_still_generates`.
+Representative mobile reds: hardcoding a 3-year season window (the #355 defect) reds SC-4a;
+leaking `team_user_ids` into a recipient-facing path reds SC-13; a season toggle mutating
+team state reds SC-7c.
+
+**Baseline note.** The backend agent measured 3584 against a 3524 baseline on `50e0451`;
+the 3631 above is the same work rebased onto `2a492b6`, which brought in more tests. Both
+numbers are real; only the 3631 describes what would merge.
+
+**Merge conflict resolved by hand, worth recording:** D-096's likes-you quality gates landed
+on the exact lines #362's injector widening touched (`backend/server.py`). Union-merged —
+their `gate_level`/`min_user_gain`/`seed_value` are used in the merged body below, and #362's
+`enumerate` index feeds the R-15 cap-drop counter. Neither side dropped; verified by the
+full suite above.
+
+**Not claimed:** that either feature behaves correctly on a device. No runtime evidence exists.
+
 ## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
 
 **Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
