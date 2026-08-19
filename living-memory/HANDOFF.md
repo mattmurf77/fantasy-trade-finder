@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
 - [2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point](#2026-08-18--matchmaking-engine-rebuilt-standing-handover-doc-is-the-entry-point)
@@ -30,6 +31,48 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
+
+### Where I stopped
+
+Complete and committed on **`feat/pick-slot-labels`** (worktree off `origin/main` `7462c23`). **Not pushed,
+not merged.** An owned 2026 pick now reads **`2026 1.08`** instead of `2026 1st` — the operator's
+2026-08-19 TradesHome report. [D-090](DECISIONS.md), [scope](../docs/plans/pick-slot-labels/scope.md).
+`pytest backend/tests` **3508 passed, 1 skipped** against a re-measured `origin/main` baseline of 3480.
+Zero mobile/web/extension files touched: every client already renders the server's string.
+
+### The finding that unblocked it
+
+The 2026-07-18 operator position quoted in `pick_values.pick_pool_value` — *"we can't yet resolve a pick's
+slot"* — is **false for the current year, and cheaply so**. Sleeper's `draft_order` already rides the
+`/league/<id>/drafts` payload `_sync_sleeper_owned_picks` fetches for #228, and that function already holds
+the `roster_id -> user_id` map. **Zero new upstream calls.** The pricing half of that decision is
+deliberately untouched.
+
+### What needs a human
+
+1. **[Q-023](OPEN_QUESTIONS.md) — should the slot drive PRICE?** This is the real open question and it is
+   the operator's. Measured, not built: on DP's 2026 curve a 1.01 is **+130 %** and a 1.12 **−61 %** against
+   our flat 2117 — **5.9× inside one round**. On the operator's own league that moves **48 of 48**
+   current-year pick values and **38 of 48** tier badges (a 1.12 would badge `second`, not `first_1`). Tier
+   colour is a five-client invariant, so this is not a display tweak. The half-measure worth pricing first
+   is applying it only under the already-opt-in `market_slots` mode.
+2. **The scope §8 TestFlight checklist is UNRUN** — the only runtime evidence this gets under D-056. Its
+   stop-ship items are 4 and 5: if a 1.01 shows a different VALUE or TIER than a 1.12, pricing leaked in.
+3. **Flag default.** `picks.slot_labels` ships **ON**, matching its two nearest siblings. If the operator
+   prefers OFF-then-flip, it is one boolean in `config/features.json` and nothing else in the diff depends
+   on it.
+
+### Known gaps, stated rather than hidden
+
+- **MFL keeps generic labels** — its order needs an authed `TYPE=draftResults` fetch nobody on the label
+  path makes. Zero prod exposure today (its one league is already drafted).
+- **A league shows generic labels until it next syncs**, because the order is written by the pick sync.
+- **A co-owner-keyed team resolves no roster** and keeps a generic label beside eleven slotted ones —
+  deliberate; eleven right beats twelve vague.
+- `npx tsc --noEmit` could not run locally (typescript absent from `mobile/node_modules` on this machine,
+  in the main checkout too). The diff has zero `.ts`/`.tsx` files; CI covers it. `testid-lint` OK.
 
 ## 2026-08-19 — Settings IA rebased onto `main` and shipped
 

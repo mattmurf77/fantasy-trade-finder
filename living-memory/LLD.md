@@ -30,6 +30,8 @@
 - [Settings tree: one route, two components, per-page query ownership (2026-08-19, account.settings_hub)](#settings-tree-one-route-two-components-per-page-query-ownership-2026-08-19-accountsettings_hub)
 - [Derived league state belongs to the writer, not the reader (2026-08-19, D-091)](#derived-league-state-belongs-to-the-writer-not-the-reader-2026-08-19-d-091)
 
+- [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
+
 ---
 
 ## Authoritative References
@@ -366,3 +368,40 @@ Route naming: `Settings` is the hub/root; second-level routes are `Settings<Grou
   rebuilds them. A write-side fix behind a flag on a replace-sync needs **no migration and no
   backfill**; a flag on an append-only writer would have needed both, and its "off" state would not
   have been a true restore. Check which of the two you have before calling a flag a kill switch.
+
+## Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)
+
+A draft pick's slot ("1.08") is a **derived coordinate**: a pure function of the pick's original roster
+and the league's draft order. [D-090](DECISIONS.md) makes it visible on owned-pick labels, and the
+conventions that fall out generalise past picks.
+
+- **Persist the INPUT that changes rarely, derive the coordinate that changes with it.** The order goes
+  on the league (`leagues.draft_slot_order` for Sleeper, `leagues.pick_assignment_settings` for a
+  user-assigned board); the slot is computed at read time and never written. A denormalized
+  `draft_picks.slot` would go stale on every commissioner reorder, and `draft_picks`' grain
+  (`league, season, round, original_roster`) cannot express one — the D18 rule
+  `PickAssignmentScreen.tsx:146-152` already states client-side. **If a value can be recomputed from a
+  stored input in microseconds, storing it buys nothing and costs a consistency invariant.**
+- **A derivation that cannot be made honestly returns `None`, and `None` renders the pre-existing
+  string.** `pick_slots.slot_for` has five refusals (unset order, wrong season, unknown roster, slot
+  wider than the league, snake with `reversal_round`), and every one degrades to the round ordinal. The
+  shape to copy: the *absence* of a resolution is a first-class return value, not an exception and never
+  a fallback guess. `draft_board_service`'s `order_confidence` and `_pick_no` are the same pattern.
+- **Bind data a caller already fetched instead of re-fetching it.** `_sync_sleeper_owned_picks` was
+  already calling `GET /v1/league/<id>/drafts` for the #228 exclusion and already held the
+  `roster_id -> user_id` map; the resolver reuses both, so the feature adds **zero** upstream calls.
+  Before adding an integration read for a display value, check what the surrounding function already has
+  in hand.
+- **Resolve once per league, pass down; never look up inside a per-row formatter.**
+  `_owned_pick_label(p, slot_order=None)` takes the order as an argument. Each of its five call sites
+  calls `_league_slot_order(league_id)` once and threads the result through the loop, because the label
+  runs per pick and a 192-slot grid would otherwise do 192 lookups. The optional-argument-defaulting-to-
+  `None` shape is also what keeps the function byte-identical for any caller that does not pass it.
+- **A display flag short-circuits BEFORE its data read, not after.** `_league_slot_order` returns `None`
+  on the disabled flag before touching the DB, so a killed feature costs nothing rather than costing a
+  read whose result is discarded. Pinned by `test_flag_off_never_reads_the_order`.
+- **A numbering read is not an engine read.** `_assigned_slot_order` names a LITERAL `PICK_SOURCE_ANY`
+  rather than `_pick_read_source()`, and is registered in `test_pick_assignment.py`'s
+  `_SANCTIONED_SOURCE_CALLERS` rather than its seven engine sites — because what "1.05" means must not
+  change when a *pricing* flag moves, or a trade card and the assignment screen would disagree about the
+  same slot.

@@ -67,6 +67,22 @@ already `source='user'`.
 - Added while the cap below was already blown; it is operator-directed and current, so it is logged
   rather than dropped — but it makes the paydown one item more overdue.
 
+## 2026-08-19 — Slot-driven pick pricing (operator-ruled, queued behind D-090)
+
+**Operator ruling** closing the direction half of [Q-023](OPEN_QUESTIONS.md): *"Slot should drive price
+but we can push this live first and then solve for that."* Slot labels (D-090) ship now; pricing follows
+as its own change.
+
+- **Bright line — this is not a follow-up commit.** It moves 48 of 48 current-year pick values and 38 of
+  48 tier badges on the operator's league, and tier colour is a five-client invariant. Own scope block,
+  own evidence, own TestFlight pass.
+- **Ship labels first on purpose:** so a wrong-looking value can be attributed to pricing rather than to
+  labelling.
+- **Decide before building (see Q-023):** all picks or only under the opt-in `trade.slot_pricing`
+  mode · unknown-order leagues fall back to the Mid rung or are excluded · does the TIER band follow the
+  slot, or only the trade value.
+- Future seasons keep the Mid rung regardless — their order is genuinely unknowable.
+
 ## Queue cap status — the 7-item cap is blown; proposed drops
 
 *(Noted 2026-08-19 rather than silently overflowing, per the hygiene rules below.)* This file carries

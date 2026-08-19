@@ -215,6 +215,23 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # purpose: MFL sync rows are platform truth and must never follow the
     # `picks.assign_tradeable` flag (user-asserted rows are ESPN's path).
     "_mock_owned_pick_overlay",  # server.py  — MFL mock traded-pick overlay
+    # D-090 — the slot-label path's read of the assignment grid. DECIDED, not
+    # silently added, per this set's own rule. It belongs HERE and not among
+    # the seven engine sites for two reasons:
+    #   * it prices nothing. It reads `original_user_id` / `original_roster_id`
+    #     only, to recover the map that turns `pick_assignment_settings.order`
+    #     into `roster_id -> slot`. No value, tier or engine input is derived.
+    #   * NUMBERING MUST NOT FOLLOW THE PRICING FLAG. The assignment screen
+    #     shows a league its slots whether or not `picks.assign_tradeable` is
+    #     on; a trade card should not disagree with that screen about what
+    #     "1.05" means because a pricing switch moved. Hence the LITERAL
+    #     `PICK_SOURCE_ANY`, exactly as its four neighbours above name a
+    #     literal, rather than `_pick_read_source()`.
+    # The contested/orphaned row filter that rides `'any'` is welcome here: a
+    # disputed slot contributes no numbering entry and its pick keeps the
+    # generic round label, which is the honest rendering of "we don't agree
+    # who this is".
+    "_assigned_slot_order",      # server.py  — D-090 slot-label numbering read
 })
 
 #: Everything allowed to name `source=` at all: the seven engine read sites
