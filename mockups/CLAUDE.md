@@ -14,6 +14,7 @@ rejected — read it for reasoning, never for current UI.
 
 | Lab | Item(s) | Last touched | Status | Question it answers |
 |---|---|---|---|---|
+| [`settings-ia-hub/`](settings-ia-hub/index.html) | — | 2026-08-19 | in flight | Settings as a hub page + five second-level pages, and modal sheet → pushed page. Embeds all three real `screens/mobile/settings/` captures; §2–§5 frames are labelled reconstructions (the captures predate the ESPN/MFL disconnect rows added by 3293f4a). Plan: `docs/plans/settings-ia-hub/` |
 | `trade-suggestion-redesign/` | — | 2026-08-16 | **partially built** | The presentation rebuild: hero → Featured → uncapped browse, asymmetric explanations, banded confidence, honest empty state. States 01/03/04/07/09 are BUILT behind `trades.presentation_v2` (`docs/plans/trade-presentation-v2/scope.md`); 02 (MESO variants) and 05 (turn states) are blocked on backend that does not exist — `trade_gen.v2` is dark and there is no trade-thread state machine |
 | [`candidates-300-v2/`](candidates-300-v2/README.md) | #300 r2 | 2026-08-12 | most recent | League rankings → trade candidates, round 2, drawn against #299 as shipped. Verdict: one list + one median divider |
 | [`candidates-300/`](candidates-300/README.md) | #300 r1 | 2026-08-12 | superseded by v2 | Round 1 of the same question; the trailing-affordance geometry contest |

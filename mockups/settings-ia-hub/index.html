@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings IA — hub + second-level pages</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-004/005) ──────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external
+     requests, so nothing here depends on the network. Frame geometry
+     (390px, 52pt TopBar, 44pt native header, 44pt row floor) descends from
+     mockups/candidates-300-v2/index.html.
+     NO emoji, no gradients, no blur, no radius > 8px except specced pills. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 72px;
+       display:flex;flex-direction:column;align-items:center}
+  .wrap{max-width:1480px;width:100%}
+
+  /* ── page furniture ─────────────────────────────────────────────────── */
+  .navbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 14px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+    position:sticky;top:0;z-index:20}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 11px}
+  .navbar a:hover{color:var(--chalk)}
+  .navbar .lbl{font:500 11px var(--mono);color:var(--chalk-faint);margin-right:4px}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:20px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0 0 8px;font-size:13px;line-height:1.65;color:var(--chalk-dim)}
+  .note ul{padding-left:18px}
+  .note b{color:var(--chalk);font-weight:600}
+  .note code{font:500 12px var(--mono);color:var(--chalk);background:var(--ink-3);
+             padding:1px 5px;border-radius:2px}
+  .note a{color:var(--ice)}
+
+  h2.sec{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase;margin:36px 0 6px;display:flex;align-items:center;gap:9px}
+  h2.sec::before{content:"";width:4px;height:20px;background:var(--ice);flex:none}
+  p.lede{margin:0 0 18px;font-size:13px;line-height:1.65;color:var(--chalk-dim);max-width:96ch}
+
+  .flag{border-radius:8px;padding:14px 18px;margin-bottom:20px;font-size:13px;line-height:1.65}
+  .flag.warn{background:rgba(245,158,11,.07);border:1px solid var(--warn);color:var(--chalk-dim)}
+  .flag.real{background:rgba(34,197,94,.06);border:1px solid var(--pos);color:var(--chalk-dim)}
+  .flag b{color:var(--chalk)}
+  .flag .tag{display:inline-block;font:600 11px var(--ui);letter-spacing:.08em;
+             text-transform:uppercase;padding:2px 7px;border-radius:2px;margin-right:8px}
+  .flag.warn .tag{background:var(--warn);color:var(--on-ice)}
+  .flag.real .tag{background:var(--pos);color:var(--on-ice)}
+
+  .rail{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;gap:10px;flex:none}
+  .cap{font:500 11px var(--mono);color:var(--chalk-faint);letter-spacing:.02em;
+       max-width:390px;line-height:1.6}
+  .cap b{color:var(--chalk-dim)}
+  .stamp{display:inline-block;font:600 11px var(--ui);letter-spacing:.08em;
+         text-transform:uppercase;padding:3px 8px;border-radius:2px;align-self:flex-start}
+  .stamp.capture{background:var(--pos);color:var(--on-ice)}
+  .stamp.recon{background:var(--warn);color:var(--on-ice)}
+
+  img.shot{width:390px;border:1px solid var(--line-strong);border-radius:22px;display:block}
+
+  /* ── phone frame ────────────────────────────────────────────────────── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none}
+  .phone.sheet{border-radius:22px;padding-top:26px;background:#05070a}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font:500 11px var(--mono);color:var(--chalk-dim)}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 12px;border-bottom:1px solid var(--line);background:var(--ink-0)}
+  .navhdr .t{font:600 15px var(--cond);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+  .navhdr .sq{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;
+              justify-content:center;color:var(--chalk-dim)}
+  .navhdr .sp{width:32px}
+  .sheettop{border-top-left-radius:8px;border-top-right-radius:8px;background:var(--ink-0)}
+  .body{padding:16px 16px 20px;height:702px;overflow:hidden;position:relative}
+  .body.short{height:520px}
+  .body.auto{height:auto}
+
+  /* ── Chalkline row primitives (mirrors SettingsScreen styles) ───────── */
+  .tick{display:flex;align-items:center;gap:8px;margin:24px 0 8px}
+  .tick:first-child{margin-top:0}
+  .tick::before{content:"";width:3px;height:13px;background:var(--ice);flex:none}
+  .tick span{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+
+  .row{display:flex;align-items:center;gap:12px;min-height:44px;padding:12px 0;
+       border-bottom:1px solid var(--line)}
+  .row .gr{flex:1;min-width:0}
+  .k{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk)}
+  .k.neg{color:var(--neg)}
+  .sub{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:4px}
+  .val{font:400 14px var(--ui);color:var(--chalk)}
+  .foot{font:400 13px/18px var(--ui);color:var(--chalk-faint);margin:4px 0 8px}
+
+  /* hub nav row — the NEW construction this lab proposes */
+  .nav{display:flex;align-items:center;gap:12px;min-height:56px;padding:11px 0;
+       border-bottom:1px solid var(--line)}
+  .nav .gr{flex:1;min-width:0}
+  .nav .t{font:600 16px/22px var(--ui);color:var(--chalk)}
+  .nav .p{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nav .p.none{color:var(--chalk-faint);font-style:italic}
+
+  .idblock{display:flex;align-items:center;gap:12px;padding:14px 0 16px;
+           border-bottom:1px solid var(--line)}
+  .idblock .who{flex:1;min-width:0}
+  .idblock .u{font:600 16px var(--ui);color:var(--chalk)}
+  .idblock .m{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .chip{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        padding:3px 8px;border-radius:2px;border:1px solid var(--warn);color:var(--warn)}
+  .chip.ok{border-color:var(--pos);color:var(--pos)}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;gap:12px}
+  .card .help{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .input{height:44px;background:var(--ink-2);border:1px solid var(--line-strong);
+         border-radius:4px;display:flex;align-items:center;padding:0 12px;
+         font:400 14px var(--ui);color:var(--chalk-faint)}
+  .btn{height:44px;background:var(--ice);color:var(--on-ice);border-radius:4px;
+       display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+  .btn.sec{background:transparent;border:1px solid var(--line-strong);color:var(--chalk)}
+
+  .seg{display:flex;gap:8px;margin:8px 0}
+  .seg div{flex:1;border:1px solid var(--line-strong);border-radius:4px;padding:9px 0;
+           text-align:center;font:400 13px var(--ui);color:var(--chalk-dim)}
+  .seg div.on{border-color:var(--ice);background:var(--ink-3);color:var(--ice);font-weight:600}
+  .segblk{padding:12px 0;border-bottom:1px solid var(--line)}
+
+  .sw{width:51px;height:31px;border-radius:999px;background:var(--ink-3);position:relative;flex:none}
+  .sw.on{background:var(--ice)}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;
+             border-radius:999px;background:var(--chalk)}
+  .sw.on::after{left:22px}
+
+  .steer{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px}
+  .steer .ends{display:flex;justify-content:space-between;font:600 11px var(--ui);
+               letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .steer .track{display:flex;align-items:center;margin:14px 2px}
+  .steer .dot{width:13px;height:13px;border-radius:999px;border:1.5px solid var(--chalk-dim);flex:none}
+  .steer .dot.on{border-color:var(--ice);background:var(--ice)}
+  .steer .seg2{height:1px;background:var(--line-strong);flex:1}
+
+  .signout{min-height:44px;padding:12px 0;border-top:1px solid var(--line);
+           border-bottom:1px solid var(--line);font:400 14px var(--ui);color:var(--neg);
+           display:flex;align-items:center;margin-top:24px}
+  .gap{height:32px}
+
+  /* callout pins */
+  .pin{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
+       border-radius:2px;background:var(--ice);color:var(--on-ice);
+       font:600 11px var(--mono);padding:0 4px;margin-right:7px;vertical-align:1px}
+  .pin.move{background:var(--flare)}
+  .pin.new{background:var(--pos)}
+  .keyrow{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.6;
+          color:var(--chalk-dim);margin-bottom:7px}
+  .keyrow b{color:var(--chalk);font-weight:600}
+
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;
+        color:var(--chalk-dim);line-height:1.5}
+  th{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);
+     border-bottom:1px solid var(--line-strong)}
+  td b{color:var(--chalk);font-weight:600}
+  td code{font:500 12px var(--mono);color:var(--chalk)}
+  .tag2{display:inline-block;font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+        padding:2px 6px;border-radius:2px;white-space:nowrap}
+  .tag2.mv{background:var(--flare);color:var(--on-ice)}
+  .tag2.nw{background:var(--pos);color:var(--on-ice)}
+  .tag2.same{border:1px solid var(--line-strong);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="navbar">
+  <span class="lbl">SETTINGS IA LAB</span>
+  <a href="#current">1 · Current</a>
+  <a href="#hub">2 · Hub</a>
+  <a href="#pages">3 · Second level</a>
+  <a href="#chrome">4 · Sheet → page</a>
+  <a href="#map">5 · What moved</a>
+</div>
+
+<div class="note">
+  <h1>Settings IA — hub page + second-level pages</h1>
+  <p><b>The question:</b> the shipped Settings screen is one modal sheet holding ~25 controls across
+  7 sections. Can it become a top-level hub plus second-level pages — and a real pushed page instead
+  of a half sheet — without making anyone hunt for a setting they used to be able to see?</p>
+  <p><b>Plan:</b> <code>docs/plans/settings-ia-hub/plan.md</code> · <b>Scope:</b>
+  <code>docs/plans/settings-ia-hub/scope.md</code></p>
+  <p><b>Operator decisions, 2026-08-18 — these bind the frames below:</b></p>
+  <ul>
+    <li><b>Sign out moves to the Account page</b>, not the hub. Placed under the identity block;
+      Delete account stays last, at the opposite end of the page.</li>
+    <li><b>Ranking and Trade values stay two pages</b>, grouped under one hub banner.</li>
+    <li><b><code>account.settings_v2</code> retires in Phase 4</b>, same wave.</li>
+  </ul>
+</div>
+
+<div class="flag real">
+  <span class="tag">Capture</span>
+  <b>The "current" frames in §1 are real captures</b>, embedded per the mockups hard rule —
+  <code>screens/mobile/settings/*.png</code>, taken 2026-08-10 from the real app on FTF-iOS18
+  (release flags, profiles <code>standard</code> and <code>two-leagues</code>). Nothing in §1 is redrawn.
+</div>
+
+<div class="flag warn">
+  <span class="tag">Stale</span>
+  <b>Those captures predate three rows that are live today, and the screen library is frozen.</b>
+  D-056 (2026-08-15) retired the simulator including captures, so a refresh is out of policy —
+  <code>screens/</code> is frozen at 2026-08-11. <code>manifest.json</code> records
+  <code>source_sha256 ce7e7df0…</code> for <code>SettingsScreen.tsx</code>; the file on
+  <code>origin/main</code> today hashes <code>911c8f1e…</code>. Five commits touched it since the
+  capture, and one matters here: <b>3293f4a</b> (2026-08-12 platform-unlink incident) added
+  <b>Disconnect ESPN account</b> and <b>Disconnect MFL sign-in</b> to the Account section, and
+  <b>aa2e5e7</b> reworked the account-only path. So the real Account capture below shows
+  <i>Sleeper sending</i> but not the ESPN/MFL disconnect rows — the exact rows this proposal moves.
+  <b>Every frame in §2–§4 is a labelled reconstruction from source, not a capture.</b>
+</div>
+
+<!-- ══════════════════════════════ 1 · CURRENT ══════════════════════════ -->
+<h2 class="sec" id="current">1 · Current — one sheet, seven sections</h2>
+<p class="lede">Real captures. Note the presentation itself: the card starts below a gap with the
+screen behind it still visible at the top — <b>this is the half sheet</b>
+(<code>presentation: 'modal'</code>, RootNav.tsx:514). Its only exits are the ✕ added by feedback
+#130 and a swipe-down.</p>
+
+<div class="rail">
+  <div class="col">
+    <span class="stamp capture">Real capture</span>
+    <img class="shot" src="../../screens/mobile/settings/populated.png"
+         alt="Settings, populated state — Leagues, Ranking, Trade values">
+    <div class="cap"><b>populated.png</b> — profile <code>standard</code>. Top of the sheet:
+      LEAGUES (connect card, ESPN + MFL link rows) → RANKING (SteerSlider) → TRADE VALUES.
+      Everything above is one scroll.</div>
+  </div>
+  <div class="col">
+    <span class="stamp capture">Real capture</span>
+    <img class="shot" src="../../screens/mobile/settings/league-rows.png"
+         alt="Settings with two leagues — switch rows above the connect card">
+    <div class="cap"><b>league-rows.png</b> — profile <code>two-leagues</code>. The switch rows only
+      appear with 2+ leagues, which is why single-league users see the connect card first.</div>
+  </div>
+  <div class="col">
+    <span class="stamp capture">Real capture</span>
+    <img class="shot" src="../../screens/mobile/settings/account-section.png"
+         alt="Settings account section — verification, sending, export, delete, about">
+    <div class="cap"><b>account-section.png</b> — the finding in one frame. Identity, verification,
+      a platform credential, and both data-rights actions are one undifferentiated hairline list;
+      <b>DELETE ACCOUNT</b> is visually a peer of <i>Sleeper sending: Not connected</i>.
+      <b>Stale:</b> the ESPN and MFL disconnect rows now sit in this list too.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ 2 · HUB ═════════════════════════════ -->
+<h2 class="sec" id="hub">2 · Proposed — the hub</h2>
+<p class="lede">Six rows and nothing below them. Every row carries a <b>state preview</b>, which is
+what stops a hub from being a tax: the common question ("are notifications on?", "which stud tax am
+I on?") is answered without a drill-in. Preview values here are the captured
+<code>qa_standard</code> profile's real values wherever the capture proves them; the Notifications
+preview is illustrative — that state was never captured.</p>
+
+<div class="rail">
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Settings</div><div class="sp"></div>
+      </div>
+      <div class="body">
+        <div class="idblock">
+          <div class="who">
+            <div class="u">@qa_standard</div>
+            <div class="m">Signed in with Apple</div>
+          </div>
+          <span class="chip">Not verified</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <div class="tick"><span>Leagues</span></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Leagues</div>
+            <div class="p">QA Standard League + 1 more · Sleeper</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+
+        <div class="tick"><span>How the app works</span></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Ranking</div>
+            <div class="p none">Not chosen yet</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Trade values</div>
+            <div class="p">Stud tax: Market · Picks: Tier ladder</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+
+        <div class="tick"><span>Alerts</span></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Notifications</div>
+            <div class="p">3 of 4 on · Quiet hours 10p–8a</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+
+        <div class="tick"><span>Account</span></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Account &amp; data</div>
+            <div class="p">Apple · Not verified · Sign out</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+
+        <div class="tick"><span>About</span></div>
+        <div class="nav"><div class="gr">
+            <div class="t">Help &amp; about</div>
+            <div class="p">FAQ, privacy, terms · v1.13.2</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+    <div class="cap">Release build. A <b>Testing</b> row appears above nothing else in dev/tester
+      builds (<code>__DEV__ || testing.stage_users</code>, false in prod).</div>
+  </div>
+
+  <div class="col" style="max-width:520px">
+    <div class="note" style="margin:0">
+      <p><b>What the hub is doing, row by row</b></p>
+      <div class="keyrow"><span class="pin">1</span><span><b>Identity block, not a nav row.</b>
+        Who you are, whether you're verified, and a tap through to Account. The verification chip is
+        warn-bordered while unverified — the state the capture actually shows.</span></div>
+      <div class="keyrow"><span class="pin">2</span><span><b>Group banners are TickLabels</b>
+        (3px ice bar + Archivo 600 11 UPPER), the same primitive the shipped screen uses for section
+        headers. Ranking and Trade values sit under one banner so they read as related without being
+        merged into one page.</span></div>
+      <div class="keyrow"><span class="pin">3</span><span><b>Nav-row title is 16px sentence case</b>
+        (<code>type.title</code>), not the 11px uppercase <code>type.label</code> that shipped rows
+        use for their key. With a 13px preview underneath, a label-styled title would be smaller
+        than its own subtitle. This is a <b>new construction and needs a spec row in
+        <code>docs/design/components.md</code> § Navigation</b> before it ships — flagged in the
+        plan, not decided here.</span></div>
+      <div class="keyrow"><span class="pin">4</span><span><b>"Not chosen yet" is rendered faint and
+        italic</b> — the honest-empty case. Plan rule: a preview that isn't known for free isn't
+        rendered at all. A settings page that lies about a setting is worse than one that says
+        nothing.</span></div>
+      <div class="keyrow"><span class="pin">5</span><span><b>Nothing below the last row.</b> Sign
+        out lives on Account now (operator decision), so the hub is purely navigational and fits one
+        screen with no scroll — the first time Settings has.</span></div>
+      <p style="margin-top:14px"><b>Cost of the previews:</b> zero network. Leagues and Ranking read
+      the session store; Trade values and Notifications read the React Query cache if it's already
+      resident; version comes from <code>expo-constants</code>. Opening Settings goes from six
+      queries plus two fetches to none.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ 3 · SECOND LEVEL ════════════════════════ -->
+<h2 class="sec" id="pages">3 · Second level — five pages (+ Testing)</h2>
+<p class="lede">Each page owns its own queries, so a slow link-status call can never blank the whole
+of Settings the way <code>prefsQuery.isLoading</code> does today (SettingsScreen.tsx:750).
+<span class="pin move">M</span> marks a row that moved here from another section;
+<span class="pin new">N</span> marks something new.</p>
+
+<div class="rail">
+
+  <!-- Leagues -->
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Leagues</div><div class="sp"></div>
+      </div>
+      <div class="body">
+        <div class="tick"><span>Your leagues</span></div>
+        <div class="row"><div class="gr">
+          <div style="font:600 16px var(--ui)">QA Standard League</div>
+          <div class="sub"><span style="font-family:var(--mono)">12</span> teams</div></div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#56D9EC" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="row"><div class="gr">
+          <div style="font:600 16px var(--ui)">QA Second League</div>
+          <div class="sub"><span style="font-family:var(--mono)">10</span> teams</div></div></div>
+
+        <div class="tick"><span>Add a league</span></div>
+        <div class="card">
+          <div class="help">Paste a Sleeper league URL (or bare league ID) to sync it.</div>
+          <div class="input">sleeper.com/leagues/…</div>
+          <div class="btn">Connect</div>
+        </div>
+        <div class="row"><div class="gr">
+          <div class="k">Link an ESPN league</div>
+          <div class="sub">Read-only import: rankings, tiers, and trios work today.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr">
+          <div class="k">Link an MFL league</div>
+          <div class="sub">Read-only import: rankings, tiers, and trios work today.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+
+        <div class="tick"><span>Connected accounts</span></div>
+        <div class="row"><div class="gr">
+          <div class="k"><span class="pin move">M</span>Disconnect Sleeper sending</div>
+          <div class="sub">Connected — FTF can send trades you approve. Disconnecting deletes the stored token.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr">
+          <div class="k"><span class="pin move">M</span>Disconnect ESPN account</div>
+          <div class="sub">Connected — disconnecting deletes the stored ESPN sign-in cookies.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr">
+          <div class="k"><span class="pin move">M</span>Disconnect MFL sign-in</div>
+          <div class="sub">Signed in as qa_standard — disconnecting deletes the stored session cookie.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+    <div class="cap"><b>The biggest single fix.</b> Linking a platform and unlinking it are now the
+      same page. Today "Link an ESPN league" is under Leagues and "Disconnect ESPN account" is ~15
+      rows away under Account, with nothing connecting them.</div>
+  </div>
+
+  <!-- Ranking + Trade values stacked -->
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Ranking</div><div class="sp"></div>
+      </div>
+      <div class="body short">
+        <div class="tick"><span>Where the Rank tab opens</span></div>
+        <div class="steer">
+          <div class="ends"><span>We steer</span><span>You steer</span></div>
+          <div class="track">
+            <div class="dot"></div><div class="seg2"></div>
+            <div class="dot"></div><div class="seg2"></div>
+            <div class="dot"></div><div class="seg2"></div>
+            <div class="dot"></div><div class="seg2"></div>
+            <div class="dot"></div>
+          </div>
+          <div class="sub" style="margin:0">Not chosen yet — the Rank tab opens on the chooser until you pick.</div>
+        </div>
+        <div class="foot" style="margin-top:12px">Your trade suggestions are only as good as your
+          rankings — pick the flow you'll actually keep up with. Changing this re-points the Rank tab
+          immediately, not next launch.</div>
+      </div>
+    </div>
+    <div class="cap">One control, given room to explain itself. The plan keeps this separate from
+      Trade values: different question, and merging them recreates the flat-list problem at smaller
+      scale.</div>
+
+    <span class="stamp recon" style="margin-top:14px">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Trade values</div><div class="sp"></div>
+      </div>
+      <div class="body short">
+        <div class="tick"><span>Stud tax</span></div>
+        <div class="segblk">
+          <div class="seg"><div class="on">Market</div><div>Heavy</div><div>Off</div></div>
+          <div class="sub">Market — matches market consensus (recommended). Applies to the
+            calculator and trade suggestions.</div>
+        </div>
+        <div class="tick"><span>Pick pricing</span></div>
+        <div class="segblk">
+          <div class="seg"><div class="on">Tier ladder</div><div>Market</div></div>
+          <div class="sub">Tier ladder — every pick prices at its round's tier value (current
+            behaviour). Applies to the calculator and trade suggestions.</div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">Both segmented controls carry their real shipped copy. Each gets a TickLabel
+      here; today "Pick pricing" is an unbannered block hanging under the stud-tax row.</div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Notifications</div><div class="sp"></div>
+      </div>
+      <div class="body">
+        <div class="tick"><span>What we send</span></div>
+        <div class="row"><div class="gr">
+          <div class="k">Trade matches</div>
+          <div class="sub">New matches, counter-offers, league activity</div></div>
+          <div class="sw on"></div></div>
+        <div class="row"><div class="gr">
+          <div class="k">Weekly digest</div>
+          <div class="sub">Tuesday/Wednesday morning roundup</div></div>
+          <div class="sw on"></div></div>
+        <div class="row"><div class="gr">
+          <div class="k">Stay in the game</div>
+          <div class="sub">Occasional nudges if you've been away</div></div>
+          <div class="sw"></div></div>
+
+        <div class="tick"><span>Quiet hours</span></div>
+        <div class="row"><div class="gr">
+          <div class="k">Pause overnight (10pm – 8am)</div>
+          <div class="sub">Notifications will bundle into one summary at 8am local</div></div>
+          <div class="sw on"></div></div>
+        <div class="row"><div class="gr"><div class="k">Time zone</div></div>
+          <div class="val">America/New_York</div></div>
+        <div class="foot">Detected from this device</div>
+      </div>
+    </div>
+    <div class="cap">The one page where blocking on <code>GET /api/notifications/prefs</code> is
+      honest. Today that query gates the entire screen, so opening Settings to switch a league waits
+      on notification prefs.</div>
+  </div>
+
+  <!-- Account -->
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Account &amp; data</div><div class="sp"></div>
+      </div>
+      <div class="body">
+        <div class="tick"><span>Identity</span></div>
+        <div class="row"><div class="gr"><div class="k">Sleeper</div></div>
+          <div class="val">@qa_standard</div></div>
+        <div class="row"><div class="gr"><div class="k">Verification</div></div>
+          <div class="val">Not verified</div></div>
+        <div class="foot">Until you verify, anyone who knows your username could open a session that
+          sees this board — verifying locks it to you.</div>
+        <div class="row"><div class="gr">
+          <div class="k">Verify account</div>
+          <div class="sub">Prove you own this Sleeper account to protect your ranks.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="signout" style="margin-top:16px">
+          <span class="pin move" style="margin-top:1px">M</span>Sign out</div>
+
+        <div class="tick" style="margin-top:28px"><span>Your data</span></div>
+        <div class="row"><div class="gr">
+          <div class="k">Download my data</div>
+          <div class="sub">Export everything we store about you as a JSON file.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr">
+          <div class="k neg">Delete account</div>
+          <div class="sub">Permanently delete your account and all of its data.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+    <div class="cap"><b>Sign out sits with the identity it terminates; Delete account stays last,
+      under Your data.</b> The two destructive controls are deliberately at opposite ends of the
+      page — stacking them adjacent invites a mis-tap on the irreversible one. The three platform
+      disconnects that used to sit between them are gone to Leagues.</div>
+  </div>
+
+  <!-- Help & about -->
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Help &amp; about</div><div class="sp"></div>
+      </div>
+      <div class="body short">
+        <div class="tick"><span>In-app guidance</span></div>
+        <div class="row"><div class="gr">
+          <div class="k"><span class="pin move">M</span>The Analyst</div>
+          <div class="sub">In-app guide bubbles on relevant screens. Turn off to dismiss The Analyst
+            everywhere.</div></div>
+          <div class="sw on"></div></div>
+
+        <div class="tick"><span>Help</span></div>
+        <div class="row"><div class="gr">
+          <div class="k">Help &amp; FAQ</div>
+          <div class="sub">How rankings, matches, and trade values work.</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr"><div class="k">Privacy Policy</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr"><div class="k">Terms of Use</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="row"><div class="gr">
+          <div class="k"><span class="pin new">N</span>Version</div></div>
+          <div class="val" style="font-family:var(--mono);font-size:13px">1.13.2 (47)</div></div>
+      </div>
+    </div>
+    <div class="cap">The Analyst moves here because it <i>is</i> the in-app help system — it belongs
+      beside the FAQ link, not in a one-toggle section of its own. <b>Version is new:</b> the
+      shipped Settings screen has no version or build row at all, which support triage needs.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ 4 · SHEET → PAGE ════════════════════════ -->
+<h2 class="sec" id="chrome">4 · Half sheet → real page</h2>
+<p class="lede">The chrome change, isolated. Left is the shipped modal (cropped from the real
+capture); right is the pushed page. This is not cosmetic — it's what removes the navigation hack at
+SettingsScreen.tsx:227.</p>
+
+<div class="rail">
+  <div class="col">
+    <span class="stamp capture">Real capture (cropped)</span>
+    <div class="phone" style="overflow:hidden;height:260px">
+      <img class="shot" src="../../screens/mobile/settings/populated.png"
+           style="border:0;border-radius:0;margin-top:0" alt="Modal header with close control">
+    </div>
+    <div class="cap"><b>Today.</b> The card floats below a gap with the screen behind it visible at
+      the top — the half sheet. Title centred, ✕ at the right (feedback #130, added because
+      swipe-down was the only exit and nobody found it).</div>
+  </div>
+
+  <div class="col">
+    <span class="stamp recon">Reconstruction</span>
+    <div class="phone">
+      <div class="status"><span>10:37</span><span>▮▮▮</span></div>
+      <div class="navhdr">
+        <div class="sq"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+        <div class="t">Settings</div><div class="sp"></div>
+      </div>
+      <div class="body" style="height:186px">
+        <div class="idblock" style="border:0">
+          <div class="who"><div class="u">@qa_standard</div>
+            <div class="m">Signed in with Apple</div></div>
+          <span class="chip">Not verified</span>
+        </div>
+      </div>
+    </div>
+    <div class="cap"><b>Proposed.</b> Full-height page from the top edge. Back chevron at the left
+      using the existing <code>HeaderBack</code> (RootNav.tsx:168) — the #151 pattern, needed
+      because the native back control is dead on iOS 26 when the previous screen runs
+      <code>headerShown: false</code>, which <code>Main</code> does. The ✕ is deleted with the
+      presentation, along with its testID <code>settings.close-btn</code>.</div>
+  </div>
+
+  <div class="col" style="max-width:480px">
+    <div class="note" style="margin:0">
+      <p><b>What the push buys, beyond looking right</b></p>
+      <div class="keyrow"><span class="pin">1</span><span><b>The nav hack goes away.</b> Every
+        outbound link today calls <code>goBack()</code> <i>then</i> <code>navigate()</code>, because
+        pushing onto a modal stack strands the user. Cost: back from Verify account lands on the
+        tabs, not on Settings. On a pushed page it's a plain navigate and the back stack
+        works.</span></div>
+      <div class="keyrow"><span class="pin">2</span><span><b>Feedback becomes possible.</b> #188
+        exempts modals from mounting <code>FeedbackFAB</code>, so Settings is one of the only
+        surfaces where a tester can't file in place. Pushed pages aren't exempt.</span></div>
+      <div class="keyrow"><span class="pin">3</span><span><b>Deep links get a destination.</b>
+        <code>ux.deeplink_router_v2</code> is on in prod; <code>settings/notifications</code> can
+        open a real page with a real parent instead of a modal with none.</span></div>
+      <div class="keyrow"><span class="pin move">!</span><span><b>The one regression risk.</b>
+        Testers on 1.13.2 dismiss Settings by swiping <i>down</i>. A pushed page swipes
+        <i>right</i>. That's a learned gesture and it's item 1 on the TestFlight
+        checklist.</span></div>
+      <p style="margin-top:14px"><b>#130 is not being reverted.</b> The ✕ was a real fix for a real
+      complaint about an undiscoverable exit; the plan removes the presentation that caused it, and
+      records that in <code>DECISIONS.md</code> so a later session doesn't re-add a modal citing
+      #130.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ 5 · WHAT MOVED ══════════════════════════ -->
+<h2 class="sec" id="map">5 · What moved</h2>
+<p class="lede">Nothing is dropped. Every row below is live in prod today; the two
+<span class="tag2 nw">new</span> entries are the only additions. This table is the contract a
+structural check (<code>mobile/tests/check-settings-ia.js</code>) asserts at build time — it's what
+catches a setting silently lost in the split.</p>
+
+<table>
+  <tr><th style="width:26%">Row</th><th style="width:15%">Today</th><th style="width:17%">Proposed</th><th>Note</th></tr>
+  <tr><td><b>Switch league rows</b></td><td>Leagues</td><td>Leagues</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Connect a league card</b></td><td>Leagues</td><td>Leagues</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Link an ESPN league</b></td><td>Leagues</td><td>Leagues</td><td><span class="tag2 same">unchanged</span> — still routes to LeaguePicker with the link sheet auto-opened</td></tr>
+  <tr><td><b>Link an MFL league</b></td><td>Leagues</td><td>Leagues</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Disconnect Sleeper sending</b></td><td>Account</td><td>Leagues</td><td><span class="tag2 mv">moved</span> link and unlink on one page</td></tr>
+  <tr><td><b>Disconnect ESPN account</b></td><td>Account</td><td>Leagues</td><td><span class="tag2 mv">moved</span> <i>not in the 2026-08-10 capture — added by 3293f4a</i></td></tr>
+  <tr><td><b>Disconnect MFL sign-in</b></td><td>Account</td><td>Leagues</td><td><span class="tag2 mv">moved</span> <i>same — added by 3293f4a</i></td></tr>
+  <tr><td><b>Rank-home SteerSlider</b></td><td>Ranking</td><td>Ranking</td><td><span class="tag2 same">unchanged</span> keeps immediate-apply</td></tr>
+  <tr><td><b>Stud tax</b></td><td>Trade values</td><td>Trade values</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Pick pricing</b></td><td>Trade values</td><td>Trade values</td><td><span class="tag2 same">unchanged</span> gains its own TickLabel</td></tr>
+  <tr><td><b>The Analyst</b></td><td>Guided tour</td><td>Help &amp; about</td><td><span class="tag2 mv">moved</span> it's the in-app help system</td></tr>
+  <tr><td><b>Denied-permission banner</b></td><td>Notifications</td><td>Notifications</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Trade matches · Weekly digest · Stay in the game</b></td><td>Notifications</td><td>Notifications</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Pause overnight · Time zone</b></td><td>Notifications</td><td>Notifications</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Identity rows · Link Apple · Sleeper · account-only link form</b></td><td>Account</td><td>Account &amp; data</td><td><span class="tag2 same">unchanged</span> also feeds the hub identity block</td></tr>
+  <tr><td><b>Verification · Verify account</b></td><td>Account</td><td>Account &amp; data</td><td><span class="tag2 same">unchanged</span> back now returns here, not to the tabs</td></tr>
+  <tr><td><b>Public profile</b></td><td>Account</td><td>Account &amp; data</td><td><span class="tag2 same">unchanged</span> <code>profiles.user_toggle</code> is <b>false</b> in prod — dark today, carried anyway</td></tr>
+  <tr><td><b>Download my data</b></td><td>Account</td><td>Account &amp; data</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Delete account</b></td><td>Account</td><td>Account &amp; data</td><td><span class="tag2 same">unchanged</span> stays last on its page</td></tr>
+  <tr><td><b>Help &amp; FAQ · Privacy · Terms</b></td><td>About</td><td>Help &amp; about</td><td><span class="tag2 same">unchanged</span></td></tr>
+  <tr><td><b>Test feedback · Test stages</b></td><td>Testing</td><td>Testing</td><td><span class="tag2 same">unchanged</span> hub row gated as today</td></tr>
+  <tr><td><b>Sign out</b></td><td>bottom of the sheet</td><td>Account &amp; data</td><td><span class="tag2 mv">moved</span> operator decision — two taps from the gear instead of one</td></tr>
+  <tr><td><b>Version + build</b></td><td>—</td><td>Help &amp; about</td><td><span class="tag2 nw">new</span> no version row exists today</td></tr>
+  <tr><td><b>FeedbackFAB</b></td><td>—</td><td>every page</td><td><span class="tag2 nw">new</span> #188; the modal was exempt</td></tr>
+</table>
+
+<div class="note" style="margin-top:28px">
+  <p><b>Not designed here, on purpose.</b> No native inset-grouped list styling — ADR-008 already
+  rejected that trade explicitly, so this stays Chalkline hairline rows throughout. No new settings
+  beyond the version row. No change to what any setting <i>does</i>: stud tax, pick pricing,
+  rank-home routing, notification prefs and every disconnect behave exactly as they do in 1.13.2.
+  No collapse-by-default groups — the #243 scroll audit is right that hiding settings a user came to
+  find is a regression, and grouping isn't hiding when the hub previews state.</p>
+</div>
+
+</div>
+</body>
+</html>
