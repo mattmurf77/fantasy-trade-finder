@@ -181,11 +181,17 @@ def _cfg(key: str, default: float) -> float:
 def serve_interleaved() -> bool:
     """Phase 5 (interleaved serving) vs Phase 4 (dark validation).
 
-    `bakeoff_serve_interleaved` defaults to 0.0 = DARK: all three arms
-    generate and log, only arm B is served, and the normal presentation stack
-    runs untouched — zero user-visible risk. The operator flips the knob to
-    1.0 (config only, no deploy) to light interleaved serving."""
-    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 0.0) >= 1.0
+    `bakeoff_serve_interleaved` defaults to 1.0 = INTERLEAVED — arm C's cards
+    reach users, drafted against arm B's, and the post-generation re-rankers
+    are bypassed so the merged deck keeps its draft order (§3.4 Channel 2).
+    Operator decision 2026-08-18 ("just include arm C now"): the dark phase is
+    skipped, so the default IS the served mode.
+
+    0.0 restores Phase 4 dark — all arms generate and log, only arm B is
+    served, the normal presentation stack runs untouched. That is the revert,
+    and it is config-only (no deploy):
+    `PUT /api/admin/config/bakeoff_serve_interleaved {"value": 0}`."""
+    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 1.0) >= 1.0
 
 
 def deck_limit() -> int | None:
