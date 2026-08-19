@@ -9,6 +9,23 @@
 
 ---
 
+> **2026-08-19 — a fourth arm exists (D-095).** This plan is titled "three-model"
+> and the count is now four: `backend/bakeoff_profiles.MODEL_CHALLENGER_PROFILE`
+> adds arm **D**, `challenger` — the landability challenger
+> ([PRD](../landability-challenger/PRD.md)). It is on the default roster
+> (`bakeoff_include_challenger` = 1), generated and logged, and **never served**
+> while `bakeoff_serve_interleaved` is 0.
+>
+> **Arm A is untouched by that work, deliberately.** The challenger was briefed
+> as "the new Arm A" and is not one: D-075 makes `MODEL_A_PROFILE` a pinned
+> constant with a golden, and overwriting it makes every comparison in this plan
+> unfalsifiable. `MODEL_A_PROFILE`, `model_a()`, `MODEL_A_REFERENCE_SHA` and the
+> golden's captured deck are byte-unchanged; the challenger's three new knobs are
+> **excluded** from arm A's profile with a reason in
+> [scope-phase2.md](scope-phase2.md), because their *defaults* are the pre-wave
+> engine. Read `deck_impressions.model_arm = 'baseline'` as the pre-G6
+> reconstruction, exactly as before — never as the challenger.
+
 ## 1. What "three models" precisely means
 
 | Arm | Name | What it is | How it is invoked |

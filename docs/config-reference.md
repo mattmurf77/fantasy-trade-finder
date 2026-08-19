@@ -57,6 +57,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Trade generation pipeline v2 (flag `trade_gen.v2` — dark)](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py)
   - [Trade presentment rules (flag `trade.presentment_rules`) — `trade_service._DEFAULT_CFG`, DB-seeded](#trade-presentment-rules-flag-tradepresentment_rules-trade_service_default_cfg-db-seeded)
   - [Bake-off arm A — `MODEL_A_PROFILE` + the R4 bypass (`backend/bakeoff_profiles.py`)](#bake-off-arm-a--model_a_profile--the-r4-bypass-backendbakeoff_profilespy)
+  - [Bake-off arm D — the landability challenger (`MODEL_CHALLENGER_PROFILE`)](#bake-off-arm-d--the-landability-challenger-model_challenger_profile)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -652,6 +653,9 @@ Both knobs shape the **baseline consensus seed values** (the DP→Elo pool seeds
 | `mutual_gain_cap` | 1500.0 | Normalization ceiling for the harmonic-mean term in the composite score |
 | `waiver_slot_cost` | 425.0 | Value cost per extra player received (FantasyCalc-derived ≈ rank-300 value) |
 | `shrink_pseudocount` | 4.0 | n₀ in confidence shrinkage `w = n / (n + n₀)` toward seed Elo |
+| `user_elo_shrink` | 1.0 (**live identity**) | **D-095, landability challenger (arm D).** `1` = the confidence blend above runs, exactly as it always has. `0` = `_shrink_user_elo` returns the user's board **raw** — the challenger's *shrink-neither* stance. The blend is user-only: the partner's `elo_ratings` are already used raw, so the live engine prices the two sides of a trade with different functions, and that asymmetry is why **86.9%** of boarded-pair 1-for-1s exist in only one direction. Shrink-*both* would need `comparison_counts` on `member_rankings`, which do not exist — hence a switch, not a symmetry fix. **Not a dial:** only `0` and `1` are meaningful, and `shrink_pseudocount = 0` is *not* a substitute (`w = n/(n+0)` is undefined at `n = 0`, the exact case that matters). At `0` the D-085 `placement_tier_clamp` also stops applying, because a raw personal Elo already *is* the user's stated number and there is no blend left to bound. Live default is the live identity: nothing changes until `model_challenger()` is entered. |
+| `consensus_both_ways` | 0.0 (**live identity**) | **D-095, arm D.** `0` = the consensus path keeps its hard `rv − gv ≥ user_gain_epsilon` sign test, i.e. only the direction where the **viewer wins** can emit. That single predicate is the viewer-first product identity on **84.5%** of served cards, and it is why the user receives more than they give on **86.3%** of them — an invariant, not a tilt. `≥ 1` drops the sign test so both directions of an even trade can surface, and additionally enumerates **1-for-2** as the sibling of 2-for-1 (production holds 6,635 `1x1` and 459 `2x1` packages and exactly **zero** `1x2`: partner-favourable consolidation is currently unrepresentable, not merely rare). Only safe alongside `consensus_fairness_floor` — see the next row. Note both sides are priced through the same `seed_value` functional, so user and partner surplus are exact negatives: a symmetric ε > 0 is unsatisfiable, and this knob deliberately does not attempt one. |
+| `consensus_fairness_floor` | 0.0 (**live identity**) | **D-095, arm D.** A floor on the consensus path's fairness bar, applied as `max(requested, floor)` — it can only ever *tighten*, so a client asking for 0.90 still gets 0.90. `0` = whatever threshold the caller passed, which in practice is often the client toggle's **0.50**. The challenger sets **0.75**, and the two knobs travel together on purpose: opening both directions at a 0.50 floor is a 2:1 user-pays flood, while at 0.75 the worst either side can be out is exactly `1 − 0.75` = **25%**. Measured offline over the 7,094-card audited window (post-D-091 pick horizon): 0.75 both-ways yields **200.5%** of the one-way baseline's card count, **61.2%** of them user-pays. Consensus path only — the divergence path has `fairness_floor_divergence` and a real dual-surplus gate. |
 | `placement_tier_clamp` | 1.0 | **D-085** — clamps the shrunk personal Elo of a player the user explicitly **PLACED** (a tier save / drag-reorder, i.e. an `_elo_overrides` pin) to the Elo band of the tier he was placed in (`RankingService.placement_bands()` → `tier_config.json`). Confidence shrinkage counts **comparisons**; a placement is an **assertion**, which `w` cannot see — so a placed player with few head-to-head votes was priced wherever consensus wanted him, up to a full tier away. Consensus still re-prices him *inside* his band, never out of it. Applied AFTER the blend, so a mis-placement stays correctable and the clamp's displacement decays to zero as `n` rises. **Never** clamps an unplaced player (that would freeze the board at consensus) or a pin below the lowest band (the #161 demotion Elo / anchor "no value" at 1100 — `tier_for_elo` returns `None`, and those are "unranked, pending placement" markers, not valuations). Personal-valuation path only: every fairness/surplus **gate** still prices the real package on `seed_value`, and `_value_uncertainty` is deliberately untouched. **0 disables** — byte-identical to the pre-D-085 blend. |
 | `range_base` | 0.35 | Value half-width fraction at n=0 comparisons (range-overlap fairness) |
 
@@ -784,7 +788,10 @@ Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` s
 | `bakeoff_lane_reallocate` | **1.0 (on)** | D-086 (2026-08-19). A lane quota the group's own supply cannot meet leaves **slots** empty, not just that lane's slots: before D-086 a group holding 7 value / 0 window cards served 5 and dropped 5. At `1`, once the nominal quota is taken each lane extends into the slots the other lane provably could not fill, **drawing only from its own bucket** — so no card ever occupies the other lane's slot and `deck_impressions.lane_slot` stays literally true (that is the whole difference from `bakeoff_fill_policy` = 1). `short` is computed against the nominal ask *before* reallocation and is untouched; the spill is recorded in `groups_json[key].realloc`. Measured on the 18 live runs of 2026-08-19: **13.8 cards/deck before, 16.0 after**, with every under-fill still on the record. `0` restores the pre-D-086 composition byte-for-byte, deploy-free. |
 | `bakeoff_include_baseline` | 0.0 (**arm A out**) | Arm roster. `0` (operator decision 2026-08-18) = arm `baseline` is not in the served rotation **and is not generated at all**; `1` restores it as a first-class arm, gaining it a `divergence` and a `consensus` group. Arm A leaves by configuration, never deletion: `MODEL_A_PROFILE`, `model_a()`, the arm-A golden and the knob-inventory guard all stay in the tree and keep passing, so this is a one-knob, no-deploy round trip. It is also the cheapest half of the fan-out budget — arm A was the **slowest** arm (4.19 s of the 7.36 s three-arm fixture; its profile zeroes every gate, so more candidates survive). Note the interaction: at `1` there are five groups' worth of composition (50 cards) against a 30-card `bakeoff_deck_limit`, so raise the cap or lower `bakeoff_group_size` too. |
 
-**Kill values that restore Phase 3 exactly:** `bakeoff_group_size` = 0, `bakeoff_deck_limit` = 0, `bakeoff_include_baseline` = 1 — the uncapped three-arm team draft with no group composition. Asserted, not assumed (`test_bakeoff_composition.py::test_phase3_kill_values_restore_the_uncapped_three_arm_draft`).
+| `bakeoff_include_challenger` | 1.0 (**arm D in**) | Arm roster (D-095, [PRD](plans/landability-challenger/PRD.md) §5 A1). `1` = arm `challenger` — the **landability challenger** — is generated, attributed and logged on every organic bake-off job, gaining a `divergence` and a `consensus` group. `0` restores the exact pre-D-095 roster with no deploy, and gives back the arm's whole cost: one extra full `generate_trades` per job, on the same sequential thread. **It is generated, not served.** `bakeoff_serve_interleaved` is 0, so users still see arm `current`; lighting interleaved serving is a separate operator decision. Never confuse this arm with `baseline` — see the arm-D section below. |
+| `bakeoff_include_gen_v2` | 1.0 (**arm C in**) | Arm roster (D-095). `0` drops arm `gen_v2` so the head-to-head is `current` vs `challenger` alone. **Composition only** — it does not change `backend/trade_gen_v2.py`, which is out of the challenger's scope. Useful because arm C currently forfeits everything it generates (see `bakeoff_serve_interleaved`), so its slots are pure deck shrinkage. |
+
+**Kill values that restore Phase 3 exactly:** `bakeoff_group_size` = 0, `bakeoff_deck_limit` = 0, `bakeoff_include_baseline` = 1, `bakeoff_include_challenger` = 0 — the uncapped three-arm team draft with no group composition. Asserted, not assumed (`test_bakeoff_composition.py::test_phase3_kill_values_restore_the_uncapped_three_arm_draft`).
 
 **`trade.lanes` is load-bearing while the bake-off runs.** The value/outlook split reads `TradeCard.lane`, which only `trade.lanes` stamps. With that flag off no card carries a lane, every group's pool is wholly unlabelled, and the split goes inert for every group (top-N by arm rank, `groups_json[key].lane_split_active: false`). The deck still fills — but the value/outlook comparison is answering nothing. Do not flip `trade.lanes` off during a bake-off.
 
@@ -931,6 +938,63 @@ moves. That is deliberate: a new knob is a new way for arm A to stop being the
 pre-wave engine. Add its kill value to `MODEL_A_PROFILE` and re-capture the
 golden, or record in the scope block why it is excluded — then update the
 inventory. Never re-capture the golden just to make a failure go away.
+
+### Bake-off arm D — the landability challenger (`MODEL_CHALLENGER_PROFILE`)
+
+**Also not a knob — a second pinned set, and emphatically *not* a replacement
+for arm A.** Spec: [plans/landability-challenger/PRD.md](plans/landability-challenger/PRD.md).
+Decision: **D-095**.
+
+The live finder is a market-even engine that shows only the side where the
+viewer wins, then ranks that side by the biggest name. That is a product
+choice, not a bug — KTC and Dynasty Daddy print both sides of an even trade;
+we print the steal. Arm D asks the other question of the same engine:
+
+> show trades two sides could both take — even on consensus, dual-surplus on
+> boarded pairs — and stop ranking the most lopsided star deal first.
+
+It is a thread-local **config overlay** on the live v1/v3 path, entered as
+`with model_challenger():`. Nine keys; the three new ones default to the live
+identity, the other six are existing knobs whose live defaults are untouched:
+
+| | Key | Live | Arm D | Why |
+|---|---|---:|---:|---|
+| generation | `user_elo_shrink` | 1.0 | **0.0** | shrink neither board (the partner's is already raw) |
+| generation | `consensus_both_ways` | 0.0 | **1.0** | drop the `rv ≥ gv` sign test; enumerate 1-for-2 |
+| generation | `consensus_fairness_floor` | 0.0 | **0.75** | the brake that makes both-ways safe (worst case 25% out) |
+| generation | `need_gate_min_value` | 200 | **0.0** | R5 off — it hard-kills laterals with no partner-need term |
+| ranking | `tier_mult_elite` | 1.60 | **1.15** | live tier span is 4.57× against fairness's 2.00×, so the |
+| ranking | `tier_mult_starter` | 1.25 | **1.08** | biggest name outranks balance: an elite card leads a |
+| ranking | `tier_mult_solid` | 1.00 | **1.00** | perfectly even solid one at fairness 0.625, i.e. while |
+| ranking | `tier_mult_depth` | 0.55 | **0.90** | taking 60% more than it gives. The arm-D ladder spans |
+| ranking | `tier_mult_bench` | 0.35 | **0.80** | 1.44×, moving that crossover to fairness 0.870 |
+
+**Three properties are load-bearing, and each is a test, not a claim.**
+
+1. **Arm B does not move.** The three new keys default to the live identity, so
+   with the overlay unentered the live engine is byte-identical. Proved by
+   goldens in `backend/tests/test_bakeoff_challenger.py` captured at the
+   `origin/main` commit *before* the knobs existed — code that had never heard
+   of them.
+2. **Arm A does not move.** The challenger is a **fourth arm**, not a new arm
+   A. `MODEL_A_PROFILE`, `model_a()` and the arm-A golden's captured deck are
+   unchanged; the new keys are *excluded* from that profile with a written
+   reason in [plans/three-model-bakeoff/scope-phase2.md](plans/three-model-bakeoff/scope-phase2.md),
+   because their **defaults are the pre-wave engine** and pinning a kill value
+   would change arm A rather than preserve it.
+3. **No user sees it.** `bakeoff_serve_interleaved` stays 0, so the arm
+   generates, attributes (`deck_impressions.model_arm = 'challenger'`) and
+   logs (`bakeoff_runs.arms_json`, `groups_json`, `config_json`) while arm
+   `current` is what is served.
+
+**No R4 bypass.** Arm A bypasses the windowless awaiting/matched exclusion
+because R4 postdates its reference SHA and has no kill knob. Arm D has no such
+excuse — re-serving a trade the user already has pending is not a more
+landable trade — so `r4_bypassed()` is False inside `model_challenger()`.
+
+**Never spell this arm `baseline`.** `model_arm` is a stored column; if the
+two ever shared a value, neither run would be readable afterwards. Docs may
+call it "arm D"; code calls it `challenger`.
 
 ### Dismiss cooldown (D-067) — `backend/server.py` session_init + swipe route
 

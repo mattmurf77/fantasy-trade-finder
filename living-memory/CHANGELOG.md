@@ -10,6 +10,29 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — Bake-off arm D: the landability challenger (dark, not merged)
+
+**Branch `feat/bakeoff-arm-a-challenger` off `origin/main` `50e0451`. Not pushed.**
+[D-095](DECISIONS.md) · [PRD](../docs/plans/landability-challenger/PRD.md).
+
+A fourth bake-off arm, `challenger`, running the live v1/v3 engine under a
+thread-local overlay: shrink neither board, drop the consensus `rv ≥ gv` sign
+test (so an even trade can surface in the direction the **partner** gains),
+enumerate 1-for-2, floor consensus fairness at 0.75, R5 off, tier ladder
+compressed 4.57× → 1.44× so fairness can outrank the biggest name.
+
+**It was briefed as "the new Arm A" and is deliberately not one.** D-075 pins
+arm A as a constant with a golden; overwriting it makes the bake-off
+unfalsifiable. Arm A, its profile and its captured deck are untouched — the
+new knobs are *excluded* from `MODEL_A_PROFILE` because their **defaults are
+the pre-wave engine**.
+
+Dark: `bakeoff_serve_interleaved` stays 0, users still see arm `current`.
+`bakeoff_include_challenger` = 0 is the no-deploy kill. Arm B byte-identical,
+proved by goldens captured at the pre-knob commit. 3524 → **3554 passed, 1
+skipped**; 13 sabotages, 13 caught.
+
+---
 ## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers
 
 **Flag flip only — no code, no build.** `account.settings_hub` false → **true** in
