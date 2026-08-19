@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
 - [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
 - [2026-08-18b — Follow-on batch status (3/4/5 built; 6/7 resolved)](#2026-08-18b--follow-on-batch-status-345-built-67-resolved)
@@ -24,6 +25,25 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume
+
+Built and unmerged on **`fix/likes-you-quality-gates`** ([D-096](DECISIONS.md),
+[scope](../docs/plans/likes-you-quality-gates/scope.md)). *Why now:* it is a live user-facing defect —
+115 of 198 served likes-you cards show the user paying, at deck position 1–3, measured in prod.
+
+1. **Operator: run the 10-step TestFlight checklist + the 2-step rollback rehearsal**
+   ([checklist](../docs/plans/likes-you-quality-gates/testflight-checklist.md)). Only runtime evidence
+   available under [D-056](DECISIONS.md). Step 2 — *no LIKES YOU card's value bar tilts against you* —
+   is the whole change.
+2. **Push + merge**, then confirm the deploy. Nothing is pushed.
+3. **Watch the surface volume for a week** on `deck_impressions.features_json` (`likes_you: true`):
+   user-pays share must read **0**, and the count of likes-you impressions should fall to roughly 40%
+   of its prior level, not to zero. If it does hit zero for real users, the lever is
+   `likes_you_min_user_gain`, **not** the gate level — level 1 and level 2 scored identically on the
+   measured population, so the floor is what bites, not R1.
 
 ---
 

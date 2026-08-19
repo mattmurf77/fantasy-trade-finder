@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
 - [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
@@ -31,6 +32,57 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed
+
+### Where I stopped
+
+Complete and committed on **`fix/likes-you-quality-gates`** (worktree off `origin/main` `50e0451`).
+**Not pushed, not merged.** `pytest backend/tests` **3540 passed, 1 skipped** against a re-measured
+`50e0451` baseline of **3524 passed, 1 skipped**. Backend-only — zero mobile/web/extension files.
+[D-096](DECISIONS.md), [scope](../docs/plans/likes-you-quality-gates/scope.md),
+[code-walk](../docs/plans/likes-you-quality-gates/code-walk.md).
+
+### What was wrong, measured
+
+The likes-you injector shipped cards through **zero** quality gates by recorded decision
+([D-055](DECISIONS.md) sub-decision (5) / Q-G6-1). Its only floor was measured on **raw summed**
+values while the value bar renders **package-adjusted** ones — the mismatch is how a −500 floor
+rendered a −5,571 card, at deck position 1–3. Read-only prod: **115 of 198** served likes-you
+impressions showed the user paying.
+
+### The finding that shaped the fix
+
+The audit's P0 said "run R1". **Blanket R1 kills 58 of the 83 cards that clear the floor, and all
+58 are cards where the USER is being overpaid** — the largest a **+6,325 one-for-one the
+counterparty had already liked**. That is the best card the system can make. So R1 runs
+**directionally** (viewer-heavier side only), which kills 0 additional cards but closes the
+raw-vs-package sign-divergence corner. A fairness bar was rejected on the same measurement.
+
+### What is owed
+
+1. **The operator TestFlight checklist is UNRUN** — `docs/plans/likes-you-quality-gates/testflight-checklist.md`,
+   10 steps + a 2-step rollback rehearsal. Under D-056 it is the only runtime evidence this gets,
+   and **step 2 (the value bar never tilts against the user on a LIKES YOU card) is the whole point**.
+2. **Push + merge.** Nothing is pushed. Branch tip is in the ledger entry.
+3. **Watch the surface volume after merge.** Measured cost is 198 → 83 impressions (41.9%) and
+   51 → 16 distinct cards. If likes-you cards effectively vanish for real users, the intermediate
+   `likes_you_gate_level = 1` (floor only, no presentment) is the first thing to try — but note
+   level 1 and level 2 scored *identically* on the measured population, so a vanishing surface is
+   the floor's doing, not R1's, and the honest lever is `likes_you_min_user_gain`.
+
+### Landmines
+
+- **`likes_you_gate_level = 0` is the deploy-free revert, one value.** `likes_you_min_user_delta`
+  keeps its name and −500 default *precisely* so that revert is exact — do not "tidy" it away.
+- **A sibling session owns `backend/trade_service.py` (bake-off arm A), `backend/bakeoff_profiles.py`
+  and the bake-off tests.** This branch touches `trade_service.py` `_DEFAULT_CFG` only (+14 lines,
+  two keys, no logic) and adds two words to `_PINNED_KNOBS` in `test_bakeoff_arm_a_golden.py`.
+  `bakeoff_profiles.py` is untouched. Expect a trivial conflict in those two spots and nowhere else.
+- Arm A is **deliberately not pinned** to level 0 — the injector is a serving-layer post-process no
+  generator reads; reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
+
+---
 
 ## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
 

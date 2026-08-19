@@ -403,6 +403,20 @@ _DEFAULT_CFG: dict[str, float] = {
     # value on is an insult, not an opportunity. Set very negative to
     # restore pre-D-055 behavior (no floor).
     "likes_you_min_user_delta": -500.0,
+    # D-096 (2026-08-19) — the likes-you quality ladder, read by
+    # server._likes_you_gate_level. 0 = pre-D-096 behaviour EXACTLY (the
+    # raw-sum floor above, no presentment gates); 1 = the floor moves to
+    # `likes_you_min_user_gain` on PACKAGE-ADJUSTED values (the numbers the
+    # TradeValueBar renders); 2 = level 1 plus directional R1 (overpay_ok)
+    # and filler_ok. `likes_you_gate_level = 0` is the one-value deploy-free
+    # revert; `likes_you_min_user_delta` above is deliberately unchanged so
+    # that revert is exact.
+    "likes_you_gate_level":        2.0,
+    # The floor at gate level >= 1, in package-adjusted v2 value space.
+    # 0.0 == `user_gain_epsilon`: the identical rule the gated generators
+    # already apply to the consensus package delta, so the likes-you
+    # surface now obeys the same user-gain rule as the rest of the deck.
+    "likes_you_min_user_gain":     0.0,
     # Deck composition (verified against real data 2026-06-09)
     "v3_diversity_max_overlap":   0.4,   # max asset Jaccard between two cards of one pair
     "consensus_score_scale":      0.3,   # consensus fallback cards rank below divergence finds

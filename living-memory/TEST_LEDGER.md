@@ -10,6 +10,88 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19h — likes-you injector quality gates (D-096, NOT SHIPPED, on `fix/likes-you-quality-gates`)
+
+**Branch:** `fix/likes-you-quality-gates`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+No feature flag: `trade.likes_you` already gates the surface. Knob-only, default **ON** at
+`likes_you_gate_level = 2` (its OFF state, level 0, is the defect).
+Scope + code-walk + checklist: [docs/plans/likes-you-quality-gates/](../docs/plans/likes-you-quality-gates/).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q -p no:randomly` | **3540 passed, 1 skipped, 0 failed** |
+| Baseline on the same branch point (`50e0451`), before any edit | **3524 passed, 1 skipped** — reproduced exactly, in a separate detached worktree |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The 10-step operator TestFlight checklist + 2-step rollback rehearsal are UNRUN.** |
+
+**Net +16 tests, all new** (`backend/tests/test_likes_you_gates.py`): the raw-vs-package unit split
+(including a guard on the fixture itself, so the file cannot silently stop proving anything), the
+gate-level ladder, `likes_you_gate_level = 0` as an exact revert, directional R1 in both directions,
+`filler_ok` and its documented kill switch, the no-cap-slot-consumed semantics, that a gated-out
+*existing* card keeps its organic deck position, that the card's bar values are the same objects the
+gate compared, knob defaults, garbage-level clamping, `likes_you_min_user_gain == user_gain_epsilon`,
+and a pin that R2/R3/R5 are deliberately NOT run.
+
+**4 pre-existing tests touched, none loosened:**
+- `test_trade_match_flow.py` ×3 (`..._floor_blocks_below_threshold_injection`,
+  `..._floor_passes_above_threshold_injection`, `..._floor_knob_override_respected`) — the D-055
+  floor block is **kept in full** and re-pinned to `likes_you_gate_level = 0` via `_inject_floor_deck`,
+  so every assertion in it now stands guard over D-096's documented revert path instead of being
+  deleted. Two docstrings updated to say which level they describe.
+- `test_bakeoff_arm_a_golden.py` ×1 — the two new knobs added to `_PINNED_KNOBS`. Arm A is
+  **not** pinned to level 0; the exclusion and its reason are recorded in
+  [`scope-phase2.md`](../docs/plans/three-model-bakeoff/scope-phase2.md) § Excluded. `bakeoff_profiles.py`
+  was **not** touched (a sibling session owns it).
+
+### Prod measurement (READ-ONLY, `SET TRANSACTION READ ONLY`, SELECT only)
+
+Population: **198 served likes-you impressions / 51 distinct cards**, one league, 2026-08-11 → 08-19
+(`trade_impressions` for the asset ids, `deck_impressions.features_json` for prod's own logged bar
+values). Per-card consensus values reconstructed from `player_value_history` daily snapshots +
+`draft_picks.pool_value`; **reconstruction validated at median abs error 2.9** against 83 rows where
+prod logged both the assets and the bar values, and it reproduces the audit's worst card to the
+decimal (−6,019.4 on the recorded values).
+
+| Option | Impressions surviving | Distinct cards | User-pays | Worst bar delta |
+|---|---|---|---|---|
+| **As served today** | 198 / 198 | 51 / 51 | **115** | **−5,571** |
+| Package floor ≥ 0 only (level 1) | 83 (41.9%) | 16 | 0 | +32 |
+| **Package floor ≥ 0 + directional R1 + `filler_ok` (level 2, SHIPPED)** | **83 (41.9%)** | **16** | **0** | **+32** |
+| Package floor ≥ 0 + **blanket** R1 | 25 (12.6%) | 9 | 0 | +32 |
+| Package floor ≥ 0 + blanket R1 + fairness ≥ 0.75 | 25 (12.6%) | 9 | 0 | +32 |
+| Fairness ≥ 0.75 alone | 115 (58.1%) | — | 90 | −2,436 |
+| R1 (blanket) alone | 120 (60.6%) | — | 95 | −2,136 |
+| `filler_ok` alone | 191 (96.5%) | — | 108 | −5,571 |
+
+Restricted to the 145 impressions served **after** the D-055 floor went live (2026-08-15), where the
+old floor was already active: as served 145, user-pays **76**, worst **−4,672**; level 2 → **69
+(47.6%)**, 15 distinct, user-pays **0**. Loosening the package floor to −500 was measured and
+rejected: 74 survivors instead of 69, but 60 of them still show the user paying.
+
+**The finding that shaped the design:** blanket R1 kills 58 of the 83 floor-surviving cards and
+**58 of 58 of those kills are cards where the USER is the one being overpaid** — the largest a
+**+6,325 one-for-one that the counterparty had already liked**. Directional R1 kills **0** of the 83.
+On the post-D-055 slice the same shape holds: 55 of 69, all 55 user-favourable, 0 killed directionally.
+
+### Sabotage tests (D-056 requirement) — all reverted
+
+| Mutation | Result |
+|---|---|
+| Floor compared against the raw delta again (undo the unit fix) | 2 failed |
+| Directional guard `g > r` removed (blanket R1) | 4 failed |
+| `if gate_level <= 0:` → `if False:` (level 0 stops reverting) | 4 failed, incl. all 3 re-pinned D-055 tests |
+| `filler_ok` call replaced with `return True` | 1 failed |
+| Reverted | 49 passed |
+
+**Files touched:** `backend/server.py`, `backend/trade_service.py` (`_DEFAULT_CFG` only, +14 lines,
+no logic), `backend/tests/test_likes_you_gates.py` (new), `backend/tests/test_trade_match_flow.py`,
+`backend/tests/test_bakeoff_arm_a_golden.py`, `docs/config-reference.md`,
+`docs/plans/three-model-bakeoff/scope-phase2.md`, `docs/plans/likes-you-quality-gates/` (new),
+`living-memory/{DECISIONS,LLD,TEST_LEDGER,CHANGELOG,NEXT,HANDOFF}.md`.
+
+---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 
 **Branch:** `fix/pick-horizon`, branched from `origin/main` `7462c23`. **Not pushed, not merged.**

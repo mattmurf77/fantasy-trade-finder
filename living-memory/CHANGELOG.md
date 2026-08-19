@@ -10,6 +10,32 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads
+
+**Not shipped — committed to `fix/likes-you-quality-gates`, not pushed, not merged.**
+
+`server._inject_likes_you_cards_impl` faced no quality gates by design ([D-055](DECISIONS.md)
+sub-decision (5) / Q-G6-1). Its only floor was measured on **raw summed** values while the
+value bar renders **package-adjusted** ones — so a −500 floor shipped a −5,571 card, pinned
+to deck position 1–3. Read-only prod measurement: **115 of 198** served likes-you
+impressions showed the user paying, vs. effectively none on the gated deck.
+
+[**D-096**](DECISIONS.md) reverses the exemption: the floor moves into package-adjusted
+units at a default of **0.0** (= `user_gain_epsilon`, the gated path's own rule), and R1
+`overpay_ok` + `filler_ok` run at level 2. **R1 runs DIRECTIONALLY** — blanket R1 was
+measured and rejected because it kills 58 of the 83 floor-surviving cards and **all 58 are
+cards where the USER is being overpaid**, the largest a +6,325 one-for-one the counterparty
+had already liked. Fairness/R2/R3/R5 excluded with stated reasons and a pinning test.
+
+Measured cost: **198 → 83 impressions (41.9%), 51 → 16 distinct cards, user-pays 115 → 0,
+worst card −5,571 → +32.** One knob, `likes_you_gate_level`; **`= 0` restores today's
+behaviour exactly, deploy-free**, which is why `likes_you_min_user_delta` keeps its −500
+default. `pytest backend/tests` 3524 → **3540 passed, 1 skipped**. Evidence per D-056:
+16 unit tests, a code-walk proof, 4 sabotage runs, and an UNRUN operator TestFlight
+checklist. Arm A of the bake-off is deliberately not pinned (serving-layer post-process);
+`bakeoff_profiles.py` untouched.
+
+---
 ## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers
 
 **Flag flip only — no code, no build.** `account.settings_hub` false → **true** in
