@@ -22,7 +22,7 @@ Plan + scope: [docs/plans/settings-ia-hub/](../docs/plans/settings-ia-hub/). Cod
 | `npx tsc --noEmit` (mobile) | **exit 0** |
 | `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
 | `mobile/tests/check-*.js` (whole suite) | **59 passed, 0 failed** — includes the 3 new settings checks |
-| `pytest backend/tests -q` | **3399 passed, 1 skipped, 5 failed** — all 5 reproduce on a clean `origin/main` with zero local changes. **Pre-existing, not from this branch.** See below. |
+| `pytest backend/tests -q` | **3399 passed, 1 skipped, 5 failed** — all 5 reproduce on a clean `origin/main` with zero local changes. **Pre-existing, not from this branch.** See below. Final run after the fixture fix in the paragraph below; an intermediate run was 7 failed. |
 | Maestro / simulator | n/a — retired by D-056. Replaced by the 3 structural checks + the code-walk proof. |
 | Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
 | **Runtime evidence** | **NONE. The plan §9 operator TestFlight checklist is UNRUN.** |
@@ -58,6 +58,19 @@ three in `test_suggestion_telemetry.py`, and
 (expects Elo 1502.0 ± 0.001502, obtains 1500.0 — a re-posted swipe not applying its rating update).
 Confirmed pre-existing by stashing this branch's flag change and re-running. This branch DID add the
 one missing mirror entry its own flag required.
+
+**A regression this branch caused, caught by running the full suite rather than trusting an earlier
+run.** Registering `account.settings_hub` initially mirrored it into `backend/tests/fixtures/flags/release.json`
+only. Two other fixtures — `onboarding-v2.json` and `profiles-on.json` — are asserted to be
+**key-set-equal** to release (`assert set(release) == set(profiles_on)`, and the onboarding equivalent),
+so the single new key broke both: 5 failures became 7. Fixed by mirroring the key into those two
+fixtures as well. `all-on.json` (42 keys), `release-300.json` and `release-espn-send-off.json` (162 keys,
+already missing 10 other keys) are deliberately NOT key-set-equal and no test requires them to be — they
+were left alone rather than "fixed" into scope creep.
+
+The lesson worth keeping: a new flag key is not registered until every fixture that asserts key-set
+equality with `release.json` carries it. `git grep -l "account.settings_v2" backend/tests/fixtures/`
+finds them.
 
 **Correction to this branch's own record:** the phase-0 commit message claimed the full-screen
 `prefsQuery.isLoading` gate "is gone". That is true only on the hub path. The gate is still live at

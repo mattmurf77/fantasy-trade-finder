@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Settings IA built on a branch, nothing merged; `main`'s red suite blocks every merge](#2026-08-19--settings-ia-built-on-a-branch-nothing-merged-mains-red-suite-blocks-every-merge)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
 - [2026-08-18 — Matchmaking engine rebuilt; standing handover doc is the entry point](#2026-08-18--matchmaking-engine-rebuilt-standing-handover-doc-is-the-entry-point)
 - [2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut](#2026-08-18--dismiss-cooldown-shipped-d-067-backend-only-no-build-cut)
@@ -29,6 +30,63 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — Settings IA built on a branch, nothing merged; `main`'s red suite blocks every merge
+
+*(This file holds ONE live entry, overwritten each session — see [`FORMAT.md`](FORMAT.md) § Retention.
+17 accumulated entries from 2026-08-11…18 were cleared here on 2026-08-19; their shipped content is
+in [`CHANGELOG.md`](CHANGELOG.md) and its `archive/`.)*
+
+### Where I stopped
+
+1. **Settings IA is built and green on `feat/settings-ia-hub`, 5 commits, unmerged.** Hub page +
+   seven second-level pages + twelve section modules under `mobile/src/screens/settings/`;
+   `account.settings_hub` registered **default OFF**; Settings flipped from `presentation: 'modal'`
+   to a pushed page ([D-079](DECISIONS.md)). Details: [CHANGELOG §2026-08-19](CHANGELOG.md).
+2. **Worktree:** `…/5c245f45-…/scratchpad/wt-settings-ia`. Not swept — once the branch's content is
+   verified on `origin/main`, ledger the tip sha per [`../docs/recovery/CLAUDE.md`](../docs/recovery/CLAUDE.md),
+   then `git worktree remove` and delete the branch. Capture, then delete, never the reverse.
+3. **Evidence run:** `tsc --noEmit` 0, `testid-lint.sh` OK, 59/59 assertions across the three new
+   `check-settings-*.js` suites, each mutation-verified. `pytest` was **not** green — see Blocked.
+
+### In flight / half-done
+
+1. **Phase 4 not started** — graduate `account.settings_hub`, delete both legacy branches, retire
+   `account.settings_v2`. Until then the flat list and its `prefsQuery.isLoading` full-screen gate
+   (`SettingsScreen.tsx:745`) are still in the binary.
+2. **Two promised doc updates still owed:** `living-memory/LLD.md` (settings route naming +
+   per-page query ownership) and `mobile/src/screens/CLAUDE.md` (the new subtree). Tracked in
+   [`../docs/plans/settings-ia-hub/scope.md`](../docs/plans/settings-ia-hub/scope.md) §4.
+3. **Zero runtime evidence.** Plan §9's 10-item operator TestFlight checklist is unrun, and under
+   [D-056](DECISIONS.md) it is the only runtime evidence mobile can get.
+
+### Blocked on
+
+1. **`origin/main` has 5 pre-existing backend test failures. CLAUDE.md's pre-ship gate requires
+   green CI, so this blocks merging this branch — and every other branch.** They reproduce on a
+   clean `origin/main` checkout and are nothing to do with the settings work:
+   `test_seed_ui_test_db.py::test_release_flags_mirror_features_json` (`trade.bakeoff` fixture drift
+   from `ecdbcb3`); three in `test_suggestion_telemetry.py`; one in
+   `test_trade_decision_idempotency.py` where a re-posted swipe expects Elo `1502.0` and gets
+   `1500.0`. **Nobody owns them.** Queued in [`NEXT.md`](NEXT.md).
+2. **Operator decision needed to graduate the flag** — the criterion is one TestFlight pass against
+   plan §9 with no P0, and no build has been cut.
+
+### Don't repeat
+
+1. **Do not re-add `presentation: 'modal'` to Settings citing feedback #130.** #130 was a real fix
+   for a real complaint, and this change removes the *presentation* that caused it — the back
+   chevron is the discoverable control #130 wanted. Re-adding the modal restores the
+   `navigateFromSettings` goBack-hack (F5) and re-exempts Settings from the feedback FAB (F6).
+   Reasoning: [D-079](DECISIONS.md).
+2. **The flag does not roll back the presentation.** `account.settings_hub` false restores the flat
+   list, not the modal or swipe-down-to-dismiss — that needs a build. Accepted by the operator
+   2026-08-19; the old "no deploy, no rebuild" claim is corrected in the scope block, but a stale
+   copy of it still sits in `docs/config-reference.md`'s flag row.
+
+---
+
+---
 
 ## 2026-08-18 — Dismiss cooldown SHIPPED (D-067); backend-only, no build cut
 

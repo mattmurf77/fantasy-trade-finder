@@ -38,7 +38,7 @@ states exist and when each was taken; this table is the name→surface map.
 | `league` | `LeagueScreen.tsx` | `rank-home` | `RankHomeScreen.tsx` |
 | `league-summary` | `LeagueSummaryScreen.tsx` | `record-picks` | `RecordPicksScreen.tsx` |
 | `leagues` | `LeaguePickerScreen.tsx` | `rookie-ranks` | `RookieRanksScreen.tsx` |
-| `manual-ranks` | `ManualRanksScreen.tsx` | `settings` | `SettingsScreen.tsx` |
+| `manual-ranks` | `ManualRanksScreen.tsx` | `settings` | `SettingsScreen.tsx` **†** |
 | `matches` | `MatchesScreen.tsx` | `signin` | `SignInScreen.tsx` |
 | `mock-draft` | `MockDraftScreen.tsx` | `tiers` | `TiersScreen.tsx` |
 | `onboarding` | `OnboardingScreen.tsx` | `trades` | `TradesScreen.tsx` |
@@ -49,6 +49,24 @@ Modal surfaces (`sheets-` prefix): `sheets-espn-link` (`EspnLinkSheet.tsx`),
 `sheets-feedback` (`FeedbackSheet.tsx`), `sheets-league-switcher`
 (`LeagueSwitcherSheet.tsx`), `sheets-rank-menu` (`TabNav.tsx` RankMenu),
 `sheets-trade-dna` (`TradeDnaSheet.tsx`).
+
+**† `settings` — doubly stale, and the source is no longer one file.** The four captures
+(`account-section`, `league-rows`, `loading`, `populated`) were taken **2026-08-10**, and two changes have
+landed since:
+
+- **`3293f4a`** (2026-08-12, "platform-unlink") added the user-facing ESPN/MFL disconnect rows. No capture
+  shows them.
+- **The settings-IA work** (2026-08-19, branch `feat/settings-ia-hub`, flag `account.settings_hub`) moved
+  Settings off `presentation: 'modal'` onto a pushed page and split it into a hub plus seven second-level
+  pages under `mobile/src/screens/settings/` (twelve section modules beneath that). `SettingsScreen.tsx` is
+  now **only the flag-off flat list**; on the flag-on path these captures depict a screen that no longer
+  exists in that shape — different presentation, different header control, different row set per page.
+
+What that does and does not mean: the PNGs remain **true captures of the build they were taken from**, which
+is what the library is for, and the flag is default OFF so the flag-off path is closer to them than the
+flag-on path is. But do not read them as the current surface, and do not request a refresh — the library is
+frozen under D-056 and there is no process to update it. For a mockup touching Settings, follow the
+reconstruction rule below and label it as a reconstruction.
 
 `screens/web/` is empty and reserved — see [`web/README.md`](web/README.md).
 

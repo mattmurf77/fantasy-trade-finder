@@ -27,6 +27,7 @@
 - [Bake-off attribution + hygiene seams (2026-08-18, trade.bakeoff)](#bake-off-attribution--hygiene-seams-2026-08-18-tradebakeoff)
 - [Presentation surfaces: parity-by-reuse, and the entry-by-optional-prop flag gate (2026-08-18, trades.presentation_v2)](#presentation-surfaces-parity-by-reuse-and-the-entry-by-optional-prop-flag-gate-2026-08-18-tradespresentation_v2)
 - [Placements vs comparisons: assertion and sample are different inputs (2026-08-19, D-085)](#placements-vs-comparisons-assertion-and-sample-are-different-inputs-2026-08-19-d-085)
+- [Settings tree: one route, two components, per-page query ownership (2026-08-19, account.settings_hub)](#settings-tree-one-route-two-components-per-page-query-ownership-2026-08-19-accountsettings_hub)
 
 ---
 
@@ -306,3 +307,34 @@ The placement tier clamp ([scope](../docs/plans/placement-tier-clamp/scope.md)) 
 - **The knob decides whether a placement map is consulted, not whether it is built.** `placement_bands()` is computed off the `RankingService` unconditionally and the kill switch lives at the point of use in `_shrink_user_elo`. This keeps the disable path a pure identity on the valuation (nothing upstream changes shape) and keeps the map available to any future consumer without re-plumbing.
 - **This convention does NOT extend to gates.** Per [Ranking vs gate](#ranking-vs-gate-what-a-term-may-judge-2026-08-18-engine-quality), a gate prices the real package on real consensus values. The clamp touches only the personal-valuation path, and `_value_uncertainty` — which feeds the range-overlap fairness gate — is deliberately left placement-blind, asserted via `inspect.signature` so adding a parameter fails CI. Wanting a gate to respect placements is an operator decision, not an implementation detail.
 
+---
+
+## Settings tree: one route, two components, per-page query ownership (2026-08-19, account.settings_hub)
+
+The Settings surface moved from one 1,712-line screen to a tree under `mobile/src/screens/settings/`
+([plan](../docs/plans/settings-ia-hub/plan.md)). Four conventions come out of it:
+
+- **A flag that changes what a screen FETCHES branches at the route, not inside the screen.** `Settings`
+  is one route mounting one of two components via the `SettingsRoute` wrapper in `RootNav.tsx`. A branch
+  *inside* `SettingsScreen` would not have worked: its six `useQuery` calls and two `useEffect` fetches
+  are hooks at the top of the body, so the flag-on path would still pay the entire network cost, and an
+  early return placed above them makes every later hook conditional. Mount one component or the other
+  when the point of the flag is what the screen costs.
+- **A page owns the queries for the rows it renders.** Each module under `screens/settings/sections/`
+  fetches its own data; no settings page hoists another page's state. The rule this replaces is why
+  opening Settings to switch a league waited on `GET /api/notifications/prefs` — one screen owned every
+  query, and one full-screen `isLoading` gate blanked all of them.
+- **A section renders its own in-flow placeholder; a screen never renders a full-screen spinner for one
+  section's data.** A full-screen gate makes the slowest query the cost of the whole surface.
+- **A summary/preview value is rendered only if it is free, and never guessed.** A hub row's preview
+  reads the session store or a resident React Query cache entry via `getQueryData` (non-reactive, never
+  fetches). If neither has it, the subtitle is omitted, or an honest-empty string is rendered in a
+  visibly distinct style. Concretely: the Trade values row has NO preview, because stud tax and pick
+  pricing are fetched by bare effects with no query key — rendering them would print the code default as
+  if it were the user's stored setting. A settings surface that states a setting wrongly is worse than
+  one that stays quiet.
+
+Route naming: `Settings` is the hub/root; second-level routes are `Settings<Group>`
+(`SettingsLeagues`, `SettingsRanking`, `SettingsTradeValues`, `SettingsNotifications`, `SettingsAccount`,
+`SettingsAbout`, `SettingsTesting`), each URL-addressable at `settings/<kebab-slug>` in
+`utils/deepLinks.ts`. All register unconditionally — the flag gates the entry row, not the route.

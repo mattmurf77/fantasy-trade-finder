@@ -9,6 +9,8 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
+- [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
 - [2026-08-18b — Follow-on batch status (3/4/5 built; 6/7 resolved)](#2026-08-18b--follow-on-batch-status-345-built-67-resolved)
 - [2026-08-18 — Bug-sweep follow-ons (B1–B5)](#2026-08-18--bug-sweep-follow-ons-b1b5)
 - [2026-08-16 — Matchmaking engine follow-ons](#2026-08-16--matchmaking-engine-follow-ons)
@@ -22,6 +24,47 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)
+
+Built and unmerged; `account.settings_hub` default OFF (see [`CHANGELOG.md`](CHANGELOG.md) 2026-08-19,
+[D-079](DECISIONS.md)). In order:
+
+1. **Fix the 5 red backend tests on `origin/main`.** *(unowned; blocks EVERY branch, not just this one)*
+   CLAUDE.md's pre-ship gate requires green CI. `test_seed_ui_test_db.py::test_release_flags_mirror_features_json`
+   (`trade.bakeoff` fixture drift from `ecdbcb3`), three in `test_suggestion_telemetry.py`, one in
+   `test_trade_decision_idempotency.py` (re-posted swipe expects Elo 1502.0, gets 1500.0). Reproduce on a
+   clean checkout before assuming they are environmental.
+2. **Operator: run the plan §9 TestFlight checklist** *(next EAS build, `account.settings_hub` on for your
+   device)* — [`../docs/plans/settings-ia-hub/plan.md`](../docs/plans/settings-ia-hub/plan.md) §9, 10 items.
+   It is the **only** runtime evidence this change can get under [D-056](DECISIONS.md), and graduating the
+   flag hangs on it. Item 1 (push-from-right, swipe-down no longer dismisses) is the one to look at hardest —
+   that behaviour changed in **both** flag states and cannot be rolled back by the flag.
+3. **Phase 4** *(after item 2 passes)* — graduate `account.settings_hub` to default true, delete the flat
+   `SettingsScreen` branch (and with it the `prefsQuery.isLoading` full-screen gate still live at
+   `SettingsScreen.tsx:745`), retire `account.settings_v2` and its long-dead legacy branch. Also settles the
+   two doc updates still owed from the scope block: `living-memory/LLD.md` and `mobile/src/screens/CLAUDE.md`.
+
+---
+
+## Queue cap status — the 7-item cap is blown; proposed drops
+
+*(Noted 2026-08-19 rather than silently overflowing, per the hygiene rules below.)* This file carries
+**14 dated sections and ~45 active items** against a stated cap of **7 items / 1.5KB**. The section above
+was added anyway because it is current work, but the drift is real and nobody has been paying it down.
+
+Proposed drops, in order of least controversy — someone with the context should confirm before deleting:
+
+1. **Completed items still sitting here as checkmarks**, which the hygiene rules explicitly forbid:
+   2026-08-18b item 3 (struck through, shipped in `e8ae476`) and 2026-08-15 guide-v2 item 4 (marked
+   "DONE in this build"). Move the outcome to `CHANGELOG.md` and delete the lines.
+2. **`2026-08-08 — Priority Queue`** and **`2026-08-11 — P0 remediation status + deferrals`** — the two
+   oldest sections. Their resolved parts belong in `CHANGELOG.md`; anything genuinely still open should be
+   restated as one item in a current section rather than kept as a status page.
+3. **`2026-08-15 — Compressed-board engine fixes SHIPPED (PR #122)`** — shipped; what remains is a watch
+   item ("eyeball the rescued cards"), which is one line, not a section.
 
 ---
 
