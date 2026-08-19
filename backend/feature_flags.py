@@ -811,6 +811,16 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ no fan-out, no interleave, no new columns stamped, no
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
+    # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
+    # CLIENT-ONLY. No route reads this key; it is registered here so the
+    # features-json-keys-known guard accepts it and so /api/flags serves it
+    # to mobile. ON ⇒ the Acquire tab's mode strip gains a leading "Today"
+    # chip that opens the additive TodaysTrade / TradeBrowseAll screens (one
+    # endorsed hero + a small Featured tier + an uncapped ranked browse
+    # list). OFF (default) ⇒ no chip, no entry point, and TradesScreen /
+    # TradeFinderModeBar / TradeHomeUtilityRow render byte-identical to
+    # today. The existing deck is never modified either way.
+    "trades.presentation_v2",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
