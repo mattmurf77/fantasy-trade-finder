@@ -203,7 +203,7 @@ pick priced below the `waivers` floor carries `null` rather than a flattering ru
 
 **Honest read of that last block:** deep picks barely touch real decks, so this was never worth a
 repricing — which is the measured argument for fixing the badge and leaving the ladder alone
-(and for parking [Q-020](OPEN_QUESTIONS.md)).
+(and for parking [Q-021](OPEN_QUESTIONS.md)).
 
 **Not run:** the manual TestFlight checklist (7 steps, in the scope block §3) — it needs the
 operator and a build. Step 7 is the one that matters most: build a trade containing a 2026 3rd and

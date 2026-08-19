@@ -163,7 +163,7 @@ Why not the alternatives:
 
 - **Not the seeds.** Elo 1320 for a Mid 3rd is not the defect. Moving it would be repricing a well-corroborated ladder to compensate for a display bug, and the D-084 memo already measured that path breaking `test_tier_occupancy.py` in three places.
 - **Not the tier bands.** Nothing about the bands is wrong. Moving them would drag all five client mirrors (G-051) and repaint every player's board to work around a pick-badge arithmetic error.
-- **Not re-anchoring `seed_elo_for_value` to decompress the floor.** This is the change the D-084 memo gestured at, and it is genuinely open — but it is a *rank-equivalence against the outside market* question, and it would move **every player's seed Elo in the app**, changing tier occupancy, deck composition, matchup selection and every user's board. Spending that blast radius to fix a badge that a one-expression change fixes correctly would be backwards. It is re-logged as Q-020.
+- **Not re-anchoring `seed_elo_for_value` to decompress the floor.** This is the change the D-084 memo gestured at, and it is genuinely open — but it is a *rank-equivalence against the outside market* question, and it would move **every player's seed Elo in the app**, changing tier occupancy, deck composition, matchup selection and every user's board. Spending that blast radius to fix a badge that a one-expression change fixes correctly would be backwards. It is re-logged as Q-021.
 - **Not clamping or special-casing round 3.** That papers over an error that is present on ten of the twelve rungs.
 
 ---
@@ -258,7 +258,7 @@ No tier band moved, so the five-mirror rule in `docs/cross-client-invariants.md`
 
 Q-019 asked whether the round-3 badge required opening the seed map. **Answer: no.** It is closed as **answered**, with the badge defect resolved here.
 
-The part of it that was genuinely a seed-map question — *whether `seed_elo_for_value`'s floor compression should be re-anchored so 3rds and 4ths reach their market-equivalent player ranks* — is **not** closed, and is re-logged as **Q-020**, sized correctly this time: it moves every player's seed Elo, so it is an occupancy-and-deck change, not a pick change. The prod numbers above are the argument for leaving it parked: rounds 3–4 are 1.4 % of pick mentions and 0 % of 4th-round mentions in 2,376 served cards.
+The part of it that was genuinely a seed-map question — *whether `seed_elo_for_value`'s floor compression should be re-anchored so 3rds and 4ths reach their market-equivalent player ranks* — is **not** closed, and is re-logged as **Q-021**, sized correctly this time: it moves every player's seed Elo, so it is an occupancy-and-deck change, not a pick change. The prod numbers above are the argument for leaving it parked: rounds 3–4 are 1.4 % of pick mentions and 0 % of 4th-round mentions in 2,376 served cards.
 
 ---
 
@@ -280,4 +280,4 @@ Every Elo/value figure in this memo was computed by running the shipped function
 - **Whether any user made a trade decision off an inflated badge.** The badge is display-only and every price the engine used was correct, so a decision would have to have been driven by the label alone. Not measurable with what is logged.
 - **Whether the `null` badge on a 2029 4th reads acceptably on device.** Mobile's fallback is documented and the code path is the same one an unpriced row takes, but this was not observed at runtime — it is item 4 of the TestFlight checklist in the scope block.
 - **Why prod holds pre-D-079/D-084 `pool_value`s** (2027 1sts at 1799.5, 2026 2nds at 818.7). Those leagues have not re-synced since those decisions shipped hours ago. It does not affect this change — the fix is correct for any stored value — but it means some badges will move again on the next sync, for an unrelated reason.
-- **Whether `seed_elo_for_value`'s floor compression is a defect or an intentional choice.** Unchanged from the D-084 memo's finding: the docstring explains the ceiling anchor and says nothing about the floor. Carried into Q-020.
+- **Whether `seed_elo_for_value`'s floor compression is a defect or an intentional choice.** Unchanged from the D-084 memo's finding: the docstring explains the ceiling anchor and says nothing about the floor. Carried into Q-021.

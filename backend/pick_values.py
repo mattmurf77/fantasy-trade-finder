@@ -66,7 +66,7 @@ _PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
 # buy rank movement it does not have room for, and the memo measured it
 # breaking `test_tier_occupancy.py` in three places when tried. If 3rd/4th
 # rank-equivalence is ever revisited, the thing to open is the SEED MAP, not
-# this ladder — re-logged as Q-020, and note it moves EVERY player's seed
+# this ladder — re-logged as Q-021, and note it moves EVERY player's seed
 # Elo, so it is an occupancy-and-deck change, not a pick change.
 #
 # ⚠️  D-088 (2026-08-19) — DO NOT REACH FOR THIS BLOCK TO EXPLAIN A WRONG

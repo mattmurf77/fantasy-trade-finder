@@ -58,7 +58,7 @@ Run against a Sleeper or MFL league with synced picks (ESPN leagues carry none u
 | `docs/data-dictionary.md` | **n/a** | no column added, removed or redefined |
 | `docs/config-reference.md` | **n/a** | no env var, flag or `model_config` key |
 | `living-memory/GOTCHAS.md` | **updated** | [G-052](../../living-memory/GOTCHAS.md) — the wrong-inverse trap, its single crossing point, and the property-vs-literal testing lesson |
-| `living-memory/OPEN_QUESTIONS.md` | **updated** | Q-019 closed with its answer; the surviving seed-map half re-logged as Q-020, sized as an every-player-board change |
+| `living-memory/OPEN_QUESTIONS.md` | **updated** | Q-019 closed with its answer; the surviving seed-map half re-logged as Q-021, sized as an every-player-board change |
 | `backend/pick_values.py` module note | **updated** | the D-084 note that pointed at Q-019 now carries a warning not to reach for it to explain a wrong badge, the re-derived compression figure (54.9 Elo over ranks 200–300), and the current-year-rung invariant |
 
 ## 5. Ship gate declaration
