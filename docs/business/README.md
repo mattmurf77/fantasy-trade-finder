@@ -37,7 +37,7 @@ through the `/feedback` pipeline (the E2E feature-builder loop) or an eng-* skil
 | `/eng-backend` | Back-end engineer | Flask routes, ranking/trade engine, schema, entitlements |
 | `/eng-mobile` | Mobile engineer | Screens, EAS/TestFlight builds, version bumps, StoreKit/ATT |
 | `/eng-integrations` | External services engineer | Sleeper/Anthropic APIs, Render, future SDKs (RevenueCat, AdMob) |
-| `/eng-qa` | QA engineer | Maestro flows, regression passes, smoke tests, "safe to ship?" |
+| `/eng-qa` | QA engineer | Regression passes, structural `check-*.js` suites, TestFlight checklists, "safe to ship?" (Maestro/simulator retired — D-056) |
 | `/eng-architect` | Software architect | Cross-cutting design, ADRs, Postgres path, tech-debt register |
 | `/eng-security` | Security engineer | Auth/secrets/endpoint audits, dependency scans, pre-launch hardening |
 

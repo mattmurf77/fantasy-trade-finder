@@ -1,6 +1,8 @@
 # Fantasy Trade Finder — Project Notes for Claude
 
-Dynasty fantasy football trade-finding app. Sleeper-based login, Elo ranking via 3-player matchups, mutual-gain trade discovery.
+Dynasty fantasy football trade-finding app. Elo ranking via 3-player matchups, mutual-gain trade discovery, real trade proposals written back into the user's league. Ships to users as **`Fleeced: Dynasty Trade Finder`** (D-057) — the repo, the Render service, and `mobile/ios/DTFDynastyTradeFinder/` keep their older internal names on purpose. Currently TestFlight-only (v1.13.2); backend live on Render.
+
+Human-facing orientation (product summary, repo layout table, how to run it) is in [README.md](README.md). This file is the operating contract: conventions, gates, hard rules.
 
 ## Coding guidelines
 
@@ -15,19 +17,32 @@ Bias toward caution over speed; use judgment for trivial tasks.
 
 ## Stack
 
-- **Backend:** Python 3 / Flask (`backend/`), SQLAlchemy Core, SQLite (`trade_finder.db`), swappable to Postgres via `DATABASE_URL`
-- **Web frontend:** Vanilla HTML/CSS/JS in `web/`
-- **Mobile:** React Native / Expo in `mobile/`
+- **Backend:** Python 3.12 / Flask (`backend/`), SQLAlchemy Core, 182 routes in `server.py`, 58 tables in `database.py`. SQLite at `data/trade_finder.db` locally; Postgres in prod via `DATABASE_URL`
+- **Web frontend:** Vanilla HTML/CSS/JS in `web/` — no framework, no build step; Flask serves it as static
+- **Mobile:** React Native 0.81 + Expo SDK 54 (TypeScript) in `mobile/`; 31 screens; EAS → TestFlight
 - **Browser extension:** Chrome/Edge MV3 in `extension/`
-- **Skills:** project Claude Code skills live in `.claude/skills/` (feedback pipeline, feature-evaluator, project-reorganizer, project-architect, …); retired skill workspaces/bundles are in `archive/skill-workspaces/`
-- **Optional AI:** Anthropic Claude API for smart matchup selection (env `ANTHROPIC_API_KEY`)
+- **League platforms:** Sleeper (read + GraphQL trade write), ESPN (`espn.*` flags, live), MyFantasyLeague (`mfl.*`, live). Fleaflicker is dark (`fleaflicker.link` false)
+- **Skills:** 36 repo-local Claude Code skills in `.claude/skills/` — role skills (`eng-*`, `pm-*`, `mkt-*`, `an-*`, `ops-*`, `fin-*`) plus the `feedback`, `feature-evaluator`, `project-architect`, `project-reorganizer`, `living-memory-format-check` pipelines. `maestro-test` is present but **dead** — D-056 retired Maestro; do not invoke it. Retired skill workspaces are in `archive/skill-workspaces/`
+- **CI:** `.github/workflows/ci.yml` — `pytest backend/tests`, `tsc --noEmit`, `mobile/scripts/testid-lint.sh`. The `mobile/tests/check-*.js` structural suites are `npm run`-only and **gate nothing yet** (open item in NEXT.md)
+- **Optional AI:** Anthropic Claude API for smart matchup selection (env `ANTHROPIC_API_KEY`); algorithmic fallback when unset
 
 ## Entry points
 
-- `run.py` — Flask dev server on port 5000
+- `run.py` — Flask dev server on port 5000 (`PORT` to override; macOS AirPlay squats 5000)
+- `backend/server.py` — the Flask `app` object itself; what gunicorn imports in prod
 - `mobile/App.tsx` — Expo entry
 - `web/index.html` — single-page web app
 - `extension/manifest.json` — MV3 extension
+- `render.yaml` + `build.sh` — prod deploy (web service + 3 cron tick services)
+
+## Repo map (tracked-file counts, 1,919 total)
+
+`docs` 614 · `mobile` 448 · `backend` 352 · `screens` 144 · `mockups` 104 · `archive` 74 · `.claude` 52 · `qa` 42 · `living-memory` 23 · `web` 17 · `scripts` 17 · `extension` 12 · `config` 2 · `.github` 2 · `githooks` 1 · `reference` 1
+
+Two of these are easy to misread — each has its own CLAUDE.md, read it before touching them:
+
+- **`screens/`** — capture library of the real app, one PNG per screen per state. Written **only** by `mobile/scripts/screen-capture.sh`, and **frozen at 2026-08-11** since D-056 retired the simulator. `manifest.json` is the authority on what exists.
+- **`mockups/`** — self-contained HTML design prototypes. **Never shipped code**; never import from it or cite it as current app behavior. A mockup revising an existing screen must embed that screen's real capture as its "before" pane.
 
 ## Session memory (`living-memory/`) — read at start, write at end
 
@@ -94,24 +109,33 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 - `config/features.json` drives feature flags consumed by both backend and clients.
 - **UI rules (Chalkline design system, ADR-004 + ADR-005):** all UI work uses the tokens in `docs/design/design-system.md` and the specs in `docs/design/components.md`; live reference at `web/style-guide.html`. Never: emoji as icons, gradients, glassmorphism/blur, Inter/Roboto/system font stacks, radius >8px (except specced pills), accents other than ice (actions) and flare (informational highlights only). Position/tier hexes are data encodings governed by `docs/cross-client-invariants.md`.
 - **Credentials live in `secrets.local.env`** (project root, gitignored, never commit). Read keys from there (`CRON_SECRET` for `/api/feedback/admin` + `/api/cron/*`, optional `DATABASE_URL_PROD`, etc.) instead of asking the operator to paste secrets into chat. If a needed key is blank, ask the operator to fill it in that file.
-- **Feedback button on every screen (#188):** every new user-facing mobile screen mounts `FeedbackFAB` by default — tab-stack screens are covered by the RootNav mount; root-stack pushes render their own `<FeedbackFAB activeScreen="<RouteName>" aboveTabBar={false} />`. Exceptions: modals/sheets and onboarding flows.
+- **Feedback button on every screen (#188):** every new user-facing mobile screen *shows* `FeedbackFAB` — but only **root-stack pushes mount one**: `<FeedbackFAB activeScreen="<RouteName>" aboveTabBar={false} />`. **Tab-stack screens must NOT mount their own** — they are already covered by the single global mount in `mobile/src/navigation/RootNav.tsx` (inside the `Main` screen). A second FAB on a tab screen is the #196/#197 double-FAB bug; the tab copy of `DraftRoomScreen` avoids it with `initialParams {inTabs:true}`. Screens with a pinned bottom bar call `setPinnedBottomBarHeight` (exported by `FeedbackFAB`) instead of adjusting offsets by hand. Exceptions: modals/sheets and onboarding flows.
 - **Feedback outputs:** durable non-code output for a feedback item's fix (PRD, plan, status, QA findings, screenshots) lives in `docs/feedback/items/<id>-<slug>/` (see its README; multi-ID fixes → lowest ID). Throwaway scratch goes in gitignored `feedback-workspace/<id>/`. Batches before item #64 remain in `docs/plans/feedback-batch-2..4/` as history.
-- **Feature gates (2026-08-08, amended 2026-08-15): scope block → docs → TestFlight. Maestro/simulator is RETIRED.** Before building anything that adds/changes user-visible behavior, data collection, schema, or API surface — through *any* pipeline (feedback item, NEXT.md, staged-work, direct ask):
+- **Feature gates (2026-08-08; evidence rules rewritten 2026-08-15 per D-056): scope block → evidence → docs → ledger. All four, every feature.** Before building anything that adds/changes user-visible behavior, data collection, schema, or API surface — through *any* pipeline (feedback item, NEXT.md, staged-work, direct ask):
   1. **Scope block first:** copy [docs/templates/feature-scope.md](docs/templates/feature-scope.md) into the feature's home and fill it. Every section is answered or explicitly waived with a reason — silence is not a waiver, and waivers are surfaced to the operator before build. Analytics events are specced against the taxonomy up front (the NULL-`platform` incident is why).
-  2. **Maestro / simulator runs: RETIRED entirely (operator, 2026-08-15 — D-057, extending D-P1-08).** Do not author, extend, or run Maestro flows or simulator captures for any change, and do not spec them in plans. The operator's ruling: unreliable and a waste of tokens. Replacements: structural `check-*.js` suites + unit tests for automated evidence, a written code-walk proof for behavior that used to get a sim capture, and a concrete manual TestFlight checklist for the operator when runtime proof matters. `mobile/scripts/testid-lint.sh` still runs in CI (testIDs serve accessibility/tooling, not just flows). Existing flows in `mobile/.maestro/` are historical artifacts — leave them, don't run them.
+  2. **Evidence delta — NOT Maestro.** [D-056](living-memory/DECISIONS.md) (2026-08-15) retired Maestro and the simulator **entirely**: no flow authoring, no flow execution, no `screens/` captures, for any change in any pipeline. What replaces them: a structural `mobile/tests/check-*.js` suite and/or unit tests for anything mechanically checkable; a written **code-walk proof** (file:line-cited trace) for behavior that would once have gotten a sim capture; and a concrete **manual TestFlight checklist** for the operator when runtime proof genuinely matters — specific enough to actually catch a regression, because it is now the only runtime evidence mobile gets. `mobile/scripts/testid-lint.sh` stays in CI. Existing `mobile/.maestro/` flows are historical artifacts: kept, never run.
   3. **Mandatory doc updates:** any route change updates `docs/api-reference.md`; convention shifts update `living-memory/LLD.md`; genuine architecture shifts update `docs/architecture.md` + `living-memory/HLD.md`. The scope block's Docs table is filled row-by-row ("updated" or "n/a because"), on top of the existing trigger tables below.
-  4. **TestFlight is primary QA (D-P1-08):** user-visible mobile changes ship with a short manual TestFlight checklist for the operator when runtime verification matters; log outcomes in `living-memory/TEST_LEDGER.md`. The pre-push sim-gate hook is bypassed with `FTF_SKIP_SIM_GATE=1` (its enforcement is retired along with the gate).
+  4. **Pre-ship gate:** before merge/push to `main`, CI must be green (`pytest backend/tests`, `tsc --noEmit`, testid-lint) and the evidence from item 2 logged in `living-memory/TEST_LEDGER.md`. `githooks/pre-push` still enforces the old simulator marker (`qa/sim-runs/last-sim-run.json`); under D-056 **`FTF_SKIP_SIM_GATE=1` is the standing posture** — set it and note the evidence you ran instead. Install the hooks once per clone: `git config core.hooksPath githooks`. (`docs/runbook.md` § Pre-ship simulator gate still describes the retired tier matrix — treat it as history.)
 
-  **Rigor is an operator decision — express lane.** The gates are the *default*, not a straitjacket. At flow start the operator may declare **express** ("quick fix", "just ship it", "skip the gates") — then skip the scope block and the docs table, leaving a one-line TEST_LEDGER note: `express: <what shipped> — gates skipped by operator`. What still applies even on express: CI must be green, the secrets rules, and the recovery ledger. Two rules keep this honest:
+  **Rigor is an operator decision — express lane.** The four gates are the *default*, not a straitjacket. At flow start the operator may declare **express** ("quick fix", "just ship it", "skip the gates") — then skip the scope block, the evidence delta, and the docs table, leaving a one-line TEST_LEDGER note: `express: <what shipped> — gates skipped by operator`. What still applies even on express: CI must be green, the secrets rules, and the recovery ledger. Two rules keep this honest:
   - **Agents never self-select express.** No operator declaration → full gates. Genuinely ambiguous → ask.
   - **Bright line:** a change touching schema, API contracts, feature-flag surfaces, or analytics events is not a "quick fix" — if the operator declares express on one of those, say so explicitly and get a confirming yes before proceeding; the operator's confirmed call stands.
 - **Branch/worktree deletion goes through the recovery ledger** (2026-08-08): before deleting any branch or removing any worktree, record its tip sha in a dated file in `docs/recovery/` per [docs/recovery/CLAUDE.md](docs/recovery/CLAUDE.md) — capture, then delete, never the reverse. Verification must be **by content** against `origin/main` (this repo squash-merges, so `git branch -d` refusals and ahead-counts are not evidence); cite the evidence doc in the ledger entry. At the end of any session that shipped work from a worktree, sweep it: once the branch's content is verified on `origin/main`, ledger the sha, `git worktree remove` it (a `--force` refusal means uncommitted files — inspect before discarding), and delete the branch. Don't leave merged worktrees behind — 91 of them (8.6 GB) once broke an EAS upload. Current backlog + verdicts: `docs/reviews/2026-08-08-branch-triage.md`.
-- **Search tracked files only:** use `git grep -n "pattern"` (1,188 tracked files) or constrain Glob/Grep to specific dirs — never bare `grep -r` or repo-wide Glob from root. The filesystem holds 400k+ files of worktree/`node_modules` noise. Use `git grep --untracked` when new files matter.
+- **Search tracked files only:** use `git grep -n "pattern"` (1,919 tracked files) or constrain Glob/Grep to specific dirs — never bare `grep -r` or repo-wide Glob from root. The filesystem holds 400k+ files of worktree/`node_modules` noise. Use `git grep --untracked` when new files matter.
 
 ## Common tasks
 
-- Add API route → `backend/server.py`
-- Tweak ranking math → `backend/ranking_service.py`
-- Tweak trade generation → `backend/trade_service.py`
-- Add mobile screen → `mobile/src/screens/` + register in `mobile/src/navigation/`
-- Add web page → `web/*.html` (link from `index.html`)
+| Task | Where |
+|---|---|
+| Add/change an API route | `backend/server.py` → update `docs/api-reference.md` |
+| Change the schema | `backend/database.py` → update `docs/data-dictionary.md` |
+| Tweak ranking math | `backend/ranking_service.py`; tier bands in `backend/tier_config.json` |
+| Tweak trade generation | `backend/trade_service.py` (v2 scoring) / `backend/trade_optimizer.py` (v3 package search) |
+| Change trade card copy | `backend/trade_narrative.py` (deterministic templates, no LLM) |
+| Touch a league platform | `backend/{sleeper_write,espn_service,espn_write,mfl_service,mfl_write,fleaflicker_service}.py` |
+| Add/flip a feature flag | `config/features.json` → update `docs/config-reference.md`; hot-reload via `POST /api/feature-flags/reload` |
+| Add an analytics event | Register in `backend/analytics_taxonomy.py` **and** classify in `analytics_queries.NON_INTENT_EVENTS`, in the *same commit* as the emitter |
+| Add a mobile screen | `mobile/src/screens/` + register in `mobile/src/navigation/`; mount `FeedbackFAB` **only if it's a root-stack push** (see #188 above) |
+| Add a web page | `web/*.html`, link from `index.html` |
+| Add a backend test | `backend/tests/` (pytest) |
+| Add a mobile structural check | `mobile/tests/check-*.js` + an `npm run` script in `mobile/package.json` |

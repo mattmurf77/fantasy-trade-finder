@@ -3,8 +3,8 @@ name: feedback
 description: >
   Fetch open in-app feedback for Fantasy Trade Finder and run selected items
   through the full delivery pipeline: triage table → operator selection →
-  dual-agent planning (HLD/LLD deltas + PRD with Maestro test plan) → parallel
-  build agents (backend/mobile/web) → redundant Maestro QA → QA-resolution
+  dual-agent planning (HLD/LLD deltas + PRD with an evidence plan) → parallel
+  build agents (backend/mobile/web) → redundant static QA → QA-resolution
   loop → ship to GitHub/Render/TestFlight. Use whenever the user says
   /feedback, "check the feedback", "any new feedback?", "work the feedback
   backlog", "address feedback #N", or wants tester bug reports / polish
@@ -75,23 +75,26 @@ out of heavy groups:
 
 | Path | When | Phase 1 output | Phase 2 | Phase 3 QA |
 |---|---|---|---|---|
-| **Fast-track bug** | Crash/wrong-behavior fix, no schema/API change, ≤2 files expected | Mini-PRD (repro, root cause hypothesis, fix approach, Maestro regression flow) + scope block | 1 agent | 2 QA agents, repro flow + smoke |
-| **Polish** | UX/copy/layout on existing feature | PRD + scope block; HLD/LLD deltas only if data flow changes | 1 agent per platform | 2 QA agents, feature flows + smoke |
-| **Feature** | New capability, new endpoint, or schema change | Full: HLD delta + LLD delta + PRD + scope block | backend → then mobile+web in parallel | 2 QA agents, full test plan |
+| **Fast-track bug** | Crash/wrong-behavior fix, no schema/API change, ≤2 files expected | Mini-PRD (repro, root cause hypothesis, fix approach, regression guard to add) + scope block | 1 agent | 2 QA agents, guards + code-walk proof of the repro path |
+| **Polish** | UX/copy/layout on existing feature | PRD + scope block; HLD/LLD deltas only if data flow changes | 1 agent per platform | 2 QA agents, guards + code-walk proof |
+| **Feature** | New capability, new endpoint, or schema change | Full: HLD delta + LLD delta + PRD + scope block | backend → then mobile+web in parallel | 2 QA agents, full test plan + TestFlight checklist |
 
 Every path fills the **scope block** (`docs/templates/feature-scope.md` → the
 group's `scope.md`) per CLAUDE.md §Conventions "Feature gates": analytics events
 specced or explicitly waived (silence is not a waiver — waivers surface to the
-operator at the Phase 0/1 boundary), schema/flags, Maestro delta, docs table,
-sim-gate tier. Light paths mostly waive; the waiver must still be written.
+operator at the Phase 0/1 boundary), schema/flags, the **evidence scope** (§3:
+structural guard / unit tests / code-walk proof / TestFlight checklist — **not**
+Maestro, retired by [D-056](../../../living-memory/DECISIONS.md)), the docs table,
+and the §5 ship-gate declaration. Light paths mostly waive; the waiver must still
+be written.
 
 **Express lane (operator-declared at Phase 0 selection, never self-selected):**
 when the operator tags an item "express" / "just ship it", that item skips the
 scope block and the full QA ceremony — Phase 1 collapses to a one-paragraph fix
-note in `status.md`, Phase 2 is one agent, Phase 3 is a single QA agent running
-the repro flow (or an operator-approved skip via `FTF_SKIP_SIM_GATE=1` + the
-one-line TEST_LEDGER note). The two hard gates (selection, ship go/no-go) still
-apply. Bright line per CLAUDE.md: schema/API/flag/analytics changes aren't
+note in `status.md`, Phase 2 is one agent, Phase 3 is a single QA agent verifying
+the repro path (guards + code-walk proof), with a one-line TEST_LEDGER note:
+`express: <what shipped> — gates skipped by operator`. The two hard gates
+(selection, ship go/no-go) still apply. Bright line per CLAUDE.md: schema/API/flag/analytics changes aren't
 express — flag the mismatch and get a confirming yes before proceeding.
 
 If unsure, escalate to the heavier path — the cost of a thin PRD is two build
@@ -105,7 +108,8 @@ phase**, not all upfront:
 
 - **Phase 1 — Plan** → `references/plan-phase.md`
   Two peer agents per group: Planner drafts the plan; Author turns it into
-  HLD/LLD deltas + PRD (with Maestro test plan); Planner critiques; Author
+  HLD/LLD deltas + PRD (with the D-056 test plan: guards, unit tests, code-walk
+  proof, operator TestFlight checklist); Planner critiques; Author
   incorporates; loop max 3 rounds, orchestrator arbitrates leftovers. PRD must
   pin the exact API contracts both build agents will code against.
 - **Phase 2 — Build** → `references/build-phase.md`
@@ -114,11 +118,13 @@ phase**, not all upfront:
   agents start. Orchestrator reviews all diffs for cross-platform consistency
   before merging to the group branch.
 - **Phase 3 — QA** → `references/qa-phase.md`
-  Two independent QA agents run the same PRD test plan via Maestro on the iOS
-  simulator + smoke suite; findings land as structured `.md` files in the
-  group's item folder under `docs/feedback/items/`. Web changes get a web QA
-  pass too. The batch's final passing round doubles as the **pre-ship simulator
-  gate** evidence: write `qa/sim-runs/last-sim-run.json` + a TEST_LEDGER entry.
+  Two independent QA agents run the same PRD test plan — `tsc`, the
+  `mobile/tests/check-*.js` guards, pytest, and a file:line-cited code-walk proof
+  per requirement. **No simulator, no Maestro, no captures** (D-056). Findings
+  land as structured `.md` files in the group's item folder under
+  `docs/feedback/items/`. Web changes get a web QA pass too. The final passing
+  round produces the batch's evidence record: a TEST_LEDGER entry naming what ran
+  and what it proved, plus the operator TestFlight checklist for Phase 5.
 - **Phase 4 — QA resolution (loop)** → also in `references/qa-phase.md`
   Only if confirmed findings exist: resolution agents fix, then a **full new
   QA round** (not just the failed cases). Loop until both QA agents pass
@@ -127,9 +133,10 @@ phase**, not all upfront:
 - **Phase 5 — Ship** → `references/ship-phase.md`
   Orchestrator final pass (diff review, `tsc`, pytest, CI green on the branch,
   docs-sync per CLAUDE.md's table incl. HLD/LLD, scope-block docs table
-  verified, sim-gate evidence fresh), then **explicit operator go/no-go with a
-  ship summary**, then: merge → push (Render auto-deploys; `githooks/pre-push`
-  checks the sim-gate marker) → EAS build + submit (TestFlight) → set items
+  verified, TEST_LEDGER evidence recorded), then **explicit operator go/no-go
+  with a ship summary**, then: merge → push (Render auto-deploys;
+  `githooks/pre-push` is a deliberate no-op since D-056 — CI is the gate) →
+  EAS build + submit (TestFlight) → set items
   `fixed` → update item folders + lessons.
 
 ## Hard rules

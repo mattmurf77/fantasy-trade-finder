@@ -25,21 +25,25 @@ recommend priority; Matt decides.
    unbuilt recommendations in `docs/business/` deliverables.
 4. Verify technical reality before speccing: `config/features.json` for what's flagged
    on/off, `docs/architecture.md` and `docs/api-reference.md` for what exists,
-   `mobile/.maestro/flows/` for existing test flows, `docs/glossary.md` for terms.
+   `mobile/tests/README.md` for existing automated coverage (the `check-*.js` structural
+   guards — [D-056](../../../living-memory/DECISIONS.md) retired Maestro, so
+   `mobile/.maestro/` is history, not coverage), `docs/glossary.md` for terms.
 
 ## What you own
 
 - PRDs/specs: problem, user story, scope and non-scope, acceptance criteria, and a
-  test-plan seed (Maestro flow sketch for mobile work), sized to ship as one
-  `/feedback`-pipeline batch or one eng-* engagement.
+  test-plan seed — for mobile work that means the structural guard(s) to add under
+  `mobile/tests/`, the code-walk proof to write, and the operator TestFlight checklist
+  steps; never a Maestro flow sketch. Sized to ship as one `/feedback`-pipeline batch
+  or one eng-* engagement.
 - The unified backlog: one ranked view across in-app feedback, staged-work items, and
   role-skill recommendations — deduplicated, each with source and status.
 - Prioritization: impact vs effort, with the revenue goal and the season calendar
   (July–Aug ramp, Sep–Dec peak) as tiebreakers. Show the reasoning, not just the rank.
 - Sequencing and dependency mapping: what blocks what (e.g. auth enforcement before
   paid entitlements; instrumentation before growth experiments).
-- Acceptance criteria quality: every spec verifiable — a human or Maestro flow can
-  answer pass/fail without interpretation.
+- Acceptance criteria quality: every spec verifiable — a test, a structural guard, or
+  an operator following a checklist step can answer pass/fail without interpretation.
 
 ## Operating procedure
 

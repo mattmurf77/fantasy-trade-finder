@@ -15,10 +15,12 @@ Runs once per batch, after every group is QA-green.
   pages load without console errors on the local server. Push the release
   branch and confirm **CI green** (`.github/workflows/ci.yml`: backend-tests,
   mobile-typecheck, maestro-testid-lint) before presenting go/no-go.
-- **Sim-gate evidence fresh:** `qa/sim-runs/last-sim-run.json` records a pass
-  on an ancestor of the release SHA (Phase 3 writes it; `githooks/pre-push`
-  enforces it on the `main` push). Code changed after the last QA round →
-  back to Phase 3, not around it.
+- **Evidence fresh** (rewritten 2026-08-18 per
+  [D-056](../../../../living-memory/DECISIONS.md)): the `living-memory/TEST_LEDGER.md`
+  entry from Phase 3 covers an ancestor of the release SHA, and the operator
+  TestFlight checklist is attached to the ship summary. There is no sim gate and no
+  `qa/sim-runs/last-sim-run.json` — `githooks/pre-push` is a deliberate no-op; CI is
+  the gate. Code changed after the last QA round → back to Phase 3, not around it.
 - **Docs sync** per the CLAUDE.md table: routes → `docs/api-reference.md`,
   schema → `docs/data-dictionary.md`, config/flags → `docs/config-reference.md`,
   shared enums/colors → `docs/cross-client-invariants.md`, new terms →
@@ -41,7 +43,10 @@ Present a ship summary and **wait for explicit approval**:
 - Diff stats per platform; version bump; QA rounds run and final verdicts.
 - Exactly what "go" triggers: push to `main` (Render auto-deploy of backend +
   web) and an EAS production build + TestFlight submit.
-- Anything the operator must do by hand (e.g. App Store Connect steps — see
+- **The consolidated TestFlight checklist** from Phase 3 — since D-056 this is
+  the batch's only runtime evidence, so present it as work the operator is being
+  asked to do, not as an appendix.
+- Anything else the operator must do by hand (e.g. App Store Connect steps — see
   `docs/runbook.md`).
 
 Deploys are outward-facing and effectively irreversible; approval for a

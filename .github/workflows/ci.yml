@@ -1,7 +1,12 @@
 name: CI
 
-# First CI for this repo (2026-08-08). Three cheap jobs; the iOS-simulator Maestro
-# tier stays local per docs/runbook.md § Pre-ship simulator gate (no free macOS runner).
+# First CI for this repo (2026-08-08). Three cheap jobs.
+# D-056 (2026-08-15) retired Maestro and the simulator entirely, so there is no
+# local simulator tier behind these jobs any more — CI plus the operator's manual
+# TestFlight pass is the whole verification story. The maestro-testid-lint job keeps
+# its name but only runs testid-lint.sh, which D-056 explicitly preserved.
+# Note mobile-typecheck globs mobile/tests/check-*.js, so a guard is live in CI the
+# moment the file exists — no npm script needed.
 # Make these required checks on main via a branch ruleset (repo settings — operator).
 
 on:

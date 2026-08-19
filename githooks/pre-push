@@ -1,72 +1,29 @@
 #!/bin/sh
-# Pre-ship simulator gate (docs/runbook.md § Pre-ship simulator gate).
-# Blocks a push to main containing mobile/src changes unless qa/sim-runs/last-sim-run.json
-# records a passing Maestro run on an ancestor of the pushed commit.
-# Also WARNS (never blocks) when the push changes mobile/src/screens/ without any
-# capture under screens/ — see docs/runbook.md § Screen library.
-# Install: git config core.hooksPath githooks
-# Escape hatch (operator decision, logged loudly): FTF_SKIP_SIM_GATE=1 git push ...
-
-MARKER="qa/sim-runs/last-sim-run.json"
-FRESHNESS="mobile/scripts/screen-freshness.sh"
-Z40="0000000000000000000000000000000000000000"
-
-if [ -n "$FTF_SKIP_SIM_GATE" ]; then
-    echo "⚠️  FTF_SKIP_SIM_GATE set — simulator gate SKIPPED. Record why in living-memory/TEST_LEDGER.md." >&2
-    exit 0
-fi
-
-fail() {
-    echo "✋ pre-push: simulator gate — $1" >&2
-    echo "   Run the required Maestro tier (docs/runbook.md § Pre-ship simulator gate)," >&2
-    echo "   write $MARKER, then push again. Operator override: FTF_SKIP_SIM_GATE=1" >&2
-    exit 1
-}
-
-while read -r _local_ref local_sha _remote_ref remote_sha; do
-    case "$_remote_ref" in
-        refs/heads/main) ;;
-        *) continue ;;
-    esac
-    [ "$local_sha" = "$Z40" ] && continue  # branch deletion
-
-    # Range being pushed; on a brand-new remote branch compare against nothing pushable.
-    if [ "$remote_sha" = "$Z40" ]; then
-        range="$local_sha"
-    else
-        range="$remote_sha..$local_sha"
-    fi
-
-    if git diff --name-only "$range" 2>/dev/null | grep -q '^mobile/src/'; then
-        [ -f "$MARKER" ] || fail "no $MARKER found and this push changes mobile/src."
-
-        result=$(sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MARKER")
-        tested_sha=$(sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MARKER")
-
-        [ "$result" = "pass" ] || fail "last recorded sim run is '$result', not 'pass'."
-        [ -n "$tested_sha" ] || fail "marker has no \"sha\" field."
-        git merge-base --is-ancestor "$tested_sha" "$local_sha" 2>/dev/null \
-            || fail "sim run was on $tested_sha, which is not an ancestor of the push — rerun on current code."
-    fi
-
-    # --- Screen-library freshness: WARN ONLY, never blocks (docs/runbook.md
-    # § Screen library). Screen source moved but no capture came along? Say so
-    # and let the push through — capture freshness is a design-truth
-    # obligation, not a ship gate.
-    changed=$(git diff --name-only "$range" 2>/dev/null)
-    if printf '%s\n' "$changed" | grep -q '^mobile/src/screens/' \
-       && ! printf '%s\n' "$changed" | grep -q '^screens/'; then
-        echo "⚠️  pre-push: this push changes mobile/src/screens/ but touches no capture under screens/." >&2
-        if [ -x "$FRESHNESS" ]; then
-            "$FRESHNESS" 2>&1 | sed 's/^/   /' >&2
-        elif [ -f "$FRESHNESS" ]; then
-            bash "$FRESHNESS" 2>&1 | sed 's/^/   /' >&2   # script is bash, not sh
-        else
-            echo "   ($FRESHNESS not found — skipping freshness report.)" >&2
-        fi
-        echo "   Refresh stale screens with: mobile/scripts/screen-capture.sh --screen <x>" >&2
-        echo "   (warning only — the push is not blocked)" >&2
-    fi
-done
+# Pre-push hook — intentionally a no-op.
+#
+# HISTORY: this hook enforced the pre-ship simulator gate (blocked a push to main
+# containing mobile/src changes unless qa/sim-runs/last-sim-run.json recorded a passing
+# Maestro run on an ancestor of the pushed commit), and warned when mobile/src/screens/
+# changed without a matching capture under screens/.
+#
+# D-056 (2026-08-15) retired Maestro and the simulator ENTIRELY — no flow authoring, no
+# flow execution, no screens/ captures, for any change in any pipeline. That made both
+# checks unsatisfiable: the gate could only ever be passed via FTF_SKIP_SIM_GATE=1, which
+# became the standing posture, and the freshness warning told you to run a capture that
+# policy forbids. A gate that is always overridden is not a gate; it just trains people to
+# ignore hook output. So it is gone rather than left firing.
+#
+# The gate's replacement is CI plus recorded evidence, not a local hook:
+#   - CI: backend-tests, mobile-typecheck (also runs the mobile/tests/check-*.js suites),
+#     maestro-testid-lint  (testIDs still matter; the lint outlived the flows)
+#   - Evidence: living-memory/TEST_LEDGER.md, and a manual TestFlight checklist when
+#     runtime proof matters
+#   - See docs/templates/feature-scope.md §3 and §5.
+#
+# FTF_SKIP_SIM_GATE is no longer read. Leaving it set is harmless.
+#
+# This file is kept (rather than deleted) so that `git config core.hooksPath githooks`
+# stays valid for clones that already set it. Add real pre-push checks here if you ever
+# want them — but do not restore a gate that has to be overridden to push.
 
 exit 0

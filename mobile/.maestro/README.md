@@ -1,9 +1,65 @@
-# Maestro flows — FTF mobile smoke tests
+# Maestro flows — HISTORICAL ARTIFACT (retired 2026-08-15, D-056)
 
-Run against a booted iOS Simulator with the app installed (built via
-`npx expo run:ios` or installed from EAS).
+> **These flows are not run. Do not author, extend, or execute them.**
+>
+> **D-056 — "Maestro / Simulator Retired Entirely, Not Just as a Gate"**
+> (2026-08-15, operator decision, Status: Active) retired Maestro and the
+> simulator across every pipeline — not just as a pre-ship gate. Operator's
+> words: *"It's unreliable and a waste of tokens."*
+>
+> The flows in this directory are **deliberately kept**. D-056 explicitly
+> rejected deleting them: *"flows document intended behavior even unrun."*
+> Read them as a specification of what each screen was supposed to do; never
+> as a workflow to run or a checklist to extend.
+>
+> **What replaced them:**
+> | Evidence | Where |
+> |---|---|
+> | Automated | Structural guards in [`../tests/`](../tests/README.md) (`npm run test:<name>`) + unit tests |
+> | Behavioral | A written code-walk proof — a file:line-cited trace through the commit sequence |
+> | Runtime | A concrete manual TestFlight checklist for the operator |
+>
+> **Two things survive D-056:**
+> 1. **`../scripts/testid-lint.sh` stays in CI.** Every `testID` these flows
+>    reference must still exist in `mobile/src`, so the flows remain
+>    load-bearing for the lint even though nothing runs them.
+> 2. **The Flow-authoring laws below.** They are the expensive part — 23
+>    on-sim-proven rules that would cost weeks to reconstruct if Maestro is
+>    ever revived. Kept as a record of what the flows mean.
+>
+> `FTF_SKIP_SIM_GATE=1` is the standing posture for the `githooks/pre-push`
+> hook. `docs/runbook.md` § Pre-ship simulator gate is likewise banner-marked
+> historical.
 
-## Setup
+---
+
+## Directory map
+
+106 files. Counts are against `origin/main`.
+
+| Path | Count | What it was |
+|---|---|---|
+| `01-…` – `06-…` (this level) | 6 | The original 2026-07 smoke set, superseded by `flows/smoke/` |
+| `flows/smoke/01…12` | 12 | The final smoke suite — sign-in, league pick, trios, tiers, trades render/deck, calculator, matches, league, canary, Apple entitlement, single-pin |
+| `flows/league/` | 8 | League-rankings feature flows: pick subsets, position filter, no-picks league, picks flag-off, drill-in back affordance, position trade candidates, matches-tile scoped, invite-join |
+| `flows/rookie/` | 7 | Rookie-draft flows — Draft Room complete / order-not-set, mock loop, mock manual mode, scoped tiers + consolidated, scoped quickset + trios, flag-off no-entry |
+| `flows/trade-send/` | 1 | MFL send gating |
+| `flows/` (loose) | 13 | P0 remediation (1/5/6), ESPN connect capture, decline-reasons (fixed option + other/free-text), matches awaiting-dismiss, trades banner region, trades-generation failure, tiers-all-board, s1 spikes (×2), guide no-false-signoff |
+| `capture/` | 52 | Screen-library capture flows, `<screen>[@profile].yaml`; driven by `../scripts/screen-capture.sh` into `screens/mobile/` + `screens/manifest.json` |
+| `capture/sheets/` | 5 | Sheet captures (ESPN link, feedback, league switcher, rank menu, trade DNA) |
+| `capture/helpers/inject.js` | 1 | Fault-injection helper for the capture sweep |
+
+The `@profile` suffix on a capture filename (`league@espn.yaml`,
+`trios@fresh.yaml`) names the seeded backend profile the flow expected.
+
+---
+
+## Historical: how these were run
+
+Everything below documents the retired workflow. It is preserved for context,
+not for use.
+
+### Setup
 
 ```bash
 # Maestro CLI (one-time, requires brew)
@@ -18,7 +74,7 @@ cd mobile
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 npx expo run:ios
 ```
 
-## Run
+### Run
 
 ```bash
 cd mobile
@@ -35,7 +91,7 @@ maestro studio
 
 Screenshots land in `.maestro/screenshots/` (Maestro's default).
 
-## Flows
+### The original root flows
 
 | File | What it covers |
 |---|---|
@@ -50,25 +106,23 @@ Flows 02–06 start from the demo CTA, which only renders when the
 `landing.try_before_sync` flag is ON — it is OFF in the release flag set,
 so run the backend with it overridden (e.g. `sim-run.sh --flags`).
 
-Newer flow families (this table predates them): `flows/smoke/01..11` is the
-current smoke suite; `capture/` holds the screen-library capture flows
-(`<screen>[@profile].yaml`, run via `mobile/scripts/screen-capture.sh` —
-see `screens/CLAUDE.md`).
+This table predates the later flow families — see the directory map above for
+the full inventory (`flows/smoke/01..12`, `flows/league/`, `flows/rookie/`,
+`capture/`).
 
+### Selectors
 
-## Selectors
-
-Flows match on `testID`s from the registry in
-`mobile/src/components/CLAUDE.md` wherever one exists (repaired 2026-07-12
-after the 1.7.x copy changes); text matchers are the fallback for
-elements without an id. When a flow flakes after a UI tweak, update the
-matcher, don't loosen it.
+Flows match on `testID`s wherever one exists; text matchers were the fallback
+for elements without an id. The testID grammar and registry live in
+`docs/plans/mobile-testing/lld.md` Appendix A, cross-checked against source by
+`../scripts/testid-lint.sh` — the one part of this harness still enforced.
 
 ## Flow-authoring laws (2026-08-10, screen-library build — each paid for on-sim)
 
-Every law below cost at least one debugging round during the 141-capture
-build-out. New flows follow them; reviews check them. The `maestro-test`
-skill's trap list points here.
+Retained per D-056 as the expensive knowledge inside these flows. Every law
+below cost at least one debugging round during the 141-capture build-out.
+They describe how the retained flows are constructed and why they read the way
+they do. **No new flows are authored, so these are a record, not a rulebook.**
 
 ### Selectors & assertions
 1. **Text matchers are FULL-MATCH regex.** `"Easiest sells"` never matches

@@ -152,3 +152,108 @@ files. Seeded from history before this skill existed:
   (six failures), "zero seeder work needed" (the seeder writes no `mock_drafts`
   at all), "one `leagues[]` entry fixes it" (wrong). Make agents RUN the harness
   command rather than reason about it.
+- 2026-08-13 [triage] The caller-excluded `sess["league"].members` convention
+  claimed its THIRD victim (FB #41 → #291's fixture → the mock draft's five
+  membership sites, the fifth found only at LLD). When any surface reads
+  "everyone in the league", grep ALL its member reads before concluding scope.
+- 2026-08-13 [plan] A five-phase sequential doc pipeline (plan → HLD → LLD →
+  PRD + mockups ∥ → build ×2) caught a distinct defect class at EVERY phase:
+  the LLD found the HLD's contract one field short (`settings_echo.user_owner_id`)
+  and a fifth membership site; the mockup round found `PickTicker` rendering a
+  blank who-column across all of manual mode and the seeder having traded away
+  the QA user's round-1 pick (the shipped bug reproduced in miniature in the
+  test world). Commit each phase at its exit; hand the next agent the commit.
+- 2026-08-13 [ship] Deploy-liveness polls on `/api/events` must require
+  `accepted ≥ 1 AND dropped == 0`. The OLD build answers an unregistered event
+  with `{"accepted":1,"dropped":1}` — a loose grep on `accepted` reads that as
+  the new build being live. Bit us once; caught before it false-passed.
+- 2026-08-13 [ship] Version numbers race between concurrent sessions: 1.13.2
+  was taken by another ship mid-flight. Check `eas-cli build:list --json`
+  (never the CLI exit code) for the actual latest before bumping.
+- 2026-08-13 [build] Prove the loop, not the diff: before go/no-go, a live
+  engine run of the operator's exact scenario (slot 8, 12 teams — four
+  asserted clauses) answered "does it actually work?" in a way 2714 passing
+  tests could not. The operator asked precisely this question; have the demo
+  ready before they do.
+- 2026-08-13 [process] Never `git stash -u` to "check a baseline": on a clean
+  tree it saves nothing and the subsequent pop grabs ANOTHER SESSION'S stash
+  (conflict markers across 32 files; recovered, nothing lost, but blocked
+  destructive cleanup needed operator sign-off). Diff against the base sha
+  instead — and don't stash your own uncommitted work to switch branches
+  either; this session buried its own lessons append doing exactly that.
+- 2026-08-16 [triage] Nine items landed OVERNIGHT mid-triage (#333-#341), four of
+  them the "additional rules" an operator answer referenced. Re-fetch before
+  finalizing selection whenever an operator answer mentions feedback you haven't
+  seen — the list call is cheap and the alternative is planning against a stale
+  backlog.
+- 2026-08-16 [triage] Three of the nine overnight items (#333/#334/#337) were
+  regressions/follow-ups on the 08-14 wave that shipped with "sim gate: NOT run".
+  With Maestro retired (D-056), operator TestFlight passes are the only runtime
+  net — write the per-group TestFlight checklist as if it's the regression suite,
+  because it is.
+- 2026-08-16 [triage] An operator answer reversed a triage-time framing twice in
+  one batch: "Matches is the core swipe loop" was WRONG (TradesStackNav owns the
+  deck; MatchesScreen is a results surface) and #329 "Fixed." meant close-it not
+  build-it. Verify screen-role claims in TabNav registrations before arguing IA,
+  and confirm terse operator answers that flip a work item's direction.
+- 2026-08-16 [plan] Do NOT launch a group's critique round until the Author's
+  COMPLETION notification arrives — launching it "so it isn't idle" risked the
+  critic reading half-written docs (G9: critique dispatched a turn before the
+  author finished; corrected by messaging the critic to discard reads and
+  re-read from disk). The phase gate is the notification, not the intention.
+- 2026-08-16 [plan] The proven-to-fail rule needs to police the SPEC, not just
+  the build: G3's PRD mapped a test to a sabotage that hardcoded the expected
+  value (self-satisfying by construction), and the ordered re-audit found THREE
+  more in the same doc plus a .get() assertion hole — five defects of one class
+  in one test plan. Make "re-audit every test→sabotage mapping for
+  self-satisfaction" a standing critique-round item.
+- 2026-08-16 [plan] Expose orchestrator arbitrations to the critic as attack
+  surface ("attack if attackable") — G6's critic overturned the pin+scope
+  bypass boundary for a strictly better targeted-vs-untargeted line with a
+  code-precedent anchor, and separately caught a one-sided predicate that would
+  have banned the operator's own documented trade style. Provisional decisions
+  announced as final get defended; announced as provisional get improved.
+- 2026-08-16 [plan] Commit each group's spec at ITS round-2 sign-off on a
+  dedicated specs branch off fresh origin/main (specs stranded in a stale
+  session checkout are invisible to build worktrees). origin/main moved 3×
+  during Phase 1 alone; the authors' habit of re-verifying every cite against
+  the CURRENT tip and logging drift caught real movement every time.
+- 2026-08-16 [plan] A worked example in a test gloss is a CLAIM against the
+  formula and must be arithmetic-checked like one: G6's U-R2-3 gloss
+  ("pick+RB→2WR passes") contradicted R-2's own predicate (net WR = +2 →
+  kill) and survived BOTH review rounds because round-2 verified dispositions,
+  not example arithmetic. Caught post-launch only because a second session
+  ported the rules and hit the fork. Add "recompute every worked example
+  against its formula" to the critic's standing hunt classes.
+- 2026-08-16 [build] "Never end a turn waiting" is not enough — TWO agents in
+  one wave (G1, G5) still parked on background monitors for long pytest runs
+  and stalled until nudged. The prompt must prescribe the mechanic, not just
+  prohibit the failure: "run test suites SYNCHRONOUSLY in one foreground Bash
+  call with an adequate timeout; never run_in_background a test suite; if the
+  full sweep is too slow, run the targeted set and state that the full sweep
+  runs at integration."
+- 2026-08-16 [qa] The stall pattern generalizes past test monitors: the Phase-3
+  QA agent ended its turn "standing by" for a SUBAGENT it had spawned. Agent
+  prompts must ban ending a turn on ANY async dependency — monitor, build,
+  subagent, notification — and prescribe doing the remaining work synchronously
+  instead of delegating-then-waiting when the wait would end the turn.
+- 2026-08-17 [ship] The push to origin/main was blocked by the session's
+  permission classifier (same class as the 2026-08-08 EAS block). Plan for it:
+  bundle the living-memory ship record INTO the pre-push commit so one operator
+  push carries code + record, write the recovery ledger in
+  "CAPTURED, NOT YET SWEPT" state with the tips already recorded, and hold the
+  `fixed` status writes until the push is confirmed — statuses claiming shipped
+  work that never left the machine are worse than late ones.
+- 2026-08-17 [ship] Render auto-deploy silently did not fire: `92c31d5` stayed
+  live ~20 min past the push with NO deploy queued, despite `autoDeploy: yes`
+  and a healthy service. Polling prod for new content looked identical to a slow
+  deploy. Rule: after pushing, first confirm a deploy was CREATED for your sha
+  (`GET /v1/services/<id>/deploys?limit=1` vs `git ls-remote origin main`), then
+  poll content; trigger via `POST /v1/services/<id>/deploys` if none exists.
+- 2026-08-17 [ship] Verify branch containment before a sweep by COMMIT ANCESTRY
+  (`git log origin/main..<branch>` = 0), not by `git diff origin/main..<branch>`
+  — the two-dot diff counts what main has that the branch lacks and reports
+  100+ files for a fully-merged branch, which reads as "not contained" and
+  invites the wrong call. The ancestry check caught two branches
+  (`wave-calc`, the specs branch) holding content that existed NOWHERE else —
+  including a 455-line Phase-1 plan — minutes before deletion.

@@ -12,7 +12,10 @@ and it is silent and temporary — this ledger is the durable one.
    `git worktree remove` needed `--force` because of uncommitted files — if it did,
    say what was discarded).
 2. **Write a dated file** in this folder: `YYYY-MM-DD-<short-topic>.md` — or append
-   to the same day's existing file for one cleanup pass.
+   to the same day's existing file for one cleanup pass. For a large sweep that also
+   needs to preserve uncommitted work, use a **dated folder** with a `README.md` and a
+   `patches/` directory of `git diff` output, one per worktree — see
+   `2026-08-16-worktree-sweep/`.
 3. Each entry needs:
    - a table of `tip sha | branch name` (plus worktree path where applicable)
    - one line on **why** deletion was safe, linking the verification evidence

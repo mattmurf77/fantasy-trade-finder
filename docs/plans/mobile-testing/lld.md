@@ -1,5 +1,21 @@
 # FTF Mobile Testing System — Low-Level Design (2026-07-10)
 
+> **PARTLY RETIRED (2026-08-15, D-056) — read this before acting on anything below.**
+>
+> D-056 retired Maestro and the simulator **entirely**: no flow authoring, no flow
+> execution, no `screens/` captures, for any change in any pipeline. Every section of this
+> document describing flows, the simulator harness, `sim-build.sh` / `sim-run.sh`, or the
+> pre-ship gate is **historical** — do not follow it as instructions.
+>
+> **Still live and load-bearing:** the `testID` conventions, including **§2.6** and the
+> selector rules in **§4.4** and the registry in **Appendix A**. `mobile/scripts/testid-lint.sh`
+> reads them and runs in CI on every push (the `maestro-testid-lint` job kept its name).
+> Changing those sections changes what CI enforces.
+>
+> Current evidence regime: structural `mobile/tests/check-*.js` suites (all of which run in
+> CI) + unit tests, a file:line-cited code-walk proof, and a manual TestFlight checklist.
+> See `docs/templates/feature-scope.md` §3.
+
 *Implements `hld.md` C1–C9 / ADR-1…10 within `prd.md` R-01…R-32. Ground truth for app facts: `app-inventory-2026-07-10.md`.*
 
 ---

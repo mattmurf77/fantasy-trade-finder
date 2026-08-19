@@ -27,7 +27,7 @@ Operational procedures. Add to this as you learn things.
 - [Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)](#weekly-deck-replenishment-f10-flag-deckreplenishment-2026-07-26)
 - [Reset / wipe](#reset-wipe)
 - [HTTP compression / encoding (OBS-API-02)](#http-compression-encoding-obs-api-02)
-- [Mobile UI-test harness (partial — pre-Maestro state, 2026-07-11)](#mobile-ui-test-harness-partial-pre-maestro-state-2026-07-11)
+- [Mobile UI-test harness (RETIRED 2026-08-15 — historical)](#mobile-ui-test-harness-retired-2026-08-15--historical)
   - [Harness build gotchas (2026-07-11)](#harness-build-gotchas-2026-07-11)
   - [Draft replay corpora (rookie-draft M1, 2026-08-06)](#draft-replay-corpora-rookie-draft-m1-2026-08-06)
 - [Sign in with Apple — App Store Connect / Apple Developer setup (account-auth P2, 2026-07-11)](#sign-in-with-apple-app-store-connect-apple-developer-setup-account-auth-p2-2026-07-11)
@@ -367,9 +367,22 @@ Wipes the current user's `swipe_decisions`, `trade_decisions`, `member_rankings`
 
 React Native's `fetch` auto-negotiates `Accept-Encoding: gzip, deflate, br` on every request. Cloudflare and Render both compress at the edge, so JSON responses are gzip-compressed in transit without any Flask-side configuration. The mobile app uses `/api/warm` (a lightweight ping) instead of fetching the full player payload on startup, so the largest payload (`/api/players`) is only fetched on first-run or after a 24-hour staleness. No additional Flask middleware is needed for current load; add `flask-compress` only if a new heavy endpoint is introduced that bypasses edge caching.
 
-## Mobile UI-test harness (partial — pre-Maestro state, 2026-07-11)
+## Mobile UI-test harness (RETIRED 2026-08-15 — historical)
 
-Spec: `docs/plans/mobile-testing/` (plan/prd/hld/lld/test-cases). **Day-to-day driver: the `/maestro-test` skill** (`.claude/skills/maestro-test/SKILL.md`) — feature / page / whole-app scopes, encodes the traps below. Built so far: backend seams + blueprint (`backend/test_support.py`, seams in `server.py` — all env-gated, `pytest backend/tests/test_test_support.py` pins them incl. inertness), build contract (`mobile/app.config.js`), scripts (`mobile/scripts/sim-build.sh`, `sim-run.sh`, `testid-lint.sh`), S1-spike testIDs (SignIn + tab bar).
+> **RETIRED (2026-08-15, D-056).** Maestro and the simulator are retired entirely: no flow
+> authoring, no flow execution, no `screens/` captures, for any change in any pipeline.
+> The `/maestro-test` skill is superseded and should not be invoked. Everything in this
+> section is kept as a record of how the harness worked, not as instructions.
+>
+> **What to do instead:** structural `mobile/tests/check-*.js` suites + unit tests for
+> anything mechanically checkable, a file:line-cited code-walk proof otherwise, and a
+> manual TestFlight checklist when runtime proof matters. `mobile/scripts/testid-lint.sh`
+> still runs in CI. See `docs/templates/feature-scope.md` §3.
+>
+> **Still live from this section:** the `testID` registry in
+> `docs/plans/mobile-testing/lld.md` Appendix A, which `testid-lint.sh` reads.
+
+Spec: `docs/plans/mobile-testing/` (plan/prd/hld/lld/test-cases). Day-to-day driver was the `/maestro-test` skill (`.claude/skills/maestro-test/SKILL.md`) — feature / page / whole-app scopes, encoded the traps below. Built so far: backend seams + blueprint (`backend/test_support.py`, seams in `server.py` — all env-gated, `pytest backend/tests/test_test_support.py` pins them incl. inertness), build contract (`mobile/app.config.js`), scripts (`mobile/scripts/sim-build.sh`, `sim-run.sh`, `testid-lint.sh`), S1-spike testIDs (SignIn + tab bar).
 
 - **Test build:** `./mobile/scripts/sim-build.sh --env test` → Release sim app pointed at `http://127.0.0.1:5000`, Sentry DSN nulled, `resolved-config.json` emitted for the rails. `--env prod-check` statically asserts the shipping config (never builds).
 - **Boot a hermetic cell:** `./mobile/scripts/sim-run.sh --udid <UDID> --app <path/to/.app> --profile standard` → seeds the profile, starts Flask in test mode, handshakes `/__test__/whoami`, erases+boots the sim, installs + launches. Without `--flow` it stops there (manual/S2 verification); with `--flow` it runs Maestro (once installed: `brew install maestro`).

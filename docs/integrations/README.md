@@ -7,7 +7,7 @@ gives an instrumentation build agent the endpoint list, auth model, payload
 shapes, error modes, call frequency, and a safe-to-log / must-redact split so
 logging can be added without guessing at what a call site actually does.
 
-This is a sibling to `docs/references/<site>/<api-name>/` (see `docs/CLAUDE.md`),
+This was conceived as a sibling to a `docs/references/<site>/<api-name>/` tree (see `docs/CLAUDE.md`) — **that tree was never populated and does not exist**; this folder is the only live home for integration references,
 which holds raw reverse-engineered wire-shape notes; files here are the
 consumer-facing distillation — one file per external service, organized around
 "what do we call and why," not around capturing a single verification session.

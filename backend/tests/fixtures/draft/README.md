@@ -41,8 +41,9 @@ maps `…/v1/<path>` → `<dir>/<path>.json`, so the tree below is literally the
 **MFL** has no env seam — `mfl_service` injects `_opener` (`_fetch_one`). MFL corpora are
 therefore a committed `draftResults.json` plus `draft_replay.mfl_opener(<corpus>)`, matching
 the convention `backend/tests/fixtures/mfl_league_snapshot_2026-07-17.json` already uses.
-`draft_board_service`'s MFL path must accept an injectable `_opener` all the way down, or M5
-is untestable.
+`draft_board_service`'s MFL path threads an injectable `_opener` all the way down
+(`DraftBoardService.mfl_opener` → `mfl_service.fetch_draft_results(..., _opener=…)`) — that is
+what makes M5 testable; don't collapse it.
 
 ## Re-recording
 

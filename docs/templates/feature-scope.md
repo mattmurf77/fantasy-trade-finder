@@ -47,17 +47,22 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 - New/changed feature flags: <list, or "none"> → `config/features.json` + `backend/feature_flags.py` `FLAG_KEYS` + `docs/config-reference.md`, default state + graduation criterion stated
 - New env vars / `model_config` keys: <list, or "none"> → `docs/config-reference.md`; ship-the-knob: name the deploy-free rollback lever if the feature is risky
 
-## 3. Test scope (mobile test platform)
+## 3. Evidence scope
 
-<!-- Every user-visible mobile change ships with a Maestro delta. -->
+<!-- D-056 (2026-08-15) retired Maestro and the simulator ENTIRELY: no flow authoring,
+     no flow execution, no screens/ captures, for any change in any pipeline.
+     Fill the rows below instead. Do not add a Maestro or capture row back. -->
 
-- [ ] **New flow:** `mobile/.maestro/<file>.yaml` — covers: …
-- [ ] **Extended flow:** <existing file> — added steps: …
-- [ ] **WAIVED because:** … (e.g. not mobile-visible; covered by smoke flow NN unchanged)
-- `testID`s added/renamed: <list> (must pass `mobile/scripts/testid-lint.sh`)
-- **Capture delta:** <screens to re-capture at ship, e.g. `trades`, `sheets/trade-dna` | none — no visual change> — run `mobile/scripts/screen-capture.sh --screen <x>` (see `docs/runbook.md` § Screen library)
-- Smoke-suite impact: which of the 11 smoke flows cross this surface, and are they still green?
-- Backend: pytest files added/updated: <list, or why none>
+- [ ] **Structural guard:** `mobile/tests/check-<name>.js` — pins: …
+      (dependency-free so it runs under plain node; add the matching `npm run test:<name>`)
+- [ ] **Unit tests:** backend pytest files added/updated: <list, or why none>
+- [ ] **Code-walk proof:** file:line-cited trace for behavior that is not mechanically
+      checkable — <paste or link>
+- [ ] **Manual TestFlight checklist** (only when runtime proof genuinely matters):
+      numbered steps + expected result, specific enough to catch a regression —
+      this is now the ONLY runtime evidence mobile gets
+- [ ] **WAIVED because:** … (e.g. backend-only; no user-visible surface)
+- `testID`s added/renamed: <list> (must pass `mobile/scripts/testid-lint.sh`, still in CI)
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
@@ -75,7 +80,12 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 
 ## 5. Ship gate declaration
 
-- **Simulator-gate tier** (per the matrix in `docs/runbook.md` § Pre-ship simulator gate):
-  Tier: <1 full smoke + feature flow / 2 feature flow + affected smoke subset / 3 smoke subset / 4 none — CI only>
-- Evidence: TEST_LEDGER entry + `qa/sim-runs/last-sim-run.json` written after the run
-- Operator deviation from the matrix (if any) and why: …
+<!-- The simulator-gate tier matrix is RETIRED (D-056, 2026-08-15). There is no tier to
+     declare and no qa/sim-runs/last-sim-run.json to write. -->
+
+- **CI green:** `backend-tests` + `mobile-typecheck` (which also runs the `check-*.js`
+  suites) + `maestro-testid-lint` — all passing on the pushed sha
+- **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming what ran and what it proved
+- **TestFlight verification** (if a checklist was written in §3): run by the operator, outcome
+  logged in TEST_LEDGER
+- Express lane declared by the operator? <yes + what was skipped / no>
