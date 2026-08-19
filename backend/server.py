@@ -1331,6 +1331,140 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 # actual generic Mid 1st asset in their pool (Elo 1650), and m = N — the
 # user's own definition of a top-tier asset — lands on the same Elo the
 # default math gives "4 firsts". N = 4 → γ = 1 → byte-identical to the
+# ---------------------------------------------------------------------------
+# With-trade playoff-odds impact (#357, flag `outlook.trade_impact`)
+# ---------------------------------------------------------------------------
+# Answers Jon's *"raises your playoff odds to X"*. Reverses D-025's deferral of
+# the card odds block, which was dropped on backend cost that had never been
+# measured; measured 2026-08-19 it was a ~20x overestimate for a DELTA, because
+# the simulator seeds off the league rather than the rosters and so both runs
+# share one random stream (common random numbers). See
+# `backend/outlook/trade_delta.py` for the full argument and its evidence.
+#
+# THE CACHE IS THE PERFORMANCE DESIGN. Within one deck the baseline is
+# identical for all ~30 cards, so `_outlook_impact_baseline` computes the
+# LeagueState + baseline sim ONCE per (league, basis, completed_weeks) and each
+# card re-sims only the with-trade half (~112 ms at DELTA_SIM_COUNT). Without
+# this the 30-card deck would pay 60 simulations instead of 31.
+_OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
+_OUTLOOK_IMPACT_LOCK = threading.Lock()
+_OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
+
+
+def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
+    """(LeagueState, baseline_payload, player_value, player_pos, seed_type) or None.
+
+    Sleeper-only by construction: `backend/outlook/league_state.py` registers
+    ESPN/MFL/Fleaflicker as NotImplemented stubs, so this returns None for them
+    and the caller omits the block. That is the same honest-absence posture
+    `LeagueSummaryScreen`'s `outlookSupported` gate already takes client-side.
+    """
+    platform = (get_league_draft_context(league_id) or {}).get("platform") or "sleeper"
+    if platform != "sleeper":
+        return None
+
+    key = (league_id, basis)
+    now = time.time()
+    with _OUTLOOK_IMPACT_LOCK:
+        hit = _OUTLOOK_IMPACT_CACHE.get(key)
+        if hit and (now - hit[0]) < _OUTLOOK_IMPACT_TTL:
+            return hit[2]
+
+    from . import outlook as outlook_pkg
+    from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
+
+    fmt = _active_format(sess)
+    captured: dict = {}
+    state = outlook_pkg.build_league_state(
+        league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
+    if not state.teams:
+        return None
+
+    pool_players, seed = _get_universal_pool(fmt)
+    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+    if svc_seed:
+        seed = {**svc_seed, **seed}
+    players_meta = {p.id: p for p in pool_players}
+    for p in (sess.get("players") or []):
+        players_meta.setdefault(p.id, p)
+    e2v = _trade_service_mod.elo_to_value
+
+    board_elo = None
+    if basis == "personal" and sess.get("service") is not None:
+        board_elo = {rp.player.id: rp.elo
+                     for rp in sess["service"].get_rankings(position=None).rankings}
+
+    def _value_of(pid: str) -> float:
+        if board_elo is not None and pid in board_elo:
+            return e2v(board_elo[pid])
+        if pid in seed:
+            return e2v(seed[pid])
+        return 0.0
+
+    player_value: dict[str, float] = {}
+    player_pos: dict[str, str] = {}
+    for t in state.teams:
+        for raw_pid in t.player_ids:
+            pid = str(raw_pid)
+            if pid in player_value:
+                continue
+            player_value[pid] = round(_value_of(pid), 1)
+            pm = players_meta.get(pid)
+            player_pos[pid] = getattr(pm, "position", None) or "?"
+
+    seed_type = captured.get("playoff_seed_type")
+    baseline = resim_baseline(
+        state, player_value=player_value, player_pos=player_pos,
+        model_cfg=get_config(), basis=basis, scoring_format=fmt,
+        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+
+    bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
+    with _OUTLOOK_IMPACT_LOCK:
+        _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
+    return bundle
+
+
+def _trade_outlook_impact(league_id: str, caller_user_id: str,
+                          opponent_user_id: str, give: list, recv: list,
+                          sess: dict, basis: str = "consensus") -> dict | None:
+    """The `outlook_impact` block, or None.
+
+    None — never a partial or a guessed number — whenever the answer cannot be
+    computed honestly: flag off, non-Sleeper league, no resolvable roster for
+    either side, or any failure inside the pipeline. An odds hiccup must never
+    cost the caller their trade evaluation, so every caller wraps this in its
+    own try/except as well.
+    """
+    if not is_enabled("outlook.trade_impact"):
+        return None
+    if not (give or recv):
+        return None
+    bundle = _outlook_impact_baseline(league_id, basis, sess)
+    if bundle is None:
+        return None
+    state, baseline, player_value, player_pos, seed_type, fmt = bundle
+
+    # LeagueState is keyed by roster_id; the caller/opponent arrive as LEAGUE
+    # user ids (see backend/CLAUDE.md § Identity). Resolve through the state's
+    # own rows so co-owned rosters resolve the same way everywhere else does.
+    roster_of = {str(t.user_id): t.roster_id for t in state.teams}
+    me = roster_of.get(str(caller_user_id))
+    them = roster_of.get(str(opponent_user_id))
+    if me is None or them is None:
+        return None
+
+    from .outlook.trade_delta import DELTA_SIM_COUNT, compute_trade_odds_impact
+    imp = compute_trade_odds_impact(
+        baseline, state,
+        user_roster_id=me, opponent_roster_id=them,
+        give_player_ids=[str(x) for x in (give or [])],
+        receive_player_ids=[str(x) for x in (recv or [])],
+        player_value=player_value, player_pos=player_pos,
+        model_cfg=get_config(), basis=basis, scoring_format=fmt,
+        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+    return imp.as_dict() if imp is not None else None
+
+
 # plain m × base mapping (so the default anchor Elos are unchanged by the
 # re-derivation). Applies ONLY to the anchor wizard's multi-first keys:
 # single-pick anchors, the generic pick assets in the pool, and the
@@ -9520,6 +9654,24 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                         result["starter_impact"] = _si
                 except Exception as si_err:
                     log.warning("evaluate: starter-impact build failed (omitted): %s", si_err)
+
+                # #357 (flag `outlook.trade_impact`) — what this trade does to
+                # the caller's PLAYOFF odds. Additive and independently
+                # omissible: a failure here costs the odds block, never the
+                # evaluation. Sleeper-only and Mode-B only (a rosterless Mode-A
+                # read has no league to simulate). See _trade_outlook_impact.
+                try:
+                    # LEAGUE identity, not the account id: LeagueState rows are
+                    # keyed on the roster's owner_id, so a co-owned roster
+                    # resolves only through _league_user_id (backend/CLAUDE.md
+                    # § Identity). Identical for a sole owner.
+                    _oi = _trade_outlook_impact(
+                        league_id, _league_user_id(_mode_b_sess),
+                        opponent_user_id, give, recv, _mode_b_sess)
+                    if _oi is not None:
+                        result["outlook_impact"] = _oi
+                except Exception as oi_err:
+                    log.warning("evaluate: outlook-impact build failed (omitted): %s", oi_err)
 
         # ── Eveners (DynastyGM teardown 2026-07-26) ──────────────────────────
         # Additive `eveners` list: one-tap assets to balance an uneven trade.

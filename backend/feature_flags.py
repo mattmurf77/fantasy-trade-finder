@@ -504,6 +504,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # Protocol providers; the projection/points source is config-selected via
     # FTF_OUTLOOK_STRENGTH_SOURCE. Preseason payloads are flagged beta.
     "outlook.odds",
+    # #357 — with-trade playoff-odds delta on evaluate + deck cards.
+    # Independent of `outlook.odds`: that one gates the STANDALONE League
+    # Summary surface, this one gates the per-trade DELTA. Either may be on
+    # without the other, and each is its own kill switch.
+    "outlook.trade_impact",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
