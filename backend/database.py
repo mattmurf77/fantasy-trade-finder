@@ -2068,11 +2068,13 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Forced deck regeneration (docs/reviews/2026-08-18-bug-sweep) ─────
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
-    # Read by ranking_service. All three at 0.0 restores the pre-2026-08-18
-    # behaviour exactly (goldens: backend/tests/test_override_pin_unpin.py).
+    # Read by ranking_service. pin_tier_bounded=0 with the other three at their
+    # shipped values restores the pre-2026-08-18 freeze exactly (goldens:
+    # backend/tests/test_pin_tier_bounded.py, test_override_pin_unpin.py).
+    ("pin_tier_bounded",        1.0,  "Tier-bounded voting: a pinned (tier/reorder-placed) player is no longer frozen — his Elo evolves from votes but is CLAMPED to the band of the tier he was placed in (tier_config.json). Re-ranking inside a tier works; nothing moves across tiers. A pin below the lowest band (the #161 demotion Elo / anchor 'no value') has no band and stays frozen. 0 restores the total freeze"),
     ("pin_exclude_comparisons", 1.0,  "F1: count only the comparisons that actually MOVED a player's Elo in comparison_counts() — a pinned player's votes no longer raise the direction-blind shrinkage weight (which made down-voting a pin RAISE its trade value). 0 disables"),
-    ("pin_unpin_on_newer_swipe", 1.0, "F2: a ranking swipe recorded strictly AFTER a tier/reorder pin releases that player — the pin stays as the starting Elo and newer swipes apply on top. 0 disables (pins permanent)"),
-    ("pin_legacy_at_epoch",     0.0,  "F2 legacy policy: 0 = a pin with no stored write time is PERMANENT (no existing board changes until re-tiered); 1 = treat it as written at the epoch, so ANY recorded swipe — including historical ones — releases it. Operator decision, see docs/config-reference.md"),
+    ("pin_unpin_on_newer_swipe", 0.0, "F2 — SUPERSEDED by pin_tier_bounded and therefore OFF: a ranking swipe recorded strictly AFTER a tier/reorder pin released that player outright. Full release is no longer the model (a pin is a durable band constraint, not something that expires); kept as the revert path to Phase 0 — set pin_tier_bounded=0 and this to 1"),
+    ("pin_legacy_at_epoch",     0.0,  "F2 legacy policy — SUPERSEDED (inert while pin_unpin_on_newer_swipe is 0): 0 = a pin with no stored write time is PERMANENT; 1 = treat it as written at the epoch, so ANY recorded swipe — including historical ones — releases it. Only meaningful on the Phase 0 revert path; see docs/config-reference.md"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
     # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────

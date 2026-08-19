@@ -23,6 +23,7 @@ import copy
 
 import pytest
 
+from backend import ranking_service as rs
 from backend.ranking_service import RankingService, Player
 
 
@@ -156,8 +157,14 @@ def test_elo_memo_identical_to_reference():
 
 
 def test_elo_override_anchoring_preserved_through_memo():
-    """The override/anchoring path (623-662) must survive memoization: pinned
-    players keep their exact override ELO on both the cold and warm call."""
+    """The override/anchoring path must survive memoization: a pinned player's
+    ELO is the same on the cold and the warm call, and stays inside the band of
+    the tier he was placed in (`pin_tier_bounded`, 2026-08-18).
+
+    Before tier-bounded voting this asserted the pin EXACTLY, because a pin was
+    a total freeze. That contract now lives on the kill switch — see the test
+    below — while the memo contract (cold == warm) is unchanged and is what
+    this file exists to gate."""
     svc = _build_service()
     pool = svc._pool("RB")
 
@@ -169,11 +176,27 @@ def test_elo_override_anchoring_preserved_through_memo():
     warm = svc._compute_elo(pool)        # cache hit
 
     for pid, pinned in overrides.items():
-        # Overridden players are anchored: their ELO equals the pinned value
-        # exactly, with no drift, on both the cold and the warm path.
+        assert cold[pid] == warm[pid]
+        tier = RankingService.tier_for_elo(pinned, "RB", "1qb_ppr")
+        lo, hi = RankingService.tier_bands_for("RB", "1qb_ppr")[tier]
+        assert min(lo, pinned) <= cold[pid] <= max(hi, pinned)
+    assert warm == cold
+
+
+def test_elo_override_is_exact_again_under_the_kill_switch(monkeypatch):
+    """`pin_tier_bounded=0` restores the freeze: the pinned value, exactly, on
+    both the cold and the warm path."""
+    monkeypatch.setitem(rs._cfg, "pin_tier_bounded", 0.0)
+    svc = _build_service()
+    pool = svc._pool("RB")
+
+    overrides = dict(svc._elo_overrides)
+    svc._elo_cache = None
+    cold = svc._compute_elo(pool)
+    warm = svc._compute_elo(pool)
+    for pid, pinned in overrides.items():
         assert cold[pid] == pinned
         assert warm[pid] == pinned
-    assert warm == cold
 
 
 def test_stats_memo_identical_to_reference():
@@ -230,8 +253,13 @@ def test_tier_override_bumps_version_and_recomputes():
 
     after = svc._compute_elo(pool)
     assert after != before
-    # r2's new override must now be reflected exactly (anchored).
-    assert after["r2"] == svc._elo_overrides["r2"]
+    # r2's new override must now govern him: it is his starting rating and,
+    # under pin_tier_bounded, the tier he is confined to. He is only voted
+    # against players far below him, so he sits at the band's ceiling.
+    pinned = svc._elo_overrides["r2"]
+    lo, hi = RankingService.tier_bands_for("RB", "1qb_ppr")[
+        RankingService.tier_for_elo(pinned, "RB", "1qb_ppr")]
+    assert min(lo, pinned) <= after["r2"] <= max(hi, pinned)
 
 
 def test_reorder_bumps_version_and_recomputes():

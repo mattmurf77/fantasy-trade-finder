@@ -543,8 +543,10 @@ The trio loop rotates among three strategies (never repeating the previous one),
 
 A tier save, Quick Rank pass, drag reorder, pick-anchor or cross-format copy
 writes an Elo **override** into `users.tier_overrides`, which *pins* that
-player: `_compute_elo` seeds them from the override and skips every rating
-update. [The 2026-08-18 valuation audit](reviews/2026-08-18-valuation-age-audit.md)
+player: `_compute_elo` seeds them from the override. Originally it then skipped
+every rating update, so the pin was a **freeze**; since `pin_tier_bounded`
+(2026-08-18) the pin instead names the **tier** the player may move inside.
+[The 2026-08-18 valuation audit](reviews/2026-08-18-valuation-age-audit.md)
 found the pin composing badly with the trade layer's confidence shrinkage —
 `_shrink_user_elo` weights personal Elo by `w = n/(n + shrink_pseudocount)`
 where `n` is the **comparison count**, with no reference to which way the user
@@ -555,15 +557,31 @@ player's trade value 12.5%** — voting him down made the engine want him more.
 Scale at the time of the audit: **67.8% of all 4,013 recorded comparisons had
 both players pinned**, making the Elo update a no-op on both sides.
 
-All three knobs at `0.0` reproduce the pre-2026-08-18 behaviour byte-for-byte
-(golden: `backend/tests/fixtures/override_pin_golden.json`, captured on the
-pre-fix code and asserted by `test_override_pin_unpin.py`).
+**Tier-bounded voting replaced the freeze on 2026-08-18** (operator design
+call, [D-076](../living-memory/DECISIONS.md)): *"for deliberately placed
+players in tiers, the voting can just rerank a player within his current set
+tier. So some adjustment is expected, but nothing massive across a tier."* A
+pin is now a permanent **band constraint**, not a frozen value and not
+something a later swipe expires. That change **supersedes F2** — both F2 knobs
+are kept and still functional, but default OFF.
+
+Revert paths, both live via `PUT /api/admin/config`, no deploy:
+
+| Want | Set |
+|---|---|
+| Phase 0 (freeze + release-on-newer-swipe) | `pin_tier_bounded=0`, `pin_unpin_on_newer_swipe=1` — byte-identical to `origin/main`, golden `backend/tests/fixtures/pin_tier_bounded_golden.json` |
+| Pre-2026-08-18 (a pin freezes, and its votes still build confidence) | all four knobs `0` — golden `backend/tests/fixtures/override_pin_golden.json` |
+
+Both goldens were **captured** by running the tests' own fixtures against the
+pristine prior tree, and each carries a guard test asserting the golden still
+exhibits the behaviour it is supposed to record, so the proof cannot rot.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `pin_exclude_comparisons` | 1.0 (**ON**) | **F1.** `RankingService.comparison_counts()` counts only the comparisons that actually **moved** a player's Elo. A still-pinned player therefore scores `n = 0` and prices at *exactly* the consensus seed — the honest answer, since his personal Elo carries no vote signal. This removes the inversion above. Note the map is shared by both consumers: `_shrink_user_elo` (value blending) **and** `_value_uncertainty` (`range_base/sqrt(1+n)`, the range-overlap fairness gate). That is deliberate — after the exclusion a pinned player's value *is* the consensus seed, and this codebase already assigns maximum uncertainty to any player valued at consensus (`n=0 ⇒ unc = range_base`); a narrow range around a value carrying zero personal signal would be false precision. The affected population is small (only players both pinned **and** compared). **`0` disables**, restoring raw counts for both consumers. |
-| `pin_unpin_on_newer_swipe` | 1.0 (**ON**) | **F2.** A ranking swipe recorded **strictly after** the pin was written releases that player: the pin stays as his *starting* rating and only swipes newer than it are applied on top. The user's most recent expression of preference beats their older one; the pin already summarises everything said before it, so pre-pin history is not resurrected. Only **ranking** swipes trigger a release — a trade like/pass is an indirect, low-K signal about a whole package and must not destroy a deliberate tier placement — but once released, newer trade swipes do apply. Requires a stored write time; see `pin_legacy_at_epoch` for pins that have none. **`0` disables** (pins permanent, the pre-fix contract). |
-| `pin_legacy_at_epoch` | 0.0 (**OFF**) | **F2 legacy policy.** Overrides written before 2026-08-18 carry **no timestamp** (`users.tier_overrides.__override_at__` did not exist). `0` treats such a pin as **permanent** — it is never released by a swipe — so no existing board changes until the user next tiers/reorders that player, which stamps it. `1` treats it as written at the epoch, so **any** recorded swipe (including historical ones) releases it, retroactively re-opening every legacy pin on the next Elo compute. At the time of shipping that was **739 of 2,735** live pinned entries, which would take the live-comparison rate from 32.2% to 100%. Deliberately an operator decision, not a default: it is a large, one-shot change to boards users deliberately arranged. The alternative lever is a timestamp **backfill** (proposal in [docs/plans/three-model-bakeoff/scope-phase0.md](plans/three-model-bakeoff/scope-phase0.md) §6) which is reversible per-player and can be scoped to one user. Inert while `pin_unpin_on_newer_swipe` is `0`. |
+| `pin_tier_bounded` | 1.0 (**ON**) | **Tier-bounded voting.** The pinned Elo is read as a **tier label** (`RankingService.tier_for_elo`) and every subsequent rating update is clamped to that tier's band (`tier_bands_for` → `backend/tier_config.json`). Bands are 165–205 Elo wide, so a player genuinely re-ranks inside his tier while never crossing one. **Nothing is written anywhere** — the band is derived at Elo-compute time from the pinned value the board already stores — so all **2,735** pre-existing pins are covered with no migration, no backfill and no opt-in. Two populations stay frozen on purpose: a pin **below the lowest band** (`tier_for_elo → None`; that is `DEMOTED_ELO`/`ANCHOR_NO_VALUE_ELO` = 1100, the "unranked, pending placement" markers) has no tier to move inside, and a pin F2 has *released* is gone altogether so nothing clamps it. A pin sitting in a **gap** between two bands (e.g. 1576–1579) or **above the top band's max** widens its own clamp to `min(lo, pin)`/`max(hi, pin)`, so the clamp can never move a player who has not been voted on. Measured on prod at ship: effective comparisons **1,292 → 3,938 of 4,013 (32.2% → 98.1%)**, and **667 of 2,735 pins (24.4%)** actually move. **`0` restores the total freeze.** |
+| `pin_exclude_comparisons` | 1.0 (**ON**) | **F1, narrowed by tier-bounding.** `RankingService.comparison_counts()` counts only the comparisons that actually **moved** a player's Elo. Under the freeze that excluded *every* vote on a pinned player (`n = 0`, priced at exactly the consensus seed). Under tier-bounding an in-band vote really does move him, so it counts as evidence again, and the exclusion narrows to the genuinely inert residue: a player **clamped at a band edge** with the vote still pushing him further out, and a **pin with no band**. Keeping the rule in this narrowed form rather than reverting it is what makes the value truer — a vote the tier floor swallowed would otherwise raise confidence in a number the user was trying to lower, which is the audited inversion one tier down. The map is shared by both consumers: `_shrink_user_elo` (value blending) **and** `_value_uncertainty` (`range_base/sqrt(1+n)`, the range-overlap fairness gate); confidence earned from updates that changed nothing is false precision. **`0` disables**, restoring raw counts for both consumers. |
+| `pin_unpin_on_newer_swipe` | 0.0 (**OFF** — superseded) | **F2, superseded by `pin_tier_bounded`.** Shipped ON for a few hours on 2026-08-18 and then defaulted OFF: full release is no longer the model, because a pin is a durable band constraint rather than something that expires on the next swipe. Kept and still functional as the revert path to Phase 0. When it is `1`, a ranking swipe recorded **strictly after** the pin releases that player — the pin stays as his *starting* rating and only swipes newer than it apply on top — and a released player then evolves **unclamped**, because release means the pin is gone. Tier-bounding only governs pins still in force. Only **ranking** swipes trigger a release; once released, newer trade swipes do apply. Requires a stored write time; see `pin_legacy_at_epoch`. |
+| `pin_legacy_at_epoch` | 0.0 (**OFF** — superseded) | **F2 legacy policy, superseded.** Only qualifies F2, and F2 is now off, so this knob is **inert** unless `pin_unpin_on_newer_swipe` is turned back on. It exists because overrides written before 2026-08-18 carry **no timestamp** (`users.tier_overrides.__override_at__` did not exist): `0` treats such a pin as permanent, `1` treats it as written at the epoch so any recorded swipe releases it. It was the lever for unfreezing the **739 of 2,735** legacy pins that had ever been voted on — a question tier-bounding now answers without any operator decision, since the band is computed from the pin itself. The timestamp **backfill** proposal in [scope-phase0.md](plans/three-model-bakeoff/scope-phase0.md) §6 is likewise moot; it is left recorded, not withdrawn. |
 
 ### Forced deck regeneration — `backend/server.py`, DB-seeded
 

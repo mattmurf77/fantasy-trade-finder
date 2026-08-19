@@ -101,6 +101,74 @@ count real rows after two POSTs, so their passing is itself the evidence the gua
 second sabotage run needed.
 
 ---
+## 2026-08-18d — Tier-bounded voting (a pin confines a player to a tier)
+
+**Branch:** `feat/tier-bounded-pins`, rebased onto `origin/main` `74620a7`. **Not shipped, not pushed.**
+**Scope block:** [`docs/plans/three-model-bakeoff/scope-tier-bounded.md`](../docs/plans/three-model-bakeoff/scope-tier-bounded.md) · **Decision:** [D-076](DECISIONS.md).
+
+| Gate | Baseline (`origin/main`) | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3280 passed, 1 skipped (`74620a7`) | **3314 passed, 1 skipped** |
+
+The +34 is this branch's own: 33 in the new module, plus one from splitting a `test_elo_memoization.py` test in two. Suite was run green at both bases — 3267 → 3301 on `9a20ca8` before the rebase, 3280 → 3314 after it; `9a20ca8..74620a7` does not touch `ranking_service.py`, `trade_service._shrink_user_elo`/`_value_uncertainty` or `tier_config.json`, so the captured golden is unaffected by the rebase.
+
+| `npx tsc --noEmit` (mobile) | n/a — zero files under `mobile/` in the diff | n/a |
+| `mobile/scripts/testid-lint.sh` | n/a — same reason | n/a |
+
+- **New: `backend/tests/test_pin_tier_bounded.py` — 33 tests.** The Adams scenario (pinned
+  1565.28 in `second` [1400, 1575], 17 down-votes → Elo 1426.6, materially down, never outside
+  the band); clamp at both edges; a pin exactly on a band boundary; a pin in a band gap; a pin
+  above the top band; unranked/`None`-tier pins frozen rather than crashed or floated; a
+  zero-vote pin untouched by the clamp; a clamped player climbing back into the band; both
+  scoring formats plus monkeypatched bands proving the clamp reads the service's own format and
+  the player's own position; the `pin_exclude_comparisons` narrowing in both directions and its
+  `_value_uncertainty` sharing; monotonicity, direction-awareness, and the disclosed n=0→1
+  residual; the F2 interaction both ways; the knob in both memo keys.
+- **Byte identity proved by CAPTURE.** `backend/tests/fixtures/pin_tier_bounded_golden.json`
+  was produced by copying the new module's own `build_service`/`snapshot` verbatim into a
+  detached worktree of pristine `origin/main` (`9a20ca8`; `git diff e8ae476..9a20ca8 --
+  backend/` is empty) and running it there before a line of production code changed. Asserted
+  as a whole document at `pin_tier_bounded=0` + `pin_unpin_on_newer_swipe=1`. A guard test
+  asserts the golden still *exhibits* the freeze (every pinned player exactly on his pin, every
+  pinned count 0, the un-pinned control moved), so the proof cannot rot.
+- **Mutation matrix — every guard bites.** Each mutation applied to a clean tree:
+  remove the clamp → **11 fail**; drop the `min(lo,pin)`/`max(hi,pin)` widening → **2 fail**;
+  let an unranked pin float free → **1 fails**; count clamped-away votes as confidence →
+  **3 fail**. Restored → 33 pass.
+- **Updated, not deleted:** `test_override_pin_unpin.py` (41 tests) now states the Phase 0
+  configuration explicitly instead of reading today's defaults, so it keeps gating the Phase 0
+  contract, which is still reachable by knob. `test_elo_memoization.py` had two tests asserting
+  a pinned Elo *exactly* — that was the freeze contract; split into the memo contract
+  (cold == warm, and inside the band) plus a new test asserting exactness under the kill switch.
+- **Prod measured read-only** (`DATABASE_URL_PROD`, `SELECT` only under
+  `default_transaction_read_only=on`), 2026-08-18. Every board replayed through the **real**
+  `RankingService._compute_elo`/`_pin_bounds` via `replay_from_db`; the "today" column
+  reproduces the audit's 2,721-inert figure exactly, which is what validates the replay.
+
+  | | Comparisons | Effective | Pins | Players who move |
+  |---|---|---|---|---|
+  | Today (freeze) | 4,013 | 1,292 (32.2%) | 2,735 | 0 |
+  | **Tier-bounded** | 4,013 | **3,938 (98.1%)** | 2,735 | **667 (24.4%)** |
+
+  Ceiling on the second number is 739 — the pins that have ever appeared in a comparison at all
+  — so **90.3% of every pin the user has ever voted on now moves**. The 72 that do not are 47
+  pins below the lowest band (frozen by design) and 25 clamped hard at an edge.
+- **Correction to the 2026-08-18 audit, found by the replay:** the operator's 18 Davante Adams
+  comparisons are `decision_type = 'trade'`, and trade decisions have **never** entered
+  `comparison_counts` for any player (`_compute_stats` walks only `_swipes`). His Elo now moves
+  (1565.28 → 1530.15) but his effective value is the consensus seed 1138.8 both before and
+  after. The audit's `n = 6` came from unfiltered SQL over `swipe_decisions`; it flagged its own
+  confidence on that arithmetic as medium-high. The mechanism is real — the 353 → 1,666 jump in
+  live *ranking* comparisons is what measures it — the per-player +12.5% is not.
+- **Sim gate: Tier 4 (none, CI only).** Backend-only diff; zero files under `mobile/`.
+  `qa/sim-runs/last-sim-run.json` not written — under D-056 there is nothing to run.
+  `FTF_SKIP_SIM_GATE=1` is the standing posture for any push.
+- **Not covered by any test here:** whether the thawed boards produce better decks. That is
+  empirical and the lever is `pin_tier_bounded` — one `PUT /api/admin/config` to set and to
+  undo. Also untested: the band-edge UI affordance, which is a client change and deliberately
+  not built (scope §5).
+
+---
 ## 2026-08-18b — Bug-sweep follow-ons (items 3/4/5) + research 6/7
 
 **Branch:** `feat/sweep-followups-2026-08-18` (off `origin/main` `90fb19a`). **Not shipped** — awaiting operator go.

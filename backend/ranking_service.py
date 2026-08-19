@@ -113,12 +113,36 @@ _DEFAULT_CFG: dict[str, float] = {
     #   the engine value him MORE (+12.5% on the audited case). 1.0 = count only
     #   the comparisons that actually moved the player's Elo. 0.0 = kill.
     "pin_exclude_comparisons":    1.0,
-    # pin_unpin_on_newer_swipe — F2. A ranking swipe recorded strictly AFTER the
-    #   pin was written releases that player: the pin stays as the starting
-    #   rating, and every swipe newer than it is applied on top. The user's most
-    #   recent expression of preference wins over their older one. 1.0 = on,
-    #   0.0 = kill (pins are permanent, the pre-fix behaviour).
-    "pin_unpin_on_newer_swipe":   1.0,
+    # pin_tier_bounded — TIER-BOUNDED VOTING (2026-08-18, operator design call;
+    #   supersedes F2 below). A pin is no longer a freeze and no longer
+    #   something a later swipe destroys: it is a permanent TIER constraint.
+    #   The pinned Elo names the tier the user placed the player in
+    #   (tier_for_elo), and the player's rating then evolves from votes
+    #   normally, CLAMPED to that tier's band (tier_bands_for /
+    #   tier_config.json). Bands are 165-205 Elo wide, so there is real room to
+    #   re-rank inside a tier while "nothing massive across a tier" holds.
+    #   The clamp is derived at compute time from the pinned value itself, so
+    #   all 2,735 pre-existing pins are covered with no data write and no
+    #   migration. A pin BELOW the lowest band (tier_for_elo -> None: the #161
+    #   demotion Elo 1100 and the anchor "no value" answer) has no band and
+    #   stays frozen — those are deliberate "unranked, pending placement"
+    #   markers and a vote must not resurrect them. A pin sitting in a GAP
+    #   between two bands, or above the top band's max (apply_reorder permutes
+    #   raw seed Elos, which do not have to land inside a band), widens the
+    #   clamp to contain itself — min(lo, pin) / max(hi, pin) — so a player
+    #   with zero votes can never be moved by the clamp alone.
+    #   1.0 = on (default), 0.0 = kill (pins freeze again, exactly as before).
+    "pin_tier_bounded":           1.0,
+    # pin_unpin_on_newer_swipe — F2. SUPERSEDED by pin_tier_bounded and
+    #   therefore defaulted OFF (was 1.0 for a few hours on 2026-08-18). Full
+    #   release is no longer the model: a pin is a durable band constraint, not
+    #   something that expires on the next swipe. Kept, and still functional,
+    #   as the revert path to Phase 0 behaviour — set pin_tier_bounded=0 and
+    #   this to 1 to get it back. When BOTH are on, a released player is
+    #   released outright (no clamp), because the F2 contract is that the pin
+    #   is gone; tier-bounding only governs pins that are still in force.
+    #   1.0 = on, 0.0 = off (the default).
+    "pin_unpin_on_newer_swipe":   0.0,
     # pin_legacy_at_epoch — F2 legacy policy. Overrides written before this
     #   change carry no timestamp. 0.0 (default) = an unstamped pin is treated
     #   as PERMANENT — it is never released by a swipe, so no existing board
@@ -127,6 +151,8 @@ _DEFAULT_CFG: dict[str, float] = {
     #   recorded swipe — including historical ones — releases it. The 1.0 side
     #   retroactively re-opens every legacy pin on the next Elo compute; it is
     #   an operator decision, not a default. See docs/config-reference.md.
+    #   Also SUPERSEDED by pin_tier_bounded: it only qualifies F2, and F2 is
+    #   off by default, so this knob is inert unless F2 is turned back on.
     "pin_legacy_at_epoch":        0.0,
 }
 
@@ -397,6 +423,12 @@ class RankingService:
         self._elo_cache: Optional[dict[str, float]] = None
         self._elo_cache_version: int = 0
         self._elo_cache_key: Optional[tuple] = None
+        # {pinned pid: opponents whose RANKING comparison actually changed that
+        # player's rating}. Written by _compute_elo alongside _elo_cache (and
+        # therefore valid under the same cache key); read by comparison_counts
+        # as the definition of a LIVE comparison. Only pinned players are
+        # tracked — everyone else's live count is just len(stats["compared"]).
+        self._elo_moved: dict[str, set[str]] = {}
         self._stats_cache: Optional[dict[str, dict]] = None
         self._stats_cache_version: int = 0
         self._stats_cache_key: Optional[tuple] = None
@@ -421,7 +453,8 @@ class RankingService:
         """
         return (_c("pin_exclude_comparisons"),
                 _c("pin_unpin_on_newer_swipe"),
-                _c("pin_legacy_at_epoch"))
+                _c("pin_legacy_at_epoch"),
+                _c("pin_tier_bounded"))
 
     def _pin(self, pid: str, elo: float, at: Optional[str] = None) -> None:
         """Write an Elo override and stamp WHEN it was written.
@@ -485,6 +518,68 @@ class RankingService:
                 if ts is not None and ts > pin_at[pid]:
                     released[pid] = pin_at[pid]
         return released
+
+    def _pin_bounds(
+        self,
+        pool_ids: set[str],
+        released: dict[str, datetime],
+    ) -> dict[str, tuple[float, float]]:
+        """Per-pin Elo band for TIER-BOUNDED voting — {pid: (lo, hi)}.
+
+        The operator's design call (2026-08-18): a deliberately placed player
+        should still be re-rankable *by voting*, but only inside the tier he
+        was placed in — "some adjustment is expected, but nothing massive
+        across a tier". So the pinned Elo is read as a tier label
+        (`tier_for_elo`) and the player's rating is clamped to that tier's band
+        (`tier_bands_for`, i.e. `tier_config.json`) after every update. Bands
+        are 165-205 Elo wide, which is genuine room to move.
+
+        Nothing is written anywhere: the band is derived at compute time from
+        the pinned value the board already stores, so every pre-existing pin is
+        covered without a migration or a backfill.
+
+        Two populations are deliberately absent from the result and therefore
+        stay FROZEN, exactly as before this change:
+
+        * **Pins with no band** — `tier_for_elo` returns None below the lowest
+          band (1150 in every cell). That is where `DEMOTED_ELO` (#161, a
+          player explicitly passed over in a Quick Set save) and the anchor
+          wizard's "no value" answer put people. Those are deliberate
+          "unranked, pending placement" markers, not tier placements; a stray
+          comparison must not drag one back onto the board.
+        * **Pins F2 has released** — if `pin_unpin_on_newer_swipe` is turned
+          back on, a released pin is *gone*, so the player evolves unclamped.
+          Tier-bounding only governs pins still in force. (F2 is off by
+          default; this is the interaction rule, not the normal path.)
+
+        The band is widened to contain the pin itself — `min(lo, pin)` /
+        `max(hi, pin)`. `tier_config.json` has small GAPS between bands (e.g.
+        1576-1579 sits between `second`.max and `first_1`.min) and the top
+        band's max is finite, while `apply_reorder` permutes raw seed Elos that
+        need not land inside any band. Without the widening, a pinned player
+        with zero votes could be silently moved by the first vote that touched
+        him, purely by the clamp snapping him into the band; with it, a player
+        can never be pushed further from his own pin than the band already is.
+        """
+        if not self._elo_overrides or _c("pin_tier_bounded") != 1.0:
+            return {}
+        bounds: dict[str, tuple[float, float]] = {}
+        bands_by_pos: dict[Optional[str], dict[str, tuple[float, float]]] = {}
+        for pid, pin in self._elo_overrides.items():
+            if pid not in pool_ids or pid in released:
+                continue
+            player = self._players.get(pid)
+            pos = player.position if player else None
+            bands = bands_by_pos.get(pos)
+            if bands is None:
+                bands = bands_by_pos[pos] = self.tier_bands_for(
+                    pos, self._scoring_format)
+            tier = self.tier_for_elo(pin, pos, self._scoring_format)
+            if tier is None or tier not in bands:
+                continue                      # unranked pin -> stays frozen
+            lo, hi = bands[tier]
+            bounds[pid] = (min(lo, pin), max(hi, pin))
+        return bounds
 
     # ------------------------------------------------------------------
     # Public API
@@ -960,35 +1055,48 @@ class RankingService:
 
     def comparison_counts(self) -> dict[str, int]:
         """Per-player count of unique opponents whose comparison actually
-        MOVED that player's Elo.
+        MOVED that player's Elo — the player's LIVE comparisons.
 
         Consumed by the trade layer as `confidence`: it feeds
         `trade_service._shrink_user_elo` (personal Elo blended toward the
         consensus seed with w = n/(n+n0)) and `_value_uncertainty` (per-player
         value half-width, range_base/sqrt(1+n)).
 
-        F1 (pin_exclude_comparisons, 2026-08-18). The shrinkage weight is
-        direction-BLIND — it reads how MUCH you voted, never which way. A
-        pinned player's Elo cannot move at all, so every comparison they were
-        shown only raised w and pulled the effective trade value further toward
-        the pin. On the audited board the pin sat above consensus, so voting a
-        player DOWN 17 times raised his trade value 12.5%. Counting only the
-        comparisons that actually moved him removes the inversion: a still-
-        pinned player scores 0 and is therefore valued at exactly consensus,
-        which is the honest answer — his personal Elo carries no vote signal.
+        Why "actually moved" and not "was shown" (pin_exclude_comparisons, F1,
+        2026-08-18). The shrinkage weight is direction-BLIND — it reads how
+        MUCH you voted, never which way. When a pin was a total freeze, every
+        comparison a pinned player was shown only raised w and pulled the
+        effective trade value further toward the pin; on the audited board the
+        pin sat above consensus, so voting a player DOWN 17 times raised his
+        trade value 12.5%.
+
+        Under TIER-BOUNDED voting (pin_tier_bounded) most of those comparisons
+        are no longer inert — a pinned player's rating really does move inside
+        his tier band — so they are counted again, and the rule NARROWS to the
+        genuinely inert residue:
+
+        * a player clamped at a band edge with the vote still pushing him
+          further out (the update changes nothing, so it is not evidence), and
+        * a pin with no tier band at all (below the lowest band: the #161
+          demotion Elo and the anchor "no value" answer), which stays frozen.
+
+        Keeping the rule in this narrowed form rather than reverting it is what
+        makes the value truer: a vote that moved a player is real evidence and
+        now counts, while a vote the tier floor swallowed would otherwise raise
+        confidence in a number the user was trying to lower — the same
+        inversion, one tier down. Reverting it outright would reinstate that
+        inversion for exactly the players at a band edge, which is where a user
+        who keeps voting someone down ends up.
 
         `_value_uncertainty` deliberately shares this map rather than keeping
-        the raw counts. After the exclusion a pinned player's value IS the
-        consensus seed, and this codebase already assigns maximum uncertainty
-        to any player valued at consensus (n=0 ⇒ unc = range_base). Handing
-        that same value a narrow range because of votes that were discarded
-        would be false precision. The affected population is small — only
-        players that are both pinned AND compared — and the single knob turns
+        the raw counts, for the same reason it did before: confidence that came
+        from updates which changed nothing is false precision. One knob turns
         both consumers back off together.
 
-        Pure read: `_compute_stats` (memoized) supplies the base counts and
-        `_pin_release` decides who is still pinned; no ranking math is touched.
-        Memoized on _version, like its two neighbours.
+        Pure read: `_compute_stats` supplies the base counts and `_compute_elo`
+        supplies the live-comparison map (`_elo_moved`); both are memoized on
+        the same key, and neither is re-run when warm. Only PINNED players are
+        recounted — everyone else's comparisons all move them by definition.
         """
         conf_key = (self._version, self._pin_cfg_key())
         if self._conf_cache is not None and self._conf_cache_version == conf_key:
@@ -999,26 +1107,10 @@ class RankingService:
         counts = {pid: len(s["compared"]) for pid, s in stats.items()}
 
         if _c("pin_exclude_comparisons") == 1.0 and self._elo_overrides:
-            pool_ids = {p.id for p in pool}
-            released = self._pin_release(pool_ids)
-            # Recount the pinned players from the swipes that moved them: none
-            # while frozen, and only post-release opponents once released.
-            live: dict[str, set[str]] = {
-                pid: set() for pid in self._elo_overrides if pid in counts
-            }
-            if released:
-                for s in self._swipes:
-                    w, l = s.winner_id, s.loser_id
-                    if w not in pool_ids or l not in pool_ids:
-                        continue
-                    ts = _parse_ts(s.timestamp)
-                    if ts is None:
-                        continue
-                    for pid, other in ((w, l), (l, w)):
-                        since = released.get(pid)
-                        if since is not None and ts > since:
-                            live[pid].add(other)
-            counts.update({pid: len(opps) for pid, opps in live.items()})
+            self._compute_elo(pool)          # populates self._elo_moved
+            moved = self._elo_moved
+            counts.update({pid: len(moved.get(pid, ()))
+                           for pid in self._elo_overrides if pid in counts})
 
         self._conf_cache = counts
         self._conf_cache_version = conf_key
@@ -1276,13 +1368,14 @@ class RankingService:
 
         pool_ids = {p.id for p in pool}
         # Seed each player's starting ELO.  Manual overrides (from tier saves
-        # or drag-and-drop reorders) are the user's EXPLICIT ranking — once
-        # set, they pin the player's ELO and historical swipes do not move
-        # them. (Previous behavior re-applied every swipe on top of the
-        # override, which silently dragged tier-placed players away from
-        # where the user put them. For a user with many past trios swipes,
-        # tier saves became decorative — the round-trip broke and chips
-        # appeared in unexpected tiers after refresh.)
+        # or drag-and-drop reorders) are the user's EXPLICIT ranking, so they
+        # are the STARTING rating and, under pin_tier_bounded, also the tier
+        # the player is confined to. (The original behaviour re-applied every
+        # swipe on top of the override without any bound, which silently
+        # dragged tier-placed players away from where the user put them — tier
+        # saves became decorative and chips appeared in unexpected tiers after
+        # refresh. The fix for that was a total freeze, which then made the
+        # vote loop inert; the band is the middle ground.)
         ratings: dict[str, float] = {}
         for p in pool:
             if p.id in self._elo_overrides:
@@ -1298,27 +1391,58 @@ class RankingService:
         # swipe newer than it. Empty dict ⇒ the pre-fix "pins are permanent"
         # behaviour, so the knob at 0.0 is byte-identical.
         released = self._pin_release(pool_ids)
+        # Tier-bounded voting (pin_tier_bounded, 2026-08-18): {pid: (lo, hi)}
+        # for every pin that is still in force and sits in a tier band. Those
+        # players DO evolve from votes, clamped to their band. Empty dict =>
+        # the pre-2026-08-18 "a pin is a freeze" behaviour, so the knob at 0.0
+        # is byte-identical.
+        bounds = self._pin_bounds(pool_ids, released)
+        # {pinned pid: opponents whose ranking comparison actually changed his
+        # rating} — the LIVE comparisons, consumed by comparison_counts().
+        moved: dict[str, set[str]] = {}
 
         def _moves(pid: str, ts: Optional[datetime]) -> bool:
             """Does this swipe update `pid`'s rating?
 
-            Un-pinned players always move. A pinned player moves only once
-            released, and only for swipes strictly newer than their pin.
+            Un-pinned players always move. A pinned player moves if a newer
+            swipe released him (F2, and then only for swipes strictly newer
+            than the pin) or if tier-bounding gave him a band to move inside.
+            A pin that is neither released nor banded is frozen.
             """
             if pid not in override_ids:
                 return True
             since = released.get(pid)
-            if since is None:
-                return False          # still pinned
-            return ts is not None and ts > since
+            if since is not None:
+                return ts is not None and ts > since
+            return pid in bounds
+
+        def _apply(pid: str, delta: float, other: str, track: bool) -> None:
+            """Add `delta` to `pid`'s rating, clamped to his tier band if any.
+
+            A clamped-away update is exactly the case the trade layer must not
+            count as evidence: the player is at the edge of the tier the user
+            put him in and the vote is pushing him further out, so it moves
+            nothing. `track` records only RANKING comparisons, matching the
+            base counts in `_compute_stats` (which ignores trade swipes).
+            """
+            before = ratings[pid]
+            after = before + delta
+            band = bounds.get(pid)
+            if band is not None:
+                after = min(max(after, band[0]), band[1])
+            if after == before:
+                return
+            ratings[pid] = after
+            if track and pid in override_ids:
+                moved.setdefault(pid, set()).add(other)
 
         # Regular ranking swipes — full K factor.
-        # Skip the rating update for any pid that has a LIVE override: the user
-        # has explicitly placed them via tiers/reorder and wants that value
-        # to stick. The OTHER side of the swipe (if not overridden) still
-        # evolves against the overridden player's anchor ELO, which is the
-        # right behaviour: a non-tier-placed player who beat a top-tier
-        # player should still gain ELO.
+        # A pinned player's update is bounded (or, for a pin with no tier band,
+        # skipped) — the user has explicitly placed them via tiers/reorder and
+        # wants that placement to hold, but voting still re-orders them inside
+        # it. The OTHER side of the swipe still evolves against the pinned
+        # player's anchor ELO, which is the right behaviour: a non-tier-placed
+        # player who beat a top-tier player should still gain ELO.
         for s in self._swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
@@ -1327,9 +1451,9 @@ class RankingService:
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             if _moves(w, ts):
-                ratings[w] += elo_k * (1.0 - ea)
+                _apply(w, elo_k * (1.0 - ea), l, True)
             if _moves(l, ts):
-                ratings[l] += elo_k * (0.0 - (1.0 - ea))
+                _apply(l, elo_k * (0.0 - (1.0 - ea)), w, True)
 
         # Trade-decision swipes — reduced K factor (softer signal).
         # Same anchoring rule as above. A trade swipe can never RELEASE a pin
@@ -1342,13 +1466,14 @@ class RankingService:
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             if _moves(w, ts):
-                ratings[w] += k * (1.0 - ea)
+                _apply(w, k * (1.0 - ea), l, False)
             if _moves(l, ts):
-                ratings[l] += k * (0.0 - (1.0 - ea))
+                _apply(l, k * (0.0 - (1.0 - ea)), w, False)
 
         self._elo_cache = ratings
         self._elo_cache_version = self._version
         self._elo_cache_key = cache_key
+        self._elo_moved = moved
         return ratings
 
     def _compute_stats(self, pool: list[Player]) -> dict[str, dict]:

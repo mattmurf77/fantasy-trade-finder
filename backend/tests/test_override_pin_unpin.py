@@ -46,8 +46,17 @@ CONSENSUS_VALUE = 1138.8283833246219
 
 KILL = {"pin_exclude_comparisons": 0.0,
         "pin_unpin_on_newer_swipe": 0.0,
-        "pin_legacy_at_epoch": 0.0}
-DEFAULTS = {k: rs._DEFAULT_CFG[k] for k in KILL}
+        "pin_legacy_at_epoch": 0.0,
+        "pin_tier_bounded": 0.0}
+# Phase 0's shipped configuration. TIER-BOUNDED VOTING (2026-08-18) superseded
+# it hours later — `pin_tier_bounded` now defaults ON and F2 defaults OFF — but
+# Phase 0 remains reachable by knob and is the documented revert path, so this
+# module states that configuration explicitly instead of reading today's
+# defaults. Today's defaults are covered by test_pin_tier_bounded.py.
+DEFAULTS = {"pin_exclude_comparisons": 1.0,
+            "pin_unpin_on_newer_swipe": 1.0,
+            "pin_legacy_at_epoch": 0.0,
+            "pin_tier_bounded": 0.0}
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +69,7 @@ def restore_cfg():
 
 
 def cfg(**overrides):
-    """Start from the shipped defaults, then apply this test's overrides."""
+    """Start from the Phase 0 configuration, then apply this test's overrides."""
     rs._cfg.update(DEFAULTS)
     rs._cfg.update(overrides)
 

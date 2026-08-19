@@ -1,0 +1,57 @@
+{
+  "counts": {
+    "adams": 0,
+    "boundary": 0,
+    "edge_hi": 0,
+    "edge_lo": 0,
+    "free": 8,
+    "gapped": 0,
+    "quiet": 1,
+    "rb_pin": 0,
+    "unranked": 0
+  },
+  "elo": {
+    "adams": 1565.3,
+    "boundary": 1580.0,
+    "edge_hi": 1575.0,
+    "edge_lo": 1400.0,
+    "free": 1642.8,
+    "gapped": 1577.0,
+    "quiet": 1441.8,
+    "rb_pin": 1700.0,
+    "unranked": 1100.0
+  },
+  "shrunk": {
+    "adams": 1526.0,
+    "boundary": 1600.0,
+    "edge_hi": 1480.0,
+    "edge_lo": 1470.0,
+    "free": 1595.214755,
+    "gapped": 1560.0,
+    "quiet": 1448.356482,
+    "rb_pin": 1650.0,
+    "unranked": 1210.0
+  },
+  "unc": {
+    "adams": 0.35,
+    "boundary": 0.35,
+    "edge_hi": 0.35,
+    "edge_lo": 0.35,
+    "free": 0.116667,
+    "gapped": 0.35,
+    "quiet": 0.247487,
+    "rb_pin": 0.35,
+    "unranked": 0.35
+  },
+  "value": {
+    "adams": 1138.828383,
+    "boundary": 1648.721271,
+    "edge_hi": 904.837418,
+    "edge_lo": 860.707976,
+    "free": 1609.741774,
+    "gapped": 1349.858808,
+    "quiet": 772.427141,
+    "rb_pin": 2117.000017,
+    "unranked": 234.570288
+  }
+}
