@@ -91,6 +91,15 @@ injecting a fake `_DEFAULT_CFG` key fails the inventory test naming `shiny_new_k
 **Not covered:** no runtime/TestFlight evidence exists or is claimed — nothing reaches a client.
 The new code is unreachable in production until Phase 3 wires a caller behind `trade.bakeoff`.
 
+**Second rebase, same session** (onto `origin/main` `9a20ca8`, picking up the bake-off Phase 0 batch
+`e8ae476`): clean, no conflicts, despite that batch touching `backend/database.py`,
+`backend/server.py` and `docs/data-dictionary.md` — the same three files this work edits. Re-verified
+after: both `save_trade_swipes` gates present (`server.py:11010`, `:11347`), guard intact, and
+**pytest 3270 passed / 1 skipped** (the +51 over 3219 is Phase 0's own
+`test_force_supersedes_running_job.py` and `test_override_pin_unpin.py`). The three route-level tests
+count real rows after two POSTs, so their passing is itself the evidence the guard still works — no
+second sabotage run needed.
+
 ---
 ## 2026-08-18b — Bug-sweep follow-ons (items 3/4/5) + research 6/7
 

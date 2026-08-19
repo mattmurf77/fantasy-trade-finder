@@ -740,6 +740,11 @@ counts `swipe_decisions` rows, which the source pins alone could not do.
 `session_init` because the persisted rows — now correct — are what `replay_from_db` reloads. Pinned
 by `test_route_replay_leaves_the_in_session_signal_doubled` so that it stays a decision rather than
 drifting into a leak.
+**Watch (not yet true as of 2026-08-18):** the matchmaking session reports that `feat/tier-bounded-pins`
+— in flight, **not landed** — clamps a tier-placed player's Elo to his tier band, which would make this
+residual strictly smaller for *pinned* players (a doubled signal could not push value past the band
+edge) and leave it unchanged for unpinned ones. Re-check this paragraph once that branch is on `main`;
+do not treat the tighter bound as real until then.
 **Status:** Active.
 
 ---
