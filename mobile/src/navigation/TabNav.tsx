@@ -38,6 +38,15 @@ import TradesScreen from '../screens/TradesScreen';
 // stays in the tree pending a later cleanup pass, but nothing imports it.
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
+// Presentation v2 (flag `trades.presentation_v2`, docs/plans/
+// trade-presentation-v2/scope.md). Both screens register UNCONDITIONALLY,
+// per the house rule that a flag gates the ENTRY POINT, not the navigator
+// entry — a registered-but-unreachable route costs nothing at render time
+// and keeps a stale deep link landing on a real screen instead of 404ing.
+// The entry point is the mode strip's "Today" chip, which exists only while
+// the flag is on.
+import TodaysTradeScreen from '../screens/TodaysTradeScreen';
+import TradeBrowseAllScreen from '../screens/TradeBrowseAllScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 // rookie-draft placement (operator decision 2026-08-06, option A′) — the
 // SAME screen the root stack registers. Dual registration is deliberate:
@@ -73,7 +82,13 @@ export type RankRoute =
   | 'ManualRanks'
   | 'RookieRanks'
   | 'Trends';
-export type TradesRoute = 'TradesHome' | 'TradeDeck' | 'Portfolio' | 'TradeCalculator';
+export type TradesRoute =
+  | 'TradesHome'
+  | 'TradeDeck'
+  | 'Portfolio'
+  | 'TradeCalculator'
+  | 'TodaysTrade'
+  | 'TradeBrowseAll';
 
 // #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
 // reached from the Rank menu, not a linear drill-down. The native back button
@@ -434,6 +449,20 @@ function TradesStackNav() {
       {finderHubOn ? (
         <TradesStack.Screen name="TradeDeck" component={TradesScreen} />
       ) : null}
+      {/* Presentation v2 — registered unconditionally (see the import
+          comment). Reachable only via the flag-gated "Today" chip. Both use
+          the shared always-on back control, falling back to the Acquire
+          landing, because native back is dead on iOS 26 (RNS#3294). */}
+      <TradesStack.Screen
+        name="TodaysTrade"
+        component={TodaysTradeScreen}
+        options={subScreenOptions("Today's Trade", 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="TradeBrowseAll"
+        component={TradeBrowseAllScreen}
+        options={subScreenOptions('All trades', 'TodaysTrade')}
+      />
       <TradesStack.Screen
         name="Portfolio"
         component={PortfolioScreen}

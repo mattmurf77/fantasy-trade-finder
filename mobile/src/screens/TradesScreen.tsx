@@ -648,6 +648,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // rookie-draft placement, option B — gates the mode strip's leading Draft
   // chip (the room's permanent home). Off ⇒ no chip, strip unchanged.
   const draftRoomOn = useFlag('draft.room');
+  // Presentation v2 (docs/plans/trade-presentation-v2/scope.md, operator
+  // decision 2026-08-18). Gates the mode strip's leading "Today" chip, which
+  // is the ONLY entry point to the additive TodaysTrade / TradeBrowseAll
+  // screens. This flag changes NOTHING else in this file: no state, no
+  // query, no render branch, no behaviour of the existing deck. Off ⇒ the
+  // handler is omitted, the chip does not exist, and the strip renders
+  // byte-identically to today. Pinned by mobile/tests/check-presentation-v2.js.
+  const presentationV2On = useFlag('trades.presentation_v2');
   // #269 — sheet-local team-targeting selection (declared ahead of
   // `scopedOpponent` below, which reads it). Single-select; `null` = no
   // opponent chosen (unscoped, today's behavior).
@@ -4704,6 +4712,13 @@ export default function TradesScreen({ navigation, route }: any) {
                     ? () => navigation?.navigate?.('DraftRoom')
                     : undefined
                 }
+                // Presentation v2 — passing the handler is what creates the
+                // control; flag off ⇒ omitted ⇒ this row is unchanged.
+                onTodaysTrade={
+                  presentationV2On
+                    ? () => navigation?.navigate?.('TodaysTrade')
+                    : undefined
+                }
               />
             ) : (
               <TradeFinderModeBar
@@ -4719,6 +4734,14 @@ export default function TradesScreen({ navigation, route }: any) {
                 onDraft={
                   draftRoomOn
                     ? () => navigation?.navigate?.('DraftRoom')
+                    : undefined
+                }
+                // Presentation v2 — same convention as onDraft above: the
+                // handler's presence IS the chip. Flag off ⇒ omitted ⇒ the
+                // strip's chip array is unchanged.
+                onTodaysTrade={
+                  presentationV2On
+                    ? () => navigation?.navigate?.('TodaysTrade')
                     : undefined
                 }
                 showHint={deck.length === 0}

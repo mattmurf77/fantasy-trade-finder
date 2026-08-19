@@ -35,7 +35,7 @@ const COPY: Record<FinderMode, { title: string; hint: string }> = {
   },
 };
 
-type ChipKey = FinderMode | 'calc' | 'free-agents' | 'draft';
+type ChipKey = FinderMode | 'calc' | 'free-agents' | 'draft' | 'today';
 
 const CHIPS: { key: ChipKey; label: string }[] = [
   { key: 'guided', label: 'Guided' },
@@ -58,6 +58,19 @@ const CHIPS: { key: ChipKey; label: string }[] = [
 // rather than switch deck mode, with deliberately no visual distinction.
 const DRAFT_CHIP: { key: ChipKey; label: string } = { key: 'draft', label: 'Draft' };
 
+// Presentation v2 (flag `trades.presentation_v2`, operator decision
+// 2026-08-18: "build and ship it as a new tab in the acquire page for now").
+// Same optional-prop convention as the Draft chip — PASSING THE HANDLER IS
+// WHAT CREATES THE CHIP, so with the flag off `chips` is object-for-object
+// and order-for-order identical to today's array and this component renders
+// byte-identically.
+//
+// It LEADS, ahead of even the Draft chip, for the same reason Draft leads:
+// the strip is genuinely scrolled at five chips (~402pt against ~361pt of
+// usable width), so an appended chip is never seen. It is also the surface
+// under evaluation — a hidden entry point produces no signal to evaluate.
+const TODAY_CHIP: { key: ChipKey; label: string } = { key: 'today', label: 'Today' };
+
 interface Props {
   mode: FinderMode;
   /** In-place switch between the three deck modes (setParams). */
@@ -70,6 +83,11 @@ interface Props {
    *  OMIT to render today's five chips exactly — the host passes this only
    *  when `draft.room` is on, so the flag gates the chip's existence. */
   onDraft?: () => void;
+  /** Open the presentation-v2 surface (`TodaysTrade`, flag
+   *  `trades.presentation_v2`). OMIT to render today's chips exactly — the
+   *  host passes this only when the flag is on, so the flag gates the chip's
+   *  existence, never this component. */
+  onTodaysTrade?: () => void;
   /** Team mode: the scoped league-mate's display name, if chosen. */
   teamName?: string | null;
   /** Render the one-line mode hint (cold start only, #246 mock B2). */
@@ -87,6 +105,7 @@ export default function TradeFinderModeBar({
   onCalculator,
   onFreeAgents,
   onDraft,
+  onTodaysTrade,
   teamName,
   showHint = false,
   hideTeamAndPlayer = false,
@@ -96,8 +115,11 @@ export default function TradeFinderModeBar({
     ? CHIPS.filter((c) => c.key !== 'team' && c.key !== 'player')
     : CHIPS;
   // Draft LEADS when present (see DRAFT_CHIP); absent ⇒ the array is the
-  // shipped five, identical object identity and order.
-  const chips = onDraft ? [DRAFT_CHIP, ...baseChips] : baseChips;
+  // shipped five, identical object identity and order. Today leads Draft
+  // when present (see TODAY_CHIP); absent ⇒ this line is a no-op and the
+  // array is byte-for-byte what it was before presentation v2 existed.
+  const withDraft = onDraft ? [DRAFT_CHIP, ...baseChips] : baseChips;
+  const chips = onTodaysTrade ? [TODAY_CHIP, ...withDraft] : withDraft;
   const hint =
     mode === 'team' && teamName
       ? `Only mutual-gain deals with ${teamName}.`
@@ -126,7 +148,9 @@ export default function TradeFinderModeBar({
                     ? onFreeAgents()
                     : c.key === 'draft'
                       ? onDraft?.()
-                      : onSwitch(c.key)
+                      : c.key === 'today'
+                        ? onTodaysTrade?.()
+                        : onSwitch(c.key)
               }
               style={({ pressed }) => [
                 styles.chip,

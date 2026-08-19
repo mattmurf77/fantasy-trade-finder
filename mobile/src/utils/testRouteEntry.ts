@@ -82,6 +82,12 @@ const TAB_OF: Record<string, string> = {
   TradeDeck: 'Trades',
   Portfolio: 'Trades',
   TradeCalculator: 'Trades',
+  // Presentation v2 (flag `trades.presentation_v2`). Listed for the same
+  // reason the routes are registered unconditionally in TabNav — the entry
+  // point is flag-gated, the route is not, so an operator QA launch can
+  // reach the surface directly.
+  TodaysTrade: 'Trades',
+  TradeBrowseAll: 'Trades',
   // League stack
   LeagueRankings: 'League',
   LeagueHome: 'League',

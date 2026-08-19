@@ -25,11 +25,40 @@ interface Props {
   onDraft?: () => void;
   onFreeAgents: () => void;
   onManualCalc: () => void;
+  /** Presentation v2 (flag `trades.presentation_v2`) — opens the `TodaysTrade`
+   *  surface. Same optional-prop convention as `onDraft`: omitting it renders
+   *  today's two/three buttons exactly, so a flag-off build is byte-identical.
+   *  This row REPLACES TradeFinderModeBar for users in the
+   *  `trades_home_inline` experiment, so the entry point has to exist here
+   *  too — otherwise those users could never reach the surface under test. */
+  onTodaysTrade?: () => void;
 }
 
-export default function TradeHomeUtilityRow({ onDraft, onFreeAgents, onManualCalc }: Props) {
+export default function TradeHomeUtilityRow({
+  onDraft,
+  onFreeAgents,
+  onManualCalc,
+  onTodaysTrade,
+}: Props) {
   return (
     <View style={styles.row} testID="trades.home-utility-row">
+      {onTodaysTrade ? (
+        <Pressable
+          testID="trades.home-utility.todays-trade"
+          accessibilityRole="button"
+          accessibilityLabel="Today's trade"
+          onPress={() => {
+            haptics.selection();
+            onTodaysTrade();
+          }}
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+        >
+          {/* `trade` is the same glyph the Acquire tab itself carries — this
+              button opens the endorsed trade, so it is the honest fit. */}
+          <Icon name="trade" size={28} color={chalk.dim} />
+          <Text style={styles.lbl}>Today</Text>
+        </Pressable>
+      ) : null}
       {onDraft ? (
         <Pressable
           testID="trades.home-utility.draft"
