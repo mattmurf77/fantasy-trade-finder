@@ -181,10 +181,16 @@ export default function SettingsHubScreen({ navigation }: any) {
   }
 
   // ── Account preview ────────────────────────────────────────────────────
+  // 'Sign out' is named here on purpose. The operator's 2026-08-18 decision
+  // moved it off the hub onto this page, which costs discoverability — users
+  // reach for it at the bottom of Settings by habit. Naming it in the preview
+  // buys that back for free: it is a true statement about what is behind this
+  // row, not a guess, so it satisfies the never-guess rule in plan §6.
   const accountPreview =
     [
       signInLabel,
       verificationKnown ? (isVerified ? 'Verified' : 'Not verified') : null,
+      'Sign out',
     ]
       .filter(Boolean)
       .join(' · ') || null;

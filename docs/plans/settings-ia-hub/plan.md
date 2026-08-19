@@ -155,19 +155,18 @@ the hub** — operator decision 2026-08-18; it lives on the Account page (see be
 │  Ranking                                        ›  │
 │    Opens on Tiers                                  │
 │  Trade values                                   ›  │
-│    Stud tax: Market · Picks: Tier ladder           │
 │                                                    │
 │  ALERTS                                            │
 │  Notifications                                  ›  │
-│    3 of 4 on · Quiet hours 10p–8a                  │
+│    2 of 3 on · Quiet hours 10p–8a                  │
 │                                                    │
 │  ACCOUNT                                           │
 │  Account & data                                 ›  │
-│    Apple · Verified                                │
+│    Apple · Verified · Sign out                     │
 │                                                    │
 │  ABOUT                                             │
 │  Help & about                                   ›  │
-│    FAQ, privacy, terms · v1.13.2                   │
+│    FAQ, privacy, terms · v1.14.0                   │
 │                                                    │
 │  [Testing]                                      ›  │   ← dev/tester builds only
 │                                                    │
@@ -307,7 +306,7 @@ The split is also the fix for F4.
 |---|---|---|
 | Leagues | `useSession(s => s.leagues)` + active league | free (store) |
 | Ranking | `useSession(s => s.rankingMethodPref)` | free (store) |
-| Trade values | last-known stud tax / pick pricing, persisted locally alongside the existing state | free after first visit; **omit the subtitle when unknown** — never show a guess |
+| Trade values | **none — no preview.** Stud tax and pick pricing are fetched by bare effects with no React Query key, so nothing is free to read on a cold open. Printing the code default as the user's setting is the exact lie this rule forbids. Row is title + chevron only. |
 | Notifications | `['notif-prefs']` from the React Query cache **if already resident**, else no subtitle | free |
 | Account & data | `useSession(s => s.user)` + `['account']` cache if resident | free |
 | Help & about | `Constants.expoConfig.version` | free |
@@ -437,7 +436,7 @@ a regression):
 1. Gear → Settings **pushes from the right**, fills the screen to the top, back chevron top-left.
    Swipe-right dismisses; swipe-down does **not** (expected change).
 2. Hub fits without scrolling; every row shows a preview line, or no line at all — never a wrong one.
-3. Notifications page: flip Weekly digest off, back to hub, hub preview updates to "2 of 4 on".
+3. Notifications page: flip Weekly digest off, back to hub, hub preview drops by one (e.g. "2 of 3 on" → "1 of 3 on").
 4. Account → Verify account → SleeperConnect → back lands on **Account**, not on the tabs (F5).
 5. Leagues page shows the ESPN/MFL disconnect rows; disconnect ESPN, confirm the row disappears and
    Send-in-ESPN is gated again.

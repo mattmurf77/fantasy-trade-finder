@@ -315,8 +315,7 @@ preview is illustrative — that state was never captured.</p>
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="nav"><div class="gr">
-            <div class="t">Trade values</div>
-            <div class="p">Stud tax: Market · Picks: Tier ladder</div></div>
+            <div class="t">Trade values</div></div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"/></svg></div>
@@ -324,7 +323,7 @@ preview is illustrative — that state was never captured.</p>
         <div class="tick"><span>Alerts</span></div>
         <div class="nav"><div class="gr">
             <div class="t">Notifications</div>
-            <div class="p">3 of 4 on · Quiet hours 10p–8a</div></div>
+            <div class="p">2 of 3 on · Quiet hours 10p–8a</div></div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"/></svg></div>
@@ -340,7 +339,7 @@ preview is illustrative — that state was never captured.</p>
         <div class="tick"><span>About</span></div>
         <div class="nav"><div class="gr">
             <div class="t">Help &amp; about</div>
-            <div class="p">FAQ, privacy, terms · v1.13.2</div></div>
+            <div class="p">FAQ, privacy, terms · v1.14.0</div></div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#97A1AE"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"/></svg></div>
@@ -370,6 +369,13 @@ preview is illustrative — that state was never captured.</p>
         italic</b> — the honest-empty case. Plan rule: a preview that isn't known for free isn't
         rendered at all. A settings page that lies about a setting is worse than one that says
         nothing.</span></div>
+      <div class="keyrow"><span class="pin new">B</span><span><b>Trade values has no preview — and
+        that is the rule working.</b> This frame originally read "Stud tax: Market · Picks: Tier
+        ladder". It was drawn from the app's <i>defaults</i>, not from the user's stored setting:
+        stud tax and pick pricing are fetched by bare effects with no React Query key, so on a cold
+        hub open there is nothing free to read. Printing the default as if it were the user's choice
+        is exactly the lie rule 4 forbids, so the built hub renders title + chevron only. Corrected
+        here after the build caught it.</span></div>
       <div class="keyrow"><span class="pin">5</span><span><b>Nothing below the last row.</b> Sign
         out lives on Account now (operator decision), so the hub is purely navigational and fits one
         screen with no scroll — the first time Settings has.</span></div>
@@ -627,7 +633,7 @@ of Settings the way <code>prefsQuery.isLoading</code> does today (SettingsScreen
             stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="row"><div class="gr">
           <div class="k"><span class="pin new">N</span>Version</div></div>
-          <div class="val" style="font-family:var(--mono);font-size:13px">1.13.2 (47)</div></div>
+          <div class="val" style="font-family:var(--mono);font-size:13px">1.14.0 (1)</div></div>
       </div>
     </div>
     <div class="cap">The Analyst moves here because it <i>is</i> the in-app help system — it belongs
@@ -693,7 +699,7 @@ SettingsScreen.tsx:227.</p>
         <code>ux.deeplink_router_v2</code> is on in prod; <code>settings/notifications</code> can
         open a real page with a real parent instead of a modal with none.</span></div>
       <div class="keyrow"><span class="pin move">!</span><span><b>The one regression risk.</b>
-        Testers on 1.13.2 dismiss Settings by swiping <i>down</i>. A pushed page swipes
+        Testers on the shipped build dismiss Settings by swiping <i>down</i>. A pushed page swipes
         <i>right</i>. That's a learned gesture and it's item 1 on the TestFlight
         checklist.</span></div>
       <p style="margin-top:14px"><b>#130 is not being reverted.</b> The ✕ was a real fix for a real
@@ -743,7 +749,7 @@ catches a setting silently lost in the split.</p>
   <p><b>Not designed here, on purpose.</b> No native inset-grouped list styling — ADR-008 already
   rejected that trade explicitly, so this stays Chalkline hairline rows throughout. No new settings
   beyond the version row. No change to what any setting <i>does</i>: stud tax, pick pricing,
-  rank-home routing, notification prefs and every disconnect behave exactly as they do in 1.13.2.
+  rank-home routing, notification prefs and every disconnect behave exactly as they do in the shipped build.
   No collapse-by-default groups — the #243 scroll audit is right that hiding settings a user came to
   find is a regression, and grouping isn't hiding when the hub previews state.</p>
 </div>
