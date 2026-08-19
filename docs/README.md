@@ -35,6 +35,7 @@ Project reference material. Start here when you need to look something up.
 | [integrations/](integrations/) | One file per external service FTF calls (Sleeper, ESPN, MFL, DynastyProcess, nflverse, Anthropic, Expo push) — endpoints, auth, error modes, redaction rules |
 | [plans/](plans/) | Initiative docs (plan/scope/PRD/HLD/LLD per thread). **Start at [plans/README.md](plans/README.md)** — it marks each one shipped / active / superseded / abandoned |
 | [recovery/](recovery/) | Branch/worktree deletion ledger — capture tip sha before deleting |
+| [research/](research/) | External research corpora gathered to inform design — `matchmaking/` (how dating/two-sided matchers build models, 3 rounds, 2026-08-15/16) and `onboarding/`. Memos carry per-claim confidence flags and source URLs |
 | [reviews/](reviews/) | Point-in-time audit snapshots — dated, not current truth |
 | [templates/](templates/) | `feature-scope.md` — copy into a feature's home before building |
 

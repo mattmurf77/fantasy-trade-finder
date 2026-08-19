@@ -1,6 +1,6 @@
 # Plan: Draft-Surface Extensions (rookie-rank bridge · ESPN manual tracking · mock drafts)
 
-**Status: candidate v1 — dual-agent synthesis, under cross-review** · 2026-08-06
+**Status: SHIPPED 2026-08-08.** (Drafted 2026-08-06 as candidate v1, dual-agent synthesis under cross-review; that review completed and the work shipped. Kept as the design record — see `README.md` in this folder for per-item status.)
 Sources: Agent A (execution lens) + Agent B (risk lens), both grounded on `origin/main` @ `3c976cb`.
 
 ## 0. Ground truth (verified, both lenses independently)

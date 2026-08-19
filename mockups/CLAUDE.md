@@ -16,6 +16,7 @@ rejected — read it for reasoning, never for current UI.
 |---|---|---|---|---|
 | [`candidates-300-v2/`](candidates-300-v2/README.md) | #300 r2 | 2026-08-12 | most recent | League rankings → trade candidates, round 2, drawn against #299 as shipped. Verdict: one list + one median divider |
 | [`candidates-300/`](candidates-300/README.md) | #300 r1 | 2026-08-12 | superseded by v2 | Round 1 of the same question; the trailing-affordance geometry contest |
+| [`mock-draft-2026-08-13/`](mock-draft-2026-08-13/README.md) | #295 #296 #305 | 2026-08-13 | historical | Mock-draft repair + manual drafting for all teams. Master viewer `index.html` is link-only (no iframes, works over `file://`). Binding docs: `docs/feedback/items/295-mock-user-not-in-draft/` |
 | [`polish-lab-2026-08-11/`](polish-lab-2026-08-11/README.md) | #297 #298 #299 #302 | 2026-08-12 | historical | Single-pin recovery, league tile density, drill-in back affordance |
 | `decline-reason-capture/` | — | untracked | in flight | Five ways to learn *why* a trade was declined. Spec: `docs/plans/decline-reason-capture/SPEC.md` |
 | [`outlook-odds/`](outlook-odds/feasibility.md) | #169 | 2026-08-10 | historical | Outlook / odds / value surfacing on League Summary, + a feasibility write-up |

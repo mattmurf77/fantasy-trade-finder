@@ -68,21 +68,22 @@ Plus `archive/` — a sixth, non-conceptual bucket: immutable, rotated-out entri
 
 ## Read-at / write-at quick reference
 
-> **⚠ CONFLICT with the root [`../CLAUDE.md`](../CLAUDE.md) — unresolved; do not silently
-> pick a side.** The root CLAUDE.md §"Session memory" states **"Session start requires zero
-> reads"**: a `SessionStart` hook injects HANDOFF, NEXT, the CHANGELOG top-2, and the
-> GOTCHAS index automatically, and it explicitly says *never re-read HANDOFF.md, NEXT.md,
-> or CHANGELOG.md at boot*. It also puts `PRACTICES.md` and `OPEN_QUESTIONS.md` on
-> pull-on-demand, not session start. The "Session start" rows below predate that hook.
+> **Session start requires zero reads.** Resolved 2026-08-18 against the actual hook
+> configuration in `.claude/settings.json`, so this table and the root
+> [`../CLAUDE.md`](../CLAUDE.md) now agree.
 >
-> **Both hooks exist and were verified in `.claude/settings.json` on 2026-08-18** — a
-> `SessionStart` command injecting the four capped slices, and a `Stop` command that warns
-> once per session when a code file is newer than every file in `living-memory/`.
+> The `SessionStart` hook injects four capped slices automatically — **HANDOFF, NEXT, the
+> CHANGELOG top-2, and the GOTCHAS index**. Those four are *already in your context*: never
+> re-read them at boot. Open the file only when you need more than the injected slice
+> (older CHANGELOG entries, a full GOTCHAS entry by ID).
 >
-> Per the project's own precedence rule, **root `CLAUDE.md` + `docs/` win** — so in practice
-> treat the five "Session start" rows as *already delivered by the hook*, and read the file
-> only when you need more than the injected slice. The rows are left as written pending an
-> operator/doc-owner reconciliation.
+> **`PRACTICES.md` and `OPEN_QUESTIONS.md` are NOT injected** — the hook does not reference
+> them. They are pull-on-demand, at the moment described in their Read-at row. An earlier
+> version of this table listed both as "session start" reads; that predated the hook and was
+> the source of the disagreement.
+>
+> A `Stop` hook also warns once per session when a code file is newer than every file in
+> `living-memory/`. Both hooks were verified present on 2026-08-18.
 
 Retention policy (max live entries/age, per-entry cap, archive target, index style) is specified per file in [`FORMAT.md`](FORMAT.md) §Retention & Rotation — the column below just flags whether a file rotates at all.
 
@@ -91,8 +92,8 @@ Retention policy (max live entries/age, per-entry cap, archive target, index sty
 | [`CHANGELOG.md`](CHANGELOG.md) | Session start *(injected — top 2 entries)* | Session end | Rotates — last 10 entries live; older in `archive/CHANGELOG-*.md` |
 | [`HANDOFF.md`](HANDOFF.md) | Session start *(injected)* | Session end (overwrite, don't accumulate) | Capped — 2,000 bytes, one live entry |
 | [`NEXT.md`](NEXT.md) | Session start *(injected)*, after CHANGELOG + HANDOFF | When priority order shifts | Capped — 1.5KB queue, 7 active items |
-| [`PRACTICES.md`](PRACTICES.md) | Session start (cheat sheet) — *root CLAUDE.md says on-demand* | When patterns solidify | Rotates once >~15KB |
-| [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) | Session start (any answers?) — *root CLAUDE.md says before asking the operator anything* | The instant you'd otherwise block | Rotates once >~15KB |
+| [`PRACTICES.md`](PRACTICES.md) | On demand — not injected; when you want the cheat sheet | When patterns solidify | Rotates once >~15KB |
+| [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) | On demand — not injected; **before asking the operator anything**, to check it isn't already logged | The instant you'd otherwise block | Rotates once >~15KB |
 | [`HLD.md`](HLD.md) | Before structural changes | Quarterly at most | Reference, not rotated |
 | [`LLD.md`](LLD.md) | Before schema / template changes | When conventions shift | Reference, not rotated |
 | [`CONTEXT.md`](CONTEXT.md) | New agent onboarding | Major scope shifts | Reference, not rotated |

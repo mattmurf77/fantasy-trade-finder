@@ -256,7 +256,7 @@ M1 exists so that M3–M5 are testable without a live draft. The replayer trunca
 5. **RB-5 — The 2027 window is structurally empty.** Feb–Apr 2027 has no class to rank. Bounded by the designed pre-class-load state, the last-year toggle, the class-load monitor wired in M0, and M8's calendar-gated rehearsal.
 6. **RB-6 — `refetchInterval` has zero precedent in this app.** M4 builds the first recurring-poll surface; the app-wide TanStack default is `refetchOnWindowFocus: false`. The pass threshold for background/blur is literally zero requests, verified by instrumentation, not by reading the code.
 7. **RB-7 — Partial saves can cosmetically invert against stale neighbors** until the next full-band save. Inherent to any partial save (the plan's round-4 non-blocking note). One sentence in the build PRD; not a design change.
-8. **RB-8 — There is no CI and no `conftest.py`.** The suite is run by hand (`python3 -m pytest backend/tests/`, ~1414 tests). D10's "full suite green" is a human gate; every milestone's exit must state the command and the expected counts.
+8. **RB-8 — There is no `conftest.py`.** ~~There is no CI.~~ *(Corrected 2026-08-18: CI does exist — `.github/workflows/ci.yml` runs `python -m pytest backend/tests -q` on every PR and push to `main`, alongside `mobile-typecheck` and `maestro-testid-lint`. The original claim was wrong when written or has since been overtaken.)* There is still no `conftest.py` anywhere in `backend/tests/`, so fixtures are wired per-file. The suite also runs by hand (`python3 -m pytest backend/tests/`). D10's "full suite green" is satisfied by CI; every milestone's exit should still state the command and expected counts.
 
 ---
 

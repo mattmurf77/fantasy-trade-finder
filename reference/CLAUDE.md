@@ -1,10 +1,12 @@
 # reference/ — Notes for Claude
 
-Competitor app/web screenshots captured for teardowns. **Reference captures only** — a
-capture index may sit alongside the images, but the analysis lives in `docs/`.
+External reference material: competitor app/web screenshots captured for teardowns, plus
+written references on outside systems FTF benchmarks itself against. For capture sets the
+analysis lives in `docs/`, not here.
 
 | Capture set | Captured | Contents |
 |---|---|---|
+| [`x-algorithm/`](x-algorithm/README.md) | 2026-08-14 | **Not a capture set** — a written reference on X's open-sourced For You feed algorithm (repo `xai-org/x-algorithm`, snapshot `a389166`), produced so FTF can audit its own trade-suggestion pipeline against it. Companion plan: [`docs/plans/trade-relevance-engine/`](../docs/plans/trade-relevance-engine/README.md). Tracked in git. |
 | `dynasty-nerds-app/` | 2026-08-04 | 32 full-page desktop screenshots (1440×844) of app.dynastynerds.com via the operator's logged-in session, plus `index.md` — a per-file page/URL/description index. Untracked in git. |
 
 Where the analysis lives:
