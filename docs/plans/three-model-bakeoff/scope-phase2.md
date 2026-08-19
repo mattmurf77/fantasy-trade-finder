@@ -83,6 +83,7 @@ exclusion be justified):
 | `gen2_*` (all) | pre-dates / arm C | `trade_gen_v2` is **arm C**. Arm A must not touch its knobs. |
 | `bakeoff_serve_interleaved` | Phase 3, 2026-08-18 | **Not generation logic — it is the bake-off's own orchestration.** Read only by `bakeoff_runner._cfg`, never by any generator: it selects Phase-4 dark validation vs Phase-5 interleaved serving, which is a decision about the merged deck, made after all three arms have already run. Setting it per-arm would be meaningless. |
 | `bakeoff_deck_limit` | Phase 3, 2026-08-18 | Same — a cap on the INTERLEAVED deck, applied by the team-draft merge after generation. No arm can see it. |
+| `bakeoff_group_size`, `bakeoff_group_value_slots`, `bakeoff_fill_policy`, `bakeoff_lane_reallocate`, `bakeoff_include_baseline` | composition, 2026-08-18 / D-086 2026-08-19 | Same class — **deck composition, not generation.** All five are read only by `bakeoff_runner`, after every arm has finished producing its ranked list, and they decide how those lists are narrowed, quota'd and merged. An arm cannot observe them, so a per-arm value would be meaningless. `bakeoff_lane_reallocate` in particular only ever moves a SLOT between lanes inside one already-generated group; it cannot change, add or remove a card any arm proposed. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag

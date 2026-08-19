@@ -36,14 +36,25 @@ push arm `gen_v2` to the deck's tail, reintroducing exactly the position
 confound team-draft exists to remove (acceptance falls ~27% across a session
 from position alone).
 
-Under-fill is DATA, never a silent backfill. `window` is only ~19% of live
-divergence supply, so groups 1 and 3 will routinely fail to find five outlook
-cards, and arm gen_v2 has never served so its lane mix is unmeasured. Whether
-an arm can produce outlook-basis divergence ideas at all is one of the more
-interesting things this test can reveal, and a quiet backfill from the value
-lane would hide it completely. Every (group, lane) shortfall is recorded on
+Under-fill is DATA, never a silent backfill. `window` is only ~25% of live
+supply, so no group can find five outlook cards reliably, and arm gen_v2 has
+never served so its lane mix was unmeasured. Whether an arm can produce
+outlook-basis divergence ideas at all is one of the more interesting things
+this test can reveal, and a quiet backfill from the value lane would hide it
+completely. Every (group, lane) shortfall is recorded on
 `bakeoff_runs.groups_json`; `bakeoff_fill_policy` chooses whether the residual
-slots are left empty (default) or backfilled with a flagged substitute.
+slots are backfilled with a flagged CROSS-LANE substitute (1) or not (0,
+default).
+
+D-086 (2026-08-19) separates a second question from that one: a slot the
+outlook lane cannot fill is not automatically a slot the GROUP cannot fill.
+`bakeoff_lane_reallocate` (default ON) lets each lane spill into slots the
+other lane provably could not use, drawing only from its OWN bucket — so
+every served card still sits in a slot matching its own label and `lane_slot`
+keeps meaning what it says. `short` is computed against the nominal 5/5 ask
+BEFORE reallocation and is untouched, `realloc` records the spill explicitly,
+so the under-fill finding survives intact while the deck stops paying for it.
+Measured on 18 live runs: 13.8 cards/deck before, 16.0 after.
 
 Arm C is invoked REGARDLESS of the `trade_gen.v2` flag. That flag gates the
 *normal serving path* — whether `_generate_trades_impl` routes the whole deck
@@ -256,8 +267,42 @@ def backfill_residual_slots() -> bool:
     1 = backfill from the same GROUP's other lane (then its unlabelled
     remainder), every substitute stamped `lane_slot = 'fill'` so no analysis
     can mistake it for a card that earned an outlook slot.
+
+    Orthogonal to `bakeoff_lane_reallocate` (D-086): that runs FIRST and moves
+    slots between lanes without moving cards between lanes, so by the time
+    this policy sees a residual, both lane buckets are exhausted and a fill
+    can only come from the unlabelled `(none)` remainder.
     """
     return _cfg("bakeoff_fill_policy", 0.0) >= 1.0
+
+
+def lane_reallocate() -> bool:
+    """`bakeoff_lane_reallocate` — **default 1 = ON** (D-086, 2026-08-19).
+
+    A lane quota the group's own lane cannot supply leaves SLOTS empty, not
+    just that lane's slots. Before D-086 a group holding 7 value cards and 0
+    window cards served 5 and dropped 5, and a group holding 10 value / 0
+    window served 5 and dropped 5 — measured across 18 live runs that cost
+    40 of 288 fillable slots (13.8 cards/deck served against a 16.0 ceiling
+    the group partition already allowed).
+
+    ON: after the nominal quota is taken, each lane may extend into slots the
+    OTHER lane provably could not fill, drawing only from its OWN bucket. The
+    cards keep their true `lane_slot` (`value` / `outlook`) because no card
+    ever occupies the other lane's slot — that is what distinguishes this
+    from `bakeoff_fill_policy` = 1, where a value card takes an OUTLOOK slot
+    and is flagged `fill` precisely so analysis discounts it.
+
+    What D-078 protected is protected still: `short` is computed against the
+    nominal ask BEFORE any reallocation, `pool` records the raw lane supply,
+    and `groups_json[key].realloc` names the spill card-for-card. "Can this
+    arm produce outlook-basis ideas?" is answered by `short` and `pool`, and
+    both are untouched. What changes is only that the deck no longer shrinks
+    to make the point a column already makes.
+
+    0 restores the pre-D-086 composition byte-for-byte, deploy-free.
+    """
+    return _cfg("bakeoff_lane_reallocate", 1.0) >= 1.0
 
 
 def elo_freeze_mult(fit_mult: float) -> float:
@@ -466,10 +511,20 @@ class GroupResult:
     ranks: dict = field(default_factory=dict)
     #: {"size": n, "value": n, "outlook": n} — what was asked for
     quota: dict = field(default_factory=dict)
-    #: {"value": n, "outlook": n, "fill": n} — what was found
+    #: {"value": n, "outlook": n, "fill": n} — what was found. Under
+    #: `bakeoff_lane_reallocate` (D-086) a lane's count can EXCEED its quota:
+    #: it absorbed slots the other lane could not fill, from its own bucket.
+    #: The excess is `realloc`, so the two are never guesswork.
     filled: dict = field(default_factory=dict)
-    #: {"value": n, "outlook": n} — the UNDER-FILL, per lane. The point.
+    #: {"value": n, "outlook": n} — the UNDER-FILL, per lane, against the
+    #: NOMINAL quota and computed BEFORE reallocation. The point. D-086 does
+    #: not touch this number: a group that found no outlook card still reads
+    #: `{"outlook": 5}` here whether or not the value lane used those slots.
     short: dict = field(default_factory=dict)
+    #: {"value": n, "outlook": n} — slots each lane absorbed from the other
+    #: lane's unfillable quota (D-086), drawn from its OWN bucket. All-zero
+    #: when both lanes met their quota or `bakeoff_lane_reallocate` is 0.
+    realloc: dict = field(default_factory=dict)
     #: {"value": n, "window": n, "(none)": n} — supply the group could draw on
     pool: dict = field(default_factory=dict)
     #: False when NO card in the pool carried a lane label, i.e. the outlook
@@ -484,6 +539,7 @@ class GroupResult:
             "quota":             dict(self.quota),
             "filled":            dict(self.filled),
             "short":             dict(self.short),
+            "realloc":           dict(self.realloc),
             "pool":              dict(self.pool),
             "composed":          len(self.cards),
             "lane_split_active": self.lane_split_active,
@@ -492,6 +548,7 @@ class GroupResult:
 
 def compose_group(group: Group, arm_cards: list, *, size: int,
                   value_slots: int, backfill: bool,
+                  reallocate: bool = True,
                   outlook_leads: bool = False) -> GroupResult:
     """Narrow one arm's ranked list to a group and fill that group's quota.
 
@@ -502,13 +559,21 @@ def compose_group(group: Group, arm_cards: list, *, size: int,
       2. Bucket by lane into value / outlook(`window`) / `(none)`.
       3. Take the top `value_slots` of the value bucket and the top
          `size - value_slots` of the outlook bucket. Whatever a lane could not
-         supply is recorded in `short` and, by default, LEFT EMPTY.
-      4. `backfill` (bakeoff_fill_policy = 1) only: refill the residual slots
-         from the same group's leftovers — the other lane's unused tail first,
-         then the `(none)` bucket — in arm-rank order, each stamped
-         `SLOT_FILL`. The group's own arm and basis still hold, so a fill is a
-         lane substitution and nothing more.
-      5. Order the quota'd cards by ALTERNATING lanes (`outlook_leads` picks
+         supply is recorded in `short` — always, and always against this
+         nominal ask, whatever steps 4 and 5 then do with the empty slots.
+      4. `reallocate` (bakeoff_lane_reallocate = 1, the default; D-086): a
+         lane that met its quota extends into the slots the other lane could
+         not fill, drawing only from its OWN bucket, and the extension is
+         recorded in `realloc`. No card changes lane, so every card still
+         takes a slot its own label earned — the difference from step 5,
+         where it does not.
+      5. `backfill` (bakeoff_fill_policy = 1) only: refill whatever residual
+         survives step 4 from the group's leftovers in arm-rank order, each
+         stamped `SLOT_FILL`. With reallocation on, both lane buckets are
+         already drained, so a fill can only be an `(none)`-bucket card. The
+         group's own arm and basis still hold, so a fill is a lane
+         substitution and nothing more.
+      6. Order the quota'd cards by ALTERNATING lanes (`outlook_leads` picks
          which lane takes slot 0, seeded per deck+group by the caller) so
          neither lane systematically occupies the better half of the group's
          positions. Each lane keeps its internal arm-rank order. Fills append
@@ -540,24 +605,37 @@ def compose_group(group: Group, arm_cards: list, *, size: int,
         res.slots = {id(c): SLOT_FILL for c in res.cards}
         res.filled = {"value": 0, "outlook": 0, "fill": len(res.cards)}
         res.short = {"value": value_slots, "outlook": outlook_slots}
+        res.realloc = {"value": 0, "outlook": 0}
         res.ranks = {id(c): i for i, c in enumerate(res.cards)}
         return res
 
     take_v = buckets[LANE_VALUE][:value_slots]
     take_o = buckets[LANE_OUTLOOK][:outlook_slots]
+    #: Against the NOMINAL ask, before reallocation — D-086 must not be able
+    #: to soften this number, because it is the whole reason the column exists.
     res.short = {"value":   value_slots - len(take_v),
                  "outlook": outlook_slots - len(take_o)}
 
+    # D-086 — lane REALLOCATION. Slots exist only because one lane's bucket
+    # ran dry, so at most one lane can have a tail to spill into them and the
+    # order of the two extensions below cannot change the outcome.
+    res.realloc = {"value": 0, "outlook": 0}
+    if reallocate:
+        spare = max(0, size - len(take_v) - len(take_o))
+        if spare > 0:
+            extra_v = buckets[LANE_VALUE][value_slots:value_slots + spare]
+            extra_o = buckets[LANE_OUTLOOK][
+                outlook_slots:outlook_slots + spare - len(extra_v)]
+            take_v = take_v + extra_v
+            take_o = take_o + extra_o
+            res.realloc = {"value": len(extra_v), "outlook": len(extra_o)}
+
     fills: list = []
     if backfill:
-        residual = res.short["value"] + res.short["outlook"]
+        residual = max(0, size - len(take_v) - len(take_o))
         if residual > 0:
-            rank = {id(c): i for i, c in enumerate(pool)}
-            leftover = (buckets[LANE_VALUE][value_slots:]
-                        + buckets[LANE_OUTLOOK][outlook_slots:]
-                        + buckets[LANE_NONE])
-            leftover.sort(key=lambda c: rank[id(c)])
-            fills = leftover[:residual]
+            taken = {id(c) for c in take_v} | {id(c) for c in take_o}
+            fills = [c for c in pool if id(c) not in taken][:residual]
 
     # Alternate the two lanes so neither owns the group's front half.
     first, second = ((take_o, take_v) if outlook_leads else (take_v, take_o))
@@ -1112,11 +1190,13 @@ def compose_deck(arm_lists: dict[str, list], *, league_id: str,
 
     value_slots = min(group_value_slots(), size)
     backfill = backfill_residual_slots()
+    reallocate = lane_reallocate()
     groups: dict[str, GroupResult] = {}
     for grp in groups_for(roster):
         groups[grp.key] = compose_group(
             grp, arm_lists.get(grp.arm, []),
             size=size, value_slots=value_slots, backfill=backfill,
+            reallocate=reallocate,
             outlook_leads=outlook_leads_for(grp.key, league_id, iso_week))
     order = draft_order_for(list(groups), league_id, iso_week)
     return groups, order, group_draft(groups, order, arm_lists, limit=limit)

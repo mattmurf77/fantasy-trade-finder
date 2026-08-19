@@ -567,7 +567,12 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #       a residual slot its own lane did not earn (only reachable under
     #       model_config bakeoff_fill_policy = 1, or when the lane axis is
     #       undefined for the deck), so no analysis can mistake a backfill for
-    #       a card that genuinely filled an outlook quota.
+    #       a card that genuinely filled an outlook quota. NOTE (D-086): lane
+    #       REALLOCATION does not produce 'fill' — a value card that took a
+    #       slot the outlook lane could not use is still stamped 'value',
+    #       because it is a value-lane card in a value slot; the group's
+    #       realized split is groups_json[key].filled and the spill is
+    #       groups_json[key].realloc.
     #     All three NULL on a card no group produced — a likes-you injection,
     #     a dark-mode deck, or a run with composition killed.
     #     The card's own `basis` and `lane` are already on features_json (and

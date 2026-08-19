@@ -214,6 +214,22 @@ The consensus group clears its outlook quota at ~20 surviving cards; the
 divergence groups need ~25. Pinned by
 `test_measured_under_fill_across_realistic_divergence_supply`.
 
+> **Amendment 2026-08-19 — [D-086](../../../living-memory/DECISIONS.md).** Everything above still
+> holds, and one thing was missing from it: leave-short gives up the **slot**,
+> not just the lane's claim on it. Measured over 18 live runs (54 group-runs,
+> 527 cards), a group holding ten value cards for ten slots served **five** —
+> 40 of 288 fillable slots lost, 13.8 cards/deck against a within-group
+> ceiling of 16.0. `bakeoff_lane_reallocate` (default 1) now lets a lane
+> extend into slots the other lane could not fill, **drawing only from its own
+> bucket**, so no card crosses lanes and the `lane_slot` stamp stays true —
+> that is what separates it from `bakeoff_fill_policy` = 1 above. The
+> under-fill record is unchanged: `short` is computed against the nominal 5/5
+> ask *before* reallocation, `pool` is untouched, and the spill is recorded in
+> the new `groups_json[key].realloc`. Live supply also came in richer than the
+> ~19% divergence estimate this section used — **24.7%** overall, and **0%**
+> in `current_divergence` (0/23, [Q-020](../../../living-memory/OPEN_QUESTIONS.md)).
+> Full diagnosis and the counterfactual quota replay: [scope-outlook-lane.md](scope-outlook-lane.md).
+
 ### 4.2 Absent `lane` — its own bucket, never a lane, never an empty deck
 
 `classify_lane` returns `None` precisely when the **outlook axis is undefined**

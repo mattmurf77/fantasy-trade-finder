@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
 - [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
 - [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
@@ -17,6 +18,15 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-19 — Open Items (bake-off outlook lane)
+
+### Q-020 — Arm `current`'s divergence cards never label `window`. Real model property, or too small a sample?
+- **Why it matters:** [D-086](DECISIONS.md) fixed the deck-size loss caused by unfillable outlook quotas, but left one measurement standing: across all 18 `bakeoff_runs` rows of 2026-08-19, group `current_divergence` produced **0 `window` cards out of 23**. Every other group produced them — `current_consensus` 28.1% (114/405), `gen_v2` 16.2% (16/99) — and `gen_v2` is *also* divergence-basis, generated for the same user, the same declared window and the same week. If real, "the v3 divergence optimizer cannot build outlook-shaped packages" is exactly the kind of finding the bake-off exists to produce, and it would be a genuine generator difference between `trade_optimizer.generate_pair_trades_v3` and `trade_gen_v2`.
+- **Why it cannot be called yet:** n = 23. Under `gen_v2`'s own 16.2% rate, P(0 of 23) ≈ 1.4% — suggestive, not conclusive. And the same group averages only **1.3 cards of any lane per run**, so the sample is thin because the *group* is nearly empty, which is a second confound (whatever survives that funnel may not be representative).
+- **Plausible non-defect mechanism worth testing first:** divergence cards are built from board disagreement and skew toward like-for-like swaps, whose value-weighted now-lean shift sits below `lane_shift_frac` (0.10) and therefore labels `value` by `classify_lane`'s own rule (`backend/trade_service.py:2206`). That would make 0% correct rather than broken.
+- **Needed to close:** either more runs (the group needs roughly 100 divergence cards before 0% is distinguishable from 16%), or a direct offline measurement — replay a seeded league through `generate_pair_trades_v3` and histogram `TradeCard.lane_shift` against the 0.10 threshold. The second is cheap and does not wait on traffic.
+- **Owner:** whoever next works the bake-off track; not blocking D-086.
 
 ## 2026-08-19 — Open Items (round-2 pick recalibration)
 
