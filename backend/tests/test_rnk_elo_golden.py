@@ -9,8 +9,9 @@ Elo update to its documented spec with hand-computed values:
   - Zero-sum conservation: without overrides, total Elo is invariant per swipe.
   - 3-player decomposition: [A,B,C] → exactly 3 pairwise (A>B, A>C, B>C),
     final order preserved.
-  - Override pinning: a tier-placed player's Elo doesn't move; the partner still
-    evolves against the anchor.
+  - Override pinning: a tier-placed player's Elo doesn't move for swipes OLDER
+    than the pin; a NEWER swipe releases it (F2, 2026-08-18); the partner
+    evolves against the anchor either way.
   - Replay determinism: same swipe sequence → identical Elo.
 
 Complements test_elo_memoization.py (which covers caching/parity, not the
@@ -108,8 +109,38 @@ def test_three_player_exact_sequential():
 
 
 # ── 4. Override pinning ─────────────────────────────────────────────────────
+#
+# UPDATED 2026-08-18 (F2, docs/reviews/2026-08-18-valuation-age-audit.md §8).
+# The pin is no longer permanent: a ranking swipe recorded AFTER it releases
+# the player, because the user's most recent expression of preference should
+# beat their older one. The old contract — "an overridden player's Elo never
+# moves" — is still exactly what the kill switch restores, and is asserted as
+# such below. Full coverage lives in test_override_pin_unpin.py.
 
-def test_override_pins_winner_partner_still_moves():
+def test_override_pins_a_player_against_EARLIER_swipes():
+    """A swipe that predates the pin is superseded by it."""
+    svc = _svc(["a", "b"])
+    svc.record_ranking(["a", "b"])                       # swipe first...
+    svc.apply_tiers(position="RB", tiers={"first_1": ["a"]}, scoring_format="1qb_ppr")
+    pinned = svc._elo_overrides["a"]                     # ...then the pin
+    elo = _elo(svc)
+    assert elo["a"] == round(pinned, 1), "the pin is the user's newest word"
+
+
+def test_a_newer_swipe_releases_the_pin_partner_still_moves():
+    """The F2 behaviour: pin, then vote, and the vote counts."""
+    svc = _svc(["a", "b"])
+    svc.apply_tiers(position="RB", tiers={"first_1": ["a"]}, scoring_format="1qb_ppr")
+    pinned = _elo(svc)["a"]
+    svc.record_ranking(["b", "a"])           # a LOSES, after the pin
+    elo = _elo(svc)
+    assert elo["a"] < pinned, "a swipe newer than the pin must move the player"
+    assert elo["b"] > INIT, "the winner still gains against the anchor"
+
+
+def test_unpin_kill_switch_restores_permanent_pinning(monkeypatch):
+    """pin_unpin_on_newer_swipe=0 is a byte-exact revert to the old contract."""
+    monkeypatch.setitem(rs._cfg, "pin_unpin_on_newer_swipe", 0.0)
     svc = _svc(["a", "b"])
     svc.apply_tiers(position="RB", tiers={"first_1": ["a"]}, scoring_format="1qb_ppr")
     pinned = _elo(svc)["a"]

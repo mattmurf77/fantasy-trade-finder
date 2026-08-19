@@ -82,12 +82,19 @@ def _build_service():
 # ---------------------------------------------------------------------------
 
 class _ComputeSpy:
-    def __init__(self, svc, attr, cache_attr, version_attr, key_attr):
+    def __init__(self, svc, attr, cache_attr, version_attr, key_attr, key_fn):
         self._svc = svc
         self._attr = attr
         self._cache_attr = cache_attr
         self._version_attr = version_attr
         self._key_attr = key_attr
+        # The two caches no longer share a key shape: _compute_elo folds the
+        # board-override pin knobs in (so a kill switch pulled via
+        # PUT /api/admin/config takes effect on warm sessions immediately,
+        # without waiting for a _version bump), while _compute_stats does not.
+        # The spy must mirror whichever key it is watching or it mis-predicts
+        # every hit as a miss.
+        self._key_fn = key_fn
         self._orig = getattr(svc, attr)
         self.calls = 0
         self.full_computes = 0
@@ -95,7 +102,7 @@ class _ComputeSpy:
     def __enter__(self):
         def wrapper(pool, *args, **kwargs):
             self.calls += 1
-            cache_key = tuple(p.id for p in pool)
+            cache_key = self._key_fn(pool)
             is_hit = (
                 getattr(self._svc, self._cache_attr) is not None
                 and getattr(self._svc, self._version_attr) == self._svc._version
@@ -117,6 +124,7 @@ def _elo_spy(svc):
     return _ComputeSpy(
         svc, "_compute_elo",
         "_elo_cache", "_elo_cache_version", "_elo_cache_key",
+        key_fn=lambda pool: (tuple(p.id for p in pool), svc._pin_cfg_key()),
     )
 
 
@@ -124,6 +132,7 @@ def _stats_spy(svc):
     return _ComputeSpy(
         svc, "_compute_stats",
         "_stats_cache", "_stats_cache_version", "_stats_cache_key",
+        key_fn=lambda pool: tuple(p.id for p in pool),
     )
 
 

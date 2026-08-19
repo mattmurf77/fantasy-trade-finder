@@ -2065,6 +2065,14 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trio_boundary_margin",  60.0,   "Elo window on each side of a tier edge to pull boundary straddlers from"),
     ("trio_within_tier_rate",  0.35,  "Share of trios comparing top-vs-bottom of the SAME tier (intra-tier order); remainder after boundary+within = tightest local ordering"),
     ("trio_repeat_avoid",      8.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes gracefully (oldest-seen first) when the pool is too small"),
+    # ── Forced deck regeneration (docs/reviews/2026-08-18-bug-sweep) ─────
+    ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
+    # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
+    # Read by ranking_service. All three at 0.0 restores the pre-2026-08-18
+    # behaviour exactly (goldens: backend/tests/test_override_pin_unpin.py).
+    ("pin_exclude_comparisons", 1.0,  "F1: count only the comparisons that actually MOVED a player's Elo in comparison_counts() — a pinned player's votes no longer raise the direction-blind shrinkage weight (which made down-voting a pin RAISE its trade value). 0 disables"),
+    ("pin_unpin_on_newer_swipe", 1.0, "F2: a ranking swipe recorded strictly AFTER a tier/reorder pin releases that player — the pin stays as the starting Elo and newer swipes apply on top. 0 disables (pins permanent)"),
+    ("pin_legacy_at_epoch",     0.0,  "F2 legacy policy: 0 = a pin with no stored write time is PERMANENT (no existing board changes until re-tiered); 1 = treat it as written at the epoch, so ANY recorded swipe — including historical ones — releases it. Operator decision, see docs/config-reference.md"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
     # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────
@@ -4277,14 +4285,45 @@ def get_tiers_saved(
     return all_saved.get(scoring_format, [])
 
 
+# ── Override write timestamps (F2, 2026-08-18) ───────────────────────────────
+# `docs/reviews/2026-08-18-valuation-age-audit.md` §8 F2: a swipe recorded
+# AFTER a pin should release it, which needs to know WHEN the pin was written.
+# Stored as a SIBLING key — {fmt: {pid: iso8601}} — rather than by changing the
+# per-format value shape from `{pid: elo}` to `{pid: {elo, at}}`. The sibling
+# form needs no migration, cannot break `load_tier_overrides`' float cast, and
+# leaves every existing reader (og_image, accounts, the restore path) untouched.
+# A pid with an override but no stamp is a LEGACY pin; ranking_service's
+# `pin_legacy_at_epoch` knob decides what that means (default: permanent).
+PIN_STAMPS_KEY = "__override_at__"
+
+
+def _stamps_from_extras(extras: dict, scoring_format: str) -> dict[str, str]:
+    """The {pid: iso} stamp map for one format out of a parsed extras blob."""
+    blob = extras.get(PIN_STAMPS_KEY)
+    if not isinstance(blob, dict):
+        return {}
+    fmt = blob.get(scoring_format)
+    if not isinstance(fmt, dict):
+        return {}
+    return {str(k): str(v) for k, v in fmt.items() if v}
+
+
 def save_tier_overrides(
     user_id: str,
     overrides: dict[str, float],
     scoring_format: str = DEFAULT_SCORING,
+    stamps: dict[str, str] | None = None,
 ) -> None:
     """
     Persist the user's tier/reorder override map for one scoring format.
     Other formats' overrides are left untouched.
+
+    `stamps` — {pid: iso8601} write times for those overrides (F2). Passing
+    None keeps whatever stamps are already stored, so a caller that has not
+    been updated cannot silently strip them. Either way the stored map is
+    pruned to the pids actually present in `overrides`: a stamp without an
+    override is dead weight, and leaving it would re-stamp a pin the user
+    cleared and later re-created.
     """
     is_postgres = not DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:
@@ -4301,11 +4340,28 @@ def save_tier_overrides(
             ).fetchone()
         raw = row.tier_overrides if row else None
         all_overrides = _parse_per_format_json(raw, is_list=False)
-        # Non-format sibling keys (the pre-rookie-scope snapshot) survive the
-        # round-trip. `extras` FIRST so a format key can never be shadowed.
+        # Non-format sibling keys (the pre-rookie-scope snapshot, the override
+        # stamps) survive the round-trip. `extras` FIRST so a format key can
+        # never be shadowed.
         extras = _parse_extra_keys(raw)
         # Cast ELO values to float so JSON stays clean
         all_overrides[scoring_format] = {pid: float(elo) for pid, elo in overrides.items()}
+
+        stored = _stamps_from_extras(extras, scoring_format)
+        if stamps is not None:
+            stored = {str(pid): str(at) for pid, at in stamps.items() if at}
+        stored = {pid: at for pid, at in stored.items() if pid in overrides}
+        blob = extras.get(PIN_STAMPS_KEY)
+        blob = dict(blob) if isinstance(blob, dict) else {}
+        if stored:
+            blob[scoring_format] = stored
+        else:
+            blob.pop(scoring_format, None)
+        if blob:
+            extras[PIN_STAMPS_KEY] = blob
+        else:
+            extras.pop(PIN_STAMPS_KEY, None)
+
         conn.execute(
             update(users_table)
             .where(users_table.c.sleeper_user_id == user_id)
@@ -4330,6 +4386,26 @@ def load_tier_overrides(
         return {k: float(v) for k, v in fmt_overrides.items()}
     except (TypeError, ValueError):
         return {}
+
+
+def load_tier_override_stamps(
+    user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> dict[str, str]:
+    """Return {player_id: iso8601} write times for this user + format's pins.
+
+    Missing pids are LEGACY pins written before F2 shipped. Deliberately a
+    separate read from `load_tier_overrides` so the override load path keeps
+    its exact shape and failure modes.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.tier_overrides).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    return _stamps_from_extras(
+        _parse_extra_keys(row.tier_overrides if row else None), scoring_format)
 
 
 # ── Rookie-scope pre-save snapshot (M2, LLD §3.2) ─────────────────────────
@@ -4446,6 +4522,17 @@ def restore_tier_overrides_from_snapshot(
                         if isinstance(stored, dict) else {})
             all_overrides[fmt] = restored
             counts[fmt] = len(restored)
+            # The snapshot predates F2 and carries no write times, so the
+            # restored pins come back as LEGACY (permanent under the default
+            # pin_legacy_at_epoch). Keeping the current stamps would be worse:
+            # they describe pins the restore just threw away.
+            stamp_blob = extras.get(PIN_STAMPS_KEY)
+            if isinstance(stamp_blob, dict):
+                stamp_blob.pop(fmt, None)
+                if stamp_blob:
+                    extras[PIN_STAMPS_KEY] = stamp_blob
+                else:
+                    extras.pop(PIN_STAMPS_KEY, None)
         conn.execute(
             update(users_table)
             .where(users_table.c.sleeper_user_id == user_id)

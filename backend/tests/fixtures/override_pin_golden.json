@@ -1,0 +1,32 @@
+{
+  "counts": {
+    "p_free": 2,
+    "p_pinned": 2,
+    "p_pinned2": 1,
+    "p_quiet": 1
+  },
+  "elo": {
+    "p_free": 1712.1,
+    "p_pinned": 1565.3,
+    "p_pinned2": 1341.3,
+    "p_quiet": 1444.0
+  },
+  "shrunk": {
+    "p_free": 1570.697778,
+    "p_pinned": 1539.092593,
+    "p_pinned2": 1452.266667,
+    "p_quiet": 1448.807859
+  },
+  "unc": {
+    "p_free": 0.202073,
+    "p_pinned": 0.202073,
+    "p_pinned2": 0.247487,
+    "p_quiet": 0.247487
+  },
+  "value": {
+    "p_free": 1424.027166,
+    "p_pinned": 1215.873761,
+    "p_pinned2": 787.677398,
+    "p_quiet": 774.172389
+  }
+}

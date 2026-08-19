@@ -99,6 +99,35 @@ _DEFAULT_CFG: dict[str, float] = {
     # lever for the one part of this feature that touches ranking math. Read
     # ONLY on the reasoned-pass path; /api/trades/swipe never consults it.
     "pass_reason_elo_suppression": 1.0,
+    # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
+    # A tier/reorder save writes an Elo OVERRIDE that pins a player: _compute_elo
+    # seeds them from the override and skips every rating update. Two knobs undo
+    # the two ways that pin used to work against the user. Both at 0.0 restores
+    # the pre-2026-08-18 behaviour exactly (pinned by test_override_pin_unpin).
+    #
+    # pin_exclude_comparisons — F1. comparison_counts() feeds the trade layer's
+    #   confidence shrinkage (trade_service._shrink_user_elo), whose weight
+    #   w = n/(n+n0) is DIRECTION-BLIND. Because a pinned player's Elo cannot
+    #   move, every extra comparison only raised w and dragged the effective
+    #   trade value further toward the pin — voting a pinned player DOWN made
+    #   the engine value him MORE (+12.5% on the audited case). 1.0 = count only
+    #   the comparisons that actually moved the player's Elo. 0.0 = kill.
+    "pin_exclude_comparisons":    1.0,
+    # pin_unpin_on_newer_swipe — F2. A ranking swipe recorded strictly AFTER the
+    #   pin was written releases that player: the pin stays as the starting
+    #   rating, and every swipe newer than it is applied on top. The user's most
+    #   recent expression of preference wins over their older one. 1.0 = on,
+    #   0.0 = kill (pins are permanent, the pre-fix behaviour).
+    "pin_unpin_on_newer_swipe":   1.0,
+    # pin_legacy_at_epoch — F2 legacy policy. Overrides written before this
+    #   change carry no timestamp. 0.0 (default) = an unstamped pin is treated
+    #   as PERMANENT — it is never released by a swipe, so no existing board
+    #   changes until the user next tiers/reorders that player (which stamps
+    #   it). 1.0 = an unstamped pin is treated as written at the epoch, so ANY
+    #   recorded swipe — including historical ones — releases it. The 1.0 side
+    #   retroactively re-opens every legacy pin on the next Elo compute; it is
+    #   an operator decision, not a default. See docs/config-reference.md.
+    "pin_legacy_at_epoch":        0.0,
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -118,6 +147,31 @@ def reload_config() -> None:
 
 def _c(key: str) -> float:
     return _cfg.get(key, _DEFAULT_CFG[key])
+
+
+# Sentinel meaning "written at the beginning of time" — every recorded swipe is
+# newer than this, so a pin carrying it is released by any comparison. Used for
+# legacy (unstamped) overrides when pin_legacy_at_epoch is on.
+_PIN_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _parse_ts(raw: str | None) -> Optional[datetime]:
+    """Parse an ISO-8601 stamp to an aware UTC datetime, or None.
+
+    Both sources are written by `datetime.now(timezone.utc).isoformat()`
+    (SwipeDecision.timestamp in-memory, `database._now()` for the persisted
+    `swipe_decisions.created_at`), so they are directly comparable. Naive
+    strings are assumed UTC rather than dropped: an unparseable or missing
+    stamp returns None, and every caller treats None as "no information",
+    which never releases a pin.
+    """
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +354,13 @@ class RankingService:
         self._generator  = matchup_generator
         self._seed       = seed_ratings or {}
         self._elo_overrides: dict[str, float] = {}  # manual reorder overrides
+        # When each override was written — ISO-8601 UTC, pid-keyed, PARALLEL to
+        # _elo_overrides rather than folded into it so the persisted per-format
+        # `{pid: elo}` shape (users.tier_overrides) is unchanged. A pid present
+        # in _elo_overrides but absent here is a LEGACY pin (written before
+        # 2026-08-18); pin_legacy_at_epoch decides what that means. Persisted
+        # under the `__OVERRIDE_AT__` sibling key by database.save_tier_overrides.
+        self._elo_override_at: dict[str, str] = {}
         # Scoring format this service ranks in — drives which tier_config.json
         # value bands the boundary-probing trio selector reads. Defaults to
         # 1qb_ppr; multi-format callers set it post-construct (like _user_id).
@@ -339,6 +400,91 @@ class RankingService:
         self._stats_cache: Optional[dict[str, dict]] = None
         self._stats_cache_version: int = 0
         self._stats_cache_key: Optional[tuple] = None
+        # comparison_counts() memo — same _version keying, no pool key because
+        # it always runs over the full player set.
+        self._conf_cache: Optional[dict[str, int]] = None
+        self._conf_cache_version: Optional[tuple] = None
+
+    # ------------------------------------------------------------------
+    # Board-override pins
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pin_cfg_key() -> tuple:
+        """The three pin knobs, as a cache-key component.
+
+        `_compute_elo` / `comparison_counts` memoize on `_version`, which only
+        moves on a state mutation — a live `PUT /api/admin/config` would not
+        bump it, so a kill switch pulled in an incident would not take effect
+        on warm sessions until the user next swiped. Folding the knobs into the
+        key makes the kill immediate.
+        """
+        return (_c("pin_exclude_comparisons"),
+                _c("pin_unpin_on_newer_swipe"),
+                _c("pin_legacy_at_epoch"))
+
+    def _pin(self, pid: str, elo: float, at: Optional[str] = None) -> None:
+        """Write an Elo override and stamp WHEN it was written.
+
+        Every override write goes through here so `_elo_override_at` can never
+        drift from `_elo_overrides` — an unstamped entry means "legacy", and a
+        mutator that forgot to stamp would silently make a brand-new pin
+        unreleasable. `at` lets one bulk save share a single stamp.
+        """
+        self._elo_overrides[pid] = float(elo)
+        self._elo_override_at[pid] = at or datetime.now(timezone.utc).isoformat()
+
+    def _unpin(self, pid: str) -> None:
+        """Drop an override and its stamp together."""
+        self._elo_overrides.pop(pid, None)
+        self._elo_override_at.pop(pid, None)
+
+    def _pin_release(self, pool_ids: set[str]) -> dict[str, datetime]:
+        """Which pinned players a newer ranking swipe has RELEASED, and from when.
+
+        Returns {pid: released_from} for every override that a swipe has
+        unpinned. `released_from` is the pin's own timestamp: the pin stays as
+        the player's starting rating and only swipes STRICTLY newer than it are
+        applied on top. That is the point of the fix — the tier placement
+        already summarises everything the user said before it, so replaying
+        pre-pin history would resurrect the very swipes the placement
+        superseded. Pins absent from the result stay frozen.
+
+        Only RANKING swipes (`_swipes`) can trigger a release. A trade like/pass
+        is an indirect, low-K signal about a whole package; letting one destroy
+        a deliberate tier placement would be a much bigger product change than
+        the defect warrants. Once a pin IS released, newer trade swipes do
+        apply — the player is simply un-pinned from that moment on.
+        """
+        if not self._elo_overrides or _c("pin_unpin_on_newer_swipe") != 1.0:
+            return {}
+
+        legacy_at_epoch = _c("pin_legacy_at_epoch") == 1.0
+        pin_at: dict[str, datetime] = {}
+        for pid in self._elo_overrides:
+            if pid not in pool_ids:
+                continue
+            stamp = _parse_ts(self._elo_override_at.get(pid))
+            if stamp is None:
+                if not legacy_at_epoch:
+                    continue          # unstamped + policy off ⇒ permanent pin
+                stamp = _PIN_EPOCH
+            pin_at[pid] = stamp
+        if not pin_at:
+            return {}
+
+        released: dict[str, datetime] = {}
+        for s in self._swipes:
+            for pid in (s.winner_id, s.loser_id):
+                if pid not in pin_at or pid in released:
+                    continue
+                other = s.loser_id if pid == s.winner_id else s.winner_id
+                if other not in pool_ids:
+                    continue          # swipe is skipped by _compute_elo anyway
+                ts = _parse_ts(s.timestamp)
+                if ts is not None and ts > pin_at[pid]:
+                    released[pid] = pin_at[pid]
+        return released
 
     # ------------------------------------------------------------------
     # Public API
@@ -813,15 +959,70 @@ class RankingService:
         }
 
     def comparison_counts(self) -> dict[str, int]:
-        """Per-player count of unique opponents faced in ranking swipes.
+        """Per-player count of unique opponents whose comparison actually
+        MOVED that player's Elo.
 
-        Consumed by the trade layer (Tier 1 confidence shrinkage) to shrink
-        under-sampled personal Elo toward consensus. Pure read: delegates to
-        the memoized _compute_stats over the full pool — no ranking math is
-        touched and repeat calls at the same _version are O(pool).
+        Consumed by the trade layer as `confidence`: it feeds
+        `trade_service._shrink_user_elo` (personal Elo blended toward the
+        consensus seed with w = n/(n+n0)) and `_value_uncertainty` (per-player
+        value half-width, range_base/sqrt(1+n)).
+
+        F1 (pin_exclude_comparisons, 2026-08-18). The shrinkage weight is
+        direction-BLIND — it reads how MUCH you voted, never which way. A
+        pinned player's Elo cannot move at all, so every comparison they were
+        shown only raised w and pulled the effective trade value further toward
+        the pin. On the audited board the pin sat above consensus, so voting a
+        player DOWN 17 times raised his trade value 12.5%. Counting only the
+        comparisons that actually moved him removes the inversion: a still-
+        pinned player scores 0 and is therefore valued at exactly consensus,
+        which is the honest answer — his personal Elo carries no vote signal.
+
+        `_value_uncertainty` deliberately shares this map rather than keeping
+        the raw counts. After the exclusion a pinned player's value IS the
+        consensus seed, and this codebase already assigns maximum uncertainty
+        to any player valued at consensus (n=0 ⇒ unc = range_base). Handing
+        that same value a narrow range because of votes that were discarded
+        would be false precision. The affected population is small — only
+        players that are both pinned AND compared — and the single knob turns
+        both consumers back off together.
+
+        Pure read: `_compute_stats` (memoized) supplies the base counts and
+        `_pin_release` decides who is still pinned; no ranking math is touched.
+        Memoized on _version, like its two neighbours.
         """
-        stats = self._compute_stats(list(self._players.values()))
-        return {pid: len(s["compared"]) for pid, s in stats.items()}
+        conf_key = (self._version, self._pin_cfg_key())
+        if self._conf_cache is not None and self._conf_cache_version == conf_key:
+            return self._conf_cache
+
+        pool = list(self._players.values())
+        stats = self._compute_stats(pool)
+        counts = {pid: len(s["compared"]) for pid, s in stats.items()}
+
+        if _c("pin_exclude_comparisons") == 1.0 and self._elo_overrides:
+            pool_ids = {p.id for p in pool}
+            released = self._pin_release(pool_ids)
+            # Recount the pinned players from the swipes that moved them: none
+            # while frozen, and only post-release opponents once released.
+            live: dict[str, set[str]] = {
+                pid: set() for pid in self._elo_overrides if pid in counts
+            }
+            if released:
+                for s in self._swipes:
+                    w, l = s.winner_id, s.loser_id
+                    if w not in pool_ids or l not in pool_ids:
+                        continue
+                    ts = _parse_ts(s.timestamp)
+                    if ts is None:
+                        continue
+                    for pid, other in ((w, l), (l, w)):
+                        since = released.get(pid)
+                        if since is not None and ts > since:
+                            live[pid].add(other)
+            counts.update({pid: len(opps) for pid, opps in live.items()})
+
+        self._conf_cache = counts
+        self._conf_cache_version = conf_key
+        return counts
 
     def replay_from_db(self, swipes: list[dict]) -> int:
         """
@@ -846,7 +1047,12 @@ class RankingService:
 
             dtype = row.get("decision_type", "rank")
             k     = float(row.get("k_factor", _c("elo_k")))
-            sd    = SwipeDecision(winner_id=wid, loser_id=lid)
+            # Carry the PERSISTED timestamp. SwipeDecision defaults it to now,
+            # which is right for a live swipe and catastrophic for a replay:
+            # every historical swipe would look newer than every pin, so a
+            # server restart would silently unpin whole boards (F2).
+            sd    = SwipeDecision(winner_id=wid, loser_id=lid,
+                                  timestamp=row.get("created_at") or "")
 
             if dtype == "rank":
                 self._swipes.append(sd)
@@ -1060,7 +1266,7 @@ class RankingService:
         # compute. The returned object is shared by reference (identity is
         # intentional — see AC-1); all current callers treat the result as
         # read-only (audited: get_rankings, _algorithmic_trio, apply_reorder).
-        cache_key = tuple(p.id for p in pool)
+        cache_key = (tuple(p.id for p in pool), self._pin_cfg_key())
         if (
             self._elo_cache is not None
             and self._elo_cache_version == self._version
@@ -1086,9 +1292,28 @@ class RankingService:
 
         elo_k = _c("elo_k")
         override_ids = self._elo_overrides  # dict — `in` is O(1)
+        # F2 (pin_unpin_on_newer_swipe): pins that a LATER ranking swipe has
+        # released, mapped to the pin's own timestamp. A released player keeps
+        # the pin as their starting rating (set above) but evolves from every
+        # swipe newer than it. Empty dict ⇒ the pre-fix "pins are permanent"
+        # behaviour, so the knob at 0.0 is byte-identical.
+        released = self._pin_release(pool_ids)
+
+        def _moves(pid: str, ts: Optional[datetime]) -> bool:
+            """Does this swipe update `pid`'s rating?
+
+            Un-pinned players always move. A pinned player moves only once
+            released, and only for swipes strictly newer than their pin.
+            """
+            if pid not in override_ids:
+                return True
+            since = released.get(pid)
+            if since is None:
+                return False          # still pinned
+            return ts is not None and ts > since
 
         # Regular ranking swipes — full K factor.
-        # Skip the rating update for any pid that has an override: the user
+        # Skip the rating update for any pid that has a LIVE override: the user
         # has explicitly placed them via tiers/reorder and wants that value
         # to stick. The OTHER side of the swipe (if not overridden) still
         # evolves against the overridden player's anchor ELO, which is the
@@ -1098,24 +1323,27 @@ class RankingService:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
                 continue
+            ts = _parse_ts(s.timestamp) if released else None
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
-            if w not in override_ids:
+            if _moves(w, ts):
                 ratings[w] += elo_k * (1.0 - ea)
-            if l not in override_ids:
+            if _moves(l, ts):
                 ratings[l] += elo_k * (0.0 - (1.0 - ea))
 
         # Trade-decision swipes — reduced K factor (softer signal).
-        # Same anchoring rule as above.
+        # Same anchoring rule as above. A trade swipe can never RELEASE a pin
+        # (see _pin_release), but it does move an already-released player.
         for s, k in self._trade_swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
                 continue
+            ts = _parse_ts(s.timestamp) if released else None
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
-            if w not in override_ids:
+            if _moves(w, ts):
                 ratings[w] += k * (1.0 - ea)
-            if l not in override_ids:
+            if _moves(l, ts):
                 ratings[l] += k * (0.0 - (1.0 - ea))
 
         self._elo_cache = ratings
@@ -1400,16 +1628,20 @@ class RankingService:
         # both cleared and re-tiered in the same save (rare, e.g. concurrent
         # tab) ends up with the new tier's band rather than left without an
         # override. The tier-write loop below will re-set it.
+        # One stamp for the whole save — every pin this call writes was
+        # written at the same instant (F2, _pin_release).
+        now = datetime.now(timezone.utc).isoformat()
+
         if cleared_pids:
             for pid in cleared_pids:
-                self._elo_overrides.pop(pid, None)
+                self._unpin(pid)
 
         # Pin demoted pids below every band (after clears, before tier
         # writes — see the precedence note in the docstring).
         if demoted_pids:
             for pid in demoted_pids:
                 if pid in pool_ids:
-                    self._elo_overrides[pid] = self.DEMOTED_ELO
+                    self._pin(pid, self.DEMOTED_ELO, now)
 
         for tier_name, player_ids in tiers.items():
             band = bands.get(tier_name)
@@ -1421,10 +1653,10 @@ class RankingService:
             if n == 0:
                 continue
             if n == 1:
-                self._elo_overrides[valid[0]] = hi
+                self._pin(valid[0], hi, now)
             else:
                 for i, pid in enumerate(valid):
-                    self._elo_overrides[pid] = hi - (hi - lo) * i / (n - 1)
+                    self._pin(pid, hi - (hi - lo) * i / (n - 1), now)
 
         self._version += 1
 
@@ -1488,12 +1720,13 @@ class RankingService:
             return self._elo_overrides.get(pid, current.get(pid, self.ELO_INITIAL))
 
         # ── clears and demotions, SCOPED (D3 / #161 / O4) ──────────────────
+        now = datetime.now(timezone.utc).isoformat()   # one stamp per save (F2)
         for pid in (cleared_pids or []):
             if pid in scope_pids:            # a clear for an unshown vet is ignored
-                self._elo_overrides.pop(pid, None)
+                self._unpin(pid)
         for pid in (demoted_pids or []):
             if pid in scope_pids and pid in pool_ids:   # visible + scoped only
-                self._elo_overrides[pid] = self.DEMOTED_ELO
+                self._pin(pid, self.DEMOTED_ELO, now)
 
         merged_orders: dict[str, list[str]] = {}
         _SLOT = ("SCOPED_SLOT",)
@@ -1549,7 +1782,7 @@ class RankingService:
                 # 6. PERSIST SCOPED PIDS ONLY. This `if` is the whole of D3 —
                 #    removing it produces the rejected full-band persist.
                 if pid in scope_pids:
-                    self._elo_overrides[pid] = v
+                    self._pin(pid, v, now)
 
             merged_orders[tier_name] = merged
 
@@ -1570,7 +1803,7 @@ class RankingService:
         player = next((p for p in self._pool(None) if p.id == player_id), None)
         if player is None:
             return None
-        self._elo_overrides[player_id] = float(target_elo)
+        self._pin(player_id, target_elo)
         self._version += 1
         return player
 
@@ -1636,8 +1869,9 @@ class RankingService:
             if target_elos[i] >= target_elos[i - 1]:
                 target_elos[i] = target_elos[i - 1] - 0.001
 
+        now = datetime.now(timezone.utc).isoformat()   # one stamp per save (F2)
         for pid, target_elo in zip(valid_ids, target_elos):
-            self._elo_overrides[pid] = target_elo
+            self._pin(pid, target_elo, now)
 
         self._version += 1
 
@@ -1681,8 +1915,9 @@ class RankingService:
             if target_elos[i] >= target_elos[i - 1]:
                 target_elos[i] = target_elos[i - 1] - 0.001
 
+        now = datetime.now(timezone.utc).isoformat()   # one stamp per save (F2)
         for pid, target_elo in zip(valid_ids, target_elos):
-            self._elo_overrides[pid] = target_elo
+            self._pin(pid, target_elo, now)
 
         self._version += 1
         return len(valid_ids)

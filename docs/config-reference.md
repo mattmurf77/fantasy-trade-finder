@@ -39,6 +39,8 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
   - [Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded](#trios-tier-calibration-variety-ranking_service_default_cfg-db-seeded)
   - [Decline-reason Elo suppression — `ranking_service._DEFAULT_CFG`](#decline-reason-elo-suppression-ranking_service_default_cfg)
+  - [Board-override pins — `ranking_service._DEFAULT_CFG`, DB-seeded](#board-override-pins-ranking_service_default_cfg-db-seeded)
+  - [Forced deck regeneration — `backend/server.py`, DB-seeded](#forced-deck-regeneration-backendserverpy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -535,6 +537,38 @@ The trio loop rotates among three strategies (never repeating the previous one),
 | `pass_reason_elo_suppression` | 1.0 (**ON**) | Decline-reason capture (flag `feedback.decline_reasons`, SPEC §4). Today every pass fires `record_trade_signal(winner=give, loser=receive)` — it asserts *"I value my players more than theirs"*. Once the tester says **why** they passed, that assertion holds for exactly one answer. **ON (≥0.5):** only `value_giving` ("Giving up too much") writes the pass's Elo signal. `value_getting` says the *opposite*, so writing the usual signal would invert it; every `fit_*`, every `other*` and every layer-1-only answer makes no valuation claim at all — all suppressed. Because layer-1-only always suppresses, a kept signal lands at the **layer-2 tap**, not the tile tap, and `trade_pass_reasons.elo_signal_at` makes it once-only per impression. **OFF (<0.5):** every reasoned pass writes Elo at the tile tap, exactly as today's ✕ does — the deploy-free rollback lever for the one part of this feature that touches ranking math. Read **only** on the reasoned-pass path: `/api/trades/swipe` never consults it, so unreasoned passes are unaffected in either position. Not currently in `_MODEL_CONFIG_DEFAULTS`, so it is a code default until seeded. |
 
 > Known one-way behavior, recorded rather than fixed: an Elo signal earned by `value_giving` is **not retracted** if the tester later switches tiles — there is no negative-K correction path on this route (that machinery exists only for match dispositions, `trade_k_decline_correction`). It can never write a second time. See [data-dictionary § trade_pass_reasons](data-dictionary.md#trade_pass_reasons).
+
+### Board-override pins — `ranking_service._DEFAULT_CFG`, DB-seeded
+
+A tier save, Quick Rank pass, drag reorder, pick-anchor or cross-format copy
+writes an Elo **override** into `users.tier_overrides`, which *pins* that
+player: `_compute_elo` seeds them from the override and skips every rating
+update. [The 2026-08-18 valuation audit](reviews/2026-08-18-valuation-age-audit.md)
+found the pin composing badly with the trade layer's confidence shrinkage —
+`_shrink_user_elo` weights personal Elo by `w = n/(n + shrink_pseudocount)`
+where `n` is the **comparison count**, with no reference to which way the user
+voted. A pinned player's Elo cannot move, so every additional comparison only
+raised `w` and dragged the effective trade value further toward the pin. On the
+audited board the pin sat *above* consensus, so **17 down-votes raised the
+player's trade value 12.5%** — voting him down made the engine want him more.
+Scale at the time of the audit: **67.8% of all 4,013 recorded comparisons had
+both players pinned**, making the Elo update a no-op on both sides.
+
+All three knobs at `0.0` reproduce the pre-2026-08-18 behaviour byte-for-byte
+(golden: `backend/tests/fixtures/override_pin_golden.json`, captured on the
+pre-fix code and asserted by `test_override_pin_unpin.py`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pin_exclude_comparisons` | 1.0 (**ON**) | **F1.** `RankingService.comparison_counts()` counts only the comparisons that actually **moved** a player's Elo. A still-pinned player therefore scores `n = 0` and prices at *exactly* the consensus seed — the honest answer, since his personal Elo carries no vote signal. This removes the inversion above. Note the map is shared by both consumers: `_shrink_user_elo` (value blending) **and** `_value_uncertainty` (`range_base/sqrt(1+n)`, the range-overlap fairness gate). That is deliberate — after the exclusion a pinned player's value *is* the consensus seed, and this codebase already assigns maximum uncertainty to any player valued at consensus (`n=0 ⇒ unc = range_base`); a narrow range around a value carrying zero personal signal would be false precision. The affected population is small (only players both pinned **and** compared). **`0` disables**, restoring raw counts for both consumers. |
+| `pin_unpin_on_newer_swipe` | 1.0 (**ON**) | **F2.** A ranking swipe recorded **strictly after** the pin was written releases that player: the pin stays as his *starting* rating and only swipes newer than it are applied on top. The user's most recent expression of preference beats their older one; the pin already summarises everything said before it, so pre-pin history is not resurrected. Only **ranking** swipes trigger a release — a trade like/pass is an indirect, low-K signal about a whole package and must not destroy a deliberate tier placement — but once released, newer trade swipes do apply. Requires a stored write time; see `pin_legacy_at_epoch` for pins that have none. **`0` disables** (pins permanent, the pre-fix contract). |
+| `pin_legacy_at_epoch` | 0.0 (**OFF**) | **F2 legacy policy.** Overrides written before 2026-08-18 carry **no timestamp** (`users.tier_overrides.__override_at__` did not exist). `0` treats such a pin as **permanent** — it is never released by a swipe — so no existing board changes until the user next tiers/reorders that player, which stamps it. `1` treats it as written at the epoch, so **any** recorded swipe (including historical ones) releases it, retroactively re-opening every legacy pin on the next Elo compute. At the time of shipping that was **739 of 2,735** live pinned entries, which would take the live-comparison rate from 32.2% to 100%. Deliberately an operator decision, not a default: it is a large, one-shot change to boards users deliberately arranged. The alternative lever is a timestamp **backfill** (proposal in [docs/plans/three-model-bakeoff/scope-phase0.md](plans/three-model-bakeoff/scope-phase0.md) §6) which is reversible per-player and can be scoped to one user. Inert while `pin_unpin_on_newer_swipe` is `0`. |
+
+### Forced deck regeneration — `backend/server.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `force_supersedes_running` | 1.0 (**ON**) | `POST /api/trades/generate` with `force: true` **supersedes** an already-RUNNING job for the same `(user, league, format)` key and spawns a fresh one. Before 2026-08-18 the cache-hit branch honoured `force` but the in-flight branch did not, so a forced request arriving mid-generation returned the running job verbatim — same `job_id`, same minted `trade_id`s — and the forced regeneration never happened ("The deck rebuilds around it." after a Quick Set save; it did not). The job registry has **no cancellation mechanism**, so the superseded worker runs to completion but finishes *quietly*: no further snapshot publishes (`_job_live`), no `deck_impressions` rows, and no `trades_generated` event — a deck nobody was served must leave no trace in the signal corpus. It still transitions to `complete`, so a client holding the old `job_id` polls to a terminal state as before. **`0` restores the pre-2026-08-18 silent share.** |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

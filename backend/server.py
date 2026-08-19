@@ -166,7 +166,7 @@ from .database import (
     set_ranking_method, get_ranking_method, set_ranking_method_if_unset,
     get_profile_public, set_profile_public,
     save_tiers_position, get_tiers_saved,
-    save_tier_overrides, load_tier_overrides,
+    save_tier_overrides, load_tier_overrides, load_tier_override_stamps,
     # rookie-draft M2 — the pre-scope board snapshot (operator restore path)
     take_tier_override_snapshot,
     save_anchor_scale, load_anchor_scale,
@@ -2735,6 +2735,47 @@ def _trade_job_key(user_id: str, league_id: str, scoring_format: str) -> tuple:
     return (user_id, league_id, scoring_format)
 
 
+def _force_supersede_enabled() -> bool:
+    """Does `force: true` supersede an already-RUNNING job?
+
+    Model-config knob `force_supersedes_running` (default 1) so it can be
+    killed via `PUT /api/admin/config` without a deploy. 0 restores the
+    pre-2026-08-18 behaviour exactly: a forced request while a job is in
+    flight silently returns that job, and the forced regeneration never
+    happens (docs/reviews/2026-08-18-bug-sweep/ticket.md).
+    """
+    try:
+        return float(get_config().get("force_supersedes_running", 1.0)) == 1.0
+    except Exception:
+        return True
+
+
+def _job_live(j: dict | None) -> bool:
+    """May this job still publish snapshots or write impressions?
+
+    A job is live while it is running AND has not been superseded by a forced
+    regeneration. There is no cancellation mechanism in the registry — a
+    superseded worker runs to completion — so this is what makes it finish
+    QUIETLY: no further snapshot publishes, and (checked separately at the
+    call site) no deck-impression rows for a deck no user will ever be served.
+    Without it, forcing a fresh deck would silently corrupt the impression
+    corpus with rows nobody saw.
+    """
+    return bool(j is not None and j["status"] == "running"
+                and not j.get("superseded"))
+
+
+def _job_superseded(job_id: str) -> bool:
+    """Read the supersede marker under the lock. Called at each DURABLE side
+    effect (impression rows, the trades_generated event) rather than once up
+    front, so a supersede landing mid-worker still suppresses everything after
+    it. The window it cannot close is a supersede that lands between this
+    check and the write — bounded, and it fails toward writing, which is the
+    pre-fix behaviour."""
+    with _trade_jobs_lock:
+        return bool((_trade_jobs.get(job_id) or {}).get("superseded"))
+
+
 def _trade_job_public_view(job: dict) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key."""
@@ -2810,7 +2851,7 @@ def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlo
             snapshot.append(d)
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
-            if j and j["status"] == "running":
+            if _job_live(j):
                 j["opponents_done"]  = opponents_done
                 j["opponents_total"] = opponents_total
                 j["cards"]           = snapshot
@@ -5251,7 +5292,7 @@ def _run_trade_job(
                     snapshot.append(d)
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
-                    if j is not None and j["status"] == "running":
+                    if _job_live(j):
                         j["cards"] = snapshot
 
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
@@ -5283,7 +5324,7 @@ def _run_trade_job(
                     snapshot.append(d)
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
-                    if j is not None and j["status"] == "running":
+                    if _job_live(j):
                         j["cards"] = snapshot
             except Exception as ly_err:
                 log.warning("likes-you injection failed (non-fatal): %s", ly_err)
@@ -5329,7 +5370,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if j is not None and j["status"] == "running":
+                        if _job_live(j):
                             j["cards"] = snapshot
             except Exception as fat_err:
                 log.warning("deck fatigue layer failed (non-fatal): %s", fat_err)
@@ -5416,7 +5457,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if j is not None and j["status"] == "running":
+                        if _job_live(j):
                             j["cards"] = snapshot
             except Exception as ord_err:
                 log.warning("deck ordering (A5/A6) failed (non-fatal): %s", ord_err)
@@ -5457,7 +5498,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if j is not None and j["status"] == "running":
+                        if _job_live(j):
                             j["cards"] = snapshot
             except Exception as ex_err:
                 log.warning("deck exploration layer failed (non-fatal): %s", ex_err)
@@ -5500,7 +5541,7 @@ def _run_trade_job(
                             snapshot.append(d)
                         with _trade_jobs_lock:
                             j = _trade_jobs.get(job_id)
-                            if j is not None and j["status"] == "running":
+                            if _job_live(j):
                                 j["cards"] = snapshot
                 except Exception as fs_err:
                     log.warning("first-session shaping failed (non-fatal): %s",
@@ -5572,8 +5613,13 @@ def _run_trade_job(
             _j = _trade_jobs.get(job_id)
             job_source = (_j or {}).get("source")
 
+        # A forced regeneration superseded this job while it was running. It
+        # is about to finish, but nobody will ever see these cards, so logging
+        # impressions for them would poison the deck-signal corpus with rows
+        # that had zero chance of a view. Skip the whole block.
         try:
-            if league_id != "league_demo" and _deck_signal_v2_enabled():
+            if (league_id != "league_demo" and _deck_signal_v2_enabled()
+                    and not _job_superseded(job_id)):
                 telemetry_kw: dict = {}
                 if _suggestion_telemetry_enabled():
                     telemetry_kw = {
@@ -5606,7 +5652,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if j is not None and j["status"] == "running":
+                        if _job_live(j):
                             j["cards"] = snapshot
         except Exception as sig_err:
             log.warning("deck signal-v2 impression logging failed (non-fatal): %s", sig_err)
@@ -5617,6 +5663,9 @@ def _run_trade_job(
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if j is not None:
+                # Superseded jobs still transition to "complete" — a client
+                # that already holds this job_id keeps polling to a terminal
+                # state exactly as before, it just never receives new cards.
                 j["status"]      = "complete"
                 j["finished_at"] = time.monotonic()
                 if j.get("started_at") is not None:
@@ -5625,6 +5674,9 @@ def _run_trade_job(
         # FR-20 (analytics P0, LLD §6.4b): trades_generated — post-engine,
         # once per completed job (never per /status poll). Worker thread, so
         # no request context / device headers; never allowed to fail the job.
+        # Same reasoning as the impression block: a superseded deck was never
+        # served, so counting it as a generated deck would overstate supply
+        # and skew every per-deck rate computed against it.
         try:
             _lanes: dict[str, int] = {}
             # served_final: the analytics contract is "cards the user can
@@ -5643,12 +5695,13 @@ def _run_trade_job(
             # (pull jobs carry no marker; props stay byte-identical for them).
             if job_source:
                 _ev_props["deck_source"] = job_source
-            record_event(
-                g_user_id, "trades_generated",
-                league_id=league_id,
-                source="api",
-                props=_ev_props,
-            )
+            if not _job_superseded(job_id):
+                record_event(
+                    g_user_id, "trades_generated",
+                    league_id=league_id,
+                    source="api",
+                    props=_ev_props,
+                )
         except Exception as ev_err:
             log.warning("record_event(trades_generated) failed: %s", ev_err)
 
@@ -7191,6 +7244,7 @@ def copy_tiers_from_format_route():
     # format's consensus value curve. Any pre-existing target override for
     # a pid not in the source is dropped — that's what "copy" means here.
     to_svc._elo_overrides = {}
+    to_svc._elo_override_at = {}          # F2: stamps travel with the overrides
 
     position_counts: dict[str, int] = {}
     for position, ordered_pids in by_position.items():
@@ -7202,7 +7256,9 @@ def copy_tiers_from_format_route():
 
     # Persist override dict.
     try:
-        save_tier_overrides(g_user_id, to_svc._elo_overrides, scoring_format=to_format)
+        save_tier_overrides(g_user_id, to_svc._elo_overrides,
+                            scoring_format=to_format,
+                            stamps=to_svc._elo_override_at)
     except Exception as db_err:
         log.warning("copy-from-format: save_tier_overrides failed: %s", db_err)
         return jsonify({"error": f"DB write failed: {db_err}"}), 500
@@ -7942,7 +7998,9 @@ def save_tiers_route():
         # Persist the full tier override dict for THIS format so it survives
         # session rebuilds. The other format's overrides are untouched.
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+            save_tier_overrides(g_user_id, service._elo_overrides,
+                                scoring_format=fmt,
+                                stamps=service._elo_override_at)
         except Exception as db_err:
             log.warning("save_tier_overrides failed: %s", db_err)
 
@@ -8115,7 +8173,9 @@ def save_anchor_route():
         # Persist the override dict for THIS format (same path as tiers/save)
         # so the anchor survives session rebuilds.
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+            save_tier_overrides(g_user_id, service._elo_overrides,
+                                scoring_format=fmt,
+                                stamps=service._elo_override_at)
         except Exception as db_err:
             log.warning("save_tier_overrides after anchor failed: %s", db_err)
 
@@ -8498,7 +8558,9 @@ def reorder_rankings():
 
         # Persist override dict for THIS format so it survives session rebuilds
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+            save_tier_overrides(g_user_id, service._elo_overrides,
+                                scoring_format=fmt,
+                                stamps=service._elo_override_at)
         except Exception as db_err:
             log.warning("save_tier_overrides after reorder failed: %s", db_err)
 
@@ -8693,7 +8755,9 @@ def rankings_import_apply():
         # survive session rebuilds, leaguemates see the published board,
         # taste prior + Trends refresh.
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+            save_tier_overrides(g_user_id, service._elo_overrides,
+                                scoring_format=fmt,
+                                stamps=service._elo_override_at)
         except Exception as db_err:
             log.warning("save_tier_overrides after import failed: %s", db_err)
         try:
@@ -10425,8 +10489,14 @@ def generate_trades():
     fmt                = _active_format(sess)
     # Onboarding item 7 (F2): a Quick Set save changes the board but not the
     # cache key, so the post-quickset regeneration passes force=true to skip
-    # the complete-fresh cache hit. A running job is still shared (never two
-    # concurrent workers for one key), and pinned jobs already bypass.
+    # the complete-fresh cache hit. Pinned jobs already bypass.
+    #
+    # UPDATED 2026-08-18 — `force` now also supersedes a RUNNING job (knob
+    # force_supersedes_running). It previously did not, so the running job was
+    # returned verbatim and the forced regeneration never happened. The old
+    # "never two concurrent workers for one key" invariant is therefore gone
+    # by design: the superseded worker runs to completion (there is no
+    # cancellation mechanism) but finishes quietly — see _job_live.
     force_fresh        = bool(body.get("force"))
 
     # F3 (deck.fatigue) — "Refresh my deck": clear the user's SOFT fatigue
@@ -10479,8 +10549,23 @@ def generate_trades():
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
             # original params — the frontend can re-tap once status flips.
+            #
+            # ...unless the caller asked to FORCE. The cache-hit branch above
+            # honours `force`, this one used to ignore it, so a forced
+            # regeneration arriving while a job was in flight returned that
+            # job verbatim — same job_id, same minted trade_ids — and the
+            # regeneration never happened. That is what broke the Quick Set →
+            # Trades handoff ("The deck rebuilds around it." — it did not),
+            # and it is the same reason a board change that alters values
+            # (e.g. an override released by a newer vote) could be invisible.
+            # Supersede the running job and fall through to spawn a fresh one.
             if existing.get("status") == "running":
-                return jsonify(_trade_job_public_view(existing))
+                if not (force_fresh and _force_supersede_enabled()):
+                    return jsonify(_trade_job_public_view(existing))
+                existing["superseded"]    = True
+                existing["superseded_at"] = time.monotonic()
+                log.info("trade-job %s superseded by force=true (key=%s)",
+                         existing_id, key)
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
             _trade_jobs_by_key.pop(key, None)
@@ -14056,6 +14141,7 @@ def account_reset_rankings():
         try:
             svc.reset(position=None)
             svc._elo_overrides = {}
+            svc._elo_override_at = {}
         except Exception:
             log.exception("account reset-rankings in-memory reset failed")
     log.info("AUTH-VERIFIED reset-rankings user_id=%s counts=%s", user_id, counts)
@@ -16302,6 +16388,10 @@ def session_init():
             try:
                 overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
                 svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
+                # F2 — write times for those pins. Pids missing from this map
+                # are legacy pins (pre-2026-08-18); see pin_legacy_at_epoch.
+                svc._elo_override_at = load_tier_override_stamps(
+                    user_id=user_id, scoring_format=fmt)
                 if svc._elo_overrides:
                     log.info("  ✅ [%s] restored %d tier overrides", fmt, len(svc._elo_overrides))
             except Exception as db_err:
@@ -19428,6 +19518,8 @@ def _extension_build_session(user_id: str, username: str,
             # through the current pool — the filter destroys data.
             overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
             svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
+            svc._elo_override_at = load_tier_override_stamps(
+                user_id=user_id, scoring_format=fmt)          # F2
         except Exception as e:
             log.warning("  [%s] extension override restore failed: %s", fmt, e)
         new_services[fmt] = svc

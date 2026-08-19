@@ -45,6 +45,61 @@ correct with the server field live.
 
 ---
 
+## 2026-08-18 — Phase 0: board-override pins + forced regeneration (branch only, NOT merged)
+
+Branch `feat/unpin-overrides`, rebased onto `origin/main` @ `355bddb`. Scope block:
+[`docs/plans/three-model-bakeoff/scope-phase0.md`](../docs/plans/three-model-bakeoff/scope-phase0.md).
+Three knobbed fixes for the defect diagnosed in
+[`docs/reviews/2026-08-18-valuation-age-audit.md`](../docs/reviews/2026-08-18-valuation-age-audit.md)
+plus the `force`-ignored-while-running bug from the bug-sweep ticket.
+**Not pushed, not merged** — build-agent output awaiting operator review.
+
+| Gate | Baseline (`origin/main`) | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3175 passed, 1 skipped | **3224 passed, 1 skipped, 0 failed** (271s) |
+| `npx tsc --noEmit` (mobile) | n/a | **not run — zero files under `mobile/`** |
+| `mobile/scripts/testid-lint.sh` | n/a | **not run — no testIDs touched** |
+
+- **+49 tests, zero regressions.** `test_override_pin_unpin.py` (41) and
+  `test_force_supersedes_running_job.py` (8). Every knob has a behaviour test AND a
+  kill-value test.
+- **Kill-value byte-identity is proven against captured output, not asserted.**
+  `backend/tests/fixtures/override_pin_golden.json` was produced by running the test's
+  exact fixture against pristine `origin/main` **before a line of production code
+  changed**, and is compared as a whole document (elo / comparison counts / shrunk elo /
+  uncertainty / effective value). A companion test asserts the golden still *exhibits*
+  the defect (`value > consensus` while `elo` never moved), so the proof cannot rot into
+  a tautology if the fixture drifts.
+- **The fixture reproduces the audited numbers exactly**: consensus value 1138.83, pinned
+  board value 1385.95, and at the kill values the effective value sits at 1215.87 —
+  *above* consensus purely because the player was voted on. With F1 on it is 1138.83,
+  i.e. exactly consensus.
+- **Mutation-checked.** Reverting the impression gate makes
+  `test_a_superseded_job_writes_no_impressions` fail with **4 orphaned impression rows**;
+  reverting the route gate makes `test_forced_request_while_running_spawns_a_new_job`
+  fail. A control test proves the same harness *does* write impressions normally, so the
+  zero-rows assertion is not vacuous.
+- **Two existing test files changed, both because the contract genuinely moved, neither
+  weakened.** `test_rnk_elo_golden.py`'s "an overridden player's Elo never moves" was the
+  pre-F2 contract; it is now three tests (pinned against *earlier* swipes; released by a
+  *newer* one; the old contract restored by the kill switch). `test_elo_memoization.py`'s
+  spy reconstructed `_elo_cache_key` by hand and needed the pin knobs added after they
+  were folded into the key (so a kill pulled via `PUT /api/admin/config` takes effect on
+  warm sessions immediately).
+- **Prod blast radius measured read-only** (`DATABASE_URL_PROD`, `SELECT` only under
+  `default_transaction_read_only=on`), 2026-08-18: 4,013 comparisons, 2,721 inert
+  (67.8%); 2,735 pinned entries, 739 of them carrying at least one vote. With the shipped
+  defaults live comparisons stay at **1,292/4,013 (32.2%)** — F2 is inert on legacy pins
+  by design. What F1 changes immediately: **6,250 of 8,026 confidence-contributing
+  player-sides (77.9%) stop counting.**
+- **Sim gate: Tier 4 (none, CI only).** Backend-only diff; zero files under `mobile/`.
+  `qa/sim-runs/last-sim-run.json` not written — under D-056 there is nothing to run.
+  `FTF_SKIP_SIM_GATE=1` is the standing posture for any push.
+- **Not covered by any test here:** whether released boards actually produce better decks.
+  That is an empirical question and the named lever is `pin_legacy_at_epoch` — a single
+  `PUT /api/admin/config` to set and to undo. See scope §6.
+
+---
 ## 2026-08-18 — Operator bug sweep B1–B5 (five fixes, two adversarial rounds)
 
 **Branch:** `fix/bug-sweep-2026-08-18` (off `origin/main` `90fb19a`). **Ticket:** [`docs/reviews/2026-08-18-bug-sweep/ticket.md`](../docs/reviews/2026-08-18-bug-sweep/ticket.md).
