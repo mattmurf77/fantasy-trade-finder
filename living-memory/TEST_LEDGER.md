@@ -98,7 +98,7 @@ confirm the card can still be passed afterward.
 
 ---
 
-## 2026-08-18 — Engine quality wave (D-068) built, NOT shipped
+## 2026-08-18 — Engine quality wave (D-074, renumbered from D-068) built, NOT shipped
 
 Branch `feat/engine-pick-and-diversity` off `origin/main` @ `90fb19a`. Five knobbed
 ranking/gating fixes for the two live-corpus defects (picks buying fairness for free;

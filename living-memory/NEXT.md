@@ -36,7 +36,8 @@ fixed. What remains:
 4. **`/api/trade/evaluate`'s eveners hand-set `is_pick`** rather than deriving it from `trade_service.is_pick_asset`. Contract is correct today; rebinding it gives one derivation. Small.
 5. **The web client still has B3's picks bug** (`web/index.html:635`, `web/js/app.js:3156/3184/3219`) — carried over, still open, now further diverged from mobile since mobile also gained the `is_pick` migration.
 6. **Class-(b) re-fronting is untested** — a card can be re-fronted by the `sortedDeck` re-sort with neither `setDeckIdx` nor `setDeck([])`, so no current test can see it. `rerankRemaining` guards positions `≤ curIdx + 1`; the memo does not.
-7. **Item 5's residual:** the replay guard is read-then-write in one transaction, not a distributed lock — two simultaneous requests on separate workers could still both write. All 40 observed prod duplicates were sequential.
+7. **Ledger hygiene: `D-039` is a duplicate on `main`** — "Tier-Board Share Routes…" and "ESPN Trade-Write…" share the ID. **Pre-existing**, not from this batch (the fresh `D-068` collision was fixed here by renumbering the later entry to `D-074`). Left alone deliberately: it is old enough that references may exist in shipped docs, so renumbering needs a reference sweep first. **Third collision in three days** — the grep-then-write rule can't see an unpushed sibling session, which is the actual root cause and worth solving properly (a reserved-range convention, or an ID lint in CI).
+8. **Item 5's residual:** the replay guard is read-then-write in one transaction, not a distributed lock — two simultaneous requests on separate workers could still both write. All 40 observed prod duplicates were sequential.
 
 ---
 

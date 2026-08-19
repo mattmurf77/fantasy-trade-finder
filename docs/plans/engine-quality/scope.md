@@ -124,7 +124,7 @@ behavior (proven by test, one per knob).
 | `living-memory/HLD.md` | n/a | No new module, client, or major flow. |
 | `docs/cross-client-invariants.md` | n/a | No shared constant, enum, or color changes. The knobs are backend-only ranking parameters no client reads. |
 | `docs/glossary.md` | updated | New terms: **signal core**, **centerpiece**, **headliner cap**, **matched pick pair**. |
-| `DECISIONS.md` | updated | **D-068** — design (b) divergence-gated fairness chosen over (a) a package-size penalty, with the full alternatives list and the accepted consequences. |
+| `DECISIONS.md` | updated | **D-074** (renumbered from D-068 — ID collision) — design (b) divergence-gated fairness chosen over (a) a package-size penalty, with the full alternatives list and the accepted consequences. |
 | `living-memory/TEST_LEDGER.md` | updated | Suite totals, the before/after fixture numbers, the golden-capture procedure, and what is NOT covered. |
 
 ## 5. Design decision for change 1 (recorded, per the brief)
