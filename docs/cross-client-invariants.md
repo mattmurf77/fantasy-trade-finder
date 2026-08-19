@@ -39,6 +39,19 @@ The Elo ranges that map a player into a tier. Single source of truth is `backend
 
 Saved boards need no data migration when bands change: `users.tier_overrides` stores raw Elo per player, so overrides re-bucket through the new walk on read.
 
+**Two value↔Elo maps exist, and picking the wrong inverse is a recurring defect class (D-088, 2026-08-19).** Nothing may be band-walked until it is on the tier-band Elo scale, and there are **two** different maps onto that scale. Feeding a number to the wrong one is the #263 bug class, and it has now shipped twice.
+
+| The number you hold | Scale | Invert it with | Never with |
+|---|---|---|---|
+| `draft_picks.pool_value`, `pick_pool_value(...)`, any `/api/trade/evaluate` `value`, `total_value`, evener `value` | **engine value** (`elo_to_value` units — `1000·e^{0.005(elo−1500)}`, floor ≈ 223) | `trade_service.value_to_elo` | `seed_elo_for_value` |
+| DynastyProcess `value_1qb` / `value_2qb`, `files/values.csv` `pos == "PICK"` rows, anything read off a DP CSV | **DP consensus** (raw 0–10000) | `data_loader.seed_elo_for_value` | `value_to_elo` |
+
+The two maps agree at **exactly one point, Elo 1548.0**, and diverge in both directions — so a mistake is silent near a mid-1st and grows the cheaper the asset. Using `seed_elo_for_value` on an engine value inflates: a Mid 3rd (Elo 1320) reads 1383.5, a Mid 4th (1240) reads 1339.3, a Late 4th (1220) reads 1329.5. That is what made a current-year 3rd badge `second` on `GET /api/league/picks` after D-084 moved the `second` floor to 1370. Full derivation: [docs/reviews/2026-08-19-pick-badge-scale.md](reviews/2026-08-19-pick-badge-scale.md).
+
+**The invariant to test against, in either direction:** a CURRENT-year pick of round R must badge exactly where `GENERIC_PICK_SEEDS[(R, "Mid")]` sits, because `tier_config.json`'s `_calibration` *defines* the band floors as those rungs. Pinned by `backend/tests/test_league_picks_tier.py::test_current_year_rungs_badge_their_own_round`.
+
+**Clients never re-derive a tier from a value.** Every tier on the wire is server-computed through `RankingService.tier_for_elo`; the mirrors below exist only as pre-fetch fallbacks for the *bands*, never as a place to redo this conversion.
+
 Since #313, `1qb_ppr` QB **seed values** are compressed so no quarterback seeds above the `first_1` band (`qb_1qb_cap_elo`, default 1785). The **bands themselves are unchanged and remain position- and format-uniform** — the cap is applied in value space at pool build, so every client's tier walk (`mobile/src/utils/tierBands.ts`, the extension badge, `RankingService.tier_for_elo`) stays a single shared ladder with no per-position fork.
 
 **Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`ORDERED_TIERS` / `tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` (fallback `TIER_CONFIG` mirror), `web/js/app.js` (`_eloToTierLabel` floor mirror), `extension` badge (consumes the backend walk).

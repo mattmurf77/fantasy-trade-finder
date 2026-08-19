@@ -7,7 +7,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
+- [2026-08-19 — Open Items (pick ladder, rounds 3-4)](#2026-08-19--open-items-pick-ladder-rounds-3-4)
 - [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
 - [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
@@ -18,15 +18,16 @@
 
 ---
 
-## 2026-08-19 — Open Items (round-2 pick recalibration)
+## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
 
-### Q-019 — Rounds 3 and 4 price 50–70 ranks above market, and no pick-seed edit can fix it. Do we open the seed map?
-- **Why it matters:** [D-084](DECISIONS.md) corrected round 2 (Mid 2nd: rank 119 → 136 against a market median of 140.5) and deliberately stopped there. The same measurement puts our **Mid 3rd at rank 165 against a market median of 231.5** and our **Mid 4th at 228 against 296** — errors of 67 and 68 ranks, three times round 2's. They were left alone because they are **not reachable from `GENERIC_PICK_SEEDS`**.
-- **The structural reason (this is the part that matters):** `data_loader.seed_elo_for_value` maps DP value 0 → Elo 1200 affinely, so the board has almost no resolution below rank ~200 — rank 230 sits at Elo 1238.8 and rank 300 at 1206.6, i.e. **70 ranks compressed into 32 Elo points**. The market-implied Elo for a Mid 4th is **1207, which is inside the current `waivers` band**. Pushing 3rd/4th seeds down cannot buy rank movement the scale does not have room for; the memo measured the attempt (Option B) breaking `test_tier_occupancy.py` in three places and bucketing the Mid 3rd seed as `second`.
-- **It is now user-visible, in one place.** With `second`'s floor at 1370, a **current-year 3rd badges "2nd"** (Elo 1383.5 through the same seed map). Pinned with an explanatory note in `backend/tests/test_league_picks_tier.py` and step 9 of the D-084 TestFlight checklist, so it is expected rather than reported as a surprise — but it is the visible edge of this question.
-- **Unresolved sub-question:** is the floor compression a **defect or a deliberate choice**? `seed_elo_for_value`'s docstring explains the *top* of the affine map (DP 10000 → the 4-firsts rung) and says nothing about the bottom. Nobody currently knows whether anyone intended it.
-- **Needed to close:** an operator call on whether deep-pick accuracy is worth touching the seed map — which reprices **every low-value asset on every board**, not just picks, and is therefore a materially larger blast radius than D-084. Cheaper middle option worth pricing first: leave the seed map alone and give the `third`/`fourth` bands their own floors decoupled from the pick rungs, accepting that the `_calibration` "floor = a rung of the ladder" invariant then holds only for rounds 1–2.
+### Q-020 — Should `seed_elo_for_value`'s floor compression be re-anchored so 3rds and 4ths reach market-equivalent player ranks?
+- **Why it matters:** the surviving half of Q-019. Our Mid 3rd is worth the **165th** asset against a market median of **231.5**, and our Mid 4th the 228th against 296 — errors of 67 and 68 ranks. They are unreachable from the pick ladder because the seed map has almost no resolution down there (54.9 Elo across ranks 200–300; the market-implied Elo for a Mid 4th, ≈1207, sits **inside** the `waivers` band).
+- **What it would cost, stated bluntly:** re-anchoring the map moves **every player's seed Elo in the app**, not just picks — tier occupancy, deck composition, matchup selection and every user's board. It is a materially larger blast radius than D-084, which only moved two band edges.
+- **The argument for leaving it parked (measured, read-only prod, 2026-08-19):** 3rd-round picks appear in **27 of 2,376 served cards — 1.1 %** — and 4th-round picks in **zero**. Picks are in 55.9 % of cards, but firsts are 80.9 % of pick mentions and 2nds 17.7 %. Deep-pick accuracy buys almost nothing in real decks today.
+- **Still unresolved:** is the floor compression a **defect or a deliberate choice**? `seed_elo_for_value`'s docstring explains the *ceiling* anchor (DP 10000 → the 4-firsts rung) and says nothing about the floor. Unchanged from Q-019.
+- **Cheaper middle option worth pricing first:** leave the seed map alone and give `third`/`fourth` their own band floors decoupled from the pick rungs — accepting that `_calibration`'s "floor = a rung of the ladder" invariant would then hold only for rounds 1–2, and that `test_league_picks_tier.py::test_current_year_rungs_badge_their_own_round` (D-088) would need retargeting.
 - **Owner:** operator (scope call), then a backend session.
+
 
 ## 2026-08-19 — Open Items (pick-year valuation)
 
@@ -150,6 +151,11 @@
 ---
 
 ## Closed Questions (kept for cross-reference)
+
+### Q-019 — Rounds 3/4 badge above their round: do we open the seed map?
+- **Resolution (2026-08-19, [D-088](DECISIONS.md)):** **No.** The badge was a wrong inverse, not a price. `GET /api/league/picks` inverted `pool_value` (stored in `elo_to_value` units) with `data_loader.seed_elo_for_value`, which inverts DynastyProcess's raw 0-10000 scale instead. The two maps agree at exactly Elo 1548.0 and diverge either side, inflating every rung below a mid-1st — Mid 3rd 1320 → **1383.5** (+63.4), Mid 4th 1240 → 1339.3 (+99.3) — so 1383.5 cleared D-084's new `second` floor of 1370. The pick's real price is Elo 1320, **45 points inside `third`**. Fixed with `trade_service.value_to_elo`; no seed, band, client mirror or stored price moved. Memo: [docs/reviews/2026-08-19-pick-badge-scale.md](../docs/reviews/2026-08-19-pick-badge-scale.md).
+- **The compression half of the question was correct and survives as [Q-020](#q-020--should-seed_elo_for_values-floor-compression-be-re-anchored-so-3rds-and-4ths-reach-market-equivalent-player-ranks):** re-derived on the checked-in snapshot, ranks 200→300 span Elo 1262.9 → 1208.0 — 100 ranks inside **54.9 Elo points**, one eighth the per-rank resolution of ranks 50-100. It does make market-rank alignment for 3rds/4ths unreachable from `GENERIC_PICK_SEEDS`. It was simply not the cause of the badge.
+- **Lesson:** the symptom was attributed to the nearest known structural weakness rather than traced. Both facts were true; only one was load-bearing.
 
 ### Q-010 — Render cold-start mitigation
 - **Resolution (2026-06-08):** Upgraded to Render Starter dyno ($7/mo, always-on). No code change needed.

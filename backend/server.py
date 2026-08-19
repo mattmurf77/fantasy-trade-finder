@@ -72,8 +72,13 @@ _bh = _BufferHandler()
 _bh.setFormatter(logging.Formatter("%(levelname)s  %(message)s"))
 log.addHandler(_bh)
 from .ranking_service import RankingService, Player, TIER_CONFIG, ORDERED_TIERS
+# D-088 (2026-08-19): `seed_elo_for_value` is deliberately NOT imported here.
+# It inverts the DynastyProcess 0-10000 consensus scale, and server.py handles
+# `pool_value`/`elo_to_value`-scale numbers — feeding one to the other was the
+# #320 pick-badge defect (see `_pick_tier` in /api/league/picks). Value-scale
+# numbers invert with `_trade_service_mod.value_to_elo`.
 from .data_loader import (load_consensus_maps, seed_elo_for_players,
-                          seed_elo_for_value, normalise_name)
+                          normalise_name)
 from .database import (
     init_db,
     upsert_user, upsert_league,
@@ -9806,22 +9811,61 @@ def get_league_picks():
         # #320 (D-320-1, supersedes #263's "picks stay numeric") — additive
         # `tier` per pick row: the pick-value ladder rung its DISCOUNTED
         # `pool_value` sits in TODAY, so calculator surfaces can badge picks
-        # the same way they badge players. `seed_elo_for_value` inverts the
-        # value map back onto the tier bands' Elo scale before the canonical
-        # `tier_for_elo` band walk — never `pool_value` passed straight in
-        # (elo_to_value scale ≠ tier-band Elo scale, the exact #263 bug).
-        # Position None takes the bands' documented general-pool fallback;
-        # pick value is position-uniform by design (tier_config.json). A
-        # consequence the operator accepted (D-320-2): a far-out pick's
-        # badge reflects its discounted price — a 2028 2nd may badge 3rd.
-        # NULL pool_value → null tier; clients fall back to the numeric.
+        # the same way they badge players. Position None takes the bands'
+        # documented general-pool fallback; pick value is position-uniform
+        # by design (tier_config.json). A consequence the operator accepted
+        # (D-320-2): a far-out pick's badge reflects its discounted price —
+        # a 2027 2nd badges 3rd. NULL pool_value → null tier (and so does
+        # a price below the `waivers` floor, which a deep far-out pick can
+        # honestly be); clients fall back to the numeric.
+        #
+        # ── D-088 (2026-08-19): THE INVERSE HERE IS `value_to_elo`. ───────
+        # #320 shipped `seed_elo_for_value(pool_value)`, which was the RIGHT
+        # instinct (don't pass a value straight to a band walk — the #263
+        # bug) with the WRONG inverse, and it is a second, subtler instance
+        # of the same scale confusion:
+        #
+        #   * `pool_value` is in ELO_TO_VALUE units — `pick_values.
+        #     pick_pool_value` returns `elo_to_value(seed) * decay`, and
+        #     `database.py`'s column comment says so. Its exact inverse is
+        #     `trade_service.value_to_elo`.
+        #   * `seed_elo_for_value` inverts a DIFFERENT map: DynastyProcess's
+        #     raw 0–10000 consensus scale (`seed_value_for_elo` is its real
+        #     inverse). Feeding it an elo_to_value number is a category
+        #     error — the affine DP rescale (× 0.8245, + 223.13) gets applied
+        #     to a number that never lived on the DP scale.
+        #
+        # The two maps cross at exactly Elo 1548.0 and diverge in both
+        # directions, so the badge INFLATED everything cheaper than a mid-1st
+        # by a growing amount: Mid 3rd 1320 → 1383.5 (+63.4), Mid 4th 1240 →
+        # 1339.3 (+99.3), Late 4th 1220 → 1329.5 (+109.5). That is why a
+        # CURRENT-YEAR 3RD BADGED `second` after D-084 lowered the `second`
+        # floor to 1370: 1383.5 cleared it. The pick's real price was never
+        # 1383.5 — it is Elo 1320, a full 45 Elo INSIDE the `third` band.
+        #
+        # tier_config.json's own `_calibration` is the proof: "third floor =
+        # Late 3rd seed 1280", i.e. GENERIC_PICK_SEEDS live ON the tier-band
+        # Elo scale by construction. Any badge that puts a current-year Mid
+        # 3rd anywhere but `third` contradicts the config that defines the
+        # bands. `value_to_elo` restores that identity exactly:
+        # `value_to_elo(pick_pool_value(r, 0)) == GENERIC_PICK_SEEDS[(r,
+        # "Mid")]` for every round — pinned in test_league_picks_tier.py.
+        #
+        # NOT a tier-band change: `tier_config.json` and its five client
+        # mirrors (docs/cross-client-invariants.md, G-051) are untouched, and
+        # neither is any price — `draft_picks.pool_value`, the deck, the
+        # calculator and `test_tier_occupancy.py` are all unaffected. This is
+        # display-only, and it is why Q-019 closed WITHOUT reopening the seed
+        # map: the seed map's real floor compression is genuine but is a
+        # RANK-EQUIVALENCE issue against the outside market, not the cause of
+        # the wrong badge. See docs/reviews/2026-08-19-pick-badge-scale.md.
         fmt = sess.get("active_format") or DEFAULT_SCORING
         def _pick_tier(p: dict):
             v = p.get("pool_value")
             if v is None:
                 return None
             return RankingService.tier_for_elo(
-                seed_elo_for_value(float(v)), None, fmt)
+                _trade_service_mod.value_to_elo(float(v)), None, fmt)
         all_picks = [{**p, "label": _owned_pick_label(p),
                       "tier": _pick_tier(p),
                       **_pick_wire_source(p, tradeable)} for p in raw]

@@ -10,6 +10,60 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19c — Pick-badge value→Elo inverse (D-088); the round-3 "overprice" was arithmetic
+
+**Branch:** `fix/pick-round3-value`, worktree `wt-round3`, from `origin/main` `a130dfc`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/pick-badge-scale/scope.md](../docs/plans/pick-badge-scale/scope.md). Decision: [D-088](DECISIONS.md). Memo: [docs/reviews/2026-08-19-pick-badge-scale.md](../docs/reviews/2026-08-19-pick-badge-scale.md). Gotcha: [G-052](GOTCHAS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3441 passed, 1 skipped (baseline at `a130dfc`) | **3443 passed, 1 skipped, 0 failed** (+2 new tests, 5 retargeted) |
+| `tsc --noEmit` | — | **clean, exit 0** (mobile diff is a JSDoc comment only) |
+| `mobile/scripts/testid-lint.sh` | — | **OK** (no testIDs added or renamed) |
+| `test_tier_occupancy.py` | 47 passed | **47 passed, file not opened** — no band or seed moved, so occupancy could not move |
+| `test_pick_anchor.py` · `test_pin_tier_bounded.py` · `test_pick_pricing_m6b.py` · `test_slot_values.py` | green | green, **untouched** — none of them reads the badge path |
+
+**What the tests now prove that the old ones did not.** The pre-existing pins in
+`test_league_picks_tier.py` were literal Elos (`1383.5 → 'second'`) written by reading the buggy
+output back, so they *confirmed* the defect rather than catching it. The replacement is a
+**property**: `test_current_year_rungs_badge_their_own_round` asserts, through the route and for
+all four rounds, that a current-year pick of round R badges exactly where
+`GENERIC_PICK_SEEDS[(R, "Mid")]` sits — which is what `tier_config.json`'s `_calibration` already
+defines to be true. No wrong inverse satisfies it for all four rounds. A second test pins that a
+pick priced below the `waivers` floor carries `null` rather than a flattering rung.
+
+**Arithmetic verified rather than quoted.** Executed against the shipped functions:
+
+| Claim | Verified |
+|---|---|
+| The compression the D-084 memo cited | Real. On `dp_values_snapshot_2026-07-10.json` (641 players, `1qb_ppr`), ranks 200→300 span Elo **1262.9 → 1208.0 = 54.9 points**, vs 2.508 Elo/rank at 100–200 and 4.417 at 50–100 |
+| ...but not the cause | The badge never reads the player board. `pool_value` → Elo is the whole path |
+| The two maps cross once | At **Elo 1548.0** exactly (`223.130 + 0.824487·v = v` ⟹ `v = 1270.9`) |
+| Badge inflation, by rung | Mid 2nd +35.2 · Mid 3rd **+63.4** · Mid 4th **+99.3** · Late 4th +109.5 Elo |
+| 1383.5 reproduces end to end | `elo_to_value(1320) = 406.570` → `seed_elo_for_value(406.570) = 1383.5` (wrong) vs `value_to_elo(406.570) = 1320.0` (right) |
+
+**Measured on prod, read-only (`SET TRANSACTION READ ONLY`, SELECT only, no writes).**
+
+| Question | Answer |
+|---|---|
+| Pick rows at risk | **1,104** across **7** leagues, all with a non-NULL `pool_value` |
+| Badges that change, recomputed both ways over the *actual stored* values | **600 (54.3 %)** — 538 down, 62 up |
+| Named transitions | `third`→`fourth` 188 · `third`→`waivers` 152 · `second`→`third` 136 · `second`→`first_1` 62 · `third`→`null` 62 |
+| Unchanged | `first_1`→`first_1` 164 · `second`→`second` 252 · `third`→`third` 88 |
+| 3rd-round picks in served cards | **27 of 2,376 = 1.1 %** (1.4 % of 1,909 pick mentions) |
+| 4th-round picks in served cards | **0** |
+| Picks overall | 1,329 of 2,376 cards = **55.9 %**; firsts **80.9 %** of pick mentions, 2nds 17.7 % |
+
+**Honest read of that last block:** deep picks barely touch real decks, so this was never worth a
+repricing — which is the measured argument for fixing the badge and leaving the ladder alone
+(and for parking [Q-020](OPEN_QUESTIONS.md)).
+
+**Not run:** the manual TestFlight checklist (7 steps, in the scope block §3) — it needs the
+operator and a build. Step 7 is the one that matters most: build a trade containing a 2026 3rd and
+confirm the **values and fairness verdict are unchanged**, since any numeric movement would mean
+the fix leaked out of the display layer.
+
+---
 ## 2026-08-19b — Give-side headliner cap (D-082); the flood C4 could not see
 
 **Branch:** `fix/deck-give-headliner-cap`, from `origin/main` `8b7689a`. **Not shipped** — not pushed, not merged.
