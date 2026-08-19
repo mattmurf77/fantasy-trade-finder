@@ -342,6 +342,12 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
         team_outlook: vars.outlook,
         acquire_positions: vars.acquire,
         trade_away_positions: vars.shed,
+        // #360 — COMPILE FIX ONLY. This screen is UNROUTED dead code kept
+        // in tree per #246 (navigation/TabNav.tsx says so explicitly); the
+        // Avoiding UI is deliberately NOT built here. `avoid_positions`
+        // became required on LeaguePreferences, so this literal needs the
+        // key to typecheck and nothing more.
+        avoid_positions: [],
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });

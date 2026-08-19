@@ -83,9 +83,12 @@ import {
   getAwaitingTrades,
   undoDeckSuppression,
   fetchAssetIdeas,
+  getStandingOffers,
   type AssetIdea,
   type SwipeSignal,
+  type StandingOffer,
 } from '../api/trades';
+import StandingOfferSheet from '../components/StandingOfferSheet';
 import {
   postDeclineReason,
   type Layer1Code,
@@ -101,6 +104,8 @@ import {
   copyTiersFromFormat,
   getAssetPrefs,
   setAssetPref,
+  getLeaguePicks,
+  getLeagueMembers,
   type Outlook,
 } from '../api/league';
 import { getLeagueRosters, getLeagueUsers, myOwnerId } from '../api/sleeper';
@@ -277,6 +282,14 @@ let identityStripDismissedThisSession = false;
 // once per app session, whatever the trigger path (module-level so a tab
 // remount can't re-fire it).
 let quicksetPromptShownThisSession = false;
+
+// #362 (R-1 condition 11): the standing-offer prompt shows at most once per
+// app session. Module-level for the same reason as the line above — a tab
+// remount must not re-fire it. The PERSISTED half of the ladder (snooze →
+// one session-2 re-offer → retired) lives in useOnboardingState, because a
+// session counter alone resets on every cold start and would prompt a user
+// who said no forever.
+let standingOfferPromptShownThisSession = false;
 
 // Guided tour session caps (script §3): S5.5 next-position ask and the S7
 // trio ramp each show at most once per app session.
@@ -619,6 +632,23 @@ export default function TradesScreen({ navigation, route }: any) {
   const fullSheetOn = useFlag('trades.edit_full_sheet');
   // #172 — trade intent modes chip row (full sheet only).
   const intentModesOn = useFlag('trades.intent_modes');
+  // #360/#361 — "Avoiding" positions. Gates the receipt part and the
+  // empty-state copy below; the DNA sheet gates its own row on the same
+  // flag. DELIBERATELY absent from LAUNCHED_FLAG_DEFAULTS — that map fails
+  // OPEN, and a kill switch that keeps rendering after the operator kills
+  // it would let the UI accept a promise the engine has stopped honoring.
+  // The cost is a one-frame pop-in on a cold boot; see the longer note in
+  // TradeDnaSheet.tsx. Do not add the key to that map.
+  const avoidOn = useFlag('trade.avoid_positions');
+  // #362 — the post-like standing-offer prompt. All three flags are load
+  // bearing, not belt-and-braces: `trade.likes_you` gates the RECEIVING half
+  // (an offer nobody can be shown is a promise we cannot keep), and
+  // `trade.picks_in_pool` decides whether picks are roster assets at all —
+  // with it off the injector can never match, so prompting would be a lie.
+  const standingOffersOn = useFlag('trade.standing_offers');
+  const likesYouOn = useFlag('trade.likes_you');
+  const picksInPoolOn = useFlag('trade.picks_in_pool');
+  const standingOfferReady = standingOffersOn && likesYouOn && picksInPoolOn;
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
@@ -1020,6 +1050,11 @@ export default function TradesScreen({ navigation, route }: any) {
         team_outlook: outlook,
         acquire_positions: [],
         trade_away_positions: [],
+        // #360 — this one-tap confirm deliberately writes EMPTY position
+        // arrays (it is confirming an inferred outlook, not a positional
+        // edit), so Avoiding is cleared here exactly as Chasing and
+        // Shopping already are. Consistent with the two siblings above.
+        avoid_positions: [],
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
@@ -1049,6 +1084,91 @@ export default function TradesScreen({ navigation, route }: any) {
     [assetPrefsQuery.data],
   );
 
+  // ── #362 standing offers (flag trade.standing_offers) ────────────────
+  // Prefetched when the deck loads so the swipe-time gate can answer from
+  // cache. FAIL-CLOSED: if either query is unresolved when the user swipes,
+  // the prompt simply does not fire. A missed prompt is free; a swipe
+  // surface that blocks on a spinner is not — speed is the whole value of
+  // this screen.
+  //
+  // `standingOffersQuery` also 409s during the sign-in → session-init
+  // window (the route takes `_require_initialized_session`). react-query
+  // holds the error, `data` stays undefined, and the gate reads that as
+  // "not ready" — which is exactly right.
+  const leaguePicksQuery = useQuery({
+    queryKey: ['league-picks', leagueId],
+    queryFn: () => getLeaguePicks(leagueId!),
+    enabled: standingOfferReady && !!leagueId && !isDemo,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const standingOffersQuery = useQuery({
+    queryKey: ['standing-offers', leagueId],
+    queryFn: () => getStandingOffers(leagueId!),
+    enabled: standingOfferReady && !!leagueId && !isDemo,
+    staleTime: 60_000,
+    retry: false,
+  });
+  // R-5 — the team grid lists league MEMBERS, not pick owners: a team that
+  // owns no first must still appear and be seen to own none. Members and
+  // picks are two sources and are never conflated.
+  const leagueMembersQuery = useQuery({
+    queryKey: ['league-members', leagueId],
+    queryFn: () => getLeagueMembers(leagueId!),
+    enabled: standingOfferReady && !!leagueId && !isDemo,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  // The sheet's props, captured at trigger time from the card that was just
+  // liked. Non-null IS the visibility (R-2): there is exactly one place that
+  // sets it, `maybeShowStandingOfferPrompt`.
+  const [standingOfferPrompt, setStandingOfferPrompt] = useState<{
+    playerId: string;
+    playerName: string;
+    sourcePickId: string;
+    sourceSeason: number;
+    sourceTeamUserId: string;
+    round: number;
+    sourceTradeId: string;
+  } | null>(null);
+
+  // R-4 — the season pill set: the sorted distinct seasons this league
+  // really holds round-1 picks in, straight from `all_picks`. There is no
+  // year literal and no window length anywhere in this derivation, which is
+  // the point: D-091 made `all_picks` horizon-correct at the writer, so
+  // reading it is correct by construction and needs no new constant.
+  const standingOfferSeasons = useMemo(() => {
+    const rows = leaguePicksQuery.data?.all_picks ?? [];
+    const round = standingOfferPrompt?.round ?? 1;
+    return [...new Set(rows.filter((p) => p.round === round).map((p) => p.season))].sort(
+      (a, b) => a - b,
+    );
+  }, [leaguePicksQuery.data, standingOfferPrompt?.round]);
+
+  // R-5 — every OTHER league member. From the members endpoint, NOT from
+  // `all_picks`: conflating the two would silently drop the teams that own
+  // no first, which are exactly the rows the user needs to SEE own none.
+  const standingOfferMembers = useMemo(
+    () =>
+      (leagueMembersQuery.data?.members ?? [])
+        .filter((m) => m.user_id !== userId)
+        .map((m) => ({ user_id: m.user_id, username: m.username })),
+    [leagueMembersQuery.data, userId],
+  );
+
+  // R-5 — owner → the seasons they hold a round-`round` pick in. Annotation
+  // only; it never changes a row's checked state.
+  const standingOfferFirstsByOwner = useMemo(() => {
+    const out: Record<string, number[]> = {};
+    const round = standingOfferPrompt?.round ?? 1;
+    for (const p of leaguePicksQuery.data?.all_picks ?? []) {
+      if (p.round !== round || !p.owner_user_id) continue;
+      (out[p.owner_user_id] ||= []).push(p.season);
+    }
+    return out;
+  }, [leaguePicksQuery.data, standingOfferPrompt?.round]);
+
   // #315 — row 2 of the outlook receipt: the OTHER configurations set
   // through the sheet, so the banner honestly summarizes what "Change"
   // edits. Middle-dot separated, only set parts included. Team scope and
@@ -1061,17 +1181,25 @@ export default function TradesScreen({ navigation, route }: any) {
     const parts: string[] = [];
     const chasing = prefsQuery.data?.acquire_positions ?? [];
     const shopping = prefsQuery.data?.trade_away_positions ?? [];
+    const avoiding = prefsQuery.data?.avoid_positions ?? [];
     if (chasing.length > 0) {
       parts.push(`Chasing ${chasing.map(posLabel).join(', ')}`);
     }
     if (shopping.length > 0) {
       parts.push(`Shopping ${shopping.map(posLabel).join(', ')}`);
     }
+    // #360 R-10 — Avoiding stays visible above the deck, after Shopping.
+    // This is what makes the "an exclusion beats a pin" rule honest rather
+    // than silent: a pinned receive target at an avoided position yields
+    // no card, and the banner is where the user can see why.
+    if (avoidOn && avoiding.length > 0) {
+      parts.push(`Avoiding ${avoiding.map(posLabel).join(', ')}`);
+    }
     if (intentModesOn && tradeIntent) parts.push(TRADE_INTENT_LABEL[tradeIntent]);
     const offTable = untouchableIds?.size ?? 0;
     if (offTable > 0) parts.push(`${offTable} off the table`);
     return parts.join(' · ');
-  }, [prefsQuery.data, intentModesOn, tradeIntent, untouchableIds]);
+  }, [prefsQuery.data, avoidOn, intentModesOn, tradeIntent, untouchableIds]);
 
   const untouchableMutation = useMutation({
     mutationFn: ({ playerId, list }: {
@@ -1521,12 +1649,24 @@ export default function TradesScreen({ navigation, route }: any) {
           tier_up: 'No tier-up trades found right now.',
           tier_down: 'No tier-down trades found right now.',
         };
+        // #360 R-9 — an empty deck while Avoiding is set must NAME
+        // Avoiding as a possible cause. Avoiding is a hard receive-pool
+        // exclusion, so it is the likeliest reason a deck came back empty,
+        // and "no trades found" alone reads as "the finder is broken".
+        // Sits BELOW the intent branch (a live intent is the more specific
+        // shape) and ABOVE the fairness fallback.
+        const avoiding = prefsQuery.data?.avoid_positions ?? [];
+        const posLabel = (p: string) => (p === 'PICK' ? 'Picks' : p);
         setToast({
           msg: tradeIntent
             ? intentCopy[tradeIntent]
-            : fairnessOn
-              ? 'No fair trades found. Try turning Trade fairness off.'
-              : 'No trades found. Rank more players or try again later.',
+            : avoidOn && avoiding.length > 0
+              ? `No trades found that avoid ${avoiding
+                  .map(posLabel)
+                  .join(', ')}. Try un-avoiding one.`
+              : fairnessOn
+                ? 'No fair trades found. Try turning Trade fairness off.'
+                : 'No trades found. Rank more players or try again later.',
           tone: 'warn',
         });
       }
@@ -3152,6 +3292,119 @@ export default function TradesScreen({ navigation, route }: any) {
     track('quickset_prompt_snoozed', { retired: retire }, 'Trades');
   }
 
+  // #362 (R-1 condition 10, the asynchronous half) — a like that turns out
+  // to have completed a MUTUAL MATCH is a bigger moment than this ask, and
+  // the match is only known once the swipe POST answers. The prompt is set
+  // synchronously in advance(), so this retracts it when the response says
+  // `matched`. Read-only on the mutation's result: `swipeMutation` itself is
+  // deliberately untouched (it is the co-ownership boundary with #360).
+  useEffect(() => {
+    if (!standingOfferPrompt) return;
+    if ((swipeMutation.data as any)?.matched === true) setStandingOfferPrompt(null);
+  }, [swipeMutation.data, standingOfferPrompt]);
+
+  // ── #362 — the post-like standing-offer prompt ───────────────────────
+  // Modelled line-for-line on maybeShowQuicksetPrompt / snoozeQuicksetPrompt
+  // directly above: same one-per-session module flag, same persisted snooze
+  // ladder, same "join the arbitration, never bypass it" posture.
+  //
+  // THIS IS THE ONLY SITE THAT SETS THE SHEET VISIBLE (R-2). A second
+  // `setStandingOfferPrompt({...})` added anywhere else would skip all
+  // eleven conditions below and turn a swipe surface into a nag.
+  //
+  // R-18 (FB-46) — the gate reads ONLY fields present on both a real and a
+  // RECONSTRUCTED card: the give/receive lists, the opponent id and the
+  // trade id. Never `composite_score`, `fairness`, `basis` or `likesYou` —
+  // a reconstructed card zeroes those, and keying off them would make the
+  // prompt fire (or not) depending on how the card reached the client.
+  function maybeShowStandingOfferPrompt(card: TradeCard, opts: { firstLike: boolean }) {
+    // 1 — all three flags (the receiving half and picks-as-assets included).
+    if (!standingOfferReady) return;
+    // 11a — at most one per app session, and never over an open sheet.
+    if (standingOfferPromptShownThisSession || standingOfferPrompt) return;
+    // 9 — the user's FIRST like belongs to the celebration → s6.2 → Apple
+    // chain. That moment is already spoken for.
+    if (opts.firstLike) return;
+    // 10 — no other surface is claiming this swipe. "Never two overlapping
+    // surfaces" is the rule the post-like branch states out loud.
+    if (quicksetPromptVisible || guidedS3Pending || adaptationMoment) return;
+    if (guideActiveStepId() || appleAskEligible('like')) return;
+    // 7 — not a demo, pinned, opponent-scoped or otherwise special deck.
+    // Mirrors the server's own likes-you exclusions.
+    if (isDemo || !leagueId) return;
+    if (pinnedGive.length > 0 || pinnedReceive.length > 0 || scopedOpponent) return;
+    // 11b — the persisted ladder: snooze → one re-offer in session 2 →
+    // retired for good.
+    const ob = getOnboardingState();
+    if (ob.standingOfferPromptRetired) return;
+    if (
+      ob.standingOfferPromptSnoozed
+      && (ob.sessionCount < 2 || ob.standingOfferPromptSession2Shown)
+    ) {
+      return;
+    }
+    // 3 — a 1-for-1, and nothing else.
+    if (card.give_players.length !== 1 || card.receive_players.length !== 1) return;
+    const player = card.give_players[0];
+    const asset = card.receive_players[0];
+    // 4 — the received asset is an OWNED LEAGUE pick. The id format is
+    // `{league_id}_{season}_{round}_{original_roster_id}`; generic rungs are
+    // `generic_pick_*` and fail the prefix test. This is a cheap pre-filter
+    // only — `all_picks` below is the authority, and season/round are never
+    // parsed out of the id in client code.
+    if (asset.position !== 'PICK' || !asset.id.startsWith(`${leagueId}_`)) return;
+    // 5/6 — data availability is FAIL-CLOSED. An unresolved prefetch means
+    // no prompt; the swipe surface never blocks on a spinner. A missed
+    // prompt is free, a stalled swipe is not.
+    const picks = leaguePicksQuery.data;
+    const offers = standingOffersQuery.data;
+    const members = leagueMembersQuery.data?.members;
+    if (!picks || !offers || !members) return;
+    if (picks.picks_supported !== true) return;
+    const sourcePick = picks.all_picks.find((p) => p.pick_id === asset.id);
+    if (!sourcePick || sourcePick.round !== 1) return;
+    const round = sourcePick.round;
+    // 8 — no LIVE offer already covers this (player, round). Mirrors the
+    // writer's predicate: revoked_at IS NULL AND expires_at > now.
+    const alreadyLive = offers.some(
+      (o) =>
+        o.player_id === player.id
+        && o.round === round
+        && !o.revoked_at
+        && o.days_left > 0,
+    );
+    if (alreadyLive) return;
+    // The sheet needs at least one other member to broadcast to.
+    if (members.filter((m) => m.user_id !== userId).length === 0) return;
+
+    standingOfferPromptShownThisSession = true;
+    patchOnboardingState({
+      standingOfferPromptShows: ob.standingOfferPromptShows + 1,
+      ...(ob.standingOfferPromptSnoozed ? { standingOfferPromptSession2Shown: true } : {}),
+    });
+    setStandingOfferPrompt({
+      playerId: player.id,
+      playerName: player.name,
+      sourcePickId: sourcePick.pick_id,
+      sourceSeason: sourcePick.season,
+      sourceTeamUserId: card.opponent_user_id,
+      round,
+      sourceTradeId: card.trade_id,
+    });
+  }
+
+  function skipStandingOfferPrompt() {
+    setStandingOfferPrompt(null);
+    const ob = getOnboardingState();
+    // A snooze of the session-2 re-offer retires the prompt for good —
+    // the same terminal branch snoozeQuicksetPrompt uses.
+    const retire = ob.standingOfferPromptSnoozed && ob.standingOfferPromptSession2Shown;
+    patchOnboardingState(
+      retire ? { standingOfferPromptRetired: true } : { standingOfferPromptSnoozed: true },
+    );
+    track('standing_offer_skipped', { snoozed: !retire, retired: retire }, 'Trades');
+  }
+
   function acceptQuicksetPrompt(via: 'prompt' | 'chip' = 'prompt', position?: string) {
     setQuicksetPromptVisible(false);
     track('quickset_prompt_accepted', { via }, 'Trades');
@@ -4236,6 +4489,12 @@ export default function TradesScreen({ navigation, route }: any) {
         setToast({ msg: likeToast, tone: 'success' });
         maybeAskApple('like');
       }
+      // #362 — LAST in the post-like ladder, deliberately. Everything above
+      // owns the moment when it fires; this only asks for the swipe nothing
+      // else claimed. The like is already banked (swipeMutation.mutate
+      // above) and the deck already advanced, so the sheet renders over the
+      // NEXT card and dismissing it can never cost the user their like.
+      maybeShowStandingOfferPrompt(topCard, { firstLike });
     } else {
       haptics.swipe();
       if (swipeUndoOn) {
@@ -4450,6 +4709,11 @@ export default function TradesScreen({ navigation, route }: any) {
       team_outlook: outlook,
       acquire_positions: acquire,
       trade_away_positions: away,
+      // #360 — the legacy OutlookSheet has no Avoiding control, so this
+      // path re-sends the CURRENTLY STORED list rather than `[]`. Sending
+      // an empty array here would silently wipe an avoid set the user
+      // configured in the DNA sheet, on a submit that never mentioned it.
+      avoid_positions: prefsQuery.data?.avoid_positions ?? [],
     });
     queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
     setToast({ msg: 'Outlook saved', tone: 'success' });
@@ -6612,6 +6876,52 @@ export default function TradesScreen({ navigation, route }: any) {
         trigger={appleAsk ?? 'like'}
         onClose={closeAppleAsk}
       />
+
+      {/* #362 — the post-like standing-offer sheet. `standingOfferPrompt`
+          is set in exactly one place (maybeShowStandingOfferPrompt), which
+          is what keeps the eleven trigger conditions unbypassable. Mounted
+          only while the prompt is live so the queries below are never read
+          on a deck that never asked. */}
+      {standingOfferPrompt && leagueId ? (
+        <StandingOfferSheet
+          visible
+          leagueId={leagueId}
+          playerId={standingOfferPrompt.playerId}
+          playerName={standingOfferPrompt.playerName}
+          sourcePickId={standingOfferPrompt.sourcePickId}
+          sourceSeason={standingOfferPrompt.sourceSeason}
+          sourceTeamUserId={standingOfferPrompt.sourceTeamUserId}
+          round={standingOfferPrompt.round}
+          sourceTradeId={standingOfferPrompt.sourceTradeId}
+          // R-4 — the year pills ARE the league's real round-1 horizon,
+          // derived from all_picks. Never a fixed N-year window: that is
+          // the #355 defect, which offered picks in seasons the league did
+          // not have and reached 12.8% of served cards.
+          availableSeasons={standingOfferSeasons}
+          // R-5 — members and their pick ownership are two different
+          // sources, deliberately not conflated: a team with no first must
+          // still appear, showing that it has none.
+          members={standingOfferMembers}
+          memberFirstsBySeason={standingOfferFirstsByOwner}
+          onSkip={skipStandingOfferPrompt}
+          onPosted={(offer) => {
+            setStandingOfferPrompt(null);
+            queryClient.invalidateQueries({ queryKey: ['standing-offers', leagueId] });
+            // R-8 — the count comes from the POST RESPONSE (`team_count`),
+            // not a client-side array length: the server is the authority
+            // on what it actually stored. Sender's own count, on the
+            // sender's own device (R-19 clause 3).
+            setToast({
+              msg:
+                `Standing offer posted — ${offer.team_count} `
+                + `${offer.team_count === 1 ? 'team' : 'teams'} will see `
+                + `${offer.player_name} for a 1st. Manage it in Matches → `
+                + 'Standing offers.',
+              tone: 'success',
+            });
+          }}
+        />
+      ) : null}
 
       {/* S3 PRD-02 (ux.player_context_menu) — shared long-press menu.
           menuTarget is only ever set while the flag is on. */}

@@ -103,15 +103,25 @@ function dnaPosColor(pos: string): string {
   return posColor(pos as any) ?? ink.lineStrong;
 }
 
-// One Chasing/Shopping toggle button (lifted from the hub — selected =
-// solid position-color fill + check glyph + bolded dark label; the check
-// is the primary state cue, never color alone).
+// One Chasing/Shopping/Avoiding toggle button (lifted from the hub —
+// selected = solid position-color fill + glyph + bolded dark label; the
+// glyph is the primary state cue, never color alone).
+//
+// #360 R-15 — `glyph` defaults to 'check' so the two shipped rows are
+// untouched. The Avoiding row passes 'x': a check meaning "avoided"
+// inverts the state cue this component's whole construction rests on.
+// The chip FILL stays `dnaPosColor` on every row — it is the position
+// data encoding governed by docs/cross-client-invariants.md, not a
+// semantic color, so Avoiding is never recolored to a "danger" red
+// (which would also introduce a non-sanctioned accent: Chalkline permits
+// ice for actions and flare for informational highlights only).
 function DnaToggle({
   label,
   color,
   selected,
   testID,
   accessibilityLabel,
+  glyph = 'check',
   onPress,
 }: {
   label: string;
@@ -119,6 +129,7 @@ function DnaToggle({
   selected: boolean;
   testID: string;
   accessibilityLabel: string;
+  glyph?: 'check' | 'x';
   onPress: () => void;
 }) {
   return (
@@ -138,7 +149,7 @@ function DnaToggle({
       ]}
     >
       {selected ? (
-        <Icon name="check" size={12} color={ice.on} />
+        <Icon name={glyph} size={12} color={ice.on} />
       ) : (
         <View style={[styles.ptbDot, { backgroundColor: color }]} />
       )}
@@ -237,8 +248,28 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
   );
   const [draftChasing, setDraftChasing] = useState<string[]>([]);
   const [draftShopping, setDraftShopping] = useState<string[]>([]);
+  // #360/#361 — positions the user refuses to receive. Draft state, the
+  // seeding effect and the autosave payload key are all UNCONDITIONAL (not
+  // behind `avoidOn`), so a kill-switch flip in either direction preserves
+  // whatever the user saved; only the RENDER of the row is gated.
+  const [draftAvoiding, setDraftAvoiding] = useState<string[]>([]);
   const [dnaError, setDnaError] = useState<string | null>(null);
   const dnaTouched = useRef(false);
+
+  // #360 — kill switch for the Avoiding row (trade.avoid_positions).
+  //
+  // This key is DELIBERATELY ABSENT from LAUNCHED_FLAG_DEFAULTS in
+  // useFeatureFlags.ts, which is why the row paints in one frame late on a
+  // cold boot. That map FAILS OPEN by design (see its #115 comment): a
+  // first-ever boot with no cached map, or a failed revalidate, keeps every
+  // listed feature ON. For a flag whose entire job is to be a kill switch
+  // that stops the ENGINE honoring a promise, listing it would mean a
+  // client with a failed revalidate keeps offering the Avoiding row after
+  // the operator killed the flag — the UI would accept a preference the
+  // engine has stopped honoring. A silently-ignored user promise is
+  // strictly worse than a one-frame pop-in, so the pop-in is the accepted
+  // cost. Do not "fix" this by adding the key to that map.
+  const avoidOn = useFlag('trade.avoid_positions');
 
   // #173 — untouchables management (flag trade.preference_lists, same
   // gate the deck uses for its lock toggles).
@@ -359,6 +390,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     );
     setDraftChasing(prefs?.acquire_positions ?? []);
     setDraftShopping(prefs?.trade_away_positions ?? []);
+    setDraftAvoiding(prefs?.avoid_positions ?? []);
   }, [prefs, visible]);
 
   // Guided Onboarding v2 — `outlook_saved` fires on the FIRST preference
@@ -384,11 +416,19 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
       outlook: NonNullable<Outlook>;
       acquire: string[];
       shed: string[];
+      // #360 R-13 — every payload site carries ALL FOUR lists. Omitting
+      // `avoid` from any one of them fails SILENTLY: the backend leaves
+      // the stored value untouched on an omit (and echoes `[]`, which is
+      // not authoritative), so a Chasing tap that cleared QB from Avoiding
+      // would not persist the clear and the next sheet open would re-seed
+      // the stale value.
+      avoid: string[];
     }) =>
       saveLeaguePreferences(leagueId!, {
         team_outlook: vars.outlook,
         acquire_positions: vars.acquire,
         trade_away_positions: vars.shed,
+        avoid_positions: vars.avoid,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
@@ -402,6 +442,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     outlook: NonNullable<Outlook>;
     acquire: string[];
     shed: string[];
+    avoid: string[];        // #360 R-13
   } | null>(null);
   const dnaInFlight = useRef(false);
 
@@ -428,6 +469,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
       );
       setDraftChasing(saved?.acquire_positions ?? []);
       setDraftShopping(saved?.trade_away_positions ?? []);
+      setDraftAvoiding(saved?.avoid_positions ?? []);   // #360 R-13
       dnaTouched.current = false;
       setDnaError(e?.message || 'Could not save preferences');
     } finally {
@@ -440,6 +482,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     outlook: NonNullable<Outlook>;
     acquire: string[];
     shed: string[];
+    avoid: string[];        // #360 R-13
   }) => {
     // The single choke point for every outlook / Chasing / Shopping write,
     // so "first preference write of this sheet session" is one guard and
@@ -464,38 +507,69 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     dnaTouched.current = true;
     setDnaError(null);
     setDraftOutlook(key);
-    queueDnaSave({ outlook: key, acquire: draftChasing, shed: draftShopping });
+    queueDnaSave({
+      outlook: key,
+      acquire: draftChasing,
+      shed: draftShopping,
+      avoid: draftAvoiding,       // #360 R-13
+    });
     full?.onAnyChange?.();
   };
 
   // Multi-select within a row; cross-row mutual exclusion MOVES the
   // position. Next values are computed up front so the tap can autosave
   // the exact state it shows.
-  const toggleDnaPos = (side: 'chase' | 'shop', pos: string) => {
+  //
+  // #360 D-094 — the three rows are NOT symmetric, and the obvious
+  // "make all three mutually exclusive like the existing two" is the
+  // highest-risk misimplementation in this feature:
+  //
+  //   tapped 'chase' → clears the position from BOTH shop and avoid
+  //   tapped 'shop'  → clears chase, LEAVES avoid alone
+  //   tapped 'avoid' → clears chase, LEAVES shop alone
+  //
+  // Chasing ("send me one") and Avoiding ("never send me one") contradict,
+  // so they move. Shopping and Avoiding do not: Shopping gates give_ids,
+  // Avoiding gates the receive pool — disjoint sides of the same trade.
+  // "I'm selling my QB and I don't want another one back" is the modal
+  // real usage, and making the three mutually exclusive would render it
+  // unexpressible. Pinned by check-avoid-positions.js §3.
+  const toggleDnaPos = (side: 'chase' | 'shop' | 'avoid', pos: string) => {
     haptics.selection();
     dnaTouched.current = true;
     setDnaError(null);
     let nextChasing: string[];
     let nextShopping: string[];
+    let nextAvoiding: string[];
     if (side === 'chase') {
       nextChasing = draftChasing.includes(pos)
         ? draftChasing.filter((p) => p !== pos)
         : [...draftChasing, pos];
       nextShopping = draftShopping.filter((p) => p !== pos);
-    } else {
+      nextAvoiding = draftAvoiding.filter((p) => p !== pos);
+    } else if (side === 'shop') {
       nextShopping = draftShopping.includes(pos)
         ? draftShopping.filter((p) => p !== pos)
         : [...draftShopping, pos];
       nextChasing = draftChasing.filter((p) => p !== pos);
+      nextAvoiding = draftAvoiding;
+    } else {
+      nextAvoiding = draftAvoiding.includes(pos)
+        ? draftAvoiding.filter((p) => p !== pos)
+        : [...draftAvoiding, pos];
+      nextChasing = draftChasing.filter((p) => p !== pos);
+      nextShopping = draftShopping;
     }
     setDraftChasing(nextChasing);
     setDraftShopping(nextShopping);
+    setDraftAvoiding(nextAvoiding);
     queueDnaSave({
       // The backend requires a valid outlook to persist positions;
       // 'not_sure' is the honest no-choice value.
       outlook: draftOutlook ?? 'not_sure',
       acquire: nextChasing,
       shed: nextShopping,
+      avoid: nextAvoiding,
     });
     full?.onAnyChange?.();
   };
@@ -701,6 +775,33 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
                 </View>
               </View>
 
+              {/* #360/#361 — Avoiding. A third posLine directly BELOW
+                  Shopping (RN lays a column out in child order, so source
+                  order is screen order). Gated on `avoidOn`: flag off ⇒
+                  the sheet is byte-identical to pre-#360. */}
+              {avoidOn ? (
+                <View style={styles.posLine}>
+                  <View style={styles.posLbl}>
+                    <Text style={styles.posLblText}>Avoiding</Text>
+                    <Text style={styles.posLblSub}>no thanks</Text>
+                  </View>
+                  <View style={styles.toggleRow}>
+                    {DNA_POSITIONS.map((p) => (
+                      <DnaToggle
+                        key={`avoid-${p.key}`}
+                        label={p.label}
+                        color={dnaPosColor(p.key)}
+                        selected={draftAvoiding.includes(p.key)}
+                        testID={`dna.avoid.${p.tid}`}
+                        accessibilityLabel={`Avoid ${p.label}`}
+                        glyph="x"
+                        onPress={() => toggleDnaPos('avoid', p.key)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
               {/* #172 — trade intent modes, its own primary question
                   (it IS a primary question, per the operator ask) placed
                   with outlook/positions, above the demoted "Fine tuning"
@@ -778,10 +879,48 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
                 ))}
               </View>
 
+              {/* #360/#361 — Avoiding in the LEGACY half-sheet too. This
+                  branch is live (omitting `full` is what keeps the #257
+                  flag-off path byte-identical), so shipping the row only
+                  into the `full` variant would silently lose it here. */}
+              {avoidOn ? (
+                <>
+                  <Text style={styles.dnaGroupHdr}>
+                    Avoiding — tap all that apply{' '}
+                    <Text style={styles.dnaMs}>· multi-select</Text>
+                  </Text>
+                  <View style={styles.toggleRow}>
+                    {DNA_POSITIONS.map((p) => (
+                      <DnaToggle
+                        key={`avoid-${p.key}`}
+                        label={p.label}
+                        color={dnaPosColor(p.key)}
+                        selected={draftAvoiding.includes(p.key)}
+                        testID={`dna.avoid.${p.tid}`}
+                        accessibilityLabel={`Avoid ${p.label}`}
+                        glyph="x"
+                        onPress={() => toggleDnaPos('avoid', p.key)}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              {/* #360 R-14 — the hint must state the THREE-way rule,
+                  including the Shopping + Avoiding exception (D-094).
+                  Leaving the old two-way sentence in place after Avoiding
+                  ships would be actively wrong documentation inside the
+                  product. Flag off ⇒ the original sentence, unchanged. */}
               <Text style={styles.dnaHint}>
-                Pick as many per row as apply. A position can't be both chased
-                and shopped — tapping it on one row moves it there. Changes save
-                as you tap.
+                {avoidOn
+                  ? "Pick as many per row as apply. A position can't be both " +
+                    'chased and shopped, or both chased and avoided — tapping ' +
+                    'it there moves it. Shopping and avoiding the same ' +
+                    "position is fine: you're selling it and don't want " +
+                    'another back. Changes save as you tap.'
+                  : "Pick as many per row as apply. A position can't be both " +
+                    'chased and shopped — tapping it on one row moves it ' +
+                    'there. Changes save as you tap.'}
               </Text>
             </>
           )}

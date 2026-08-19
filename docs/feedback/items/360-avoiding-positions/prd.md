@@ -574,3 +574,60 @@ backend build agent. A `file:line`-cited trace showing:
    rule**, not by omission — with the `not_interested` grep that proves it for
    eveners and the §5.1 caveat restated for gen-v2.
 4. The flag-off path reaches none of them.
+
+---
+
+## Build deviations — recorded 2026-08-19 (orchestrator)
+
+> The PRD must stay true, because QA tests against it. These are the places the
+> shipped build differs from the spec above, with the reason each was accepted.
+
+**D-1 — Hazard A-10 is REVERSED. `trade.avoid_positions` is deliberately NOT in
+`LAUNCHED_FLAG_DEFAULTS`, and no test asserts its presence.**
+A-10 was written before this session learned that the map **fails open** by design
+(the `#115` comment in `mobile/src/state/useFeatureFlags.ts`): a first-ever boot with
+no cached map, or a failed revalidate, keeps listed features ON. For a flag whose
+entire job is to be a kill switch, listing it means a client with a failed revalidate
+keeps rendering the Avoiding row *after the operator kills the flag* — the sheet would
+go on accepting a preference the engine has stopped honoring. A silently-ignored user
+promise is strictly worse than the one-frame paint-in that omitting the key causes.
+The one-frame pop-in is accepted. Reasoning is written into comments at both gating
+sites (`TradeDnaSheet.tsx`, `TradesScreen.tsx`) and in the check file's header.
+This is the same trap that `mobile/src/api/league.ts:709` warns about for
+`outlook.odds`; see D-094 in the parallel Team Review work.
+
+**D-2 — Hazard A-8 reworded rather than implemented literally.**
+A-8 asked for the string `both chased and shopped` to be removed from the file
+entirely. That is incompatible with **R-11 (flag-off ⇒ byte-identical)**, which this
+same PRD requires: with the flag off the Avoiding row does not exist and the two-way
+sentence is the *correct* copy. Shipped as a conditional on `avoidOn`, with the
+flag-**ON** branch pinned instead (checks A-8b/c/d). Sabotage-proven.
+
+**D-3 — `saveLeaguePreferences` has FOUR object-literal call sites, not five.**
+`lld-delta.md` §5.1 said five and `plan.md` said two. The four are
+`TradeDnaSheet.tsx:388`, `TradeFinderHubScreen.tsx:341`, `TradesScreen.tsx:1019`,
+`TradesScreen.tsx:4449`. All four carry `avoid_positions`.
+
+**D-4 — `avoidOn` had to be introduced in `TradesScreen.tsx`.**
+§5.3's table describes regions 2 and 3 as though the flag were already in scope there.
+It was not; added beside `intentModesOn`.
+
+**D-5 — OPEN FOR THE OPERATOR: the one-tap outlook confirm clears `avoid_positions`.**
+§5.3 region 1 specifies that `confirmOutlookMutation` writes empty position arrays, and
+it was built as written (`TradesScreen.tsx:1047-1058`). The consequence: a user who has
+set Avoiding but has **not** declared an outlook sees the inferred-outlook banner, taps
+**Confirm**, and their saved Avoiding set is wiped.
+
+This is **inherited, not introduced** — `acquire_positions` and `trade_away_positions`
+are already cleared by the same call, so Avoiding is merely consistent with its two
+siblings. It was built as specced rather than "improved" in passing, per the
+surgical-changes rule.
+
+It is nonetheless worth an operator decision, because Avoiding reads as a stronger
+promise than the other two ("never send me this") and losing it silently is a worse
+failure than losing a Chasing hint. **The fix, if wanted, is ~3 lines:** drop all three
+position keys from that mutation's payload entirely. The backend contract already
+supports it — an omitted position key leaves the stored value **unchanged** (verified
+over HTTP during the backend build). That would preserve all three lists on an outlook
+confirm and is a strict improvement, but it also changes existing Chasing/Shopping
+behavior, which is why it was not done unilaterally.

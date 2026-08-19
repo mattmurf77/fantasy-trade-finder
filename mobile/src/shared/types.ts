@@ -182,6 +182,22 @@ export interface TradeCard {
   // Backend serializes `likes_you` only when true; normalizer defaults
   // to false.
   likesYou?: boolean;
+  // #362 — server-composed "Why you're seeing this" line, set when this card
+  // came from a league-mate's STANDING OFFER rather than an exact mirror.
+  // Serialized only when present. Composed from (sender, player, round,
+  // seasons) alone: it carries no team ids, no team count and no member name
+  // other than the sender's, by construction (R-19). Never build this string
+  // client-side — the server owns the copy.
+  standingOfferReason?: string;
+  // #362 — set when one of the DECK OWNER'S OWN live standing offers covers
+  // this card (their give side holds the offered player and the receive side
+  // a round-`round` pick in an offered season). Drives the
+  // `Open to 1sts · '27–'28` chip. Display only, server-stamped, and bound
+  // to the offer record — it dies when the offer is revoked or expires.
+  // There is deliberately NO global "open to 1sts" player badge anywhere in
+  // the app: a permanent marker outlives the intent that created it and
+  // would leak the offer to league-mates who were excluded from it.
+  standingOfferMine?: { round: number; seasons: number[] };
   // F1 signal spine (flag deck.signal_v2): server-minted id joining this
   // served card to its deck_impressions row. Present only when the flag was
   // on at generation time; echoed back (with dwell/engagement fields) on

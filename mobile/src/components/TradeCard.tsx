@@ -21,6 +21,25 @@ import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
 
+// #362 — chip copy helpers. Both derive entirely from the server-stamped
+// `standing_offer_mine` payload; neither invents a season the offer does
+// not carry.
+const ROUND_WORDS: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' };
+function roundWordFor(round: number): string {
+  return ROUND_WORDS[round] ?? `R${round}`;
+}
+/** [2027, 2028] → "'27–'28" · [2027] → "'27" · [2027, 2029] → "'27 '29". */
+function seasonSpan(seasons: number[]): string {
+  const sorted = [...seasons].sort((a, b) => a - b);
+  const short = (s: number) => `'${String(s).slice(-2)}`;
+  if (sorted.length === 0) return '';
+  if (sorted.length === 1) return short(sorted[0]);
+  const contiguous = sorted.every((s, i) => i === 0 || s === sorted[i - 1] + 1);
+  return contiguous
+    ? `${short(sorted[0])}–${short(sorted[sorted.length - 1])}`
+    : sorted.map(short).join(' ');
+}
+
 interface Props {
   data: TradeCardData;
   variant?: 'swipe' | 'match';
@@ -384,6 +403,29 @@ function TradeCardComp({
         </View>
       )}
 
+      {/* #362 — the SENDER's own standing-offer chip. Server-stamped
+          (`standing_offer_mine`), so there is no client-side join, and it
+          appears only on the offer owner's own deck. Ice, not flare: this
+          is an action-state marker on the user's OWN commitment, where the
+          counterparty-side pill below stays flare (informational).
+          Provenance-chip construction, reusing the wildcard chip's shape —
+          no new pill or badge component. The chip is bound to the offer
+          record and dies with it; there is deliberately no global "open to
+          1sts" badge on the player anywhere in the app, which would
+          outlive the intent and leak the offer to excluded league-mates. */}
+      {data.standingOfferMine ? (
+        <View
+          style={[styles.wildcardChip, styles.standingChip]}
+          accessibilityLabel={`Open to ${roundWordFor(data.standingOfferMine.round)}s in ${data.standingOfferMine.seasons.join(', ')}`}
+          testID="trade-card.standing-offer-chip"
+        >
+          <View style={[styles.wildcardTick, styles.standingTick]} />
+          <Text style={styles.wildcardLabel}>
+            {`OPEN TO ${roundWordFor(data.standingOfferMine.round).toUpperCase()}S · ${seasonSpan(data.standingOfferMine.seasons)}`}
+          </Text>
+        </View>
+      ) : null}
+
       {/* F7 exploration wildcard (server flag deck.exploration) — honest
           labeling: this card was deliberately drawn from OUTSIDE the user's
           learned taste (gate-passing quality, off-taste pick). Provenance-
@@ -438,6 +480,22 @@ function TradeCardComp({
           </View>
         )}
       </View>
+
+      {/* #362 — "Why you're seeing this", when the card came from a
+          league-mate's standing offer rather than an exact mirror. The
+          string is composed SERVER-SIDE and rendered verbatim: it names the
+          sender, the player, the round and the seasons, and by construction
+          carries no team count, no roster list and no other member's name
+          (R-19). Never rebuild it client-side. Without this line a boosted
+          card is indistinguishable from a lucky generation. */}
+      {data.standingOfferReason ? (
+        <View style={styles.consensusNote} testID="trade-card.standing-offer-reason">
+          <Text style={type.label}>Why you're seeing this</Text>
+          <Text style={type.bodySm} testID="trade-card.standing-offer-reason.body">
+            {data.standingOfferReason}
+          </Text>
+        </View>
+      ) : null}
 
       {/* FB-47 — partner-fit line. Muted, hint-tier: it narrates why this
           counterparty ranks where they do in the deck, nothing more. */}
@@ -777,6 +835,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: chalk.base,
   },
+  // #362 sender-side chip: the same construction as the wildcard chip,
+  // re-accented ice. Ice because this marks the user's OWN standing
+  // commitment (an action state); flare stays reserved for the
+  // informational counterparty-side "They're interested" pill.
+  standingChip: { borderColor: ice.base },
+  standingTick: { backgroundColor: ice.base },
   // Consensus-basis note: deliberately muted — it's a caveat, not a sell.
   consensusNote: { gap: space.xs },
   // FB-47 partner-fit line: hint-tier row — 6px hollow square marker (same

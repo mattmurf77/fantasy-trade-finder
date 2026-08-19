@@ -51,7 +51,9 @@
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",
     "test:outlook-bands": "node tests/check-outlook-bands.js",
-    "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js"
+    "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js",
+    "test:avoid-positions": "node tests/check-avoid-positions.js",
+    "test:standing-offer-362": "node tests/check-standing-offer-362.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

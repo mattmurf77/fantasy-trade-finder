@@ -673,3 +673,39 @@ On a real 12-team Sleeper league, with `trade.standing_offers` on:
 **Not a decision — a note for the builder.** D-090 is committed to
 `feat/pick-slot-labels` and **not merged**. It is display-only and does not affect this
 item either way, but do not assume slot labels are live on `main`.
+
+---
+
+## Build deviations — recorded 2026-08-19 (orchestrator)
+
+> The PRD must stay true, because QA tests against it.
+
+**D-1 — `StandingOfferSheetProps.onSkip` is `() => void`, not `(snoozed, retired) => void`.**
+The snooze ladder lives in `useOnboardingState`, and the retire computation has to sit
+next to the patch that applies it — exactly as `snoozeQuicksetPrompt` does. The LLD's
+signature would have forced the sheet to duplicate that computation, giving two places
+that decide when the prompt retires. The parent now owns the ladder, the patch, and the
+`standing_offer_skipped` event. Check SC-3d pins the terminal branch against quickset's.
+
+**D-2 — SC-14 reinterpreted: the flag must be ABSENT from `LAUNCHED_FLAG_DEFAULTS`, not present-and-matching.**
+The PRD asked the flag key to "agree between `config/features.json` and the client
+default map". `trade.standing_offers` ships **dark**, and that map **fails open** — a
+listed key is ON for a first-ever boot or a failed revalidate. Asserting presence would
+have pinned a fail-open bug that lights a dark feature. Shipped as: SC-14a asserts
+`false` in `config/features.json`; SC-14b asserts **absence** from the defaults map.
+Same reasoning as #360's D-1 and as `mobile/src/api/league.ts:709`.
+
+**D-3 — A mutual-match retraction effect was added (~8 lines).**
+R-1 condition 10 requires "no mutual match on the swipe response", which is not knowable
+synchronously inside `advance()`. Implemented as an effect observing `swipeMutation.data`
+only; `swipeMutation` itself is untouched.
+
+**D-4 — There is no mutual-match modal in `TradesScreen`.**
+CW-1 cites `:1820-1839` as the mutual-match modal. That range is `swipeMutation.onSuccess`,
+which only stashes `match_id` in a ref for the share affordance; the match surfaces on the
+Matches tab. This is why D-3 above is an effect rather than a state check.
+
+**D-5 — Edit and Repost are out of v1 on the manage surface**, as argued in R-10 —
+either would need a fourth route and a second entry point into the post-like sheet, and
+revoke-then-repost already reaches the same end state. Mockup §5 shows both controls;
+the mockup is ahead of v1 here. Pinned by check SC-10d.
