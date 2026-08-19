@@ -265,20 +265,37 @@ the comparison inverted — i.e. with the exact opposite of the requested featur
 lifting the real function out of source and running it over a fixture (the
 `check-picker-pick-filter.js` idiom) over matching source text.
 
-### G-049 — `save_trade_decision` is a plain INSERT — a duplicate pass double-counts Elo
-**Symptom:** n/a (latent). Recorded because D-068 deliberately opens a narrow path to it.
-**Cause:** `backend/database.py:4794` inserts unconditionally; `trade_decisions` has no unique
-constraint on `(user_id, league_id, trade_id)`. A repeated pass writes a second `trade_decisions`
-row, a second `trade_swipes` row, and `_compute_elo`'s replay applies `trade_k_pass` **twice**. The
-D-067 cooldown key is genuinely idempotent (a `frozenset` into a set), which makes the write path
-look safer than it is.
-**Lesson:** do not describe this path as idempotent — the 2026-08-18 sweep's own ticket did, and
-that error nearly shipped a Retry button whose whole cost was the duplicate. Any change that makes
-a re-swipe reachable (retry affordances, guard re-arming, offline replay) must weigh a doubled Elo
-signal, bounded by `trade_k_pass`. The durable fix is an upsert or a unique constraint; not done
-here because it is a schema change, not a bug fix.
-
-## 2026-08-11
+### G-049 — a duplicate pass double-counts Elo — and the damage is in `swipe_decisions`, not `trade_decisions`
+**Symptom:** a replayed pass applies `trade_k_pass` twice, skewing the board.
+**Cause:** `save_trade_decision` (`backend/database.py`) was a plain INSERT and
+`trade_decisions` has no unique constraint. **Corrected 2026-08-18 (second pass):** the
+first version of this entry implied a constraint on `trade_decisions` was the fix. It is
+not. `_compute_elo` replays **`swipe_decisions`** (via `load_swipe_decisions`), so the
+Elo harm comes from the `save_trade_swipes` write; the duplicate `trade_decisions` row is
+nearly harmless because every read path already dedupes (`load_awaiting_trades`'s
+`seen_keys`, `_past_decision_keys` is a set). **Fixing the wrong table would have changed
+nothing measurable.**
+**Why a unique constraint is not available:** duplicate `(user, league, trade_id)` rows are
+**by design** — `retracted_at` (#318) means a re-like after a retraction writes a fresh row,
+the revive path. A constraint also cannot be created against prod (63 pre-existing
+duplicates would reject it), and an `IntegrityError` inside the route's persist block would
+skip `check_for_match`, silently killing mutual-match detection on a re-like.
+**What the prod data showed** (933 rows): duplicates split into two cleanly separated
+populations — **40 double-writes at 0.015–0.200 s** (identical payloads, 39 of them passes)
+and **23 genuine re-decisions at 147.7 s and up**. A **738× empty band** between them, which
+is what makes a time-window guard safe rather than a guess.
+**Fix shipped:** a replay guard in `save_trade_decision` (10 s, still-live rows only,
+identical payload, same decision) returning `bool`, plus **both** route call sites
+(`swipe_trade`, `_apply_reasoned_pass`) gating `save_trade_swipes` on that verdict.
+`check_for_match` is deliberately NOT gated — a replayed like must still surface a match.
+**Lesson:** name the table that actually carries the harm. Two tables were written by one
+action and the entry blamed the one with the obvious missing constraint. Also: the contract
+test defined its own caller and so proved the *contract* while leaving the *call sites*
+unpinned — sabotage showed both gates could be deleted with every test green. Route pins
+(`inspect.getsource`) now cover them.
+**Residual:** the guard is read-then-write in one transaction, not a distributed lock — two
+simultaneous requests on separate workers could still both write. All 40 observed prod
+duplicates were sequential.
 
 ### G-028 — six rookie-scope tests fail only in checkouts that carry real data
 - **Symptom:** `backend/tests/test_rookie_scope.py` fails 6 tests (`KeyError: 'player_a'` from `/api/trio?scope=rookie`) in the main checkout, while the same commit passes 34/34 in a fresh worktree and CI. Looks like your diff broke it; it didn't.

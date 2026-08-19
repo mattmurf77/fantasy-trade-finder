@@ -118,16 +118,20 @@ const rewinds = findAll(
   (n) => ts.isCallExpression(n) && n.expression.getText() === 'setDeckIdx',
 )
   .filter((n) => !ADVANCE.test((n.arguments[0]?.getText() ?? '').trim()))
-  // Exempt: the deck is being replaced wholesale in this same block, so no
-  // previously-dispositioned card survives to be re-fronted.
-  .filter((n) => {
-    const block = ancestor(n, ts.isBlock);
-    return !(block && block.getText().includes('setDeck([])'));
-  })
+  // NO `setDeck([])` EXEMPTION. It used to exempt any rewind whose block
+  // replaced the deck wholesale, reasoning that no dispositioned card
+  // survives to be re-fronted. That reasoning is unsound: the guard is a
+  // REF that outlives the deck, and the replacement deck can carry the same
+  // trade_ids — the server hands back a still-running job verbatim even
+  // under `force`, so the old job's poller can refill the emptied deck with
+  // the exact card just dispositioned. Every genuinely-safe site already
+  // clears the guard anyway, so the exemption's only real effect was to let
+  // the one site that forgot (the QuickSet regen handoff) pass. Removing it
+  // is why that site now carries the clear.
   .map((n) => ({ node: n, line: lineOf(n), fn: ancestor(n, isFunctionLike) }));
 
 assert(
-  rewinds.length >= 4,
+  rewinds.length >= 5,
   'TradesScreen: the rewind scan still finds deck rewinds to check',
   `found ${rewinds.length} — a renamed setter would make this test vacuous`,
 );

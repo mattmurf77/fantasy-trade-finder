@@ -4791,6 +4791,44 @@ def load_swipe_decisions(
 # Trade decision operations
 # ---------------------------------------------------------------------------
 
+# G-049 / D-068 — replay window for save_trade_decision's idempotency guard.
+#
+# Sized from prod (2026-08-18, 933 trade_decisions rows). Grouping by
+# (user_id, league_id, trade_id, decision) and measuring the gap to the
+# previous row gives two cleanly separated populations:
+#   * 40 double-writes, the WIDEST 0.200 s apart  (client double-fire)
+#   * 23 genuine re-decisions, the CLOSEST 147.7 s apart (card re-served
+#     by a deck regeneration and swiped again)
+# Nothing at all falls between 0.2 s and 147.7 s — a 738x empty band. 10 s
+# sits in the middle of it with 50x headroom on the duplicate side and 14x
+# on the re-decision side. Raising this past ~120 s would start swallowing
+# decisions the user really made; lowering it below ~1 s would start
+# letting double-fires through.
+TRADE_DECISION_DEDUPE_SECONDS = 10.0
+
+
+def _decision_replay_gap_ok(prev_created_at: str | None, now_iso: str) -> bool:
+    """True when `prev_created_at` is recent enough to call the incoming
+    write a replay of it. Any unparseable/absent timestamp returns False —
+    the guard FAILS OPEN, because losing a real decision is strictly worse
+    than keeping a duplicate row."""
+    if not prev_created_at:
+        return False
+    try:
+        prev = datetime.fromisoformat(prev_created_at)
+        now  = datetime.fromisoformat(now_iso)
+    except (TypeError, ValueError):
+        return False
+    # Legacy rows may be naive; treat those as UTC rather than crashing on a
+    # naive/aware subtraction.
+    if prev.tzinfo is None:
+        prev = prev.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    delta = (now - prev).total_seconds()
+    return 0 <= delta <= TRADE_DECISION_DEDUPE_SECONDS
+
+
 def save_trade_decision(
     user_id: str,
     league_id: str,
@@ -4798,18 +4836,92 @@ def save_trade_decision(
     give_player_ids: list[str],
     receive_player_ids: list[str],
     decision: str,
-) -> None:
-    """Persist a high-level trade card decision (like/pass)."""
+) -> bool:
+    """Persist a high-level trade card decision (like/pass).
+
+    Returns **True** when a row was written and **False** when the call was
+    recognised as a REPLAY of the row immediately preceding it and skipped
+    (G-049).
+
+    Callers that also apply an Elo signal — `save_trade_swipes()` and
+    `RankingService.record_trade_signal()` — MUST skip both on a False
+    return. The duplicated row here is only the fingerprint; the actual harm
+    is the doubled `trade_k_pass` those two apply, and `swipe_decisions`
+    carries no trade/league identity of its own, so this is the single point
+    in the write path where a replay can still be recognised.
+
+    Why a *window* and not a unique constraint
+    ------------------------------------------
+    Duplicate `(user_id, league_id, trade_id)` rows are legitimate in two
+    separate ways, so no unique index over that triple is correct:
+      * the #318 **revive path** — like -> retract -> re-like deliberately
+        writes a fresh row with `retracted_at` NULL (see the column comment
+        on the table definition above);
+      * a **genuine re-decision** of a re-served card — 23 such rows in
+        prod, none closer together than 147.7 s.
+    A unique index would break both, and could not even be created on the
+    live table (63 pre-existing duplicate rows would reject it).
+
+    So the guard fires only for the narrow signature of a double-write: a
+    still-**live** (`retracted_at IS NULL`) row, same `decision`, with a
+    byte-identical give/receive payload, written less than
+    `TRADE_DECISION_DEDUPE_SECONDS` ago. Everything else falls through and
+    is written, so no decision the user actually made is ever dropped.
+
+    Not a distributed lock: two genuinely simultaneous requests on separate
+    workers can still both miss the SELECT under READ COMMITTED. That window
+    is one statement wide instead of unbounded, and closing it fully would
+    need the unique index that the revive path forbids.
+    """
+    give_json    = json.dumps(give_player_ids)
+    receive_json = json.dumps(receive_player_ids)
+    now          = _now()
+
     with engine.begin() as conn:
+        # `trade_id` is the card identity; without one there is nothing to
+        # match a replay against, so such writes always insert.
+        if trade_id:
+            prev = conn.execute(
+                select(
+                    trade_decisions_table.c.created_at,
+                    trade_decisions_table.c.give_player_ids,
+                    trade_decisions_table.c.receive_player_ids,
+                ).where(
+                    and_(
+                        trade_decisions_table.c.user_id   == user_id,
+                        trade_decisions_table.c.league_id == league_id,
+                        trade_decisions_table.c.trade_id  == trade_id,
+                        trade_decisions_table.c.decision  == decision,
+                        # A retracted row must NOT suppress the re-like that
+                        # revives it (#318).
+                        trade_decisions_table.c.retracted_at.is_(None),
+                    )
+                ).order_by(trade_decisions_table.c.id.desc()).limit(1)
+            ).fetchone()
+
+            if (
+                prev is not None
+                and prev.give_player_ids    == give_json
+                and prev.receive_player_ids == receive_json
+                and _decision_replay_gap_ok(prev.created_at, now)
+            ):
+                log.info(
+                    "save_trade_decision: replay suppressed (G-049) "
+                    "user=%s league=%s trade=%s decision=%s",
+                    user_id, league_id, trade_id, decision,
+                )
+                return False
+
         conn.execute(insert(trade_decisions_table).values(
             user_id            = user_id,
             league_id          = league_id,
             trade_id           = trade_id,
-            give_player_ids    = json.dumps(give_player_ids),
-            receive_player_ids = json.dumps(receive_player_ids),
+            give_player_ids    = give_json,
+            receive_player_ids = receive_json,
             decision           = decision,
-            created_at         = _now(),
+            created_at         = now,
         ))
+    return True
 
 
 def load_trade_decisions(

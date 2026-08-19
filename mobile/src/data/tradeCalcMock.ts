@@ -29,6 +29,14 @@ export interface CalcPlayer {
    *  youth/vet board biases price them naturally (youth-lovers pay up,
    *  win-now owners fade) with zero extra valuation math. */
   pick?: true;
+  /** Server-supplied pick identity, mapped from `CalcValueRow.is_pick`.
+   *  DISTINCT from `pick` above: that one is a demo-board authoring flag,
+   *  this is the backend's canonical verdict and is the field consumers
+   *  should prefer (docs/cross-client-invariants.md § "Pick identity on the
+   *  wire"). Undefined when the row predates the field — consumers must
+   *  fall back to the `pos`/`nflTeam` check, never treat undefined as
+   *  false. */
+  isPick?: boolean;
   /** draft-extensions W3 M-C (D17) — provenance for an owned league pick,
    *  copied verbatim off `GET /api/league/picks`. Only the In-league
    *  calculator ever sets these (it is the only mount with a real league):

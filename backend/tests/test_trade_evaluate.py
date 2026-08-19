@@ -846,7 +846,10 @@ def test_values_endpoint_shape_and_etag():
         # value-desc (#214: pool gained 'elite' 7389.1 > 'stud' 4481.7 >
         # 'good2' 4055.2 > 'good')
         assert [p["id"] for p in rows[:4]] == ["elite", "stud", "good2", "good"]
-        assert set(rows[0]) == {"id", "name", "position", "team", "age", "value", "tier"}
+        # B3 follow-up (2026-08-18): `is_pick` is additive — pick identity is
+        # now explicit on the wire. Pinned in test_trade_values_is_pick.py.
+        assert set(rows[0]) == {"id", "name", "position", "team", "age", "value",
+                                "tier", "is_pick"}
         # #263 — tier is walked off the RAW seed Elo (not the transformed
         # `value`), via the same RankingService.tier_for_elo the extension/
         # anchor wizard use.

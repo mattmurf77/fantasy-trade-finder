@@ -446,6 +446,45 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # below carries it, `has_free_text` is a BOOLEAN, and no event in this
     # family may gain a text prop.
     "trade_pass_layer1", "trade_pass_layer2",
+    # ── Deck double-fire guards, 2026-08-18 ─────────────────────────────
+    # Tracking-plan addendum (the precondition this module's docstring
+    # demands): docs/business/analytics/2026-08-18-swipe-guard-blocked.md.
+    # Origin: docs/reviews/2026-08-18-bug-sweep/ticket.md §B4; D-068 is the
+    # decision that DEFERRED this event, and G-049 the gotcha it leaves open.
+    #
+    # `advance()` in TradesScreen.tsx has two early-return double-fire
+    # guards. When either rejects a disposition the user's ✕/✓/swipe does
+    # NOTHING and, until this row, produced NO telemetry of any kind — the
+    # B4 user tapped through a permanent stall and generated zero events, so
+    # a human report was the only detector. One name, two guards, told apart
+    # by the `guard` prop (swipe_undo | decline_reasons) so "is anyone stuck
+    # on the deck?" stays one query.
+    #
+    # CLIENT-fired and unforgeable-by-design-irrelevant: the server never
+    # learns that a tap was swallowed, which IS the finding. It may never
+    # appear in SERVER_FIRED_EVENTS (the disjointness assert below).
+    #
+    # NOT in FUNNEL_CRITICAL, deliberately. That set is the SDK's drop-LAST
+    # policy under queue overflow, hand-mirrored in mobile/src/api/events.ts
+    # (unchanged by this commit). Beyond "diagnostic, not a pre-auth funnel
+    # primitive": a trapped user is the one most likely to overflow the
+    # queue, so drop-last would make their guard rows evict signin_* and
+    # experiment_exposed. This is the event that SHOULD go first.
+    #
+    # NOT in analytics_queries.NON_INTENT_EVENTS, deliberately — the one
+    # case in this file where that omission is argued rather than an
+    # oversight. INTENT is derived by SUBTRACTION, so the test is whether
+    # admitting it step-changes DAU/WAU: it cannot. (a) It is a real user
+    # gesture the app REFUSED — the class of sleeper_send_failed, which is
+    # INTENT. (b) Every emission is preceded on the same card in the same
+    # session by trade_card_viewed, which is INTENT and fires on every card
+    # reaching the top of the deck, so no new user-day exists to add. The
+    # decline-reason pair above was admitted on exactly this argument.
+    #
+    # VOLUME: the emitter fires on a LADDER of blocked_n (1,2,3,5,10,25) per
+    # (card, guard) with a 50-row session cap — six rows per trapped card,
+    # never unbounded. Analysis reads max(blocked_n), NEVER count(rows).
+    "swipe_guard_blocked",
 })
 
 # ---------------------------------------------------------------------------
@@ -1127,6 +1166,38 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                     "switched_from",
                                     "impression_id", "trade_id",
                                     "ms_since_render", "platform"}),
+    # ── Deck double-fire guards, 2026-08-18 ─────────────────────────────
+    # Addendum: docs/business/analytics/2026-08-18-swipe-guard-blocked.md,
+    # whose props table IS this row and nothing more.
+    #
+    # CLOSED ENUMS:
+    #   guard    ∈ swipe_undo | decline_reasons  — which early-return fired.
+    #             A third guard extends the enum HERE first.
+    #   decision ∈ like | pass — what the user was trying to do. A `like`
+    #             row on a card already passed is the escape attempt, and it
+    #             is what separates "double-tapped" from "trapped".
+    #
+    # `blocked_n` is the CONSECUTIVE block count on this (card, guard), and
+    # only ladder points are emitted (1,2,3,5,10,25). blocked_n == 1 is an
+    # ordinary double-fire; >= 3 cannot be one. Read max(blocked_n), never
+    # count(rows).
+    # `impression_id` is the SERVE, not the card — the trap is per-serve (a
+    # re-fronted card is a fresh predicament on the same trade_id) — and is
+    # the literal 'none' when absent, matching reasonEventProps() so a
+    # missing serve is distinguishable from a stripped prop.
+    # `ms_since_render` is card-render → block, in ms (same source as the
+    # trade_pass_layer* family): a fat-finger double-tap and a user tapping
+    # again because nothing happened are tens of ms apart vs seconds.
+    #
+    # NO `platform` PROP, on purpose. Device platform is a user_events
+    # COLUMN derived server-side in analytics_ingest.py (the NULL-`platform`
+    # incident); the trade_pass_layer* rows above are the one deliberate,
+    # operator-approved exception and this event does not inherit it.
+    # No player ids, names, league identity or free text — nothing here
+    # identifies a person; league_id rides the envelope column as always.
+    "swipe_guard_blocked": frozenset({"guard", "decision", "trade_id",
+                                      "impression_id", "blocked_n",
+                                      "ms_since_render"}),
 }
 
 

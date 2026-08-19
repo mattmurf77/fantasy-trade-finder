@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
+  Keyboard,
   View,
   Text,
   Pressable,
@@ -131,10 +132,21 @@ export default function AnalystGuide() {
       });
     };
     const unsubscribe = subscribeGuideTargetsMoved(remeasure);
+    // The keyboard is the one shifter no host can announce. SignIn spotlights
+    // the username field and asks the user to type; its KeyboardAvoidingView
+    // (behavior 'padding') shrinks a `justifyContent:'center'` body, so the
+    // field travels UP while the ring stays — and that screen has no scroll
+    // container, so the onScroll path above can never fire there. Listening
+    // here rather than in the host keeps every future screen covered for
+    // free, and avoids putting a notifier in a screen with nothing to scroll.
+    const kShow = Keyboard.addListener('keyboardDidShow', remeasure);
+    const kHide = Keyboard.addListener('keyboardDidHide', remeasure);
     return () => {
       cancelled = true;
       if (raf !== null) cancelAnimationFrame(raf);
       unsubscribe();
+      kShow.remove();
+      kHide.remove();
     };
   }, [spotlightTarget, frameResolved, guideV2, trackSpotlightFrame]);
 

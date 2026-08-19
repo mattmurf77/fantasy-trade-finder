@@ -211,6 +211,20 @@ const UNDO_HOLD_MS = 5000;
 // fires, so the failure lands long after the tap that caused it.
 const SWIPE_ERROR_HOLD_MS = 6000;
 
+// `swipe_guard_blocked` volume policy (B4 / D-068 follow-up; tracking-plan
+// addendum docs/business/analytics/2026-08-18-swipe-guard-blocked.md).
+//
+// A trapped user tapping repeatedly IS the phenomenon, so collapsing to one
+// row per card would delete the measurement — but firing on every block is
+// unbounded, and a stuck user in a tight loop could fill the 500-event SDK
+// queue and evict real funnel rows. So: emit at LADDER points of the
+// consecutive-block count per (card, guard), hard-capped per session.
+// Six rows per trapped card; the B4 user's fifty taps land as six rows
+// topping out at blocked_n 25 — same conclusion, 12% of the volume.
+// Analysis reads max(blocked_n), NEVER count(rows).
+const GUARD_BLOCK_LADDER = [1, 2, 3, 5, 10, 25];
+const GUARD_BLOCK_SESSION_CAP = 50;
+
 // F1 signal spine (flag deck.signal_v2, PRD F1): dwell timer cap (guards
 // against left-open decks inflating dwell) and the front-of-deck threshold
 // after which a card counts as `viewed` (served ≠ seen).
@@ -1891,6 +1905,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // Double-fire guard (S3B-08): last-dispositioned RAW trade_id — the tap
   // and gesture paths can both fire advance() for the same top card.
   const lastDispositionedRef = useRef<string | null>(null);
+  // `swipe_guard_blocked` bookkeeping (B4 / D-068 follow-up). Consecutive
+  // blocks on ONE (card, guard) pair — reset when either changes, so this
+  // measures a single predicament and never accumulates across the deck.
+  // `sessionEmitted` is the hard backstop: a user in a tight loop must not
+  // be able to fill the 500-event SDK queue and evict real funnel rows.
+  const guardBlockRef = useRef<{ key: string | null; n: number; sessionEmitted: number }>(
+    { key: null, n: 0, sessionEmitted: 0 },
+  );
   // S7 PRD-01 — trade_id → mutual-match id learned from swipe responses.
   const matchIdByTradeRef = useRef<Map<string, string>>(new Map());
   // Current sorted deck for callbacks whose closures may be stale (the
@@ -2283,6 +2305,8 @@ export default function TradesScreen({ navigation, route }: any) {
         nflTeam: r.team ?? 'FA',
         age: r.age ?? 0,
         base: r.value,
+        // Canonical pick verdict from the server (see calc.ts is_pick).
+        isPick: r.is_pick,
       }));
   }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, myOwner, scopedOpponent]);
 
@@ -3161,13 +3185,23 @@ export default function TradesScreen({ navigation, route }: any) {
         prevPackages: new Set(deck.map(tradePackageKey)),
       };
       // The regen REPLACES this deck, it doesn't extend it. The append
-      // effect de-dupes on trade_id and every regenerated card carries a
+      // effect de-dupes on trade_id and every newly GENERATED card carries a
       // fresh uuid, so without this clear the same packages land a second
       // time and the index rewind below drops the user onto a doubled deck.
-      // Every other deck-invalidating path clears first (fairness toggle
-      // :832, league switch :1565, target change :2113) — this one didn't.
+      //
+      // "Fresh uuid per card" is true of minting but does NOT make the ids
+      // disjoint across this reset: `force: true` defeats the server's
+      // complete-and-fresh cache branch but NOT its in-flight share, which
+      // returns a still-`running` job verbatim (server.py, the
+      // `existing.get("status") == "running"` return). So the old job can
+      // refill this emptied deck with the very ids just dispositioned.
+      // Clear the guard and drop the job for the same reason every other
+      // deck-invalidating path does — see resetDeckForNewTargets below.
+      deckEpochRef.current += 1;
+      lastDispositionedRef.current = null; // regenerated decks can reuse ids
       setDeck([]);
       setDeckIdx(0);
+      setJob(null); // stop the old job's poller refilling the deck we just cleared
       generateMutation.mutate(
         { force: true },
         {
@@ -3850,6 +3884,58 @@ export default function TradesScreen({ navigation, route }: any) {
     doRemove();
   }
 
+  // ── `swipe_guard_blocked` (B4 / D-068 follow-up) ──────────────────────
+  // Tracking plan: docs/business/analytics/2026-08-18-swipe-guard-blocked.md.
+  //
+  // Both of advance()'s early-return double-fire guards report here. Until
+  // this existed a poisoned guard swallowed every ✕/✓/swipe on a card and
+  // produced NO telemetry of any kind — the B4 user tapped through a
+  // permanent stall and generated zero events, so a human report was the
+  // only detector. Emission never changes control flow: track() is no-throw
+  // fire-and-forget and the caller returns exactly as it did before.
+  //
+  // `guard` is the discriminator (one event name, two guards); `decision` is
+  // what the user was reaching for, which is the difference between a
+  // double-tapped ✕ and a user hunting for an escape. The CONTROL (button vs
+  // gesture vs VoiceOver) is deliberately not a prop — all three funnel
+  // through one onLike/onPass pair before advance() sees them, so the
+  // emitter cannot honestly tell them apart. NO `platform` prop: device
+  // platform is a user_events COLUMN derived server-side (the NULL-platform
+  // incident); the decline-reason family's prop is a specced exception this
+  // event does not inherit.
+  function reportGuardBlocked(
+    guard: 'swipe_undo' | 'decline_reasons',
+    decision: 'like' | 'pass',
+    rawId: string,
+  ) {
+    const st = guardBlockRef.current;
+    const key = `${guard}:${rawId}`;
+    // A different card or a different guard is a different predicament.
+    if (st.key !== key) {
+      st.key = key;
+      st.n = 0;
+    }
+    st.n += 1;
+    if (!GUARD_BLOCK_LADDER.includes(st.n)) return;
+    if (st.sessionEmitted >= GUARD_BLOCK_SESSION_CAP) return;
+    st.sessionEmitted += 1;
+    track(
+      'swipe_guard_blocked',
+      {
+        guard,
+        decision,
+        trade_id: rawId,
+        // The SERVE, not the card: a re-fronted card is a fresh predicament
+        // on the same trade_id. Literal 'none' (reasonEventProps()'s
+        // convention) so a missing serve is not a stripped prop.
+        impression_id: rawTopCard?.impression_id ?? 'none',
+        blocked_n: st.n,
+        ms_since_render: Math.max(0, Date.now() - cardRenderedAtRef.current),
+      },
+      'Trades',
+    );
+  }
+
   function advance(
     decision: 'like' | 'pass',
     // Decline-reason capture (SPEC §3): the layer-1 tile tap IS the pass, but
@@ -3872,15 +3958,23 @@ export default function TradesScreen({ navigation, route }: any) {
       !opts?.deferDeckAdvance &&
       reasonBankedIdRef.current === dispatchRawId
     ) {
+      reportGuardBlocked('decline_reasons', decision, dispatchRawId);
       return;
     }
     if (swipeUndoOn) {
-      if (lastDispositionedRef.current === dispatchRawId) return;
+      if (lastDispositionedRef.current === dispatchRawId) {
+        reportGuardBlocked('swipe_undo', decision, dispatchRawId);
+        return;
+      }
       lastDispositionedRef.current = dispatchRawId;
       // A newer disposition always commits the previous pending pass first
       // (at most one undoable action in flight; ordering preserved).
       flushPendingPass();
     }
+    // Past both guards: the disposition got through, so whatever streak of
+    // blocks preceded it is over. Keeps `blocked_n` a count of CONSECUTIVE
+    // blocks on one predicament rather than a session tally.
+    guardBlockRef.current.key = null;
     // N6.1's lifetime bound (PRD §5.3): the bubble auto-dismisses on the
     // next swipe as well as after 8 s, so a cta step can never hold the
     // interrupt slot across further swipes and starve the push primer or

@@ -22,6 +22,15 @@ export interface CalcValueRow {
    *  bands. Reuse this field for tier display; never re-derive a tier from
    *  `value` client-side. */
   tier: Tier;
+  /** Authoritative draft-pick identity, from the backend's canonical
+   *  `trade_service.is_pick_asset` (docs/cross-client-invariants.md §
+   *  "Pick identity on the wire"). Prefer this over inferring from
+   *  `position`/`team`: the universal pool's generic rungs deliberately
+   *  carry a REAL player position so they mix into the trio/rank tabs, and
+   *  are marked as picks by `team === 'PICK'` alone — an asymmetry that has
+   *  now shipped two bugs (#222, and the 2026-08-18 B3 sweep). Optional
+   *  because a client can outlive the deploy that added it. */
+  is_pick?: boolean;
 }
 
 export type CalcVerdict = 'even' | 'fair' | 'unfair';

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-18b — Follow-on batch status (3/4/5 built; 6/7 resolved)](#2026-08-18b--follow-on-batch-status-345-built-67-resolved)
 - [2026-08-18 — Bug-sweep follow-ons (B1–B5)](#2026-08-18--bug-sweep-follow-ons-b1b5)
 - [2026-08-16 — Matchmaking engine follow-ons](#2026-08-16--matchmaking-engine-follow-ons)
 - [2026-08-16 — Presentment-rules follow-ons (G6, D-062)](#2026-08-16--presentment-rules-follow-ons-g6-d-062)
@@ -21,6 +22,21 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-18b — Follow-on batch status (3/4/5 built; 6/7 resolved)
+
+On `feat/sweep-followups-2026-08-18`, **not shipped**. Items 3, 4, 5 built; 6 and 7 researched and
+fixed. What remains:
+
+1. **Operator: ship decision for the follow-on branch** — full gates green (pytest 3191, tsc clean, 56 suites). Needs a merge + a TestFlight build for the client half.
+2. **Operator: does `swipe_guard_blocked` count toward DAU/WAU?** It was deliberately left out of `NON_INTENT_EVENTS` (D-071). Reasoning is pinned by a test; one line to reverse if you disagree.
+3. **`/api/trades/generate` ignores `force_fresh` for in-flight jobs** — a forced regeneration can return the pre-existing deck, so "rebuild around this board" silently doesn't. API contract, bright line. **Routed to the "Matchmaking model research agents" session**; track there, not here.
+4. **`/api/trade/evaluate`'s eveners hand-set `is_pick`** rather than deriving it from `trade_service.is_pick_asset`. Contract is correct today; rebinding it gives one derivation. Small.
+5. **The web client still has B3's picks bug** (`web/index.html:635`, `web/js/app.js:3156/3184/3219`) — carried over, still open, now further diverged from mobile since mobile also gained the `is_pick` migration.
+6. **Class-(b) re-fronting is untested** — a card can be re-fronted by the `sortedDeck` re-sort with neither `setDeckIdx` nor `setDeck([])`, so no current test can see it. `rerankRemaining` guards positions `≤ curIdx + 1`; the memo does not.
+7. **Item 5's residual:** the replay guard is read-then-write in one transaction, not a distributed lock — two simultaneous requests on separate workers could still both write. All 40 observed prod duplicates were sequential.
 
 ---
 

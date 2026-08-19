@@ -8934,11 +8934,26 @@ def trade_calc_values_route():
     `value` above is elo_to_value-transformed and NOT on the same scale as
     the tier bands, so `tier` is computed from the pre-transform seed Elo,
     not derived from `value`.
+
+    B3 follow-up (2026-08-18) — `is_pick` is the AUTHORITATIVE pick-identity
+    signal on this wire, derived from the canonical predicate
+    `trade_service.is_pick_asset` (never a second implementation). It exists
+    because the pool's 12 generic rungs carry a FAKE player position
+    (`_PICK_POS` in build_universal_pool) so they distribute across the
+    trio/rank position tabs, and were marked as picks by `team == "PICK"`
+    alone — an inference five clients each re-derived, twice wrongly
+    (feedback #222, the 2026-08-18 B3 sweep). ADDITIVE ONLY: `position` /
+    `team` are untouched, so the `team == "PICK"` inference keeps working as
+    legacy compat for clients that have not migrated (and for responses
+    cached before this shipped). See docs/cross-client-invariants.md
+    "Pick identity on the wire".
     """
     fmt = _calc_scoring_format(request.args.get("scoring_format"))
     try:
         pool_players, seed = _get_universal_pool(fmt)
         e2v = _trade_service_mod.elo_to_value
+        # Canonical predicate, bound once — see the docstring's B3 note.
+        is_pick = _trade_service_mod.is_pick_asset
         rows = [{
             "id":       p.id,
             "name":     p.name,
@@ -8947,6 +8962,7 @@ def trade_calc_values_route():
             "age":      getattr(p, "age", None),
             "value":    round(e2v(seed.get(p.id, 1500.0)), 1),
             "tier":     RankingService.tier_for_elo(seed.get(p.id, 1500.0), p.position, fmt),
+            "is_pick":  is_pick(p),
         } for p in pool_players]
         rows.sort(key=lambda r: r["value"], reverse=True)
         payload = json.dumps({"scoring_format": fmt, "players": rows})
@@ -10881,7 +10897,14 @@ def swipe_trade():
         # Persist to DB — write-through
         match_data = None
         try:
-            save_trade_decision(
+            # False ⇒ this is a double-fire replay of the decision we just
+            # wrote (identical payload, still live, inside the dedupe
+            # window). The Elo damage lives in `swipe_decisions` — that is
+            # the table `_compute_elo` replays — so skipping the swipe write
+            # is what actually stops `trade_k_pass` being applied twice.
+            # `check_for_match` below is deliberately NOT skipped: a replayed
+            # like must still be able to surface a mutual match.
+            wrote_decision = save_trade_decision(
                 user_id            = g_user_id,
                 league_id          = card.league_id,
                 trade_id           = trade_id,
@@ -10889,13 +10912,14 @@ def swipe_trade():
                 receive_player_ids = card.receive_player_ids,
                 decision           = decision,
             )
-            save_trade_swipes(
-                user_id        = g_user_id,
-                winner_ids     = win_ids,
-                loser_ids      = lose_ids,
-                k_factor       = k_factor,
-                scoring_format = _active_format(sess),
-            )
+            if wrote_decision:
+                save_trade_swipes(
+                    user_id        = g_user_id,
+                    winner_ids     = win_ids,
+                    loser_ids      = lose_ids,
+                    k_factor       = k_factor,
+                    scoring_format = _active_format(sess),
+                )
 
             try:
                 record_event(
@@ -11212,7 +11236,10 @@ def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
     )
 
     try:
-        save_trade_decision(
+        # See the swipe_trade site above: False ⇒ double-fire replay, so the
+        # swipe write (the one _compute_elo replays) is skipped to keep
+        # trade_k_pass single-counted.
+        wrote_decision = save_trade_decision(
             user_id            = g_user_id,
             league_id          = card.league_id,
             trade_id           = card.trade_id,
@@ -11220,7 +11247,7 @@ def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
             receive_player_ids = card.receive_player_ids,
             decision           = "pass",
         )
-        if elo:
+        if elo and wrote_decision:
             from .ranking_service import _c as _rs_c
             save_trade_swipes(
                 user_id        = g_user_id,

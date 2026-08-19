@@ -10,6 +10,41 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18b — Bug-sweep follow-ons (items 3/4/5) + research 6/7
+
+**Branch:** `feat/sweep-followups-2026-08-18` (off `origin/main` `90fb19a`). **Not shipped** — awaiting operator go.
+
+| Gate | Sweep baseline | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3148 passed, 1 skipped | **3191 passed, 1 skipped** |
+| `npx tsc --noEmit` (mobile) | clean | **clean** |
+| `check-*.js` | 54 suites | **56 suites, all pass** |
+| `testid-lint.sh` | OK | **OK** |
+
+**Two false-confidence findings, both caught by sabotage rather than by review:**
+1. `test_trade_decision_idempotency.py` defined its own `swipe_once()` caller, proving the *contract*
+   while leaving `server.py`'s two call-site gates unpinned — both could be deleted with every test
+   green. Closed with `inspect.getsource` route pins (the `test_pass_cooldown.py` idiom).
+2. `check-swipe-failure-recovery.js` exempted rewinds that called `setDeck([])`. Unsound — the guard
+   is a ref that outlives the deck — and its only real effect was to let the one site that forgot
+   (QuickSet regen) pass. Exemption removed; scan went **4 → 9 sites**.
+
+**Sabotage coverage:** item 3 ran 65 mutations (all RED, three initially-weak assertions rewritten
+after they survived); item 4 ran 9; item 5 ran 9; the orchestrator separately sabotage-verified the
+QuickSet guard clear, the picker `loading` assertion, and both new route pins.
+
+**Prod reads (read-only, `DATABASE_URL_PROD`):** `trade_decisions` 933 rows — 40 double-writes
+(0.015–0.200 s) vs 23 genuine re-decisions (147.7 s+), 738× empty band; 62 duplicate `swipe_decisions`
+rows ≤1 s apart, 48 correlating with a duplicated decision.
+
+**On-device checks owed (next build):** (1) **SignIn keyboard** — fresh install, tour on, tap the
+username field: the ring must follow it up. This is the highest-value check in the batch and is a
+30-second visual confirm. (2) QuickSet regen: pass a card, take the Quick-Set prompt mid-generation,
+return, confirm the deck rebuilds and the card can still be passed. (3) Calculator PICK chip still
+correct with the server field live.
+
+---
+
 ## 2026-08-18 — Operator bug sweep B1–B5 (five fixes, two adversarial rounds)
 
 **Branch:** `fix/bug-sweep-2026-08-18` (off `origin/main` `90fb19a`). **Ticket:** [`docs/reviews/2026-08-18-bug-sweep/ticket.md`](../docs/reviews/2026-08-18-bug-sweep/ticket.md).

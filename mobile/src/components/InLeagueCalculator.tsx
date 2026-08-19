@@ -284,6 +284,8 @@ export default function InLeagueCalculator({
         nflTeam: r.team ?? '—',
         age: r.age ?? 0,
         base: r.value,
+        // Canonical pick verdict from the server (see calc.ts is_pick).
+        isPick: r.is_pick,
       };
     }
     // Owned picks are selectable assets too — merge so TradeSide + evaluate

@@ -208,7 +208,13 @@ High-level trade card decisions — audit trail.
 | `created_at` | str | |
 | `retracted_at` | str, nullable | ISO UTC; NULL = live like (#318 awaiting-dismiss). Set (never cleared) by `POST /api/trades/awaiting/dismiss` on every like row sharing the dismissed trade's `(league_id, give-set, receive-set)` key. Retracted rows are invisible to `load_awaiting_trades` / `load_recent_league_likes` / `check_for_match`, but stay visible to swipe-Elo history, impressions joins and the past-decisions deck suppression (deliberate). A re-like writes a fresh NULL row — the revive path. Additive boot migration; existing rows backfill NULL. |
 
-Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)` — `check_for_match` fires on every "like" swipe filtering on these three columns.
+Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)` — `check_for_match` fires on every "like" swipe filtering on these three columns; also serves the write-time replay guard below.
+
+**Duplicate rows are legal, and there is deliberately no unique constraint.** Two distinct kinds of duplicate on `(user_id, league_id, trade_id)` are correct behaviour: the #318 **revive path** (like → retract → re-like writes a fresh `retracted_at IS NULL` row), and a **genuine re-decision** of a card a deck regeneration re-served. A unique index over that triple would break both, and could not be created against the live table in any case.
+
+**Write-time replay guard (G-049).** `save_trade_decision()` is idempotent over a short window and returns `True` when it wrote a row, `False` when it recognised a replay and skipped one. It suppresses only the narrow signature of a double-POST: a still-**live** row for the same `(user_id, league_id, trade_id, decision)` with a byte-identical give/receive payload, written less than `database.TRADE_DECISION_DEDUPE_SECONDS` (10 s) ago. Everything else is written, so no decision the user made is dropped; an unparseable `created_at` fails **open**. The window is sized from prod (2026-08-18): true double-writes were at most 0.200 s apart, the closest legitimate re-decision 147.7 s — nothing in between.
+
+Callers that also apply an Elo signal (`save_trade_swipes()`, `RankingService.record_trade_signal()`) **must skip both on a `False` return**. `swipe_decisions` stores no trade or league identity, so this return value is the only place downstream writers can learn that a swipe was a replay; ignoring it re-applies `trade_k_pass` twice. The guard is not a distributed lock — two genuinely simultaneous requests on separate workers can still both write.
 
 ---
 

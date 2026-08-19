@@ -246,6 +246,10 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         nflTeam: r.team ?? '—',
         age: r.age ?? 0,
         base: r.value,
+        // Carry the server's canonical pick verdict through; consumers
+        // prefer it over the pos/team inference (cross-client-invariants
+        // § Pick identity on the wire). Undefined pre-deploy — not false.
+        isPick: r.is_pick,
       })),
     [valuesQuery.data],
   );

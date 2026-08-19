@@ -358,6 +358,44 @@ when they filter to QB. Any rank printed for the other basis is denominated by
 
 ---
 
+## Pick identity on the wire — `is_pick` is authoritative, the magic string is legacy compat
+
+**A client must never decide what is a draft pick by looking at `position` or `team`.** It reads the server's explicit flag. This section is the single statement of that rule and the register of every place it is mirrored.
+
+**Why the inference was ever needed.** `build_universal_pool` (`backend/server.py`) stamps the 12 generic pick rungs with a **FAKE player position** — `_PICK_POS = {1:"RB", 2:"WR", 3:"TE", 4:"QB"}` — deliberately, so draft capital distributes across the trio/rank position tabs and gets ranked against players. That fake position is **load-bearing and is not changing**: it feeds tab distribution across five clients and the tier-occupancy tests. It also means a rung is *not* `position == "PICK"`; historically it was identifiable only by `team == "PICK"`.
+
+**The canonical predicate** is `trade_service.is_pick_asset` (`backend/trade_service.py`): `position == "PICK" OR team == "PICK"`. Both arms are required — owned-pick pseudo-players (`server._owned_pick_assets`) carry `position == "PICK"`, the generic rungs carry only `team == "PICK"`. Every backend site that needs pick-ness calls this function; nothing re-implements it.
+
+**The wire contract (B3 follow-up, 2026-08-18).** `GET /api/trade/values` serializes `is_pick` (bool, always present) directly from that predicate. It is **additive**: `_PICK_POS`, `position` and `team` are unchanged, so a client that has not migrated sees a byte-identical row apart from the new key.
+
+| Rule | |
+|---|---|
+| **Authoritative** | the server-supplied boolean (`is_pick` on the wire) |
+| **Legacy compat — keep, do not delete** | `position === 'PICK' \|\| team === 'PICK'` — the fallback for servers older than 2026-08-18, for responses served from the endpoint's `stale-while-revalidate` cache from before the deploy, and for pick shapes that never come from this endpoint at all (owned league picks built client-side from `/api/league/picks`; the demo calculator's mock picks) |
+| **Only an EXPLICIT boolean wins** | a mapper wired against an older server hands over `undefined`; reading that as `false` re-creates the bug. Guard with `typeof … === 'boolean'`, never bare truthiness |
+| **Never** | re-derive pick-ness from a name, a label, a round number, or `position` alone |
+
+**Two shipped bugs are why this is registered here** rather than left to each client: feedback **#222** (picks leaking into the free-agent list) and the **2026-08-18 B3 sweep** (the calculator's PICK filter matched nothing — the rungs are typed RB/WR/TE/QB — while the RB/WR/TE/QB chips wrongly listed picks). Both were a client re-deriving identity the backend already knew.
+
+**Mirror locations — every client re-derivation of pick identity.** This list did not exist before 2026-08-18, which is why the drift went uncaught. Add a row when you add a re-derivation; the goal is for every row to become "reads the server field".
+
+| Location | Predicate | Status |
+|---|---|---|
+| `backend/trade_service.py` `is_pick_asset` | `position == "PICK" or team == "PICK"` | **canonical — the single source** |
+| `backend/server.py` `trade_calc_values_route` | serializes `is_pick` from the canonical predicate | serves the flag |
+| `mobile/src/components/PlayerPickerModal.tsx` `isPickAsset` | server field, falling back to `pos`/`nflTeam` | **migrated** (2026-08-18) — pinned by `mobile/tests/check-picker-server-pick-flag.js` + `check-picker-pick-filter.js` |
+| `mobile/src/screens/TradesScreen.tsx` `isPickAsset` (~:249) | `position === 'PICK' \|\| pick_value != null` | not migrated — different payload (`/api/trades`), uses `pick_value` |
+| `mobile/src/utils/sessionRerank.ts` (~:109) | `position === 'PICK' \|\| pick_value > 0` | not migrated — ranking payload |
+| `mobile/src/components/InLeagueCalculator.tsx` (~:548, :873) | `pos === 'PICK'` | not migrated — operates on client-built owned picks |
+| `mobile/src/screens/TradeCalculatorScreen.tsx` (~:405) | `pos === 'PICK'` | not migrated |
+| `web/js/app.js` (~:1746) | `pick_value != null` | not migrated — `/api/rankings` payload |
+
+**Client mapper contract for the mobile calculator.** `CalcValueRow.is_pick` (`mobile/src/api/calc.ts`) maps to `CalcPlayer.isPick?: boolean` — a **separate field from** the demo-only `CalcPlayer.pick?: true`, which is set by the mock board and asserts nothing about the server. Mappers forward the server value verbatim or omit the key; they never synthesize it.
+
+**Backend pin:** `backend/tests/test_trade_values_is_pick.py` (the flag follows the canonical predicate, is true for all 12 rungs and for owned picks, false for players including free agents, and no pre-existing field moved).
+
+---
+
 ## Progress gating thresholds
 
 Minimum rank decisions per position before Trade Finder unlocks. Tracked per scoring format; result lands in `users.unlocked_formats`.

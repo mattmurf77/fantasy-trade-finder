@@ -700,6 +700,81 @@ ranking inputs, not a feature preference.
 route. Documented in the route, the scope block, and pinned by a test proving it cannot
 write twice.
 
+## D-073 — A Replayed Pass Is Suppressed by a Time-Window Guard, Not a Unique Constraint
+**Date:** 2026-08-18
+**Context:** G-049 — a duplicate pass double-counted `trade_k_pass`. The obvious fix (unique
+constraint on `trade_decisions`) is unavailable: `retracted_at` (#318) makes duplicate
+`(user, league, trade_id)` rows **deliberate** (the revive path), the constraint cannot be created
+against prod (63 pre-existing duplicates reject it), and an `IntegrityError` in the route's persist
+block would skip `check_for_match`, killing mutual-match detection on a re-like. **G-049 also named
+the wrong table** — `_compute_elo` replays `swipe_decisions`, so a `trade_decisions` constraint would
+have fixed nothing measurable.
+**Evidence:** prod (933 rows) splits duplicates into **40 double-writes at 0.015–0.200 s** and
+**23 genuine re-decisions at 147.7 s+**, with a **738× empty band** between. The gap is what makes a
+time window safe rather than a guess.
+**Decision:** `save_trade_decision` suppresses a write only on the narrow double-fire signature — a
+still-live row (`retracted_at IS NULL`), same `(user, league, trade_id, decision)`, byte-identical
+payload, inside `TRADE_DECISION_DEDUPE_SECONDS = 10.0` — and returns `bool`. **Both** route call
+sites (`swipe_trade`, `_apply_reasoned_pass`) gate `save_trade_swipes` on that verdict, which is what
+actually single-counts the Elo. `check_for_match` is **not** gated: a replayed like must still
+surface a match. The guard fails **open** on an unparseable timestamp — losing a real decision is
+worse than keeping a duplicate row. No migration, no DDL.
+**Alternatives considered:** unique/partial index (rejected above); dedupe inside `_compute_elo` or
+`save_trade_swipes` (**not implementable** — `swipe_decisions` carries no trade or league identity,
+and prod has 661 legitimate repeats of the same `(winner, loser, k)` triple within an hour, so a
+blind identity dedupe would delete real signal); a genuine upsert (nothing to update — a replay
+should change no state).
+**Consequences:** read-then-write in one transaction, not a distributed lock — two simultaneous
+requests on separate workers could still both write. All 40 observed prod duplicates were sequential.
+The contract test defines its own caller, so **route pins** (`inspect.getsource`) were added after
+sabotage showed both call-site gates could be deleted with every test still green.
+**Status:** Active.
+
+---
+
+## D-072 — `is_pick` Is Authoritative on the Wire; the `team == "PICK"` Inference Is Legacy Compat
+**Date:** 2026-08-18
+**Context:** `build_universal_pool` gives generic pick rungs a **fake player position** (`_PICK_POS`)
+so they distribute across the trio/rank tabs, marking them as picks by `team == "PICK"` alone. Five
+clients each re-derived pick identity from that magic string, and getting it wrong shipped two bugs:
+#222 (picks leaking into free agents) and the 2026-08-18 B3 sweep (PICK filter matched nothing).
+**Decision:** `/api/trade/values` now emits an explicit `is_pick`, derived from the canonical
+`trade_service.is_pick_asset`. **Purely additive** — `_PICK_POS`, `position`, `team` and field order
+are untouched, because the fake position is load-bearing for tab distribution. Consumers prefer
+`is_pick` and **fall back** to the two-field check when it is absent; only an *explicit boolean* is
+authoritative, so a client running against an older server does not read `undefined` as "not a pick".
+`docs/cross-client-invariants.md` gains a mirror-locations table listing all eight re-derivations —
+the absence of one is why drift went uncaught.
+**Alternatives considered:** changing `_PICK_POS` to `"PICK"` (rejected — ripples through five clients
+and the tier-occupancy tests); client-only fixes (rejected — that is the pattern that produced two
+bugs).
+**Consequences:** the ETag rotates once. `/api/trade/evaluate`'s eveners already emit a hand-set
+`is_pick` not derived from the canonical predicate — rebinding it is a recommended follow-up, not done
+here.
+**Status:** Active.
+
+---
+
+## D-071 — `swipe_guard_blocked` Is an INTENT Event, Laddered Not Deduped
+**Date:** 2026-08-18 (operator instruction; D-068 had deferred it)
+**Context:** The B4 stall trapped users and produced **zero telemetry** — a user could tap ✕ fifty
+times and generate no events, which is why it took a user report to find.
+**Decision:** One event name covering **both** deck guards (`swipe_undo` and `decline_reasons`),
+discriminated by a `guard` prop — instrumenting only the older guard would light the strand already
+fixed and leave dark the one that is not. Emission is **laddered** (`1,2,3,5,10,25` consecutive
+blocks per card/guard, 50/session cap), not deduped: collapsing to one row per card would delete the
+measurement, and firing per tap is unbounded. Analysis reads `max(blocked_n)`, never `count(rows)`.
+**Not `FUNNEL_CRITICAL`** — a trapped user is the most likely to overflow the queue, so drop-last
+would evict their `signin_*` rows; this event should go first.
+**Contested call, recorded:** it was **not** added to `NON_INTENT_EVENTS`. The argument is that it is
+a real user gesture the app refused (the class of `sleeper_send_failed`, which is INTENT) and that
+every emission is preceded on the same card by `trade_card_viewed`, which is INTENT and fires on
+every fronted card — so no new user-day is created. A test pins that premise so it cannot rot
+silently. **If the operator disagrees, it is one line.**
+**Status:** Active.
+
+---
+
 ## D-070 — Tier-Target Chips Are Direction-Aware; a Repeat Tap Is a No-Op
 **Date:** 2026-08-18 (operator: *"when users are ranking players and push a player down a tier, the default should be that the player is at the top of the next tier"*)
 **Context:** The "Tier down" button (`moveTierByOne`) already inserted at the top — that path was never broken. The reported behavior came from the **tier-target chips** ("Move to 3rd") and the VoiceOver "Move to \<tier\>" action, which appended to the destination's END regardless of direction. Within-tier order is score-derived, but `apply_tiers` spreads the submitted index monotonically across the tier's Elo band (`ranking_service.py:1419-1427`), so client order round-trips faithfully — persistence was ruled out with a new round-trip test.
@@ -724,7 +799,7 @@ write twice.
 **Date:** 2026-08-18 (operator bug report: *"he wasn't able to [pass]. It kept the suggestion on the screen without a way to move past"*)
 **Context:** `swipeMutation.onError` rewinds the deck to re-front a card whose POST failed, but never cleared `lastDispositionedRef` — so every subsequent ✕/✓/swipe on that card hit a bare `return` and the user was trapped with no error and no escape but a league switch. Six other sites clear that guard; one carries a comment describing this exact hazard. The failure was also effectively invisible: the POST is held `UNDO_HOLD_MS = 5000` before firing, and the warning toast held for the 1500 ms default.
 **Decision:** (1) Clear the guard in `onError` on an `ctx.rawId` match — one statement, placed OUTSIDE the `setDeckIdx` updater, because React may re-invoke updaters and a ref mutation there is unsafe. (2) **No Retry action on the toast.** With the guard cleared, the card's own ✕ re-POSTs *and* advances the deck; a Retry button would re-POST while leaving the card fronted, inviting a second pass. That matters because **`save_trade_decision` is a plain `INSERT`** (`backend/database.py:4794`) with no upsert and no unique constraint — a duplicate writes a second `trade_decisions` row, a second `trade_swipes` row, and replays `trade_k_pass` twice. (3) The toast holds 6 s and says "Tap again to retry", which is now literally true; a `verification_required` 403 gets its own copy and points at the banner the same failure raises, since retrying a standing gate can never succeed.
-**Alternatives considered:** Retry that also advances the deck on success (rejected — needs deck mutation from a closure that may outlive a fairness re-sort, strictly riskier than the ✕ that already works). A `swipe_guard_blocked` analytics event (deferred — needs an `analytics_taxonomy.py` row, which crosses the CLAUDE.md bright line; the stall consequently remains invisible in telemetry).
+**Alternatives considered:** Retry that also advances the deck on success (rejected — needs deck mutation from a closure that may outlive a fairness re-sort, strictly riskier than the ✕ that already works). A `swipe_guard_blocked` analytics event (deferred at the time — needs an `analytics_taxonomy.py` row, which crosses the bright line. **Built 2026-08-18 on operator instruction — see D-071**; the stall is no longer invisible).
 **Consequences:** Re-arming opens a duplicate-record path the stall previously prevented — a swipe that succeeded server-side but lost its response now lets the user re-pass and double-record. Accepted: a permanent trap is strictly worse. Recorded as **G-049**.
 **Status:** Active.
 

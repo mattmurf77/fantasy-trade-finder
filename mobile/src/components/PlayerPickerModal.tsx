@@ -37,14 +37,32 @@ import {
 
 const POSITIONS: CalcPos[] = ['QB', 'RB', 'WR', 'TE', 'PICK'];
 
-// B3 — mirror of the canonical backend predicate `is_pick_asset`
-// (backend/trade_service.py:1138-1147). A pick reaches this modal in three
-// shapes and only BOTH fields together cover them: owned picks (pos 'PICK',
-// nflTeam 'PICK'), the universal pool's generic rungs (a FAKE player
-// position from `_PICK_POS`, backend/server.py:1464, marked as picks by
-// `team == 'PICK'` alone), and demo picks (pos 'PICK', nflTeam '—'). The
-// magic string is the server's; do not drift it without the backend.
-const isPickAsset = (p: CalcPlayer) => p.pos === 'PICK' || p.nflTeam === 'PICK';
+// B3 follow-up (2026-08-18) — pick identity is now SERVER-SUPPLIED, and this
+// is the first client migrated off the magic string.
+//
+// PREFERRED: `isPick`, mapped straight off `/api/trade/values`' `is_pick`
+// (docs/cross-client-invariants.md "Pick identity on the wire"). The server
+// derives it from the canonical predicate `trade_service.is_pick_asset`
+// (backend/trade_service.py:1138-1147), so a client that reads it can never
+// disagree with the engine. Only an explicit boolean is authoritative — an
+// `isPick: undefined` from a mapper wired against an older server must fall
+// through, not read as `false`.
+//
+// THE FALLBACK STAYS, and is not dead code. `is_pick` is additive: it is
+// absent on any server older than this change, on cached/`stale-while-
+// revalidate` responses served from before it deployed, and on the pick
+// shapes that never come from this endpoint at all — owned league picks
+// (pos 'PICK', nflTeam 'PICK', built client-side from `/api/league/picks`)
+// and the demo calculator's mock picks (pos 'PICK', nflTeam '—'). BOTH
+// fields are needed: the universal pool's generic rungs carry a FAKE player
+// position (`_PICK_POS`, backend/server.py:1464) and are marked as picks by
+// `team === 'PICK'` alone. Deleting either arm re-opens feedback #222 /
+// sweep B3. The magic string is the server's; do not drift it alone.
+// (The body stays on the `=>` line: check-picker-pick-filter.js lifts it out
+// with `const isPickAsset = (p: CalcPlayer) => ([^;]+);` and runs it.)
+const isPickAsset = (p: CalcPlayer) => ('isPick' in p && typeof p.isPick === 'boolean'
+  ? p.isPick
+  : p.pos === 'PICK' || p.nflTeam === 'PICK');
 
 // B3 — two-sided position filter. The PICK chip keeps every pick asset (a
 // generic rung typed 'RB' server-side included, which is why the old
