@@ -68,6 +68,14 @@ removed. No pre-existing knob's default was re-tuned.
 **Excluded — each with its reason** (per the mission's requirement that every
 exclusion be justified):
 
+> **2026-08-19 (D-095).** The landability challenger was briefed as "the new
+> arm A" and is deliberately **not** one: it ships as a fourth arm,
+> `challenger`, with its own `MODEL_CHALLENGER_PROFILE`. `MODEL_A_PROFILE`,
+> `model_a()` and the arm-A golden's captured deck are unchanged by that work
+> — arm A is the bake-off's only fixed point, and overwriting it makes every
+> comparison unfalsifiable (D-075). The five knobs the challenger introduced
+> are excluded below, and the first row is the reason why in detail.
+
 | Key | Added | Why arm A does not set it |
 |---|---|---|
 | `max_overpay_min_value` | G6 | **Inert companion.** `overpay_ok` returns True at `max_overpay_frac <= 0` before reading it. Pinning it would imply it matters. |
@@ -84,6 +92,8 @@ exclusion be justified):
 | `gen2_*` (all) | pre-dates / arm C | `trade_gen_v2` is **arm C**. Arm A must not touch its knobs. |
 | `bakeoff_serve_interleaved` | Phase 3, 2026-08-18 | **Not generation logic — it is the bake-off's own orchestration.** Read only by `bakeoff_runner._cfg`, never by any generator: it selects Phase-4 dark validation vs Phase-5 interleaved serving, which is a decision about the merged deck, made after all three arms have already run. Setting it per-arm would be meaningless. |
 | `bakeoff_deck_limit` | Phase 3, 2026-08-18 | Same — a cap on the INTERLEAVED deck, applied by the team-draft merge after generation. No arm can see it. |
+| `user_elo_shrink`, `consensus_both_ways`, `consensus_fairness_floor` | D-095, landability challenger (arm D), 2026-08-19 | **Their defaults ARE the pre-wave engine — pinning a kill value would CHANGE arm A, not preserve it.** This is the one exclusion on this page that runs the opposite way to all the others. Every other row is "a knob post-dating the reference SHA, disabled so arm A behaves as it did"; these three are knobs whose *live default* is the pre-wave behaviour and whose *non-default* value is a proposal about the future. `user_elo_shrink` = 1.0 is the confidence blend the engine has always done; `consensus_both_ways` = 0.0 is the `rv >= gv` sign test it has always applied; `consensus_fairness_floor` = 0.0 is "use whatever threshold the caller passed". Setting any of them to the challenger value in `MODEL_A_PROFILE` would make arm A skip shrinkage and emit both directions of an even trade — behaviour the pre-G6 engine never had, silently rewriting the baseline that every bake-off comparison is measured against. They belong to `bakeoff_profiles.MODEL_CHALLENGER_PROFILE` and nowhere else ([landability-challenger PRD](../landability-challenger/PRD.md) N1, A2). All three are pinned in `_PINNED_KNOBS` as usual, so the inventory guard still fires if a fourth appears. |
+| `bakeoff_include_challenger`, `bakeoff_include_gen_v2` | D-095, 2026-08-19 | Same class as `bakeoff_include_baseline` below — **arm roster, not generation.** Read only by `bakeoff_runner.arm_roster()`, before any arm runs; an arm cannot observe which other arms are on the roster. |
 | `bakeoff_group_size`, `bakeoff_group_value_slots`, `bakeoff_fill_policy`, `bakeoff_lane_reallocate`, `bakeoff_include_baseline` | composition, 2026-08-18 / D-086 2026-08-19 | Same class — **deck composition, not generation.** All five are read only by `bakeoff_runner`, after every arm has finished producing its ranked list, and they decide how those lists are narrowed, quota'd and merged. An arm cannot observe them, so a per-arm value would be meaningless. `bakeoff_lane_reallocate` in particular only ever moves a SLOT between lanes inside one already-generated group; it cannot change, add or remove a card any arm proposed. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the

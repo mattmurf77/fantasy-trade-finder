@@ -216,6 +216,84 @@ is gone from both clients and from the module, and S5 exists to keep it gone. Di
 interest unconditionally (same defect class) but is dark behind `trades.presentation_v2: false` and
 belongs to a surface under separate review. Recorded in D-097 and scope §9; **not** touched.
 
+## 2026-08-19h — Landability challenger, bake-off arm D (D-095, NOT SHIPPED, on `feat/bakeoff-arm-a-challenger`)
+
+**Branch:** `feat/bakeoff-arm-a-challenger`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+Spec: [docs/plans/landability-challenger/PRD.md](../docs/plans/landability-challenger/PRD.md) §5 Track A (A1–A4).
+No feature flag: `trade.bakeoff` already gates the fan-out and `bakeoff_serve_interleaved` stays **0**, so the arm is dark.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3554 passed, 1 skipped, 0 failed** |
+| Baseline re-measured on the same branch point before any edit | **3524 passed, 1 skipped** — reproduced exactly |
+| PRD A4 done-when set | `test_bakeoff_challenger.py test_bakeoff_arm_a_golden.py test_bakeoff_composition.py test_bakeoff_runner.py test_user_gain_gate.py` — **120 passed** (the sabotage matrix ran a wider set including `test_bakeoff_serving.py`: 148) |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE, and none is owed** — the arm generates and logs but is never served (PRD G7). The dark contract is asserted in tests instead: `test_the_challenger_generates_and_logs_but_is_never_served`. |
+
+**Net +30 tests** — 25 new in `backend/tests/test_bakeoff_challenger.py`, 5 new in
+`test_bakeoff_composition.py` / `test_bakeoff_serving.py`.
+
+**The load-bearing invariant — arm B is byte-identical — is PROVED, not asserted.**
+`test_bakeoff_challenger.py` carries two goldens captured by checking out `origin/main`
+`50e0451` into a second worktree, copying the test file in, and running its capture mode
+there: code that had never heard of the three new knobs. Today's live-defaults run must
+reproduce both byte for byte. Surfaces: a full `generate_trades` deck (covers dedup, deck
+caps, v2 orchestration) and `_generate_consensus_for_pair` called directly and uncapped —
+the latter because deck-assembly caps hide most of the consensus path, so measured through
+a deck alone the two consensus knobs would read as inert while being perfectly alive.
+Backed by `test_every_new_knob_is_inert_at_its_default`, which sets each knob *explicitly*
+to the value `_DEFAULT_CFG` already carries — that catches a knob inert only because some
+other guard skips its code path, which a golden cannot distinguish.
+
+**Arm A is byte-identical too**, per PRD N1: `MODEL_A_PROFILE`, `model_a()`,
+`MODEL_A_REFERENCE_SHA` and the golden's captured deck are unchanged. The only edit to
+`test_bakeoff_arm_a_golden.py` is five names added to `_PINNED_KNOBS` plus one sentence of
+remedy text; its 10 tests pass unmodified.
+
+**Code-walk proof** (file:line on this branch):
+
+| Lever | Site | Live identity |
+|---|---|---|
+| `user_elo_shrink` | `trade_service.py:1339` — `if confidence is None or _c("user_elo_shrink") <= 0: return dict(user_elo)` | 1.0 ⇒ the early return never fires; the blend below is untouched |
+| `consensus_both_ways` | `trade_service.py:5086` — `if not _both_ways and rv - gv < _c("user_gain_epsilon")` | 0.0 ⇒ `_both_ways` False ⇒ the original predicate, unchanged |
+| 1-for-2 loop | `trade_service.py:5168` — `if _both_ways and len(cards) < max_cards` | 0.0 ⇒ loop never entered |
+| `consensus_fairness_floor` | `trade_service.py:4998` (`_thr = max(requested, floor)`), read at `:5117` | 0.0 ⇒ `_thr is fairness_threshold` |
+| profile entry point | `bakeoff_profiles.py` `model_challenger()` — `_cfg_override(MODEL_CHALLENGER_PROFILE)`, **no** `r4_bypass` | inert until entered |
+| fan-out | `bakeoff_runner.py` `run_bakeoff` `elif arm == ARM_CHALLENGER:` — snapshot taken INSIDE the overlay | arm B's branch untouched |
+| roster | `bakeoff_runner.arm_roster()` — `ALL_ARMS` filtered by four include knobs | `bakeoff_include_challenger` = 0 restores the pre-D-095 roster |
+
+**Import-time binding checked, not assumed.** `trade_optimizer.py:51` and
+`trade_gen_v2.py:112` import `_c` and `_shrink_user_elo` **by value**. All three knobs
+are read *inside* existing function bodies rather than by wrapping or rebinding them, so
+every bound site sees the change — the class of no-op that cost an audit agent a
+perfect-zero measurement on a gate firing 1.17M times cannot occur here.
+
+**Sabotage-tested: 13 deliberate breakages, 13 caught.** Each mutation applied, the A4
+pytest set run, the mutation reverted:
+
+| # | Sabotage | Caught by |
+|---|---|---|
+| 1 | `user_elo_shrink` ignored (shrink always off) | arm-B goldens, both shrink tests, **arm-A golden**, `test_user_gain_gate` Maye-for-Dart repro (v2 + v3) |
+| 2 | sign test dropped for every arm | both arm-B goldens, `test_live_never_emits_a_card_the_user_pays_for` |
+| 3 | both-ways knob never read | `test_both_ways_emits_the_user_pays_direction`, `test_one_for_two_exists_only_under_both_ways` |
+| 4 | floor knob never read | 3 floor tests |
+| 5 | floor OVERRIDES instead of tightening | `test_the_floor_only_ever_tightens` |
+| 6 | 1-for-2 enumeration removed | `test_one_for_two_exists_only_under_both_ways` |
+| 7 | overlay entered for arm B as well | 7 tests incl. both config-snapshot tests |
+| 8 | `model_challenger` gains arm A's R4 bypass | `test_model_challenger_does_not_bypass_r4` |
+| 9 | a challenger knob leaks into `MODEL_A_PROFILE` | **arm-A golden**, `test_the_two_profiles_do_not_collide`, `test_model_a_still_sees_the_live_identity_for_the_new_knobs` |
+| 10 | tier ladder left uncompressed | both ladder tests |
+| 11 | challenger dropped from the default roster | 8 tests across composition/serving/challenger |
+| 12 | challenger stops being an engine arm (loses its consensus group) | 3 tests incl. the dark-mode group assertion |
+| 13 | a new knob vanishes from `_PINNED_KNOBS` | the arm-A inventory guard **and** its cross-check |
+
+**Known gap:** Track C's `measurement.md` (the offline four-cell count) is not written by
+this work — C1 was run elsewhere and its numbers (0.75 both-ways = 200.5% of the one-way
+baseline, 61.2% user-pays, damage capped at 25.0%) are quoted in the profile and
+config-reference on that authority, not re-derived here.
+
 ---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 
