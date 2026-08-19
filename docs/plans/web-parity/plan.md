@@ -69,6 +69,8 @@ Phases 0–2 are unconditional under all three postures.
 
 ## Phase 0 — stop the bleeding
 
+> **STATUS: BUILT 2026-08-19**, commit `26d7841`. 7 of 8 items; P0-3 needs the operator.
+
 Everything here is live-user-facing breakage. No new capability, no new endpoints.
 
 | ID | Fix | Where | Note |
@@ -88,6 +90,9 @@ P0 lands before the harness, so each item gets a written before/after note in th
 ---
 
 ## Phase 1 — foundation
+
+> **STATUS: BUILT 2026-08-19** on `fix/web-phase0`. All six items done; the structural
+> gate went from 101/161 to **161/161**. Not merged, not deployed.
 
 Nothing in Phase 2 or 3 is safe or cheap until this lands.
 

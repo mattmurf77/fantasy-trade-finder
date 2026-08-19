@@ -3,35 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>League Rankings — Fantasy Trade Finder</title>
+  <title>League power rankings — Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="Every team in your dynasty league ranked by total roster value, broken down by position, on consensus values or your own board.">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/league-rankings.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="League power rankings — Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="Every team in your dynasty league ranked by total roster value, broken down by position, on consensus values or your own board.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/league-rankings.html">
+  <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      /* Chalkline tokens (docs/design/design-system.md) */
-      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
-      --line: #262C35; --line-strong: #59647A;
-      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
-      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
-      --flare: #F0508C;
-      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
-      /* Position hexes — data encodings, docs/cross-client-invariants.md */
-      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
-      /* Picks segment — neutral ink-family tone (line-strong), NOT a new hue */
-      --picks: #59647A;
-      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
-      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
-      --font-ui: 'Archivo', sans-serif;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-data: 'IBM Plex Mono', monospace;
-      /* Legacy aliases shared with positional-tiers.html rules */
-      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
-      --text: var(--chalk); --muted: var(--chalk-dim);
-      --accent: var(--ice);
-    }
 
     :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) {
@@ -190,7 +176,8 @@
       margin-bottom: 8px;
     }
     .pr-title-group { display: flex; flex-direction: column; gap: 4px; }
-    .pr-page-title { font-size: 20px; font-weight: 700; }
+    .pr-page-title {
+      margin-top: 0;   /* promoted to <h1>; drop the UA default */ font-size: 20px; font-weight: 700; }
     .pr-page-subtitle { font-size: 13px; color: var(--muted); line-height: 1.5; max-width: 560px; }
 
     /* ── Controls row: league select · basis toggle · updated/refresh ── */
@@ -529,7 +516,7 @@
     </div>
     <div class="pr-title-row">
       <div class="pr-title-group">
-        <div class="pr-page-title">League Rankings</div>
+        <h1 class="pr-page-title">League Rankings</h1>
         <div class="pr-page-subtitle">Every team's roster value stacked by position — priced by market consensus, or by your own board.</div>
       </div>
     </div>

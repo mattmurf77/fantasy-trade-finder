@@ -10,6 +10,36 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19i — Web Phase 1 foundation (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0`. **Not pushed, not merged.** No flags, no schema, no backend change.
+
+| Gate | Result |
+|---|---|
+| `python3 qa/web/check_web_structure.py` | **161/161 pass** (baseline at Phase 1 start: 101/161) |
+| `python -m pytest backend/tests -q` | **3524 passed, 1 skipped** at commit `26d7841`; `backend/` untouched since |
+| `npx tsc --noEmit` / `testid-lint.sh` | n/a — zero mobile files touched. Not run, not claimed. |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md) |
+
+**New permanent gate:** `qa/web/check_web_structure.py`, wired as CI job `web-structure`.
+This is the first automated coverage `web/` has ever had. Pure stdlib — Playwright was
+installed and evaluated, then **not** used: the structural layer catches the entire class
+of defect this phase addressed, needs no browser, and cannot flake. A browser-level smoke
+(console errors, layout at 375px, axe) remains unbuilt and is the honest gap.
+
+Browser-verified against a local server on this branch: all 11 pages 200 with exactly one
+`<h1>`, a meta description, and the shared token link; `--line-strong` resolves to
+`#59647A` everywhere; `index.html` has `<main>` wrapping all 7 views with the 3 overlays
+correctly outside it; signed-out `positional-tiers.html` renders **real** players (Josh
+Allen, Lamar Jackson, Joe Burrow) auto-tiered, where it previously rendered 45 stale
+2024-era hardcoded ones.
+
+**Caveat worth recording:** the signed-out player path could not be verified until the
+worktree's throwaway DB was seeded — `/api/players` returns `[]` on an unsynced local DB,
+and its `Cache-Control: max-age=300` made an early empty response persist and look like a
+code bug. It was not one.
+
+---
 ## 2026-08-19h — Web Phase 0 breakage fixes (NOT SHIPPED, on `fix/web-phase0`)
 
 **Branch:** `fix/web-phase0` from `origin/main` `50e0451`. **Not pushed, not merged.** No flags added or flipped.

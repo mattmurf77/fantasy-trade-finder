@@ -10,6 +10,31 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — Web Phase 1: one token source + the first-ever web CI gate (`fix/web-phase0`, NOT merged)
+
+**`qa/web/check_web_structure.py`** — 161 structural checks over shipped `web/` source
+(design tokens, emoji-as-icons, radii, fonts, SEO, a11y, hygiene). Pure stdlib: no
+browser, no server, no new dependencies, sub-second. Wired as the `web-structure` CI
+job. **Before this, nothing in CI touched `web/` at all.** Baseline 101/161 → **161/161**.
+
+**`web/css/tokens.css` is now the single token source.** The `:root` block had been
+copy-pasted into 12 files; `--line-strong` was corrected to `#59647A` on 2026-07-19 and
+only one copy got it, so a 2.03:1 WCAG 1.4.11 failure shipped on every input and
+secondary-button border. Of 53 union variables only that one diverged, so consolidation
+was value-preserving. A second definer now fails CI.
+
+Also: removed the dead debug drawer (~135-line IIFE + 95 call sites, −13 KB, and with it
+the public bundle's reference to the CRON-gated `/api/debug/log`); replaced the 45-player
+2024-era hardcoded roster in `positional-tiers.html` with an empty pool + honest
+loading/failed states, and **un-nested the public `/api/players` fallback from the token
+guard so signed-out visitors get real players instead of stale fakes**; full SEO metadata
++ `robots.txt` + `sitemap.xml`; `<main>`/`<nav>` landmarks and a real `<h1>` on all 11
+pages; renamed the user-visible surface to **Fleeced** (D-057) and corrected two false
+FAQ claims ("mobile-first", implied App Store availability).
+
+Legal-doc entity naming deliberately left alone — that is an operator/legal call.
+
+---
 ## 2026-08-19 — Web audit + Phase 0 breakage fixes (`fix/web-phase0`, NOT merged)
 
 **Four-auditor audit of the live site** → [`docs/reviews/2026-08-19-web-parity-audit.md`](../docs/reviews/2026-08-19-web-parity-audit.md).

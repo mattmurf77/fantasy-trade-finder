@@ -3,10 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dynasty Rankings — Fantasy Trade Finder</title>
+  <title>Fleeced — Dynasty Trade Finder</title>
+  <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="Fleeced — Dynasty Trade Finder">
+  <meta property="og:description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/">
+  <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/styles.css">
   <style>
     /* League-card rank chip (#14/#21 — flag league.power_rankings).
@@ -57,7 +66,7 @@
         </h1>
 
         <p class="cb-sub">
-          Fantasy Trade Finder compares how you and your leaguemates value every player,
+          Fleeced compares how you and your leaguemates value every player,
           then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
         </p>
 
@@ -249,10 +258,10 @@
   </header>
 
   <!-- Top-level nav — tier 1 -->
-  <div class="nav-tabs nav-tier-1" role="tablist" aria-label="Main sections" style="max-width:980px;width:100%;">
+  <nav class="nav-tabs nav-tier-1" role="tablist" aria-label="Main sections" style="max-width:980px;width:100%;">
     <button class="nav-tab active" role="tab" aria-selected="true"  data-group="rank"   onclick="switchTabGroup('rank', this)">Rank Players</button>
     <button class="nav-tab"         role="tab" aria-selected="false" data-group="trades" onclick="switchTabGroup('trades', this)">Find Trades</button>
-  </div>
+  </nav>
 
   <!-- Tier 2 — contextual sub-nav. Only one is visible at a time. -->
   <div class="nav-subtabs" id="subtabs-rank" role="tablist" aria-label="Rank views" style="max-width:980px;width:100%;">
@@ -278,6 +287,7 @@
   <!-- ═══════════════════════════════════════════════════
        VIEW: RANK
   ════════════════════════════════════════════════════ -->
+  <main id="app-main">
   <div class="view active" id="view-rank">
 
   <!-- Scoring-format toggle (1QB PPR / SF TEP) — mirrored on every ranking view -->
@@ -860,6 +870,7 @@
       </div>
     </div>
   </div>
+  </main>
 
   <!-- Connect another league modal — URL paste for Sleeper / ESPN / MFL -->
   <div class="invite-modal hidden" id="connect-league-modal" onclick="closeConnectLeagueModalIfBackdrop(event)">

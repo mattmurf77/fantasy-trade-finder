@@ -3,32 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Positional Tiers — Fantasy Trade Finder</title>
+  <title>Positional tiers — Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="Group dynasty players into value tiers by position — worth 4+ firsts down to below fourth-round value — and set the board your trades are priced from.">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/positional-tiers.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="Positional tiers — Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="Group dynasty players into value tiers by position — worth 4+ firsts down to below fourth-round value — and set the board your trades are priced from.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/positional-tiers.html">
+  <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      /* Chalkline tokens (docs/design/design-system.md) */
-      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
-      --line: #262C35; --line-strong: #3D4654;
-      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
-      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
-      --flare: #F0508C;
-      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
-      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
-      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
-      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
-      --font-ui: 'Archivo', sans-serif;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-data: 'IBM Plex Mono', monospace;
-      /* Legacy aliases for the rules below */
-      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
-      --text: var(--chalk); --muted: var(--chalk-dim);
-      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
-    }
 
     :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) {
@@ -106,6 +95,7 @@
     }
 
     .tier-page-title {
+      margin-top: 0;   /* promoted to <h1>; drop the UA default */
       font-size: 20px;
       font-weight: 700;
     }
@@ -1318,7 +1308,7 @@
     </div>
     <div class="tier-title-row">
       <div class="tier-title-group">
-        <div class="tier-page-title">Set Positional Tiers</div>
+        <h1 class="tier-page-title">Set Positional Tiers</h1>
         <div class="tier-page-subtitle">Players are pre-sorted into tiers based on consensus dynasty values. Adjust them to match your own rankings.</div>
       </div>
       <!-- Scoring format toggle — rendered by inline JS below -->
@@ -1543,7 +1533,12 @@
   <!-- Celebration overlay -->
   <div class="celebration-overlay hidden" id="tier-celebration">
     <div class="celebration-card">
-      <div class="celebration-emoji">&#127942;</div>
+      <div class="celebration-mark" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75"
+             stroke-linecap="square" stroke-linejoin="miter">
+          <path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/>
+        </svg>
+      </div>
       <div class="celebration-title">All positions tiered!</div>
       <div class="celebration-sub">Your dynasty tiers are set. Time to find some trades!</div>
       <div class="celebration-actions">
@@ -1557,7 +1552,8 @@
     .celebration-overlay.hidden { display:none; }
     .celebration-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:32px 28px 28px;max-width:400px;width:90%;text-align:center;box-shadow:var(--shadow-sheet);animation:popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275); }
     @keyframes popIn{from{transform:scale(0.8);opacity:0;}to{transform:scale(1);opacity:1;}}
-    .celebration-emoji { font-size:56px;line-height:1;margin-bottom:12px; }
+    .celebration-mark { color:var(--ice);margin-bottom:12px;line-height:0; }
+    .celebration-mark svg { width:56px;height:56px; }
     .celebration-title { font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px; }
     .celebration-sub { font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5; }
     .celebration-actions { display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
@@ -1573,61 +1569,19 @@
     // ══════════════════════════════════════════════════════
     //  REAL API integration — fetches players from backend
     // ══════════════════════════════════════════════════════
-    const SAMPLE_PLAYERS = {
-      RB: [
-        { id: 'rb1',  name: 'Bijan Robinson',    team: 'ATL', pos: 'RB', elo: 1810 },
-        { id: 'rb2',  name: 'Breece Hall',        team: 'NYJ', pos: 'RB', elo: 1755 },
-        { id: 'rb3',  name: 'Jahmyr Gibbs',       team: 'DET', pos: 'RB', elo: 1740 },
-        { id: 'rb4',  name: 'Jonathan Taylor',    team: 'IND', pos: 'RB', elo: 1680 },
-        { id: 'rb5',  name: 'Saquon Barkley',     team: 'PHI', pos: 'RB', elo: 1660 },
-        { id: 'rb6',  name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', elo: 1620 },
-        { id: 'rb7',  name: 'De\'Von Achane',     team: 'MIA', pos: 'RB', elo: 1610 },
-        { id: 'rb8',  name: 'Travis Etienne',     team: 'JAX', pos: 'RB', elo: 1560 },
-        { id: 'rb9',  name: 'Isiah Pacheco',      team: 'KC',  pos: 'RB', elo: 1520 },
-        { id: 'rb10', name: 'Josh Jacobs',        team: 'GB',  pos: 'RB', elo: 1490 },
-        { id: 'rb11', name: 'Kyren Williams',     team: 'LAR', pos: 'RB', elo: 1450 },
-        { id: 'rb12', name: 'Rachaad White',      team: 'TB',  pos: 'RB', elo: 1390 },
-        { id: 'rb13', name: 'Rhamondre Stevenson',team: 'NE',  pos: 'RB', elo: 1370 },
-        { id: 'rb14', name: 'Aaron Jones',        team: 'MIN', pos: 'RB', elo: 1320 },
-        { id: 'rb15', name: 'Javonte Williams',   team: 'DEN', pos: 'RB', elo: 1280 },
-      ],
-      WR: [
-        { id: 'wr1',  name: 'Ja\'Marr Chase',    team: 'CIN', pos: 'WR', elo: 1830 },
-        { id: 'wr2',  name: 'CeeDee Lamb',       team: 'DAL', pos: 'WR', elo: 1790 },
-        { id: 'wr3',  name: 'Amon-Ra St. Brown', team: 'DET', pos: 'WR', elo: 1750 },
-        { id: 'wr4',  name: 'Tyreek Hill',       team: 'MIA', pos: 'WR', elo: 1700 },
-        { id: 'wr5',  name: 'A.J. Brown',        team: 'PHI', pos: 'WR', elo: 1680 },
-        { id: 'wr6',  name: 'Garrett Wilson',    team: 'NYJ', pos: 'WR', elo: 1620 },
-        { id: 'wr7',  name: 'Puka Nacua',        team: 'LAR', pos: 'WR', elo: 1610 },
-        { id: 'wr8',  name: 'Marvin Harrison Jr',team: 'ARI', pos: 'WR', elo: 1590 },
-        { id: 'wr9',  name: 'Chris Olave',       team: 'NO',  pos: 'WR', elo: 1530 },
-        { id: 'wr10', name: 'DeVonta Smith',     team: 'PHI', pos: 'WR', elo: 1500 },
-        { id: 'wr11', name: 'Drake London',      team: 'ATL', pos: 'WR', elo: 1470 },
-        { id: 'wr12', name: 'DK Metcalf',        team: 'SEA', pos: 'WR', elo: 1440 },
-      ],
-      QB: [
-        { id: 'qb1', name: 'Patrick Mahomes',   team: 'KC',  pos: 'QB', elo: 1820 },
-        { id: 'qb2', name: 'Josh Allen',        team: 'BUF', pos: 'QB', elo: 1790 },
-        { id: 'qb3', name: 'Lamar Jackson',     team: 'BAL', pos: 'QB', elo: 1760 },
-        { id: 'qb4', name: 'Joe Burrow',        team: 'CIN', pos: 'QB', elo: 1730 },
-        { id: 'qb5', name: 'Jalen Hurts',       team: 'PHI', pos: 'QB', elo: 1690 },
-        { id: 'qb6', name: 'C.J. Stroud',       team: 'HOU', pos: 'QB', elo: 1650 },
-        { id: 'qb7', name: 'Anthony Richardson',team: 'IND', pos: 'QB', elo: 1580 },
-        { id: 'qb8', name: 'Caleb Williams',    team: 'CHI', pos: 'QB', elo: 1560 },
-        { id: 'qb9', name: 'Jayden Daniels',    team: 'WAS', pos: 'QB', elo: 1540 },
-        { id: 'qb10',name: 'Jordan Love',       team: 'GB',  pos: 'QB', elo: 1500 },
-      ],
-      TE: [
-        { id: 'te1', name: 'Sam LaPorta',      team: 'DET', pos: 'TE', elo: 1720 },
-        { id: 'te2', name: 'Travis Kelce',     team: 'KC',  pos: 'TE', elo: 1700 },
-        { id: 'te3', name: 'Trey McBride',     team: 'ARI', pos: 'TE', elo: 1620 },
-        { id: 'te4', name: 'Mark Andrews',     team: 'BAL', pos: 'TE', elo: 1580 },
-        { id: 'te5', name: 'George Kittle',    team: 'SF',  pos: 'TE', elo: 1560 },
-        { id: 'te6', name: 'Dallas Goedert',   team: 'PHI', pos: 'TE', elo: 1460 },
-        { id: 'te7', name: 'Kyle Pitts',       team: 'ATL', pos: 'TE', elo: 1420 },
-        { id: 'te8', name: 'Dalton Kincaid',   team: 'BUF', pos: 'TE', elo: 1400 },
-      ],
-    };
+    // Live player pool, keyed by position. Populated from the API in
+    // loadPlayersFromApi(); starts EMPTY on purpose.
+    //
+    // Until 2026-08-19 this was seeded with 55 hardcoded players carrying
+    // 2024 rosters (Josh Jacobs on GB, Aaron Jones on MIN, Javonte Williams
+    // on DEN). autoAssignTiers() runs during module init, so on a slow
+    // connection users saw those wrong teams and values bucketed into real
+    // tier lanes before the fetch landed. An empty pool renders a loading
+    // state instead — honest, and it cannot go stale.
+    const playerPool = { QB: [], RB: [], WR: [], TE: [] };
+    // False until the API populates the pool. Without it an empty pool
+    // renders 'All players placed!' — the exact opposite of the truth.
+    let playersLoaded = false;
 
     // 8-tier pick-value ladder (2026-07-12, #117) — keys read directly in
     // draft-pick terms (docs/cross-client-invariants.md).
@@ -1640,7 +1594,7 @@
     // with the JSON; autoAssignTiers runs during module init (line ~1620
     // `tierState[pos] = autoAssignTiers(pos)`) before the fetch lands, so
     // we need a sensible same-shape default to bucket the placeholder
-    // SAMPLE_PLAYERS until the network round-trip completes.
+    // playerPool until the network round-trip completes.
     //
     // Each (format, position, tier) cell is { min, max }. apply_tiers on
     // the backend writes ELOs in [min, max]; autoAssignTiers below buckets
@@ -1703,7 +1657,7 @@
     }
 
     function autoAssignTiers(pos) {
-      const players = (SAMPLE_PLAYERS[pos] || []).slice();
+      const players = (playerPool[pos] || []).slice();
       // Sort by Elo descending so highest-rated appear first in each tier
       players.sort((a, b) => b.elo - a.elo);
 
@@ -1986,7 +1940,7 @@
       // Runs before the DOM rebuild so the UI reflects honest counts.
       _pruneMultiSelect();
 
-      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const players = playerPool[currentPos] || [];
       const assigned = new Set();
       TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
 
@@ -2021,7 +1975,7 @@
     }
 
     function renderPool(filter) {
-      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const players = playerPool[currentPos] || [];
       const assigned = new Set();
       TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
 
@@ -2035,7 +1989,13 @@
 
       pool.innerHTML = '';
       if (filtered.length === 0) {
-        pool.innerHTML = `<div class="pool-empty">${unassigned.length === 0 ? 'All players placed!' : 'No matches'}</div>`;
+        const poolTotal = (playerPool[currentPos] || []).length;
+        const emptyMsg =
+            !playersLoaded          ? 'Loading players\u2026'
+          : poolTotal === 0         ? 'Couldn\u2019t load players \u2014 reload to try again.'
+          : unassigned.length === 0 ? 'All players placed!'
+          :                           'No matches';
+        pool.innerHTML = `<div class="pool-empty">${emptyMsg}</div>`;
         return;
       }
       filtered.forEach(p => pool.appendChild(createChip(p, null)));
@@ -2442,7 +2402,7 @@
     let undoTimer = null;
 
     function showUndo(playerId) {
-      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const players = playerPool[currentPos] || [];
       const p = players.find(x => x.id === playerId);
       const toast = document.getElementById('undo-toast');
       document.getElementById('undo-text').textContent = p ? `${p.name} moved` : 'Player moved';
@@ -2712,8 +2672,8 @@
       // to players with a DynastyProcess value > 0 — which automatically
       // excludes retired players (Roethlisberger, Brady, etc.) since
       // DynastyProcess only tracks currently dynasty-relevant players.
+      let anyLoaded = false;
       if (token) {
-        let anyLoaded = false;
         for (const pos of POS_ORDER) {
           try {
             const res = await fetch(`/api/rankings?position=${pos}`, {
@@ -2749,7 +2709,7 @@
                 pos:  r.position || pos,
                 elo:  r.elo || 1500,
               }));
-              SAMPLE_PLAYERS[pos] = ranked;
+              playerPool[pos] = ranked;
               tierState[pos] = autoAssignTiers(pos);
               anyLoaded = true;
             }
@@ -2758,7 +2718,9 @@
           }
         }
 
-        // Safety net: if rankings returned nothing at all, fall back to
+      }
+
+        // Public fallback: no session, or rankings returned nothing. Falls back to
         // /api/players but filter by search_rank <= 200 to reduce the
         // retired-player leak (active players are almost always <200)
         if (!anyLoaded) {
@@ -2779,14 +2741,14 @@
                   elo:  rankToElo(p.search_rank),
                 }));
               if (relevant.length > 0) {
-                SAMPLE_PLAYERS[pos] = relevant;
+                playerPool[pos] = relevant;
                 tierState[pos] = autoAssignTiers(pos);
               }
             } catch (_) { /* ignore */ }
           }
         }
-      }
 
+      playersLoaded = true;   // every path lands here; the message can't stick
       render();
       if (token) loadTiersStatus();
     }

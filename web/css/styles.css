@@ -7,29 +7,6 @@
       overflow-x: hidden;
     }
 
-    :root {
-      /* ── Chalkline tokens (source of truth: docs/design/design-system.md) ── */
-      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
-      --line: #262C35; --line-strong: #3D4654;
-      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
-      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
-      --flare: #F0508C; --flare-press: #D8437B; --on-flare: #170610;
-      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
-      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
-      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
-      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
-      --t-fast: 120ms ease-out; --t-base: 180ms ease-out;
-      --t-sheet: 260ms cubic-bezier(0.32, 0.72, 0, 1);
-      --font-ui: 'Archivo', sans-serif;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-data: 'IBM Plex Mono', monospace;
-      /* Legacy aliases — pre-Chalkline rules below reference these names. */
-      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
-      --text: var(--chalk); --muted: var(--chalk-dim);
-      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
-      --gold: var(--warn); --card: var(--ink-1); --panel: var(--ink-1);
-    }
-
     /* Global focus ring — 2px ice, 2px offset (design-system.md:134) */
     :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
 

@@ -3,39 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fantasy Trade Finder — Profile</title>
+  <title>Player profile — Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="A public dynasty profile: tier board and the takes that diverge most from consensus.">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/profile.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="Player profile — Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="A public dynasty profile: tier board and the takes that diverge most from consensus.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/profile.html">
+  <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
-    :root {
-      /* Chalkline tokens (docs/design/design-system.md) */
-      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
-      --line: #262C35; --line-strong: #3D4654;
-      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
-      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
-      --flare: #F0508C;
-      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
-      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
-      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
-      --font-ui: 'Archivo', sans-serif;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-data: 'IBM Plex Mono', monospace;
-      /* Legacy aliases for the rules below */
-      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
-      --text: var(--chalk); --muted: var(--chalk-dim);
-      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
-      --gold: var(--warn);
-      /* 8-tier pick-value ladder (docs/cross-client-invariants.md) */
-      --firsts-4plus: #f87171;
-      --firsts-3:     #e879f9;
-      --firsts-2:     #fbbf24;
-      --first-1:      #2dd4bf;
-      --second:       #38bdf8;
-      --third:        #f472b6;
-      --fourth:       #a3e635;
-      --waivers:      #7a7f96;
-    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       background: var(--bg);
@@ -113,7 +95,9 @@
       flex: 1;
       min-width: 0;
     }
+    .page-h1 { position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap; }
     .pp-display {
+      margin-top: 0;   /* promoted to <h1>; drop the UA default */
       font-family: var(--font-display);
       text-transform: uppercase;
       letter-spacing: 0.02em;
@@ -305,8 +289,11 @@
 <body>
   <div class="pp-wrap">
     <div class="pp-brand">
-      <a href="/">← <strong>Fantasy Trade Finder</strong></a>
+      <a href="/">← <strong>Fleeced</strong></a>
     </div>
+    <!-- Real <h1> in the served HTML: #pp-content is replaced wholesale by
+         JS, and this page is the public share surface. -->
+    <h1 class="page-h1" id="page-h1">Dynasty profile</h1>
 
     <div id="pp-content">
       <div class="pp-section">
@@ -403,6 +390,7 @@
 
       function render(data) {
         const displayName = data.display_name || data.username;
+        setPageHeading(displayName);
         const avatarHtml = data.avatar_url
           ? `<img src="${esc(data.avatar_url)}" alt="" onerror="this.style.display='none'; this.parentNode.textContent='${esc(avatarInitials(displayName))}';">`
           : esc(avatarInitials(displayName));
@@ -436,16 +424,21 @@
             ${tiersGrid ? `<div class="pp-tiers-grid">${tiersGrid}</div>` : `<div class="pp-empty">No tiers saved yet.</div>`}
           </div>
 
-          <a class="pp-cta" href="/">See their rankings in Fantasy Trade Finder →</a>`;
+          <a class="pp-cta" href="/">See their rankings in Fleeced →</a>`;
 
         document.getElementById('pp-content').innerHTML = html;
+      }
+
+      function setPageHeading(text) {
+        const h = document.getElementById('page-h1');
+        if (h && text) h.textContent = text;
       }
 
       function renderError(message) {
         document.getElementById('pp-content').innerHTML = `
           <div class="pp-error">
             <div class="pp-error-title">Profile not found</div>
-            <div>${esc(message || 'This user hasn\u2019t set up a Fantasy Trade Finder profile yet.')}</div>
+            <div>${esc(message || 'This user hasn\u2019t set up a Fleeced profile yet.')}</div>
           </div>`;
       }
 
@@ -455,7 +448,7 @@
           renderError('No profile in this URL. Profiles live at /u/<username>.');
           return;
         }
-        document.title = `@${uname} — Fantasy Trade Finder`;
+        document.title = `@${uname} — Fleeced`;
         try {
           const res = await fetch('/api/profile/' + encodeURIComponent(uname), { cache: 'no-store' });
           if (res.status === 404) {

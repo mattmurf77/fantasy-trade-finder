@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-19 — Web audited; Phase 0 breakage fixes built on `fix/web-phase0`, unmerged](#2026-08-19--web-audited-phase-0-breakage-fixes-built-on-fixweb-phase0-unmerged)
+- [2026-08-19 — Web audited; Phases 0 + 1 built on `fix/web-phase0`, unmerged](#2026-08-19--web-audited-phases-0--1-built-on-fixweb-phase0-unmerged)
 - [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
@@ -33,7 +33,7 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-19 — Web audited; Phase 0 breakage fixes built on `fix/web-phase0`, unmerged
+## 2026-08-19 — Web audited; Phases 0 + 1 built on `fix/web-phase0`, unmerged
 
 ### Where I am right now
 
@@ -47,7 +47,17 @@ Plan + scope: [`../docs/plans/web-parity/`](../docs/plans/web-parity/).
 
 ### What's done
 
-7 of 8 Phase 0 items: the self-trapping demo path (two independent causes), the analytics race
+**Phase 1 (foundation) — complete.** `qa/web/check_web_structure.py`, 161 structural
+checks, wired as CI job `web-structure` — the first automated coverage `web/` has ever
+had. Baseline 101/161 → **161/161**. `web/css/tokens.css` is now the single token source
+(was copy-pasted into 12 files, which is why a 2.03:1 contrast failure shipped on every
+input border). Dead debug drawer removed (−13 KB, and the public bundle no longer names
+the CRON-gated `/api/debug/log`). Stale 2024 hardcoded roster replaced with real data —
+including un-nesting the public `/api/players` fallback so signed-out visitors get real
+players. Full SEO metadata + robots + sitemap. Landmarks and an `<h1>` on every page.
+User-visible surface renamed to **Fleeced**.
+
+**Phase 0 (breakage) — complete**, commit `26d7841`. 7 of 8 items: the self-trapping demo path (two independent causes), the analytics race
 that dropped **every** web event including `app_opened` ([G-053](GOTCHAS.md)), the clipped 375px
 CTA, `profile.html`'s handle parser, the missing HTML 404, design-lab pages served in prod, and
 a new `web/contact.html` — the first route a web visitor has to a deletion request.
@@ -66,10 +76,16 @@ far Phase 3 runs. All enumerated in [`scope.md`](../docs/plans/web-parity/scope.
 
 ### Next
 
-Merge decision on `fix/web-phase0`, then Phase 1 — the shared-token extraction (one stylesheet is
-linked by exactly one page; twelve others inline ~2,500 duplicated lines, which is why a 2.03:1
-contrast failure still ships in 12 files) and **a web test harness, which does not exist at all
-today** — CI runs pytest/tsc/testid-lint and none of them touch `web/`.
+Merge decision on `fix/web-phase0`, then **Phase 2 (public surface)**. Its first item —
+a public trade calculator on the already-public `POST /api/trade/evaluate` — has a hard
+prerequisite: **a rate limit and response cache**. There is no global rate limiter (only
+`/api/events` and `/api/share/package` self-limit) and it runs the full package math on a
+single gunicorn worker.
+
+Known gap from Phase 1: the harness is structural only. A browser-level smoke (console
+errors, layout at 375px, axe) is still unbuilt — Playwright was evaluated and deliberately
+not adopted, since the structural layer caught this phase's entire defect class with no
+dependencies and no flake.
 
 ---
 
