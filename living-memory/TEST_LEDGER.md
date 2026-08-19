@@ -10,6 +10,99 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-18d — Three-model bake-off Phase 3 (the runner)
+
+**Branch:** `feat/bakeoff-runner`, rebased onto `origin/main` `9d24da3` (which carries bake-off Phase 2 and tier-bounded pins). **Not shipped** — not pushed, not merged. Flag `trade.bakeoff` ships **OFF**.
+Scope block: [docs/plans/three-model-bakeoff/scope-phase3.md](../docs/plans/three-model-bakeoff/scope-phase3.md).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` | **3363 passed, 1 skipped, 0 failed** — full suite re-run after the final rebase onto `9d24da3` AND after the fairness-threshold capture |
+| `npx tsc --noEmit` (mobile) | n/a — zero mobile files changed |
+| `check-*.js` / `testid-lint.sh` | n/a — zero mobile files changed |
+| Maestro / simulator | n/a — retired by D-056; backend-only change with no user-visible surface |
+
+**New tests: 49.** `backend/tests/test_bakeoff_runner.py` (35 unit) + `backend/tests/test_bakeoff_serving.py` (14 integration through the real `server._run_trade_job`).
+
+**Third contamination channel closed (coordinator addition, same session).**
+[The trade-logic archaeology review](../docs/reviews/2026-08-18-trade-logic-archaeology.md)
+found `fairness_threshold` persisted **nowhere** — not a column, not one of the 28
+`features_json` keys — while arriving per-request from the client (0.75 toggle on / 0.50 off).
+A per-arm comparison spanning sessions with different client settings would have compared arms
+AND thresholds at once. Now `deck_impressions.fairness_threshold` (a column, not a JSON key: the
+analysis groups by it), written **per card** because the effective bar is card-dependent, and
+per arm in `bakeoff_runs.arms_json`. `bakeoff_runs.config_json` snapshots the effective config
+each arm ran under, since `model_config` has no `updated_at`.
+
+The composition is proven, not assumed: `test_served_cards_record_the_threshold_they_were_generated_under`
+runs the job at **0.75** and asserts the divergence card records **0.55**
+(`min(requested, fairness_floor_divergence)`), the consensus card **0.75**, and the arm-C card
+**NULL** — i.e. recording the requested value would have misdescribed two of the three.
+`test_arm_a_config_snapshot_is_taken_inside_the_profile` pins that arm A's snapshot is taken
+INSIDE `model_a()` (outside it the overlay is gone and arm A would be recorded as running on live
+defaults). `test_threshold_clean_query_answers_itself_from_the_table` executes the documented
+"was this comparison threshold-clean?" `GROUP BY`, so the query cannot rot into documentation-only.
+
+**Flag-off byte-identity is proven by a CAPTURED golden, not an assertion.**
+`backend/tests/support/bakeoff_harness.py` was copied into a **separate worktree detached at
+pre-bake-off `origin/main` (9a20ca8)**, run there, and its output committed as
+`backend/tests/fixtures/bakeoff/flag_off_golden.json`. With the flag off this branch reproduces it
+byte for byte — identical served card payloads and identical `deck_impressions` rows. The only
+admitted difference is the three additive columns (`model_arm`, `arm_rank`,
+`fairness_threshold`), asserted NULL on every row. The harness deliberately imports nothing from `bakeoff_runner`, which is what let it run on
+the pre-change SHA.
+
+**§3.4 Channel 2 (the silent-failure risk) is tested, not asserted.**
+`test_post_generation_rerankers_cannot_touch_the_merged_deck` turns every reordering layer ON and
+replaces each with a spy that REVERSES the deck (F2 `_order_deck`, F3 fatigue multipliers, F5 taste,
+F6 value model, F7 wildcard, F9 shaping), then asserts the served arm sequence is still the
+interleaver's. Its mirror `test_rerankers_do_run_when_the_bakeoff_is_off` proves the same spies fire
+with the flag off, so the bypass is a bake-off property and not a broken harness. F3 decline
+suppression is asserted STILL LIVE (it only removes cards).
+
+**§3.4 Channel 1** is guarded structurally: `test_every_swipe_k_multiplier_runs_through_the_elo_freeze`
+scans `backend/server.py` for every `fit_congruence_mult` K site and fails if one is missing
+`_bakeoff.elo_freeze_mult` — a new swipe path that forgot the freeze would contaminate the shared
+board with no visible symptom.
+
+**Real bug found and fixed while testing (would have been silent in prod):** `save_deck_impressions`
+inserts the batch with SQLAlchemy `executemany`, which compiles the statement from the **first row's
+keys**. Stamping `model_arm` only on attributed cards meant a deck led by an unattributed likes-you
+injection dropped attribution for the **entire deck**. Both columns (and the arm-stamped
+`policy_version`) are now written on every row, with a regression assertion in
+`test_likes_you_injection_does_not_reorder_the_interleave`.
+
+**Generation cost measured** on a synthetic 12-team / 168-asset league with 11 boarded opponents
+(scratch harness, 5 repeats, medians):
+
+| | ms | cards |
+|---|---|---|
+| single generation (today) | 3127 | 19 |
+| bake-off fan-out (3 arms) | **7359 (2.35×)** | 140-card interleaved deck |
+| — arm `baseline` | 4187 | 30 |
+| — arm `current` | 2733 | 19 |
+| — arm `gen_v2` | 424 | 105 |
+
+Arm A is the slowest because its profile zeroes every gate, so more candidates survive. Arm C
+over-produced **on this fixture only** — the synthetic boards carry gaussian noise, so divergence is
+everywhere; PLAN.md §3.2 still expects it to under-produce in production, which is exactly what the
+empty-arm rate is there to measure. Agreement on the fixture: `baseline+current` 14.
+
+**Budget finding for the operator:** the per-opponent enumeration deadline is 1 s, so an 11-opponent
+league's worst case is ~11 s per arm and ~33–45 s for the fan-out, against
+`server._JOB_HARD_TIMEOUT = 60` s. Inside the limit but thin, with no margin for a slow Postgres.
+Phase 4 must watch p95 job duration directly; `_JOB_HARD_TIMEOUT` may need raising before Phase 5.
+`bakeoff_deck_limit` defaults to uncapped, so an interleaved deck is ~3× today's — set it before
+Phase 5 unless a very long deck is wanted.
+
+**Arm-A seam: real, not stubbed.** Phase 3 was built against a temporary local stub of
+`backend/bakeoff_profiles.py` (Phase 2 had not yet landed), then **rebased onto `origin/main`, which carries Phase 2's real module** (`3760f12`). The stub was dropped in the rebase and
+the runner now calls Phase 2's `model_a()` — the only supported entry point, because it applies the
+pinned `MODEL_A_PROFILE` and the R4 bypass together. Arm A is therefore golden-tested against
+reference SHA `92c31d5` by Phase 2's own tests, and the R4 bypass is really enforced
+(`trade_service.r4_bypassed()`). Full suite re-run after the rebase.
+
+---
 ## 2026-08-18c — G-049 caller-side finish: route-level proof + the ungated-signal decision
 
 **Branch:** `feat/sweep-followups-2026-08-18` (continues the 2026-08-18b entry below). **Not shipped.**

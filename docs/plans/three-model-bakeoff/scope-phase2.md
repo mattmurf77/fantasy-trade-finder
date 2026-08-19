@@ -79,6 +79,8 @@ exclusion be justified):
 | `pin_unpin_on_newer_swipe` | Phase 0 (F2) | Same. |
 | `pin_legacy_at_epoch` | Phase 0 (F2) | Same. |
 | `gen2_*` (all) | pre-dates / arm C | `trade_gen_v2` is **arm C**. Arm A must not touch its knobs. |
+| `bakeoff_serve_interleaved` | Phase 3, 2026-08-18 | **Not generation logic — it is the bake-off's own orchestration.** Read only by `bakeoff_runner._cfg`, never by any generator: it selects Phase-4 dark validation vs Phase-5 interleaved serving, which is a decision about the merged deck, made after all three arms have already run. Setting it per-arm would be meaningless. |
+| `bakeoff_deck_limit` | Phase 3, 2026-08-18 | Same — a cap on the INTERLEAVED deck, applied by the team-draft merge after generation. No arm can see it. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag

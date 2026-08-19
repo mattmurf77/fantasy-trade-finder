@@ -32,6 +32,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Draft-surface extensions (2026-08-06)](#flags-draft-surface-extensions-2026-08-06)
 - [Flags — QA / testing surfaces](#flags-qa-testing-surfaces)
 - [Flags — Decline-reason capture (2026-08-17, ships **ON**)](#flags-decline-reason-capture-2026-08-17-ships-on)
+- [Flags — Three-model bake-off (2026-08-18, ships **OFF**)](#flags-three-model-bake-off-2026-08-18-ships-off)
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [Analytics events — Guided Onboarding v2 addendum (2026-08-15)](#analytics-events-guided-onboarding-v2-addendum-2026-08-15)
@@ -50,6 +51,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [F7 — exploration slots & archetype audition (flag `deck.exploration`)](#f7-exploration-slots-archetype-audition-flag-deckexploration)
   - [F9 — first-session win engineering (flag `deck.first_session`)](#f9-first-session-win-engineering-flag-deckfirst_session)
   - [Suggestion telemetry & ghost holdout (flag `suggestion.telemetry`)](#suggestion-telemetry-ghost-holdout-flag-suggestiontelemetry)
+  - [Three-model bake-off (flag `trade.bakeoff`)](#three-model-bake-off-flag-tradebakeoff)
   - [F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)](#f6-learned-acceptance-heads-v-vector-flag-deckvalue_model-dark)
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Trade generation pipeline v2 (flag `trade_gen.v2` — dark)](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py)
@@ -461,6 +463,22 @@ Spec: `docs/plans/decline-reason-capture/SPEC.md`. The trade card's ✕ is repla
 
 ---
 
+## Flags — Three-model bake-off (2026-08-18, ships **OFF**)
+
+Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md). Scope block: [scope-phase3.md](plans/three-model-bakeoff/scope-phase3.md). Phase 3 builds the runner; nothing user-visible changes until an operator lights Phase 5.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.bakeoff` | **false** | `backend/bakeoff_runner.py`. ON ⇒ one **organic** trade job (no pinned give/receive, no opponent scope, not the demo league) fans out into three generations run **sequentially on the existing daemon thread**: arm `baseline` (the live engine inside `_cfg_override(MODEL_A_PROFILE)` + the arm-A R4 bypass, `backend/bakeoff_profiles.py`), arm `current` (live defaults), arm `gen_v2` (`backend/trade_gen_v2.py` called **directly**). The three ranked lists merge by team-draft interleaving with the arm rotation randomised per deck (seeded `league_id` + ISO week); every served card is attributed on `deck_impressions.model_arm` / `.arm_rank` (the arm is also appended to `policy_version` as `/bo:<arm>`), duplicates record agreement in `features_json.also_proposed_by`, short arms forfeit and the forfeit is counted, and one `bakeoff_runs` row per job carries the arm order, per-arm card counts, per-arm generation ms and per-arm empty/forfeit counts. ALSO zeroes the trade-swipe K factors `trade_k_like` / `trade_k_pass` (PLAN.md §3.4 Channel 1) so arms cannot teach the shared board between decks — ranking votes (`elo_k`) stay live. OFF ⇒ no fan-out, no interleave, no new columns stamped, no `bakeoff_runs` row, swipe K factors untouched: byte-identical serving, pinned by a golden captured at the pre-bake-off SHA (`backend/tests/fixtures/bakeoff/flag_off_golden.json`). |
+
+**`trade_gen.v2` stays FALSE.** That flag gates the *normal serving path* (whether the deck routes through the v2 pipeline instead of the v1/v3 engine). The bake-off invokes the module as a third generator regardless, so the two are independent and `trade_gen.v2` must not be flipped for the bake-off.
+
+**Serving is knob-controlled INSIDE the flag** — see [`bakeoff_serve_interleaved`](#three-model-bake-off-flag-tradebakeoff) below. Default `0` = Phase-4 **dark validation**: all three arms generate and log, only arm `current` is served, and the whole presentation stack runs untouched — zero user-visible change, which is the point. `1` = Phase-5 interleaved serving, where the post-generation re-rankers (`deck.thompson_v2`, A6 diversity + per-target cap, `deck.fatigue` multipliers, `deck.taste_vectors`, `deck.value_model`, `deck.exploration` wildcard, `deck.first_session` shaping, and the likes-you injector's composite re-sort) are **bypassed for that deck** so nothing reorders the interleaver's output. F3 decline *suppression* stays live — it only removes cards.
+
+**Rollback.** Two deploy-free levers, in order of bluntness: set `bakeoff_serve_interleaved` back to `0` (serving reverts to today's deck; logging continues), or flip `trade.bakeoff` to `false` (everything stops). Both are a config edit plus `POST /api/feature-flags/reload` / `PUT /api/admin/config/<key>`.
+
+---
+
 ## Flags — API observability (2026-08-09, ships **ON**)
 
 | Flag | Default | Gates |
@@ -741,6 +759,17 @@ Read via `suggestion_telemetry._cfg` (the `_deck_cfg` pattern — `trade_service
 | `ghost_holdout_one_in` | 10 | Ghost withholding rate: an organic deck card ghosts when `sha256("ghost\|league\|iso_week\|trade_hash") % N == 0`. **≤ 0 disables ghosting without touching the flag** — the deploy-free rollback lever. Exempt always: likes-you, wildcard, F3-retest cards; pinned/opponent-targeted decks; demo league |
 | `suggestion_match_lookback_days` | 14 | Executed-trade matcher window: only suggestions served within this many days BEFORE `traded_at` are candidates |
 | `suggestion_match_min_overlap` | 0.5 | Partial-match floor: matched-token share of the larger asset set (with ≥1 matched asset required on each side) |
+
+### Three-model bake-off (flag `trade.bakeoff`)
+
+Read via `bakeoff_runner._cfg` (the `_deck_cfg` pattern — `trade_service._DEFAULT_CFG` defaults, live-tunable through `model_config` without a deploy). **Both keys are inert while the flag is off.** Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `bakeoff_serve_interleaved` | 0.0 (**dark**) | Serving mode inside the flag. `0` = Phase-4 dark validation: three arms generate and log, only arm `current` is served, presentation stack untouched — the zero-risk step that measures cost, empty-arm rates and attribution plumbing. `1` = Phase-5 interleaved serving: the team-draft deck is served and every post-generation re-ranker is bypassed for it (PLAN.md §3.4 Channel 2 — a run with those layers live on the merged deck measures deck position, not model quality, and must be discarded rather than caveated). **The deploy-free rollback lever: set back to 0 and serving reverts to today's deck while logging continues.** |
+| `bakeoff_deck_limit` | 0.0 (**uncapped**) | Max cards in an interleaved deck; the draft stops there. `0` drains every arm, so a deck is roughly 3× today's (a 12-team fixture produced 140 cards). PLAN.md §8's per-arm quota lever — set it before lighting Phase 5 unless a very long deck is wanted. Ignored in dark mode, where arm `current`'s own list is served. |
+
+**Not a knob, but part of the same hygiene contract:** while `trade.bakeoff` is on, `trade_k_like` and `trade_k_pass` are forced to 0 at the swipe path (PLAN.md §3.4 Channel 1) regardless of their `model_config` values, so a swipe on one arm's card cannot teach the board the next deck's arms read. `elo_k` (ranking votes) is deliberately untouched.
 
 ### F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)
 

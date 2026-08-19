@@ -93,6 +93,8 @@ from .database import (
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
     save_deck_candidate_set, suggestion_ratio_by_league,
+    # trade.bakeoff — one bakeoff_runs row per bake-off job
+    save_bakeoff_run,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
     # frozen legacy seam, global prior base rate)
     load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
@@ -226,6 +228,7 @@ from . import rankings_import as _rankings_import   # #232 follow-on (ranks.impo
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 # Aliased: the likes-you injector's own parameter is named `trade_service`
@@ -3733,6 +3736,10 @@ def _log_deck_signal_impressions(
     ghost_cards: list | None = None,      # [(would_be_pos, card)] withheld
     candidate_pool: list | None = None,   # untrimmed F7 over-generation pool
     policy_version: str | None = None,    # non-None ⇒ telemetry stamping ON
+    # trade.bakeoff — the run whose arms produced these cards. None (the
+    # flag-off caller value) ⇒ no model_arm / arm_rank / agreement stamping
+    # anywhere, so rows stay byte-identical to pre-bake-off.
+    bakeoff_run=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -3881,6 +3888,14 @@ def _log_deck_signal_impressions(
         # uniform-draw probability, stamped into `capture` by the worker) —
         # the randomization traffic F8's IPS estimators key on. Keys appear
         # only on wildcard cards, so flag-off rows stay byte-identical.
+        # trade.bakeoff — duplicate ledger (PLAN.md §5). The card is credited
+        # to whichever arm picked it FIRST; every other arm that proposed the
+        # same trade is listed here, so model agreement is measurable per
+        # card. Key added only when at least one other arm agreed.
+        if bakeoff_run is not None:
+            _agree = bakeoff_run.also_proposed_by(card)
+            if _agree:
+                features["also_proposed_by"] = _agree
         if getattr(card, "wildcard", False):
             features["wildcard"] = True
             features["wildcard_pool_size"] = getattr(
@@ -3920,6 +3935,32 @@ def _log_deck_signal_impressions(
             row["candidate_set_id"]   = cand_set_id
             row["candidate_set_size"] = cand_set_size
             row["assets_json"]        = json.dumps({"give": give, "receive": recv})
+        # trade.bakeoff — per-card model attribution (PLAN.md §5). model_arm
+        # is the denormalized column every query reads; the arm is ALSO
+        # encoded into policy_version so an impression row is self-describing
+        # through the pre-bake-off lens. Left NULL for a served card no arm
+        # produced (a likes-you injection), which is the honest answer.
+        if bakeoff_run is not None:
+            # Both keys are set on EVERY row (None when no arm produced the
+            # card), never conditionally: save_deck_impressions inserts the
+            # batch with executemany, which compiles the statement from the
+            # FIRST row's keys — a deck led by an unattributed likes-you card
+            # would otherwise silently drop attribution for the whole deck.
+            _attr = bakeoff_run.attribution_for(card)
+            row["model_arm"] = _attr[0] if _attr else None
+            row["arm_rank"]  = _attr[1] if _attr else None
+            # The consensus fairness bar this card actually cleared, resolved
+            # against the config ITS OWN arm ran under. Same every-row rule as
+            # the two columns above, for the same executemany reason.
+            row["fairness_threshold"] = bakeoff_run.fairness_threshold_for(card)
+            # Same executemany rule for policy_version: assign on every row,
+            # falling back to whatever the telemetry block already put there
+            # (None when suggestion.telemetry is off).
+            row["policy_version"] = (
+                _bakeoff.policy_version_for_arm(
+                    policy_version or _sugg_tel.serving_policy_version(),
+                    _attr[0])
+                if _attr is not None else row.get("policy_version"))
         rows.append(row)
     save_deck_impressions(rows)
     return imp_by_card
@@ -5243,10 +5284,27 @@ def _run_trade_job(
         # likes-you: an intent-scoped deck shouldn't carry an unrelated
         # wildcard) and the demo league. Flag off ⇒ gen_kwargs stays empty
         # and generate_trades runs byte-identically.
+        # trade.bakeoff — three-model bake-off (Phase 3; PLAN.md §3/§4/§5).
+        # ORGANIC decks only. `bakeoff_on` = fan out and log all three arms;
+        # `bakeoff_fixed_order` = the interleaver owns this deck's order, so
+        # every post-generation layer that REORDERS is bypassed below
+        # (§3.4 Channel 2). Dark mode (the default inside the flag) has
+        # bakeoff_on True and bakeoff_fixed_order False: three arms generate
+        # and log, arm `current` is served through the untouched
+        # presentation stack.
+        bakeoff_run = None
+        bakeoff_on = _bakeoff.bakeoff_active(
+            league_id, pinned_give, pinned_receive, opponent_user_id)
+        bakeoff_fixed_order = _bakeoff.bypass_rerankers(
+            league_id, pinned_give, pinned_receive, opponent_user_id)
+
         explore_active = (
             _deck_exploration_enabled() and league_id != "league_demo"
             and not pinned_give and not pinned_receive
-            and not opponent_user_id)
+            and not opponent_user_id
+            # F7 both over-generates (3× the cost, times three arms) and
+            # inserts a card at a fixed slot, shifting the interleaved deck.
+            and not bakeoff_fixed_order)
         gen_kwargs: dict = {}
         if explore_active:
             _overgen = max(0, int(_deck_cfg("exploration_overgen", 3)))
@@ -5254,7 +5312,7 @@ def _run_trade_job(
                 gen_kwargs["max_per_opponent"] = (
                     _EXPLORATION_BASE_PER_OPP + _overgen)
 
-        final_cards = trade_service.generate_trades(
+        _generate_kwargs = dict(
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
             user_roster          = g_user_roster,
@@ -5281,6 +5339,26 @@ def _run_trade_job(
             exclusion_keys       = exclusion_keys,
             **gen_kwargs,
         )
+        if bakeoff_on:
+            # Three generations, SEQUENTIAL on this thread (PLAN.md §3.1 —
+            # the config seam is thread-local). Arm A rides
+            # _cfg_override(MODEL_A_PROFILE) + the R4 bypass inside the
+            # runner; arm B is this same call, plain; arm C calls
+            # trade_gen_v2 directly. An arm that produces nothing forfeits
+            # and is RECORDED — never an error (§3.2).
+            bakeoff_run = _bakeoff.run_bakeoff(
+                generate  = lambda **ov: trade_service.generate_trades(
+                    **{**_generate_kwargs, **ov}),
+                gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
+                    trade_service, {**_generate_kwargs, **ov}),
+                league_id = league_id,
+                # Recorded, not inferred: this arrives per-request from the
+                # client and is persisted nowhere else.
+                fairness_threshold = fairness_threshold,
+            )
+            final_cards = bakeoff_run.served_deck()
+        else:
+            final_cards = trade_service.generate_trades(**_generate_kwargs)
 
         # F7 — split the over-generated list into the served deck (top
         # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
@@ -5311,6 +5389,7 @@ def _run_trade_job(
                 and not pinned_give and not pinned_receive
                 and not opponent_user_id):
             try:
+                _pre_likes_you = final_cards
                 final_cards = _inject_likes_you_cards(
                     cards         = final_cards,
                     trade_service = trade_service,
@@ -5323,6 +5402,14 @@ def _run_trade_job(
                     not_interested_ids = not_interested_ids or None,
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                 )
+                # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
+                # RE-SORTED by composite_score, which would silently destroy
+                # the team-draft position balance. Injected likes-you cards
+                # keep the top (they shift every arm by the same constant);
+                # every arm card returns to its interleaved index.
+                if bakeoff_fixed_order:
+                    final_cards = _bakeoff.restore_order(_pre_likes_you,
+                                                         final_cards)
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):
                     d = trade_card_to_dict(c, players_dict)
@@ -5355,7 +5442,11 @@ def _run_trade_job(
                     league_id = league_id,
                     seed_map  = seed_map,
                 )
-                fatigue_mults = _deck_fatigue_multipliers(
+                # trade.bakeoff §3.4 Channel 2 — the SUPPRESSION pass above
+                # stays live (it only removes cards, which shifts every arm
+                # equally and is a durable user promise), but the fatigue
+                # MULTIPLIERS reorder, so a bake-off deck gets none.
+                fatigue_mults = None if bakeoff_fixed_order else _deck_fatigue_multipliers(
                     final_cards,
                     user_id    = g_user_id,
                     league_id  = league_id,
@@ -5393,7 +5484,8 @@ def _run_trade_job(
         # path is byte-identical to flag-off — the cold-start contract.
         # Non-fatal: any failure serves the deck exactly as generated.
         taste_mults: dict | None = None
-        if _deck_taste_enabled() and league_id != "league_demo":
+        if (_deck_taste_enabled() and league_id != "league_demo"
+                and not bakeoff_fixed_order):   # §3.4 Channel 2 — reorders
             try:
                 taste_mults = _taste_service.taste_multipliers(
                     final_cards,
@@ -5415,7 +5507,8 @@ def _run_trade_job(
         # user, or any error — so every downstream path is byte-identical
         # to pre-F6 (the kill-switch acceptance criterion).
         value_scores: dict | None = None
-        if _deck_value_model_enabled() and league_id != "league_demo":
+        if (_deck_value_model_enabled() and league_id != "league_demo"
+                and not bakeoff_fixed_order):   # §3.4 Channel 2 — base-key swap
             value_scores = _deck_value_scores(
                 final_cards,
                 user_id        = g_user_id,
@@ -5433,7 +5526,13 @@ def _run_trade_job(
         # any failure serves the deck exactly as generated. F3: fatigue
         # multipliers ride the same call (None when the flag is off).
         signal_capture: dict | None = None
-        if league_id != "league_demo" and (
+        # trade.bakeoff §3.4 Channel 2 — the whole ordering layer (F2
+        # Thompson draw, A6 diversity penalty, _cap_per_target) is bypassed
+        # on a bake-off deck: it is the layer that would most obviously
+        # destroy the team-draft position balance, and it would do it
+        # silently. Impressions then record propensity 1.0, which is exactly
+        # honest — an interleaved deck IS a deterministic serve.
+        if not bakeoff_fixed_order and league_id != "league_demo" and (
                 _thompson_deck_enabled() or _deck_thompson_v2_enabled()
                 or _deck_diversity_enabled() or fatigue_mults or taste_mults
                 or value_scores):
@@ -5535,8 +5634,13 @@ def _run_trade_job(
                             fs_err)
             if fs_first_deck:
                 try:
-                    shaped = _apply_first_session_shaping(
-                        final_cards, seed_map=seed_map)
+                    # §3.4 Channel 2 — the confidence-weighted top region
+                    # reorders and the size clamp drops cards, so a bake-off
+                    # deck is left exactly as interleaved. The additive
+                    # `first_deck` job marker below still fires.
+                    shaped = (final_cards if bakeoff_fixed_order
+                              else _apply_first_session_shaping(
+                                  final_cards, seed_map=seed_map))
                     if ([id(c) for c in shaped] != [id(c) for c in final_cards]
                             or len(shaped) != len(final_cards)):
                         final_cards = shaped
@@ -5588,6 +5692,11 @@ def _run_trade_job(
 
         # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
         # served count (lld §5 amendment). Flag off ⇒ no line at all.
+        # trade.bakeoff caveat: after a bake-off fan-out these counters reflect
+        # the LAST arm to run `_generate_trades_impl` (arm A, whose profile
+        # zeroes every rule), not the served deck. The tripwire is a log line
+        # only — no behaviour reads it — so the bake-off leaves it alone
+        # rather than growing per-arm counters for a WARNING.
         if FLAGS.trade_presentment_rules:
             _log_presentment_outcome(trade_service, job_id, league_id,
                                      len(served_final))
@@ -5645,6 +5754,7 @@ def _run_trade_job(
                     source         = job_source,
                     seed_map       = seed_map,   # F3 — centerpiece stamping
                     first_deck     = fs_first_deck,   # F9 — frozen features stamp
+                    bakeoff_run    = bakeoff_run,     # trade.bakeoff — arm attribution
                     **telemetry_kw,
                 )
                 if imp_by_card:
@@ -5663,6 +5773,19 @@ def _run_trade_job(
                             j["cards"] = snapshot
         except Exception as sig_err:
             log.warning("deck signal-v2 impression logging failed (non-fatal): %s", sig_err)
+
+        # trade.bakeoff — ONE bakeoff_runs row per bake-off job: arm order,
+        # per-arm card counts / generation ms / empty + forfeit counts, and
+        # the pairwise agreement tally (PLAN.md §5). Written for EVERY run,
+        # including a superseded one — this is a RUN ledger, and Phase 4's
+        # whole job is measuring generation cost and empty-arm rates, which a
+        # superseded run measures just as well. Never allowed to fail the job.
+        if bakeoff_run is not None:
+            try:
+                save_bakeoff_run(bakeoff_run.run_row(
+                    job_id=job_id, user_id=g_user_id, league_id=league_id))
+            except Exception as bo_err:
+                log.warning("bake-off run logging failed (non-fatal): %s", bo_err)
 
         # Mark complete. Final card snapshot was already published by the
         # last on_opponent_done invocation (or the likes-you republish above).
@@ -10938,6 +11061,13 @@ def swipe_trade():
         # design — a bounded 2x overcount traded for an unbounded 0x
         # undercount on a DB blip. Pinned by
         # test_trade_decision_idempotency.py::test_route_replay_leaves_the_in_session_signal_doubled.
+        # trade.bakeoff §3.4 Channel 1 — zero the trade-swipe K factors for
+        # the duration of a bake-off run, so an arm's card cannot teach the
+        # shared board the next deck's arms read. Applied at the multiplier
+        # BOTH halves already share (the in-memory record_trade_signal and
+        # the persisted swipe_decisions k_factor), so the live board and the
+        # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
+        fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
         if decision == "like":
             service.record_trade_signal(
                 winner_ids = card.receive_player_ids,
@@ -11316,6 +11446,13 @@ def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
     # when `elo` is False.
     fit_mult = _trade_service_mod.fit_congruence_mult(
         getattr(card, "lane_shift", None), "pass")
+    # trade.bakeoff §3.4 Channel 1 — zero the trade-swipe K factors for
+    # the duration of a bake-off run, so an arm's card cannot teach the
+    # shared board the next deck's arms read. Applied at the multiplier
+    # BOTH halves already share (the in-memory record_trade_signal and
+    # the persisted swipe_decisions k_factor), so the live board and the
+    # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
+    fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
 
     # Not gated on the replay verdict, same as swipe_trade — see the G-049 /
     # D-073 note there. `elo` is SPEC §4's suppression, a different question.
@@ -11559,6 +11696,13 @@ def _apply_reasoned_pass_elo_only(sess, card) -> None:
     """
     fit_mult = _trade_service_mod.fit_congruence_mult(
         getattr(card, "lane_shift", None), "pass")
+    # trade.bakeoff §3.4 Channel 1 — zero the trade-swipe K factors for
+    # the duration of a bake-off run, so an arm's card cannot teach the
+    # shared board the next deck's arms read. Applied at the multiplier
+    # BOTH halves already share (the in-memory record_trade_signal and
+    # the persisted swipe_decisions k_factor), so the live board and the
+    # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
+    fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
     try:
         sess["service"].record_trade_signal(
             winner_ids = card.give_player_ids,

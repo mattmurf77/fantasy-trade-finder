@@ -497,6 +497,20 @@ _DEFAULT_CFG: dict[str, float] = {
     "suggestion_match_min_overlap":   0.5,
 
     # ------------------------------------------------------------------
+    # trade.bakeoff — three-model bake-off (docs/plans/three-model-bakeoff/
+    # PLAN.md; read via bakeoff_runner._cfg — the _deck_cfg pattern). Both
+    # keys are inert while the flag is off.
+    # ------------------------------------------------------------------
+    # Serving mode: 0 = Phase-4 DARK validation (all three arms generate and
+    # log, only arm `current` is served, presentation stack untouched);
+    # 1 = Phase-5 interleaved serving (team-draft deck, post-generation
+    # re-rankers bypassed per PLAN.md §3.4 Channel 2).
+    "bakeoff_serve_interleaved":   0.0,
+    # Max cards in an interleaved deck. 0 = uncapped (the draft drains every
+    # arm) — the lever for 3x supply, PLAN.md §8.
+    "bakeoff_deck_limit":          0.0,
+
+    # ------------------------------------------------------------------
     # trade_gen.v2 — divergence-driven staged pipeline (backend/
     # trade_gen_v2.py; matchmaking research item 2, flag default OFF).
     # All knobs documented in docs/config-reference.md § trade_gen.v2.

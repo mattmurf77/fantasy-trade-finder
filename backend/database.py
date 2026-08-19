@@ -526,6 +526,32 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("candidate_set_id",   String),
     Column("candidate_set_size", Integer),
     Column("assets_json",        Text),
+    # ── trade.bakeoff (three-model bake-off Phase 3; scope block:
+    # docs/plans/three-model-bakeoff/scope-phase3.md) — per-card model
+    # attribution. NULL while the flag is off / on every pre-bake-off row;
+    # additive via _migrate_db, no backfill.
+    #   model_arm: 'baseline' | 'current' | 'gen_v2' — the arm that PRODUCED
+    #     this card. Denormalized from policy_version (which also encodes it
+    #     as '<policy>/bo:<arm>') so no query has to parse a string. NULL on
+    #     a served card no arm produced — e.g. a likes-you injection.
+    #   arm_rank: the card's 0-based rank within its OWN arm's ranked list,
+    #     never its deck position (that is card_index). The pair
+    #     (model_arm, arm_rank, card_index) is what separates model quality
+    #     from deck-position effects.
+    Column("model_arm",          String),
+    Column("arm_rank",           Integer),
+    #   fairness_threshold: the consensus fairness bar this card ACTUALLY had
+    #     to clear. The client sends a per-request value (0.75 fairness toggle
+    #     on / 0.50 off) which the engine then composes per card — relaxed
+    #     (#189) cards ride min(requested, relaxed_fairness_threshold), and
+    #     divergence cards ride min(…, fairness_floor_divergence) while
+    #     consensus cards keep the full bar. Before this it was persisted
+    #     NOWHERE (docs/reviews/2026-08-18-trade-logic-archaeology.md), so a
+    #     per-arm comparison spanning sessions with different client settings
+    #     compared arms AND thresholds at once. NULL on an arm `gen_v2` card
+    #     (trade_gen_v2 takes no fairness_threshold — its bar is the gen2_*
+    #     stack), which is the honest answer, not missing data.
+    Column("fairness_threshold", Float),
 )
 
 Index(
@@ -594,6 +620,57 @@ suggestion_trade_links_table = Table("suggestion_trade_links", metadata,
 Index(
     "ix_suggestion_trade_links_league",
     suggestion_trade_links_table.c.league_id,
+)
+
+# ── trade.bakeoff — three-model bake-off run ledger ─────────────────────────
+# docs/plans/three-model-bakeoff/PLAN.md §5. ONE row per organic trade job
+# while the flag is on: the per-JOB half of the bake-off record (the per-CARD
+# half rides deck_impressions.model_arm / .arm_rank). Written best-effort
+# after the deck is assembled — a failure here never fails the job.
+#
+#   arm_order       — JSON list, the team-draft rotation this deck used
+#                     (randomised per deck, seeded league_id + ISO week).
+#   served_arm      — 'current' in Phase-4 dark validation (all three arms
+#                     generated and logged, one arm served); NULL once
+#                     interleaved serving is lit.
+#   deck_size       — cards in the INTERLEAVED deck (computed and logged even
+#                     in dark mode, where it is not what got served).
+#   total_ms        — wall clock for all three generations.
+#   arms_json       — {arm: {cards, gen_ms, empty, forfeits, served, error}}.
+#                     `empty` is the PLAN.md §3.2 empty-arm rate's numerator;
+#                     `forfeits` counts rotation slots the arm could not fill
+#                     (arm gen_v2 is expected to forfeit — that is data, not
+#                     an error). `error` is non-NULL only when an arm raised.
+#   agreement_json  — {"armA+armB": n} counts of served cards both arms
+#                     proposed (first picker credited; the duplicate ledger).
+bakeoff_runs_table = Table("bakeoff_runs", metadata,
+    Column("run_id",         String,  primary_key=True),   # uuid4 hex
+    Column("deck_job_id",    String,  nullable=False),     # _trade_jobs job_id
+    Column("user_id",        String,  nullable=False),
+    Column("league_id",      String,  nullable=False),
+    Column("arm_order",      Text,    nullable=False),
+    Column("served_arm",     String),                      # NULL ⇒ interleaved
+    Column("deck_size",      Integer, nullable=False),
+    Column("total_ms",       Integer),
+    Column("arms_json",      Text,    nullable=False),
+    Column("agreement_json", Text),
+    #   config_json — {"base": <arm current's effective trade_service config>,
+    #     "arm_delta": {arm: {changed keys}}}. `model_config` has no
+    #     `updated_at`, so a knob's change date is otherwise unknowable after
+    #     the fact; snapshotting per run makes every card traceable to the
+    #     configuration that produced it. Stored whole rather than hashed — a
+    #     fingerprint would say the config changed without saying to what.
+    Column("config_json",    Text),
+    Column("created_at",     String,  nullable=False),     # ISO UTC
+)
+
+Index(
+    "ix_bakeoff_runs_league",
+    bakeoff_runs_table.c.league_id,
+)
+Index(
+    "ix_bakeoff_runs_job",
+    bakeoff_runs_table.c.deck_job_id,
 )
 
 # deck_outcomes: append-only labels joined to deck_impressions by
@@ -2406,6 +2483,12 @@ def _migrate_db() -> None:
         ("deck_impressions",   "candidate_set_id",      "VARCHAR"),
         ("deck_impressions",   "candidate_set_size",    "INTEGER"),
         ("deck_impressions",   "assets_json",           "TEXT"),
+        # trade.bakeoff — per-card model attribution on the F1 spine (see
+        # deck_impressions_table comments). NULL on all pre-bake-off rows;
+        # no backfill by design (no arm produced them).
+        ("deck_impressions",   "model_arm",             "VARCHAR"),
+        ("deck_impressions",   "arm_rank",              "INTEGER"),
+        ("deck_impressions",   "fairness_threshold",    "FLOAT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -5470,6 +5553,13 @@ def save_deck_candidate_set(row: dict) -> None:
     in try/except — telemetry must never break trade generation."""
     with engine.begin() as conn:
         conn.execute(insert(deck_candidate_sets_table).values(**row))
+
+
+def save_bakeoff_run(row: dict) -> None:
+    """trade.bakeoff — ONE pre-built bakeoff_runs row per job (flag on).
+    Caller wraps in try/except: bake-off bookkeeping never fails a trade job."""
+    with engine.begin() as conn:
+        conn.execute(insert(bakeoff_runs_table).values(**row))
 
 
 def load_unlinked_league_trades(league_id: str) -> list[dict]:

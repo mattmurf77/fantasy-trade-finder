@@ -50,6 +50,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 - [`trade_pass_reasons`](#trade_pass_reasons)
 - [`deck_candidate_sets`](#deck_candidate_sets)
 - [`suggestion_trade_links`](#suggestion_trade_links)
+- [`bakeoff_runs`](#bakeoff_runs)
 - [`deck_suppressions`](#deck_suppressions)
 - [`deck_fatigue_resets`](#deck_fatigue_resets)
 - [`deck_replenish_log`](#deck_replenish_log)
@@ -369,6 +370,11 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `candidate_set_id` | str | soft reference → `deck_candidate_sets.candidate_set_id` (the action set this card was chosen from) |
 | `candidate_set_size` | int | denormalized `deck_candidate_sets.size` |
 | `assets_json` | JSON text | `{"give": [asset ids], "receive": [asset ids]}` — the first-class asset bundle (`trade_hash` can't be inverted); what the executed-trade matcher compares against `sleeper_trades` |
+| `model_arm` | str | **trade.bakeoff** (both columns below: stamped only while the flag is on; NULL on flag-off / pre-bake-off rows; `docs/plans/three-model-bakeoff/scope-phase3.md`) — the arm that PRODUCED this card: `baseline` \| `current` \| `gen_v2`. **Denormalized** from `policy_version` (which also carries it as `<policy>/bo:<arm>`) so no query has to parse a string. NULL on a served card no arm produced — a likes-you injection — which is the honest answer, not a gap. Written on **every** row of a bake-off deck (never conditionally): `save_deck_impressions` inserts the batch with `executemany`, which compiles the statement from the FIRST row's keys, so a deck led by an unattributed card would otherwise silently drop attribution for the whole deck |
+| `fairness_threshold` | float | **trade.bakeoff** — the consensus fairness bar this card ACTUALLY had to clear. The client sends a per-request value (0.75 fairness toggle on / 0.50 off) which the engine then composes **per card**: a `relaxed` card (#189, reachable on an organic deck via the user's acquire/trade-away preferences) rides `min(requested, relaxed_fairness_threshold)`; a `divergence` card rides `min(…, fairness_floor_divergence)` (both members have real boards, so the consensus check is an extreme-case veto only); a `consensus` card keeps the full bar. NULL on an arm `gen_v2` card — `trade_gen_v2` takes no `fairness_threshold` at all, its bar is the `gen2_*` dual-board ε stack — which is the honest answer, not missing data. **Why it exists:** before this the value was persisted nowhere (`docs/reviews/2026-08-18-trade-logic-archaeology.md`), so a per-arm comparison spanning sessions with different client settings compared arms AND thresholds at once with nothing in the data to separate them. Same every-row write rule as the two columns above |
+| `arm_rank` | int | the card's **0-based rank within its own arm's ranked list** — never its deck position (that is `card_index`). The pair `(model_arm, arm_rank, card_index)` is what separates model quality from deck-position effects: `arm_rank` is what the model thought, `card_index` is where the interleaver put it |
+
+`features_json` additionally carries `also_proposed_by` (list of arm names) on a bake-off card that ANOTHER arm also proposed — the duplicate ledger. Credit is first-picker, so the trade appears once; agreement is recorded rather than discarded.
 
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
 
@@ -462,6 +468,43 @@ Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
 | `computed_at` | str | ISO UTC |
 
 Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestion_link_txid` on `transaction_id`.
+
+---
+
+## `bakeoff_runs`
+
+**trade.bakeoff** three-model bake-off run ledger (`docs/plans/three-model-bakeoff/PLAN.md` §5, scope block `scope-phase3.md`) — **one row per organic trade job while the flag is on**, the per-JOB half of the record; the per-CARD half rides `deck_impressions.model_arm` / `.arm_rank`. Written best-effort by `server._run_trade_job` (→ `save_bakeoff_run`) after the deck is assembled; a failure here never fails the job. Written for **every** run including a superseded one — this is a RUN ledger, and the empty-arm/cost questions it answers are just as valid for a deck nobody saw.
+
+| Column | Type | Notes |
+|---|---|---|
+| `run_id` | str PK | uuid4 hex |
+| `deck_job_id` | str | `_trade_jobs` job id — joins to `deck_impressions.deck_job_id` |
+| `user_id` | str | |
+| `league_id` | str | |
+| `arm_order` | JSON text | the team-draft rotation this deck used, e.g. `["current","gen_v2","baseline"]`. Randomised **per deck**, seeded on `league_id` + ISO week — stable for a league within a week (so a re-run reproduces the deck) and rotating between weeks (so no arm is permanently in slot 3) |
+| `served_arm` | str | `current` during Phase-4 dark validation (three arms generated and logged, ONE served); NULL once interleaved serving is lit |
+| `deck_size` | int | cards in the **interleaved** deck — computed and logged even in dark mode, where it is not what got served |
+| `total_ms` | int | wall clock for all three generations (they run sequentially on one thread) |
+| `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job |
+| `config_json` | JSON text | `{"base": <arm `current`'s effective `trade_service` config>, "arm_delta": {arm: {keys that differ}}}`, snapshotted **inside each arm's own context** (so arm A's reflects `MODEL_A_PROFILE`). `model_config` has no `updated_at`, so a knob's change date is otherwise unknowable after the fact and the whole experiment rests on knowing which configuration produced each card. Stored whole rather than hashed — a fingerprint would say the config changed without saying to what. ~5 KB base plus a handful of delta keys; arm C's delta is empty. Deliberately **not** a config-versioning system: one snapshot per run, no history, no dedup |
+| `agreement_json` | JSON text | `{"armA+armB": n}` — served cards both arms proposed (first picker credited, the loser recorded). High `baseline+current` means the 2026-08-16 fixes changed little; `current+gen_v2` is the interesting number for a future blend |
+| `created_at` | str | ISO UTC |
+
+Indexes: `ix_bakeoff_runs_league` on `league_id`; `ix_bakeoff_runs_job` on `deck_job_id`.
+
+**"Was this comparison threshold-clean?"** — the question PLAN.md §6 needs answered before any per-arm rate is quoted. One `GROUP BY`, no archaeology:
+
+```sql
+SELECT model_arm,
+       COUNT(DISTINCT fairness_threshold) AS thresholds,
+       MIN(fairness_threshold), MAX(fairness_threshold),
+       COUNT(*) AS impressions
+FROM deck_impressions
+WHERE model_arm IS NOT NULL
+GROUP BY model_arm;
+```
+
+More than one distinct threshold within the population being compared means the arms differ in admission bar as well as in model, and the comparison must be sliced by `fairness_threshold` (or restricted to one value) before it means anything. Pinned by `test_bakeoff_serving.py::test_threshold_clean_query_answers_itself_from_the_table`.
 
 ---
 

@@ -787,6 +787,30 @@ FLAG_KEYS: tuple[str, ...] = (
     # (pass_reason_elo_suppression), not this flag, so ranking math can be
     # reverted without taking the capture down with it.
     "feedback.decline_reasons",
+    # ── Three-model bake-off — docs/plans/three-model-bakeoff/PLAN.md ─────
+    # Scope block: docs/plans/three-model-bakeoff/scope-phase3.md. ON = one
+    # organic trade job fans out into THREE generations run sequentially on
+    # the existing daemon thread — arm `baseline` (the live engine under the
+    # pinned MODEL_A_PROFILE + the arm-A R4 bypass), arm `current` (live
+    # defaults), arm `gen_v2` (backend/trade_gen_v2.py called directly,
+    # regardless of `trade_gen.v2`, which gates the NORMAL serving path and
+    # stays FALSE) — merged by team-draft interleaving, with every served
+    # card attributed on deck_impressions.model_arm / .arm_rank and one
+    # bakeoff_runs row per job. Also zeroes the trade-swipe K factors
+    # (PLAN.md §3.4 Channel 1) so arms cannot teach the shared board between
+    # decks; ranking votes (elo_k) stay live.
+    #
+    # Serving is knob-controlled INSIDE the flag: model_config
+    # bakeoff_serve_interleaved 0 (default) = Phase-4 dark validation — all
+    # three arms generate and log, only arm `current` is served, the
+    # presentation stack runs untouched; 1 = Phase-5 interleaved serving,
+    # where the post-generation re-rankers (F2/F3/F5/F6/F7/F9 + A6
+    # diversity) are BYPASSED for that deck so nothing reorders the
+    # interleaver's output (PLAN.md §3.4 Channel 2).
+    #
+    # OFF (default) ⇒ no fan-out, no interleave, no new columns stamped, no
+    # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
+    "trade.bakeoff",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
