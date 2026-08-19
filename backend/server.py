@@ -2897,17 +2897,55 @@ def _fuzzy_match_tau() -> float:
         return 0.8
 
 
+def _likes_you_cfg(key: str, default: float) -> float:
+    """A likes-you model_config knob, read through trade_service's live
+    config dict — same pattern as _fuzzy_match_tau/_deck_cfg. Defensive: a
+    missing key or import problem can never break deck generation; it falls
+    back to the shipped default."""
+    try:
+        from .trade_service import _cfg as _ts_cfg
+        return float(_ts_cfg.get(key, default))
+    except Exception:
+        return float(default)
+
+
+def _likes_you_gate_level() -> int:
+    """D-096 — the likes-you quality ladder, model_config
+    `likes_you_gate_level`. ONE deploy-free lever:
+
+      0 — pre-D-096 behaviour EXACTLY: the D-055 raw-sum floor at
+          `likes_you_min_user_delta` (-500), no presentment gates.
+      1 — the floor moves to `likes_you_min_user_gain` (0.0) measured in
+          PACKAGE-ADJUSTED units — the same number the TradeValueBar
+          renders. No presentment gates.
+      2 — level 1 plus directional R1 (`overpay_ok`) and `filler_ok`.
+          SHIPPED DEFAULT.
+
+    Unknown/garbage values clamp into [0, 2] rather than failing the deck.
+    """
+    return max(0, min(2, int(_likes_you_cfg("likes_you_gate_level", 2.0))))
+
+
 def _likes_you_min_user_delta() -> float:
     """model_config key 'likes_you_min_user_delta' (default -500.0), read
     through trade_service's live config dict — same pattern as
-    _fuzzy_match_tau. The user-gain floor on the likes-you injection
-    (D-055). Defensive: a missing key or import problem can never break
-    deck generation; it falls back to the ratified default."""
-    try:
-        from .trade_service import _cfg as _ts_cfg
-        return float(_ts_cfg.get("likes_you_min_user_delta", -500.0))
-    except Exception:
-        return -500.0
+    _fuzzy_match_tau. The D-055 user-gain floor, measured on RAW summed
+    values. D-096 demoted this to the LEVEL-0 (legacy) floor only; levels
+    >= 1 use `likes_you_min_user_gain` on package-adjusted values instead.
+    Its value and default are deliberately unchanged so that
+    `likes_you_gate_level = 0` restores today's behaviour in ONE value."""
+    return _likes_you_cfg("likes_you_min_user_delta", -500.0)
+
+
+def _likes_you_min_user_gain() -> float:
+    """D-096 — the user-gain floor in PACKAGE-ADJUSTED value-bar units
+    (model_config `likes_you_min_user_gain`, default 0.0). 0.0 is not an
+    arbitrary pick: it is the value of `user_gain_epsilon`, the identical
+    rule the gated generators already apply to the consensus package delta
+    (trade_service.py `if rv - gv < _c("user_gain_epsilon")`). The
+    likes-you surface now obeys the same user-gain rule as every other
+    card in the deck."""
+    return _likes_you_cfg("likes_you_min_user_gain", 0.0)
 
 
 def _likes_you_user_delta(give_ids: list, recv_ids: list,
@@ -2923,6 +2961,87 @@ def _likes_you_user_delta(give_ids: list, recv_ids: list,
     _e2v = _trade_service_mod.elo_to_value
     return (sum(_e2v(seed_map.get(pid, 1500.0)) for pid in recv_ids)
             - sum(_e2v(seed_map.get(pid, 1500.0)) for pid in give_ids))
+
+
+def _likes_you_seed_value(seed_map: dict):
+    """pid -> consensus value in v2 value space. This is the `seed_value`
+    accessor shape every gate predicate in trade_service expects, built
+    from what the injector already holds — no new lookups."""
+    _e2v = _trade_service_mod.elo_to_value
+    return lambda pid: _e2v(seed_map.get(pid, 1500.0))
+
+
+def _likes_you_package_delta(give_ids: list, recv_ids: list,
+                             seed_value) -> tuple:
+    """D-096 — (give_pkg, recv_pkg, recv_pkg - give_pkg) in PACKAGE-ADJUSTED
+    v2 value space: exactly the two numbers the card carries into
+    `TradeCard.give_value` / `receive_value`, which is what the mobile
+    TradeValueBar renders.
+
+    This closes the unit mismatch that let a -500 floor ship a -6,019 card:
+    D-055's floor was measured on RAW summed values while the bar the user
+    reads is package-adjusted, and the two disagree by the depth discount
+    and the crown credit (`package_value_v2`). Measured on the 198 served
+    likes-you impressions the sign of the two metrics disagrees on 15, and
+    5 cards clear the raw -500 floor while showing a >= 500 loss on the bar.
+
+    MUST run under the deck owner's pinned stud-tax mode — the caller
+    `_inject_likes_you_cards` already wraps the whole impl in
+    `stud_tax_override`, which is why this is not called anywhere else.
+    """
+    from .trade_optimizer import _consensus_packages
+    gv, rv = _consensus_packages(give_ids, recv_ids, seed_value)
+    return gv, rv, rv - gv
+
+
+def _likes_you_presentment_ok(give_ids: list, recv_ids: list,
+                              seed_value) -> bool:
+    """D-096 — the two construction rules the injector adopts at gate
+    level 2. Both are IMPORTED from trade_service unmodified.
+
+    **R1 `overpay_ok`, run DIRECTIONALLY** — honoured only when the VIEWER
+    is the heavier side by raw consensus sum. R1 is a symmetric credibility
+    bound, and that symmetry is right on a generated card: nobody accepts a
+    wild overpay, in either direction. A likes-you card is not a prediction
+    — the counterparty has ALREADY liked this exact package, so the
+    acceptance evidence is empirical, and the half of R1 that kills
+    user-favourable lopsidedness would delete precisely the best cards the
+    surface can produce. Measured on the 198 served impressions: blanket R1
+    kills 58 of the 83 that clear the package floor, and 58 of those 58
+    kills are cards where the USER is the one being overpaid — the largest
+    a +6,325 one-for-one. Directional R1 kills 0 of the 83; it is here to
+    close the corner where the package discount flatters a raw-space
+    overpay into a near-zero bar.
+
+    **`filler_ok`** runs with the consensus accessor on BOTH board
+    arguments — the injector holds no personal board, and consensus is the
+    currency every other number on a synthesized card is already in. It
+    kills 7 of the 198 alone, all of which already fail the floor: zero
+    measured cost, and it keeps a junk-stuffed multi-asset mirror off deck
+    position 1.
+
+    Deliberately NOT applied, each with its reason:
+      * a fairness threshold — it costs the same 55 user-favourable cards
+        blanket R1 does (83 -> 25 survivors at >= 0.75) and adds zero kills
+        the floor has not already made. `overpay_ok`'s own contract is that
+        it never reads `fairness_threshold`; wiring the mobile fairness
+        toggle into this surface would let a user setting silently gut it.
+      * R2 `pos_net_ok` / R3 `pick_gap_ok` / R5 `need_gate_ok` — these are
+        SHAPE and FIT rules ("is this the trade you were looking for?").
+        The counterparty's like is the whole signal here; a mirrored like
+        that happens to be roster-shaped oddly is still a real offer, and
+        R5 in particular needs a resolved outlook the injector does not hold.
+      * `user_gain_ok_1for1` — needs `raw_user_elo`, the user's pre-shrinkage
+        personal board, which is not threaded to the injector. The package
+        floor is the aggregate form of the same test.
+    """
+    g = sum(seed_value(p) for p in give_ids)
+    r = sum(seed_value(p) for p in recv_ids)
+    if g > r and not _trade_service_mod.overpay_ok(
+            give_ids, recv_ids, seed_value):
+        return False
+    return _trade_service_mod.filler_ok(
+        give_ids, recv_ids, seed_value, seed_value)
 
 
 _LIKES_YOU_CAP = 3   # max likes-you injections per generated deck
@@ -2967,11 +3086,17 @@ def _inject_likes_you_cards_impl(
       already want this", not its score) and give it the same boost.
     - At most _LIKES_YOU_CAP injections; trades the user already swiped on
       (past_decision_keys) are skipped.
-    - D-055 user-gain floor: a like whose net consensus value for the
-      VIEWER (receive − give, summed player values) is below
-      model_config `likes_you_min_user_delta` (default -500) is not
-      injected at all — neither flagged/boosted nor synthesized — and does
-      not consume a cap slot.
+    - Quality gates (D-096, reversing D-055 sub-decision (5) / Q-G6-1).
+      `likes_you_gate_level` (default 2) selects:
+        0 — the D-055 raw-sum floor at `likes_you_min_user_delta` (-500),
+            i.e. pre-D-096 behaviour exactly;
+        1 — a floor at `likes_you_min_user_gain` (default 0.0) measured on
+            the PACKAGE-ADJUSTED values the TradeValueBar renders;
+        2 — level 1 plus directional R1 (`overpay_ok`) and `filler_ok`.
+      A like failing the active gates is not injected at all — neither
+      flagged/boosted nor synthesized — and does not consume a cap slot.
+      An existing generated card that fails keeps its organic deck
+      position; it loses only the likes-you flag and the position-1 boost.
 
     Returns the deck re-sorted by composite_score descending. Synthesized
     cards are registered in trade_service._trade_cards so /api/trades/swipe
@@ -2994,7 +3119,10 @@ def _inject_likes_you_cards_impl(
     injected  = 0
     seen_keys = set()
     new_cards = []
-    min_user_delta = _likes_you_min_user_delta()
+    gate_level     = _likes_you_gate_level()          # D-096
+    min_user_delta = _likes_you_min_user_delta()      # level 0 — raw sums
+    min_user_gain  = _likes_you_min_user_gain()       # levels >= 1 — package
+    seed_value     = _likes_you_seed_value(seed_map)
     for like in likes:
         if injected >= _LIKES_YOU_CAP:
             break
@@ -3031,9 +3159,11 @@ def _inject_likes_you_cards_impl(
             continue
         # G6 R4 #336 (Q-G6-1) — never re-inject a trade that is currently
         # live in the user's match pipeline (awaiting like or pending/
-        # accepted match). DEDUP only: the quality rules R1/R2/R3/R5 stay
-        # off this surface per Q21 — the D-055 user-gain floor below is
-        # its only quality gate. Bake-off arm A bypasses R4 per-thread
+        # accepted match). Q-G6-1 ruled this surface got "exactly R4 dedup,
+        # none of the quality rules"; D-096 (2026-08-19) REVERSED that in
+        # part — R1 (directional) and filler_ok now run below alongside the
+        # user-gain floor. R2/R3/R5 remain off, by reasoned exclusion — see
+        # _likes_you_presentment_ok. Bake-off arm A bypasses R4 per-thread
         # (trade_service.r4_bypass) — R4 has no knob, so that context is the
         # only way to run arm A's pre-G6 behaviour without flipping the flag
         # for arms B/C and every other user.
@@ -3044,16 +3174,39 @@ def _inject_likes_you_cards_impl(
             except Exception:
                 pass
             continue
-        # D-055 — user-gain floor. The injection's pull is "they already
-        # want this", but a like the VIEWER loses badly on reads as an
-        # insult rather than an opportunity, and it lands at deck position
-        # 1-3. The 2026-08-15 Phase A gate found all 8 insulting first-deck
-        # cards were likes-you injections (docs/plans/open-access-phase-a-
-        # gates.md § Gate (a)). Below the floor: no flag, no boost, no
-        # synthesis — and no cap slot consumed, so a good like still gets
-        # the slot. Neutral/positive likes are untouched.
-        if _likes_you_user_delta(my_give, my_recv, seed_map) < min_user_delta:
-            continue
+        # ── Quality gates (D-055 floor, D-096 ladder) ─────────────────
+        # The injection's pull is "they already want this", but a like the
+        # VIEWER loses badly on reads as an insult rather than an
+        # opportunity, and it lands at deck position 1-3. The 2026-08-15
+        # Phase A gate found all 8 insulting first-deck cards were
+        # likes-you injections (docs/plans/open-access-phase-a-gates.md
+        # § Gate (a)); the 2026-08-19 audit then found the -500 raw-sum
+        # floor D-055 answered that with still let 115 of 198 served cards
+        # show the user paying, worst -5,571 on the bar.
+        #
+        # D-096 REVERSES D-055 sub-decision (5) / Q-G6-1 ("exactly R4
+        # dedup, none of the quality rules"): see
+        # docs/plans/likes-you-quality-gates/scope.md.
+        #
+        # Failing any gate: no flag, no boost, no synthesis — and NO CAP
+        # SLOT CONSUMED, so a good like still gets the slot. An EXISTING
+        # generated card that fails keeps its organic deck position; only
+        # the likes-you flag and the position-1 boost are withheld.
+        _gv = _rv = None
+        if gate_level <= 0:
+            # Level 0 — pre-D-096 behaviour exactly: the raw-sum floor.
+            if _likes_you_user_delta(my_give, my_recv, seed_map) < min_user_delta:
+                continue
+        else:
+            # Level >= 1 — the floor in the units the value bar renders.
+            _gv, _rv, _delta = _likes_you_package_delta(
+                my_give, my_recv, seed_value)
+            if _delta < min_user_gain:
+                continue
+            # Level 2 — directional R1 + filler_ok, imported unmodified.
+            if gate_level >= 2 and not _likes_you_presentment_ok(
+                    my_give, my_recv, seed_value):
+                continue
 
         existing = existing_by_key.get(key)
         if existing is not None:
@@ -3069,10 +3222,12 @@ def _inject_likes_you_cards_impl(
         # Consensus package values (value space) for the TradeValueBar — same
         # fn the calculator uses. seed_map is raw Elo, so wrap it in
         # elo_to_value; fairness_score above stays on its raw-Elo basis.
-        from .trade_optimizer import _consensus_packages
-        _e2v = _trade_service_mod.elo_to_value
-        _gv, _rv = _consensus_packages(
-            my_give, my_recv, lambda pid: _e2v(seed_map.get(pid, 1500.0)))
+        # D-096: at gate level >= 1 these are ALREADY computed above (the
+        # floor is measured on them), so reuse rather than recompute — the
+        # gate and the bar can then never disagree by construction.
+        if _gv is None or _rv is None:
+            _gv, _rv, _ = _likes_you_package_delta(
+                my_give, my_recv, seed_value)
         card = TradeCard(
             trade_id           = f"likesyou_{uuid.uuid4().hex[:12]}",
             league_id          = league_id,
