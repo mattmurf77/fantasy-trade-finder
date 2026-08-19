@@ -49,6 +49,24 @@ Built and unmerged; `account.settings_hub` default OFF (see [`CHANGELOG.md`](CHA
 
 ---
 
+## 2026-08-19 — ESPN pick-assignment horizon becomes a user setting (backlog)
+
+**Operator ruling, 2026-08-19** (closing [Q-022](OPEN_QUESTIONS.md)): *"The user should be able to
+decide how many future draft pick years to set in the espn assignment. Not critical for now, backlog
+item."* Neither answer the question offered — not Sleeper's derived rolling three, not the recorded
+`current + 3` — the span is a **league setting the assigning member owns**, which fits rows that are
+already `source='user'`.
+
+- **One commit, three parts, or it breaks:** a per-league setting (default 4 classes so no existing
+  league moves) → `database.seed_pick_grid` reading it instead of `_ASSIGNMENT_SEASONS_AHEAD`
+  (`backend/server.py:12202`) → the assignment progress denominator (`backend/server.py:12447`)
+  deriving from the same value. Split them and every league's progress reads wrong.
+- **Do NOT point this at `draft_status.pick_horizon`.** That one is derived from platform truth;
+  this one is a user declaration. They are deliberately separate — see Q-022.
+- **Not blocking:** zero exposure today, no ESPN rows in `draft_picks` in prod.
+- Added while the cap below was already blown; it is operator-directed and current, so it is logged
+  rather than dropped — but it makes the paydown one item more overdue.
+
 ## Queue cap status — the 7-item cap is blown; proposed drops
 
 *(Noted 2026-08-19 rather than silently overflowing, per the hygiene rules below.)* This file carries

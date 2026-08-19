@@ -41,6 +41,11 @@
 - **Why it is not urgent:** zero exposure today. Prod holds **no ESPN rows at all** in `draft_picks` (only `sleeper` and `mfl`), so no user is currently seeing an assignment-grid phantom.
 - **What would close it:** an operator ruling on one question — *does an off-platform ESPN dynasty rookie draft carry three classes like Sleeper, or four?* If three, the change is `seed_pick_grid` adopting `draft_status.pick_horizon` **plus** the progress-total line, in one commit. If four, record why the platforms differ so the next reader does not "fix" it.
 - **Owner:** unassigned; not blocking D-091.
+- **OPERATOR RULING 2026-08-19 — neither. Make it user-configurable, and backlog it.** Verbatim: *"The user should be able to decide how many future draft pick years to set in the espn assignment. Not critical for now, backlog item."*
+  - This answers the question by rejecting its premise: the count is not a constant to be derived (Sleeper's rolling three) **or** asserted (the recorded `current + 3`) — it is a **league setting the assigning member owns**. That is coherent with why these rows exist at all: they are already `source='user'` and surfaced as "Member-entered — not verified with ESPN", so the span is the league's claim too, not just its contents.
+  - **Scope when it is picked up:** a per-league setting (default = today's 4 classes, so no existing league changes), `seed_pick_grid` reading it instead of `_ASSIGNMENT_SEASONS_AHEAD`, **and** the progress denominator at `backend/server.py:12447` deriving from the same value in the same commit — reason (2) above is a real trap, and splitting them makes every league's assignment progress read wrong.
+  - **Explicitly NOT adopting `draft_status.pick_horizon` here.** The Sleeper horizon is derived from platform truth; this one is a user's declaration. Keeping them separate is the point — do not "fix" this later by pointing it at the derived horizon.
+  - **Status: backlogged, not blocking.** Zero exposure stands (no ESPN rows in prod). Tracked in `NEXT.md`.
 
 ## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
 
