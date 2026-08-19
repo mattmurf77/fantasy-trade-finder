@@ -37,6 +37,13 @@ export type Layer2Code =
   | 'fit_new_weakness'
   | 'fit_duplicate'
   | 'fit_other'
+  // The "Neither" tile's structured options (SPEC §2 amendment 2026-08-19,
+  // D-079). Two codes, not one: `keep` is a give-side keep-list signal
+  // ("won't trade MY guy"), `avoid` is a receive-side avoid-list signal
+  // ("don't want THEIR guy"), and they point at different engine fixes.
+  // The shared `other_player_` stem makes the axis selectable as a prefix.
+  | 'other_player_keep'
+  | 'other_player_avoid'
   | 'other_text';
 
 /** Layer-2 codes that open the free-text box instead of committing outright. */

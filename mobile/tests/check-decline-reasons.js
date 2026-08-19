@@ -198,10 +198,11 @@ for (const call of trackCalls) {
 // 4. Taxonomy matches SPEC §2, code for code
 // ═══════════════════════════════════════════════════════════════════════
 
-// The 8 codes, transcribed from SPEC §2. Held here rather than parsed out of
-// the spec because SPEC.md is not on this branch (the plan folder lands with
-// the backend half) — but when it IS present, the two are cross-checked below
-// so the transcription can never quietly diverge from the spec it copies.
+// The 10 codes, transcribed from SPEC §2, and cross-checked against the spec
+// file itself below so the transcription can never quietly diverge from what
+// it copies. (The `existsSync` guard is kept because SPEC.md was untracked
+// until 2026-08-19 — it lived only in one checkout's working tree, so this
+// cross-check had never actually executed. It runs now.)
 const SPEC_CODES = [
   'value_giving',
   'value_getting',
@@ -210,13 +211,18 @@ const SPEC_CODES = [
   'fit_new_weakness',
   'fit_duplicate',
   'fit_other',
+  // SPEC §2 amendment 2026-08-19 (D-079) — the "Neither" tile's structured
+  // options. Section 6 below pins them as a PAIR and pins that "Neither" is
+  // no longer free-text-only.
+  'other_player_keep',
+  'other_player_avoid',
   'other_text',
 ];
 const specPath = path.join(REPO, 'docs/plans/decline-reason-capture/SPEC.md');
 if (fs.existsSync(specPath)) {
   const spec = fs.readFileSync(specPath, 'utf8');
   const inSpec = new Set(
-    (spec.match(/`(value_[a-z]+|fit_[a-z_]+|other_text)`/g) || []).map((m) =>
+    (spec.match(/`(value_[a-z]+|fit_[a-z_]+|other_[a-z_]+)`/g) || []).map((m) =>
       m.replace(/`/g, ''),
     ),
   );
@@ -268,6 +274,122 @@ assert(
   'DeclineReasonPanel: tiles report expanded, options report selected',
   'screen readers need the layer-1/layer-2 state, not just the label',
 );
+
+// ═══════════════════════════════════════════════════════════════════════
+// 6. "Neither" carries structured options (SPEC §2 amendment, D-079)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// WHY THIS SECTION EXISTS. "Neither" shipped free-text-only and became the
+// single largest bucket of the first production burst (9 of 19 passes, 47%),
+// almost all of it ONE un-coded reason: the tester did not want to trade a
+// specific player. The tile now has options, and two properties of that fix
+// are silently reversible by a well-meaning refactor:
+//
+//   a. Reverting "Neither" to free-text-only (restoring the `freeOnly`
+//      shortcut) puts the 47% straight back into an un-analysable box.
+//   b. COLLAPSING the two player codes into one. `keep` ("won't trade MY
+//      guy") is a give-side keep-list signal and `avoid` ("don't want THEIR
+//      guy") is a receive-side avoid-list signal — different engine fixes.
+//      One code means reading free text to route the fix, which is the exact
+//      failure that made "Neither" a black box.
+//
+// Read from the TILES table via the AST, not by regex, so a re-order or a
+// re-wrap of the source cannot fake a pass.
+
+const panelSrc = parse('src/components/DeclineReasonPanel.tsx');
+
+function literal(node) {
+  if (!node) return undefined;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  return undefined;
+}
+function objProps(node) {
+  const out = {};
+  for (const prop of node.properties) {
+    if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+    out[prop.name.getText().replace(/['"]/g, '')] = prop.initializer;
+  }
+  return out;
+}
+
+const tilesDecl = findAll(
+  panelSrc,
+  (n) => ts.isVariableDeclaration(n) && n.name.getText() === 'TILES',
+)[0];
+assert(!!tilesDecl, 'DeclineReasonPanel: the TILES table still exists');
+
+let otherTile = null;
+if (tilesDecl) {
+  const arr = findAll(tilesDecl, (n) => ts.isArrayLiteralExpression(n))[0];
+  for (const el of arr ? arr.elements : []) {
+    if (!ts.isObjectLiteralExpression(el)) continue;
+    const props = objProps(el);
+    if (literal(props.key) === 'other') otherTile = props;
+  }
+}
+assert(!!otherTile, "DeclineReasonPanel: the layer-1 'other' tile is in TILES");
+
+if (otherTile) {
+  const opts = ts.isArrayLiteralExpression(otherTile.options)
+    ? otherTile.options.elements
+        .filter((e) => ts.isObjectLiteralExpression(e))
+        .map((e) => {
+          const p = objProps(e);
+          return {
+            code: literal(p.code),
+            free: literal(p.free) === true,
+            testID: literal(p.testID),
+          };
+        })
+    : [];
+
+  assert(
+    opts.length > 0,
+    "DeclineReasonPanel: 'Neither' offers structured options, not free text only",
+    'reverting it to free-text-only puts 47% of passes back in an un-analysable box',
+  );
+  assert(
+    !/freeOnly/.test(panelText),
+    'DeclineReasonPanel: the free-text-only tile shortcut is gone',
+    'a `freeOnly` tile renders the composer with no options — the reverted behaviour',
+  );
+
+  const PLAYER_PREF = ['other_player_keep', 'other_player_avoid'];
+  for (const code of PLAYER_PREF) {
+    const o = opts.find((x) => x.code === code);
+    assert(!!o, `DeclineReasonPanel: 'Neither' offers ${code}`);
+    if (o) {
+      assert(
+        o.free === false,
+        `DeclineReasonPanel: ${code} commits on tap, it does not open a text box`,
+        'SPEC §3 — a fixed option writes its code and advances; only "Other" banks-then-opens',
+      );
+      assert(
+        o.testID === `trades.pass-reason.l2.${code}`,
+        `DeclineReasonPanel: ${code} carries its conventional testID`,
+        `found ${o.testID}`,
+      );
+    }
+  }
+  assert(
+    PLAYER_PREF.every((c) => opts.some((o) => o.code === c)),
+    'DeclineReasonPanel: the player-preference codes are a PAIR',
+    'keep (my side) and avoid (their side) point at different engine fixes — one code loses that',
+  );
+
+  const otherRow = opts.find((o) => o.code === 'other_text');
+  assert(
+    !!otherRow && otherRow.free === true,
+    "DeclineReasonPanel: 'Neither' still ends in a free-text 'Other' row",
+    'the residual bucket must survive — the two player codes do not cover everything',
+  );
+  assert(
+    opts[opts.length - 1] && opts[opts.length - 1].code === 'other_text',
+    "DeclineReasonPanel: 'Neither' lists 'Other' last, as every tile does",
+  );
+}
 
 console.log('');
 if (failures) {

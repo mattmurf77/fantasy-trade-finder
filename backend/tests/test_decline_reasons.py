@@ -360,6 +360,81 @@ def test_neither_tile_free_text_lands_as_other_text(harness):
     assert row["free_text"] == "just a bad vibe"
 
 
+# ---------------------------------------------------------------------------
+# Player preference under "Neither" (SPEC §2 amendment 2026-08-19, D-079)
+# ---------------------------------------------------------------------------
+# The "Neither" tile was free-text-only and became 47% of the first production
+# burst, almost all of it one un-coded reason: "I don't want to trade THIS
+# player". It now carries two structured codes. These tests pin the pair as a
+# PAIR — a refactor that collapses them into one code, or reparents either to
+# `value`, fails here.
+
+_PLAYER_PREF = ("other_player_keep", "other_player_avoid")
+
+
+@pytest.mark.parametrize("detail", _PLAYER_PREF)
+def test_player_preference_codes_are_children_of_other(harness, detail):
+    """Both live under "Neither" — not under Value, which is the tempting
+    mis-parent for `other_player_keep` ("won't give up my guy")."""
+    assert db_module.PASS_REASON_PARENT[detail] == "other"
+    assert detail in db_module.PASS_REASON_LAYER2["other"]
+
+    client, _service, _svc, eng = harness
+    r = _post(client, _reason({"reason": "other", "detail": detail}))
+    assert r.status_code == 200, r.get_json()
+    row = load_trade_pass_reason(IMP)
+    assert row["reason"] == "other"
+    assert row["detail"] == detail
+    assert row["free_text"] is None          # a fixed option, never a text row
+    assert _row_count(eng) == 1
+
+
+@pytest.mark.parametrize("detail", _PLAYER_PREF)
+@pytest.mark.parametrize("wrong", ["value", "fit"])
+def test_player_preference_rejects_a_foreign_layer1(harness, detail, wrong):
+    client, _service, _svc, eng = harness
+    r = _post(client, _reason({"reason": wrong, "detail": detail}))
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "detail_reason_mismatch"
+    assert _row_count(eng) == 0
+
+
+@pytest.mark.parametrize("detail", _PLAYER_PREF)
+def test_player_preference_arriving_alone_still_names_its_reason(harness, detail):
+    """Layer-2-first (dropped layer-1 request, app restart): the row must
+    derive `reason='other'` from the prefix rather than store a half row."""
+    client, _service, _svc, _eng = harness
+    _post(client, _reason({"detail": detail}))
+    row = load_trade_pass_reason(IMP)
+    assert row["reason"] == "other"
+    assert row["detail"] == detail
+
+
+def test_player_preference_is_distinguishable_from_plain_neither_free_text(harness):
+    """The whole point of the amendment: the two directions and the residual
+    free text are three different stored answers, not one bucket."""
+    client, _service, trade_svc, _eng = harness
+    seen = {}
+    for i, detail in enumerate(_PLAYER_PREF + ("other_text",)):
+        tid = f"pref_trade_{i}"
+        trade_svc._trade_cards[tid] = TradeCard(
+            trade_id=tid, league_id=LEAGUE, proposing_user_id=ME,
+            target_user_id=OPP, target_username="opp",
+            give_player_ids=["g1"], receive_player_ids=["r1"],
+            mismatch_score=0.0, fairness_score=0.0, composite_score=0.0,
+        )
+        _seed_impression(f"pref_imp_{i}", tid, card_index=i + 1)
+        body = {"trade_id": tid, "impression_id": f"pref_imp_{i}",
+                "reason": "other", "detail": detail}
+        if detail == "other_text":
+            body["text"] = "some other thing entirely"
+        assert _post(client, body).status_code == 200
+        seen[detail] = load_trade_pass_reason(f"pref_imp_{i}")["detail"]
+    assert seen == {"other_player_keep": "other_player_keep",
+                    "other_player_avoid": "other_player_avoid",
+                    "other_text": "other_text"}
+
+
 def test_switching_tiles_records_switched_from_and_keeps_the_first_answer(harness):
     """SPEC §3 — switching is a refinement, not a reset."""
     client, _service, _svc, eng = harness
@@ -568,7 +643,7 @@ def test_every_specced_code_is_accepted(harness):
     assert set(db_module.PASS_REASON_PARENT) == {
         "value_giving", "value_getting", "value_other",
         "fit_outlook", "fit_new_weakness", "fit_duplicate", "fit_other",
-        "other_text",
+        "other_player_keep", "other_player_avoid", "other_text",
     }
     client, _service, trade_svc, _eng = harness
     for i, detail in enumerate(sorted(db_module.PASS_REASON_PARENT)):
@@ -599,6 +674,12 @@ _ELO_MATRIX = [
     ("fit_new_weakness", False),
     ("fit_duplicate",    False),
     ("fit_other",        False),
+    # SPEC §2 amendment 2026-08-19 (D-079). `other_player_keep` is the
+    # near-miss: "won't trade one of my players" LOOKS like value_giving but
+    # it is attachment, not a price claim — "not this player at any price"
+    # is the opposite of a statement about price. Both suppress.
+    ("other_player_keep", False),
+    ("other_player_avoid", False),
     ("other_text",       False),
 ]
 
@@ -698,7 +779,8 @@ def test_pass_reason_writes_elo_rule_is_pure(harness):
         assert rs_module.pass_reason_writes_elo("value_giving") is True
         for code in ("value", "fit", "other", "value_getting", "value_other",
                      "fit_outlook", "fit_new_weakness", "fit_duplicate",
-                     "fit_other", "other_text", None, ""):
+                     "fit_other", "other_player_keep", "other_player_avoid",
+                     "other_text", None, ""):
             assert rs_module.pass_reason_writes_elo(code) is False, code
     with _knob(0.0):
         for code in ("value", "value_getting", "fit_other", None, ""):

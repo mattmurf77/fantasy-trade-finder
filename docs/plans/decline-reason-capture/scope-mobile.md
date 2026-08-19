@@ -24,7 +24,7 @@ the NULL-`platform` incident is why.
 | Event | Properties | Fires when | Client |
 |---|---|---|---|
 | `trade_pass_layer1` | `reason` (`value`\|`fit`\|`other`), `switched_from` (`value`\|`fit`\|`other`\|`none`), `impression_id` (or the literal `none`), `trade_id`, `ms_since_render` (int), `platform` (`ios`\|`android`\|`web`) | The layer-1 tile tap. **Carries the disposition** — there is no separate pass event on this path. | mobile |
-| `trade_pass_layer2` | `reason`, `detail` (the 8 layer-2 codes), `has_free_text` (bool), plus the five shared props above | A fixed layer-2 option tap, or the free-text send. | mobile |
+| `trade_pass_layer2` | `reason`, `detail` (the 8 layer-2 codes; 10 since the 2026-08-19 amendment — enum widened, event unchanged), `has_free_text` (bool), plus the five shared props above | A fixed layer-2 option tap, or the free-text send. | mobile |
 
 Consequences that follow, deliberately:
 
@@ -106,7 +106,7 @@ stored table are **backend-branch** work.
   `release` flag set (feature OFF) and taps `trades.pass-btn` — it must keep
   passing **unchanged**, and does; that is the flag-off proof at the flow level.
 - **`testID`s added:** `trades.pass-reasons`, `trades.pass-reason.value|fit|other`,
-  `trades.pass-reason.l2.<8 codes>`, `trades.pass-reason.text`,
+  `trades.pass-reason.l2.<8 codes; 10 since 2026-08-19>`, `trades.pass-reason.text`,
   `trades.pass-reason.send`. `mobile/scripts/testid-lint.sh` → **OK**. Two
   allow-list globs added (`trades.pass-reason.*`, `trades.pass-reasons`) with
   the constructing file named, per law 4: the ids are object values on the
@@ -141,7 +141,7 @@ stored table are **backend-branch** work.
 | `living-memory/LLD.md` | n/a | No convention shifted. The client keeps its existing shapes: a thin `api/` module, a `useFlag` gate, `track()` for events. |
 | `docs/architecture.md` | n/a | No backend module wiring or data flow changed by the mobile half. |
 | `living-memory/HLD.md` | n/a | No new client, module or major flow — one card affordance changed behind a dark flag. |
-| `docs/cross-client-invariants.md` | **no — flagged, not edited** | The layer-1/layer-2 codes ARE cross-client enum strings and belong there. Deliberately left to integration: only mobile implements them today, and the backend branch owns the glossary/data-dictionary rows they must agree with. **Follow-up at merge:** add a `§ Decline reasons` block listing the 3 + 8 codes verbatim from SPEC §2. |
+| `docs/cross-client-invariants.md` | **no — flagged, not edited** | The layer-1/layer-2 codes ARE cross-client enum strings and belong there. Deliberately left to integration: only mobile implements them today, and the backend branch owns the glossary/data-dictionary rows they must agree with. **Follow-up at merge:** add a `§ Decline reasons` block listing the 3 + 8 codes verbatim from SPEC §2. **Still open as of 2026-08-19** (now 3 + 10) — re-checked by the player-preference amendment and deliberately left open: the codes are still backend+mobile only, with no web or extension consumer. |
 | `docs/glossary.md` | **no — backend-branch owned** | Per the task's file-ownership split. |
 | `docs/design/components.md` | **no — flagged, see §5** | Two new constructions named as candidates rather than added unilaterally. |
 | ADR / `DECISIONS.md` | not yet | Three decisions worth recording at merge, listed in §6. No ADR: nothing architectural, all three are local product/interaction calls. |
