@@ -56,6 +56,8 @@ from .trade_service import (
     _harmonic_mean,
     _starters_at,
     _value_uncertainty,
+    mismatch_damp,
+    rank_fairness,
     elo_to_value,
     filler_ok,
     fit_premium_1for1,
@@ -477,8 +479,19 @@ def generate_pair_trades_v3(
 
         return recv_val_user - give_val_user, give_val_opp - recv_val_opp
 
-    def _composite(hm: float, fairness: float, all_ids, recv_ids=None) -> float:
-        comp = W_MIS * min(hm, GAIN_CAP) / GAIN_CAP + W_FAIR * fairness
+    def _composite(hm: float, fairness: float, all_ids, recv_ids=None,
+                   give_ids=None) -> float:
+        # C1/C5 (2026-08-18, docs/plans/engine-quality/scope.md) — RANKING
+        # terms only; the card stamps the real full-package fairness and
+        # every gate above already ran on the real package. give_ids=None
+        # (no split available) skips C1 only, never C5.
+        _fair_rank = fairness
+        if give_ids is not None and recv_ids is not None:
+            _fair_rank = rank_fairness(fairness, give_ids, recv_ids,
+                                       _sv, _uv, _vo)
+        comp = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
+                * mismatch_damp(all_ids, _sv, confidence)
+                + W_FAIR * _fair_rank)
         comp *= _tier_mult(shrunk_user_elo, all_ids)
         # Backlog #2 — per-target reward, after the mutual-gain gates, capped.
         if _targets and recv_ids:
@@ -526,7 +539,7 @@ def generate_pair_trades_v3(
             # #227 — a 1-for-1 pick-for-pick swap is pointless churn
             # (mirrors the v2 _consider gate; gated before the near-miss
             # collection below so the 3.4 sweetener pass can't rescue it).
-            if not pick_swap_ok(give_ids, recv_ids, players):
+            if not pick_swap_ok(give_ids, recv_ids, players, _sv):
                 continue
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of
@@ -558,7 +571,8 @@ def generate_pair_trades_v3(
 
             hm = _harmonic_mean(user_surplus, opp_surplus)
             order -= 1   # earlier combos win composite ties (desc sort)
-            scored.append((_composite(hm, fairness, give_ids + recv_ids, recv_ids),
+            scored.append((_composite(hm, fairness, give_ids + recv_ids,
+                                      recv_ids, give_ids),
                            order, hm, fairness, give_ids, recv_ids,
                            _fit_paid))
 
@@ -639,11 +653,18 @@ def generate_pair_trades_v3(
             if sweet is None:
                 continue
             s_pid, side, new_give, new_recv, user_s, opp_s, ratio = sweet
+            # C3 — re-validate the SWEETENED combo: the sweetener can itself
+            # be a pick, and adding one to a side that faces a same-value pick
+            # turns the deal into the matched-pair churn the gate now catches.
+            # (Same re-validation slot the G6 rules already use.)
+            if not pick_swap_ok(new_give, new_recv, players, _sv):
+                continue
             key = (frozenset(new_give), frozenset(new_recv))
             if key in organic_keys:
                 continue
             hm = _harmonic_mean(user_s, opp_s)
-            comp = _composite(hm, ratio, new_give + new_recv, new_recv)
+            comp = _composite(hm, ratio, new_give + new_recv, new_recv,
+                              new_give)
             card = _card(comp, hm, ratio, new_give, new_recv)
             card.sweetener = {"player_id": s_pid, "side": side}
             cards.append(card)

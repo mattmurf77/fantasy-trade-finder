@@ -23,6 +23,7 @@
 - [Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)](#presentment-rules-construction-gate-vs-presentment-filter-layering-2026-08-16-tradepresentment_rules)
 - [Mock-draft ownership honesty: resolver-owned labels (2026-08-16, #328)](#mock-draft-ownership-honesty-resolver-owned-labels-2026-08-16-328)
 - [Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)](#finder-preselection-contract-now-carries-opponent--auto-run-intent-2026-08-16-330)
+- [Ranking vs gate: what a term may judge (2026-08-18, engine-quality)](#ranking-vs-gate-what-a-term-may-judge-2026-08-18-engine-quality)
 
 ---
 
@@ -247,3 +248,14 @@ from the resolved data. Vocabulary + client contract:
 ## Finder preselection contract now carries opponent + auto-run intent (2026-08-16, #330)
 
 The finder preselection contract (store `useFinderTargets`, never route params — #300) now also carries the scoped opponent and a one-shot auto-run intent: `handoff: {opponent {userId,name}, autoRun, seq} | null`, seq store-stamped monotonic (a same-team repeat handoff must still re-fire TradesScreen's choke-point effect, whose deps gain the consumed `autoRunSeq`). Consumed on focus, exactly once; `clear()`/league-switch GC it. Pinned by `mobile/tests/check-offer-prefill-330.js` + `-unit.js`.
+
+## Ranking vs gate: what a term may judge (2026-08-18, engine-quality)
+
+The 2026-08-18 wave ([scope](../docs/plans/engine-quality/scope.md)) sets one convention for anything that touches the composite:
+
+- **A gate judges the REAL package; a ranking term may judge only the divergence-bearing content.** A gate answers "may this be served?", so it prices every asset actually in the trade — a draft pick genuinely transfers value and can genuinely make an unfair trade fair. A ranking term answers "is this a better idea than that one?", and the composite's subject is MUTUAL GAIN, so an asset both boards price identically carries nothing to rank on. Concretely: `_fairness` / `_fairness_v3` still gate and still stamp `fairness_score` on the card; `rank_fairness` re-prices the same ratio on the **signal core** for the composite only. New scoring work picks one of these two roles explicitly — a term that silently does both is how a zero-information asset bought score for a whole quarter of the live deck.
+- **Zero-information assets are DROPPED from a ranking package, never zero-weighted.** `package_value_v2`'s 'heavy' crown premium branches on `len(values) < n_other`, so a zero-VALUED asset still changes the asset count and can still move the ratio. Dropping makes the invariance exact in every stud-tax mode.
+- **A change that creates ties owns them.** Pricing on the core makes a package and its zero-divergence-padded sibling score identically; the v2 heap's pre-existing tie-break was `_tb` descending (later-enumerated wins) and 1-for-1s enumerate first, so the bare deal lost every tie it now made. The tie-break moved under the same knob that creates the ties, so the kill value reverts both halves together.
+- **Per-rule knobs, not a group flag.** Each of the five changes carries its own `model_config` key whose disable value restores byte-identical prior behaviour (proven against `origin/main` goldens in `test_engine_quality_golden.py`). Same convention as the G6 presentment knobs; a shared flag would make the changes un-revertible independently.
+- **Deck-wide constraints belong at deck assembly.** The headliner cap lives in `_dedup_and_sort`, alongside the R4 exclusion, not inside a per-pair generator: a constraint on the SERVED SET has to see the served set, and streaming snapshots re-derive it from the same accumulating list for free.
+

@@ -607,6 +607,61 @@ _DEFAULT_CFG: dict[str, float] = {
     # passes.
     "need_gate_min_value":      500.0,
     "need_gate_upgrade_margin":   0.0,
+
+    # ------------------------------------------------------------------
+    # Engine quality — 2026-08-18 field wave (docs/plans/engine-quality/
+    # scope.md). Five independent ranking/gating fixes for the two
+    # defects diagnosed from the live corpus: picks buying fairness for
+    # free (A) and one high-divergence asset flooding a whole deck (B).
+    # Same per-rule kill-switch convention as the G6 knobs above: each
+    # key's disable value restores byte-identical prior behaviour and is
+    # a deploy-free revert (PUT /api/admin/config/<key>). Defaults are ON
+    # because today's behaviour IS the bug.
+    # ------------------------------------------------------------------
+    # C1 — divergence-gated RANKING fairness. An asset enters the "signal
+    # core" (the sub-package the ranking fairness term is priced on) only
+    # when the two boards disagree about it by at least this FRACTION of
+    # its own value. Picks sit at exactly 0 by construction, so they can
+    # never move the ranking fairness ratio. The fairness GATE and the
+    # card's stamped fairness_score still price the REAL package.
+    # 0 disables (ranking fairness = full-package fairness, as before).
+    "rank_div_min_frac":          0.02,
+    # C2 — minimal-package preference in the pinned/targeted asset-ideas
+    # ranker. Variants whose |receive − give| gaps fall in the same band
+    # (width = frac × the pinned asset's consensus value) are treated as
+    # equivalent, and the one with FEWER pieces wins. Outside the band
+    # the closer deal still wins, so a genuinely needed sweetener is
+    # never dropped. Units are FAIRNESS, measured from the best variant
+    # of the same search: a variant within 0.10 fairness of the best is
+    # near-equivalent, so a bare deal at 0.79 beats its sweetened sibling
+    # at 0.85 (the sweetener is not buying enough to justify the extra
+    # asset), while a bare deal at 0.57 still loses to a sibling at 0.70.
+    # 0 disables (closest-gap-wins, as before).
+    "min_package_band":           0.10,
+    # C3 — matched-pick-pair strip in pick_swap_ok. Picks are paired
+    # across the two sides best-first; a pair whose min/max consensus
+    # value ratio is at or above this frac is "matched" — zero divergence
+    # both ways, contributing nothing — and is stripped before the churn
+    # gate judges the trade. Emptying either side means the real content
+    # WAS the pick swap: killed. Consolidation (2 lesser picks for 1
+    # better) survives because those values sit outside the band.
+    # 0 disables (the literal 1-for-1 ban only, as before).
+    "pick_pair_strip_frac":       0.85,
+    # C4 — headliner diversity cap at deck assembly: at most this many
+    # cards in one served deck may share the same centerpiece (the
+    # package's highest-consensus asset — the SAME definition as
+    # deck_impressions.centerpiece_id, so the metric and the cap agree).
+    # Applied after the composite sort, so each headliner keeps its best
+    # cards. 0 disables (uncapped, as before).
+    "deck_headliner_cap":         2.0,
+    # C5 — confidence damping of the RANKING mismatch term: the term is
+    # scaled by max(0, 1 − damp × unc), where unc is the package's
+    # value-weighted mean _value_uncertainty (range_base / sqrt(1+n)).
+    # A large apparent divergence resting on a player almost nobody has
+    # ranked is treated as the artifact it probably is. The surplus GATES
+    # are untouched. 0 disables (undamped, as before); confidence=None
+    # (no comparison counts) is also a no-op at any value.
+    "mismatch_confidence_damp":   1.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1072,6 +1127,121 @@ def _value_uncertainty(pid: str, confidence: dict[str, int] | None) -> float:
     return _c("range_base") / math.sqrt(1.0 + n)
 
 
+# ---------------------------------------------------------------------------
+# Engine quality C1/C5 — ranking-vs-gate separation (2026-08-18)
+# docs/plans/engine-quality/scope.md §5.
+#
+# A GATE judges the real package: a pick genuinely transfers value and can
+# genuinely make an unfair trade fair, so every gate keeps pricing the whole
+# thing on real consensus values. A RANKING term may judge only the
+# divergence-bearing content, because the composite is supposed to score
+# MUTUAL GAIN, and an asset both boards price identically carries no
+# information about mutual gain at all.
+# ---------------------------------------------------------------------------
+
+
+def board_divergence(pid: str, user_val, opp_val) -> float:
+    """How much the two boards disagree about ``pid``, as a fraction of the
+    larger of the two valuations. 0 = the boards agree exactly, which is what
+    every draft pick scores by construction (all boards are primed with the
+    same bridged Elo — see pick_swap_ok). user_val / opp_val are RAW board
+    accessors (pid → value), never marginal values: this asks "do the two
+    managers price him differently?", not "does he fit this roster?"."""
+    u, o = user_val(pid), opp_val(pid)
+    hi = max(abs(u), abs(o))
+    if hi <= 0:
+        return 0.0
+    return abs(u - o) / hi
+
+
+def signal_core(ids, user_val, opp_val) -> list[str]:
+    """The sub-list of ``ids`` whose board divergence clears
+    rank_div_min_frac — the assets that carry mutual-gain information."""
+    frac = _c("rank_div_min_frac")
+    return [p for p in ids if board_divergence(p, user_val, opp_val) >= frac]
+
+
+def rank_fairness(fairness: float, give_ids: list[str], recv_ids: list[str],
+                  seed_value, user_val, opp_val) -> float:
+    """C1 — the fairness term used for RANKING only (Defect A).
+
+    Prices the consensus fairness ratio on the SIGNAL CORE of each side
+    instead of the full package, so an asset with ~zero board divergence
+    cannot raise it. Because zero-divergence assets are dropped outright
+    (not zero-weighted), the invariance is exact in every stud-tax mode:
+    adding such an asset to either side leaves this value bit-for-bit
+    unchanged, for any base package, fair or not. (Zero-WEIGHTING would not
+    do it — package_value_v2's 'heavy' crown premium branches on
+    len(values) < n_other, so a zero-valued asset still changes the count.)
+
+    Degenerate cores fall back to the passed-in full-package ``fairness``:
+      • one side is entirely zero-divergence — the legitimate "buy a player
+        with a pick" shape. Scoring it 0 would systematically demote every
+        pick-for-player trade, which is a new defect, not the one being fixed.
+      • consensus-basis cards, where nothing diverges by definition.
+
+    rank_div_min_frac <= 0 ⇒ returns ``fairness`` unchanged (kill value:
+    byte-identical pre-C1 behaviour).
+    """
+    if _c("rank_div_min_frac") <= 0:
+        return fairness
+    core_give = signal_core(give_ids, user_val, opp_val)
+    core_recv = signal_core(recv_ids, user_val, opp_val)
+    if not core_give or not core_recv:
+        return fairness
+    gvals = [seed_value(p) for p in core_give]
+    rvals = [seed_value(p) for p in core_recv]
+    v_max = max(gvals + rvals)
+    gv = package_value_v2(gvals, v_max, n_other=len(core_recv),
+                          other_values=rvals)
+    rv = package_value_v2(rvals, v_max, n_other=len(core_give),
+                          other_values=gvals)
+    if gv <= 0 or rv <= 0:
+        return fairness
+    return round(min(gv, rv) / max(gv, rv), 3)
+
+
+def mismatch_damp(ids, seed_value, confidence: dict[str, int] | None) -> float:
+    """C5 — multiplier on the RANKING mismatch term.
+
+    _value_uncertainty already shrinks with comparison count, but it fed only
+    the fairness GATE's range overlap, never the ranking. A package whose
+    apparent divergence rests on players almost nobody has ranked should not
+    outrank one built on well-sampled disagreement, so scale the mismatch
+    contribution by max(0, 1 − damp × unc) where unc is the package's
+    value-weighted mean per-asset uncertainty.
+
+    The surplus gates are untouched — this only reorders cards that already
+    cleared them. confidence=None (no counts available) ⇒ unc is 0 ⇒ 1.0, and
+    mismatch_confidence_damp <= 0 ⇒ 1.0 (kill value: byte-identical pre-C5).
+    """
+    k = _c("mismatch_confidence_damp")
+    if k <= 0 or confidence is None:
+        return 1.0
+    vals = [seed_value(p) for p in ids]
+    total = sum(vals)
+    if total <= 0:
+        return 1.0
+    unc = sum(v * _value_uncertainty(p, confidence)
+              for v, p in zip(vals, ids)) / total
+    return max(0.0, 1.0 - k * unc)
+
+
+def deck_centerpiece(give_ids, recv_ids, seed_elo: dict) -> str | None:
+    """C4 — a package's centerpiece: its highest-consensus asset.
+
+    THE single definition, shared with `deck_impressions.centerpiece_id`
+    (server._fatigue_centerpiece delegates here) so the headliner cap and the
+    metric that measured the flooding agree by construction. Deterministic
+    tie-break by player id, so serve-time and decline-time derivations agree
+    even on a cold seed map.
+    """
+    pids = [str(p) for p in list(give_ids or []) + list(recv_ids or [])]
+    if not pids:
+        return None
+    return max(pids, key=lambda p: (float(seed_elo.get(p, 1500.0)), p))
+
+
 def user_gain_ok_1for1(
     give_ids: list[str],
     recv_ids: list[str],
@@ -1146,23 +1316,80 @@ def is_pick_asset(p) -> bool:
         or getattr(p, "team", None) == "PICK"))
 
 
+def strip_matched_pick_pairs(give_ids: list[str], recv_ids: list[str],
+                             players: dict, seed_value,
+                             frac: float) -> tuple[list[str], list[str]]:
+    """C3 helper — remove matched/near-matched pick PAIRS from the two sides.
+
+    Picks are collected per side, sorted by consensus value (best first) and
+    paired across the sides index-wise. A pair whose min/max value ratio is at
+    or above ``frac`` is "matched": the same asset class at the same price on
+    both boards, contributing zero divergence in BOTH directions, so it tells
+    us nothing about the trade. Both members are dropped.
+
+    Pairing best-against-best is what preserves CONSOLIDATION: two lesser
+    picks for one better pick pair the better one against the larger lesser
+    one, their ratio falls outside the band, nothing strips, and the shape
+    survives — which is right, because changing pick shape has real utility
+    even at equal total value. Returns the surviving (give, recv) lists with
+    the original order otherwise intact; deterministic for a fixed input.
+    """
+    g_picks = sorted((p for p in give_ids if is_pick_asset(players.get(p))),
+                     key=lambda p: (-seed_value(p), p))
+    r_picks = sorted((p for p in recv_ids if is_pick_asset(players.get(p))),
+                     key=lambda p: (-seed_value(p), p))
+    drop: set[str] = set()
+    for gp, rp in zip(g_picks, r_picks):
+        gv, rv = seed_value(gp), seed_value(rp)
+        hi = max(gv, rv)
+        if hi <= 0:
+            continue
+        if min(gv, rv) / hi >= frac:
+            drop.add(gp)
+            drop.add(rp)
+    if not drop:
+        return list(give_ids), list(recv_ids)
+    return ([p for p in give_ids if p not in drop],
+            [p for p in recv_ids if p not in drop])
+
+
 def pick_swap_ok(give_ids: list[str], recv_ids: list[str],
-                 players: dict) -> bool:
-    """#227 — degenerate pick-churn gate: a 1-for-1 card where BOTH sides
-    are draft picks is never a suggestion. Picks carry zero divergence by
+                 players: dict, seed_value=None) -> bool:
+    """#227 — degenerate pick-churn gate: a card whose real content is a
+    pick-for-pick swap is never a suggestion. Picks carry zero divergence by
     construction (every board is primed with the same bridged Elo), so a
     pick-for-pick swap the fairness gate passes is ~equal-value churn with
     no mutual-gain basis.
 
-    Deliberately NARROW (documented decision):
-      • pick + player for anything, and player-for-pick 1-for-1s, PASS —
-        picks as sweeteners/headline compensation are real trades.
-      • pure pick-for-pick PACKAGES (2-for-1 etc.) PASS — consolidating
-        two lesser picks into a better one changes asset shape, which has
-        genuine utility even at equal value.
-    Only the 1-for-1 both-sides-pick shape is banned outright. Shared by
-    the v2 pair path, the v3 optimizer and the consensus fallback.
+    Originally this banned only the LITERAL 1-for-1 both-sides-pick shape,
+    and said so: pick-for-pick INSIDE a package passed by design. That let a
+    1st-for-1st ride along inside a bigger deal contributing nothing in
+    either direction — the operator saw exactly this, and a tester
+    free-texted "another example of a random 1st swap. Shouldn't happen".
+
+    C3 (2026-08-18, docs/plans/engine-quality/scope.md) closes it: matched
+    pick pairs are STRIPPED from both sides first, so the underlying trade is
+    judged on its real content. If stripping empties a side, the real content
+    WAS the pick swap — that shape is churn and is killed.
+
+    The documented legitimate cases are preserved:
+      • picks as sweeteners / headline compensation — only one side holds
+        picks, so nothing pairs and nothing strips;
+      • pick CONSOLIDATION (2 lesser picks for 1 better) — the values sit
+        outside the match band, so nothing strips and the shape survives;
+      • player-for-pick and pick-for-player 1-for-1s — unchanged.
+
+    ``seed_value`` (pid → consensus value) is what makes the strip possible;
+    callers that omit it, and ``pick_pair_strip_frac`` <= 0, both fall back to
+    the pre-C3 literal-1-for-1 rule, byte-identical. Shared by the v2 pair
+    path, the v3 optimizer and the consensus fallback.
     """
+    frac = _c("pick_pair_strip_frac")
+    if frac > 0 and seed_value is not None:
+        give_ids, recv_ids = strip_matched_pick_pairs(
+            give_ids, recv_ids, players, seed_value, frac)
+        if not give_ids or not recv_ids:
+            return False
     if len(give_ids) != 1 or len(recv_ids) != 1:
         return True
     return not (is_pick_asset(players.get(give_ids[0]))
@@ -2608,6 +2835,12 @@ class TradeService:
         self._presentment_kills: dict[str, int] = {
             "R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys: set = set()
+        #   _job_seed_elo — the consensus Elo map of the CURRENT job, so
+        #     _dedup_and_sort can derive each card's centerpiece for the C4
+        #     headliner cap. Overwritten per call like _exclusion_keys; while
+        #     it is empty the cap is inert, because with no consensus values
+        #     every asset ties and "centerpiece" would mean nothing.
+        self._job_seed_elo: dict = {}
 
     # ------------------------------------------------------------------
     # League management
@@ -2709,6 +2942,7 @@ class TradeService:
         # REPLACES the stored set on every call; None ⇒ empty set, never
         # "keep previous". Kill counters reset per job alongside it.
         self._exclusion_keys = set(exclusion_keys) if exclusion_keys else set()
+        self._job_seed_elo = seed_elo or {}      # C4 centerpiece derivation
         self._presentment_kills = {"R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys = set()
 
@@ -2914,7 +3148,40 @@ class TradeService:
                     continue
                 kept.append(c)
             cards = kept
-        return sorted(cards, key=lambda c: c.composite_score, reverse=True)
+        cards = sorted(cards, key=lambda c: c.composite_score, reverse=True)
+        # C4 (2026-08-18, docs/plans/engine-quality/scope.md) — headliner
+        # diversity. Dedup here is EXACT-KEY only, and `mismatch` is largest
+        # for whichever asset diverges most between the two boards, so that
+        # one asset generates many distinct high-scoring packages and every
+        # one of them survives: Colston Loveland appeared in 18 of 18 cards of
+        # one live deck. That makes a single valuation error catastrophic
+        # instead of survivable — mismatch is LARGEST exactly where a
+        # valuation is most wrong. Cap how many cards may share a centerpiece.
+        #
+        # Applied AFTER the composite sort, so each headliner keeps its BEST
+        # cards, and at deck assembly rather than inside one opponent's
+        # enumeration, so it constrains the FINAL served set (streaming
+        # snapshots re-derive it from the same accumulating list, exactly like
+        # the R4 exclusion above). 0 disables — byte-identical to pre-C4.
+        # An empty job seed map carries no consensus information, so every
+        # asset ties at the 1500 default and `centerpiece` degenerates to
+        # "largest player id" — a cap on that would drop cards for no reason.
+        # No seed map ⇒ no cap. (The real entry point always sets one.)
+        cap = int(_c("deck_headliner_cap"))
+        if cap > 0 and self._job_seed_elo:
+            seen_heads: dict[str, int] = {}
+            capped: list[TradeCard] = []
+            for c in cards:
+                head = deck_centerpiece(c.give_player_ids,
+                                        c.receive_player_ids,
+                                        self._job_seed_elo)
+                if head is not None:
+                    if seen_heads.get(head, 0) >= cap:
+                        continue
+                    seen_heads[head] = seen_heads.get(head, 0) + 1
+                capped.append(c)
+            cards = capped
+        return cards
 
     def presentment_kill_counts(self) -> dict[str, int]:
         """G6 R-9 — per-rule kill counters for the current/most recent job.
@@ -3164,15 +3431,38 @@ class TradeService:
                 idea["relaxed_reason"] = "fairness_band"
                 relaxed[group].append(idea)
 
+        # C2 (2026-08-18, docs/plans/engine-quality/scope.md) — minimal-package
+        # tolerance band, in FAIRNESS units, measured from the BEST variant of
+        # this search. Variants no worse than `band` below the best fairness
+        # are near-equivalent deals, and among them the one with FEWER pieces
+        # wins. A variant further out than the band still loses, so a
+        # genuinely needed sweetener is never dropped. 0 disables
+        # (closest-gap-wins, byte-identical to pre-C2).
+        _min_pkg_band = _c("min_package_band")
+
         def _emit_best(member, variants, group) -> None:
-            """variants: [(give_ids, recv_ids, res)]. Emit the closest deal
-            (min |difference|), preferring strict-band passes over relaxed."""
+            """variants: [(give_ids, recv_ids, res)]. Emit the best deal —
+            strict-band passes over relaxed, then (C2) the fewest pieces among
+            near-equivalent fairness, then closest to even."""
             if not variants:
                 return
-            def _rank(v):
-                fairness, gv, rv = v[2]
-                return (fairness < fairness_threshold, abs(rv - gv),
-                        tuple(v[0]), tuple(v[1]))
+            if _min_pkg_band <= 0:
+                def _rank(v):
+                    fairness, gv, rv = v[2]
+                    return (fairness < fairness_threshold, abs(rv - gv),
+                            tuple(v[0]), tuple(v[1]))
+            else:
+                # Ranking on |difference| alone made a bare 1-for-1 at a
+                # 200-point gap LOSE to the same trade plus a 180-point pick
+                # that shaved the gap to 20 — the pick bought the slot for
+                # free even though the bare deal was already fair.
+                _best_f = max(v[2][0] for v in variants)
+                def _rank(v):
+                    fairness, gv, rv = v[2]
+                    return (fairness < fairness_threshold,
+                            int((_best_f - fairness) / _min_pkg_band),
+                            len(v[0]) + len(v[1]),
+                            abs(rv - gv), tuple(v[0]), tuple(v[1]))
             _emit(member, *min(variants, key=_rank), group)
 
         # Bound the piece pool for 2/3-asset package enumeration.
@@ -4039,11 +4329,22 @@ class TradeService:
         K = max(int(max_cards) * 4, 1)
         heap: list[tuple] = []
         _tb = 0
+        # C1 tie-break (2026-08-18) — pricing the ranking fairness on the
+        # signal core makes a package and the same package PADDED with
+        # zero-divergence assets score IDENTICALLY (that is the invariance).
+        # The pre-existing tie-break here is `_tb` descending, i.e. the
+        # LATER-enumerated candidate wins; enumeration runs 1-for-1 first,
+        # so without this the bare deal loses every tie it now makes and
+        # gets evicted by its own padded siblings. On a tie, fewer pieces
+        # wins. Knob 0 ⇒ this slot is a constant and the ordering is
+        # byte-identical to pre-C1.
+        _min_pref = _c("rank_div_min_frac") > 0
         def _offer(composite, hm, fairness, give_ids, recv_ids,
                    fit_paid=None):
             nonlocal _tb
             _tb += 1
-            entry = (composite, _tb, hm, fairness, give_ids, recv_ids,
+            _size = -(len(give_ids) + len(recv_ids)) if _min_pref else 0
+            entry = (composite, _size, _tb, hm, fairness, give_ids, recv_ids,
                      fit_paid)
             if len(heap) < K:
                 heapq.heappush(heap, entry)
@@ -4075,7 +4376,7 @@ class TradeService:
                 return
             # #227 — a 1-for-1 pick-for-pick swap is pointless churn
             # (picks carry zero divergence by construction).
-            if not pick_swap_ok(give_ids, recv_ids, players):
+            if not pick_swap_ok(give_ids, recv_ids, players, seed_value):
                 return
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of
@@ -4140,8 +4441,14 @@ class TradeService:
                 return
 
             hm = _harmonic_mean(user_surplus, opp_surplus)   # A1 ranking
+            # C1/C5 (2026-08-18) — the RANKING terms only. The card still
+            # stamps the real full-package `fairness` below, and every gate
+            # above already ran on the real package.
             composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
-                         + W_FAIR * fairness)
+                         * mismatch_damp(give_ids + recv_ids, seed_value,
+                                         confidence)
+                         + W_FAIR * rank_fairness(fairness, give_ids, recv_ids,
+                                                  seed_value, _uv, _vo))
             composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
             # Backlog #2 — reward cards that LAND a target on the receive side.
             # Applied after the mutual-gain gates (a target never rescues a
@@ -4246,14 +4553,14 @@ class TradeService:
         # NOTE: no qb_tax / star_tax / roster_clogger in the v2 path — the
         # clogger phenomenon is handled by package_value_v2 diminishing
         # returns + the waiver-slot cost; QB/star reconciliation is Tier 2.
-        ranked = sorted(heap, key=lambda e: (e[0], e[1]), reverse=True)
+        ranked = sorted(heap, key=lambda e: (e[0], e[1], e[2]), reverse=True)
         # Consensus package values for the TradeValueBar — same fn + value
         # space the manual calculator uses, so a deck card and the calculator
         # show identical numbers for the same players. Lazy import: the
         # optimizer imports this module (top-level would cycle).
         from .trade_optimizer import _consensus_packages
         cards: list[TradeCard] = []
-        for composite, _t, hm, fairness, give_ids, recv_ids, fit_paid \
+        for composite, _sz, _t, hm, fairness, give_ids, recv_ids, fit_paid \
                 in ranked[:max_cards]:
             _gv, _rv = _consensus_packages(give_ids, recv_ids, seed_value)
             card = TradeCard(
@@ -4411,7 +4718,7 @@ class TradeService:
             if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
                 return
             # #227 — a 1-for-1 pick-for-pick swap is pointless churn.
-            if not pick_swap_ok(give_ids, recv_ids, players):
+            if not pick_swap_ok(give_ids, recv_ids, players, seed_value):
                 return
             # #141 — junk-filler gate (2-for-1 shape): the added give piece
             # must clear filler_min_frac of the side's headliner on

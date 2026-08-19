@@ -3992,13 +3992,13 @@ _FATIGUE_SESSION_PASS_MIN = 2   # passes on one centerpiece in one job ⇒ stron
 
 
 def _fatigue_centerpiece(give: list, recv: list, seed_map: dict) -> str | None:
-    """The package's highest-consensus asset — the per-item fatigue key.
-    Deterministic tie-break by player id so serve-time and decline-time
-    derivations agree even on a cold seed map."""
-    pids = [str(p) for p in list(give or []) + list(recv or [])]
-    if not pids:
-        return None
-    return max(pids, key=lambda p: (float(seed_map.get(p, 1500.0)), p))
+    """The package's highest-consensus asset — the per-item fatigue key and
+    `deck_impressions.centerpiece_id`.
+
+    Delegates to trade_service.deck_centerpiece, which is also what the C4
+    headliner cap ranks on: one definition, so the cap and the metric that
+    measured the flooding cannot drift apart."""
+    return _trade_service_mod.deck_centerpiece(give, recv, seed_map)
 
 
 def _fatigue_package_value(give: list, recv: list, seed_map: dict) -> float | None:

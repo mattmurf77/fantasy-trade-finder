@@ -63,6 +63,46 @@ confirm the card can still be passed afterward.
 
 ---
 
+## 2026-08-18 — Engine quality wave (D-068) built, NOT shipped
+
+Branch `feat/engine-pick-and-diversity` off `origin/main` @ `90fb19a`. Five knobbed
+ranking/gating fixes for the two live-corpus defects (picks buying fairness for free;
+one asset flooding a whole deck). **Not pushed, not merged** — build-agent output awaiting
+operator review.
+
+- **pytest 3150 passed / 1 skipped / 0 failed** (264s) on the branch tip.
+  Baseline on `origin/main` before any edit: **3125 passed / 1 skipped** — so **+25 new
+  tests, zero regressions**.
+- **25 tests** across `backend/tests/test_engine_quality.py` (22) and
+  `backend/tests/test_engine_quality_golden.py` (3). Each of the five knobs has a
+  behaviour test AND a kill-value no-op test; C1 additionally pins the brief's explicit
+  property, *adding a pick to a fair package does not raise composite*, with a
+  fixture-validity assertion that the defect IS live at the kill value (bare 1.554 →
+  padded 1.584 uncapped; 1.554 → 1.554 with C1 on).
+- **Kill-value byte-identity is proven against real pre-wave output**, not asserted:
+  goldens for a deck and an asset-ideas run were captured by executing the same fixtures
+  in a throwaway worktree at `origin/main` @ `90fb19a`, and `test_engine_quality_golden.py`
+  asserts all-five-knobs-killed reproduces them exactly. A third test asserts the goldens
+  are **not** vacuous (live defaults must differ), so the proof cannot silently rot into a
+  tautology. Re-capture procedure is in that file's docstring.
+- **Defect B fixture deck, before/after:** the flood source headlines **21 of 36** cards
+  across three counterparties uncapped; **2** with `deck_headliner_cap=2`. The fixture
+  floods ACROSS opponents on purpose — a per-opponent cap of 2 would still have served six.
+- **Three existing tests moved and one guard was added as a result of the wave, all
+  understood:** `test_fairness_gate_golden.py::test_v2_v3_fairness_score_parity` exposed
+  that C1's ties let a padded sibling evict the bare deal (fixed by the tie-break, no test
+  edit); `test_outlook_direction.py` (6 tests) exposed that an EMPTY job seed map makes
+  "centerpiece" degenerate to "largest player id" (fixed by disabling the cap with no seed
+  map, no test edit); `test_asset_ideas.py::test_receive_direction_mirrors_grouping`
+  exposed that an absolute-gap C2 band mis-ranks a 0.572-fairness bare deal above its
+  0.697 sibling (fixed by re-basing the band on fairness, no test edit). **No existing
+  test was weakened to make this wave pass.**
+- **Sim gate: Tier 4 (none, CI only)** per the operator's build brief — backend-only diff,
+  zero files under `mobile/`. `qa/sim-runs/last-sim-run.json` not written; nothing to run.
+- **Not covered by any test here:** the live-corpus effect. The five defaults are reasoned
+  from fixtures, not fitted to the 563-impression corpus — each knob is the named tuning
+  lever and a re-run of the corpus query is the measurement.
+
 ## 2026-08-18 — Dismiss cooldown (D-067) shipped
 
 - **pytest 3125 passed / 1 skipped / 0 failed** on the merged tree (`505ca2c`), run pre-push.
