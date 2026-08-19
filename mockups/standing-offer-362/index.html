@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#362 — standing offer: broaden a liked 1-for-1</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Self-contained: no scripts, no external fonts, no network. The only
+     external reference in this lab is one <img src> to the real capture at
+     ../../screens/mobile/trades/populated.png — a relative path from a real
+     file, so it resolves over file://.
+     Position + tier hexes are cross-client invariants
+     (docs/cross-client-invariants.md). */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --picks:#7A7F96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 80px;
+       display:flex;flex-direction:column;align-items:center;gap:16px}
+  .wrap{max-width:1400px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk-dim)}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .posbox{border-left:3px solid var(--pos);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  table{border-collapse:collapse;width:100%;margin-top:8px;font-size:12.5px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;color:var(--chalk-dim)}
+  th{background:var(--ink-2);color:var(--chalk);font:600 11px var(--ui);
+     letter-spacing:.06em;text-transform:uppercase}
+  td code{font-size:11.5px}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:34px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+
+  .row{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;width:100%;margin-top:10px}
+  .col{display:flex;flex-direction:column;gap:9px;flex:none}
+  .caption{width:390px;font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+  .tag{display:inline-block;font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;
+       padding:2px 7px;border-radius:2px;margin-bottom:2px}
+  .tag.real{background:var(--ink-3);color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .tag.recon{background:rgba(240,80,140,.12);color:var(--flare);border:1px solid var(--flare)}
+
+  /* ── phone frame ─────────────────────────────────────────────────── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;flex:none;position:relative}
+  .phone img{display:block;width:100%;height:auto}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:11px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .tbmain{display:flex;flex-direction:column;gap:1px;min-width:0;border-left:2px solid var(--ice);padding-left:8px}
+  .tbkick{font:600 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tbname{display:flex;align-items:center;gap:7px}
+  .tbname .n{font:700 15px var(--cond);letter-spacing:.04em;text-transform:uppercase}
+  .fmt{display:inline-flex;gap:5px;background:var(--ice);color:var(--on-ice);border-radius:2px;
+       padding:1px 6px;font:600 10px var(--mono);letter-spacing:.06em}
+  .tbicons{display:flex;gap:14px;color:var(--chalk-dim);flex:0 0 auto;font-size:13px}
+  .body{padding:12px;padding-bottom:20px;position:relative}
+  .body.sheeted{min-height:620px}
+  .body.sheeted{filter:brightness(.42)}
+  .body.sheeted>.card{margin-bottom:0}
+
+  /* ── deck card ───────────────────────────────────────────────────── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px}
+  .kick{font:600 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .who{display:flex;align-items:center;gap:8px;margin:2px 0 12px}
+  .who .u{font:700 19px var(--cond);letter-spacing:.03em}
+  .est{font:600 9px var(--mono);letter-spacing:.08em;color:var(--chalk-faint);
+       border:1px solid var(--line-strong);border-radius:2px;padding:1px 4px}
+  .idea{font-size:12.5px;line-height:1.5;color:var(--chalk-dim);margin:0 0 12px}
+  .strengthbar{height:5px;background:var(--ink-3);border-radius:2px;margin:4px 0 14px;overflow:hidden}
+  .strengthbar i{display:block;height:100%;background:var(--ice);width:64%}
+  .sides{display:flex;gap:12px}
+  .side{flex:1;min-width:0}
+  .sidehdr{font:600 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim);
+           border-left:2px solid var(--ice);padding-left:7px;margin-bottom:7px}
+  .tile{background:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:10px 10px 10px 12px;
+        position:relative;overflow:hidden}
+  .tile::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+  .tile.te::before{background:var(--te)}
+  .tile.qb::before{background:var(--qb)}
+  .tile.pick::before{background:var(--picks)}
+  .posbadge{display:inline-block;font:700 10px var(--mono);letter-spacing:.06em;
+            border:1px solid var(--wr);color:var(--wr);border-radius:3px;padding:1px 5px;margin-bottom:7px}
+  .posbadge.te{border-color:var(--te);color:var(--te)}
+  .posbadge.qb{border-color:var(--qb);color:var(--qb)}
+  .posbadge.pick{border-color:var(--picks);color:var(--chalk-dim)}
+  .pname{font:700 16px var(--cond);letter-spacing:.03em;line-height:1.1}
+  .pmeta{font-size:11.5px;color:var(--chalk-faint);margin-top:3px;font-family:var(--mono)}
+  .swing{margin-top:14px}
+  .swing .v{font:700 20px var(--cond);letter-spacing:.03em;margin:2px 0 3px}
+  .swing p{font-size:12px;color:var(--chalk-dim);margin:0}
+
+  /* the new chip */
+  .offerchip{display:inline-flex;align-items:center;gap:6px;background:rgba(86,217,236,.10);
+             border:1px solid var(--ice);color:var(--ice);border-radius:4px;padding:3px 8px;
+             font:600 10px var(--mono);letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px}
+  .interested{display:inline-flex;align-items:center;gap:6px;background:rgba(240,80,140,.12);
+             border:1px solid var(--flare);color:var(--flare);border-radius:4px;padding:3px 8px;
+             font:600 10px var(--mono);letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px}
+
+  /* ── bottom sheet ────────────────────────────────────────────────── */
+  .sheetwrap{position:absolute;left:0;right:0;bottom:0;z-index:2}
+  .sheet{background:var(--ink-1);border:1px solid var(--line-strong);border-top-left-radius:14px;
+         border-top-right-radius:14px;padding:14px 14px 18px;position:relative;z-index:2}
+  .grab{width:34px;height:4px;border-radius:2px;background:var(--line-strong);margin:0 auto 14px}
+  .sh1{font:700 19px var(--cond);letter-spacing:.03em;text-transform:uppercase;margin:0 0 6px}
+  .sub{font-size:12.5px;line-height:1.5;color:var(--chalk-dim);margin:0 0 16px}
+  .sub b{color:var(--chalk)}
+  .grouphdr{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 8px}
+  .grouphdr .g{font:600 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}
+  .grouphdr .all{font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ice)}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .pill{border:1px solid var(--line-strong);border-radius:4px;padding:7px 13px;
+        font:600 12px var(--mono);letter-spacing:.04em;color:var(--chalk-dim);background:var(--ink-2)}
+  .pill.on{background:var(--ice);border-color:var(--ice);color:var(--on-ice)}
+  .pill.src{position:relative}
+  .pill.src::after{content:"FROM THIS OFFER";position:absolute;left:0;top:calc(100% + 4px);
+        font:600 8px var(--mono);letter-spacing:.06em;color:var(--chalk-faint);white-space:nowrap}
+  .hint{font-size:11px;color:var(--chalk-faint);margin:14px 0 16px;line-height:1.5}
+
+  .teams{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:4px}
+  .team{display:flex;align-items:center;gap:8px;background:var(--ink-2);border:1px solid var(--line);
+        border-radius:5px;padding:8px 9px;min-width:0}
+  .team.on{border-color:var(--ice);background:rgba(86,217,236,.07)}
+  .box{width:15px;height:15px;border:1px solid var(--line-strong);border-radius:3px;flex:none;
+       display:flex;align-items:center;justify-content:center;font-size:10px;color:transparent}
+  .team.on .box{background:var(--ice);border-color:var(--ice);color:var(--on-ice);font-weight:700}
+  .team .tn{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--chalk-dim)}
+  .team.on .tn{color:var(--chalk)}
+  .team .hasp{font:600 9px var(--mono);color:var(--chalk-faint);margin-left:auto;flex:none}
+
+  .cta{display:block;width:100%;background:var(--ice);color:var(--on-ice);border:none;border-radius:6px;
+       padding:13px;font:700 14px var(--ui);letter-spacing:.04em;text-align:center;margin-top:18px}
+  .cta.dim{background:transparent;color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .skip{display:block;text-align:center;font:600 12px var(--ui);color:var(--chalk-dim);margin-top:12px}
+
+  .toast{background:var(--ink-2);border:1px solid var(--ice);border-left-width:3px;border-radius:6px;
+         padding:11px 13px;margin-bottom:12px}
+  .toast .t{font:600 12px var(--ui);color:var(--chalk);margin-bottom:3px}
+  .toast .d{font-size:11.5px;color:var(--chalk-dim);line-height:1.5}
+
+  .listrow{display:flex;align-items:center;gap:10px;background:var(--ink-1);border:1px solid var(--line);
+           border-radius:6px;padding:11px 12px;margin-bottom:8px}
+  .listrow .l{min-width:0;flex:1}
+  .listrow .l .a{font:700 14px var(--cond);letter-spacing:.03em}
+  .listrow .l .b{font-size:11px;color:var(--chalk-dim);margin-top:2px;font-family:var(--mono)}
+  .listrow .x{font-size:11px;color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>#362 — Standing offer: broaden a liked 1-for-1</h1>
+    <div class="q">“Idea on the cycling thru one player for one pick. If you accept hey I’m willing to
+      trade Malik Willis for a 2028 1st maybe you just add a label so the rest of the league knows he’s
+      willing to trade for a first. Or a pop up after you say yes to that trade that’s like hey I’ll sell
+      Willis for a 27 or 28 first but not 29 or maybe like a first from any of these rosters but not xyz”
+      — <b>jonbonjourvi</b>, TradesHome, v1.15.0, 2026-08-19</div>
+    <p><b>Operator framing (2026-08-19):</b> when a user likes a 1-for-1 where they receive a first, prompt
+      them to select <b>all other teams</b> they’d take a first from and <b>all other years</b> they’d accept.
+      Team selection and year selection are <b>independent</b>. Completing the flow <b>prioritizes showing that
+      card</b> to every user on a selected team.</p>
+
+    <h2>The one-line design question</h2>
+    <p>Today a “like” is stored as one <b>exact</b> package — <code>(give_ids, receive_ids)</code> — and a
+      league-mate only sees the “They’re interested” pill when their deck happens to generate the exact mirror.
+      This item asks the like to become a <b>generalized standing offer</b>: one player out, one asset
+      <i>class</i> in (a 1st), across a chosen year set × a chosen team set. The design work is the prompt
+      that collects those two sets without turning a swipe into a form.</p>
+
+    <div class="posbox"><b>The plumbing already exists.</b> <code>load_recent_league_likes()</code>
+      (<code>backend/database.py:4425</code>) reads league-mates’ likes from the last 90 days, and
+      <code>_inject_likes_you_cards()</code> (<code>backend/server.py:2807</code>) boosts/pins the mirror into
+      their deck with the <b>“They’re interested”</b> pill (<code>TradeCard.tsx:363</code>), capped at 3
+      injections. #362 widens the <i>match rule</i> feeding that same injector — it does not need a new
+      surface on the receiving end.</div>
+
+    <h2>Provenance</h2>
+    <ul>
+      <li><b>Traced (1 image):</b> <code>screens/mobile/trades/populated.png</code>, captured
+        <b>2026-08-10</b> (<code>screens/manifest.json</code>), embedded below as §1.</li>
+      <li><b>Reconstructed (everything else):</b> the screen library is <b>frozen at 2026-08-11</b>
+        (D-056), and <code>TradesScreen.tsx</code> / <code>TradeCard.tsx</code> have moved twice since the
+        capture — <code>f8acd71</code> (the #297/#298/#299/#302 batch) and <code>586dbba</code> (liked-but-
+        unmatched share wiring). Frames §2–§5 are labelled <span style="color:var(--flare)">reconstructions</span>,
+        never captures.</li>
+      <li><b>Source of truth for behavior:</b> <code>POST /api/trades/swipe</code>
+        (<code>server.py:10155</code>); “Pass / Interested are driven by swipe gestures on the top card”
+        (<code>TradesScreen.tsx:4920</code>).</li>
+    </ul>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §1 -->
+  <div class="sec">§1 · Today — the deck card, real capture</div>
+  <div class="row">
+    <div class="col">
+      <span class="tag real">Real capture · 2026-08-10</span>
+      <div class="phone"><img src="../../screens/mobile/trades/populated.png" alt="Acquire tab, populated deck card"></div>
+    </div>
+    <div class="col">
+      <div class="caption">
+        <p><b>What exists.</b> One card at a time. Swipe right = <b>Interested</b> (a “like”), swipe left =
+          Pass. There is no button row for the two — only Queue and Send in Sleeper render as buttons, which is
+          why the capture shows no Like/Pass affordance.</p>
+        <p style="margin-top:10px"><b>What a like does today.</b> It writes one row to
+          <code>trade_decisions</code> holding the exact give/receive id lists, moves Elo, and makes the exact
+          mirror eligible for the counterparty’s deck. Nothing about it says “…and I’d do this deal with anyone
+          else.”</p>
+        <p style="margin-top:10px"><b>Where §2 attaches.</b> Immediately after the right-swipe commits, before
+          the next card animates in — the one moment the user has already expressed intent and hasn’t moved on.</p>
+        <div class="warnbox" style="margin-top:12px"><b>Capture drift.</b> This PNG predates
+          <code>f8acd71</code> and <code>586dbba</code>. It is exact for the 2026-08-10 build and is embedded
+          as the screen-identity anchor, not as proof of today’s pixel state.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §2 -->
+  <div class="sec">§2 · The prompt — years × teams, independent</div>
+  <div class="row">
+    <div class="col">
+      <span class="tag recon">Reconstruction</span>
+      <div class="phone">
+        <div class="status"><span>7:42</span><span>▪▪▪ ⌁ ▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><span>◔</span><span>⚙</span></div>
+        </div>
+        <div class="body sheeted">
+          <div class="card">
+            <div class="kick">Trade with</div>
+            <div class="who"><span class="u">@qa_l1_member_05</span><span class="est">EST.</span></div>
+            <div class="sides">
+              <div class="side"><div class="sidehdr">You send</div>
+                <div class="tile qb"><span class="posbadge qb" style="border-color:var(--qb);color:var(--qb)">QB</span>
+                  <div class="pname">Malik Willis</div><div class="pmeta">GB · 26 yo</div></div></div>
+              <div class="side"><div class="sidehdr">You get</div>
+                <div class="tile pick"><span class="posbadge pick">PICK</span>
+                  <div class="pname">2028 1st</div><div class="pmeta">via @qa_l1_member_05</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="sheetwrap"><div class="sheet">
+          <div class="grab"></div>
+          <div class="sh1">Open to more firsts?</div>
+          <p class="sub">You’d send <b>Malik Willis</b> for a <b>2028 1st</b>. Tell us the rest of what you’d
+            take and we’ll put this in front of those teams.</p>
+
+          <div class="grouphdr"><span class="g">Years you’d accept</span><span class="all">All</span></div>
+          <div class="pills">
+            <span class="pill on">2027</span>
+            <span class="pill on src">2028</span>
+            <span class="pill">2029</span>
+          </div>
+
+          <div class="hint">Years and teams are independent — picking 2027 doesn’t change who sees this, and
+            picking a team doesn’t change which years you’d take.</div>
+
+          <div class="grouphdr"><span class="g">Teams you’d take one from</span><span class="all">All</span></div>
+          <div class="teams">
+            <div class="team on"><span class="box">✓</span><span class="tn">@qa_l1_member_05</span><span class="hasp">27 28</span></div>
+            <div class="team on"><span class="box">✓</span><span class="tn">@bigbenchmob</span><span class="hasp">27 28 29</span></div>
+            <div class="team on"><span class="box">✓</span><span class="tn">@dynastydegen</span><span class="hasp">28</span></div>
+            <div class="team"><span class="box">✓</span><span class="tn">@thewaiverwire</span><span class="hasp">27 29</span></div>
+            <div class="team on"><span class="box">✓</span><span class="tn">@punt_the_te</span><span class="hasp">27 28 29</span></div>
+            <div class="team"><span class="box">✓</span><span class="tn">@zeroRB_zealot</span><span class="hasp">—</span></div>
+          </div>
+          <div class="hint" style="margin:8px 0 0">Showing 6 of 11 · the trailing numbers are the first-round
+            picks each team still owns in your selected years.</div>
+
+          <div class="cta">Broadcast to 4 teams</div>
+          <span class="skip">Just this one trade</span>
+        </div></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="caption">
+        <p><b>Two independent multi-selects, one screen.</b> Years is a 3-pill row; teams is a two-up checkbox
+          grid. Nothing is nested inside anything else, which is the operator’s constraint made literal — a
+          matrix picker (this team × these years) would be the wrong shape and four times the taps.</p>
+        <p style="margin-top:10px"><b>Prefilled from the card you just liked.</b> 2028 and
+          <code>@qa_l1_member_05</code> arrive checked and captioned <span style="font-family:var(--mono);
+          font-size:10px">FROM THIS OFFER</span>. 2027 and two teams are shown pre-checked here only to
+          illustrate a mid-edit state; the shipped default is <b>source-only</b> — see the open question in §6.</p>
+        <p style="margin-top:10px"><b>The trailing numbers earn the row.</b> Each team shows which of your
+          selected years it actually still owns a 1st in. <code>@zeroRB_zealot</code> shows “—”: they have no
+          first left to give, so checking them broadcasts into a vacuum. This is the difference between a
+          picker and a guess, and it’s free — <code>GET /api/league/picks</code> already serves it.</p>
+        <p style="margin-top:10px"><b>Skipping is a first-class exit.</b> “Just this one trade” dismisses with
+          today’s exact behavior: the like is already committed by the time this sheet appears. The sheet can
+          never cost you the like.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §3 -->
+  <div class="sec">§3 · Confirmation + the label on your own card</div>
+  <div class="row">
+    <div class="col">
+      <span class="tag recon">Reconstruction</span>
+      <div class="phone">
+        <div class="status"><span>7:43</span><span>▪▪▪ ⌁ ▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><span>◔</span><span>⚙</span></div>
+        </div>
+        <div class="body">
+          <div class="toast">
+            <div class="t">Standing offer posted</div>
+            <div class="d">4 teams will see <b>Willis for a 1st</b> near the top of their deck. Manage it in
+              Matches → Standing offers.</div>
+          </div>
+          <div class="card">
+            <div class="offerchip">◈ Open to 1sts · ’27–’28</div>
+            <div class="kick">Trade with</div>
+            <div class="who"><span class="u">@bigbenchmob</span><span class="est">EST.</span></div>
+            <div class="kick" style="margin-bottom:4px">Match strength</div>
+            <div class="strengthbar"><i></i></div>
+            <div class="sides">
+              <div class="side"><div class="sidehdr">You send</div>
+                <div class="tile qb"><span class="posbadge qb">QB</span>
+                  <div class="pname">Malik Willis</div><div class="pmeta">GB · 26 yo</div></div></div>
+              <div class="side"><div class="sidehdr">You get</div>
+                <div class="tile pick"><span class="posbadge pick">PICK</span>
+                  <div class="pname">2027 1st</div><div class="pmeta">via @bigbenchmob</div></div></div>
+            </div>
+            <div class="swing">
+              <div class="kick">Dynasty value swing</div>
+              <div class="v">Even</div>
+              <p>Within a rounding error — <b>90</b> apart (≈ 0.1 firsts)</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="caption">
+        <p><b>The label Jon asked for, scoped honestly.</b> <span class="offerchip" style="margin:0 2px;
+          vertical-align:middle">◈ Open to 1sts · ’27–’28</span> is a chip on the <i>card</i>, not a badge on
+          the player everywhere in the app. It says what you committed to and in which years, and it appears on
+          every card in your deck that matches the standing offer.</p>
+        <p style="margin-top:10px"><b>Why not a global player badge.</b> A permanent “Willis: open to 1sts”
+          marker outlives the intent that created it — rosters change, the QB you were shopping becomes the QB
+          you need. The chip is bound to the offer record and expires with it.</p>
+        <p style="margin-top:10px"><b>The toast names the count and the exit.</b> “4 teams” is the only
+          number that matters, and the manage location is stated once so the offer never becomes something the
+          user can’t find or revoke.</p>
+        <div class="icebox" style="margin-top:12px"><b>Reuses the ice accent correctly</b> — the chip is an
+          action-state marker on your own commitment. The counterparty-side pill (§4) stays flare, matching
+          the shipped “They’re interested” treatment.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §4 -->
+  <div class="sec">§4 · What a selected league-mate sees</div>
+  <div class="row">
+    <div class="col">
+      <span class="tag recon">Reconstruction</span>
+      <div class="phone">
+        <div class="status"><span>8:02</span><span>▪▪▪ ⌁ ▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">League</div>
+            <div class="tbname"><span class="n">QA Standard League</span><span class="fmt">SF TEP</span></div></div>
+          <div class="tbicons"><span>◔</span><span>⚙</span></div>
+        </div>
+        <div class="body">
+          <div class="card">
+            <div class="interested">👀 They’re interested</div>
+            <div class="kick">Trade with</div>
+            <div class="who"><span class="u">@qa_l1_member_01</span><span class="est">EST.</span></div>
+            <div class="kick">Why you’re seeing this</div>
+            <p class="idea">@qa_l1_member_01 posted a standing offer: <b>Malik Willis for any 2027 or 2028
+              1st</b>, and you hold a 2027 1st.</p>
+            <div class="kick" style="margin-bottom:4px">Match strength</div>
+            <div class="strengthbar"><i style="width:78%"></i></div>
+            <div class="sides">
+              <div class="side"><div class="sidehdr">You send</div>
+                <div class="tile pick"><span class="posbadge pick">PICK</span>
+                  <div class="pname">2027 1st</div><div class="pmeta">your own</div></div></div>
+              <div class="side"><div class="sidehdr">You get</div>
+                <div class="tile qb"><span class="posbadge qb">QB</span>
+                  <div class="pname">Malik Willis</div><div class="pmeta">GB · 26 yo</div></div></div>
+            </div>
+            <div class="swing">
+              <div class="kick">Dynasty value swing</div>
+              <div class="v">Even</div>
+              <p>Within a rounding error — <b>90</b> apart (≈ 0.1 firsts)</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="caption">
+        <p><b>No new surface on this side.</b> This is the shipped likes-you card
+          (<code>_inject_likes_you_cards</code> + the flare “They’re interested” pill), reached through a wider
+          match rule. That is the whole reason this item is small: the receiving experience already exists and
+          already has a boost/pin path and a 3-injection cap.</p>
+        <p style="margin-top:10px"><b>One line of new copy.</b> “Why you’re seeing this” replaces the generic
+          fair-value idea text when the card came from a standing offer, and it names the offer in the sender’s
+          own terms. Without it, a boosted card is indistinguishable from a lucky generation.</p>
+        <p style="margin-top:10px"><b>It must not leak the un-selected teams.</b> The recipient learns that
+          <i>they</i> were selected — never who else was, and never who was excluded. Jon’s “but not xyz”
+          framing is a private negative; surfacing it would start fights.</p>
+        <div class="warnbox" style="margin-top:12px"><b>Cap interaction, unresolved.</b> Standing-offer cards
+          and organic likes-you cards compete for the same 3 injection slots. Which wins when a league gets
+          chatty is an open question (§6).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §5 -->
+  <div class="sec">§5 · Manage — Matches → Standing offers</div>
+  <div class="row">
+    <div class="col">
+      <span class="tag recon">Reconstruction</span>
+      <div class="phone">
+        <div class="status"><span>8:10</span><span>▪▪▪ ⌁ ▮</span></div>
+        <div class="topbar">
+          <div class="tbmain"><div class="tbkick">Matches</div>
+            <div class="tbname"><span class="n">Standing offers</span></div></div>
+          <div class="tbicons"><span>⚙</span></div>
+        </div>
+        <div class="body">
+          <div class="kick" style="margin-bottom:8px">Active · 2</div>
+          <div class="listrow"><div class="l">
+            <div class="a">Malik Willis → any 1st</div>
+            <div class="b">’27 ’28 · 4 teams · 18 days left</div></div><span class="x">Edit</span></div>
+          <div class="listrow"><div class="l">
+            <div class="a">Tee Higgins → any 1st</div>
+            <div class="b">’27 ’28 ’29 · 9 teams · 3 days left</div></div><span class="x">Edit</span></div>
+          <div class="kick" style="margin:18px 0 8px">Expired · 1</div>
+          <div class="listrow" style="opacity:.55"><div class="l">
+            <div class="a">Jaylen Wright → any 2nd</div>
+            <div class="b">’27 · 11 teams · expired 2026-08-04</div></div><span class="x">Repost</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="caption">
+        <p><b>Every broadcast needs a revoke.</b> A standing offer is the first thing in FTF that puts your
+          intent in front of other people without a further tap from you. It has to be listable, editable, and
+          killable from one place, or it becomes a thing users are afraid to use.</p>
+        <p style="margin-top:10px"><b>Expiry is shown, not hidden.</b> The existing likes-you window is 90
+          days (<code>load_recent_league_likes</code>). A standing offer is a louder signal than a private
+          like and should almost certainly expire faster — 21 days is drawn here as a starting proposal, not a
+          decision (§6).</p>
+        <p style="margin-top:10px"><b>Placement.</b> Matches is where cross-user trade state already lives, so
+          this is a section there rather than a new tab. It is <i>not</i> in Settings — this is content, not
+          configuration.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────── §6 -->
+  <div class="sec">§6 · What this needs before it can be built</div>
+  <div class="note">
+    <h2>Not as simple as it looks — three real decisions</h2>
+    <table>
+      <tr><th style="width:20%">Question</th><th style="width:44%">Why it isn’t obvious</th><th>Proposal</th></tr>
+      <tr>
+        <td><b>Default selection</b></td>
+        <td>Pre-checking every team maximizes reach and is the “broadcast” reading of the ask — but it makes
+          the sheet a <i>confirm</i>, and users who tap through blast the whole league by accident. Pre-checking
+          only the source team makes it a real choice but buries the value behind 4+ taps.</td>
+        <td>Source-only checked, with a prominent <b>All</b> affordance per group. The CTA count
+          (“Broadcast to 1 team”) makes an unedited tap-through visibly weak, which is the right nudge.</td>
+      </tr>
+      <tr>
+        <td><b>Asset class granularity</b><br><span style="font-family:var(--mono);font-size:10px;
+          color:var(--warn)">CORRECTED 2026-08-19</span></td>
+        <td><s>“A 1st” is not one thing. A rebuilding team’s 2027 1st and a contender’s are two tiers apart, and
+          FTF already prices them separately via the 8-tier pick ladder. An offer that says “any 1st” will
+          generate cards the sender would refuse — which trains them to stop trusting the pill.</s>
+          <br><b>This premise is false</b> — see the correction below.</td>
+        <td><s>Bound the offer by the <b>value of the pick in the card that created it</b>, ±1 ladder tier. The
+          sender never sees the math; they see the years and teams they chose. Needs an explicit call before
+          build.</s><br><b>Rejected.</b> No value gate is built. The offer is bounded by round, by the user’s
+          own season and team selection, and by the existing D-055 floor.</td>
+      </tr>
+      <tr>
+        <td><b>Injection cap</b></td>
+        <td><code>_inject_likes_you_cards</code> caps at 3 per deck. In a 12-team league where standing offers
+          catch on, a single user could be targeted by six of them and the cap silently drops the rest — with
+          no signal to sender or recipient that it happened.</td>
+        <td>Keep the cap; add a reserved split (e.g. 2 organic + 1 standing-offer) and log the drop so the
+          decision is measurable rather than invisible.</td>
+      </tr>
+    </table>
+
+    <div class="warnbox"><b>Correction — 2026-08-19, after the build spec was written.</b>
+      The “asset class granularity” row above is <b>wrong on its facts</b> and the ±1-ladder-tier proposal was
+      rejected. It is left in place, struck through, rather than deleted: this lab is read for its reasoning,
+      and a silently-rewritten premise teaches nothing.
+      <br><br>
+      <b>What the row got wrong.</b> FTF does <i>not</i> price a rebuilder’s 2027 1st differently from a
+      contender’s. Two shipped decisions make every first in a league carry <b>exactly the same engine
+      value</b>:
+      <br>• <b>Slot is not a pricing input.</b> <code>pick_pool_value</code> prices every league pick at the
+      generic ladder’s <b>Mid</b> rung of its round (<code>backend/pick_values.py:264-286</code>). D-090
+      re-examined this and did <i>not</i> overturn it; per-slot pricing is logged <b>unbuilt</b> as Q-023.
+      Slot labels are display-only.
+      <br>• <b>Year is not a pricing input for firsts.</b> D-079 set round-1 year decay to <b>1.00</b>
+      (<code>backend/pick_values.py:159-163</code>, knob <code>pick_year_decay_r1</code>). A 2029 1st prices
+      identically to a 2026 1st — that was the whole point of D-079.
+      <br><br>
+      <b>Why that kills the proposal.</b> A ±1-tier band over a set of identical values admits everything.
+      There is no per-(team, year) first value for the band to be relative <i>to</i>. It would be code that
+      looks like a safeguard and does nothing.
+      <br><br>
+      <b>What bounds the offer instead:</b> the <b>round</b> (fixed to the originating pick’s round, parsed
+      free from the pick id); the <b>seasons and teams the user picks</b> — Jon’s “but not xyz” is a
+      hand-written roster-quality filter, and a better instrument than any value band we could infer; and the
+      pre-existing <b>D-055 user-gain floor</b> on the receiving side, which standing-offer cards inherit for
+      free because they run through the same injector loop. The one real exposure — a
+      <code>market_slots</code> user, for whom season <i>does</i> spread value — is exactly what D-055 was
+      built to catch.
+      <br><br>
+      <b>Revisit only if Q-023 (per-slot pick pricing) is ever built.</b> That, not #362, is where a value
+      band would belong. Ruling recorded as <b>D-093</b>; build contract in
+      <code>docs/feedback/items/362-standing-offer/</code>.</div>
+
+    <h2>Trigger condition — narrower than “any 1-for-1”</h2>
+    <p>The prompt should fire only when <b>all</b> of these hold, or it becomes a nag on a swipe surface whose
+      entire value is speed:</p>
+    <ul>
+      <li>The like was a <b>1-for-1</b>, and</li>
+      <li>the received asset is a <b>pick</b> (the generalizable side — “any 1st” means something; “any Tyler
+        Warren” does not), and</li>
+      <li>the user has <b>no active standing offer</b> for that player, and</li>
+      <li>they haven’t dismissed the prompt <b>twice</b> this session.</li>
+    </ul>
+    <div class="flarebox"><b>Scope note.</b> Jon’s “or a pop up after you say yes” already anticipates the
+      interruption cost. The prompt is the feature; getting its trigger wrong is the way this ships and then
+      gets flagged as annoying two weeks later.</div>
+
+    <h2>What it would touch</h2>
+    <table>
+      <tr><th style="width:30%">Layer</th><th>Change</th></tr>
+      <tr><td><code>backend/database.py</code></td><td>New <code>standing_offers</code> table
+        (user, league, player_id, asset_class, round, years[], team_user_ids[], created_at, expires_at,
+        revoked_at) + loader. <b>Schema change → not express-lane eligible.</b></td></tr>
+      <tr><td><code>backend/server.py</code></td><td><code>POST/GET/DELETE /api/trades/standing-offer</code>;
+        widen <code>_inject_likes_you_cards_impl</code>’s match rule to union standing offers with exact
+        mirrors. → <code>docs/api-reference.md</code></td></tr>
+      <tr><td><code>mobile/.../TradesScreen.tsx</code></td><td>Post-like sheet + trigger conditions; the
+        offer chip on matching cards.</td></tr>
+      <tr><td><code>mobile/.../TradeCard.tsx</code></td><td>“Why you’re seeing this” line for standing-offer
+        cards; the offer chip slot.</td></tr>
+      <tr><td><code>MatchesScreen.tsx</code></td><td>Standing offers section — list, edit, revoke.</td></tr>
+      <tr><td><code>analytics_taxonomy.py</code></td><td><code>standing_offer_prompted</code> /
+        <code>_posted</code> / <code>_skipped</code> / <code>_card_shown</code> / <code>_revoked</code>,
+        registered <b>and</b> classified in <code>NON_INTENT_EVENTS</code> in the same commit.</td></tr>
+      <tr><td><code>config/features.json</code></td><td><code>trade.standing_offers</code>, default off.</td></tr>
+    </table>
+    <div class="warnbox"><b>Gate posture.</b> New table + new routes + new flag + new analytics events. Per
+      CLAUDE.md §Feature gates this is the <b>bright line</b> — it is not a quick fix, and it needs the full
+      scope block before any code is written.</div>
+  </div>
+
+</div>
+</body>
+</html>

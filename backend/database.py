@@ -991,6 +991,7 @@ league_preferences_table = Table("league_preferences", metadata,
     Column("team_outlook",        String,  nullable=False),
     Column("acquire_positions",   Text,    default="[]"),  # JSON array e.g. ["WR","TE"]
     Column("trade_away_positions",Text,    default="[]"),  # JSON array e.g. ["QB"]
+    Column("avoid_positions",     Text,    default="[]"),  # JSON array e.g. ["QB","TE"] — #360
     Column("updated_at",          String),
     UniqueConstraint("user_id", "league_id", name="uq_league_pref"),
 )
@@ -1020,6 +1021,44 @@ asset_preferences_table = Table("asset_preferences", metadata,
     Column("list_type",  String,  nullable=False),   # 'untouchable' | 'target'
     Column("created_at", String),
     UniqueConstraint("user_id", "league_id", "player_id", name="uq_asset_pref"),
+)
+
+
+# ---------------------------------------------------------------------------
+# standing_offers — broadcast intent to trade one player for any pick of a
+# round (#362)
+# ---------------------------------------------------------------------------
+# Where trade_decisions holds ONE exact package the user liked, this holds a
+# GENERALISED offer: "I will send player P for any round-R pick, in seasons
+# Y, from teams T, in this league, until expires_at."
+#
+# Read by _inject_likes_you_cards_impl as a second candidate source next to
+# the exact mirrors; written only by POST /api/trades/standing-offer.
+#
+# At most ONE LIVE offer per (user_id, league_id, player_id, round) —
+# enforced AT THE WRITER with a `revoked_at IS NULL` predicate, deliberately
+# NOT a UniqueConstraint: revoke-then-repost is a supported flow and a hard
+# constraint would collide with it. Same idiom as
+# trade_decisions.retracted_at (#318, database.py:335).
+#
+# NOTE the table is created by metadata.create_all — do NOT add a
+# migration_cols row for it; that list is three-tuples for COLUMNS ON
+# EXISTING TABLES and a bogus entry would ALTER TABLE ADD COLUMN a column
+# that create_all just made.
+# ---------------------------------------------------------------------------
+standing_offers_table = Table("standing_offers", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("user_id",         String,  nullable=False),   # the SENDER
+    Column("league_id",       String,  nullable=False),
+    Column("player_id",       String,  nullable=False),   # the asset offered OUT
+    Column("round",           Integer, nullable=False),   # pick round wanted IN (v1: always 1)
+    Column("seasons",         Text,    default="[]"),     # JSON array of ints, e.g. [2027, 2028]
+    Column("team_user_ids",   Text,    default="[]"),     # JSON array of strings — PRIVATE (R-19)
+    Column("source_trade_id", String),                    # provenance: the like that made it; nullable
+    Column("created_at",      String),                    # ISO UTC
+    Column("expires_at",      String),                    # ISO UTC, STORED not derived (R-23)
+    Column("revoked_at",      String),                    # ISO UTC; NULL = live
+    Index("ix_standing_offers_league_live", "league_id", "revoked_at"),
 )
 
 
@@ -2368,6 +2407,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("pick_year_decay_r2", 0.85, "D-079: per-year value multiplier for a 2nd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r3", 0.85, "D-079: per-year value multiplier for a 3rd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r4", 0.85, "D-079: per-year value multiplier for a 4th-round pick and deeper (KTC 1QB crowd rate 0.856)"),
+    # ── #362 standing offers (flag trade.standing_offers) ────────────────
+    ("standing_offer_days",       30.0, "#362: days a standing offer stays live; STORED on the row at create time, so a change here moves only offers created after it"),
+    ("standing_offer_inject_cap",  2.0, "#362: max of the 3 likes-you injection slots a deck may spend on standing offers (organic mirrors are evaluated first). 3 = unreserved cap; **`0` = off / kill switch**, standing offers stop injecting without a flag flip"),
 ]
 
 
@@ -2444,6 +2486,11 @@ def _migrate_db() -> None:
         ("trade_matches",      "user_b_dismissed",     "INTEGER"),
         ("league_preferences", "acquire_positions",    "TEXT"),
         ("league_preferences", "trade_away_positions", "TEXT"),
+        # #360/#361 — receive-side positional exclusion. TEXT to match the two
+        # rows above. NO SQL DEFAULT and NO BACKFILL by design: every existing
+        # row reads NULL, and load_league_preference's _parse_positions returns
+        # [] for any falsy raw value, which is the correct "avoiding nothing".
+        ("league_preferences", "avoid_positions",      "TEXT"),
         # Feedback lifecycle status (operator-managed; NULL reads as 'new')
         ("app_feedback",       "status",                "VARCHAR"),
         ("app_feedback",       "status_updated_at",     "VARCHAR"),
@@ -5275,6 +5322,163 @@ def load_recent_league_likes(
             "created_at":         r.created_at,
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# Standing offers (#362) — a generalised, time-boxed, team-targeted intent
+# ---------------------------------------------------------------------------
+
+def _standing_offer_row_to_dict(r) -> dict:
+    """Row → dict with `seasons` / `team_user_ids` already json.loads-ed.
+    Malformed JSON degrades to [] rather than raising — a bad row must not
+    take down a whole list read."""
+    def _j(raw, default):
+        try:
+            v = json.loads(raw) if raw else default
+            return v if isinstance(v, list) else default
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return {
+        "id":              r.id,
+        "user_id":         r.user_id,
+        "league_id":       r.league_id,
+        "player_id":       r.player_id,
+        "round":           r.round,
+        "seasons":         [int(x) for x in _j(r.seasons, []) if isinstance(x, (int, float, str)) and str(x).isdigit()],
+        "team_user_ids":   [str(x) for x in _j(r.team_user_ids, [])],
+        "source_trade_id": r.source_trade_id,
+        "created_at":      r.created_at,
+        "expires_at":      r.expires_at,
+        "revoked_at":      r.revoked_at,
+    }
+
+
+def create_standing_offer(*, user_id: str, league_id: str, player_id: str,
+                          round: int, seasons: list, team_user_ids: list,
+                          source_trade_id: str | None = None,
+                          days: float = 30.0) -> dict | None:
+    """#362 — insert a standing offer.
+
+    Returns the row dict, or None when a LIVE offer already exists for
+    (user_id, league_id, player_id, round). An EXPIRED or REVOKED row does
+    NOT block a new one — revoke-then-repost is the supported "edit" flow,
+    which is exactly why this is a writer predicate and not a
+    UniqueConstraint (R-21).
+    """
+    now_dt = datetime.now(timezone.utc)
+    now    = now_dt.isoformat()
+    with engine.begin() as conn:
+        live = conn.execute(
+            select(standing_offers_table.c.id).where(
+                and_(
+                    standing_offers_table.c.user_id    == user_id,
+                    standing_offers_table.c.league_id  == league_id,
+                    standing_offers_table.c.player_id  == player_id,
+                    standing_offers_table.c.round      == int(round),
+                    standing_offers_table.c.revoked_at.is_(None),
+                    standing_offers_table.c.expires_at > now,
+                )
+            )
+        ).fetchone()
+        if live is not None:
+            return None
+        expires = (now_dt + timedelta(days=float(days))).isoformat()
+        res = conn.execute(insert(standing_offers_table).values(
+            user_id         = user_id,
+            league_id       = league_id,
+            player_id       = player_id,
+            round           = int(round),
+            seasons         = json.dumps(sorted({int(x) for x in seasons})),
+            team_user_ids   = json.dumps(sorted({str(x) for x in team_user_ids})),
+            source_trade_id = source_trade_id,
+            created_at      = now,
+            expires_at      = expires,
+            revoked_at      = None,
+        ))
+        new_id = res.inserted_primary_key[0]
+        row = conn.execute(
+            select(standing_offers_table).where(
+                standing_offers_table.c.id == new_id)
+        ).fetchone()
+    return _standing_offer_row_to_dict(row) if row is not None else None
+
+
+def load_standing_offers(*, league_id: str, exclude_user_id: str | None = None,
+                         live_only: bool = True) -> list[dict]:
+    """#362 — standing offers for a league, newest first (id DESC, mirroring
+    load_recent_league_likes' ordering so nothing new has to be explained
+    about deck order). live_only ⇒ revoked_at IS NULL AND expires_at > now."""
+    now = datetime.now(timezone.utc).isoformat()
+    conds = [standing_offers_table.c.league_id == league_id]
+    if exclude_user_id is not None:
+        conds.append(standing_offers_table.c.user_id != exclude_user_id)
+    if live_only:
+        conds.append(standing_offers_table.c.revoked_at.is_(None))
+        conds.append(standing_offers_table.c.expires_at > now)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(standing_offers_table).where(and_(*conds))
+            .order_by(standing_offers_table.c.id.desc())
+        ).fetchall()
+    return [_standing_offer_row_to_dict(r) for r in rows]
+
+
+def load_user_standing_offers(*, user_id: str,
+                              league_id: str | None = None) -> list[dict]:
+    """#362 — the caller's OWN offers, live AND expired AND revoked, newest
+    first. Used by the manage surface only, so team_user_ids is included
+    (it is the sender's own data — R-19 clause 1)."""
+    conds = [standing_offers_table.c.user_id == user_id]
+    if league_id:
+        conds.append(standing_offers_table.c.league_id == league_id)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(standing_offers_table).where(and_(*conds))
+            .order_by(standing_offers_table.c.id.desc())
+        ).fetchall()
+    return [_standing_offer_row_to_dict(r) for r in rows]
+
+
+def revoke_standing_offer(*, user_id: str, offer_id: int) -> bool:
+    """#362 — set revoked_at on the caller's own LIVE offer.
+
+    Idempotent: returns False when already revoked or not owned by user_id.
+    NEVER deletes — the row is history (trade_decisions.retracted_at idiom).
+    Ownership is in the WHERE clause, not checked after the read, so a caller
+    can never revoke another user's offer.
+    """
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(standing_offers_table)
+            .where(and_(
+                standing_offers_table.c.id         == int(offer_id),
+                standing_offers_table.c.user_id    == user_id,
+                standing_offers_table.c.revoked_at.is_(None),
+            ))
+            .values(revoked_at=_now())
+        )
+    return bool(res.rowcount)
+
+
+def league_pick_seasons(*, league_id: str, round: int = 1) -> list[int]:
+    """#362 R-22 / R-4 — the league's REAL pick horizon for a round: the
+    sorted distinct `season` values of that round's draft_picks rows.
+
+    Deliberately NOT a hardcoded N-year window — that is the #355 defect
+    D-091 fixed at the writer (sync_draft_picks), so deriving from the table
+    is correct by construction. Source-agnostic: a user-asserted row is a
+    real pick for horizon purposes.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).where(
+                and_(
+                    draft_picks_table.c.league_id == league_id,
+                    draft_picks_table.c.round     == int(round),
+                )
+            ).distinct()
+        ).fetchall()
+    return sorted({int(r.season) for r in rows})
 
 
 # ---------------------------------------------------------------------------
@@ -8479,6 +8683,7 @@ def upsert_league_preference(
     team_outlook: str,
     acquire_positions: list[str] | None = None,
     trade_away_positions: list[str] | None = None,
+    avoid_positions: list[str] | None = None,
 ) -> None:
     """
     Store or update a user's team-building outlook and positional preferences
@@ -8487,8 +8692,11 @@ def upsert_league_preference(
     team_outlook must be one of:
         championship | contender | rebuilder | jets | not_sure
 
-    acquire_positions / trade_away_positions: lists of position strings
-        e.g. ["WR", "TE"] or ["QB"].  Pass None to leave existing value unchanged.
+    acquire_positions / trade_away_positions / avoid_positions: lists of
+        position strings e.g. ["WR", "TE"] or ["QB"].  Pass None to leave the
+        existing value unchanged; pass [] to clear it.  #360: a caller that
+        omits avoid_positions (e.g. the web client) preserves whatever is
+        stored — this is what makes a web save non-destructive.
     """
     if team_outlook not in _VALID_OUTLOOKS:
         raise ValueError(f"team_outlook must be one of {sorted(_VALID_OUTLOOKS)}")
@@ -8510,6 +8718,8 @@ def upsert_league_preference(
             vals["acquire_positions"]    = json.dumps(acquire_positions)
         if trade_away_positions is not None:
             vals["trade_away_positions"] = json.dumps(trade_away_positions)
+        if avoid_positions is not None:
+            vals["avoid_positions"]      = json.dumps(avoid_positions)
 
         if existing:
             conn.execute(
@@ -8528,9 +8738,11 @@ def upsert_league_preference(
                 league_id            = league_id,
                 acquire_positions    = vals.get("acquire_positions",    "[]"),
                 trade_away_positions = vals.get("trade_away_positions", "[]"),
+                avoid_positions      = vals.get("avoid_positions",      "[]"),
                 updated_at           = now,
                 **{k: v for k, v in vals.items()
-                   if k not in ("acquire_positions", "trade_away_positions", "updated_at")},
+                   if k not in ("acquire_positions", "trade_away_positions",
+                                "avoid_positions", "updated_at")},
             ))
 
 
@@ -8544,6 +8756,7 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
             "team_outlook":        str | None,
             "acquire_positions":   list[str],   # e.g. ["WR", "TE"]
             "trade_away_positions": list[str],  # e.g. ["QB"]
+            "avoid_positions":     list[str],   # e.g. ["QB", "TE"]  — #360
         }
     """
     with engine.connect() as conn:
@@ -8571,6 +8784,9 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
         "team_outlook":          row.team_outlook,
         "acquire_positions":     _parse_positions(getattr(row, "acquire_positions",    None)),
         "trade_away_positions":  _parse_positions(getattr(row, "trade_away_positions", None)),
+        # #360 — getattr default is required, not defensive noise: a row read
+        # before the migration ran has no such attribute.
+        "avoid_positions":       _parse_positions(getattr(row, "avoid_positions",      None)),
     }
 
 

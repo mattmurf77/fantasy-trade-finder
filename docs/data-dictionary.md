@@ -60,6 +60,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 
 - [`players`](#players)
 - [`league_preferences`](#league_preferences)
+- [`standing_offers`](#standing_offers)
 - [`draft_picks`](#draft_picks)
   - [The containment rule (W3 M-A, ADR-010) — read this before adding a reader](#the-containment-rule-w3-m-a-adr-010-read-this-before-adding-a-reader)
 - [`recorded_picks`](#recorded_picks)
@@ -658,6 +659,7 @@ Per-(user, league) team-building outlook. Unique on `(user_id, league_id)`.
 | `team_outlook` | str | `championship` / `contender` / `rebuilder` / `jets` / `not_sure` |
 | `acquire_positions` | JSON text | e.g. `["WR","TE"]` |
 | `trade_away_positions` | JSON text | e.g. `["QB"]` |
+| `avoid_positions` | JSON text | **#360/#361** — positions the user will not accept on the RECEIVE side, e.g. `["QB","TE"]`, drawn from `{QB,RB,WR,TE,PICK}`. Added additively via `_migrate_db()` with **no SQL `DEFAULT` and no backfill**: `ALTER TABLE … ADD COLUMN` is issued bare, so every pre-existing row reads `NULL`, and `load_league_preference`'s `_parse_positions` maps `NULL`, `""`, malformed JSON and non-list JSON all to `[]` — the correct "avoiding nothing". Adding a SQL default would make SQLite and Postgres disagree about what a pre-existing row contains. Read is **not** flag-gated (`GET`/`POST /api/league/preferences` always serve and accept it); `trade.avoid_positions` gates only whether the ENGINE reads the column, so a kill-switch flip never destroys the data. |
 | `updated_at` | str | |
 
 ---
@@ -808,6 +810,30 @@ Per-player trade preferences, per league (backlog #2). Where `league_preferences
 | `created_at` | str | ISO UTC |
 
 Constraint: `uq_asset_pref` on `(user_id, league_id, player_id)` — a player holds at most one tag per league; `set_asset_preference` deletes any prior tag before inserting (single membership), so setting `target` on an existing untouchable moves it. Read via `load_asset_preferences` → `{"untouchables": [...], "targets": [...]}`; written via `set_asset_preference(..., list_type)` where `list_type=None` removes. Add/remove history for the #65 label stream is captured in `user_events` (`asset_pref_added`/`asset_pref_removed`), not here.
+
+---
+
+## `standing_offers`
+
+Per-`(user, league, player, round)` broadcast intent to trade a player for any pick of a round (**#362**, flag `trade.standing_offers`). Where `trade_decisions` holds ONE exact package the user liked, this holds a **generalised** offer: "I will send player P for any round-R pick, in seasons Y, from teams T, in this league, until `expires_at`." Read by `server._inject_likes_you_cards_impl` as a second candidate source next to the exact mirrors; written only by `POST /api/trades/standing-offer`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str | the **SENDER** |
+| `league_id` | str | |
+| `player_id` | str | the asset offered OUT |
+| `round` | int | pick round wanted IN; v1 always `1`. The column exists so widening past firsts is a config change, not a schema change |
+| `seasons` | JSON text | e.g. `[2027, 2028]`. Validated at create time against the league's REAL pick horizon (the distinct round-1 `draft_picks` seasons), never a hardcoded N-year window — that is the #355 defect D-091 fixed at the writer |
+| `team_user_ids` | JSON text | e.g. `["u_1","u_2"]`. **Private** — read only inside the injector's match test and on the sender's own payloads; never on a recipient-facing payload (#362 R-19) |
+| `source_trade_id` | str, nullable | provenance: the `trade_id` of the like that created it. Never validated against the deck — an FB-46-reconstructed card carries a synthetic id and must still work |
+| `created_at` | str | ISO UTC |
+| `expires_at` | str | ISO UTC. **Stored, not derived**, at `created_at + standing_offer_days` (knob, default 30): a derived expiry would let a knob change silently move the deadline on an offer the user was already shown a countdown for |
+| `revoked_at` | str, nullable | ISO UTC; `NULL` = live. Revoke NEVER deletes — the row is history |
+
+Index: `ix_standing_offers_league_live` on `(league_id, revoked_at)` — the injector's read shape.
+
+**Constraint:** at most ONE **live** row per `(user_id, league_id, player_id, round)`, enforced **at the writer** with a `revoked_at IS NULL AND expires_at > now` predicate in `create_standing_offer`, and deliberately **not** by a unique index. Revoke-then-repost is the supported "edit" flow and a hard DB constraint would collide with it. Same idiom as `trade_decisions.retracted_at` (#318). Created by `metadata.create_all`, so there is **no `migration_cols` entry** — that list is three-tuples for columns on *existing* tables, and a bogus entry there would `ALTER TABLE ADD COLUMN` a column `create_all` just made.
 
 ---
 

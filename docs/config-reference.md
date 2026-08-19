@@ -483,7 +483,33 @@ Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md
 
 **Serving is knob-controlled INSIDE the flag** — see [`bakeoff_serve_interleaved`](#three-model-bake-off-flag-tradebakeoff) below. Default `0` = Phase-4 **dark validation**: all three arms generate and log, only arm `current` is served, and the whole presentation stack runs untouched — zero user-visible change, which is the point. `1` = Phase-5 interleaved serving, where the post-generation re-rankers (`deck.thompson_v2`, A6 diversity + per-target cap, `deck.fatigue` multipliers, `deck.taste_vectors`, `deck.value_model`, `deck.exploration` wildcard, `deck.first_session` shaping, and the likes-you injector's composite re-sort) are **bypassed for that deck** so nothing reorders the interleaver's output. F3 decline *suppression* stays live — it only removes cards.
 
+**GUARDRAIL (#360, 2026-08-19): do not raise `bakeoff_serve_interleaved` above `0` until `trade_gen_v2` honors `acquire_positions`, `trade_away_positions` and `avoid_positions`.** gen-v2 applies the per-player negative lists (`not_interested_ids`, `untouchable_ids`) but reads NO positional preferences at all, so interleaved serving would break Chasing and Shopping today and Avoiding as soon as it ships Tracked as `living-memory/OPEN_QUESTIONS.md` **Q-026**.
+
 **Rollback.** Two deploy-free levers, in order of bluntness: set `bakeoff_serve_interleaved` back to `0` (serving reverts to today's deck; logging continues), or flip `trade.bakeoff` to `false` (everything stops). Both are a config edit plus `POST /api/feature-flags/reload` / `PUT /api/admin/config/<key>`.
+
+---
+
+## Flags — "Avoiding" positions (#360/#361, 2026-08-19 — ships **ON**)
+
+Feature docs: [docs/feedback/items/360-avoiding-positions/](feedback/items/360-avoiding-positions/). A third row in the Trade DNA sheet, under Chasing and Shopping. **No new `model_config` keys** — the dormant `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` multipliers stay dormant (D-093), so there is no new tuning surface to look for and no knob-inventory golden to edit.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.avoid_positions` | **true** | The ENGINE READ only. ON ⇒ `server._run_trade_job` loads `league_preferences.avoid_positions` and every receive pool drops assets at those positions at **pool construction** — `trade_optimizer.generate_pair_trades_v3`'s `known_opp`, `_try_sweeten`'s receive-side candidates, `trade_service._generate_for_pair_v2`'s `_known_opp`, `_generate_consensus_for_pair`'s `_opp_pool`, `_generate_asset_ideas_impl`'s three receive-side guards, and `server._inject_likes_you_cards_impl`. Because the exclusion lives in pool construction rather than in a gate, the #189 relaxed-targeted pass **structurally cannot** relax it. Pick-ness is resolved through the canonical `is_pick_asset` *before* reading `position`, so avoiding QB never deletes a 4th-round pick (the generic rungs carry a deliberately fake position for tier display); avoiding `PICK` — the fifth chip — is the only way to exclude pick assets. Server-side, **avoid beats chase**: the job drops every avoided position from `acquire_positions` before anything downstream sees the pair, because otherwise `_positions_ok` would demand a position the pools no longer contain and every opponent would yield zero cards with no error. OFF ⇒ the loader leaves the list empty at the single point of entry and every generation path is byte-identical to pre-#360. |
+
+**Persistence is deliberately NOT gated.** `GET`/`POST /api/league/preferences` always serve and accept `avoid_positions` in **both** flag states. A kill-switch flip must never destroy user data, and flipping back on must restore every user's saved set with no migration and no re-entry. The flag is a two-file edit (`config/features.json` + `mobile/src/state/useFeatureFlags.ts`'s `LAUNCHED_FLAG_DEFAULTS`) — a key present in only one disagrees with itself across the client's first two paints.
+
+---
+
+## Flags — Standing offers (#362) (2026-08-19 — ships dark)
+
+Feature docs: [docs/feedback/items/362-standing-offer/](feedback/items/362-standing-offer/).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.standing_offers` | **false** | The post-like sheet, the three `/api/trades/standing-offer*` routes, the standing-offer branch of `server._inject_likes_you_cards_impl`, and the sender-side chip stamp `_stamp_own_standing_offers`. **Requires `trade.likes_you`** (the receiving half is gated on it) **and `trade.picks_in_pool`** (picks must be roster assets or the injector can never match) — with either off the feature is inert. OFF (default) ⇒ all three routes `404 feature_disabled` before any session work, no prompt, no injector predicate evaluated, and no card payload key added, so deck payloads are byte-identical. Graduation: an operator TestFlight pass on a real 12-team Sleeper league. |
+
+**Deploy-free tuning inside the flag:** [`standing_offer_inject_cap`](#standing-offers-flag-tradestanding_offers--backendserverpy-db-seeded) (`0` kills injection without a flag flip) and [`standing_offer_days`](#standing-offers-flag-tradestanding_offers--backendserverpy-db-seeded).
 
 ---
 
@@ -782,7 +808,7 @@ Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` s
 
 | Key | Default | Meaning |
 |---|---|---|
-| `bakeoff_serve_interleaved` | 0.0 (**dark**) | Serving mode inside the flag. `0` = Phase-4 dark validation: three arms generate and log, only arm `current` is served, presentation stack untouched — the zero-risk step that measures cost, empty-arm rates and attribution plumbing. `1` = Phase-5 interleaved serving: the team-draft deck is served and every post-generation re-ranker is bypassed for it (PLAN.md §3.4 Channel 2 — a run with those layers live on the merged deck measures deck position, not model quality, and must be discarded rather than caveated). **The deploy-free rollback lever: set back to 0 and serving reverts to today's deck while logging continues.** |
+| `bakeoff_serve_interleaved` | 0.0 (**dark**) | Serving mode inside the flag. `0` = Phase-4 dark validation: three arms generate and log, only arm `current` is served, presentation stack untouched — the zero-risk step that measures cost, empty-arm rates and attribution plumbing. `1` = Phase-5 interleaved serving: the team-draft deck is served and every post-generation re-ranker is bypassed for it (PLAN.md §3.4 Channel 2 — a run with those layers live on the merged deck measures deck position, not model quality, and must be discarded rather than caveated). **The deploy-free rollback lever: set back to 0 and serving reverts to today's deck while logging continues.** **GUARDRAIL (#360): do not raise this above `0` until `trade_gen_v2` honors `acquire_positions`, `trade_away_positions` and `avoid_positions` — it reads no positional preferences at all today. (Q-026).** |
 | `bakeoff_deck_limit` | **30.0** | Max cards in the served bake-off deck; the draft stops there. 30 is the composed deck exactly: three groups of `bakeoff_group_size`. `0` = uncapped, which together with `bakeoff_group_size` = 0 restores Phase 3's drain-every-arm draft (roughly 3× today's deck — a 12-team fixture produced 140 cards). Ignored in dark mode, where arm `current`'s own list is served. |
 | `bakeoff_group_size` | 10.0 | Cards per **group**. A group is (arm, basis): each engine arm contributes a `divergence` group and a `consensus` group, arm `gen_v2` contributes one (it emits nothing else). At the default roster that is three groups → a 30-card deck. **`0` kills the whole composition layer** — no groups, no lane quotas, and the draft reverts to Phase 3's plain per-ARM team draft. |
 | `bakeoff_group_value_slots` | 5.0 | Value-lane slots inside each group. The **outlook**-lane slots are the remainder (`bakeoff_group_size` − this), so the split can never be inconsistent with the group size. "Outlook" is the engine's `window` lane (`trade_service.classify_lane`) — same axis, one label. |
@@ -1019,6 +1045,13 @@ Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds
 | `outlook_seed` | 0.0 | Config seed XORed with `stable_hash(league_id)` for the deterministic RNG (same league+seed → identical odds). |
 | `outlook_bye_multiplier_enabled` | 0.0 | Gate for the EVALUATED per-week bye-week μ multiplier (`backend/outlook/bye_multiplier.py`) — **`pipeline.py` does not read this key; it exists only as the wiring point for a future ship decision.** See [feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md](feedback/items/169-outlook-league-summary/bye-week-multiplier-2026-08-09.md) for the backtest verdict before ever flipping this. |
 | `outlook_bye_multiplier_scale` | 1.0 | Linear scale from starting-lineup value-fraction-on-bye to the μ multiplier haircut (`mu_multipliers()`). **Heuristic, unshipped.** |
+
+### Standing offers (flag `trade.standing_offers`) — `backend/server.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `standing_offer_days` | 30.0 | Days a standing offer stays live. **Stored on the row at create time** (`expires_at = created_at + standing_offer_days`), never derived at read time — a derived expiry would let a knob change silently move the deadline on an offer the user was already shown "18 days left" for. Consequence: a change here moves only offers created **after** it. 30 is a deliberate 3× tightening of the 90-day like window, because a standing offer is the first thing in FTF that puts a user's intent in front of other people with no further tap from them. |
+| `standing_offer_inject_cap` | 2.0 | Max of the **3** likes-you injection slots (`_LIKES_YOU_CAP`, unchanged) a deck may spend on standing offers. Organic mirrors are evaluated FIRST, so this is a reservation for them, not a quota for standing offers. `3` reproduces an unreserved cap. Drops are counted on `trade_service._standing_offer_cap_drops` and logged once per injection — never evented (one event per dropped card in a chatty league is high-cardinality server noise for a question a counter answers). **`0` = off / kill switch: standing offers stop injecting without a flag flip.** |
 
 ### Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded
 
