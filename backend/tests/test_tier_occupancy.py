@@ -185,7 +185,7 @@ def test_anchor_rungs_land_in_matching_tiers(fmt, pos):
         1869.7: "firsts_3",       # 3 firsts
         1788.6: "firsts_2",       # 2 firsts
         1650.0: "first_1",        # Mid 1st seed
-        1460.0: "second",         # Mid 2nd seed
+        1400.0: "second",         # Mid 2nd seed (D-084: was 1460)
         1320.0: "third",          # Mid 3rd seed
         1240.0: "fourth",         # Mid 4th seed
         1200.0: "waivers",        # DP value 0 (the seed floor)

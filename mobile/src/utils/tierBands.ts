@@ -8,8 +8,11 @@
 // directly in draft-pick terms, each floor a rung of the anchor/pick Elo
 // ladder (firsts_4plus ≥ 1927 ≈ 4 mid 1sts, firsts_3 ≥ 1869 ≈ 3 mid 1sts,
 // firsts_2 ≥ 1788 ≈ 2 mid 1sts, first_1 ≥ 1580 = Late 1st, second ≥
-// 1400 = Late 2nd, third ≥ 1280 = Late 3rd, fourth ≥ 1220 = Late 4th,
-// waivers below that). Pick value is position-uniform by design, so the
+// 1370 = Late 2nd, third ≥ 1280 = Late 3rd, fourth ≥ 1220 = Late 4th,
+// waivers below that). The `second` floor moved 1400 → 1370 on 2026-08-19
+// (D-084) when the round-2 pick seeds were deflated toward market — the
+// Late 2nd seed IS the `second` floor, so the two always move together.
+// Pick value is position-uniform by design, so the
 // bands are identical across positions and scoring formats; occupancy
 // differs because the seed Elos do.
 //
@@ -67,7 +70,7 @@ const FALLBACK: Thresholds = {
   firsts_3:     1869,
   firsts_2:     1788,
   first_1:      1580,
-  second:       1400,
+  second:       1370,   // D-084: was 1400 (Late 2nd seed)
   third:        1280,
   fourth:       1220,
 };

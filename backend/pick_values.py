@@ -26,9 +26,21 @@ GENERIC_PICK_SEEDS: dict[tuple[int, str], float] = {
     (1, "Early"):  1720,   # ~top-3 pick: elite rookie prospect
     (1, "Mid"):    1650,   # ~mid-1st: solid first-round value (BASE FIRST)
     (1, "Late"):   1580,   # ~late-1st: still premium but less certain
-    (2, "Early"):  1520,   # ~early-2nd: solid starter potential
-    (2, "Mid"):    1460,   # ~mid-2nd: depth/upside piece
-    (2, "Late"):   1400,   # ~late-2nd: dart throw
+    # ── D-084 (2026-08-19) — round 2 deflated toward market. ──────────
+    # docs/reviews/2026-08-19-ktc-pick-value-comparison.md. On the only
+    # scale-free measure (what player rank is a pick worth), our 1st round
+    # was exact (Mid 1st = the 65th asset vs a market median of 66.5) while
+    # our Mid 2nd sat at the 119th against a market median of the 141st —
+    # 22 ranks too generous. KTC/FantasyCalc/DynastyProcess all agree once
+    # read on a common scale. Was 1520/1460/1400; the Mid 2nd:1st ratio
+    # falls 0.387 → 0.287 and the Mid 2nd lands at rank ≈136 vs 140.5.
+    # DO NOT "fix" this from KTC's published ratio (0.697): that scale is
+    # bottom-compressed, and transplanting it would price a mid-2nd as the
+    # 86th-best dynasty asset, above George Kittle.
+    # Rounds 1/3/4 are deliberately untouched — see the module note below.
+    (2, "Early"):  1470,   # ~early-2nd: solid starter potential
+    (2, "Mid"):    1400,   # ~mid-2nd: depth/upside piece
+    (2, "Late"):   1370,   # ~late-2nd: dart throw (== `second` tier floor)
     (3, "Early"):  1360,   # ~early-3rd: longshot upside
     (3, "Mid"):    1320,   # ~mid-3rd: roster filler
     (3, "Late"):   1280,   # ~late-3rd: minimal value
@@ -37,6 +49,42 @@ GENERIC_PICK_SEEDS: dict[tuple[int, str], float] = {
     (4, "Late"):   1220,   # ~late-4th: minimal
 }
 _PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+
+# ── D-084 module note: what was NOT changed, and how to walk it back ──────
+#
+# ROUND 1 IS DELIBERATELY UNTOUCHED. It is the one part of the ladder the
+# market fully endorses: Mid 1st = the 65th-best asset on our board against a
+# market median of 66.5, Early/Late within 10 ranks. Do not "improve" it.
+#
+# ROUNDS 3 AND 4 ARE NOT FIXABLE HERE, and their apparent 50–70 rank error is
+# mostly an artifact, not a pricing opinion. `data_loader.seed_elo_for_value`
+# maps DP value 0 → Elo 1200, so the board has almost no resolution below
+# rank ~200: rank 230 sits at Elo 1238.8 and rank 300 at 1206.6 — 70 ranks
+# inside 32 Elo points. The market-implied Elo for a Mid 4th (1207) falls
+# INSIDE the current `waivers` band. Moving 3rd/4th seeds down cannot buy
+# rank movement it does not have room for, and the memo measured it breaking
+# `test_tier_occupancy.py` in three places when tried. If 3rd/4th pricing is
+# ever revisited, the thing to open is the SEED MAP, not this ladder. Logged
+# as Q-019.
+#
+# THESE SEEDS ARE NOT CONFIG-DRIVEN, AND THAT IS DELIBERATE (D-084). The
+# sibling change D-079 shipped `model_config` knobs so it could be reverted
+# without a deploy; that is the right shape for a rate that prices an asset
+# in isolation. It is the WRONG shape here, because the Late rung of each
+# round IS that round's tier floor in tier_config.json (see its
+# `_calibration`). A knob that moved the seeds without moving the bands
+# would silently desynchronise the exact pair this change exists to keep in
+# step. tier_config.json is itself read once at process start
+# (ranking_service.TIER_CONFIG), so a band change needs a deploy regardless
+# — a seeds-only knob would buy no revert speed, only a footgun.
+#
+# REVERT PATH (no knob — this is the documented alternative): revert the
+# single D-084 commit and redeploy. It is self-contained: three seeds here,
+# `second.min` / `third.max` across the 8 blocks of tier_config.json, the
+# two client fallback mirrors (mobile/src/utils/tierBands.ts,
+# web/positional-tiers.html), web/js/app.js's label ladder, and the pinned
+# test targets. Render auto-deploys `main`; clients re-fetch /api/tier-config
+# at boot, so no client release is required to pick the old bands back up.
 
 # Year discount applied to an owned pick's pool_value per season out. Mirrors
 # database._PICK_YEAR_DISCOUNT (the legacy pick_value scale) so the two scales

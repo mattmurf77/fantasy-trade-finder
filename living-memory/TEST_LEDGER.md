@@ -56,6 +56,33 @@ same isolation technique those fixtures already used for `deck_headliner_cap` �
 fixture (`_c4b_*`) built from the real defect shape (one player for one pick, six distinct picks).
 
 ---
+
+## 2026-08-19 — Round-2 pick recalibration (D-084); the `second` tier floor moves with it
+
+**Branch:** `feat/round2-pick-recalibration`, from `origin/main` `93ac695`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/round2-pick-recalibration/scope.md](../docs/plans/round2-pick-recalibration/scope.md). Memo: [docs/reviews/2026-08-19-ktc-pick-value-comparison.md](../docs/reviews/2026-08-19-ktc-pick-value-comparison.md) (carried on this branch; not on main). Decision: [D-084](DECISIONS.md). Open question: [Q-019](OPEN_QUESTIONS.md). Gotcha: [G-051](GOTCHAS.md).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` | **3429 passed, 1 skipped, 0 failed** — byte-identical to the `93ac695` baseline (3429/1) |
+| `tsc --noEmit` (TypeScript 5.9.3, worktree-local `npm ci`) | clean, exit 0 |
+| `mobile/scripts/testid-lint.sh` | `testid-lint OK` |
+| `mobile/tests/check-*.js` — `calc-pick-tiers`, `anchor-labels`, `picks-subset-invariance`, `contrast` | 4/4 pass |
+| `test_tier_occupancy.py` | **47 passed** — `second` peaks at 32 against its ceiling of 35, exactly as the memo predicted |
+| Bake-off knob-inventory guard | untouched — **no `trade_service._DEFAULT_CFG` key added**; `trade_service.py` is not in the diff |
+
+**The blast radius was predicted and then measured to match, exactly.** Applying the seed + band edit before retargeting anything produced **11 failed / 3418 passed** — the same eleven the memo named on a throwaway copy, no more and no fewer. Nothing outside the predicted set moved. Retargeted: `test_pick_anchor` ×2 (1460 → 1400), `test_pin_tier_bounded` ×4 (one constant, `SECOND_LO` 1400 → 1370), `test_pick_pricing_m6b` ×3, `test_league_picks_tier` ×1, `test_power_rankings` ×1. Two extras retargeted deliberately although green: `test_tier_occupancy::test_anchor_rungs_land_in_matching_tiers` asserted `1460.0 → "second"`, a seed that no longer exists, and the `pin_tier_bounded_golden.json` fixture.
+
+**The honest scorecard moved and was rewritten, not silenced.** `test_pick_pricing_m6b::test_the_measured_reshaping_direction_is_deflation_not_inflation` measures how far our ladder sits above DynastyProcess's real market slot prices. `delta(2026, 2)` was `< -0.40`; it is now **−0.284**, and `delta(2027, 2)` **−0.244**. Both are now pinned with `pytest.approx` rather than a loose bound so drift in *either* direction must be acknowledged, with a docstring recording that the remaining ~28 % is intentional (Option B was measured and rejected). It also records that **the ranking flipped**: 2nds are no longer the biggest outlier — a 2026 3rd now deflates hardest (−0.355 vs −0.284), which is the Q-019 residue.
+
+**The golden fixture was re-captured against pristine code, not re-derived.** `pin_tier_bounded_golden.json` pins `edge_lo` to the `second` floor, so the floor move changed its *input*. Its docstring forbids regenerating from new code, so a separate **pristine `origin/main` worktree at 93ac695** was created and the harness validated first by re-capturing at 1400 and confirming it reproduced the checked-in golden **byte-for-byte**; only then was it re-run at 1370. Seven numbers moved, all forced by the one changed input (`elo.edge_lo`, plus ripples in `free` — his opponent in six comparisons — and `quiet`).
+
+**Production validation, read-only** (`SET TRANSACTION READ ONLY`, SELECT only, credentials read from the gitignored `secrets.local.env`, never printed). Question: *is the overpriced 2nd costing accepted trades?* **Answer: no, not measurably.** Cards containing a 2nd are liked at **34.8 % (n=46)** vs **35.2 % (n=565)** for cards with no pick at all — Fisher **p = 1.00**; 2nds appear on only **13.7 %** of 2,184 served cards. A 3-day impression-level sample points the *opposite* way (17.6 %, n=17, p=0.26); two samples disagreeing on sign is the finding. Zero of 23 free-text passes mention a 2nd. The real signal is **1sts by side** — 1st-on-give 15.6 % liked vs 1st-on-receive 47.1 % (n=128). **D-084 is justified on the rank measurement, not on acceptance data, and no lift should be expected.**
+
+Two incidental prod findings, out of scope and not fixed here: **`backend/database.py` on `main` is stale against prod** (26 vs 13 `deck_impressions` columns; `trade_pass_reasons` missing entirely), and **`model_arm` is 97.5 % NULL with zero `gen_v2` rows** — the bake-off is not producing labelled data.
+
+**Not yet run: the manual TestFlight checklist** (scope §8, 10 steps). It is the only runtime evidence this change gets under D-056, and step 9 deliberately points the operator at the one odd consequence — a current-year 3rd now badges "2nd".
+
 ## 2026-08-19 — Per-round draft-pick year decay (D-079); firsts stop decaying
 
 **Branch:** `feat/pick-year-decay`, from `origin/main` `02e27dd`. **Not shipped** — not pushed, not merged.

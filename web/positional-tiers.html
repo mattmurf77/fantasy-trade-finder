@@ -1649,19 +1649,23 @@
     let TIER_CONFIG = {
       // 2026-07-12 8-tier pick-value ladder (#117) — mirrors
       // backend/tier_config.json; see docs/cross-client-invariants.md.
+      // 2026-08-19 (D-084): second.min 1400→1370 and third.max 1395→1365,
+      // in lockstep with the round-2 pick-seed deflation (the Late 2nd
+      // seed IS the `second` floor). Live values still arrive from
+      // GET /api/tier-config; this is only the pre-fetch default.
       // Bands are position- and format-uniform in Elo space (pick value is
       // position-uniform).
       "1qb_ppr": {
-        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
       },
       "sf_tep": {
-        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
-        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1370,max:1575}, third:{min:1280,max:1365}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
       },
     };
 

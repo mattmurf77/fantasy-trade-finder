@@ -38,8 +38,26 @@ TOKEN = "sess-picks-tier-test"
 # season; current season 2026 here). Expected rungs verified against the
 # canonical band walk at authoring time (1qb_ppr bands, position-uniform):
 #   2026 1st  → pool 2117.0 → Elo 1635.5 → 'first_1'
-#   2027 2nd  → pool  695.9 → Elo 1454.6 → 'second'
-#   2026 3rd  → pool  406.6 → Elo 1383.5 → 'third'
+#   2027 2nd  → pool  515.6 → Elo 1413.3 → 'second'   (D-084: was 695.9)
+#   2026 3rd  → pool  406.6 → Elo 1383.5 → 'second'   (!! see below)
+#   2027 3rd  → pool  345.6 → Elo 1364.6 → 'third'
+#
+# ⚠️  D-084 (2026-08-19) MOVED ONE BADGE, AND IT IS THE ONE ODD-LOOKING
+# CONSEQUENCE OF THE ROUND-2 RECALIBRATION. The `second` floor dropped
+# 1400 → 1370 with the Late 2nd seed. A CURRENT-YEAR 3rd prices at Elo
+# 1383.5 on the consensus seed map, which used to sit 16.5 points BELOW the
+# old floor and now sits 13.5 points ABOVE the new one — so a 2026 3rd-round
+# pick badges "2nd". Every other rung is unmoved: all four round-2 rungs
+# still badge 'second', and 2027+ 3rds and every 4th still badge 'third'.
+#
+# This is NOT a banding bug. It is the pre-existing round-3 OVERPRICE
+# becoming visible: docs/reviews/2026-08-19-ktc-pick-value-comparison.md
+# measures a mid-3rd at ~67 ranks too dear, and shows the cause is
+# `seed_elo_for_value` compressing ranks 200-300 into 32 Elo points — which
+# no pick-seed edit can fix (Q-019, and the reason D-084 deliberately left
+# rounds 3-4 alone). The badge is honest about what our engine currently
+# believes a current-year 3rd is worth. Fixing it means opening the seed
+# map. Both rungs are pinned below so neither can drift unnoticed.
 #   2029 1st  → pool 1300.1 → Elo 1551.7 → 'second'  (D-320-2: the badge is
 #                the discounted price, not the pick's name)
 PICK_ROWS = [
@@ -60,6 +78,12 @@ PICK_ROWS = [
      "round": 1, "owner_user_id": "u_b", "owner_username": "bob",
      "is_traded": 0, "original_username": "bob",
      "pool_value": pick_pool_value(1, 3)},
+    # A 2027 3rd — still 'third' after D-084, so the band is provably still
+    # reachable and "everything collapsed upward" fails here.
+    {"pick_id": f"{LEAGUE}_2027_3_1", "league_id": LEAGUE, "season": 2027,
+     "round": 3, "owner_user_id": "u_b", "owner_username": "bob",
+     "is_traded": 0, "original_username": "bob",
+     "pool_value": pick_pool_value(3, 1)},
     # A leaguemate-ASSERTED pick (W3 M-C `source: 'user'`) — prices, so it
     # tiers exactly like a platform row (sabotage S2 trap).
     {"pick_id": f"{LEAGUE}_2026_2_9", "league_id": LEAGUE, "season": 2026,
@@ -131,7 +155,11 @@ def test_pick_rows_carry_literal_tier_rungs(client):
     # None respectively — the literal rungs are the trap.
     assert rows[f"{LEAGUE}_2026_1_1"]["tier"] == "first_1"
     assert rows[f"{LEAGUE}_2027_2_1"]["tier"] == "second"
-    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "third"
+    # D-084: a CURRENT-year 3rd now clears the lowered `second` floor
+    # (Elo 1383.5 >= 1370). Deliberate and explained in the header note.
+    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "second"
+    # ...while a 2027 3rd still bands as 'third', so the band is reachable.
+    assert rows[f"{LEAGUE}_2027_3_1"]["tier"] == "third"
 
 
 def test_far_out_pick_tier_is_the_discounted_band(client):

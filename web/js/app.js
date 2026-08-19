@@ -2098,8 +2098,11 @@
     }
 
     // ELO → tier label, mirroring the 8-tier pick-value ladder in
-    // backend/tier_config.json (2026-07-12, #117) — bands are position- and
-    // format-uniform in Elo space (docs/cross-client-invariants.md).
+    // backend/tier_config.json (2026-07-12, #117; second floor 1400→1370 on
+    // 2026-08-19, D-084) — bands are position- and format-uniform in Elo
+    // space (docs/cross-client-invariants.md). NOTE: unlike the tiers page,
+    // this ladder is a pure hardcode — it does NOT read /api/tier-config, so
+    // it must be edited by hand whenever tier_config.json's floors move.
     // Returns one of '4+ 1sts' / '3 1sts' / '2 1sts' / '1 1st' / '2nd' /
     // '3rd' / '4th' / 'FA', or '' when ELO is missing.
     function _eloToTierLabel(elo, position) {
@@ -2108,7 +2111,7 @@
       if (elo >= 1869) return '3 1sts';
       if (elo >= 1788) return '2 1sts';
       if (elo >= 1580) return '1 1st';
-      if (elo >= 1400) return '2nd';
+      if (elo >= 1370) return '2nd';
       if (elo >= 1280) return '3rd';
       if (elo >= 1220) return '4th';
       return 'FA';
