@@ -59,13 +59,35 @@ _PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
 # ROUNDS 3 AND 4 ARE NOT FIXABLE HERE, and their apparent 50–70 rank error is
 # mostly an artifact, not a pricing opinion. `data_loader.seed_elo_for_value`
 # maps DP value 0 → Elo 1200, so the board has almost no resolution below
-# rank ~200: rank 230 sits at Elo 1238.8 and rank 300 at 1206.6 — 70 ranks
-# inside 32 Elo points. The market-implied Elo for a Mid 4th (1207) falls
-# INSIDE the current `waivers` band. Moving 3rd/4th seeds down cannot buy
-# rank movement it does not have room for, and the memo measured it breaking
-# `test_tier_occupancy.py` in three places when tried. If 3rd/4th pricing is
-# ever revisited, the thing to open is the SEED MAP, not this ladder. Logged
-# as Q-019.
+# rank ~200: measured on the checked-in snapshot, ranks 200→300 span 1262.9 →
+# 1208.0 — 100 ranks inside 54.9 Elo points, one EIGHTH the per-rank
+# resolution of ranks 50–100. The market-implied Elo for a Mid 4th (1207)
+# falls INSIDE the current `waivers` band. Moving 3rd/4th seeds down cannot
+# buy rank movement it does not have room for, and the memo measured it
+# breaking `test_tier_occupancy.py` in three places when tried. If 3rd/4th
+# rank-equivalence is ever revisited, the thing to open is the SEED MAP, not
+# this ladder — re-logged as Q-020, and note it moves EVERY player's seed
+# Elo, so it is an occupancy-and-deck change, not a pick change.
+#
+# ⚠️  D-088 (2026-08-19) — DO NOT REACH FOR THIS BLOCK TO EXPLAIN A WRONG
+# PICK BADGE. Q-019 asked whether a current-year 3rd badging `second` meant
+# the seed map had to be opened. It did not, and this note was cited in
+# support of the wrong diagnosis. The badge on GET /api/league/picks was
+# computed by inverting `pool_value` (elo_to_value units) with
+# `seed_elo_for_value` (which inverts DynastyProcess's raw 0–10000 scale)
+# instead of `trade_service.value_to_elo`. The two maps cross at exactly Elo
+# 1548.0, so every rung below a mid-1st was inflated — Mid 3rd 1320 read as
+# 1383.5, Mid 4th 1240 as 1339.3 — and 1383.5 cleared D-084's new 1370
+# `second` floor. The seeds in this dict were never the problem: 1320 sits 45
+# Elo INSIDE the `third` band. Fixed display-side; these seeds and every tier
+# band are byte-unchanged. docs/reviews/2026-08-19-pick-badge-scale.md.
+#
+# The invariant that keeps the two honest, and the thing to re-check after ANY
+# edit to this dict: a current-year pick of round R must badge exactly where
+# GENERIC_PICK_SEEDS[(R, "Mid")] sits, because tier_config.json's
+# `_calibration` DEFINES the band floors as these rungs. Equivalently
+# `value_to_elo(pick_pool_value(R, 0)) == GENERIC_PICK_SEEDS[(R, "Mid")]`.
+# Pinned by test_league_picks_tier.py::test_current_year_rungs_badge_their_own_round.
 #
 # THESE SEEDS ARE NOT CONFIG-DRIVEN, AND THAT IS DELIBERATE (D-084). The
 # sibling change D-079 shipped `model_config` knobs so it could be reverted

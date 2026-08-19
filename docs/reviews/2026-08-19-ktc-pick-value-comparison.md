@@ -2,6 +2,7 @@
 
 **Date:** 2026-08-19
 **Trigger:** operator, verbatim — *"It seems that the gap between a 1st and a second is not severe enough. Compare our valuation of 1sts vs. 2nds to KTC."*
+**Partial correction (2026-08-19, [D-088](2026-08-19-pick-badge-scale.md)):** this memo's Option-B finding — that the seed map compresses the bottom of the board and that rounds 3/4 are therefore not fixable via `GENERIC_PICK_SEEDS` — was independently re-derived and **stands** (ranks 200→300 span 54.9 Elo points on the checked-in snapshot). What does NOT stand is the inference D-084 drew from it, that a current-year 3rd badging `second` was that compression becoming visible. It was a wrong value→Elo inverse in `GET /api/league/picks`, fixed display-side without touching any seed or band. See [2026-08-19-pick-badge-scale.md](2026-08-19-pick-badge-scale.md).
 **Companion:** [2026-08-19-pick-year-valuation.md](2026-08-19-pick-year-valuation.md) (D-079, the *year* axis of pick pricing, shipped earlier tonight)
 **Status:** research memo. **No pricing was changed.** `GENERIC_PICK_SEEDS` and `tier_config.json` are byte-identical to `origin/main` @ `8b7689a`.
 

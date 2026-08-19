@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-052 | A pick badges one tier too high: the wrong value→Elo inverse, silent near a 1st, worse downward | Pick badges / value scales |
 | G-051 | A tier-band edit that looks backend-only silently drifts `web/js/app.js`, which fetches nothing | Tier bands / client mirrors |
 | G-048 | Next living-memory ID computed from a stale checkout collides on main | Living-memory / concurrent sessions |
 | G-047 | "no checks reported" on a PR reads as a pass to a naive poller | CI / gh / merge gating |
@@ -396,6 +397,14 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 ---
 
 ## 2026-08-19
+
+### G-052 — two value→Elo maps exist; using the wrong inverse is silent near a 1st and grows downward
+- **Symptom:** a draft pick badges one tier too high on the picks screen / in-league calculator, and the error looks band-shaped rather than arithmetic — a current-year 3rd reads `second`, a current-year 4th reads `third`. Round-1 picks look fine, which is what makes it read as "the cheap end of the ladder is mispriced" rather than "the conversion is wrong".
+- **Cause:** the codebase has **two** maps onto the tier-band Elo scale and they are not inverses of each other. `trade_service.elo_to_value` ↔ `value_to_elo` moves between band Elo and **engine value** (what `draft_picks.pool_value`, every `/api/trade/evaluate` value and `pick_pool_value` are in). `data_loader.seed_value_for_elo` ↔ `seed_elo_for_value` moves between band Elo and **DynastyProcess's raw 0–10000 consensus scale**. Feeding an engine value to `seed_elo_for_value` applies DP's affine rescale (× 0.824487, + 223.130) to a number that never lived on the DP scale. **The two agree at exactly one point, Elo 1548.0** — solve `223.130 + 0.824487·v = v` — so the mistake is invisible around a mid-1st and grows the cheaper the asset: +35.2 Elo at a Mid 2nd, +63.4 at a Mid 3rd, +99.3 at a Mid 4th, +109.5 at a Late 4th.
+- **Fix:** match the inverse to the scale the number is actually on. Engine value → `trade_service.value_to_elo`. DP value → `data_loader.seed_elo_for_value`. `docs/cross-client-invariants.md` now carries this as a two-row table under the banding rule; the column comment on `database.py`'s `pool_value` already said which scale it was, and reading it would have settled the question in one step.
+- **Prevention:** test the **property**, not the literal. `test_league_picks_tier.py::test_current_year_rungs_badge_their_own_round` asserts that a current-year pick of round R badges exactly where `GENERIC_PICK_SEEDS[(R, "Mid")]` sits — which is what `tier_config.json`'s `_calibration` already *defines* to be true, and which no wrong inverse can satisfy for all four rounds. The literal-Elo pins that existed before happily absorbed the wrong numbers because they had been written by reading the buggy output back. **This is the third instance of the class** (#263 → #320 → [D-088](DECISIONS.md)); `seed_elo_for_value` is no longer imported into `server.py` at all, so the wrong tool is not in reach where value-scale numbers are handled.
+
+---
 
 ### G-051 — a tier-band edit drifts `web/js/app.js`, the one mirror that never fetches
 - **Symptom:** you move a tier floor in `backend/tier_config.json`, confirm mobile and the web tiers page pick it up after a reload, and the **rankings table on the web app keeps showing the old tier labels forever** — no reload, no cache clear, and no redeploy fixes it.

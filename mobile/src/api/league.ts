@@ -138,12 +138,24 @@ export interface OwnedPick {
   label: string;
   /** #320 (D-320-1, supersedes #263's "picks stay numeric") — the
    *  pick-value ladder rung this pick's DISCOUNTED `pool_value` sits in
-   *  TODAY, server-computed via seed_elo_for_value + the canonical
+   *  TODAY, server-computed via trade_service.value_to_elo + the canonical
    *  tier_for_elo band walk. Never re-derive client-side from
    *  `pool_value` (value scale ≠ the tier bands' Elo scale — the exact
    *  #263 bug class; docs/cross-client-invariants.md). D-320-2: a far-out
-   *  pick badges its discounted price — a 2028 2nd may badge 3rd. Null
-   *  (unpriced row) or absent (old servers) → numeric fallback. */
+   *  pick badges its discounted price — a 2027 2nd may badge 3rd.
+   *
+   *  D-088 (2026-08-19) corrected the server-side INVERSE (it was
+   *  seed_elo_for_value, which inverts DynastyProcess's raw 0-10000 scale
+   *  rather than the elo_to_value units pool_value is stored in), so
+   *  badges on rounds 2-4 moved DOWN — a current-year 3rd went from
+   *  'second' to 'third' and a current-year 4th from 'third' to 'fourth'.
+   *  Nothing client-side changed and no tier band moved; this note exists
+   *  so the shift is not read as a client regression.
+   *
+   *  Null → numeric fallback. Null now covers TWO cases: an unpriced row
+   *  (no `pool_value`) and a pick priced below the `waivers` floor of Elo
+   *  1150, which a deep far-out pick honestly can be (a 2029 4th prices at
+   *  Elo 1142.5). Absent entirely on old servers → same fallback. */
   tier?: Tier | null;
   /** draft-extensions W3 M-C (D17) — `draft_picks.source`. `'user'` means a
    *  LEAGUEMATE asserted this ownership on the ESPN assignment grid and no
