@@ -10,6 +10,31 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers
+
+**Flag flip only — no code, no build.** `account.settings_hub` false → **true** in
+`config/features.json` and the three fixture mirrors (`release.json`,
+`onboarding-v2.json`, `profiles-on.json` — the latter two assert value parity with
+release, so they move together or `test_seed_ui_test_db` goes red).
+
+Everyone on **1.15.0 build 120** now gets the Settings hub and its seven second-level
+pages instead of the flat list. Operator decision 2026-08-19: there is no operator-only
+path for a plain `useFlag` — `/api/feature-flags` serves `flags_dict()` globally and only
+`experiments`/`configs` resolve per device (`backend/server.py:17723`) — so seeing it at
+all meant lighting it for the whole tester group.
+
+**This inverts the plan's graduation rule**, which said verify on TestFlight *then*
+graduate. The 10-item checklist in `docs/plans/settings-ia-hub/plan.md` §9 is still
+unrun; it is now being run against a live flag rather than ahead of it.
+
+**Rollback is one line and no rebuild:** set the flag false in `config/features.json`,
+push, Render redeploys. That covers the hub only — the sheet→page presentation flip
+([D-089](DECISIONS.md)) is outside the flag and still needs a build to undo.
+
+`pytest backend/tests` 3524 passed, 1 skipped, 0 failed.
+
+---
+
 ## 2026-08-19 (Phantom draft-pick years — a league is only offered the classes it actually has; NOT SHIPPED, on `fix/pick-horizon`)
 
 - **Reported (feedback [#355](../docs/feedback/items/355-phantom-pick-years/scope.md), BUG, TradesHome, v1.15.0):** "2029 picks showing on sleeper league without 2029 picks available". Confirmed against the live Sleeper API and read-only prod: `database.sync_draft_picks` built its grid over a fixed `current_season … current_season + 3` — **four** draft classes — and Sleeper carries **three**.
