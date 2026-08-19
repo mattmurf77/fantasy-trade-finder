@@ -80,12 +80,12 @@ That is correct and needs **no backfill**: `load_league_preference`'s
 
 | Key | Default at ship | Kill-switch semantics | Graduation criterion |
 |---|---|---|---|
-| `trade.avoid_positions` | **`true`** | OFF ⇒ the engine never reads the column, every generation path is byte-identical to pre-#360, and the sheet renders no Avoiding row. The column keeps its data in both states, so flipping the flag back on restores every user's saved set. | Already graduated at ship — this is a user-requested feature, so the flag is a kill switch, not a dark launch. Remove the key no earlier than one full TestFlight cycle after ship. |
+| `trade.avoid_positions` | **`false`** (dark) | OFF ⇒ the engine never reads the column, every generation path is byte-identical to pre-#360, and the sheet renders no Avoiding row. The column keeps its data in both states, so lighting the flag later restores every user's saved set. | **REVISED 2026-08-19 by operator ruling (Q-027).** This block originally argued for graduating at ship — user-requested feature, kill switch not dark launch. The operator chose **dark**: a bright-line change (new column, new flag, engine behavior) reaching every TestFlight tester on merge with no runtime evidence behind it is the risk being managed, not the feature itself. Costs only visibility — persistence is not flag-gated. Light it after the TestFlight checklist passes; that is a four-file flip (this key + the three mirroring fixtures, G-053), deploy-free. |
 
 Registration: `config/features.json` + `backend/feature_flags.py` `FLAG_KEYS`
 (the tuple opened at `:47`; `"trade.presentment_rules"` at `:799` is the
 comment-block template) + `docs/config-reference.md`.
-Mobile: add `'trade.avoid_positions': true` to `LAUNCHED_FLAG_DEFAULTS`
+Mobile: **do NOT** add `'trade.avoid_positions'` to `LAUNCHED_FLAG_DEFAULTS` (superseded by [D-098](../../../living-memory/DECISIONS.md) — that map fails open)
 (`mobile/src/state/useFeatureFlags.ts:45`) per the #115 fail-open lesson
 documented at `:36-44` — and note the rule stated at `:62-70`: a key present in
 only one of `features.json` / `LAUNCHED_FLAG_DEFAULTS` **disagrees with itself

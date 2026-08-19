@@ -36,15 +36,16 @@ Built and unmerged on **`feat/jon-360-362`** (base `2a492b6`; backend `f488616`,
 mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
 [TEST_LEDGER 2026-08-19i](TEST_LEDGER.md) · [D-098](DECISIONS.md).
 
-1. **Answer [Q-027](OPEN_QUESTIONS.md) and [Q-028](OPEN_QUESTIONS.md), then merge.** *(S,
-   decision-blocked — not a code problem.)* Q-027: `trade.avoid_positions` currently ships
-   **lit**, so #360 goes live to every tester on merge with zero runtime evidence; shipping
-   dark costs only visibility, since persistence is deliberately not flag-gated. Q-028: the
-   one-tap outlook confirm clears `avoid_positions` (inherited — it already clears Chasing and
-   Shopping); ~3-line fix if wanted.
-2. **Run both TestFlight checklists** on the next build. They are the only runtime evidence
-   under [D-056](DECISIONS.md) and **both are unrun**. `trade.standing_offers` is **dark** —
-   light it on the test device first or #362's checklist proves nothing.
+1. **~~Answer Q-027 / Q-028~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**
+   (`trade.avoid_positions` `false`) and **keep the inherited behavior** (the one-tap outlook
+   confirm goes on clearing all three position lists). Both features now merge with **nothing
+   user-visible changing** — schema, routes and client code land inert behind two dark flags.
+
+2. **Run both TestFlight checklists** on the next build, then light `trade.avoid_positions`.
+   They are the only runtime evidence under [D-056](DECISIONS.md) and **both are unrun**. BOTH
+   flags are now dark, so each checklist needs its flag lit on the test device first or it
+   proves nothing. Lighting either one is a **four-file** flip — the key plus the three
+   fixtures that mirror it ([G-053](GOTCHAS.md)) — and is deploy-free.
 3. **[Q-026](OPEN_QUESTIONS.md) — the sleeper.** `trade_gen_v2` honors **no** positional
    preferences, so Chasing and Shopping are *already* broken there. Masked only because
    `bakeoff_serve_interleaved = 0.0` — a `model_config` knob, not a flag. One edit from a

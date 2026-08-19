@@ -688,7 +688,16 @@ def test_flag_registered_in_both_files():
     assert "trade.avoid_positions" in ff.FLAG_KEYS
     repo = Path(__file__).resolve().parents[2]
     features = json.loads((repo / "config/features.json").read_text())
-    assert features["trade.avoid_positions"] is True
+    assert features["trade.avoid_positions"] is False, (
+        "Q-027 (operator, 2026-08-19): #360 ships DARK. Persistence is not "
+        "flag-gated, so shipping dark costs only visibility — the column "
+        "stores and the API serves in both states. Lighting it later is a "
+        "deploy-free flip of this key plus the three fixtures that mirror it "
+        "(G-053).")
+    release = json.loads(
+        (repo / "backend/tests/fixtures/flags/release.json").read_text())
+    assert release["trade.avoid_positions"] == features["trade.avoid_positions"], (
+        "the release fixture must mirror what config/features.json ships")
 
 
 def test_gen_v2_guardrail_note_present():

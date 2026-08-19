@@ -34,18 +34,37 @@
 **What the operator needs to decide:** port all three preference families into gen-v2 as its own scoped piece of work, or formally accept that the knob stays at 0 until someone does. Either is fine; leaving it undecided is what is dangerous, because the knob is one edit away from a silent regression with no flag flip to audit.
 **Status:** OPEN.
 
-### Q-027 — Should `trade.avoid_positions` ship lit, making #360 live on merge?
+### Q-027 — Should `trade.avoid_positions` ship lit, making #360 live on merge? — **RESOLVED 2026-08-19: NO, ship dark**
 **Raised:** 2026-08-19 (branch `feat/jon-360-362`, built and green, unmerged)
 The scope block ships it **`true`**, arguing the flag is a kill switch rather than a dark launch because the feature was directly user-requested (#360/#361, tester `jonbonjourvi`). That matches precedent — `ranks.import` and `league.picks_always_counted` both graduated at ship for the same reason. Against it: this is a CLAUDE.md **bright-line** change (new schema column, new flag, engine behavior) going live to every TestFlight tester the moment it merges, with **no runtime evidence** behind it — D-056 leaves only the manual TestFlight checklist, which is unrun.
 Persistence is deliberately not flag-gated, so shipping dark loses nothing but visibility: the column stores, the API serves, and only the engine read plus the sheet row are gated. Flipping it on later is deploy-free.
-**Status:** OPEN — needs an operator yes/no before merge.
+**RESOLUTION (operator, 2026-08-19): ship DARK.** `trade.avoid_positions` is `false` in
+`config/features.json` and in the three fixtures that mirror it. The deciding factor was the one
+the scope block under-weighted: a bright-line change reaching every TestFlight tester on merge
+with **no runtime evidence at all** — no simulator under D-056, checklist unrun — is the risk
+being managed, not the feature. Shipping dark costs only visibility, because persistence is
+deliberately not flag-gated: the column stores and the API serves in both states, so no user
+loses data while it is off and lighting it later is deploy-free.
+**To light it:** flip **four** files (the key + `release.json` + `onboarding-v2.json` +
+`profiles-on.json` — see [G-053](GOTCHAS.md)), after the TestFlight checklist passes. Do **not**
+add it to `LAUNCHED_FLAG_DEFAULTS` ([D-098](DECISIONS.md)).
+**Status:** RESOLVED.
 
-### Q-028 — Should the one-tap outlook confirm stop clearing the position lists?
+### Q-028 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**
 **Raised:** 2026-08-19 (feedback #360 build)
 `confirmOutlookMutation` (`mobile/src/screens/TradesScreen.tsx:1047-1058`) writes empty `acquire_positions`, `trade_away_positions` **and now `avoid_positions`** when the user taps **Confirm** on the inferred-outlook banner. So a user who set Avoiding but never declared an outlook loses that set on one tap.
 **This is inherited, not introduced** — the two sibling lists have always been cleared by that call, and #360 was built as specced rather than "improved" in passing (surgical-changes rule). It is raised because Avoiding reads as a stronger promise than the other two ("never send me this"), so losing it silently is a worse failure than losing a Chasing hint.
 **The fix is ~3 lines if wanted:** drop all three position keys from that mutation's payload. The backend contract already supports it — an omitted position key leaves the stored value **unchanged** (verified over HTTP during the backend build). Strictly better, but it changes existing Chasing/Shopping behavior, which is why it was not done unilaterally.
-**Status:** OPEN — needs an operator call; blocks nothing.
+**RESOLUTION (operator, 2026-08-19): keep the inherited behavior. No code change.**
+`confirmOutlookMutation` goes on writing empty `acquire_positions`, `trade_away_positions` and
+`avoid_positions`. Avoiding stays consistent with its two siblings rather than becoming a
+special case, and this build changes no pre-existing behavior — which is what the
+surgical-changes rule asks for.
+**Still true, and still the reason this was raised:** a user who sets Avoiding without declaring
+an outlook loses it on one tap of **Confirm**. If that shows up in feedback, the fix is ~3 lines
+(drop the three position keys from that mutation; the backend leaves omitted keys unchanged) and
+it would change Chasing/Shopping too. Worth watching once #360 is lit.
+**Status:** RESOLVED (accepted as-is).
 
 ### Q-024 — Root `CLAUDE.md` says the `check-*.js` suites "gate nothing yet". `ci.yml` says they do. Which is the contract?
 - **Why it matters:** root `CLAUDE.md` §Stack states *"The `mobile/tests/check-*.js` structural suites are `npm run`-only and **gate nothing yet** (open item in NEXT.md)."* But [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)'s `mobile-typecheck` job runs `for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done` — a glob — and its own comment says *"a guard is live in CI the moment the file exists — no npm script needed."* The 42 existing suites therefore **do** gate `main`.

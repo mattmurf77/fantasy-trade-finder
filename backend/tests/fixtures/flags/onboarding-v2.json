@@ -199,6 +199,6 @@
   "feedback.decline_reasons": true,
   "trade.bakeoff": true,
   "trades.presentation_v2": false,
-  "trade.avoid_positions": true,
+  "trade.avoid_positions": false,
   "trade.standing_offers": false
 }
