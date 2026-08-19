@@ -7,6 +7,12 @@
 > signal. **Step one is only: make all three runnable in parallel and capture clean
 > attributed data.**
 
+> **2026-08-19 addendum:** a fourth arm, `challenger` (arm D), is specced in
+> [`docs/plans/landability-challenger/`](../landability-challenger/PRD.md). It is a
+> config overlay on the live engine, not a replacement of arm A. Do not edit
+> `MODEL_A_PROFILE` for it. Interleaved serving stays off until the operator
+> lights it.
+
 ---
 
 ## 1. What "three models" precisely means
