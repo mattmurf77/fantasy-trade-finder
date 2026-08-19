@@ -370,6 +370,22 @@ class GenerationReport:
     persist it without this module owning any tables."""
     league_id: str
     user_id: str
+    #: Stage 0 — how many opponents reached the pair loop at all. `boarded`
+    #: is `has_rankings and elo_ratings`; everyone else is listed in
+    #: `unranked_opponents`. Zero here is the ONLY explanation for a batch
+    #: in which every other counter is also zero, and it is a property of
+    #: the LEAGUE (nobody else has ranked), never of this pipeline.
+    boarded_opponents: int = 0
+    #: Stage 1a — boarded pairs whose tradeable universe came out empty on
+    #: one side or both: divergence needs a pid the user has an opinion on
+    #: (`user_known`) AND the opponent has ranked (`opp_elo_map`), minus
+    #: the want/accept-board filters. No overlap ⇒ nothing to compare.
+    pairs_no_board_overlap: int = 0
+    #: Stage 1b — pairs WITH overlap that still produced no centerpiece:
+    #: no opponent asset cleared `v_user − v_opp > gen2_min_divergence`.
+    #: This is the "two real boards that happen to agree" case, and it is
+    #: the counter that separates a starved arm from a gated one.
+    pairs_no_centerpiece: int = 0
     considered: int = 0
     composition_rejects: int = 0  # #141 filler / #227 pick-churn hygiene
     net_cap_rejects: int = 0     # G6 #341 net-position cap kills
@@ -387,10 +403,71 @@ class GenerationReport:
     shaped_head_by_opponent: dict = field(default_factory=dict)  # cap-shaped head
     unranked_opponents: list = field(default_factory=list)
 
+    @property
+    def starvation_reason(self) -> str | None:
+        """Why this batch emitted nothing, when nothing was emitted.
+
+        `None` means the batch either produced cards or died at a real
+        GATE (in which case the per-stage counters below say which one).
+        A non-None value means no candidate was ever ENUMERATED, so no
+        gate can be blamed — the pipeline never had inputs:
+
+          ``no_boarded_opponents`` — nobody else in the league has ranked.
+            Divergence-only by design (config/features.json
+            `_comment_trade_gen_v2`); unranked opponents belong to the
+            flag-off engine's consensus path, so this is the league
+            telling the engine it is out of scope, not a defect.
+          ``no_board_overlap``  — boarded opponents exist, but no asset is
+            priced on both boards after the want/accept filters.
+          ``no_divergence``     — both boards are real and overlapping and
+            simply agree: nothing clears `gen2_min_divergence`.
+        """
+        if self.emitted:
+            return None
+        if not self.boarded_opponents:
+            return "no_boarded_opponents"
+        if self.considered:
+            return None                       # gated, not starved
+        if self.pairs_no_board_overlap >= self.boarded_opponents:
+            return "no_board_overlap"
+        if self.pairs_no_centerpiece:
+            return "no_divergence"
+        return None
+
+    def kill_counts(self) -> dict:
+        """Per-stage attrition for one batch, in PIPELINE ORDER.
+
+        Mirrors `TradeService.presentment_kill_counts()` (G6 R-9): one flat
+        dict of counters a query can read without parsing prose, so "arm C
+        produced nothing" resolves to a stage instead of a shrug. Keys are
+        prefixed with the stage that owns them (S0 supply, S1 selection,
+        S2 enumeration, S3a-d the hard gates in the order they run, S4/S6
+        the survivors and the emission).
+        """
+        return {
+            "S0_boarded_opponents":     self.boarded_opponents,
+            "S0_unranked_opponents":    len(self.unranked_opponents),
+            "S1_no_board_overlap":      self.pairs_no_board_overlap,
+            "S1_no_centerpiece":        self.pairs_no_centerpiece,
+            "S2_considered":            self.considered,
+            "S3a_composition":          self.composition_rejects,
+            "S3a_net_cap":              self.net_cap_rejects,
+            "S3a_pick_band":            self.pick_band_rejects,
+            "S3b_feasibility":          self.feasibility_rejects,
+            "S3c_dual_board_ir":        self.ir_rejects,
+            "S3d_fairness_band":        self.band_rejects,
+            "S4_survivors":             self.survivors,
+            "S6_emitted":               self.emitted,
+            "starvation_reason":        self.starvation_reason,
+        }
+
     def as_dict(self) -> dict:
         return {
             "league_id": self.league_id,
             "user_id": self.user_id,
+            "boarded_opponents": self.boarded_opponents,
+            "pairs_no_board_overlap": self.pairs_no_board_overlap,
+            "pairs_no_centerpiece": self.pairs_no_centerpiece,
             "considered": self.considered,
             "composition_rejects": self.composition_rejects,
             "net_cap_rejects": self.net_cap_rejects,
@@ -458,11 +535,22 @@ def _pair_survivors(
     # Stage 1 — centerpieces: divergence-positive opponent assets the user
     # values above the opponent's own board; explicit targets outrank raw
     # divergence (want board as priority, not filter).
+    # Stage 1a — no shared, tradeable universe at all. Recorded rather
+    # than silently returning: an empty universe and an empty divergence
+    # set produce the same zero card count and have completely different
+    # fixes (get the opponent to rank vs. widen the divergence floor).
+    if not opp_assets or not user_assets:
+        report.pairs_no_board_overlap += 1
+        return []
+
     divergent = [(p, uval(p) - oval(p)) for p in opp_assets]
     divergent = [(p, d) for p, d in divergent if d > min_div]
     divergent.sort(key=lambda t: (t[0] in target_ids, t[1]), reverse=True)
     centerpieces = [p for p, _ in divergent[:top_k]]
     if not centerpieces:
+        # Stage 1b — two real boards that agree. The pipeline is fed and
+        # still has nothing to propose; see GenerationReport.
+        report.pairs_no_centerpiece += 1
         return []
 
     # Stage 2 pools — return assets the OPPONENT values above the user's
@@ -834,6 +922,7 @@ def generate_league_suggestions(
     boarded = [m for m in eligible if m.has_rankings and m.elo_ratings]
     report.unranked_opponents = [m.user_id for m in eligible
                                  if m not in boarded]
+    report.boarded_opponents = len(boarded)
 
     user_profile = analyze_roster_strengths(user_roster, players,
                                             scoring_format)

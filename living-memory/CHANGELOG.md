@@ -10,6 +10,17 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19d (arm C per-stage kill counts — the forfeit was a supply fact; NOT SHIPPED, on `fix/armc-gen-v2-forfeits`)
+
+- **Arm C is not broken — it is the best divergence generator in the bake-off, and nothing has ever let it reach a user.** `cards=0, forfeits=9` was read as a broken generator. Per-league it collapses: arm C returns 0 **only** in leagues `62846` and `11896`, and 6–16 in all 11 runs of league `1312140920132497408`. The reported "9 forfeits → 2 overnight improvement" was two different leagues being compared. ([D-087](DECISIONS.md), [scope](../docs/plans/three-model-bakeoff/scope-arm-c-diagnostics.md))
+- **Cause: no boarded opponent.** `member_rankings` has **zero** rows for `62846` and one user's for `11896` (the requester himself) against 4,416 rows / 6 users for `1312…`. Arm C is divergence-only by design, so those leagues give it nothing; `gen_ms` of **3** vs 221 is it returning at the `boarded` loop before enumerating anything.
+- **The aggregate "15.2 % divergence exists" does not rescue the bug theory.** 96.8 % of all-time divergence impressions (1,196/1,235) come from the single league with ≥3 boards; the boardless leagues have **zero divergence impressions ever**. The control is decisive: arm `current`'s own divergence pool is **0 in all six runs** there too — while in the boarded league arm C's pool is 6–16 (median 7) against arm `current`'s median **1**, with arm `current` producing no divergence at all in 8 of 11 runs.
+- **Zero `gen_v2` impressions is SERVING, not generation.** `served_arm = 'current'` on every run (`bakeoff_serve_interleaved = 0.0`, dark), so `model_arm` can only ever be `current` or NULL. Arm C already contributed 6 of 6 composed cards to the interleaved deck that is not served. Left at 0.0 — re-lighting is the operator's call.
+- **Fix = instrumentation, no behaviour change.** `GenerationReport.kill_counts()` emits every stage in pipeline order (`S0` supply → `S1` selection → `S2` enumeration → `S3a-d` gates → `S4`/`S6`) plus a `starvation_reason` non-null only when nothing was enumerated; `gen_v2_cards` keeps the report it used to discard and adds its own `S7_intent_filter` / `S7_headliner_cap` kills; it lands on `bakeoff_runs.arms_json[arm].diagnostics`. No gate, knob, pool or ordering rule touched.
+- **One real bug fixed alongside:** `run_row` looked forfeits up by ARM against a GROUP-keyed dict, so arm `current` (groups `current_divergence` + `current_consensus`) recorded a flat **0 in all 18 rows ever written** while arm C's key coincidentally matched. `forfeits_for_arm()` now sums over an arm's groups.
+- **Gates:** pytest **3441 → 3449 passed, 1 skipped, 0 failed** (+8). No TS/mobile/web file changed. Not pushed, not merged.
+
+---
 ## 2026-08-19b (give-side headliner cap — the flood the existing cap could not see; NOT SHIPPED, on `fix/deck-give-headliner-cap`)
 
 - **The cap that was supposed to stop this was on, and killed nothing.** Operator: *"the model will spit out 4 or 5 varieties of offers with Davante included."* His deck `2740a7fc` — 22 cards — had Adams on the give side of **6**, `1466` on **6**, Mayfield on **5**: **17 of 22 cards were three players**, with `deck_headliner_cap` = 2 in force. ([D-082](DECISIONS.md), [scope](../docs/plans/deck-give-headliner-cap/scope.md))

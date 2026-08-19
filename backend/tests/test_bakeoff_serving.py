@@ -750,3 +750,80 @@ def test_comparison_clean_query_answers_itself_from_the_table():
         assert thresholds <= 1, f"{arm}/{group_key} mixes fairness thresholds"
         assert intents <= 1, f"{arm}/{group_key} mixes trade intents"
         assert n > 0
+
+
+# ---------------------------------------------------------------------------
+# D-087 — arm-C forfeit accounting + per-stage diagnostics on arms_json
+# ---------------------------------------------------------------------------
+
+def test_forfeits_are_summed_over_an_arms_groups_not_looked_up_by_arm_name():
+    """Once composition is on the draft's participants are GROUPS, and arm
+    `current` owns two of them (`current_divergence` + `current_consensus`).
+    The old `forfeits[arm]` lookup therefore missed on every engine arm and
+    reported a flat 0 — which is what made arm C's real, non-zero forfeit
+    count read as a property of arm C. Assert the sum, and assert that an arm
+    whose groups DID forfeit can no longer record zero."""
+    from backend.bakeoff_runner import BakeoffRun, DraftResult, ArmResult
+
+    class _G:
+        def __init__(self, arm):
+            self.group = type("g", (), {"arm": arm})()
+
+    run = BakeoffRun(
+        run_id="r", arm_order=[], arms={},
+        draft=DraftResult(forfeits={"current_divergence": 3,
+                                    "current_consensus": 2,
+                                    "gen_v2": 9}),
+        served_arm=None, total_ms=0,
+        groups={"current_divergence": _G("current"),
+                "current_consensus": _G("current"),
+                "gen_v2": _G("gen_v2")},
+    )
+    assert run.forfeits_for_arm("current") == 5      # was 0 before the fix
+    assert run.forfeits_for_arm("gen_v2") == 9
+    assert run.forfeits_for_arm("baseline") == 0     # not rostered
+
+    # bakeoff_group_size = 0 — participants really are arms; direct lookup.
+    plain = BakeoffRun(run_id="r", arm_order=[], arms={},
+                       draft=DraftResult(forfeits={"current": 4, "gen_v2": 1}),
+                       served_arm=None, total_ms=0, groups={})
+    assert plain.forfeits_for_arm("current") == 4
+    assert plain.forfeits_for_arm("gen_v2") == 1
+
+
+def test_arm_c_diagnostics_reach_arms_json_and_name_the_starving_stage():
+    """The point of the whole change: `cards: 0` on arm C must arrive with
+    the stage that produced it. Arm C here is starved exactly as production
+    league 62846 is — no boarded opponent — so the recorded diagnostics must
+    say `no_boarded_opponents` and NOT blame a gate."""
+    starved = {
+        "S0_boarded_opponents": 0, "S0_unranked_opponents": 11,
+        "S1_no_board_overlap": 0, "S1_no_centerpiece": 0,
+        "S2_considered": 0, "S3c_dual_board_ir": 0,
+        "S4_survivors": 0, "S6_emitted": 0,
+        "starvation_reason": "no_boarded_opponents",
+    }
+
+    def fake_gen_v2(svc, kw):
+        bo._gen2_diag.value = dict(starved)
+        return []
+
+    with patch.object(bo, "gen_v2_cards", fake_gen_v2):
+        _capture, _job, eng = H.run_capture(
+            extra_patches=_bakeoff_patches(enabled=True, interleaved=True))
+
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    diag = json.loads(run.arms_json)["gen_v2"]["diagnostics"]
+    assert diag["starvation_reason"] == "no_boarded_opponents"
+    assert diag["S0_boarded_opponents"] == 0
+    assert diag["S2_considered"] == 0, \
+        "a starved arm must not be recorded as having been gated"
+
+
+def test_gen_v2_diagnostics_are_drained_so_they_cannot_leak_between_runs():
+    """Read-once semantics: a second run whose arm C reported nothing must
+    not inherit the first run's counters."""
+    bo._gen2_diag.value = {"S2_considered": 42}
+    assert bo.last_gen_v2_diagnostics() == {"S2_considered": 42}
+    assert bo.last_gen_v2_diagnostics() == {}

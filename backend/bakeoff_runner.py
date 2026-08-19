@@ -84,6 +84,7 @@ import hashlib
 import json
 import logging
 import random
+import threading
 import time
 import uuid
 from collections import defaultdict
@@ -797,6 +798,13 @@ class ArmResult:
     trade_intent: str | None = None
     #: The effective trade_service config INSIDE this arm's context.
     config: dict = field(default_factory=dict)
+    #: Per-stage attrition for the arms that expose it. Arm `gen_v2` fills
+    #: this from `GenerationReport.kill_counts()` plus the two
+    #: post-generation filters `gen_v2_cards` applies itself; the engine
+    #: arms leave it empty (their kill accounting lives on TradeService's
+    #: own `presentment_kill_counts`). `{}` is "this arm reports no
+    #: stages", never "this arm killed nothing".
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def empty(self) -> bool:
@@ -888,6 +896,24 @@ class BakeoffRun:
         return effective_fairness_threshold(
             card, arm.fairness_threshold, arm.config)
 
+    def forfeits_for_arm(self, arm: str) -> int:
+        """Rotation slots this ARM could not fill, summed over its groups.
+
+        The draft's participants are GROUPS once composition is on, and a
+        group key is only equal to its arm name for single-group arms —
+        arm `current` contributes `current_divergence` + `current_consensus`,
+        so the old `forfeits[arm]` lookup missed on every engine arm and
+        recorded a flat 0 for all of them. That made arm C's non-zero count
+        look like a property of arm C rather than of the key spelling. Falls
+        back to the direct lookup for the `bakeoff_group_size = 0` path,
+        where the participants really are arms.
+        """
+        if self.groups:
+            return sum(n for key, n in self.draft.forfeits.items()
+                       if (self.groups[key].group.arm if key in self.groups
+                           else key) == arm)
+        return self.draft.forfeits.get(arm, 0)
+
     def config_record(self) -> dict:
         """`{"base": <arm current's effective config>, "arm_delta": {arm: {...}}}`.
 
@@ -915,7 +941,7 @@ class BakeoffRun:
                 "cards":    len(r.cards),
                 "gen_ms":   r.gen_ms,
                 "empty":    r.empty,
-                "forfeits": self.draft.forfeits.get(arm, 0),
+                "forfeits": self.forfeits_for_arm(arm),
                 "served":   len([c for c in self.draft.deck
                                  if self.draft.attribution.get(id(c), (None,))[0] == arm]),
                 "error":    r.error,
@@ -926,6 +952,11 @@ class BakeoffRun:
                 # The EFFECTIVE #172 intent lens (null = unfiltered). Same
                 # record-the-gate-that-applied rule as the threshold above.
                 "trade_intent": r.trade_intent,
+                # Per-stage attrition, for the arms that report it (arm C
+                # today). `{}` = this arm reports no stages. This is what
+                # turns "cards: 0, forfeits: 9" from a counter into a
+                # diagnosis — see `bakeoff_runner.last_gen_v2_diagnostics`.
+                "diagnostics": r.diagnostics or {},
             }
             for arm, r in self.arms.items()
         }
@@ -958,6 +989,26 @@ class BakeoffRun:
             "config_json": json.dumps(self.config_record()),
             "created_at":  datetime.now(timezone.utc).isoformat(),
         }
+
+
+#: Arm C's per-stage attrition, handed from `gen_v2_cards` to `run_bakeoff`.
+#: A thread-local rather than a return value because `gen_v2` reaches the
+#: fan-out as an opaque `Callable[..., list]` bound by the caller — widening
+#: that contract would touch every arm. Thread-local (not module-global) for
+#: the same reason the config seam is: concurrent jobs share this module.
+#: Same shape as the `presentment_kill_counts()` precedent — a flat dict of
+#: counters, read once immediately after the call that wrote it.
+_gen2_diag = threading.local()
+
+
+def last_gen_v2_diagnostics() -> dict:
+    """Per-stage kill counts from the most recent `gen_v2_cards` call ON
+    THIS THREAD, then CLEARED. Draining is deliberate: a stale read would
+    attribute one job's attrition to another, and `{}` (arm C did not run,
+    or raised before generating) is the honest answer for that."""
+    diag = getattr(_gen2_diag, "value", None) or {}
+    _gen2_diag.value = {}
+    return dict(diag)
 
 
 def gen_v2_cards(trade_service, kwargs: dict) -> list:
@@ -1004,8 +1055,13 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
                                 stud_tax_mode_for_user, stud_tax_override)
     from .feature_flags import FLAGS
 
+    # Cleared on ENTRY as well as drained on read: a run that returns early
+    # below must not leave a previous job's counters visible to the fan-out.
+    _gen2_diag.value = {}
+
     league = trade_service._leagues.get(kwargs["league_id"])
     if league is None:
+        _gen2_diag.value = {"S0_no_league": 1}
         return []
     past_keys = set(getattr(trade_service, "_past_decision_keys", None) or set())
     past_keys |= set(kwargs.get("exclusion_keys") or set())
@@ -1034,11 +1090,27 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
         )
     cards = list(cards or [])
 
+    # Per-stage attrition (see `last_gen_v2_diagnostics`). The generator's
+    # own stages come from the report it already builds and previously
+    # threw away here; the two POST-generation filters below are counted
+    # in the same dict because they kill arm-C cards too — a batch the
+    # engine emitted and the intent lens then wiped is indistinguishable
+    # from a batch the engine never produced, in `arms_json`'s card count.
+    # `getattr` rather than a direct call: the report is whatever
+    # `generate_league_suggestions` returned as its second element, and
+    # tests substitute a plain dict for it. Diagnostics are telemetry —
+    # a stub that cannot report stages degrades to "no stages reported",
+    # it never breaks the arm.
+    _kc = getattr(_report, "kill_counts", None)
+    diag = dict(_kc()) if callable(_kc) else {}
+
     seed_elo = kwargs.get("seed_elo") or {}
     scoring_format = kwargs.get("scoring_format", "1qb_ppr")
+    _n_before = len(cards)
     cards = _filter_by_trade_intent(
         cards, effective_trade_intent(kwargs.get("trade_intent")),
         seed_elo, trade_service._players, scoring_format)
+    diag["S7_intent_filter"] = _n_before - len(cards)
 
     # C4b give-side headliner cap — the third post-generation step arms A/B get
     # and arm C would otherwise miss. `_dedup_and_sort` applies it on the v1/v3
@@ -1048,8 +1120,12 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     # give-side headliner and the bake-off would compare arms under different
     # deck-assembly rules. Arm A disables it through MODEL_A_PROFILE, which is
     # a deliberate arm difference, not an accidental one.
+    _n_before = len(cards)
     cards = cap_give_headliners(cards, seed_elo, trade_service._players,
                                 int(_c("deck_give_headliner_cap")))
+    diag["S7_headliner_cap"] = _n_before - len(cards)
+    diag["S7_served_to_deck"] = len(cards)
+    _gen2_diag.value = diag
 
     # `_vs` — the consensus (seed) value function `_generate_trades_impl`
     # builds for exactly this call. Lanes describe the trade's shape against
@@ -1192,10 +1268,15 @@ def run_bakeoff(
         except Exception as e:                        # never fail the job
             log.warning("bake-off arm %s failed (recorded, not fatal): %s", arm, e)
             cards, err = [], repr(e)
+        # Drained here, immediately after the call that wrote it, and only
+        # for arm C — `gen_v2_cards` is the only writer. An arm that raised
+        # leaves `{}`, which is the honest reading: no stage completed.
+        diag = last_gen_v2_diagnostics() if arm == ARM_GEN_V2 else {}
         arms[arm] = ArmResult(
             arm=arm, cards=cards,
             gen_ms=int((time.monotonic() - t0) * 1000),
             error=err,
+            diagnostics=diag,
             # gen_v2 takes no fairness_threshold — recording None is the
             # honest answer and is itself the fact a reader needs.
             fairness_threshold=(None if arm == ARM_GEN_V2
