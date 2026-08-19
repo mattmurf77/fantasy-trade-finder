@@ -54,6 +54,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Tier 3 (flag-gated, landing imminently)](#tier-3-flag-gated-landing-imminently)
   - [Trade generation pipeline v2 (flag `trade_gen.v2` — dark)](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py)
   - [Trade presentment rules (flag `trade.presentment_rules`) — `trade_service._DEFAULT_CFG`, DB-seeded](#trade-presentment-rules-flag-tradepresentment_rules-trade_service_default_cfg-db-seeded)
+  - [Bake-off arm A — `MODEL_A_PROFILE` + the R4 bypass (`backend/bakeoff_profiles.py`)](#bake-off-arm-a--model_a_profile--the-r4-bypass-backendbakeoff_profilespy)
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
@@ -816,6 +817,51 @@ C1/C2/C4/C5 and sees C3 only in its pre-existing narrow form.
 | `deck_headliner_cap` | 2.0 | **0** | **C4** — at most this many cards in one served deck may share a **centerpiece** (the package's highest-consensus asset). Applied in `_dedup_and_sort` AFTER the composite sort, so each headliner keeps its BEST cards, and at deck assembly rather than inside one opponent's enumeration, so it bounds the FINAL served set (streaming snapshots re-derive it from the same accumulating list, exactly like the R4 exclusion). Dedup there was exact-key only, and `mismatch` is largest for whichever asset diverges most between the two boards, so that one asset generated many distinct high-scoring packages and all of them survived — Colston Loveland in 18 of 18 cards of one live deck, 8/8 in another, MarShawn Lloyd 13/33. That made a single valuation error catastrophic instead of survivable, since mismatch is LARGEST exactly where a valuation is most wrong. The centerpiece is `trade_service.deck_centerpiece`, the same definition `deck_impressions.centerpiece_id` is written with (`server._fatigue_centerpiece` delegates to it), so the cap and the metric that measured the flooding cannot drift. Kill value drops no card and leaves the plain composite sort. |
 | `mismatch_confidence_damp` | 1.0 | **0** | **C5** — scales the RANKING mismatch term by `max(0, 1 − damp × unc)`, where `unc` is the package's value-weighted mean `_value_uncertainty` (`range_base / sqrt(1 + n)`, n = the user's comparison count for that player). That uncertainty already existed but fed only the fairness gate's range-overlap test, never the ranking, so a large apparent divergence resting on a player almost nobody has ranked outranked well-sampled disagreement. At the default a never-compared package keeps 65% of its mismatch (1 − `range_base`) and a heavily-compared one keeps ~99%. The surplus **gates** are untouched — this reorders cards that already passed, it never removes one. `confidence=None` (no counts available) is a no-op at any value: no information is not the same as low confidence. Kill value ⇒ undamped. |
 
+
+### Bake-off arm A — `MODEL_A_PROFILE` + the R4 bypass (`backend/bakeoff_profiles.py`)
+
+**Not a knob — a pinned *set* of kill values.** The three-model bake-off
+([plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md)) serves
+trade cards from three generators side by side. Arm **A** (`baseline`) is the
+engine as it behaved **before** the two waves above, and the engine was
+modified *in place*, never forked — so "original" exists only as the nine knobs
+in the two tables above set to their disable values. `MODEL_A_PROFILE` is that
+set, pinned as a constant against reference SHA **`92c31d5`** (`20b40db^` — the
+last commit before the G6 wave) and golden-tested in
+`backend/tests/test_bakeoff_arm_a_golden.py`. Scope block, with the audit of
+every knob included *and every knob deliberately excluded*:
+[plans/three-model-bakeoff/scope-phase2.md](plans/three-model-bakeoff/scope-phase2.md).
+
+| Item | Value |
+|---|---|
+| `MODEL_A_PROFILE` | `max_overpay_frac`, `pos_net_cap`, `pick_gap_frac`, `need_gate_min_value`, `rank_div_min_frac`, `min_package_band`, `pick_pair_strip_frac`, `deck_headliner_cap`, `mismatch_confidence_damp` — **all 0.0** |
+| `MODEL_A_REFERENCE_SHA` | `92c31d5` |
+| Entry point | `with backend.bakeoff_profiles.model_a(): …` |
+
+**Nothing here changes any default.** The profile rides the existing
+thread-local `_cfg_override` seam (#189), so it applies only to the thread
+inside `model_a()`; `model_config`, the DB seed values and every ordinary trade
+job are untouched. `trade_optimizer` (v3) reads `_c` from `trade_service`, so
+the v3 optimizer honours the profile too.
+
+**The R4 bypass** (`trade_service.r4_bypass()` / `r4_bypassed()`). R4 — the
+#336 windowless awaiting/matched exclusion — is the one G6 rule with **no
+knob**: `trade.presentment_rules` is its only switch, and that flag is global,
+so flipping it would disable R4 for arms B and C and for every other user.
+`r4_bypass()` is a thread-local context manager in the same style as
+`_cfg_override`; inside it, the R4 exclusion set is ignored at all three sites
+that consult it — `TradeService._dedup_and_sort` (streaming snapshots
+included), the `trade_gen.v2` hand-off, and `server._inject_likes_you_cards_impl`.
+It never bypasses `_past_decision_keys`: a trade the user already swiped on
+stays gone for every arm. Outside `model_a()` the bypass is off, so production
+behaviour is unchanged.
+
+**Adding a generation knob?** `test_no_generation_knob_was_added_without_an_arm_a_decision`
+pins the full `trade_service._DEFAULT_CFG` key set and fails by name when it
+moves. That is deliberate: a new knob is a new way for arm A to stop being the
+pre-wave engine. Add its kill value to `MODEL_A_PROFILE` and re-capture the
+golden, or record in the scope block why it is excluded — then update the
+inventory. Never re-capture the golden just to make a failure go away.
 
 ### Dismiss cooldown (D-067) — `backend/server.py` session_init + swipe route
 

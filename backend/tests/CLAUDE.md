@@ -41,7 +41,7 @@ so grep by symptom, not by import path.
 
 | Cluster | Files (examples) |
 |---|---|
-| Trade engine | `test_trade_engine_v2`, `test_trade_optimizer`, `test_trade_gen_prune`, `test_fairness_gate_golden`, `test_user_gain_gate`, `test_three_team_cycles`, `test_presentment_rules`, `test_offer_hard_lock_330` (12 `test_trade_*` files plus these) |
+| Trade engine | `test_trade_engine_v2`, `test_trade_optimizer`, `test_trade_gen_prune`, `test_fairness_gate_golden`, `test_user_gain_gate`, `test_three_team_cycles`, `test_presentment_rules`, `test_offer_hard_lock_330`, `test_engine_quality_golden`, `test_bakeoff_arm_a_golden` (12 `test_trade_*` files plus these) |
 | Deck / discovery (F1–F10) | `test_deck_*` (9: exploration, fatigue, first_session, ordering, replenishment, signal_v2, taste, thompson_v2, value_model), `test_engine_telemetry`, `test_pass_cooldown` |
 | Ranking / tiers / Elo | `test_rnk_elo_golden`, `test_elo_memoization`, `test_tier_occupancy`, `test_trio_*`, `test_compressed_board`, `test_rankings_import` |
 | Draft | `test_draft_*` (5), `test_mock_draft`, `test_mock_pick_ownership`, `test_pick_*` (8), `test_recorded_picks`, `test_owned_picks` |

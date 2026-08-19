@@ -713,6 +713,44 @@ def _c(key: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Bake-off arm A — per-thread R4 bypass (docs/plans/three-model-bakeoff/
+# PLAN.md §3.3; profile in backend/bakeoff_profiles.py)
+# ---------------------------------------------------------------------------
+# G6's R1/R2/R3/R5 each have a kill knob, so arm A ("the engine as it behaved
+# before the 2026-08-16 wave") disables them through _cfg_override. R4 — the
+# windowless awaiting/matched exclusion — has NO knob: the
+# trade.presentment_rules flag is its only switch, and flipping that flag
+# would disable R4 for arms B and C and for every other user of the process.
+# Hence this: same shape and same discipline as _cfg_override above
+# (threading.local + contextmanager), so concurrent trade jobs on sibling
+# daemon threads are untouched.
+#
+# Applied at every site that consults the R4 exclusion set:
+#   • TradeService._dedup_and_sort (the v1 path, streaming snapshots included)
+#   • the trade_gen.v2 hand-off in _generate_trades_impl
+#   • server._inject_likes_you_cards_impl (the likes-you injector)
+# Never bypasses _past_decision_keys — a trade the user already swiped on
+# stays gone for every arm.
+_r4_bypass_local = threading.local()
+
+
+@contextmanager
+def r4_bypass():
+    """Ignore the G6 R4 exclusion set for the duration, on this thread only."""
+    prev = getattr(_r4_bypass_local, "on", False)
+    _r4_bypass_local.on = True
+    try:
+        yield
+    finally:
+        _r4_bypass_local.on = prev
+
+
+def r4_bypassed() -> bool:
+    """True when the calling thread is inside an `r4_bypass()` context."""
+    return bool(getattr(_r4_bypass_local, "on", False))
+
+
+# ---------------------------------------------------------------------------
 # #214/#215 — stud-tax mode (per-user setting `stud_tax_mode`)
 # ---------------------------------------------------------------------------
 # 'market' (default) — the #214 retuned shapes: depth discount vs the
@@ -2986,8 +3024,9 @@ class TradeService:
                 # generator-scope amendment): gen-v2 gets the windowless
                 # #336 exclusion automatically; the R1/R2/R3/R5 hooks are
                 # v1-path only — gen-v2 carries its own gate stack.
-                past_decision_keys=(self._past_decision_keys
-                                    | self._exclusion_keys),
+                past_decision_keys=(
+                    self._past_decision_keys if r4_bypassed()
+                    else self._past_decision_keys | self._exclusion_keys),
                 on_opponent_done=on_opponent_done,
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
@@ -3133,14 +3172,17 @@ class TradeService:
         loop so it can be called both incrementally (snapshot for progress
         callback — which is what makes R4 bind on streaming snapshots too)
         and at the end of generation."""
-        if self._past_decision_keys or self._exclusion_keys:
+        # Bake-off arm A runs with R4 off (no knob exists — see r4_bypass()).
+        # Thread-local, so arms B/C and every other job still enforce it.
+        _r4_keys = frozenset() if r4_bypassed() else self._exclusion_keys
+        if self._past_decision_keys or _r4_keys:
             kept: list[TradeCard] = []
             for c in cards:
                 key = (frozenset(c.give_player_ids),
                        frozenset(c.receive_player_ids))
                 if key in self._past_decision_keys:
                     continue
-                if key in self._exclusion_keys:
+                if key in _r4_keys:
                     # Distinct-key accounting: snapshots re-filter the same
                     # accumulating list, so a set (not a counter) keeps the
                     # R4 kill count honest.

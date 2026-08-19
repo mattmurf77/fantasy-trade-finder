@@ -228,6 +228,9 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
+# Aliased: the likes-you injector's own parameter is named `trade_service`
+# (the service INSTANCE), so the module name is not usable inside it.
+from .trade_service import r4_bypassed as _r4_bypassed
 
 # ---------------------------------------------------------------------------
 # Demo Player Pool (used until Sleeper roster is loaded)
@@ -3018,8 +3021,12 @@ def _inject_likes_you_cards_impl(
         # live in the user's match pipeline (awaiting like or pending/
         # accepted match). DEDUP only: the quality rules R1/R2/R3/R5 stay
         # off this surface per Q21 — the D-055 user-gain floor below is
-        # its only quality gate.
-        if exclusion_keys and (key[0], key[1]) in exclusion_keys:
+        # its only quality gate. Bake-off arm A bypasses R4 per-thread
+        # (trade_service.r4_bypass) — R4 has no knob, so that context is the
+        # only way to run arm A's pre-G6 behaviour without flipping the flag
+        # for arms B/C and every other user.
+        if (exclusion_keys and not _r4_bypassed()
+                and (key[0], key[1]) in exclusion_keys):
             try:
                 trade_service._r4_excluded_keys.add((key[0], key[1]))
             except Exception:

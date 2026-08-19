@@ -48,6 +48,49 @@ callers "must skip both", which the shipped code never did; corrected to match.
 mid-session (engine-quality wave + navdoc refresh), which brings `test_engine_quality.py` and
 `test_engine_quality_golden.py` — hence 3216 as the real pre-change baseline. Nothing was lost.
 
+## 2026-08-18c — Bake-off Phase 2: arm A pinned + golden (branch only, NOT merged)
+
+Branch `feat/bakeoff-arm-a`, off `origin/main` @ `9a20ca8`. Scope block:
+[`docs/plans/three-model-bakeoff/scope-phase2.md`](../docs/plans/three-model-bakeoff/scope-phase2.md).
+Backend-only: `backend/bakeoff_profiles.py` (`MODEL_A_PROFILE`, `model_a()`), a thread-local
+R4 bypass in `trade_service`, and `backend/tests/test_bakeoff_arm_a_golden.py`.
+**Not pushed, not merged** — build-agent output; Phase 3 (`feat/bakeoff-runner`) consumes it.
+
+| Gate | Baseline (`origin/main`) | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3267 passed, 1 skipped (3268 collected with the new file ignored) | **3277 passed, 1 skipped, 0 failed** (250s) |
+| `npx tsc --noEmit` (mobile) | n/a | **not run — zero files under `mobile/`** |
+| `testid-lint.sh` | n/a | **not run — no mobile files touched** |
+| Simulator gate | — | **D-056 standing posture, `FTF_SKIP_SIM_GATE=1`**; backend-only, no runtime surface |
+
+**What the golden actually proves.** Reference SHA **`92c31d5`** (`20b40db^` on `--first-parent
+main` — the last commit before the G6 wave). Captured by adding a detached worktree at that SHA,
+copying the test file in, and running its `__main__` capture mode. Arm A (`MODEL_A_PROFILE` + the
+R4 bypass) reproduces **30 deck cards and the asset-ideas groups byte-identically**; arm B (live
+defaults) on the same fixture returns **8 cards** and different ideas.
+
+**Board-drift immunity.** The fixture pins every generation input as a literal (player table,
+`seed_elo`, `user_elo`, each opponent's `elo_ratings`, confidence counts, roster, outlook,
+fairness threshold) and calls `TradeService.generate_trades` directly — no DB read, no
+`ranking_service` call, no `comparison_counts`, no pin resolution. So Phase 0's pin fix,
+`feat/tier-bounded-pins` and premium import cannot move it: the comparison isolates generation
+logic only.
+
+**Non-vacuity, per rule** (a golden that stopped disabling anything would otherwise still pass):
+arm B records kills for **R1 2822 / R2 251 / R3 513 / R5 405** on this fixture; C1, C4 and C5 each
+move the deck alone; C2 moves the asset-ideas alone. **C3 (`pick_pair_strip_frac`) is the one
+profile entry the deck fixture cannot reach** — no matched-pick-pair shape survives the other gates
+on a realistic league (R3 kills the candidates first) — so it is asserted at its own gate
+(`pick_swap_ok`), with byte-identity already pinned by `test_engine_quality_golden.py`. Recorded as
+a known gap in the scope block rather than papered over.
+
+**Both drift alarms negative-controlled** (verified by breaking them on purpose, not by inspection):
+injecting a fake `_DEFAULT_CFG` key fails the inventory test naming `shiny_new_knob`; removing
+`deck_headliner_cap` from the profile produces a drift report listing the 22 dropped cards.
+
+**Not covered:** no runtime/TestFlight evidence exists or is claimed — nothing reaches a client.
+The new code is unreachable in production until Phase 3 wires a caller behind `trade.bakeoff`.
+
 ---
 ## 2026-08-18b — Bug-sweep follow-ons (items 3/4/5) + research 6/7
 
