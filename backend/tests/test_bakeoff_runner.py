@@ -96,14 +96,15 @@ def test_bakeoff_skips_targeted_and_demo_decks():
         assert bo.bakeoff_active("league_x", None, None, "opp") is False
 
 
-def test_interleaved_is_the_default_serving_mode_inside_the_flag():
-    # Operator decision 2026-08-18: arm C serves by default; dark is the revert.
+def test_dark_is_the_default_serving_mode_inside_the_flag():
+    # Operator 2026-08-19: back to dark. Interleaved serving shrank the deck to
+    # 10 cards because arm C forfeits everything and leave-short drops its slots.
     with _flag(True), _knobs():
-        assert bo.serve_interleaved() is True           # Phase 5
-        assert bo.bypass_rerankers("l", None, None, None) is True
-    with _flag(True), _knobs(bakeoff_serve_interleaved=0.0):
-        assert bo.serve_interleaved() is False          # Phase 4 dark, the revert
+        assert bo.serve_interleaved() is False          # Phase 4 dark
         assert bo.bypass_rerankers("l", None, None, None) is False
+    with _flag(True), _knobs(bakeoff_serve_interleaved=1.0):
+        assert bo.serve_interleaved() is True           # Phase 5, opt-in
+        assert bo.bypass_rerankers("l", None, None, None) is True
 
 
 # ---------------------------------------------------------------------------
