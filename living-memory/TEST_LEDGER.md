@@ -10,6 +10,62 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19e — Settings IA: hub + second-level pages, sheet → page (branch only, NOT merged)
+
+**Branch:** `feat/settings-ia-hub`, from `origin/main` `ecdbcb3`. **Not shipped** — not pushed, not merged.
+Flag `account.settings_hub` stays **OFF** (default false).
+Plan + scope: [docs/plans/settings-ia-hub/](../docs/plans/settings-ia-hub/). Code-walk proof:
+[code-walk-proof.md](../docs/plans/settings-ia-hub/code-walk-proof.md).
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` (mobile) | **exit 0** |
+| `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
+| `mobile/tests/check-*.js` (whole suite) | **59 passed, 0 failed** — includes the 3 new settings checks |
+| `pytest backend/tests -q` | **3399 passed, 1 skipped, 5 failed** — all 5 reproduce on a clean `origin/main` with zero local changes. **Pre-existing, not from this branch.** See below. |
+| Maestro / simulator | n/a — retired by D-056. Replaced by the 3 structural checks + the code-walk proof. |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The plan §9 operator TestFlight checklist is UNRUN.** |
+
+**New structural checks: 3** (`npm run test:settings-ia | test:settings-nav | test:settings-testids`).
+- `check-settings-ia.js` — encodes plan §4's migration map: 12 section modules → owning page, 34 rows
+  → owning module. Catches an orphaned module, a duplicated one, a row deleted from *inside* a
+  surviving module, and the four IA moves.
+- `check-settings-nav.js` — no settings route carries `presentation: 'modal'`; all 8 have a
+  `HeaderBack`; all 8 page modules mount `FeedbackFAB aboveTabBar={false}`; 8 deep-link paths resolve.
+- `check-settings-testids.js` — 11 shipped ids + 2 templated prefixes still resolve **inside
+  `src/screens/settings/`** (not merely somewhere under `src` — the legacy screen would otherwise
+  satisfy the search by itself); 9 new ids present; `settings.close-btn` gone from `src` **and** from
+  `.maestro`.
+
+**The checks were verified by mutation, not by reading.** Independently re-run at orchestration:
+restoring `presentation: 'modal'` on the `Settings` route, swapping the Sign out / Delete account
+render order, and renaming `settings.espn-disconnect` each FAIL with an accurate message. The modal
+parse walks the TS AST per `<Stack.Screen>` and self-tests that it still *detects* the modal on
+`FeedbackInbox` / `SleeperConnect`, so a broken walk fails loudly instead of passing forever.
+
+**Destructive-path copy verified byte-for-byte** against `origin/main` by brace-matched extraction of
+six functions (three platform disconnects, `confirmDeleteAccount`, `performDeleteAccount`,
+`handleExportData`). Zero drift. Delete account keeps both `Alert` stages and both destructive
+markers. An earlier fixed-line-window comparison produced false drift reports by bleeding into
+adjacent functions and was discarded — the brace-matched result is the one recorded.
+
+**Pre-existing red on `origin/main` (blocks the pre-ship gate for EVERY branch, not just this one):**
+`test_seed_ui_test_db::test_release_flags_mirror_features_json` (`trade.bakeoff` set true in
+`config/features.json` by `ecdbcb3` but left false in `backend/tests/fixtures/flags/release.json`),
+three in `test_suggestion_telemetry.py`, and
+`test_trade_decision_idempotency::test_re_posted_swipe_writes_exactly_one_set_of_swipe_decisions`
+(expects Elo 1502.0 ± 0.001502, obtains 1500.0 — a re-posted swipe not applying its rating update).
+Confirmed pre-existing by stashing this branch's flag change and re-running. This branch DID add the
+one missing mirror entry its own flag required.
+
+**Correction to this branch's own record:** the phase-0 commit message claimed the full-screen
+`prefsQuery.isLoading` gate "is gone". That is true only on the hub path. The gate is still live at
+`SettingsScreen.tsx:746` on the flag-off flat list, which phase 0 never touched; it dies with the
+legacy branch in phase 4. Corrected in the phase-1 commit message and in the code-walk proof.
+
+---
+
 ## 2026-08-19d — Placement tier clamp (D-085); a placement now bounds PRICING, not just voting
 
 **Branch:** `feat/placement-tier-clamp`, from `origin/main` `a130dfc`. **Not shipped** — not pushed, not merged.
