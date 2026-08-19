@@ -76,11 +76,21 @@ far Phase 3 runs. All enumerated in [`scope.md`](../docs/plans/web-parity/scope.
 
 ### Next
 
-Merge decision on `fix/web-phase0`, then **Phase 2 (public surface)**. Its first item —
-a public trade calculator on the already-public `POST /api/trade/evaluate` — has a hard
-prerequisite: **a rate limit and response cache**. There is no global rate limiter (only
-`/api/events` and `/api/share/package` self-limit) and it runs the full package math on a
-single gunicorn worker.
+Merge decision on `fix/web-phase0`, then **Phase 2 (the logged-in web app)**.
+
+**Operator decision 2026-08-19: no anonymous surfaces** — mobile has none either
+(`mobile/src/api/client.ts` attaches `X-Session-Token` to every request, so all three
+calculator modes run inside a session). Phase 2 is therefore a session-gated calculator,
+a market-pulse strip inside the League view, and a real landing page. The public
+calculator and SEO player pages are dropped; `players.profile_pages` is false on mobile
+too, so shipping those was never parity.
+
+**The rate-limiter prerequisite is moot** — it existed only to put `/api/trade/evaluate`
+in front of anonymous traffic. Phase 2 now has no backend dependency and no blocker.
+
+Known consequence, recorded deliberately: with no anonymous surfaces **the website cannot
+do acquisition** — everything of value sits behind "type your Sleeper username". That is
+coherent for a companion app; revisit only if acquisition is later expected from web.
 
 Known gap from Phase 1: the harness is structural only. A browser-level smoke (console
 errors, layout at 375px, axe) is still unbuilt — Playwright was evaluated and deliberately

@@ -42,7 +42,7 @@ stop at the right place. Three coherent postures:
 
 | Posture | What web is | Stops after |
 |---|---|---|
-| **A. Front door** | Marketing + public tools + handoff to the app | Phase 2 |
+| ~~A. Front door~~ | ~~Marketing + public tools + handoff to the app~~ — **foreclosed 2026-08-19**: it was the posture that depended on anonymous tools | — |
 | **B. Companion** *(recommended)* | Front door + desk-friendly deep work + accounts | Phase 3a |
 | **C. Full parity** | Everything mobile does | Phase 3c |
 
@@ -160,41 +160,65 @@ landing copy.
 
 ---
 
-## Phase 2 — public surface
+## Phase 2 — the logged-in web app
 
-Unconditional under all postures. This is where web stops being a worse app and starts doing
-a job mobile cannot.
+> **REVISED 2026-08-19 by operator decision: no anonymous surfaces.** The app has no
+> anonymous mode either — `mobile/src/api/client.ts` auto-attaches `X-Session-Token` to
+> every request, so all three calculator modes (`live` / `demo` / `league`) run inside a
+> session. An anonymous web calculator would be a *new product surface*, not parity, and
+> is out of scope.
+>
+> The original Phase 2 justified itself partly on SEO and acquisition. That justification
+> does not survive this decision — see [What this costs](#what-this-costs) below. Phase 2
+> is now simply "the web app does what the mobile app does, for signed-in users."
 
-### P2-1 — Public trade calculator ⭐
+### P2-1 — Trade calculator (session-gated)
 
-`POST /api/trade/evaluate` is **public, needs no auth, and is called only by mobile.** It
-returns the fairness verdict, eveners, and itemized adjustments. Paired with
-`/api/trade/values` — which web already calls — this is a KTC/DynastyCalculator-class public
-tool with **zero backend feature work**, and the natural SEO landing page.
+Mirror `TradeCalculatorScreen`: **In league** (real opponents and rosters, dual-board
+verdict, eveners, starting-lineup before/after) and **Real values** (consensus,
+server-authoritative). Both call `POST /api/trade/evaluate`, which web already has a
+session for. Skip the mobile **Demo league** mode unless the operator wants it — it
+exists on mobile for an offline/no-league state the web app does not have.
 
-**Hard prerequisite: rate limiting.** There is no global rate limiter — only `/api/events`
-and `/api/share/package` self-limit — and this endpoint runs the full package math on a
-**single gunicorn worker** on Render. Ship a per-IP limit and a response cache *before* it
-faces anonymous traffic. That is backend work and it is the one real dependency in Phase 2.
+**No rate limiter needed as a blocker.** That prerequisite existed only because the
+original plan put this endpoint in front of anonymous traffic. Behind a session it carries
+the same exposure mobile already does. Worth noting for the record, and *not* worth
+blocking on: `/api/session/init` mints sessions freely, so a session is not a meaningful
+cost barrier — but that is a pre-existing property of every session-gated route, not
+something this feature introduces.
 
-### P2-2 — Market movers page
+### P2-2 — Market pulse (in-app)
 
-`GET /api/market/movers` is fully public, flag ON, no session, no web consumer. Cache-friendly
-community risers/fallers — ready-made recurring SEO content.
+`GET /api/market/movers`, flag `market.movers` ON. Mobile surfaces this as
+`MarketPulseStrip` **inside** the League screen. Web should match that placement — a strip
+in the app, not a public page.
 
-### P2-3 — A real landing page
+### P2-3 — Landing page
 
-Currently one viewport: no feature section, no screenshots, no social proof, no pricing, and
-**no mention of the mobile app at all**. Given TestFlight-only distribution, the site should
-be converting visitors into testers.
+Still valid and unaffected: the current landing is one viewport with no feature section, no
+screenshots, no social proof, and **no mention of the mobile app**. Given TestFlight-only
+distribution this is the one place the site should convert visitors into testers. This is
+marketing copy, not an anonymous tool.
 
-### P2-4 — Player pages
+### Dropped from Phase 2
 
-`players.profile_pages` is false, but `/api/players/<id>/profile` exists and `player.html` is
-already built. Per-player indexable pages are the highest-volume SEO surface a fantasy site
-has. Turning the flag on is most of the work; the page needs the P1-3 metadata treatment.
+- **Public trade calculator** — the operator decision above.
+- **Player pages as an SEO surface.** `players.profile_pages` is **false**, and it is false
+  on mobile too, so shipping them is not parity. `player.html` and
+  `/api/players/<id>/profile` already exist and are web-only; turning them on is a product
+  decision, not a parity gap. Left dark.
 
----
+### What this costs
+
+Worth stating plainly so it is a choice and not an accident: **with no anonymous surfaces,
+the website cannot do acquisition.** Every page of real value sits behind "type your
+Sleeper username". The SEO work already shipped in Phase 1 (metadata, robots, sitemap)
+still helps the landing page, FAQ and legal pages get indexed, but there is no indexable
+*tool* for anyone to find.
+
+That is a coherent position — the site is a companion to the app, not a funnel. It is only
+a problem if acquisition is later expected from the web. Raise it then as its own decision,
+with the public calculator as the obvious first move.
 
 ## Phase 3 — parity, tiered
 
@@ -267,12 +291,12 @@ Sizes are relative, not calendar estimates.
 |---|---|---|---|
 | **0** | P0-1…P0-8 | **S** — mostly one-file fixes; P0-3 needs operator input | nothing; do first |
 | **1** | P1-1…P1-6 | **M–L** — P1-1 touches 13 files, P1-2 is new infra | gates Phases 2–3 |
-| **2** | P2-1…P2-4 | **M** — plus **S backend** for the rate limiter | P2-1 blocked on rate limiter |
+| **2** | P2-1…P2-3 | **M** — no backend work | nothing; Phase 1 already landed |
 | **3a** | 7 items | **L** | needs Phase 1 |
 | **3b/3c** | multi-platform, write-back, decks, drafts | **XL** | needs 3a + a credential-capture design |
 
-Critical path: **P0 → P1-1 → P1-2 → P2-1** (with the rate limiter landing in parallel with
-P1). Everything else parallelizes behind P1-2.
+Critical path: **P0 → P1-2 → P1-1 → P2-1**. Phases 0 and 1 are built; Phase 2 has no
+backend dependency and no blocker.
 
 ---
 
@@ -280,7 +304,7 @@ P1). Everything else parallelizes behind P1-2.
 
 | Risk | Mitigation |
 |---|---|
-| **Public calculator overloads a single gunicorn worker** | Rate limit + response cache before launch. Non-negotiable; it is the only hard prerequisite in Phase 2. |
+| ~~Public calculator overloads a single gunicorn worker~~ | **Moot** — no anonymous calculator (operator, 2026-08-19). Session-gated it carries mobile's existing exposure. |
 | **P1-1 regresses layout across 13 pages** | Land P1-2 first if possible; otherwise page-by-page with visual before/afters. This is the riskiest single change in the plan. |
 | **Concurrent sessions in this repo** | Multiple sessions run here and the checked-out branch is often stale. Re-diff against `origin/main` before each wave. |
 | **ESPN/MFL credential capture has no browser equivalent** | Treat 3b as a design problem first, not a port. Do not schedule it as engineering-only. |
