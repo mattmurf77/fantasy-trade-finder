@@ -235,18 +235,36 @@ def test_outlook_sleeper_fetch_without_captured_arg_does_not_crash():
 # Flag registration — `outlook.odds` is a full 4-touch flag, DARK everywhere
 # ---------------------------------------------------------------------------
 
-def test_flag_is_registered_and_defaults_off_everywhere():
+def test_flag_is_registered_and_lit_in_config_but_fails_closed_in_code():
+    """LIT 2026-08-19 by operator override (D-094, superseding D-093).
+
+    This test used to be `test_flag_is_registered_and_defaults_off_everywhere`
+    and existed to keep the flag dark. The operator lit it; the assertions are
+    inverted rather than deleted, because the *pairing* they enforce is what
+    still matters — `config/features.json` and the release fixture must agree,
+    or the seeded UI-test DB serves a different surface than production.
+
+    `DEFAULT_FLAGS` deliberately stays **False**: it is the in-code fallback
+    used when config is missing or unreadable, so the surface fails CLOSED.
+    Config lights it; code never does. That is what keeps the flag a real kill
+    switch — see `test_flag_off_still_closes_the_route` below.
+    """
     assert "outlook.odds" in FLAG_KEYS
-    assert DEFAULT_FLAGS["outlook.odds"] is False
+    assert DEFAULT_FLAGS["outlook.odds"] is False, (
+        "the in-code default must stay False so a missing/unreadable config "
+        "fails closed; the flag is lit by config/features.json, never by code")
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads(
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
-    assert features["outlook.odds"] is False
-    assert release["outlook.odds"] is False, "release fixture must mirror dark"
+    assert features["outlook.odds"] is True
+    assert release["outlook.odds"] is True, (
+        "release fixture must mirror config/features.json — a half-flip makes "
+        "the seeded UI-test DB disagree with production")
     all_on = json.loads(
         (REPO / "backend/tests/fixtures/flags/all-on.json").read_text())
     assert "outlook.odds" not in all_on, (
-        "the flag-sweep fixture must not light an uncalibrated surface")
+        "all-on is the 13-key inventory-gated CLIENT overlay, not a full map; "
+        "this flag is not one of those and must inherit its release value")
 
 
 def test_mobile_never_defaults_the_flag_on():
@@ -284,17 +302,42 @@ def _headers():
     return {"X-Session-Token": TOKEN, "Content-Type": "application/json"}
 
 
-def test_ships_off_route_is_unreachable_and_makes_no_sleeper_call(client):
-    """The ships-off gate: with the REAL flag map (nothing patched) the route
-    is unreachable and the fan-out never runs — zero behavior change."""
-    assert server.is_enabled("outlook.odds") is False
+def test_flag_on_the_route_is_reachable(client):
+    """LIT (D-094): with the REAL flag map the route no longer 404s.
+
+    Asserted via the missing-league 400 rather than a full payload, so this
+    test needs no league fixture and cannot rot when the payload shape moves.
+    The only thing it pins is that the FLAG no longer closes the door.
+    """
+    assert server.is_enabled("outlook.odds") is True
     fake, log = _fake_sleeper()
     with patch.object(server, "_sleeper_get", fake):
-        r = client.get(f"/api/league/outlook?league_id={LEAGUE_ID}",
-                       headers=_headers())
-    assert r.status_code == 404
-    assert r.get_json() == {"error": "not_found"}
-    assert log == []
+        r = client.get("/api/league/outlook", headers=_headers())
+    assert r.status_code != 404, "the flag is lit; the route must be reachable"
+    assert r.status_code == 400
+    assert r.get_json() == {"error": "league_id is required"}
+    assert log == [], "a 400 must short-circuit before any upstream fetch"
+
+
+def test_flag_off_still_closes_the_route(client):
+    """THE KILL SWITCH — the load-bearing half of the retired ships-off gate.
+
+    D-094 accepted two live risks (a preseason band can be confidently wrong
+    for an individual league; IDP leagues price a minority of their starting
+    slots) explicitly *because* turning the flag back off is instant and
+    total. That promise is only worth what this test proves: with the flag
+    off the route 404s **and** the Sleeper fan-out never runs, so a revert is
+    complete rather than merely assumed.
+    """
+    with patch.object(server, "is_enabled",
+                      lambda k: False if k == "outlook.odds" else True):
+        fake, log = _fake_sleeper()
+        with patch.object(server, "_sleeper_get", fake):
+            r = client.get(f"/api/league/outlook?league_id={LEAGUE_ID}",
+                           headers=_headers())
+        assert r.status_code == 404
+        assert r.get_json() == {"error": "not_found"}
+        assert log == [], "flag off must cost zero upstream calls"
 
 
 # ---------------------------------------------------------------------------

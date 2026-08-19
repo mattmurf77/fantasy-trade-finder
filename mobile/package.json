@@ -49,7 +49,8 @@
     "test:presentation-v2": "node tests/check-presentation-v2.js",
     "test:settings-ia": "node tests/check-settings-ia.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
-    "test:settings-testids": "node tests/check-settings-testids.js"
+    "test:settings-testids": "node tests/check-settings-testids.js",
+    "test:outlook-bands": "node tests/check-outlook-bands.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

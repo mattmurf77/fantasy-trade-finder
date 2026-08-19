@@ -171,13 +171,20 @@ import { S as GUIDE, GUIDE_RECEIPTS } from '../components/analystScript';
 //     entry points (deep link app/league/summary, stored whats-new routes).
 //     No home row, no re-tap registration (it isn't the tab root).
 //
-// #169 SEASON OUTLOOK layer (flag `outlook.odds`, DARK): ONE merged section
-// between the basis toggle and the dynasty chart. It is a SEPARATE gated
-// section — when `outlook.odds` is off (the default; the flag is absent from
-// LAUNCHED_FLAG_DEFAULTS) nothing renders and GET /api/league/outlook is NOT
-// called (it 404s while the modeling backend is dark). Only when on do we
-// fetch + render. The basis toggle governs BOTH the outlook fetch and the
-// dynasty chart.
+// #169 SEASON OUTLOOK layer (flag `outlook.odds`, **LIT 2026-08-19** by
+// operator override — D-094, superseding D-093): ONE merged section between
+// the basis toggle and the dynasty chart. It is a SEPARATE gated section —
+// when `outlook.odds` is off nothing renders and GET /api/league/outlook is
+// NOT called (it 404s). Only when on do we fetch + render. The basis toggle
+// governs BOTH the outlook fetch and the dynasty chart.
+//
+// The flag stays ABSENT from LAUNCHED_FLAG_DEFAULTS even though it is now
+// lit, and that is deliberate: those defaults fail OPEN (#115), so listing it
+// would let a client whose revalidate failed keep rendering odds after the
+// operator killed the flag. The cost is a one-frame pop-in on cold start
+// (falsy until the first flag fetch resolves). Kill-switch integrity beats
+// the pop-in on a surface whose preseason bands can be confidently wrong for
+// an individual league — see D-094's accepted risks.
 //
 // v2 (2026-08-10, docs/feedback/items/169-outlook-league-summary/
 // odds-surface-audit.md § ranked build order item 1; mockup
