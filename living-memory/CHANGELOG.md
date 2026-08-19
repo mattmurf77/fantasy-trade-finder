@@ -22,6 +22,8 @@
 
 **Also merged:** the Team Review plan for #357/#358/#359 (docs only — [D-092](DECISIONS.md), Q-024, Q-025). Build not started.
 
+**Released.** EAS iOS **build 121 (v1.15.0)**, `ccc3cd57`, built from `f1cb03e` (same tree as `main`), **submitted to TestFlight** and accepted by App Store Connect (submission `769a6193`). Awaiting Apple processing. Backend gates re-run on the merged sha with `node_modules` finally installed: `tsc --noEmit` clean and **61** structural suites green — both had been unrunnable in this worktree earlier in the session.
+
 **Watch:** nobody has seen the lit surface on a device; a preseason band can be confidently wrong (2 of 6 backtested seasons lose to climatology); `meta.priced_slot_coverage` is still unrendered, so IDP bands read as whole-lineup on 7-of-15 priced slots.
 
 ---
