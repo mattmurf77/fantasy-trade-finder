@@ -29,8 +29,15 @@ def test_clamped_high():
 
 
 def test_year_discount_still_applies():
-    # 12-team R1 next season: 67.5 * 0.85 = 57.38
-    assert compute_pick_value(1, 2027, 2026, league_size=12) == 57.38
+    # D-079: the rate is now PER ROUND on this legacy scale too, so R1 is
+    # flat and R2 keeps the 0.85 it always had.
+    # 12-team R1 next season: 67.5 * 1.00 = 67.5 (a first is a first)
+    assert compute_pick_value(1, 2027, 2026, league_size=12) == 67.5
+    assert compute_pick_value(1, 2029, 2026, league_size=12) == 67.5
+    # 12-team R2 next season: 25.0 * 0.85 = 21.25
+    assert compute_pick_value(2, 2027, 2026, league_size=12) == 21.25
+    # ...and two years out compounds: 25.0 * 0.85^2 = 18.06
+    assert compute_pick_value(2, 2028, 2026, league_size=12) == 18.06
 
 
 def test_default_kwarg_is_12():

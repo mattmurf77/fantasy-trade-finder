@@ -194,12 +194,18 @@ def test_drafted_value_takes_one_year_of_discount(client):
     c, _ = client
     _seed_league(status="drafted")
     rows = _by_id(_get(c, "/api/rankings")["rankings"])
-    pv = rows["generic_pick_1_early"]["pick_value"]
-    assert pv < _PV_1_EARLY
-    # The discount is applied in VALUE space, matching pick_pool_value's
-    # year discount (and therefore the owned 2027 pick of the same round).
-    assert elo_to_value(1200 + 6 * pv) == pytest.approx(
-        elo_to_value(_SEED_1_EARLY) * YEAR_DISCOUNT, rel=0.01)
+    # D-079: the rate is per round, so the 1st rung is now an exact no-op
+    # even when the relabel rolls it to next season — the rung's NAME moves,
+    # its value does not.
+    assert rows["generic_pick_1_early"]["pick_value"] == _PV_1_EARLY
+    assert rows["generic_pick_1_early"]["name"] == "2027 Early 1st"
+    # The 2nd rung still takes its year of discount, in VALUE space, matching
+    # pick_pool_value (and therefore the owned 2027 pick of the same round).
+    pv2 = rows["generic_pick_2_mid"]["pick_value"]
+    seed_2_mid = GENERIC_PICK_SEEDS[(2, "Mid")]
+    assert pv2 < round(max(0, (seed_2_mid - 1200) / 6), 1)
+    assert elo_to_value(1200 + 6 * pv2) == pytest.approx(
+        elo_to_value(seed_2_mid) * YEAR_DISCOUNT, rel=0.01)
 
 
 def test_relabel_never_touches_ids_elo_or_rank(client):

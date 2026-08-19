@@ -701,6 +701,18 @@ _DEFAULT_CFG: dict[str, float] = {
     # are untouched. 0 disables (undamped, as before); confidence=None
     # (no comparison counts) is also a no-op at any value.
     "mismatch_confidence_damp":   1.0,
+
+    # ------------------------------------------------------------------
+    # D-079 (2026-08-19) — per-round draft-pick year decay. Read ONLY
+    # through pick_values.year_decay(round); trade_service itself never
+    # uses them. They live here because _c() is the live-config accessor
+    # reload_config() refreshes, so a PUT /api/admin/config reprices picks
+    # with no deploy. All four at 0.85 = the pre-D-079 uniform behaviour.
+    # ------------------------------------------------------------------
+    "pick_year_decay_r1":         1.00,
+    "pick_year_decay_r2":         0.85,
+    "pick_year_decay_r3":         0.85,
+    "pick_year_decay_r4":         0.85,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

@@ -10,6 +10,54 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19 — Per-round draft-pick year decay (D-079); firsts stop decaying
+
+**Branch:** `feat/pick-year-decay`, from `origin/main` `02e27dd`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/pick-year-decay/scope.md](../docs/plans/pick-year-decay/scope.md). Review: [docs/reviews/2026-08-19-pick-year-valuation.md](../docs/reviews/2026-08-19-pick-year-valuation.md). Decision: [D-079](DECISIONS.md). Open question: [Q-018](OPEN_QUESTIONS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3404 passed, 1 skipped (baseline at `02e27dd`) | **3416 passed, 1 skipped, 0 failed** (+12 new) |
+| `tsc --noEmit` / `testid-lint` | n/a — **zero files under `mobile/` changed** | unaffected |
+| Bake-off arm-A golden + knob-inventory guard | 10 passed | 10 passed, after recording the exclusion decision |
+
+Mid-run the change produced **8 failures, every one of them the intended behaviour change** — seven
+behavioural tests asserting the old round-1 discount, plus the bake-off knob-inventory guard demanding
+a written decision for the four new `_DEFAULT_CFG` keys. None were suppressed. Each of the seven was
+**retargeted to assert the new intent plus a still-decaying round**, so "someone flattened every round"
+now fails loudly rather than passing silently: `test_owned_picks.py`, `test_dynasty_value_pick_scale.py`,
+`test_league_picks_tier.py`, `test_pick_value_scaling.py`, `test_pick_pricing_m6b.py`,
+`test_pick_rung_year_labels.py`, `test_pick_values_in_suggestions.py`.
+
+**One of those retargets was a near-miss worth recording.** `test_pick_values_in_suggestions.py` seeded
+its player fixture at a hard-coded Elo `1552.0`, chosen because it matched the *old* 2029 1st value
+(~1300). After the repricing that literal would have quietly turned "a player against a 1st" into
+"a mid player against a 1st" and the test would still have passed — measuring nothing. The seed is now
+**derived** from `pick_pool_value(1, 3)`, so the fixture moves with the ladder.
+
+**New coverage — 12 tests in `backend/tests/test_pick_year_decay.py`:** default rates; deep-round
+clamping onto `_r4`; live `model_config` reads; the `[0,1]` clamp (a rate > 1 would invert the
+arbitrage); **the deploy-free revert** — all four keys at 0.85 reproducing the pre-D-079 ladder on both
+value scales, including the literal 1300.1 that was the bug; a 2029 1st equalling a 2027 1st; later
+rounds still decaying with round ordering intact at every horizon; **zero value gradient between any
+two 1sts** (the anti-swap invariant); `compute_pick_value` on the same clock; round-aware rung
+relabelling; and a no-config fallback so a DB outage cannot take pricing down.
+
+**Code-walk proof (replaces a simulator capture, per D-056).** The evidence that *served cards* change
+is `trade_service.overpay_ok` (`backend/trade_service.py:1502–1521`) flipping verdict on the operator's
+actual card, impression `c67c2fd1e97cb6bf`: Adams 1138.8 vs the 2029 1st at 1300.1 → gap 161.3, ratio
+0.124, under both floors (500 / 0.25) → **served**, which is what prod did. At 2117.0 → gap 978.2,
+ratio 0.462, over both floors → **killed**. Asserted as the gate's boolean, not as a number.
+
+**Prod corpus measurement (read-only, `SET TRANSACTION READ ONLY`, SELECT only).** 2048
+`deck_impressions` rows with `assets_json`: **58.5 %** contain a pick; firsts are **84 %** of all pick
+mentions; **99 cards (4.8 %)** moved a 1st one way and a *different-year* 1st the other — the arbitrage,
+counted. Re-run that query after merge; the expected post-fix count is **0**, structurally.
+
+**NOT run:** the manual TestFlight checklist (§3 of the scope block) — it needs the operator on a build.
+Nothing here is runtime evidence from a device.
+
+---
 ## 2026-08-18e — Bake-off deck composition (three groups of ten; arm A out of the roster)
 
 **Branch:** `feat/bakeoff-composition`, from `origin/main` `217a8e1`. **Not shipped** — not pushed, not merged. Flag `trade.bakeoff` stays **OFF**.

@@ -184,17 +184,29 @@ def test_market_future_season_uses_dps_own_mid_rung():
 
 
 def test_market_beyond_dp_horizon_extrapolates_with_the_shipped_discount():
-    """DP publishes through 2028. 2029+ rides `YEAR_DISCOUNT` off the deepest
-    published season, in value space — the same clock `pick_pool_value` uses,
-    so the two curves do not diverge in the tail."""
+    """DP publishes through 2028. 2029+ rides the round's `year_decay` off the
+    deepest published season, in value space — the same clock
+    `pick_pool_value` uses, so the two curves do not diverge in the tail.
+
+    D-079 made that clock per-round, and the tail follows it: a round-1 tail
+    is FLAT (decay 1.0), a round-2 tail still decays. Pinning both is what
+    stops the market path from quietly keeping a rate the ladder abandoned.
+    """
     _flag_on()
     m = data_loader.load_pick_slot_values("1qb_ppr")
     base = ts.elo_to_value(m["2028 1st"])          # unrounded, as the code uses
     assert pv.market_pick_pool_value(2028, 1, "1qb_ppr") == round(base, 1)
     assert pv.market_pick_pool_value(2029, 1, "1qb_ppr") == round(
-        base * pv.YEAR_DISCOUNT, 1)
+        base * pv.year_decay(1), 1)
     assert pv.market_pick_pool_value(2031, 1, "1qb_ppr") == round(
-        base * pv.YEAR_DISCOUNT ** 3, 1)
+        base * pv.year_decay(1) ** 3, 1)
+    # round 1 is flat by default, so the tail is literally the horizon price
+    assert pv.market_pick_pool_value(2031, 1, "1qb_ppr") == round(base, 1)
+
+    base2 = ts.elo_to_value(m["2028 2nd"])
+    assert pv.market_pick_pool_value(2031, 2, "1qb_ppr") == round(
+        base2 * pv.YEAR_DISCOUNT ** 3, 1)
+    assert pv.market_pick_pool_value(2031, 2, "1qb_ppr") < round(base2, 1)
 
 
 def test_market_is_scoring_format_aware():

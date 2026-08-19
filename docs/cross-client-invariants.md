@@ -746,3 +746,29 @@ Aggregate asset values shown to users are expressed as pick-equivalent labels
 ("≈N firsts", `_aggregate_pick_label`), never raw numerics — on every client,
 ungated. Per-asset value uses the 8-rung `Tier` enum (server-computed). Raw
 numeric values are a debugging/share-image-only representation (#277/#280).
+
+## Draft-pick year decay is PER ROUND — firsts are flat (D-079, 2026-08-19)
+
+**How much a draft pick loses per season it sits in the future is a function of the pick's ROUND, and round 1 loses nothing.** A 2029 1st and a 2026 1st are the same number. Rounds 2, 3 and 4 keep decaying at 0.85/yr.
+
+This is registered here because pick values reach users through five surfaces that must agree — the tier badge on `GET /api/league/picks`, the rung values on `/api/rankings` and `/api/trio`, the Draft Room board, the trade calculator's pick rows, and every deck card's `give_value`/`receive_value` — and because a client that re-derives "a far-out pick is worth less" locally would now contradict the server.
+
+**The rule and its home.** `pick_values.year_decay(round)` is the single source; it reads `model_config` `pick_year_decay_r{1..4}` live through `trade_service._c` (see [config-reference](config-reference.md#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)). Rounds past 4 clamp onto `_r4`, exactly as `pick_pool_value` clamps deep rounds onto the `(4, 'Mid')` seed. Every pricing scale routes through it:
+
+| Site | Scale | What it prices |
+|---|---|---|
+| `pick_values.pick_pool_value` | engine value space | `draft_picks.pool_value` for owned league picks |
+| `pick_values.discount_pick_value` | rung `pick_value` | the #207 year-explicit generic rungs on `/api/rankings` |
+| `pick_values.market_pick_pool_value` | engine value space | ONLY the tail past DynastyProcess's published horizon — inside DP's window the market's own published year-over-year price stands and is never re-discounted |
+| `database.compute_pick_value` | legacy 0–100 pick scale | the older `draft_picks.pick_value` column |
+
+**Never** hard-code a per-year discount in a client, and never re-derive one from a pick's label year. `GENERIC_PICK_SEEDS` and the tier band cutoffs are unchanged by D-079 — the twelve rungs are current-year assets and were never year-discounted.
+
+**Two observable consequences that are the point, not bugs:**
+
+- A far-out 1st now badges in the **`first_1`** band, not `second`. D-320-2's rule ("the badge reflects today's value, not the pick's name") is unchanged; the value it reflects moved. Pinned by `backend/tests/test_league_picks_tier.py::test_far_out_pick_tier_is_the_discounted_band`.
+- Swapping a 1st for a different-year 1st moves exactly zero value, so the optimizer sees no edge in it. That closes the year arbitrage behind the operator's "random 1st swap. Shouldn't happen" reports.
+
+**Deploy-free revert:** set all four keys to 0.85 and `POST /api/feature-flags/reload`-equivalent for config (`PUT /api/admin/config/<key>`, which calls `trade_service.reload_config`). Pinned by `test_pick_year_decay.py::test_all_rates_at_the_old_constant_reproduce_the_old_behaviour`.
+
+**Analysis, measured prod impact, and the external sources that DISAGREE with the round-1 call:** [docs/reviews/2026-08-19-pick-year-valuation.md](reviews/2026-08-19-pick-year-valuation.md).

@@ -60,6 +60,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Outlook odds (#169) — `backend/outlook/`](#outlook-odds-169-backendoutlook)
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
+  - [Draft-pick year decay (D-079) — `pick_values.py`, DB-seeded](#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
@@ -963,6 +964,23 @@ Neutral cases weight at exactly 1.0 and are byte-identical to pre-feature behavi
 | `verdict_lopsided_min_gap_pct` | 0.20 | `classify_verdict` band cut: gap ≥ this → `lopsided`; else `slight` |
 
 These were introduced by backlog #6 (verdict banner) and are **vendored into `_DEFAULT_CFG` by backlog #27** (open calculator) when #6 is not yet integrated — the public `/api/calc/score` calls `classify_verdict`, so it shares the exact band thresholds in-app trade cards use. If #6 lands first, the keys already exist and #27's copy is a harmless duplicate to drop on merge.
+
+### Draft-pick year decay (D-079) — `pick_values.py`, DB-seeded
+
+Four knobs, one per draft round, setting the multiplicative fraction of a pick's value **retained per season the pick is in the future**. Read live through `pick_values.year_decay(round)` → `trade_service._c`, so a `PUT /api/admin/config/<key>` (which calls `trade_service.reload_config`) reprices every pick with no deploy. Rounds past 4 clamp onto `pick_year_decay_r4`, mirroring how `pick_pool_value` clamps deep rounds onto the `(4, 'Mid')` seed. Clamped to `[0, 1]` on read: a rate above 1 would make a further-out pick worth *more*.
+
+Consumed by `pick_pool_value` (owned-pick `pool_value`), `discount_pick_value` (the #207 year-explicit rungs), `database.compute_pick_value` (the legacy 0–100 scale), and `market_pick_pool_value` **only past DynastyProcess's published horizon** — inside DP's window DP's own year-over-year price is the market's discount and is not re-discounted. See [cross-client-invariants → Draft-pick year decay](cross-client-invariants.md#draft-pick-year-decay-is-per-round--firsts-are-flat-d-079-2026-08-19).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pick_year_decay_r1` | 1.00 | 1st-round picks: **flat**. A 2029 1st prices identically to a 2026 1st (2117.0 in engine value space). Operator direction 2026-08-19 ("firsts should hold similar value YOY"), after two independent tester reports that far-out 1sts were being given away for mid players and swapped for each other. ⚠️ **This is a product call, not a market calibration** — every public source discounts firsts (DynastyProcess publishes a flat 20 %/yr rule; FantasyCalc's 2027→2029 CAGR is 0.80; KTC's is 0.83), and three of four discount firsts *harder* than later rounds. Logged as a known divergence in `living-memory/OPEN_QUESTIONS.md` Q-018. |
+| `pick_year_decay_r2` | 0.85 | 2nd-round picks — unchanged from the pre-D-079 uniform rate. Corroborated: KTC's 1QB crowd rate for 2nds is 0.860. DP (0.80) and FantasyCalc (0.91) bracket it. |
+| `pick_year_decay_r3` | 0.85 | 3rd-round picks. KTC 1QB crowd rate 0.860. |
+| `pick_year_decay_r4` | 0.85 | 4th-round picks **and deeper** (deep rounds clamp here). KTC 1QB crowd rate 0.856. |
+
+> **Deploy-free revert:** set all four to `0.85` — that reproduces the pre-D-079 uniform discount exactly, on both value scales. Pinned by `backend/tests/test_pick_year_decay.py::test_all_rates_at_the_old_constant_reproduce_the_old_behaviour`. Setting `pick_year_decay_r1` alone is the narrow revert of just the round-1 call.
+
+> **Not a generation knob.** These four are deliberately **excluded from `MODEL_A_PROFILE`** (bake-off arm A) — they price an asset rather than decide which package to build from priced assets, and pinning arm A to the old rate would confound generation policy with a repricing. Reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
 
 ### Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`
 

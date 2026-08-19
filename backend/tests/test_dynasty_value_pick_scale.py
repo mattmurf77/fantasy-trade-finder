@@ -44,12 +44,19 @@ def test_compute_pick_value_output_no_longer_near_zero():
 
 
 def test_future_pick_discount_survives_the_bridge():
-    # 2027 1st (one year out) is worth less than the 2026 1st but still
-    # far from zero — the year discount must stay meaningful post-bridge.
-    v_now    = dynasty_value(_Pick(pick_value=compute_pick_value(1, 2026, 2026)))
-    v_future = dynasty_value(_Pick(pick_value=compute_pick_value(1, 2027, 2026)))
+    # D-079 retargeted this test. Round 1 is FLAT across years now, so the
+    # thing that must survive the bridge is a 2nd's decay — a round that
+    # still discounts. The 1st is asserted flat in the same breath, because
+    # "the bridge silently re-introduced a round-1 discount" is exactly the
+    # regression this file is positioned to catch.
+    v_now    = dynasty_value(_Pick(pick_value=compute_pick_value(2, 2026, 2026)))
+    v_future = dynasty_value(_Pick(pick_value=compute_pick_value(2, 2027, 2026)))
     assert 0 < v_future < v_now
-    assert v_future > 1000.0
+
+    f_now    = dynasty_value(_Pick(pick_value=compute_pick_value(1, 2026, 2026)))
+    f_future = dynasty_value(_Pick(pick_value=compute_pick_value(1, 2029, 2026)))
+    assert f_future == f_now
+    assert f_future > 1000.0
 
 
 def test_round_ordering_preserved():

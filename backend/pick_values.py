@@ -41,7 +41,90 @@ _PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
 # Year discount applied to an owned pick's pool_value per season out. Mirrors
 # database._PICK_YEAR_DISCOUNT (the legacy pick_value scale) so the two scales
 # discount the future at the same rate — only the base scale differs.
+#
+# ⚠️  SUPERSEDED AS A PRICING RATE by the per-round ladder below (D-079,
+# 2026-08-19). It survives as (a) the round-2..4 default, and (b) the rate
+# `market_pick_pool_value` uses to extrapolate PAST DynastyProcess's published
+# horizon for rounds it has no per-round opinion about. Read the rate through
+# `year_decay(round_)`, never this constant, at any site that prices a pick.
 YEAR_DISCOUNT = 0.85   # 15 % off per year out
+
+
+# ── D-079 — per-round year decay (model_config `pick_year_decay_r{1..4}`) ──
+#
+# THE DEFECT THIS FIXES (docs/reviews/2026-08-19-pick-year-valuation.md):
+# one uniform 0.85/yr priced a 2029 1st at 61.4 % of a 2026 1st (2117.0 →
+# 1300.1). That is low enough that the deck served "give Davante Adams,
+# receive a 2029 1st" as near-parity (impression c67c2fd1e97cb6bf, prod
+# 2026-08-19: give_value 1138.8 vs receive_value 1300.1), and it opened a
+# pure YEAR ARBITRAGE between two picks that are the same asset — 99 of 2048
+# served cards moved a 1st one way and a different-year 1st the other.
+#
+# THE MODEL (operator direction, 2026-08-19): "firsts should hold similar
+# value YOY. Other picks can degrade the longer away they are." Round 1 is
+# therefore FLAT (decay 1.0); rounds 2–4 keep decaying.
+#
+# ⚠️  ROUND 1 = 1.0 IS AN OPERATOR CALL, NOT A MARKET CALIBRATION, and the
+# external evidence runs AGAINST it — every public source we could read
+# discounts firsts, and three of four discount firsts HARDER than later
+# rounds. DynastyProcess publishes an explicit rule ("80% of the current
+# year's value", dynastyprocess.com/values) applied flat to every round;
+# FantasyCalc's 2027→2029 CAGR is 0.80 for 1sts but 0.91/0.95/0.98 for
+# rounds 2/3/4; KeepTradeCut's 1QB round means are 0.830/0.860/0.860/0.856.
+# Nobody prices a far-out 3rd more steeply than a far-out 1st. The operator's
+# direction still stands (it is a product decision about what THIS app should
+# recommend, and it is what closes the year-arbitrage defect), but the
+# disagreement is logged in D-079 / Q-018 and the knob exists so it is one
+# config write to walk back. Full numbers and sources:
+# docs/reviews/2026-08-19-pick-year-valuation.md.
+#
+# Rounds 2–4 hold the shipped 0.85 — which is NOT an accident of inertia:
+# KTC's raw crowd rates for exactly those rounds are 0.860 / 0.860 / 0.856,
+# so 0.85 is the incumbent AND the best-corroborated number available. DP
+# (0.80) and FantasyCalc (0.91–0.98) bracket it on either side. Moving it
+# would be an unforced repricing; this change stays on the reported defect.
+#
+# REVERT WITHOUT A DEPLOY: set `pick_year_decay_r1` back to 0.85 in
+# model_config and POST /api/admin/config (which calls trade_service.
+# reload_config). Every rate reads live through `trade_service._c`, so all
+# four rates at 0.85 reproduce today's behaviour exactly, everywhere.
+PICK_YEAR_DECAY_DEFAULTS: dict[int, float] = {
+    1: 1.00,           # a first is a first — the uncertainty cuts both ways
+    2: YEAR_DISCOUNT,
+    3: YEAR_DISCOUNT,
+    4: YEAR_DISCOUNT,
+}
+_DECAY_MIN_ROUND, _DECAY_MAX_ROUND = 1, 4
+
+
+def year_decay_key(round_: int) -> str:
+    """model_config key holding the per-year decay for `round_`. Rounds
+    outside 1–4 clamp onto the nearest modelled round, exactly as
+    `pick_pool_value` clamps deep rounds onto the (4, 'Mid') seed."""
+    try:
+        r = int(round_)
+    except (TypeError, ValueError):
+        r = _DECAY_MAX_ROUND
+    return f"pick_year_decay_r{max(_DECAY_MIN_ROUND, min(r, _DECAY_MAX_ROUND))}"
+
+
+def year_decay(round_: int) -> float:
+    """Live per-year value multiplier for a pick of `round_`.
+
+    Reads `model_config` through `trade_service._c` (the same live-config
+    accessor every other engine knob uses, so a PUT to /api/admin/config takes
+    effect on the next reload with no deploy). Clamped to [0, 1]: a rate above
+    1 would make a further-out pick worth MORE, which no source supports and
+    which would re-open the arbitrage in the other direction.
+    """
+    key = year_decay_key(round_)
+    try:
+        from .trade_service import _c
+        rate = float(_c(key))
+    except Exception:
+        rate = PICK_YEAR_DECAY_DEFAULTS[
+            int(key.rsplit("_r", 1)[1])]
+    return max(0.0, min(1.0, rate))
 
 
 def generic_pick_label(rnd: int, tier: str) -> str:
@@ -80,7 +163,8 @@ def year_pick_label(year: int, rnd: int, tier: str) -> str:
     return f"{int(year)} {tier} {_PICK_ORDINALS.get(rnd, str(rnd))}"
 
 
-def discount_pick_value(pick_value: float, years_out: int) -> float:
+def discount_pick_value(pick_value: float, years_out: int,
+                        round_: int = 1) -> float:
     """Apply the year discount to a rung's `pick_value` in VALUE space.
 
     `pick_value` is the universal pool's engine bridge — the pool builder
@@ -91,13 +175,19 @@ def discount_pick_value(pick_value: float, years_out: int) -> float:
     like the owned 2027 pick of the same round: `pick_pool_value(r, 1)`.
 
     `years_out=0` is an exact no-op, which is what keeps a not-drafted
-    league byte-identical to today's payload.
+    league byte-identical to today's payload. Under D-079 `round_=1` is a
+    second exact no-op (decay 1.0), which is why the relabel path must pass
+    the rung's real round — the caller (`server._apply_pick_rung_year_labels`)
+    has already parsed it out of the rung id.
     """
     if years_out <= 0:
         return pick_value
+    rate = year_decay(round_)
+    if rate >= 1.0:
+        return pick_value
     from .trade_service import elo_to_value as _e2v, value_to_elo as _v2e
     elo = 1200.0 + 6.0 * max(0.0, float(pick_value))
-    discounted = _e2v(elo) * (YEAR_DISCOUNT ** int(years_out))
+    discounted = _e2v(elo) * (rate ** int(years_out))
     return round(max(0.0, (_v2e(discounted) - 1200.0) / 6.0), 1)
 
 
@@ -107,8 +197,12 @@ def pick_pool_value(round_: int, years_out: int,
 
     A league pick of `(round, years_out)` is priced at the generic ladder's
     **Mid** tier of that round (operator decision 2026-07-18 — we can't yet
-    resolve a pick's slot), then discounted by `YEAR_DISCOUNT ** years_out` in
-    value space (mirroring the anchor wizard's value→elo round-trip).
+    resolve a pick's slot), then decayed by `year_decay(round) ** years_out`
+    in value space (mirroring the anchor wizard's value→elo round-trip).
+
+    The decay rate is PER ROUND since D-079: round 1 is flat by default, so a
+    2029 1st and a 2026 1st price identically and no year arbitrage exists
+    between them. Rounds 2–4 keep the shipped 0.85.
 
     `years_out=0` → exactly the generic 'Mid <round>' pool pick's value, so a
     league 1st reconciles with GENERIC_PICK_SEEDS[(1,'Mid')] by construction.
@@ -120,7 +214,7 @@ def pick_pool_value(round_: int, years_out: int,
     base_elo = GENERIC_PICK_SEEDS.get(
         (round_, "Mid"), GENERIC_PICK_SEEDS[(4, "Mid")])   # clamp deep rounds
     base_val = _e2v(base_elo)
-    return round(base_val * (YEAR_DISCOUNT ** max(0, years_out)), 1)
+    return round(base_val * (year_decay(round_) ** max(0, years_out)), 1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -255,9 +349,11 @@ def market_pick_pool_value(season: int, round_: int,
     fall back to the shipped ladder rather than inventing a number.
 
     Seasons PAST DP's horizon (it publishes ~3 years out) are extrapolated from
-    the deepest published season with the shipped `YEAR_DISCOUNT`, in value
-    space — the same discount `pick_pool_value` uses, so the two curves stay
-    on one clock out at 2029+ where DP has nothing to say.
+    the deepest published season with the shipped per-round `year_decay`, in
+    value space — the same rate `pick_pool_value` uses, so the two curves stay
+    on one clock out at 2029+ where DP has nothing to say. Inside DP's window
+    the market curve is unchanged by D-079: DP's own published year-over-year
+    prices ARE the market's discount, and we do not re-discount them.
 
     Format-aware by construction (O2/M6 §2.3: DP prices every pick higher in
     superflex — a 2026 1.01 is Elo 1864.3 in `sf_tep` vs 1816.5 in `1qb_ppr`).
@@ -288,7 +384,7 @@ def market_pick_pool_value(season: int, round_: int,
     base = _market_round_value(slot_map, horizon, round_)
     if base is None:
         return None
-    return round(base * (YEAR_DISCOUNT ** (season - horizon)), 1)
+    return round(base * (year_decay(round_) ** (season - horizon)), 1)
 
 
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",

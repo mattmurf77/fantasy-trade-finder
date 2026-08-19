@@ -6011,7 +6011,9 @@ def ranked_player_to_dict(rp) -> dict:
 # served `name` and `pick_value` change.
 #
 #   league not drafted → "2026 Early 1st", years_out=0 (exact no-op on value)
-#   league drafted     → "2027 Early 1st", years_out=1 (existing 0.85 discount)
+#   league drafted     → "2027 Early 1st", years_out=1 (per-round decay, D-079
+#                        — round 1 is flat by default, so only the 2nd/3rd/4th
+#                        rungs actually move)
 #   unknown / no league / flag off → today's "Early 1st Round Pick", unchanged
 # ---------------------------------------------------------------------------
 
@@ -6103,7 +6105,12 @@ def _apply_pick_rung_year_labels(dicts: list[dict], sess) -> None:
         rnd, tier = parsed
         d["name"] = year_pick_label(year, rnd, tier)
         if years_out and d.get("pick_value") is not None:
-            d["pick_value"] = discount_pick_value(d["pick_value"], years_out)
+            # D-079: the decay rate is per round, so the rung's own round has
+            # to reach the helper. `rnd` came out of `parse_generic_pick_id`
+            # three lines up, so it is always the rung's real round — and a
+            # 1st-round rung is now an exact no-op (decay 1.0 by default).
+            d["pick_value"] = discount_pick_value(d["pick_value"], years_out,
+                                                  rnd)
 
 
 # ---------------------------------------------------------------------------

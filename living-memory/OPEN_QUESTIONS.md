@@ -7,12 +7,30 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Open Items (pick-year valuation)](#2026-08-19--open-items-pick-year-valuation)
 - [2026-08-15 — Open Items (compressed-board pool prune)](#2026-08-15--open-items-compressed-board-pool-prune)
 - [2026-08-14 — Open Items (sleeper propose_trade)](#2026-08-14--open-items-sleeper-propose_trade)
 - [2026-06-07 — Open Items (perf-optimization)](#2026-06-07--open-items-perf-optimization)
 - [2026-05-21 — Open Items](#2026-05-21--open-items)
 - [Closed Questions (kept for cross-reference)](#closed-questions-kept-for-cross-reference)
 - [Conventions](#conventions)
+
+---
+
+## 2026-08-19 — Open Items (pick-year valuation)
+
+### Q-018 — We now price future 1st-round picks above every public market source. Is that the intent?
+- **Why it matters:** [D-079](DECISIONS.md) made 1st-round picks hold their value across seasons (a 2029 1st = a 2026 1st = 2117.0), on the operator's explicit direction, and it does cleanly close both reported defects. But the external research done at the same time found **no source that agrees**, and three of four that run the *opposite* way:
+  - **DynastyProcess** publishes an explicit rule — future picks are 80 % of the current year's value — applied **flat to every round** (2027→2028: 1st 0.7999, 2nd 0.8010, 3rd 0.8056, 4th 0.8000).
+  - **FantasyCalc** (the only source publishing 2029) — 2027→2029 CAGR: 1st **0.80**, 2nd 0.91, 3rd 0.95, 4th 0.98. Their 2029 1st is 64 % of their 2027 1st.
+  - **KeepTradeCut** 1QB round means (2027→2028): 1st 0.830, 2nd 0.860, 3rd 0.860, 4th 0.856.
+  - **DynastyCalc** Mid rungs: 1st 0.930/0.972, 2nd 0.972/0.971, 3rd 0.987/0.975.
+  So the market view is either "all rounds decay the same" or "firsts decay hardest" — never "firsts are flat".
+- **The case for shipping it anyway (and why it was):** a flat rate is the **only** rate under which two 1sts of different years are worth the same, and therefore the only one that makes the first-for-first year arbitrage structurally impossible rather than filtered after the fact. That arbitrage was 99 of 2048 served cards. Any rate below 1.0 — including the market's 0.80 — leaves it open. Pricing an asset class above market in your own recommendations is also a coherent product stance if the intent is that users should hold firsts.
+- **Two caveats that soften the market evidence** (both worth weighing before treating it as decisive): ratios only mean something on a zero-anchored scale, and an offset fit collapses KTC's apparent round-gradient entirely at `c ≈ 555` (flat 0.834, spread 0.011) — so **KTC's gradient is largely a scale artifact**. And the 2027 rookie class is unusually hyped, which inflates every 2027 number and makes any 2027→2028 step overstate pure time discount.
+- **Needed to close:** an operator call, ideally after a TestFlight pass on the new pricing — does "a 2029 1st is worth exactly a 2026 1st" read right in the deck, or does it now overprice far-out firsts in the other direction? Middle options exist and are one config write each: all four rounds on one rate (0.85 keeps today's rounds-2–4 behaviour; 0.80 matches DP) reverts to market alignment but **re-opens the swap defect**; `pick_year_decay_r1` alone at 0.85 is the narrow revert.
+- **Owner:** operator (product call), then a backend session if the rate moves.
+- **Status:** OPEN — **not blocking**. The shipped default closes the reported defect; this question is about whether the calibration is right, not whether the mechanism is.
 
 ---
 

@@ -40,7 +40,11 @@ def _isolate():
 
 
 # 2029 picks in a 2026 season → 3 years out. The values the operator should
-# have seen (engine value space): R1≈1300, R2≈503, R3≈250.
+# have seen (engine value space): R1≈2117, R2≈503, R3≈250. R1 is the FLAT
+# current-year price since D-079 (it was 1300 while firsts still decayed);
+# rounds 2-3 keep the 0.85/yr they always had. Every number below is derived
+# from `pick_pool_value`, never literal, so a retune moves the fixture with
+# the ladder instead of silently falsifying this file.
 _PICKS = [
     {"pick_id": f"L185_2029_{rnd}_1", "season": 2029, "round": rnd,
      "owner_user_id": "opp", "is_traded": 0, "original_username": "",
@@ -104,8 +108,10 @@ def test_player_vs_1st_2nd_3rd_differ_materially(monkeypatch):
     different receive values AND different fairness — pre-fix all three were
     identical (the engine's 1500-Elo default)."""
     assets = _pick_assets(monkeypatch)
-    # Ward seeded ≈ a 2029 1st (value ~1297) — the operator's mental model.
-    seed_map = {"ward": 1552.0}
+    # Ward seeded ≈ a 2029 1st — the operator's mental model. DERIVED from
+    # the ladder, because D-079 moved the 2029 1st from ~1300 to ~2117 and a
+    # hard-coded 1552.0 quietly turned this into "a mid player vs a 1st".
+    seed_map = {"ward": ts.value_to_elo(pick_pool_value(1, 3))}
     seed_map.update(srv._pick_asset_elos(assets))
     seed_value = lambda pid: ts.elo_to_value(seed_map.get(pid, 1500.0))
 
@@ -117,7 +123,7 @@ def test_player_vs_1st_2nd_3rd_differ_materially(monkeypatch):
                                              None, 0.75)
         rvs[rnd] = rv
         verdicts[rnd] = fairness is not None
-    # Materially different values (R1 ≈ 1300, R2 ≈ 503, R3 ≈ 250).
+    # Materially different values (R1 ≈ 2117, R2 ≈ 503, R3 ≈ 250).
     assert rvs[1] - rvs[2] > 300
     assert rvs[2] - rvs[3] > 100
     assert rvs[1] == pytest.approx(pick_pool_value(1, 3), abs=2.0)

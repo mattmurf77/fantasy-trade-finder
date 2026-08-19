@@ -135,19 +135,32 @@ def test_pick_rows_carry_literal_tier_rungs(client):
 
 
 def test_far_out_pick_tier_is_the_discounted_band(client):
-    """D-320-2 (operator accepted): the badge reflects TODAY's discounted
-    value, not the pick's name — a 2029 1st prices into the 'second' band.
-    This is also the honest cross-surface consistency #320 asks for, and a
-    second S1 trap (unscaled, 1300.1 reads as Elo 1300 → 'third')."""
+    """D-320-2's RULE is unchanged — the badge reflects TODAY's value, not
+    the pick's name. D-079 changed the VALUE it reflects: a 2029 1st no
+    longer decays (2117.0, not 1300.1), so the honest badge is now 'first_1'
+    rather than 'second'. The operator reported the old badge's cause
+    directly ("2029 1st values are the issue"), so this test now pins the
+    fix. The S1 "wrong scale" trap is preserved by the canonical-walk
+    assertion below: unscaled, 2117.0 would read as Elo 2117 and mis-band.
+
+    A round that still decays is asserted alongside it, so "someone flattened
+    every round" fails here rather than shipping."""
     _install_sess(_mk_sess())
     code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
     assert code == 200
-    row = _picks_by_id(body)[f"{LEAGUE}_2029_1_1"]
+    rows = _picks_by_id(body)
+    row = rows[f"{LEAGUE}_2029_1_1"]
     assert row["round"] == 1
-    assert row["tier"] == "second"
+    assert row["tier"] == "first_1"
     # ...and it matches the canonical walk over the inverted value map.
     assert row["tier"] == server.RankingService.tier_for_elo(
         seed_elo_for_value(float(row["pool_value"])), None, "1qb_ppr")
+    # A far-out 1st is now worth exactly a current-year 1st...
+    assert float(row["pool_value"]) == float(
+        rows[f"{LEAGUE}_2026_1_1"]["pool_value"])
+    # ...while a future 2nd is still worth strictly less than a current one.
+    assert float(rows[f"{LEAGUE}_2027_2_1"]["pool_value"]) < float(
+        rows[f"{LEAGUE}_2026_2_9"]["pool_value"])
 
 
 def test_asserted_user_source_pick_carries_tier_too(client):

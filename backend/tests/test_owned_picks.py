@@ -26,10 +26,21 @@ def test_pool_value_reconciles_with_generic_mid_twin():
 
 
 def test_pool_value_year_discount_is_monotonic():
-    vals = [pick_pool_value(1, y) for y in range(0, 4)]
-    assert vals == sorted(vals, reverse=True)          # strictly decreasing
-    # discount applied in value space at the configured rate
-    assert pick_pool_value(1, 1) == round(pick_pool_value(1, 0) * YEAR_DISCOUNT, 1)
+    # D-079 split the one rate into four. Rounds 2-4 keep the shipped 0.85
+    # and must stay monotonically decreasing in years_out...
+    for rnd in (2, 3, 4):
+        vals = [pick_pool_value(rnd, y) for y in range(0, 4)]
+        assert vals == sorted(vals, reverse=True)
+        assert vals[0] > vals[-1]                      # strictly, not merely
+        # discount applied in value space at the configured rate (abs=0.1:
+        # the helper rounds its own unrounded base, so recomputing from the
+        # rounded one can land a tenth away)
+        assert pick_pool_value(rnd, 1) == pytest.approx(
+            pick_pool_value(rnd, 0) * YEAR_DISCOUNT, abs=0.1)
+    # ...while round 1 is FLAT: a 2029 1st prices exactly like a 2026 1st.
+    # This is the whole defect the operator reported on 2026-08-19 ("2029 1st
+    # values are the issue"), so it is pinned as an equality, not a bound.
+    assert len({pick_pool_value(1, y) for y in range(0, 5)}) == 1
 
 
 def test_pool_value_clamps_deep_rounds():

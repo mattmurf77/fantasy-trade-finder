@@ -2339,6 +2339,14 @@ _MODEL_CONFIG_DEFAULTS = [
     # the pre-fix behavior: set this to 7.0.
     ("pass_cooldown_days",       14.0,  "Dismiss cooldown: a passed trade is excluded from generation for this many days (was hard-coded 7 alongside likes). Set 7.0 to restore pre-fix behavior; likes keep their own 7-day window"),
     ("pass_cooldown_start_epoch", 1787005800.0, "Legacy-dismiss amnesty (D-067): unix epoch; dismisses recorded BEFORE this instant are exempt from the cooldown because they predate decline-reason capture (D-066, live 2026-08-17T22:22:56Z) and carry no reason. Default 2026-08-17T22:30:00Z. Raise it to the moment the reason-carrying MOBILE build reaches testers; 0 disables the amnesty"),
+    # ── D-079 per-round draft-pick year decay (pick_values.year_decay) ───
+    # Multiplicative value RETAINED per season the pick is in the future.
+    # 1.0 = flat (a 2029 1st prices like a 2026 1st). Setting all four to
+    # 0.85 restores the pre-D-079 uniform discount with no deploy.
+    ("pick_year_decay_r1", 1.00, "D-079: per-year value multiplier for a 1st-round pick; 1.0 = firsts hold value YoY (operator direction 2026-08-19). Set 0.85 to restore the pre-D-079 uniform discount"),
+    ("pick_year_decay_r2", 0.85, "D-079: per-year value multiplier for a 2nd-round pick (KTC 1QB crowd rate 0.860)"),
+    ("pick_year_decay_r3", 0.85, "D-079: per-year value multiplier for a 3rd-round pick (KTC 1QB crowd rate 0.860)"),
+    ("pick_year_decay_r4", 0.85, "D-079: per-year value multiplier for a 4th-round pick and deeper (KTC 1QB crowd rate 0.856)"),
 ]
 
 
@@ -8984,7 +8992,10 @@ _PICK_BASE: dict[int, float] = {
     3: 10.0,   # third round
 }
 _PICK_DEFAULT_VALUE = 5.0    # 4th round and beyond
-_PICK_YEAR_DISCOUNT = 0.85   # 15 % off per year out
+# ⚠️  SUPERSEDED as a pricing rate by pick_values.year_decay(round) (D-079).
+# Kept only so the constant's old meaning stays readable next to _PICK_BASE;
+# no pricing site reads it any more.
+_PICK_YEAR_DISCOUNT = 0.85   # 15 % off per year out (pre-D-079, all rounds)
 
 
 def compute_pick_value(
@@ -8997,13 +9008,22 @@ def compute_pick_value(
     Return the dynasty fantasy value for a draft pick.
 
     Uses the mid-tier base value for the round, scales by league size
-    (12-team baseline, clamped to [0.5, 1.5]), and applies a 15 % discount
-    for each year the pick is in the future.
+    (12-team baseline, clamped to [0.5, 1.5]), and applies the round's
+    per-year decay for each year the pick is in the future.
+
+    D-079: that rate is PER ROUND (`pick_values.year_decay`), not the flat
+    15 % this used to apply — round 1 is flat by default, so a 2029 1st on
+    this legacy scale now prices like a 2026 1st, exactly as it does on the
+    `pool_value` scale. Routing both scales through the one shared helper is
+    the whole point of the ladder living in `pick_values` (see that module's
+    docstring); a second, quietly different rate here is the drift the
+    original split was created to prevent.
     """
+    from .pick_values import year_decay
     base       = _PICK_BASE.get(round_, _PICK_DEFAULT_VALUE)
     scale      = max(0.5, min(1.5, league_size / 12.0))
     years_out  = max(0, season - current_season)
-    discounted = base * scale * (_PICK_YEAR_DISCOUNT ** years_out)
+    discounted = base * scale * (year_decay(round_) ** years_out)
     return round(discounted, 2)
 
 
