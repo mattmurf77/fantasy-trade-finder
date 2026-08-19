@@ -1257,3 +1257,100 @@ def test_g6_knob_change_moves_gen_v2(monkeypatch):
     ts._cfg["pos_net_cap"] = 0.0            # G6's kill switch…
     assert g6_pos_net_ok(give, recv, players) is True   # …also disables gen-v2
     ts._cfg["pos_net_cap"] = ts._DEFAULT_CFG["pos_net_cap"]
+
+
+# ---------------------------------------------------------------------------
+# Per-stage kill counts (D-087) — separating a STARVED arm from a GATED one
+# ---------------------------------------------------------------------------
+# Arm C recorded `cards=0, forfeits=9` in production against arm `current`'s
+# 40, and every existing counter on the report read zero — the batch never
+# enumerated a candidate, so no gate could be blamed and the telemetry could
+# not say which of three completely different causes applied. These four
+# tests pin each cause to a distinct, queryable stage.
+
+def test_kill_counts_no_boarded_opponent_is_stage_zero():
+    """The production league-62846 shape: NOBODY else in the league has
+    ranked, so `boarded` is empty and the pair loop never runs. Every gate
+    counter is zero because no candidate ever reached a gate — the honest
+    reading is a supply fact about the league, not a defect in the pipeline
+    (divergence-only by design, config/features.json
+    `_comment_trade_gen_v2`)."""
+    players, user_roster, opp_roster, seed, user_elo, opp_elo = _base_pair()
+    opp = _member("opp", opp_roster, {}, has_rankings=False)
+    cards, rep = _run(players, [_member("user", user_roster, user_elo), opp],
+                      user_elo, user_roster, seed)
+    assert cards == []
+    kc = rep.kill_counts()
+    assert kc["S0_boarded_opponents"] == 0
+    assert kc["S0_unranked_opponents"] == 1
+    assert kc["S2_considered"] == 0
+    assert kc["starvation_reason"] == "no_boarded_opponents"
+
+
+def test_kill_counts_no_divergence_is_stage_one():
+    """Two REAL boards that simply agree with consensus and each other.
+    Indistinguishable from the case above under the old counters (both were
+    all-zero); it has a completely different fix, so it gets its own
+    stage."""
+    players, user_roster, opp_roster, seed, _ue, _oe = _base_pair()
+    flat = dict(seed)                      # user board == consensus
+    opp = _member("opp", opp_roster, dict(seed))   # opp board == consensus
+    cards, rep = _run(players, [_member("user", user_roster, flat), opp],
+                      flat, user_roster, seed)
+    assert cards == []
+    kc = rep.kill_counts()
+    assert kc["S0_boarded_opponents"] == 1
+    assert kc["S1_no_centerpiece"] == 1
+    assert kc["S1_no_board_overlap"] == 0
+    assert kc["S2_considered"] == 0
+    assert kc["starvation_reason"] == "no_divergence"
+
+
+def test_kill_counts_no_board_overlap_is_its_own_stage():
+    """A boarded opponent who has ranked NOTHING the user has an opinion on:
+    the tradeable universe is empty before divergence is even computed."""
+    players, user_roster, opp_roster, seed, user_elo, _oe = _base_pair()
+    opp = _member("opp", opp_roster, {"unrelated_pid": 1500.0})
+    cards, rep = _run(players, [_member("user", user_roster, user_elo), opp],
+                      user_elo, user_roster, seed)
+    assert cards == []
+    kc = rep.kill_counts()
+    assert kc["S0_boarded_opponents"] == 1
+    assert kc["S1_no_board_overlap"] == 1
+    assert kc["S1_no_centerpiece"] == 0
+    assert kc["starvation_reason"] == "no_board_overlap"
+
+
+def test_kill_counts_gated_batch_names_the_gate_not_starvation():
+    """The counterpart: candidates ARE enumerated and a hard gate kills them
+    all. `starvation_reason` must stay None — the arm was fed and the gate is
+    the answer — and the ε-gate must own the kills."""
+    players, user_roster, opp_roster, seed, user_elo, opp_elo = _base_pair()
+    ts._cfg["gen2_epsilon"] = 1e9          # nothing can clear the ε-gate
+    opp = _member("opp", opp_roster, opp_elo)
+    cards, rep = _run(players, [_member("user", user_roster, user_elo), opp],
+                      user_elo, user_roster, seed)
+    assert cards == []
+    kc = rep.kill_counts()
+    assert kc["S2_considered"] > 0
+    assert kc["S3c_dual_board_ir"] > 0
+    assert kc["S4_survivors"] == 0
+    assert kc["starvation_reason"] is None
+
+
+def test_kill_counts_keys_are_stable_and_ordered_by_stage():
+    """The dict is a query surface (mirroring `presentment_kill_counts`), so
+    its key set is part of the contract, not an implementation detail."""
+    players, user_roster, opp_roster, seed, user_elo, opp_elo = _base_pair()
+    _cards, rep = _run(players,
+                       [_member("user", user_roster, user_elo),
+                        _member("opp", opp_roster, opp_elo)],
+                       user_elo, user_roster, seed)
+    assert list(rep.kill_counts()) == [
+        "S0_boarded_opponents", "S0_unranked_opponents",
+        "S1_no_board_overlap", "S1_no_centerpiece",
+        "S2_considered",
+        "S3a_composition", "S3a_net_cap", "S3a_pick_band",
+        "S3b_feasibility", "S3c_dual_board_ir", "S3d_fairness_band",
+        "S4_survivors", "S6_emitted", "starvation_reason",
+    ]

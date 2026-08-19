@@ -133,6 +133,30 @@ bucket, so every `lane_slot` stamp remains a true statement about its card.
 user. The next organic deck writes the proof itself — `filled.value + filled.outlook` should equal
 `min(pool total, 10)` per group in `bakeoff_runs.groups_json`, with `short` unchanged in character.
 
+## 2026-08-19d — Arm C (`gen_v2`) per-stage kill counts; the forfeit was a supply fact, not a bug
+
+**Branch:** `fix/armc-gen-v2-forfeits`, from `origin/main` `a130dfc`. **Not shipped** — not pushed, not merged.
+Scope block: [docs/plans/three-model-bakeoff/scope-arm-c-diagnostics.md](../docs/plans/three-model-bakeoff/scope-arm-c-diagnostics.md). Decision: [D-087](DECISIONS.md).
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 3441 passed, 1 skipped (baseline at `a130dfc`) | **3449 passed, 1 skipped, 0 failed** (+8 new) |
+| `tsc --noEmit` / testid-lint | unaffected | unaffected — no TS, mobile or web file touched |
+
+**New tests (8).** `backend/tests/test_trade_gen_v2.py` (+5): each starvation mode pinned to a distinct stage (`no_boarded_opponents`, `no_board_overlap`, `no_divergence`); the GATED case pinned to `starvation_reason is None` with the ε-gate owning the kills; the `kill_counts()` key set and order pinned as a contract. `backend/tests/test_bakeoff_serving.py` (+3): forfeits summed over an arm's groups (arm `current` no longer reports 0 when its groups forfeited), arm-C diagnostics reaching `arms_json` with the starving stage named, and drain-on-read so one run's counters cannot leak into the next.
+
+**What was measured (read-only prod, `SET TRANSACTION READ ONLY`, SELECT only).** All 18 `bakeoff_runs` rows and 8,112 `deck_impressions`:
+
+- Arm C's `cards=0` is **per-league, not per-time**: it happens only in `62846` and `11896`; league `1312140920132497408` returned 6–16 cards in all 11 of its runs. The reported "9 forfeits → 2 improvement overnight" was two different leagues, not one improving.
+- `member_rankings`: `62846` has **zero** rows; `11896` has rows for one user — the requester himself; `1312…` has 4,416 across 6 users. Arm C is divergence-only by design, so a league with no boarded *opponent* gives it nothing.
+- **Divergence supply is real but concentrated:** 96.8 % of all-time divergence impressions (1,196/1,235) come from the one league with ≥3 boards. `62846`, `11896`, and both 1-board leagues have **zero divergence impressions ever**. The 15.2 % all-time rate is not evidence arm C had input.
+- **The control:** arm `current`'s own `current_divergence` group pool is **0 in all six runs** in those leagues — identical to arm C. In the boarded league arm C's pool is 6–16 (median 7) against arm `current`'s 0–7 (median 1), and arm `current` produced no divergence at all in 8 of 11 runs. **Arm C out-produces arm `current` on the divergence axis in 11 of 11 runs where input exists.**
+- **Zero `gen_v2` impressions is serving, not generation:** `served_arm` is `'current'` on every run (`bakeoff_serve_interleaved = 0.0`, dark), so `server.py:3950` can only stamp `current` or NULL. Arm C already contributed 6 of 6 composed cards to the interleaved deck it does not serve.
+
+**Local reproduction.** All four shapes (boarded+divergent / no boarded opponent / boarded with zero divergence / boarded with no overlap) reproduced on the `_base_pair` fixture. Under the OLD counters three of the four were byte-identical all-zero reports — that indistinguishability is the defect fixed.
+
+**Not proven here.** Arm C's card *quality* — it has still never been evaluated by a user, and cannot be until `bakeoff_serve_interleaved` is lit (operator's call, deliberately untouched). Board supply, not model quality, is the binding constraint: only one production league can exercise arm C at all.
+
 ---
 ## 2026-08-19b — Give-side headliner cap (D-082); the flood C4 could not see
 
