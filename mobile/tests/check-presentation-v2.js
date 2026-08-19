@@ -529,6 +529,36 @@ assert(
   'a dark flag listed there would paint the chip for one frame before flipping',
 );
 
+// ═══════════════════════════════════════════════════════════════════════
+// 8. Surface attribution — each screen reports its OWN user_events.screen
+// ═══════════════════════════════════════════════════════════════════════
+// `screen` (the track() third arg) is a real column, already populated on
+// 100% of client-fired trade events with 12+ distinct values in prod. The
+// original build hardcoded `'Trades'` — the value TradesScreen itself
+// reports — which merged this surface, Browse All, and the deck into ONE
+// bucket and made per-surface comparison look impossible when the mechanism
+// was there all along. These assertions exist so that cannot come back.
+const signalsSrc = read('src/hooks/usePresentationSignals.ts');
+assert(
+  !/const\s+SCREEN\s*=\s*'Trades'/.test(signalsSrc),
+  "the hook does NOT hardcode screen as 'Trades'",
+  'that value collides with TradesScreen and silently merges the buckets',
+);
+assert(
+  /usePresentationSignals\(\s*screen:\s*PresentationScreen\s*\)/.test(signalsSrc),
+  'the hook takes its surface as a parameter',
+);
+for (const [file, value] of [
+  ['src/screens/TodaysTradeScreen.tsx', 'TodaysTrade'],
+  ['src/screens/TradeBrowseAllScreen.tsx', 'TradeBrowseAll'],
+]) {
+  assert(
+    new RegExp(`usePresentationSignals\\('${value}'\\)`).test(read(file)),
+    `${file.split('/').pop()} reports screen='${value}'`,
+    'each surface must be separable from the other AND from the deck',
+  );
+}
+
 console.log('');
 if (failures) {
   console.error(`${failures} check(s) failed.`);

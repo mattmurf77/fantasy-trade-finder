@@ -57,7 +57,7 @@ export default function TodaysTradeScreen() {
   const declineReasonsOn = useFlag('feedback.decline_reasons');
 
   const deck = usePresentationDeck(leagueId);
-  const signals = usePresentationSignals();
+  const signals = usePresentationSignals('TodaysTrade');
 
   const byLeague = usePresentationDismissed((s) => s.byLeague);
   const dismiss = usePresentationDismissed((s) => s.dismiss);

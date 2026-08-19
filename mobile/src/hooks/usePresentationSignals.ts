@@ -52,7 +52,19 @@ export const VIEWED_MIN_MS = 500;
 /** Dwell ceiling. Mirrors TradesScreen's DWELL_CAP_MS. */
 export const DWELL_CAP_MS = 120_000;
 
-const SCREEN = 'Trades';
+/** `user_events.screen` — the surface an event fired from.
+ *
+ * This is the EXISTING attribution mechanism (the `track()` third argument,
+ * a real column, already populated on 100% of client-fired trade events and
+ * carrying 12+ distinct values in prod). It is NOT a new analytics property
+ * and needs no taxonomy change.
+ *
+ * It is passed in rather than hardcoded because these two screens must be
+ * separable from each other AND from the deck. Hardcoding `'Trades'` here —
+ * the value `TradesScreen` already reports — silently merged all three into
+ * one bucket, which is the whole reason per-surface comparison looked
+ * impossible. */
+export type PresentationScreen = 'TodaysTrade' | 'TradeBrowseAll';
 
 function platformProp(): string {
   // Set EXPLICITLY at the emitter, never inferred downstream — the
@@ -82,7 +94,7 @@ export interface PresentationSignals {
   ) => void;
 }
 
-export default function usePresentationSignals(): PresentationSignals {
+export default function usePresentationSignals(screen: PresentationScreen): PresentationSignals {
   const signalV2On = useFlag('deck.signal_v2');
 
   const dwellRef = useRef<{ startedAt: number; pausedAt: number | null; pausedTotal: number }>({
@@ -160,7 +172,7 @@ export default function usePresentationSignals(): PresentationSignals {
           // surface fronts one card at a time by construction, and the served
           // position already lives on the impression row server-side.
           { impression_id: impressionId, trade_id: tradeId, card_index: 0 },
-          SCREEN,
+          screen,
         );
       }, VIEWED_MIN_MS);
     },
@@ -207,7 +219,7 @@ export default function usePresentationSignals(): PresentationSignals {
 
   const reasonLayer1 = useCallback(
     (card: TradeCard, reason: Layer1Code, switchedFrom: Layer1Code | 'none') => {
-      track('trade_pass_layer1', { reason, switched_from: switchedFrom, ...reasonEventProps(card) }, SCREEN);
+      track('trade_pass_layer1', { reason, switched_from: switchedFrom, ...reasonEventProps(card) }, screen);
       void postDeclineReason({ ...writeTarget(card), layer: 1, reason, switchedFrom });
     },
     [reasonEventProps, writeTarget],
@@ -215,7 +227,7 @@ export default function usePresentationSignals(): PresentationSignals {
 
   const reasonLayer2Select = useCallback(
     (card: TradeCard, reason: Layer1Code, detail: Layer2Code) => {
-      track('trade_pass_layer2', { reason, detail, has_free_text: false, ...reasonEventProps(card) }, SCREEN);
+      track('trade_pass_layer2', { reason, detail, has_free_text: false, ...reasonEventProps(card) }, screen);
       void postDeclineReason({ ...writeTarget(card), layer: 2, reason, detail });
     },
     [reasonEventProps, writeTarget],
@@ -243,7 +255,7 @@ export default function usePresentationSignals(): PresentationSignals {
           has_free_text: freeText.length > 0,
           ...reasonEventProps(card),
         },
-        SCREEN,
+        screen,
       );
       void postDeclineReason({
         ...writeTarget(card),
