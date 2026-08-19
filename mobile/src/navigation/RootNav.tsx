@@ -16,6 +16,18 @@ import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import LeagueJoinScreen from '../screens/LeagueJoinScreen';
 import TabNav from './TabNav';
 import SettingsScreen from '../screens/SettingsScreen';
+// Settings IA (docs/plans/settings-ia-hub/plan.md) — the hub page and the
+// seven second-level pages. The hub replaces SettingsScreen on the
+// `Settings` route when `account.settings_hub` is on (see SettingsRoute
+// below); the seven pages are registered unconditionally.
+import SettingsHubScreen from '../screens/settings/SettingsHubScreen';
+import SettingsLeaguesScreen from '../screens/settings/SettingsLeaguesScreen';
+import SettingsRankingScreen from '../screens/settings/SettingsRankingScreen';
+import SettingsTradeValuesScreen from '../screens/settings/SettingsTradeValuesScreen';
+import SettingsNotificationsScreen from '../screens/settings/SettingsNotificationsScreen';
+import SettingsAccountScreen from '../screens/settings/SettingsAccountScreen';
+import SettingsAboutScreen from '../screens/settings/SettingsAboutScreen';
+import SettingsTestingScreen from '../screens/settings/SettingsTestingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
@@ -76,6 +88,18 @@ type AuthStack = {
   LeagueJoin: { leagueId: string; ref?: string };
   Main: undefined;
   Settings: undefined;
+  // Settings IA second level (plan §3). Registered UNCONDITIONALLY, like
+  // every other flag-gated surface on this stack: `account.settings_hub`
+  // gates the ENTRY ROWS (the hub renders them), not the routes, so a deep
+  // link or an in-flight push during flag revalidation lands on a real page
+  // rather than a dead one.
+  SettingsLeagues: undefined;
+  SettingsRanking: undefined;
+  SettingsTradeValues: undefined;
+  SettingsNotifications: undefined;
+  SettingsAccount: undefined;
+  SettingsAbout: undefined;
+  SettingsTesting: undefined;
   Profile: { username: string };
   FeedbackInbox: undefined;
   SleeperConnect: undefined;
@@ -149,31 +173,13 @@ function HeaderTitle({ children }: { children: string }) {
   );
 }
 
-// #130 — explicit close control for modal screens. Modal presentations only
-// offered swipe-to-dismiss, which testers didn't discover on Settings. Icon
-// Button construction per components.md (32×32, radius sm, chalk-dim glyph,
-// pressed = ink-3 fill; no emoji).
-function HeaderClose({ onPress, testID }: { onPress: () => void; testID: string }) {
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel="Close"
-      onPress={onPress}
-      hitSlop={8}
-      style={({ pressed }) => [styles.headerClose, pressed && { backgroundColor: ink.ink3 }]}
-    >
-      <Icon name="x" size={20} color={chalk.dim} />
-    </Pressable>
-  );
-}
-
 // #151 — explicit JS back control for pushed screens. The NATIVE header back
 // button goes unresponsive on iOS 26 when the previous screen hides its
 // header (react-native-screens#3294 — our root stack's Main tabs run with
 // headerShown: false), which testers hit on Free Agents. A JS Pressable
 // wired straight to navigation.goBack() sidesteps the native control
-// entirely. Same Icon Button construction as HeaderClose.
+// entirely. Icon Button construction per components.md (32×32, radius sm,
+// chalk glyph, pressed = ink-3 fill; no emoji).
 function HeaderBack({ onPress, testID }: { onPress: () => void; testID: string }) {
   return (
     <Pressable
@@ -188,6 +194,44 @@ function HeaderBack({ onPress, testID }: { onPress: () => void; testID: string }
     </Pressable>
   );
 }
+
+// Settings IA (plan §7 phase 3) — `account.settings_hub` decides WHICH
+// component the `Settings` route renders: the new hub page, or the flat list
+// that shipped in 1.13.2. This is a wrapper rather than a branch inside
+// SettingsScreen on purpose. SettingsScreen opens six queries and two
+// fetches from hooks at the top of its body, so a branch inside it would
+// still pay that cost on every open (and a post-hook early return is a
+// rules-of-hooks violation). Mounting one component or the other is what
+// makes the hub's zero-network promise (plan §6) real. Flag OFF mounts
+// exactly the component it mounts today.
+function SettingsRoute(props: any) {
+  const hubEnabled = useFlag('account.settings_hub');
+  return hubEnabled ? <SettingsHubScreen {...props} /> : <SettingsScreen {...props} />;
+}
+
+// Shared header options for the Settings second-level pages. All seven are
+// plain pushes wearing the same Chalkline bar, with the #151 explicit JS
+// back control (native back is dead on iOS 26 over a headerShown: false
+// previous screen — RNS#3294). canGoBack() guards a cold-start deep link
+// into a sub-page, which has no parent to pop to.
+const settingsPageOptions =
+  (title: string, backTestID: string) =>
+  ({ navigation }: { navigation: any }) => ({
+    headerShown: true,
+    title,
+    headerTitle: () => <HeaderTitle>{title}</HeaderTitle>,
+    headerStyle: { backgroundColor: ink.ink0 },
+    headerTintColor: chalk.base,
+    headerBackVisible: false,
+    headerLeft: () => (
+      <HeaderBack
+        testID={backTestID}
+        onPress={() =>
+          navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')
+        }
+      />
+    ),
+  });
 
 export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
@@ -516,22 +560,76 @@ export default function RootNav({ booted }: { booted: boolean }) {
             </>
           )}
         </Stack.Screen>
+        {/* Settings — a pushed page, not a modal (settings-IA plan §5). The
+            page-sheet presentation is what forced navigateFromSettings to
+            dismiss Settings before every outbound link; a push lets Back
+            come back here. #130's ✕ went with the modal it was fixing —
+            the back chevron is the discoverable control it was reaching
+            for. The flip applies in BOTH `account.settings_hub` states,
+            because it is the flat list's bug too. */}
         <Stack.Screen
           name="Settings"
-          component={SettingsScreen}
+          component={SettingsRoute}
           options={({ navigation }) => ({
-            presentation: 'modal',
             headerShown: true,
             title: 'Settings',
             headerTitle: () => <HeaderTitle>Settings</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-            // #130 — swipe-dismiss was the only exit; give the modal an
-            // explicit close control.
-            headerRight: () => (
-              <HeaderClose testID="settings.close-btn" onPress={() => navigation.goBack()} />
+            // #151 pattern — native back is dead on iOS 26 when the previous
+            // screen (Main tabs) runs headerShown: false (RNS#3294). Explicit
+            // JS back; canGoBack guards the settings:// cold-start deep link.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="settings.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
             ),
           })}
+        />
+        {/* Settings second level (plan §3). Registered unconditionally —
+            `account.settings_hub` gates the hub rows that lead here, not the
+            routes. `SettingsTesting` follows the same rule its entry row
+            already did (__DEV__ || testing.stage_users gates the ROW). */}
+        <Stack.Screen
+          name="SettingsLeagues"
+          component={SettingsLeaguesScreen}
+          options={settingsPageOptions('Leagues', 'settings.leagues.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsRanking"
+          component={SettingsRankingScreen}
+          options={settingsPageOptions('Ranking', 'settings.ranking.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsTradeValues"
+          component={SettingsTradeValuesScreen}
+          options={settingsPageOptions('Trade values', 'settings.trade-values.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsNotifications"
+          component={SettingsNotificationsScreen}
+          options={settingsPageOptions('Notifications', 'settings.notifications.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsAccount"
+          component={SettingsAccountScreen}
+          options={settingsPageOptions('Account & data', 'settings.account.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsAbout"
+          component={SettingsAboutScreen}
+          options={settingsPageOptions('Help & about', 'settings.about.back-btn')}
+        />
+        <Stack.Screen
+          name="SettingsTesting"
+          component={SettingsTestingScreen}
+          options={settingsPageOptions('Testing', 'settings.testing.back-btn')}
         />
         <Stack.Screen
           name="Profile"

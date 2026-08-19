@@ -14,14 +14,18 @@ appId: com.fantasytradefinder.app
 # league to pick (or wants the first one).
 #
 # Matrix row 167 — the "Switch league" block. `leagueSwitchRows` is null unless
-# leagues.length > 1 (SettingsScreen.tsx:711), so `two-leagues` is the only
+# leagues.length > 1 (SettingsScreen.tsx:762), so `two-leagues` is the only
 # profile that can show it.
 #
-# `account.settings_v2` is ON in the refreshed release fixture, which changes
-# section ORDER — hence the scroll-until-visible on the row content rather than
-# a fixed number of scrolls. The rows themselves have no testIDs, so the
-# fixture league name is the anchor; nothing is tapped (a tap would start a
-# real league switch), so the missing ids don't block this row.
+# `account.settings_v2` is ON and `account.settings_hub` is OFF in the
+# refreshed release fixture, so the Settings route mounts the flat v2 list;
+# v2 changes section ORDER — hence the scroll-until-visible on the row content
+# rather than a fixed number of scrolls. The rows themselves have no testIDs,
+# so the fixture league name is the anchor; nothing is tapped (a tap would
+# start a real league switch), so the missing ids don't block this row.
+#
+# Settings is a pushed page rather than a page sheet (settings-IA plan §5);
+# the entry is the same TopBar gear, the exit is the header back chevron.
 tags: [capture, settings, two-leagues]
 ---
 - launchApp:
@@ -49,11 +53,13 @@ tags: [capture, settings, two-leagues]
     timeout: 30000
 - tapOn:
     id: "topbar.settings"
-# The whole tree is absent until /api/notifications/prefs resolves — wait on
-# the close control, which only exists once Settings has painted.
+# The flat list's body is absent until /api/notifications/prefs resolves.
+# settings.back-btn is the stack header's back control, so it appears as soon
+# as the route is pushed — it confirms we ARRIVED at Settings, not that the
+# body painted. The scrollUntilVisible below is what waits for the data.
 - extendedWaitUntil:
     visible:
-      id: "settings.close-btn"
+      id: "settings.back-btn"
     timeout: 30000
 
 # ── league-rows ──────────────────────────────────────────────────────────

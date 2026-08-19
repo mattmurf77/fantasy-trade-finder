@@ -23,6 +23,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
+import FeedbackFAB from '../components/FeedbackFAB';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
 import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
@@ -216,21 +217,16 @@ export default function SettingsScreen({ navigation }: any) {
     }
   }
 
-  // ── Modal-over-modal fix (teardown 01-05, W2A→W2C handoff; gated under
-  // `account.settings_v2`) ────────────────────────────────────────────────
-  // Settings is itself a root modal. Navigating onward to another root
-  // route (FeedbackInbox / SleeperConnect / LeaguePicker) stacked a second
-  // modal on top of it, and closing THAT modal landed back on Settings
-  // instead of Main. Flag on: dismiss Settings first, then present the
-  // destination — both dispatches in the same tick coalesce on
-  // native-stack (per the W2A spec). Flag off: legacy stacking, verbatim.
+  // ── Outbound navigation ────────────────────────────────────────────────
+  // Plain navigate. The old `settingsV2` branch dismissed Settings first
+  // (goBack, then navigate) because Settings was presented as a root MODAL
+  // and pushing another root route stacked a second modal on top of it
+  // (teardown 01-05). Settings is a pushed page as of the settings-IA work
+  // (plan §5), so there is no modal to get out of and the dismissal is now
+  // actively wrong — it popped Settings off the stack, so Back from the
+  // destination landed on the tabs instead of here.
   const navigateFromSettings = (route: string, params?: object) => {
-    if (settingsV2) {
-      navigation.goBack?.();
-      navigation.navigate?.(route, params);
-    } else {
-      navigation.navigate?.(route, params);
-    }
+    navigation.navigate?.(route, params);
   };
 
   const onRankingPrefChange = (m: RankMethodPref) => {
@@ -1554,6 +1550,13 @@ export default function SettingsScreen({ navigation }: any) {
         tone={toast?.tone}
         onDismiss={() => setToast(null)}
       />
+      {/* #188 — this screen carried no feedback surface because the exemption
+          covers modals and sheets, and Settings WAS a modal. It is a pushed
+          page now, so the exemption no longer applies and the flag-off flat
+          list gets the same FAB the hub and the seven pages mount. This was
+          finding F6: Settings was one of the only surfaces where a tester
+          could not file feedback in place. */}
+      <FeedbackFAB activeScreen="Settings" aboveTabBar={false} />
     </SafeAreaView>
   );
 }

@@ -46,7 +46,10 @@
     "test:picker-chip-alignment": "node tests/check-picker-chip-alignment.js",
     "test:offer-prefill-330": "node tests/check-offer-prefill-330.js",
     "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js",
-    "test:presentation-v2": "node tests/check-presentation-v2.js"
+    "test:presentation-v2": "node tests/check-presentation-v2.js",
+    "test:settings-ia": "node tests/check-settings-ia.js",
+    "test:settings-nav": "node tests/check-settings-nav.js",
+    "test:settings-testids": "node tests/check-settings-testids.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

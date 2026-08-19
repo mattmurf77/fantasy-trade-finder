@@ -97,6 +97,19 @@ const V2_SCREENS = {
   SignIn: 'signin',
   LeaguePicker: 'leagues',
   Settings: 'settings',
+  // Settings IA second level (plan §8). `settings` still resolves to the
+  // Settings route itself, so the TopBar gear and every link already in the
+  // wild are unaffected; these seven address the pages under it. Each is
+  // addressable regardless of `account.settings_hub` — the flag gates the
+  // hub's entry rows, not the routes, so a link lands on a real page in
+  // either flag state.
+  SettingsLeagues: 'settings/leagues',
+  SettingsRanking: 'settings/ranking',
+  SettingsTradeValues: 'settings/trade-values',
+  SettingsNotifications: 'settings/notifications',
+  SettingsAccount: 'settings/account',
+  SettingsAbout: 'settings/about',
+  SettingsTesting: 'settings/testing',
   Profile: 'u/:username',
   // P0-3 — invite JOIN interstitial. ROOT stack on purpose: the invitee is
   // usually SIGNED OUT, and a route resolving inside `Main` would drop a
