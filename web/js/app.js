@@ -4873,10 +4873,48 @@
         if (typeof loadMatches === 'function') loadMatches();
       } else if (id === 'view-league') {
         loadLeagueSummary();
+        loadMarketPulse();
       }
       if (id === 'view-trends') {
         loadTrends();
       }
+    }
+
+    // ── Market pulse (#/api/market/movers, flag market.movers) ────────
+    // Community 30-day movers, mirroring mobile's MarketPulseStrip placement
+    // inside the League screen. Public endpoint. Renders nothing at all unless
+    // it has rows — the value-snapshot window is cold for the first 30 days
+    // after a deploy, and an empty "Market pulse" box would read as broken.
+    let _marketPulseLoaded = false;
+    async function loadMarketPulse() {
+      if (_marketPulseLoaded) return;
+      const host = document.getElementById('market-pulse');
+      if (!host) return;
+      if (window.FTF_FLAG && !window.FTF_FLAG('market.movers')) return;
+      try {
+        const res = await fetch('/api/market/movers');
+        if (!res.ok) return;
+        const d = await res.json();
+        const risers = (d && d.risers) || [], fallers = (d && d.fallers) || [];
+        if (!risers.length && !fallers.length) return;
+
+        const row = (p, dir) => {
+          const pos = escapeHtml(p.position || '');
+          const pct = typeof p.pct_30d === 'number'
+            ? (p.pct_30d > 0 ? '+' : '') + p.pct_30d.toFixed(1) + '%' : '';
+          return `<div class="market-row">
+            <span class="pos-badge pos-${pos}">${pos}</span>
+            <span class="nm">${escapeHtml(p.name || '')}${p.team ? ' · ' + escapeHtml(p.team) : ''}</span>
+            <span class="pct ${dir}">${pct}</span>
+          </div>`;
+        };
+        document.getElementById('market-risers').innerHTML  = risers.slice(0, 5).map(p => row(p, 'up')).join('');
+        document.getElementById('market-fallers').innerHTML = fallers.slice(0, 5).map(p => row(p, 'down')).join('');
+        const sub = document.getElementById('market-pulse-sub');
+        if (sub) sub.textContent = `Community values, last ${d.window_days || 30} days`;
+        host.classList.remove('hidden');
+        _marketPulseLoaded = true;
+      } catch (_) { /* optional surface; the League view works without it */ }
     }
 
     // ── League Summary ────────────────────────────────────────────────

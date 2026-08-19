@@ -10,6 +10,38 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19j — Web Phase 2: calculator + market pulse (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0`. Not pushed, not merged. No flags, no schema, **no backend change**.
+
+| Gate | Result |
+|---|---|
+| `python3 qa/web/check_web_structure.py` | **173/173 pass** (calculator.html registered in PAGES) |
+| `pytest backend/tests` | not re-run — `backend/` untouched since `26d7841` (3524 passed / 1 skipped there) |
+| Mobile gates | n/a — zero mobile files touched |
+
+**Browser-verified** against a local server on this branch, with a real demo session:
+search → add asset → live evaluate; a 1-for-2 priced `fair / Favors them`, gap `1,718 ≈ a
+Late 1st Round Pick`, and the one-tap evener moved it to `even` — matching the same
+engine's prod output for the same package. Adjustments disclosure renders the server's
+`why` copy. At 375px: no horizontal overflow, sides stack, **zero tap targets under 44px**.
+Market pulse verified in both states — hidden when `/api/market/movers` is empty (the real
+local state), and rendering risers/fallers when fed prod-shaped rows.
+
+**Two defects found and fixed during this pass, both mine-or-adjacent:**
+1. A one-sided trade rendered **"even / Even both ways"** — the server returns
+   `verdict: null` and the first draft defaulted it to `even`, stating something false.
+   Now prompts for the missing side, and a null verdict never coerces.
+2. `.league-list` set only `overflow-y`, which makes `overflow-x` compute to `auto` (not
+   `visible`) — it reserved a scrollbar gutter and painted a light track across the league
+   card. Pre-existing; fixed since it sits in a screen this work touched.
+
+**Local-data caveats worth recording:** `/api/trade/values` returns 0 on a cold worktree
+until the process restarts with the Sleeper cache warm, and `/api/market/movers` is empty
+until 30 days of value snapshots exist. Neither is a code defect; both cost time to
+diagnose.
+
+---
 ## 2026-08-19i — Web Phase 1 foundation (NOT SHIPPED, on `fix/web-phase0`)
 
 **Branch:** `fix/web-phase0`. **Not pushed, not merged.** No flags, no schema, no backend change.

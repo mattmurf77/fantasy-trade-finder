@@ -218,6 +218,10 @@
 
     .league-list {
       overflow-y: auto;
+      /* Setting only overflow-y makes overflow-x compute to `auto`, not
+         `visible` — which reserved a horizontal scrollbar gutter and painted a
+         light track across the bottom of the card. Pin it. */
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -4611,3 +4615,35 @@
         scroll-behavior: auto !important;
       }
     }
+
+
+/* ── Market pulse (#market-pulse) ─────────────────────────────────────────
+   Community 30-day movers inside the League view. Position hexes are data
+   encodings; the up/down colors are --pos/--neg status tokens. */
+.market-pulse {
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 14px;
+  margin-top: 16px;
+}
+.market-pulse-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.market-pulse-title {
+  font-family: var(--font-display); font-size: 15px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.market-pulse-sub { font-size: 12px; color: var(--chalk-faint); }
+.market-pulse-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .market-pulse-cols { grid-template-columns: 1fr; } }
+.market-pulse-label {
+  font-family: var(--font-data); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+}
+.market-pulse-label.up { color: var(--pos); }
+.market-pulse-label.down { color: var(--neg); }
+.market-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+.market-row + .market-row { border-top: 1px solid var(--line); }
+.market-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-row .pct { font-family: var(--font-data); font-size: 12px; font-weight: 600; }
+.market-row .pct.up { color: var(--pos); }
+.market-row .pct.down { color: var(--neg); }

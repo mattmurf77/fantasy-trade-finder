@@ -9,6 +9,9 @@ Disallow: /style-guide.html
 Disallow: /color-lab.html
 Disallow: /color-lab-2.html
 
+# Signed-in tools — nothing to index behind the sign-in.
+Disallow: /calculator.html
+
 # Templates that render nothing without a query param or path segment.
 Disallow: /player.html
 Disallow: /profile.html

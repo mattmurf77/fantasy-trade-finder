@@ -26,7 +26,7 @@ WEB = ROOT / "web"
 
 # Pages that ship to real users. Each must satisfy the SEO + a11y checks.
 PAGES = [
-    "index.html", "faq.html", "contact.html", "player.html",
+    "index.html", "faq.html", "contact.html", "calculator.html", "player.html",
     "positional-tiers.html", "league-rankings.html", "profile.html",
     "ranking-method.html", "privacy.html", "terms.html", "404.html",
 ]

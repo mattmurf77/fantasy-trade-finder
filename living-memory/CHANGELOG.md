@@ -10,6 +10,23 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — Web Phase 2: session-gated calculator + market pulse (`fix/web-phase0`, NOT merged)
+
+**`web/calculator.html`** — mirrors the app's calculator: asset search over
+`/api/trade/values`, live `POST /api/trade/evaluate`, fairness verdict + meter, the gap
+read in draft-pick terms, one-tap eveners, and the server's own adjustment rationale.
+Both bases: **Real values** (consensus) and **In league** (partner-selected, dual-board).
+**Session-gated, matching the app** — per operator decision there is no anonymous surface,
+so it is `noindex` + `Disallow`-ed and linked from the app's sub-nav.
+
+**Market pulse** — `/api/market/movers` risers/fallers inside the League view, mirroring
+where mobile puts `MarketPulseStrip`. Renders nothing when the snapshot window is cold.
+
+No backend change; the rate-limiter prerequisite died with the anonymous calculator.
+Phase 2's remaining item is the landing page (P2-3) — deliberately not rushed, since it
+is positioning copy that wants the operator's voice.
+
+---
 ## 2026-08-19 — Web Phase 1: one token source + the first-ever web CI gate (`fix/web-phase0`, NOT merged)
 
 **`qa/web/check_web_structure.py`** — 161 structural checks over shipped `web/` source

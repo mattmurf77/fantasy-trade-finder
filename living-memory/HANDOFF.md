@@ -57,6 +57,14 @@ including un-nesting the public `/api/players` fallback so signed-out visitors g
 players. Full SEO metadata + robots + sitemap. Landmarks and an `<h1>` on every page.
 User-visible surface renamed to **Fleeced**.
 
+**Phase 2 (the logged-in web app) — 2 of 3.** `web/calculator.html` ships the app's
+calculator on web (search, live evaluate, verdict + gap in pick terms, one-tap eveners,
+adjustment rationale; Real-values and In-league bases), session-gated per the operator
+decision. Market pulse renders `/api/market/movers` inside the League view where mobile
+puts it. **P2-3, the landing page, is NOT done** — it is positioning copy and wants the
+operator's voice rather than a rushed pass at the end of a long session. Everything it
+needs is already in place; the audit's specifics are in the plan.
+
 **Phase 0 (breakage) — complete**, commit `26d7841`. 7 of 8 items: the self-trapping demo path (two independent causes), the analytics race
 that dropped **every** web event including `app_opened` ([G-053](GOTCHAS.md)), the clipped 375px
 CTA, `profile.html`'s handle parser, the missing HTML 404, design-lab pages served in prod, and
