@@ -1,0 +1,144 @@
+appId: com.fantasytradefinder.app
+# tc: TC-PRESV2-01 — Today's Trade hero renders and can be actioned
+#     (docs/plans/trade-presentation-v2/scope.md §3; approved lab
+#      mockups/trade-suggestion-redesign/01-todays-trade.html)
+# profile: standard
+# flags: all-on
+#
+# ⚠ AUTHORED UNDER PROTEST OF D-056 — READ scope.md §3 BEFORE RUNNING.
+#   D-056 (2026-08-15, Active) retired Maestro entirely: "Do not author,
+#   extend, or execute" (mobile/.maestro/README.md). This flow exists because
+#   the build brief for this branch required flow authoring explicitly. It has
+#   NOT been executed, and whether it ever is remains the operator's call.
+#   The real, CI-enforced evidence for this feature is
+#   mobile/tests/check-presentation-v2.js (87 assertions) plus the code-walk
+#   and TestFlight checklist in scope.md §3. Treat this file as a written
+#   specification of intended behaviour, exactly as D-056 treats the rest of
+#   this directory.
+#
+# REQUIRES `trades.presentation_v2: true` in the resolved flag fixture. The
+# flag ships OFF, so against a default build this flow fails at the first
+# `trades.finder-mode.today` assert — which is the CORRECT failure (it is
+# precisely the flag-off byte-identity guarantee) and not a flaky one.
+#
+# What this proves: the flag-gated "Today" chip LEADS the Acquire mode strip;
+# tapping it opens the hero; the hero carries the binary endorsement badge,
+# the two-sided asymmetric explanation (user bullets + a counterparty
+# statement) and the fairness RANGE band; and the "I'm interested" action is
+# reachable and live.
+#
+# Law 2: the hero's explanation and actions sit below the package columns
+# inside a ScrollView, so every below-fold tap/assert is preceded by
+# scrollUntilVisible with visibilityPercentage 100.
+tags: [trades, presentation-v2]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+# First Trades visit auto-opens the team-outlook sheet (Contender preselected).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+
+# ── The flag-gated entry chip exists and LEADS the strip ──────────────────
+- extendedWaitUntil:
+    visible:
+      id: "trades.finder-mode.today"
+    timeout: 20000
+- tapOn:
+    id: "trades.finder-mode.today"
+
+# ── The hero renders ─────────────────────────────────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "presentation.hero"
+    timeout: 60000
+- assertVisible:
+    id: "presentation.hero-title"
+    childOf:
+      id: "presentation.hero"
+# Binary endorsement: the hero slot is only ever filled by a `strong` card.
+- assertVisible:
+    id: "presentation.confidence.strong"
+- assertVisible:
+    id: "presentation.hero-give"
+- assertVisible:
+    id: "presentation.hero-receive"
+
+# ── Fairness is a RANGE band, never a winner meter ───────────────────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.fairness-band"
+    direction: DOWN
+    visibilityPercentage: 100
+- assertVisible:
+    id: "presentation.fairness-band"
+
+# ── The asymmetric explanation: their half is a statement block ──────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.hero-their-side"
+    direction: DOWN
+    visibilityPercentage: 100
+- assertVisible:
+    id: "presentation.hero-their-side"
+- takeScreenshot: presentation-v2-hero
+
+# ── The Featured tier sits beneath the hero, with the browse exit ────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.browse-all"
+    direction: DOWN
+    visibilityPercentage: 100
+- assertVisible:
+    id: "presentation.featured"
+- assertVisible:
+    id: "presentation.browse-all"
+
+# ── The endorsed action is reachable and live ────────────────────────────
+- scrollUntilVisible:
+    element:
+      id: "presentation.hero-interested"
+    direction: UP
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    id: "presentation.hero-interested"
+# A recorded like routes to the mutual-match inbox — there is no receipt
+# screen, by design.
+- extendedWaitUntil:
+    visible:
+      id: "tab.matches"
+    timeout: 15000
+- takeScreenshot: presentation-v2-hero-actioned

@@ -163,6 +163,12 @@ const V2_SCREENS = {
           // registered when flag `trades.finder_hub` is on; harmless as a
           // path otherwise).
           TradeDeck: 'finder',
+          // Presentation v2 (flag `trades.presentation_v2`). Registered here
+          // for the same reason the routes are registered unconditionally in
+          // TabNav: a stored link must land on a real screen. The flag gates
+          // the in-app entry chip, not the URL.
+          TodaysTrade: 'today',
+          TradeBrowseAll: 'today/all',
           Portfolio: 'portfolio',
           TradeCalculator: 'calculator',
         },

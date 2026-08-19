@@ -98,3 +98,18 @@ featured-trade.idea.*
 # testID="…" attribute and stays greppable regardless).
 trades.pass-reason.*
 trades.pass-reasons
+# --- 2026-08-18 trade-suggestion presentation v2 (trades.presentation_v2) ---
+# TradeIdeaRow.tsx:54,61,78,92,97  testID={`presentation.row.${rank}`} and its
+#   rank-keyed siblings (row-open / row-dismiss / row-undo / row-ack /
+#   row-undo-link). Keyed on RANK, not trade_id: a server-minted id is
+#   addressable from neither a flow nor a bug report.
+presentation.row.*
+presentation.row-open.*
+presentation.row-dismiss.*
+presentation.row-undo.*
+presentation.row-undo-link.*
+presentation.row-ack.*
+# FeaturedBench.tsx:47  testID={`presentation.featured.row.${i}`}
+presentation.featured.row.*
+# ConfidenceChip.tsx:29  testID={`presentation.confidence.${band}`}
+presentation.confidence.*

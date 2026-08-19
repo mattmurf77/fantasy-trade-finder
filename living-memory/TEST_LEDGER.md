@@ -60,7 +60,7 @@ Nothing here is runtime evidence from a device.
 ## 2026-08-19 — Decline reasons: player preference under "Neither" (branch only, NOT merged)
 
 **Branch:** `feat/decline-reason-player-pref`, from `origin/main` `02e27dd`. **Not shipped** — not pushed, not merged. Flag `feedback.decline_reasons` unchanged (already on for all users).
-Scope block: [docs/plans/decline-reason-capture/scope-player-preference.md](../docs/plans/decline-reason-capture/scope-player-preference.md). Decision: [D-079](DECISIONS.md#d-079). Contract: [SPEC §2a](../docs/plans/decline-reason-capture/SPEC.md).
+Scope block: [docs/plans/decline-reason-capture/scope-player-preference.md](../docs/plans/decline-reason-capture/scope-player-preference.md). Decision: [D-080](DECISIONS.md#d-080). Contract: [SPEC §2a](../docs/plans/decline-reason-capture/SPEC.md).
 
 | Gate | Result |
 |---|---|
@@ -80,6 +80,30 @@ Scope block: [docs/plans/decline-reason-capture/scope-player-preference.md](../d
 **A check that had never once executed now does.** The suite's "transcribed codes still match SPEC §2" cross-check was guarded on `fs.existsSync(SPEC.md)` — and **SPEC.md was untracked**, present only in the main checkout's working tree and committed to no branch in the repo. The guard had always taken its SKIP branch, so the transcription had never actually been compared to the spec. SPEC.md is committed on this branch and the cross-check runs and passes. Committing it also surfaced a real spec/implementation divergence: SPEC §2 wrote the free-text step as `value_other` → a second `value_other_text` code, which does not exist and which the route 400s as `invalid_detail`. Corrected in the same amendment.
 
 **What was NOT verified here:** runtime behaviour on a device. Under D-056 that is the manual TestFlight checklist and nothing else — it is written but unrun, so no runtime claim is made about this change. The code-walk proof in scope block §3a is a file:line trace, not evidence of execution.
+
+## 2026-08-18f — Trade-suggestion presentation v2 (additive Acquire surface, flag OFF)
+
+**Branch:** `feat/trade-presentation-v2`, from `origin/main` `a7f8783`. **Not shipped** — not pushed, not merged. Flag `trades.presentation_v2` ships **OFF**.
+Scope block: [docs/plans/trade-presentation-v2/scope.md](../docs/plans/trade-presentation-v2/scope.md). Decision: [D-081](DECISIONS.md#d-079--the-confidence-band-is-derived-from-provenance-because-no-confidence-field-exists).
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` (mobile) | **clean** — baseline at `a7f8783` was also clean, so the delta is zero new errors |
+| `mobile/tests/check-*.js` (all 57) | **all pass**, including the new `check-presentation-v2.js` (**87 assertions**) |
+| `npm run test:presentation-v2` | **87 PASS, 0 FAIL** |
+| `bash mobile/scripts/testid-lint.sh` | **OK** (8 template-literal globs added to `testid-lint-allow.txt`, each with its constructing file:line) |
+| `pytest backend/tests` | **NOT RUN** — no Python environment in this worktree. Backend delta is one `FLAG_KEYS` string + one `config/features.json` entry; `test_entitlements.test_features_json_keys_known` is the covering test and **must be green on the pushed sha before merge** |
+| Maestro / simulator | **Not run.** Three flows AUTHORED (`presentation-v2-hero`, `-browse-dismiss`, `-honest-empty`) because the build brief required it — which directly contradicts D-056's "do not author, extend, or execute". Each carries a banner recording the conflict. Execution, and whether authoring was correct at all, is an **operator decision** (scope.md §6 item 1) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` — standing posture under D-056 |
+| Manual TestFlight | **Not run** — 12-step checklist written in scope.md §3; operator action |
+
+**What the structural guard actually proves** (not a grep-count — these are the four things that fail silently):
+1. **Flag-off byte-identity.** Both `onTodaysTrade` pass sites are ternaries on the flag passing `undefined`; both components build their control list *from the handler's presence*; `'today'` is asserted **not** to be in the static `CHIPS` array; the routes are asserted registered *and* asserted **not** flag-wrapped. A no-op-handler "simplification" — which still renders the chip — fails here.
+2. **Instrumentation parity.** Shared `swipeTrade` / `postDeclineReason` imports, `SwipeSignal` imported as a type, no hand-rolled `api.post`/`api.get` in the signals hook, the three event names cross-checked against `TradesScreen`'s own source, the four signal fields, the two-part `signal_v2 && impression_id` gate, boolean-only free text, explicit `platform`, and `VIEWED_MIN_MS`/`DWELL_CAP_MS` matched against `TradesScreen`'s literals.
+3. **The server cache-slot agreement.** Shared fairness helpers only, no raw threshold constants, never `force: true` — so the new surface cannot kick a second generation or serve a different card set to the same user.
+4. **The design laws, executed.** The pure module is transpiled and RUN: band derivation across all four provenance combinations plus the `likesYou` promotion, "no band label contains a digit", the fairness band exposing no winner/margin, `userSideBullets` naming a concrete asset and never leaking `opponent_surplus`, `counterpartyStatement` returning a number-free single string, `partitionDeck` returning **no hero** when nothing is endorsable, browse uncapped, dismissed cards excluded from hero but retained in browse, and the empty-state copy omitting an unknown roster count rather than rendering zero. Plus source-level bans: no `TradeValueBar`, no `Meter`/`fairnessColor`, no `partner_fit`, no `match_score`, no `showPercent`, no `.slice()` in browse, no `numberOfLines` anywhere on the surface.
+
+**Not proven by anything here, and stated so it is not mistaken for covered:** that the surface renders correctly on a device. Nothing in this branch has run on a simulator or a phone. The 12-step TestFlight checklist is the only runtime evidence available under D-056 and has not been executed.
 
 ---
 ## 2026-08-18e — Bake-off deck composition (three groups of ten; arm A out of the roster)
