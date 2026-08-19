@@ -57,6 +57,20 @@ Dark: `bakeoff_serve_interleaved` stays 0, users still see arm `current`.
 proved by goldens captured at the pre-knob commit. 3524 → **3554 passed, 1
 skipped**; 13 sabotages, 13 caught.
 
+## 2026-08-19 — `outlook.odds` LIT + Team Review planned (PR #142, merged `6a3eab3`)
+
+**Shipped.** Playoff odds are live. Operator override (*"Outlook odds should be visible. Forward PPG cut. I waive maestro"*) reversed the same session's own D-093 recommendation — [D-094](DECISIONS.md). Lights the #169 League-Summary layer built-but-dark since `f27c0f5` (2026-08-11): the D-025 collapsed strip, the section behind it, `GET /api/league/outlook`. **No client release needed** — the UI shipped months ago and flags come from the server; verified live, `/api/feature-flags` serves `outlook.odds: true`.
+
+**Bands only, and that is enforced, not intended.** `title_pct` stays unrenderable at any week (absence of skill, CI spans zero); `playoff_pct` renders only as the three-band chip; `OUTLOOK_WEEK6_PERCENT_ENABLED` stays false. Preseason posture (`completed_weeks == 0`): Sleeper only, `meta.beta` true ⇒ bands + row order, no win-loss numbers.
+
+**The flip was five touches, not one** — `config/features.json` plus the `release`/`onboarding-v2`/`profiles-on` fixtures (the latter two each asserted to differ from release by exactly one key). `DEFAULT_FLAGS` stays false (fails CLOSED) and mobile's `LAUNCHED_FLAG_DEFAULTS` stays untouched (those fail OPEN, which would outlive a kill).
+
+**Evidence** (Maestro waived, already void under D-056): new `mobile/tests/check-outlook-bands.js`, 7 assertions, **all six sabotages proven red**; the two darkness-guard tests inverted, keeping `test_flag_off_still_closes_the_route` (flag off ⇒ 404 + empty fan-out). Gates: pytest **3525 passed/1 skipped**, tsc clean, 61 structural suites, testid-lint OK.
+
+**Also merged:** the Team Review plan for #357/#358/#359 (docs only — [D-092](DECISIONS.md), Q-024, Q-025). Build not started.
+
+**Watch:** nobody has seen the lit surface on a device; a preseason band can be confidently wrong (2 of 6 backtested seasons lose to climatology); `meta.priced_slot_coverage` is still unrendered, so IDP bands read as whole-lineup on 7-of-15 priced slots.
+
 ---
 ## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers
 
