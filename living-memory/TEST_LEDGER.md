@@ -10,6 +10,51 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`
+
+**Branch:** `claude/team-outlook-experience-27a7a1`, worktree at `origin/main` `a76498e`. **Not pushed, not merged.**
+Full gates ran — operator did **not** declare express.
+Scope: [docs/feedback/items/364-team-review-fixes/scope.md](../docs/feedback/items/364-team-review-fixes/scope.md).
+Decisions: [D-100](DECISIONS.md), [D-101](DECISIONS.md).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **3606 passed, 1 skipped** (292s) |
+| `tsc --noEmit` | **clean** |
+| 64 `mobile/tests/check-*.js` suites | **0 failed** (incl. `check-team-review` 7/7, `check-outlook-bands` 7/7) |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — 5 of 5 | **every one turned its guard red**, sources restored, full suite re-run green |
+
+**Sabotages, individually.** (1) drop the `#368` kwargs → `test_team_review_route_passes_the_pick_capital_it_computes` FAILED;
+(2) re-cross the seed ladder → `test_seed_ladder_buys_are_off_roster_and_sells_are_on_roster` FAILED;
+(3) re-cross the community ladder → `test_community_ladder_maps_buys_to_higher_and_sells_to_lower` FAILED;
+(4) stop shipping `model` → `test_window_ships_the_model_so_no_client_restates_a_threshold` FAILED;
+(5) restore `gap = u - c` → `test_consensus_gap_sells_are_where_the_market_is_higher_than_you` FAILED.
+
+**Two pre-existing tests were not merely re-run — they were wrong, and are recorded here because
+that is the more useful finding.**
+- `test_consensus_gap_sells_expose_rank_gap` **asserted the defect**: it took a player the user rated
+  300 *above* the community and asserted he was an "easiest sell". Re-encoded and renamed; it now holds
+  **both** roster players so it proves a *selection* (the 200-below player in, the 300-above player out).
+- `test_divergence_ignores_unjudged_players` went **vacuous** under the fix — its fixture put p1
+  on-roster-and-high and p2 off-roster-and-low, so under the corrected rule both lists came back empty
+  and its leak assertion proved nothing **while still passing green**. Roster re-aimed, plus an explicit
+  non-emptiness assertion so it cannot silently hollow out again. *A green suite was hiding a dead test.*
+
+**Gotcha worth the note.** After a sabotage cycle, restoring a file with `cp` from a backup gives it an
+**older mtime than the `.pyc` written during the sabotage run**, so Python reuses the sabotaged bytecode
+and the restored tree tests red. `find backend -name __pycache__ -type d -exec rm -rf {} +` between
+cycles; verify restoration with `git diff`, not with a test result.
+
+**What is NOT proven.** The manual TestFlight checklist
+([testflight-checklist.md](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md), 13 steps)
+is **UNRUN** — under [D-056](DECISIONS.md) it is the only runtime evidence this gets, and **nobody has
+seen the corrected divergence beat on a device**. Step 8 (the sell list contains players you are LOW on)
+is the whole change. Step 13 covers the Trends screen, which moved with the upstream fix.
+
+---
 ## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
 
 **Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**

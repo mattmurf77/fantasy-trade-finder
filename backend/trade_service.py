@@ -2586,7 +2586,25 @@ def infer_team_outlook(
         elif age <= youth_age:
             youth_val += v
 
-    signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share}
+    # #365 — SHIP THE MODEL, NOT JUST ITS OUTPUT. The Team Review window beat
+    # renders every input this function reads, and a client that hardcodes one
+    # of them drifts silently the day a knob moves: the shipped screen read
+    # "Value age 23 and under" while `youth_age` has been 26, so the threshold
+    # the user was shown was never the threshold the inference applied. Same
+    # rule as `equal_pick_share` in team_review._window — a client reads an
+    # encoding, it never restates one. Additive: existing callers that only
+    # read the share keys are untouched.
+    model = {
+        "vet_age":       vet_age,
+        "youth_age":     youth_age,
+        "w_vet_share":   _c("infer_w_vet_share"),
+        "w_youth_share": _c("infer_w_youth_share"),
+        "w_pick_share":  _c("infer_w_pick_share"),
+        "contender_cut": _c("infer_contender_cut"),
+        "rebuilder_cut": _c("infer_rebuilder_cut"),
+    }
+    signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share,
+               "model": model}
     # No roster value to read ⇒ no opinion. Guard before the pick-centering
     # term, which would otherwise read "owns zero picks" as a contend signal.
     if total <= 0:

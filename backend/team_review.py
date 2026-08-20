@@ -140,6 +140,12 @@ def _window(inferred: str, signals: dict, declared: str | None,
             "equal_pick_share": round(1.0 / max(num_teams, 1), 4),
             "score": round(float(signals.get("score") or 0.0), 4),
         },
+        # #365 — the inference MODEL alongside its inputs, so the beat can show
+        # the user every number that produced the verdict: the two age
+        # thresholds, the three weights, and the two cuts `score` is bucketed
+        # against. Passed straight through from `infer_team_outlook` rather
+        # than restated here, for the same reason `equal_pick_share` is.
+        "model": dict(signals.get("model") or {}),
         "options": list(OUTLOOK_OPTIONS),
     }
 
@@ -190,6 +196,13 @@ def _divergence(
         because his board Elo *is* the seed. Including him pads both lists
         with non-opinions. `judged_ids` (wins + losses > 0) is the filter.
 
+    FIELD CONVENTION (both source ladders, #367). `higher_than_market` is
+    where YOUR board sits above the market on a player you do NOT own — your
+    buy list, because you would be paying less than you think he is worth.
+    `lower_than_market` is where the market sits above your board on a player
+    you DO own — your sell list, because someone pays you more than he is
+    worth to you. `gap` is a POSITIVE edge magnitude on both sides.
+
     Source ladder: the league-community comparison when >= 3 other members
     have ranked (`compute_consensus_gap` says so via `has_baseline`), else the
     universal consensus seed, else the beat is skipped by the caller.
@@ -226,15 +239,21 @@ def _divergence(
             "baseline_user_count": int(community_gap.get("baseline_user_count") or 0),
             "board_judged_players": len(judged_ids),
             "board_interactions": board_interactions,
+            # #367 — the field names are literal, and the lists were crossed.
+            # `easiest_buys` IS the set you are higher than the market on
+            # (your board over the OWNER's, off your roster); `easiest_sells`
+            # is the set you are lower on (the market over your board, on your
+            # roster). Shipped the other way round, which is why the screen
+            # offered your best buys under "Skip these".
             "higher_than_market": [
-                enrich(str(r["player_id"]), float(r.get("gap") or 0.0),
-                       float(r.get("community_elo") or 0.0), True)
-                for r in sells[:MAX_DIVERGENCE_ROWS]
-            ],
-            "lower_than_market": [
                 enrich(str(r["player_id"]), float(r.get("gap") or 0.0),
                        float(r.get("owner_elo") or 0.0), False)
                 for r in buys[:MAX_DIVERGENCE_ROWS]
+            ],
+            "lower_than_market": [
+                enrich(str(r["player_id"]), float(r.get("gap") or 0.0),
+                       float(r.get("community_elo") or 0.0), True)
+                for r in sells[:MAX_DIVERGENCE_ROWS]
             ],
         }
 
@@ -249,12 +268,16 @@ def _divergence(
         if base is None:
             continue
         gap = float(user_elo.get(pid, base)) - float(base)
-        if gap > 0 and pid in user_roster:
-            highs.append(enrich(pid, gap, base, True))
-        elif gap < 0 and pid not in user_roster:
-            lows.append(enrich(pid, gap, base, False))
+        if gap > 0 and pid not in user_roster:
+            # Higher than the market on a player you do NOT own → buy him.
+            highs.append(enrich(pid, gap, base, False))
+        elif gap < 0 and pid in user_roster:
+            # Lower than the market on a player you DO own → sell him. `gap`
+            # is negated so both lists carry a positive edge magnitude, the
+            # same convention compute_consensus_gap uses.
+            lows.append(enrich(pid, -gap, base, True))
     highs.sort(key=lambda r: r["gap"], reverse=True)
-    lows.sort(key=lambda r: r["gap"])
+    lows.sort(key=lambda r: r["gap"], reverse=True)
     return {
         "source": "consensus_seed",
         "baseline_user_count": 0,
