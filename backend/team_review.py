@@ -152,7 +152,7 @@ def _window(inferred: str, signals: dict, declared: str | None,
 
 def _depth(profile: dict, weakest_slot: dict | None,
            acquire: list[str], shed: list[str]) -> dict:
-    return {
+    out = {
         # `tier_depth` is computed by analyze_roster_strengths on every trade
         # job today and surfaced NOWHERE. This beat is its first consumer — it
         # is the "you're missing depth" finding, stated as elite/starter/bench
@@ -164,6 +164,25 @@ def _depth(profile: dict, weakest_slot: dict | None,
         "acquire_positions": list(acquire or []),
         "trade_away_positions": list(shed or []),
     }
+    # #366 — both keys are PASSED THROUGH from the profile, never recomputed
+    # here, and both are present only when their flag put them there. Same rule
+    # as `equal_pick_share` on the window beat and the tier bands generally: a
+    # client reads an encoding, it never derives one, and this module computes
+    # nothing new (see the module docstring — that is the whole design).
+    #
+    #   tier_basis   which banding actually ran, per position (flag
+    #                `trade.position_tiers`). Reported rather than inferred so
+    #                a fixture-sized pool falling back to the absolute cuts is
+    #                visible instead of silent.
+    #   handcuff_rb  how many of the roster's RBs are the RB2 on their NFL
+    #                depth chart (flag `trade.rb_handcuff`). Absent, not zero,
+    #                when the flag is off — "we did not look" and "we looked
+    #                and found none" are different claims and the card says so.
+    if "tier_basis" in profile:
+        out["tier_basis"] = dict(profile.get("tier_basis") or {})
+    if "handcuff_rb" in profile:
+        out["handcuff_rb"] = int(profile.get("handcuff_rb") or 0)
+    return out
 
 
 def _divergence(
