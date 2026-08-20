@@ -893,6 +893,23 @@ _DEFAULT_CFG: dict[str, float] = {
     # (PRD §4: defaulting fit_min_them on would recreate rv ≥ gv).
     "fit_min_them":               0.0,
     "fit_min_aggregate":          0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — roster + serve bits (PR-F3, LLD §2.1 + §4).
+    # Disposition B: arm roster / serving bits, not generation — read only
+    # by bakeoff_runner before or after any arm runs; an arm cannot
+    # observe them. Same five-registration discipline as the fit_* keys.
+    # ------------------------------------------------------------------
+    # 0 (default) = arm `fit` is not rostered: never generated, never
+    # drafted, never logged. 1 = fit generates + logs on every organic
+    # bake-off job (W3's dark-roster flip — an operator set_knob write).
+    "bakeoff_include_fit":        0.0,
+    # 0 (default) = a rostered fit generates, logs to arms_json, and is M3-
+    # stamped, but is EXCLUDED from the draft participants on BOTH draft
+    # paths (HLD F-6) — no fit card can reach a served deck. 1 = fit
+    # drafts like any arm (W4's serving flip). Fit-only bit by design
+    # (PLAN-v2 F5b): generalize on the second consumer, not the first.
+    "bakeoff_serve_fit":          0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

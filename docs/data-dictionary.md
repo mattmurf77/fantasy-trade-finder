@@ -76,6 +76,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 **Analytics / Experiments**
 
 - [`model_config`](#model_config)
+- [`model_config_changes`](#model_config_changes)
 - [`wrapped_events` — **FROZEN (analytics P0 cutover)**](#wrapped_events-frozen-analytics-p0-cutover)
 - [`user_events`](#user_events)
 - [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
@@ -381,6 +382,8 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 
 `features_json` additionally carries `also_proposed_by` (list of arm names) on a bake-off card that ANOTHER arm also proposed — the duplicate ledger. Credit is first-picker, so the trade appears once; agreement is recorded rather than discarded.
 
+**Fit challenger keys (PR-F3, LLD §3.3 — T2 contract):** on EVERY bake-off row — never conditionally, because `save_deck_impressions`' executemany compiles from the first row's keys and the M4 null-share tripwire needs absence to be impossible — `features_json` carries two more keys, null-valued when absent: `fit` (the arm-fit dual-score payload `{you, them, aggregate (0–200), bucket ∈ {both_high, mixed, you_tilt, them_tilt, both_ok, weak}, boards ∈ {both, viewer, partner, none}, ver, r5_fail, lenses: {you|them: {board, vs_consensus, consensus}}}` — non-null only on served `model_arm='fit'` cards; lens nulls DO serialize) and `fit_diag` (the M3 stamp `{you, them, bucket, ver, lenses}`, present on every card of every arm the post-ranking `stamp_fit_diag` pass reached, null when a card was unscorable). Analysis keys on `fit.boards` — **never** on `basis`, which on a fit card means data-availability, not divergence supply. A `fit_diag` null-share > 5% per arm marks the window suspect (readout §7f). Flag-off rows are byte-identical — both keys sit inside the `bakeoff_run is not None` guard. **`surplus_margin` on `model_arm='fit'` rows** inherits `mismatch_score` = the harmonic mean of the two 0–100 team scores (HLD F-4 — zero when either side scores zero, never used for ranking), NOT a value-space surplus.
+
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
 
 ---
@@ -496,7 +499,7 @@ Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestio
 | `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error, fairness_threshold, trade_intent}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job |
 
 | `groups_json` | JSON text | `{group_key: {arm, basis, quota, filled, short, pool, composed, served, lane_split_active}}` — the deck-composition accounting (operator decision 2026-08-18, `scope-composition.md`). **`short` is why this column exists:** the per-(group, lane) UNDER-FILL, e.g. `{"value": 0, "outlook": 3}`. `window` is only ~19% of live divergence supply, so the divergence groups routinely cannot find five outlook cards, and arm `gen_v2`'s lane mix has never been observed at all — whether an arm can produce outlook-basis divergence ideas *at all* is one of the findings this test is for, and it is invisible if a backfill hides it. `pool` is the supply the group had to draw on (`{value, window, (none)}`); `filled` what it managed (`{value, outlook, fill}`); `composed` / `served` the list length before and after the draft's duplicate suppression. `lane_split_active` is **false** when no card in the pool carried a lane at all — the outlook axis is undefined for that deck (user has no window direction, or `trade.lanes` is off) so the split went inert rather than serving an empty group. `{}` when `bakeoff_group_size` = 0 kills composition. Written in dark mode too: measuring under-fill before Phase 5 lights interleaved serving is exactly what dark validation is for |
-| `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error, fairness_threshold, trade_intent, diagnostics}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job. `diagnostics` (D-087, 2026-08-19) is the arm's **per-stage kill counts** — `{}` for the engine arms, and for arm `gen_v2` `GenerationReport.kill_counts()` (`S0_boarded_opponents`, `S0_unranked_opponents`, `S1_no_board_overlap`, `S1_no_centerpiece`, `S2_considered`, `S3a_composition`, `S3a_net_cap`, `S3a_pick_band`, `S3b_feasibility`, `S3c_dual_board_ir`, `S3d_fairness_band`, `S4_survivors`, `S6_emitted`, `starvation_reason`) plus the post-generation `S7_intent_filter` / `S7_headliner_cap` / `S7_served_to_deck` counts `bakeoff_runner.gen_v2_cards` applies itself. `starvation_reason` is non-NULL only when the batch never ENUMERATED a candidate (`no_boarded_opponents` / `no_board_overlap` / `no_divergence`) — the three causes that were indistinguishable while `cards: 0` was the only signal |
+| `arms_json` | JSON text | `{arm: {cards, gen_ms, empty, forfeits, served, error, fairness_threshold, trade_intent, diagnostics}}`. `empty` is the numerator of the empty-arm rate (PLAN.md §3.2 — arm `gen_v2` is divergence-only and expected to under-produce; that is **data**, never an error). `forfeits` counts rotation slots the arm could not fill. `served` counts cards the draft credited to it. `error` is non-NULL only when the arm raised — a raising arm is recorded and forfeits, it never fails the job. `diagnostics` (D-087, 2026-08-19) is the arm's **per-stage kill counts** — `{}` for the engine arms, and for arm `gen_v2` `GenerationReport.kill_counts()` (`S0_boarded_opponents`, `S0_unranked_opponents`, `S1_no_board_overlap`, `S1_no_centerpiece`, `S2_considered`, `S3a_composition`, `S3a_net_cap`, `S3a_pick_band`, `S3b_feasibility`, `S3c_dual_board_ir`, `S3d_fairness_band`, `S4_survivors`, `S6_emitted`, `starvation_reason`) plus the post-generation `S7_intent_filter` / `S7_headliner_cap` / `S7_served_to_deck` counts `bakeoff_runner.gen_v2_cards` applies itself. `starvation_reason` is non-NULL only when the batch never ENUMERATED a candidate (`no_boarded_opponents` / `no_board_overlap` / `no_divergence`) — the three causes that were indistinguishable while `cards: 0` was the only signal. **Arm `fit`** (fit challenger PR-F3, LLD §1.2 + §2.3) fills `diagnostics` from `FitReport.diagnostics()` + the same three `S7_*` adapter counts: `opponents`, `boarded_opponents`, `enumerated` (candidates entering the K-chain), `scored`, `killed` (`{K0..K7, junk}` — first-failure attribution, fixed chain order), `r5_fail_scored`, `capped_pairs`, `post_filtered` (`{untouchable, not_interested, position_prefs, r4_swiped, c4_centerpiece, min_them, min_aggregate}`), `emitted`, and the pre-F4 generator-character metrics `one_sided_pct` / `both_high_pct` / `mixed_pct` / `you_tilt_pct` / `median_aggregate` / `top_q_pick_share` / `top_q_junk_share` (LLD §8 R-j: computed over the scored, ranked, PRE-filter set) plus `ms` — every key present on every run, zero/None-valued, never absent. The W3 soak bars read `top_q_junk_share`, `top_q_pick_share` and `killed.K7` straight off this dict |
 | `config_json` | JSON text | `{"base": <arm `current`'s effective `trade_service` config>, "arm_delta": {arm: {keys that differ}}}`, snapshotted **inside each arm's own context** (so arm A's reflects `MODEL_A_PROFILE`). `model_config` has no `updated_at`, so a knob's change date is otherwise unknowable after the fact and the whole experiment rests on knowing which configuration produced each card. Stored whole rather than hashed — a fingerprint would say the config changed without saying to what. ~5 KB base plus a handful of delta keys; arm C's delta is empty. Deliberately **not** a config-versioning system: one snapshot per run, no history, no dedup |
 | `agreement_json` | JSON text | `{"armA+armB": n}` — served cards both arms proposed (first picker credited, the loser recorded). High `baseline+current` means the 2026-08-16 fixes changed little; `current+gen_v2` is the interesting number for a future blend |
 | `created_at` | str | ISO UTC |
@@ -895,8 +898,26 @@ Runtime-tunable constants. Edited via `/api/admin/config`. Defaults seeded on fi
 | `key` | str PK | snake_case |
 | `value` | float | |
 | `description` | str | human-readable explanation |
+| `updated_at` | str, nullable | **M-rail (fit-challenger PR-M, LLD §5.1)** — ISO UTC of the last write that went through `database.set_config()`. NULL until a key's first logged write after the column landed (additive, no backfill). A raw-SQL bypass leaves it stale — which the per-run `bakeoff_runs.config_json` snapshot diff then catches (R-5: discard) |
 
 See [config-reference.md](config-reference.md) for the seeded defaults.
+
+---
+
+## `model_config_changes`
+
+**M-rail knob-change log (fit-challenger PR-M, LLD §5.1)** — one row per `database.set_config()` call, appended **in the same transaction** as the `model_config` update, so the log and the value can never disagree. `set_config` is the single write funnel: `PUT /api/admin/config/<key>` (source default `"admin-api"`, optional body `source` ≤64 chars) and `scripts/set_knob.py` (`source='operator'` via the route; `'operator-local'` in `--local` mode) both go through it. Unknown keys still `KeyError` with no change row. Operator telemetry, not analytics — the M2 readout (`scripts/bakeoff_readout.sql` §1) reads it to censor measurement windows at logged knob-change timestamps (PLAN-v2 R-5).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `key` | str | the `model_config` key |
+| `old_value` | float, nullable | value before the write; NULL on a first logged write |
+| `new_value` | float | |
+| `changed_at` | str | ISO UTC |
+| `source` | str, nullable | `'operator'` \| `'admin-api'` \| `'operator-local'` \| `'unspecified'` \| free-form ≤64 chars |
+
+Index: `ix_model_config_changes_key` on `(key, changed_at)`.
 
 ---
 

@@ -262,7 +262,7 @@ def generate_league_suggestions(
     posture as `trade_gen_v2`."""
     t0 = time.monotonic()
     report = FitReport(league_id=league.league_id, user_id=user_id)
-    past_decision_keys = past_decision_keys or set()   # consumed by PR-F3's F4
+    past_decision_keys = past_decision_keys or set()   # F4 step 5 (R4/swiped)
     _ = (target_ids, on_opponent_done)   # kwarg parity; v1 unused / quiet arm
 
     # 1. Value accessors — RAW boards (T3, binding): cached dicts,
@@ -449,19 +449,21 @@ def generate_league_suggestions(
             players, scoring_format)
         cards.append(card)
 
-    # 5d. §1.9 post-score filters — PR-F3 callsite (marked, not yet live).
-    # When _apply_post_filters lands, the ranked card list flows through it
-    # HERE, after the pre-F4 metrics above and before emitted is counted:
-    #   cards = _apply_post_filters(
-    #       cards, report,
-    #       untouchable_ids=untouchable_ids,
-    #       not_interested_ids=not_interested_ids,
-    #       acquire_positions=acquire_positions,
-    #       trade_away_positions=trade_away_positions,
-    #       past_decision_keys=past_decision_keys,
-    #       seed_elo=seed_elo, max_per_opponent=max_per_opponent)
-    # Until then the ranked list is returned unfiltered and every
-    # report.post_filtered counter stays 0.
+    # 5d. §1.9 post-score filters (F4, the module half) — applied HERE,
+    # after the pre-F4 metrics above (LLD §8 R-j: those describe the
+    # generator, these describe the viewer's prefs) and before emitted is
+    # counted. `players` is passed beyond PR-F2's marked list because the
+    # position-pin step must tell a non-pick player from a pick (LLD §1.9
+    # step 4) and cards carry ids only — noted as a deviation in PR-F3.
+    cards = _apply_post_filters(
+        cards, report,
+        untouchable_ids=untouchable_ids,
+        not_interested_ids=not_interested_ids,
+        acquire_positions=acquire_positions,
+        trade_away_positions=trade_away_positions,
+        past_decision_keys=past_decision_keys,
+        seed_elo=seed_elo, players=players,
+        max_per_opponent=max_per_opponent)
 
     report.emitted = len(cards)
     report.ms = int((time.monotonic() - t0) * 1000)
@@ -746,13 +748,104 @@ def _score_candidate(give_ids: list[str], recv_ids: list[str], *,
 # Post-score filters (LLD §1.9, F4 — the module half) — PR-F3
 # ---------------------------------------------------------------------------
 
-def _apply_post_filters(cards, report, **job):
-    """§1.9 post-score filters over the RANKED list, order pinned:
+def _apply_post_filters(cards, report, *,
+                        untouchable_ids=None, not_interested_ids=None,
+                        acquire_positions=None, trade_away_positions=None,
+                        past_decision_keys=None, seed_elo=None,
+                        players=None, max_per_opponent=None):
+    """§1.9 post-score filters over the RANKED list, order pinned (PRD §6):
     min_them/min_aggregate → untouchables → not-interested → position pins →
     R4/already-swiped → C4 centerpiece cap → max_per_opponent. Each drop
-    counts into `report.post_filtered`. A preference hides a card AFTER
-    scoring — it never shrinks the search."""
-    raise NotImplementedError("PR-F3 — LLD §1.9 post-score filters")
+    counts into `report.post_filtered` (max_per_opponent excepted — the
+    adapter always passes None, the gen_v2/operator no-truncation contract,
+    §8 R-g, and the pinned counter key set does not name it). A preference
+    hides a card AFTER scoring — it never shrinks the search
+    (`test_untouchable_enumerated_then_filtered`)."""
+    untouchable_ids = set(untouchable_ids or ())
+    not_interested_ids = set(not_interested_ids or ())
+    past_decision_keys = past_decision_keys or set()
+    acquire = [p for p in (acquire_positions or ()) if p]
+    away = [p for p in (trade_away_positions or ()) if p]
+    players = players or {}
+    min_them = ts._c("fit_min_them")
+    min_aggregate = ts._c("fit_min_aggregate")
+
+    def _has_pos(pids, wanted) -> bool:
+        """≥1 NON-PICK player at a listed position (LLD §1.9 step 4)."""
+        for pid in pids:
+            p = players.get(pid)
+            if p is None or ts.is_pick_asset(p):
+                continue
+            if getattr(p, "position", None) in wanted:
+                return True
+        return False
+
+    kept: list = []
+    for card in cards:
+        give = card.give_player_ids
+        recv = card.receive_player_ids
+        fit = card.fit
+        # 1. Presentment floors (both default 0 = off) — FIRST, so the later
+        #    counters describe the visible universe (LLD §8 R-i).
+        if min_them > 0 and fit["them"] < min_them:
+            report.post_filtered["min_them"] += 1
+            continue
+        if min_aggregate > 0 and fit["aggregate"] < min_aggregate:
+            report.post_filtered["min_aggregate"] += 1
+            continue
+        # 2. Untouchables — the viewer never sends one.
+        if untouchable_ids and set(give) & untouchable_ids:
+            report.post_filtered["untouchable"] += 1
+            continue
+        # 3. Not-interested — the viewer never receives one.
+        if not_interested_ids and set(recv) & not_interested_ids:
+            report.post_filtered["not_interested"] += 1
+            continue
+        # 4. Position pins — only when the user set them.
+        if (acquire and not _has_pos(recv, acquire)) or \
+                (away and not _has_pos(give, away)):
+            report.post_filtered["position_prefs"] += 1
+            continue
+        # 5. G6 R4 + already-swiped — post-score by operator ruling
+        #    (PRD §6.4): fit's `enumerated` includes these, unlike gen_v2.
+        if (frozenset(give), frozenset(recv)) in past_decision_keys:
+            report.post_filtered["r4_swiped"] += 1
+            continue
+        kept.append(card)
+
+    # 6. C4 centerpiece cap — replicate the live loop
+    #    (trade_service._dedup_and_sort's C4 block): keep-first in rank
+    #    order; cap <= 0 or an empty seed map ⇒ no-op (no consensus ⇒
+    #    "centerpiece" degenerates to "largest player id").
+    cap = int(ts._c("deck_headliner_cap"))
+    if cap > 0 and seed_elo:
+        seen_heads: dict[str, int] = {}
+        capped: list = []
+        for c in kept:
+            head = ts.deck_centerpiece(c.give_player_ids,
+                                       c.receive_player_ids, seed_elo)
+            if head is not None:
+                if seen_heads.get(head, 0) >= cap:
+                    report.post_filtered["c4_centerpiece"] += 1
+                    continue
+                seen_heads[head] = seen_heads.get(head, 0) + 1
+            capped.append(c)
+        kept = capped
+
+    # 7. max_per_opponent — an int keeps the top N per target in rank
+    #    order; None (the adapter's value) = full ranked list (§8 R-g).
+    if max_per_opponent is not None:
+        n = int(max_per_opponent)
+        per: dict[str, int] = {}
+        limited: list = []
+        for c in kept:
+            uid = c.target_user_id
+            if per.get(uid, 0) >= n:
+                continue
+            per[uid] = per.get(uid, 0) + 1
+            limited.append(c)
+        kept = limited
+    return kept
 
 
 # ---------------------------------------------------------------------------

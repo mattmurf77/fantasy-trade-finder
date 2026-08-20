@@ -10,6 +10,48 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-20 — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run (NOT MERGED, worktree `claude/trade-suggestions-review-69c9eb`)
+
+**Branch:** `claude/trade-suggestions-review-69c9eb` (worktree), on top of PR-F2 `d8a80a5`. **Not committed, not merged** — the finishing package of the fit-challenger build ([PRD-build](../docs/plans/fit-challenger/PRD-build.md) PR-F3 + deferred docs rows).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3645 passed, 1 skipped, 0 failed** (bar was ≥ 3629; +20 new fit/serving tests) |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) | green with **all 17** fit/bakeoff keys in `_PINNED_KNOBS` + 17 disposition sentences in scope-phase2.md |
+| Organic isolation | `test_organic_never_imports_fit` (sys.modules + comment-stripped source grep) + the standing flag-off captured golden (`test_flag_off_is_byte_identical_to_the_captured_golden`) both green |
+| `bash mobile/scripts/testid-lint.sh` | **OK** |
+| `npx tsc --noEmit` | not run in this worktree (no `node_modules`); **zero mobile files touched** — the mobile CI jobs are byte-identical to `origin/main`'s green |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = the suite above |
+
+**Sabotage evidence (serve-bit, both draft paths — HLD F-6).** `test_serve_fit_bit_excludes_from_draft` is parametrized over `bakeoff_group_size ∈ {0, 10}`. Sabotage: the `group_size = 0` fallback's rotation was reverted from `serving_roster` to the full `roster` (the exact F-6 leak — one line in `run_bakeoff`). Result: **`[0]` went red, `[10]` stayed green** — proving the 0-path case guards the `team_draft` fallback specifically (the W1 live path), not just `compose_deck`. Reverted, re-ran green; full suite re-run green after.
+Prior sabotages standing from PR-F1/F2: T1 binding (`overpay_ok` rebind), M3 inertness (`fit_diag` delete), C7b (`test_draft_rank_only`, new in this package: one arm's composite ×100 ⇒ identical deck).
+
+**W0 offline dry run (PLAN-v2 §5 W0) — FIXTURE-ONLY.** No prod DB access from this worktree: the replay boards for league `1312140920132497408` are a prod artifact and were NOT run — that half of the W0 contract plus the baseline M2 readout snapshot is an **operator item**. Leagues below: (a) the literal bakeoff-test fixture league (`backend/tests/support/bakeoff_harness._POOL`); (b)/(c) leagues built deterministically from the committed 340-player pool `backend/tests/fixtures/player_pool_2026.json` with rank-ladder Elo seeds (1750→1250), hash-offset synthetic boards (±120 on ~40% of assets; viewer + half the opponents boarded), and 3 owned-pick pseudo-assets per team. Script: session scratchpad `w0_dry_run.py` (throwaway, not committed). All at PRD-default knobs unless noted; viewer outlook None unless noted.
+
+| League | Cap | ms (module) | enumerated | scored | emitted | killed (nonzero) | one_sided | both_high/mixed/you_tilt | top_q pick/junk | capped_pairs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| (a) harness fixture (8 players, 2 opp) | 20000 | **0** | 16 | 0 | 0 | K3 6, K4 10 | — | — | — | 0 |
+| (b) 12-team 1QB, 26-man+3-pick | 20000 | **8396** (repeat 5769) | 195,783 | 38,634 | 253 | K2 520 · K3 416 · **K4 133,923** · K5 15,765 · K6 6,525 | 0.480 | .045/.100/.164 | **0.699** / 0.055 | 6/11 |
+| (b') same, W3 posture cap 5000 | 5000 | **1826** | 55,000 | 11,326 | 248 | K4 37,389 · K5 4,254 · K6 1,764 · K2 158 · K3 109 | 0.446 | .081/.150/.209 | 0.648 / 0.059 | 11/11 |
+| (b+outlook=contender) | 20000 | 5312 (wall) | 194,913 | 33,976 | 156 | **K7 6,925** + as (b) | 0.496 | — | — | — |
+| (c) 16-team SF (`sf_tep`), 21-man+3-pick | 20000 | **5772** | 227,230 | 38,090 | 333 | K4 154,455 · K5 27,703 · K6 4,971 · K3 1,391 · K2 620 | 0.417 | .142/.166/.192 | 0.682 / **0.390** | 7/15 |
+| (c') same, cap 5000 | 5000 | **1374** | 70,210 | 10,637 | 294 | K4 46,900 · K5 10,449 · K6 1,449 | 0.359 | .237/.178/.187 | 0.638 / 0.375 | 14/15 |
+
+Emitted bucket mix (b, defaults): both_high 47 · mixed 101 · them_tilt 24 · you_tilt 22 · both_ok 5 · weak 54. Post-filters: **C4 centerpiece cap is the dominant post-score filter** (38,381 of 38,634 scored dropped on (b) — small-league centerpiece concentration; `deck_headliner_cap` 2). All other `post_filtered` counters 0 (no prefs in the fixture jobs).
+
+**Readings for the operator (the decisions this run feeds):**
+
+- **ms fail bar (scope.md §6, blocks rostering):** 12-team defaults ≈ **5.8–8.4 s** per job; at the W3 posture (`fit_max_packages_per_pair = 5000`) ≈ **1.4–1.8 s**; 16-team SF the same shape. The cap knob is the relief valve exactly as designed — W3's 5000 first looks right.
+- **R-8 volume check:** fit **253** distinct ideas vs arm B **12** (engine-default `max_per_opponent=5`, same league, 307 ms) — ratio ≈ **21×**, far above the 1.2× bar ⇒ per R-8 the build **pauses at this readout for an operator call**; no auto-roster. (Also the PRD §11.6 read: `enumerated` 195,783 ≫ arm B's emitted set.)
+- **`killed[K7]` (F7 evidence):** 0 with no declared outlook (live R5 is outlook-scoped), **6,925** under `contender` — the dual-R5 debate has its number, but only on outlook-declared jobs.
+- **W3 soak-bar preview:** `top_q_junk_share` 0.055 on the 12-team fixture (bar ≤ 0.10: passes) but **0.375–0.390 on the constructed 16-team SF fixture** — likely an artifact of 21-man rosters built from a 340-player pool (deep tails sit under `asset_floor_abs` 450 in the rank-ladder Elo mapping), but it is exactly the C5 flooding signature the soak bar exists for: read it on real W3 data before trusting either interpretation. `top_q_pick_share` ≈ 0.64–0.70 everywhere (picks ride high consensus percentile under R-c) — the W3 bar is relative to arm B, which this fixture cannot supply.
+- **(a) harness fixture emits 0 cards** — its 4-asset rosters put every cross-value package over K4's overpay ceiling; a fixture artifact, not a generator defect (the 26-man leagues emit 250+).
+
+**What is NOT proven, and is owed.** Prod replay boards (league `1312140920132497408`) + baseline M2 readout snapshot — operator, needs prod read access. Constructed-league Elo/boards are synthetic (rank-ladder + hash offsets), so bucket mixes and junk shares are directional, not calibrated. `bakeoff_include_fit` stays 0 (decision 4) until the operator sets the ms bar and answers R-8; `bakeoff_serve_fit` stays 0 regardless.
+
+---
 ## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
 
 **Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
@@ -1672,6 +1714,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-20 — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run (NOT MERGED, worktree `claude/trade-suggestions-review-69c9eb`)](#2026-08-20--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)

@@ -110,6 +110,8 @@ exclusion be justified):
 | `fit_expand_from` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
 | `fit_min_them` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
 | `fit_min_aggregate` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `bakeoff_include_fit` | fit challenger PR-F3, 2026-08-20 | Arm roster / serving bit, not generation — read only by `bakeoff_runner` before or after any arm runs; an arm cannot observe it. |
+| `bakeoff_serve_fit` | fit challenger PR-F3, 2026-08-20 | Arm roster / serving bit, not generation — read only by `bakeoff_runner` before or after any arm runs; an arm cannot observe it. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag

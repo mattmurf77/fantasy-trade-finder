@@ -466,7 +466,12 @@ def test_fit_lens_provenance_raw(monkeypatch):
         raise AssertionError("fit must never call _shrink_user_elo (T3)")
     monkeypatch.setattr(ts, "_shrink_user_elo", _boom)
 
-    cards, _report = _gen(user_elo=_USER_BOARD)      # sentinel armed
+    # PR-F3 activated the §1.9 post-filters; the C4 centerpiece cap is
+    # orthogonal to lens provenance and would drop this test's hand-computed
+    # package (or1 headlines many higher-aggregate cards), so it is disarmed
+    # for the generation call only. The sentinel stays armed throughout.
+    with ts._cfg_override({"deck_headliner_cap": 0.0}):
+        cards, _report = _gen(user_elo=_USER_BOARD)  # sentinel armed
     card = _find(cards, ["ur2"], ["or1"])
     assert card is not None
 
@@ -727,3 +732,222 @@ def test_fit_diag_unscorable_cards_get_none():
     assert own.fit_diag == {"you": 61.0, "them": 55.5, "bucket": "both_ok",
                             "ver": tgf.SCORER_VERSION,
                             "lenses": own.fit["lenses"]}
+
+
+# ═══════════════════════════ PR-F3 — §1.9 post-score filters ═══════════════
+# Filters run per-viewer AFTER scoring — a preference hides a card, it never
+# shrinks the search (LLD §1.9; PRD §6.4 rules R4 post-score too). Same
+# literal fixture; every test compares against an unfiltered control run.
+
+import sys
+
+
+def test_untouchable_enumerated_then_filtered():
+    # Untouchable = the viewer's best asset (uw1, seed 1650).
+    control, rep_c = _gen()
+    filtered, rep_f = _gen(untouchable_ids={"uw1"})
+    # The preference never shrank the search: the K-chain saw the identical
+    # candidate stream, untouchable or not.
+    assert rep_f.enumerated == rep_c.enumerated
+    assert rep_f.scored == rep_c.scored
+    # uw1 entered ≥1 scored candidate (it is in the control output)…
+    assert any("uw1" in c.give_player_ids for c in control)
+    # …and the F4 filter hid every one of them from the viewer.
+    assert rep_f.post_filtered["untouchable"] >= 1
+    assert all("uw1" not in c.give_player_ids for c in filtered)
+
+
+def test_prefs_filter_not_kill():
+    # Not-interested = the partner's best asset (ow1, seed 1660) — the
+    # receive-side mirror of the untouchable test.
+    control, rep_c = _gen()
+    filtered, rep_f = _gen(not_interested_ids={"ow1"})
+    assert rep_f.enumerated == rep_c.enumerated
+    assert rep_f.scored == rep_c.scored
+    assert any("ow1" in c.receive_player_ids for c in control)
+    assert rep_f.post_filtered["not_interested"] >= 1
+    assert all("ow1" not in c.receive_player_ids for c in filtered)
+
+
+def test_position_pins_filter():
+    control, rep_c = _gen()
+    # Acquire pin: every surviving card's receive side carries ≥1 non-pick
+    # player at a pinned position; pick-only receive sides do not satisfy it.
+    cards_a, rep_a = _gen(acquire_positions=["RB"])
+    assert rep_a.enumerated == rep_c.enumerated          # filter, not kill
+    assert rep_a.post_filtered["position_prefs"] >= 1
+    for c in cards_a:
+        assert any(_PLAYERS[p].position == "RB"
+                   and not ts.is_pick_asset(_PLAYERS[p])
+                   for p in c.receive_player_ids)
+    # Trade-away pin: the give-side mirror.
+    cards_t, rep_t = _gen(trade_away_positions=["WR"])
+    assert rep_t.post_filtered["position_prefs"] >= 1
+    for c in cards_t:
+        assert any(_PLAYERS[p].position == "WR"
+                   and not ts.is_pick_asset(_PLAYERS[p])
+                   for p in c.give_player_ids)
+
+
+def test_r4_swiped_post_filtered():
+    # Take a real surviving package, then replay the job with its key in
+    # past_decision_keys (the G6 R4 / already-swiped shape:
+    # (frozenset(give), frozenset(recv))).
+    control, rep_c = _gen()
+    assert control
+    victim = control[0]
+    key = (frozenset(victim.give_player_ids),
+           frozenset(victim.receive_player_ids))
+    filtered, rep_f = _gen(past_decision_keys={key})
+    # Post-score by operator ruling (PRD §6.4): fit's `enumerated` includes
+    # the swiped candidate — unlike gen_v2, which skips it while enumerating.
+    assert rep_f.enumerated == rep_c.enumerated
+    assert rep_f.post_filtered["r4_swiped"] >= 1
+    assert all((frozenset(c.give_player_ids),
+                frozenset(c.receive_player_ids)) != key for c in filtered)
+
+
+def test_min_them_and_min_aggregate_floors():
+    # Defaults 0 = off: the one-sided volume the arm exists to keep.
+    control, rep_c = _gen()
+    assert rep_c.post_filtered["min_them"] == 0
+    assert rep_c.post_filtered["min_aggregate"] == 0
+    assert any(c.fit["them"] < 40.0 for c in control)    # one-sided supply
+    # Floors on (presentment knobs, applied FIRST so later counters
+    # describe the visible universe — LLD §8 R-i).
+    with ts._cfg_override({"fit_min_them": 40.0}):
+        cards_t, rep_t = _gen()
+    assert rep_t.post_filtered["min_them"] >= 1
+    assert all(c.fit["them"] >= 40.0 for c in cards_t)
+    with ts._cfg_override({"fit_min_aggregate": 100.0}):
+        cards_a, rep_a = _gen()
+    assert rep_a.post_filtered["min_aggregate"] >= 1
+    assert all(c.fit["aggregate"] >= 100.0 for c in cards_a)
+
+
+def test_c4_centerpiece_cap_replicates_live():
+    # Default deck_headliner_cap = 2: at most two surviving cards share a
+    # centerpiece (ts.deck_centerpiece — max seed over BOTH sides, id
+    # tie-break), keep-first in rank order.
+    cards, rep = _gen()
+    assert rep.post_filtered["c4_centerpiece"] >= 1
+    heads: dict = {}
+    for c in cards:
+        head = ts.deck_centerpiece(c.give_player_ids, c.receive_player_ids,
+                                   _SEED)
+        heads[head] = heads.get(head, 0) + 1
+    assert heads and max(heads.values()) <= 2
+    # cap 0 ⇒ the C4 stage is a no-op (live inertness rule).
+    with ts._cfg_override({"deck_headliner_cap": 0.0}):
+        cards0, rep0 = _gen()
+    assert rep0.post_filtered["c4_centerpiece"] == 0
+    assert len(cards0) > len(cards)
+
+
+def test_max_per_opponent_module_contract():
+    # None (the adapter's value, §8 R-g) = full ranked list; an int caps
+    # per target in rank order. No post_filtered counter — the pinned key
+    # set does not name it, and the adapter can never reach it.
+    full, _rep = _gen()
+    capped, rep_c = _gen(max_per_opponent=3)
+    per: dict = {}
+    for c in capped:
+        per[c.target_user_id] = per.get(c.target_user_id, 0) + 1
+    assert per and max(per.values()) <= 3
+    assert capped == full[:len(capped)] or len(capped) < len(full)
+    assert set(rep_c.post_filtered) == set(_rep.post_filtered)
+
+
+# ───────────── organic isolation — the grep + sys.modules proof ────────────
+
+def test_organic_never_imports_fit():
+    import inspect
+
+    # Source-level: the organic generator never IMPORTS or calls this
+    # module — and neither does gen_v2 (the other organic-path generator).
+    # Comments are stripped first: the fit knob block in _DEFAULT_CFG
+    # legitimately NAMES the module while documenting that arm A never
+    # imports it.
+    def _code(mod) -> str:
+        return "\n".join(line.split("#", 1)[0]
+                         for line in inspect.getsource(mod).splitlines())
+
+    assert "trade_gen_fit" not in _code(ts)
+    import backend.trade_gen_v2 as tgv2
+    assert "trade_gen_fit" not in _code(tgv2)
+
+    # Runtime-level: drop the module from sys.modules, run an ORGANIC
+    # generate (flag `trade.bakeoff` never enters trade_service — the
+    # organic path is generate_trades itself), and prove nothing re-imported
+    # it. Restore the registry afterwards for the rest of the suite.
+    saved = sys.modules.pop("backend.trade_gen_fit", None)
+    try:
+        svc = ts.TradeService(players=_PLAYERS)
+        svc.add_league(_league())
+        cards = svc.generate_trades(
+            user_id="user", user_elo={}, user_roster=list(_USER_ROSTER),
+            league_id="Lfit", seed_elo=dict(_SEED),
+            fairness_threshold=0.5, max_per_opponent=10)
+        assert isinstance(cards, list)
+        assert "backend.trade_gen_fit" not in sys.modules
+    finally:
+        if saved is not None:
+            sys.modules["backend.trade_gen_fit"] = saved
+
+
+# ───────────── arms_json['fit'] — the diagnostics schema through the runner ─
+
+class _SvcStub:
+    """The two attributes gen_fit_cards reads from the service."""
+    def __init__(self, players, league):
+        self._players = players
+        self._leagues = {league.league_id: league}
+        self._past_decision_keys: set = set()
+
+
+#: Every §1.2 FitReport key + the three S7 post-generation counters the
+#: adapter adds — the arms_json['fit'].diagnostics contract.
+_FIT_DIAG_KEYS = {
+    "opponents", "boarded_opponents", "enumerated", "scored", "killed",
+    "r5_fail_scored", "capped_pairs", "post_filtered", "emitted",
+    "one_sided_pct", "both_high_pct", "mixed_pct", "you_tilt_pct",
+    "median_aggregate", "top_q_pick_share", "top_q_junk_share", "ms",
+    "S7_intent_filter", "S7_headliner_cap", "S7_served_to_deck",
+}
+
+
+def test_arms_json_fit_diagnostics_schema():
+    import json as _json
+
+    svc = _SvcStub(_PLAYERS, _league(opp_board=_OPP_BOARD))
+    kwargs = dict(league_id="Lfit", user_id="user",
+                  user_elo=dict(_USER_BOARD),
+                  user_roster=list(_USER_ROSTER), seed_elo=dict(_SEED),
+                  scoring_format="1qb_ppr")
+
+    # Adapter-level: the drained dict carries the full schema.
+    cards = bo.gen_fit_cards(svc, dict(kwargs))
+    assert cards
+    diag = bo.last_fit_diagnostics()
+    assert set(diag) == _FIT_DIAG_KEYS
+    assert set(diag["killed"]) == {"K0", "K1", "K2", "K3", "K4", "K5",
+                                   "K6", "K7", "junk"}
+    assert diag["S7_served_to_deck"] == len(cards)
+    # …and the drain drained (the leak guard).
+    assert bo.last_fit_diagnostics() == {}
+
+    # Runner-level: the same dict lands on arms_json['fit'].diagnostics.
+    knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0}
+    with patch.object(bo, "_cfg",
+                      lambda k, d: float(knobs.get(k, d))):
+        run = bo.run_bakeoff(
+            generate=lambda **ov: [],
+            gen_v2=lambda **ov: [],
+            gen_fit=lambda **ov: bo.gen_fit_cards(svc, {**kwargs, **ov}),
+            league_id="Lfit", iso_week="2026-W34", interleave=True,
+            roster=(bo.ARM_CURRENT, bo.ARM_FIT))
+    row = run.run_row(job_id="j", user_id="user", league_id="Lfit")
+    arms = _json.loads(row["arms_json"])
+    assert arms["fit"]["cards"] == len(cards)
+    assert set(arms["fit"]["diagnostics"]) == _FIT_DIAG_KEYS
+    assert arms["fit"]["fairness_threshold"] is None     # HLD F-7 posture

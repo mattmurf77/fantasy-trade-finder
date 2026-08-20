@@ -4194,6 +4194,16 @@ def _log_deck_signal_impressions(
             _agree = bakeoff_run.also_proposed_by(card)
             if _agree:
                 features["also_proposed_by"] = _agree
+            # Fit challenger (LLD §3.3, T2): BOTH keys on EVERY bake-off
+            # row, null-valued when absent — the M4 null-share tripwire
+            # needs absence to be impossible. They ride INSIDE features_json
+            # (one column), so the executemany first-row-keys trap
+            # (save_deck_impressions) cannot drop them. `fit` is non-null
+            # only on served fit-arm cards; `fit_diag` on every card the M3
+            # stamp reached. Flag-off rows are byte-identical — both lines
+            # sit inside the `bakeoff_run is not None` guard.
+            features["fit"]      = getattr(card, "fit", None)
+            features["fit_diag"] = getattr(card, "fit_diag", None)
         if getattr(card, "wildcard", False):
             features["wildcard"] = True
             features["wildcard_pool_size"] = getattr(
@@ -5670,6 +5680,8 @@ def _run_trade_job(
                 generate  = lambda **ov: trade_service.generate_trades(
                     **{**_generate_kwargs, **ov}),
                 gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
+                    trade_service, {**_generate_kwargs, **ov}),
+                gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
                     trade_service, {**_generate_kwargs, **ov}),
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
@@ -11039,6 +11051,13 @@ def trade_card_to_dict(card, players: dict) -> dict:
     need_fit = getattr(card, "need_fit", None)
     if need_fit is not None:
         out["need_fit"] = need_fit
+    # Fit challenger (bake-off arm `fit`, LLD §3.4) — the dual-score payload
+    # {you, them, aggregate, bucket, boards, ver, r5_fail, lenses}, only ever
+    # present on fit-arm cards inside a bake-off deck. Additive: clients
+    # ignore unknown keys (no mobile/web render in v1 — scope.md §3 waiver).
+    _fit = getattr(card, "fit", None)
+    if _fit is not None:
+        out["fit"] = _fit
     # Interview phase 2 — two-lane label ("window" | "value"), only when
     # trade.lanes stamped it (user has a resolved window).
     lane = getattr(card, "lane", None)

@@ -1024,3 +1024,188 @@ def test_run_row_serving_mode_is_served_arm_not_a_bypass_marker():
     assert not any("bypass" in k for k in row), \
         "a bypass marker appeared on the run row — update the M4 tripwire " \
         "and scope-serving.md, which document served_arm as the only signal"
+
+
+# ---------------------------------------------------------------------------
+# Fit challenger (PR-F3) — serve-bit, runner API, T2 uniform columns, C7b
+# ---------------------------------------------------------------------------
+
+def _fit_stub_lists():
+    """Stub lists for the fit-arm runner tests. Fit's first card duplicates
+    arm B's first trade so `_agreement` has something to record for a dark
+    fit."""
+    cur = [_card([f"cur_g{i}"], [f"cur_r{i}"]) for i in range(4)]
+    fit = [_card(["cur_g0"], ["cur_r0"]),          # the agreement duplicate
+           _card(["fit_g1"], ["fit_r1"]),
+           _card(["fit_g2"], ["fit_r2"])]
+    return cur, fit
+
+
+def _fit_run(*, serve_fit: float, group_size: float, gen_fit="stub",
+             fit_diag=None):
+    """`run_bakeoff` with fit rostered explicitly (the W1/challenger idiom).
+    `gen_fit="stub"` binds a 3-card stub that also writes the diagnostics
+    thread-local, the way the real adapter does; None passes no callable."""
+    cur, fit = _fit_stub_lists()
+
+    def fit_cb(**_ov):
+        bo._fit_diag_tl.value = dict(fit_diag or {"enumerated": 9,
+                                                  "scored": 3})
+        return list(fit)
+
+    kwargs = {}
+    if gen_fit == "stub":
+        kwargs["gen_fit"] = fit_cb
+    elif gen_fit is not None:
+        kwargs["gen_fit"] = gen_fit
+    knobs = {"bakeoff_group_size": float(group_size),
+             "bakeoff_deck_limit": 0.0,
+             "bakeoff_serve_fit": float(serve_fit)}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        run = bo.run_bakeoff(
+            generate=lambda **ov: list(cur),
+            gen_v2=lambda **ov: [],
+            league_id="league_fit_bit", iso_week="2026-W34",
+            interleave=True,
+            roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2, bo.ARM_FIT),
+            **kwargs)
+    return run, cur, fit
+
+
+@pytest.mark.parametrize("group_size", [0, 10])
+def test_serve_fit_bit_excludes_from_draft(group_size):
+    """F5b / HLD F-6 — the serve-bit acts on BOTH draft paths. The F-6 leak
+    lives on the `group_size = 0` path (the W1 posture: composition killed,
+    `team_draft` fallback live), so both are parametrized here."""
+    run, cur, fit = _fit_run(serve_fit=0, group_size=group_size)
+
+    # Dark fit: generated and recorded…
+    assert run.arms["fit"].cards == fit
+    row = run.run_row(job_id="j", user_id="u", league_id="league_fit_bit")
+    arms = json.loads(row["arms_json"])
+    assert arms["fit"]["cards"] == 3
+    assert arms["fit"]["diagnostics"] == {"enumerated": 9, "scored": 3}
+    # …but absent from the rotation and the deck on THIS path.
+    assert not any(p == "fit" or p.startswith("fit")
+                   for p in run.arm_order)
+    fit_ids = {id(c) for c in fit}
+    assert not any(id(c) in fit_ids for c in run.draft.deck)
+    assert not any(id(c) in fit_ids for c in run.served_deck())
+    # A dark fit still registers agreement (LLD §8 R-a): the served copy of
+    # the duplicated trade cites arm fit.
+    dup = next(c for c in run.draft.deck
+               if c.give_player_ids == ["cur_g0"])
+    assert "fit" in run.also_proposed_by(dup)
+
+    # Bit = 1: fit drafts like any arm, on the same path.
+    run_on, _cur, fit_on = _fit_run(serve_fit=1, group_size=group_size)
+    fit_on_ids = {id(c) for c in fit_on}
+    assert any(id(c) in fit_on_ids for c in run_on.draft.deck)
+    assert any(p == "fit" for p in run_on.arm_order)
+
+
+def test_run_bakeoff_gen_fit_optional():
+    """HLD F-3 — `gen_fit` is an additive keyword. Absent + fit unrostered:
+    unchanged behavior. Absent + fit rostered: a RECORDED arm error, never a
+    job failure."""
+    cur = [_card(["qb1"], ["rb2"])]
+    knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        run = bo.run_bakeoff(
+            generate=lambda **ov: list(cur), gen_v2=lambda **ov: [],
+            league_id="league_fit_opt", interleave=True,
+            roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2))
+    assert "fit" not in run.arms
+    assert len(run.draft.deck) == 1
+
+    run2, _cur, fit = _fit_run(serve_fit=1, group_size=0, gen_fit=None)
+    assert run2.arms["fit"].error is not None
+    assert "gen_fit callable" in run2.arms["fit"].error
+    assert run2.arms["fit"].cards == []
+    assert len(run2.draft.deck) > 0              # the job completed
+
+
+def test_fit_fairness_threshold_none():
+    """HLD F-7 — fit joins gen_v2's None: its fairness is a score, not a
+    gate, and `basis` on a fit card means data-availability."""
+    run, _cur, _fit = _fit_run(serve_fit=0, group_size=0)
+    assert run.arms["fit"].fairness_threshold is None
+
+
+def test_arm_roster_reads_bakeoff_include_fit():
+    """LLD §2.1 — `bakeoff_include_fit` (default 0) is the roster bit."""
+    with patch.object(bo, "_cfg", lambda k, d: float(d)):
+        assert bo.ARM_FIT not in bo.arm_roster()          # default: off
+    with patch.object(bo, "_cfg",
+                      lambda k, d: 1.0 if k == "bakeoff_include_fit"
+                      else float(d)):
+        roster = bo.arm_roster()
+    assert roster == (bo.ARM_CURRENT, bo.ARM_CHALLENGER, bo.ARM_GEN_V2,
+                      bo.ARM_FIT)
+
+
+def test_draft_rank_only():
+    """C7b — sabotage 2. Multiply ONE arm's every composite_score ×100: the
+    drafted deck is IDENTICAL, because the draft is a cursor walk over list
+    ORDER. A magnitude-reading draft would reorder and fail this assert —
+    which is what licenses fit's 0–200 composite scale next to the engine
+    arms' scale."""
+    def _deck_ids(scale):
+        b = [_card([f"bg{i}"], [f"br{i}"], composite=(3.0 - i) * scale)
+             for i in range(3)]
+        c = [_card([f"cg{i}"], [f"cr{i}"], composite=(3.0 - i))
+             for i in range(3)]
+        knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0}
+        with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+            run = bo.run_bakeoff(
+                generate=lambda **ov: list(b), gen_v2=lambda **ov: list(c),
+                league_id="league_rank_only", iso_week="2026-W34",
+                interleave=True, roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2))
+        return [(tuple(x.give_player_ids), tuple(x.receive_player_ids))
+                for x in run.served_deck()]
+
+    assert _deck_ids(1.0) == _deck_ids(100.0)
+
+
+def test_impressions_uniform_columns():
+    """T2 — `save_deck_impressions` compiles its executemany statement from
+    the FIRST row's keys. With the deck LED by an unattributed injection,
+    every row must still carry the identical key set, and every
+    features_json must decode with `fit` and `fit_diag` present (null
+    allowed — absence is what the M4 null-share tripwire cannot survive)."""
+    run, _cur, fit = _fit_run(serve_fit=1, group_size=0)
+    # Give the drafted fit cards a real fit payload (the module half would
+    # have); arm-B cards carry none — nulls must still serialize.
+    for c in fit:
+        c.fit = {"you": 61.0, "them": 55.5, "aggregate": 116.5,
+                 "bucket": "both_ok", "boards": "both", "ver": "fit-1",
+                 "r5_fail": False, "lenses": {}}
+    injection = _card(["inj_g"], ["inj_r"])      # no arm produced this
+    cards = [injection] + list(run.served_deck())
+
+    seen = {}
+    with patch.object(server, "save_deck_impressions",
+                      lambda rows: seen.setdefault("rows", rows)), \
+            patch.object(server, "load_board_state",
+                         lambda *a, **kw: (0, None)), \
+            patch.object(server, "_deck_fatigue_enabled", lambda: False), \
+            patch.object(server, "_deck_taste_enabled", lambda: False):
+        server._log_deck_signal_impressions(
+            user_id=H.ME, league_id=H.LEAGUE, job_id="j-uniform",
+            cards=cards, players_dict={}, capture=None,
+            scoring_format="1qb_ppr", seed_map={}, bakeoff_run=run)
+
+    rows = seen["rows"]
+    assert len(rows) == len(cards)
+    # One key set, batch-wide — the T2 contract.
+    assert len({tuple(sorted(r)) for r in rows}) == 1
+    feats = [json.loads(r["features_json"]) for r in rows]
+    for f in feats:
+        assert "fit" in f and "fit_diag" in f    # null allowed, never absent
+    # The injection row is honestly unattributed, null-fit…
+    assert rows[0]["model_arm"] is None
+    assert feats[0]["fit"] is None
+    # …and a served fit card carries its payload.
+    fit_rows = [i for i, r in enumerate(rows) if r["model_arm"] == "fit"]
+    assert fit_rows
+    assert feats[fit_rows[0]]["fit"]["ver"] == "fit-1"
