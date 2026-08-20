@@ -2681,7 +2681,12 @@ export default function TradesScreen({ navigation, route }: any) {
     opponentUserId: topCard?.opponent_user_id ?? null,
     givePlayerIds: topCard?.give_player_ids ?? [],
     receivePlayerIds: topCard?.receive_player_ids ?? [],
-    format: activeFormat,
+    // `calcFormat`, NOT the raw `activeFormat`: the session's format is
+    // legitimately null in several states, and every other consumer in this
+    // file already falls back through calcFormat. Passing the raw value made
+    // the hook's key null, which DISABLED the fetch and rendered nothing at
+    // all — no spinner, no error. That was the "still not there" bug.
+    format: calcFormat,
   });
   const nextCard = sortedDeck[deckIdx + 1];
 

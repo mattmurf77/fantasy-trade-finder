@@ -76,10 +76,14 @@ function slotLabel(slot: string): string {
 export default function CardImpactBlock({
   loading,
   evaluation,
+  failed = false,
   testID = 'trades.card-impact',
 }: {
   loading: boolean;
   evaluation: CalcEvaluationInLeague | null;
+  /** Distinguishes "the read failed" from "this trade moves no slots". Both
+   *  render quietly, but only one of them is a bug worth finding. */
+  failed?: boolean;
   testID?: string;
 }) {
   if (loading) {
@@ -89,7 +93,16 @@ export default function CardImpactBlock({
       </View>
     );
   }
-  if (!evaluation) return null;
+  if (!evaluation) {
+    // A failed read gets a single quiet line rather than nothing at all. It
+    // must not look identical to a healthy no-op trade — that equivalence is
+    // what hid a disabled fetch through an entire TestFlight build.
+    return failed ? (
+      <View style={styles.wrap} testID={`${testID}.unavailable`}>
+        <Text style={styles.muted}>Team impact unavailable for this trade.</Text>
+      </View>
+    ) : null;
+  }
 
   const impact = evaluation.outlook_impact;
   const slots: Slot[] = evaluation.starter_impact?.slots ?? [];
@@ -240,4 +253,5 @@ const styles = StyleSheet.create({
   band: { fontFamily: fonts.displaySemi, fontSize: 17, textTransform: 'uppercase' },
   points: { ...type.bodySm, marginLeft: 'auto', fontVariant: ['tabular-nums'] },
   noChange: { ...type.bodySm, color: chalk.dim },
+  muted: { ...type.bodySm, color: chalk.faint },
 });

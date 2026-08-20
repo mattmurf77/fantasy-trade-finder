@@ -16,17 +16,32 @@ import type { ScoringFormat } from '../shared/types';
 // This hook is therefore mounted ONLY by the top card. A peek card, a match
 // variant or a read-only mount passes `enabled: false` and costs nothing.
 //
-// EVERY FAILURE IS SILENT BY DESIGN. The card's job is the trade; the impact
-// block is enrichment. A 404 (flag off), a 501 (non-Sleeper league), a timeout
-// or a 500 all resolve to `evaluation: null`, which renders nothing at all —
-// never an error state on a swipe card.
+// FAILURES ARE QUIET ON SCREEN BUT NOT INVISIBLE TO CODE. The card's job is
+// the trade; the impact block is enrichment, so a 404 (flag off), a 501
+// (non-Sleeper league), a timeout or a 500 must never put an error state on a
+// swipe card. They resolve to `evaluation: null` — but they also set `failed`.
+//
+// The distinction was learned the hard way (2026-08-19/20). The first cut of
+// this hook rendered `null` on every failure, which is byte-identical on
+// screen to a healthy trade that moves no starting slots. A binding bug —
+// passing the session's raw `activeFormat`, which is legitimately null in
+// several states, instead of the `calcFormat` fallback every other consumer in
+// TradesScreen uses — disabled the fetch entirely and shipped in build 122
+// looking exactly like "this trade changes nothing". `failed` is what makes
+// those three states tellable apart.
 
 export interface CardImpactState {
   loading: boolean;
   evaluation: CalcEvaluationInLeague | null;
+  /** True when a fetch was attempted and FAILED, as opposed to never having
+   *  run or having returned a trade that moves no starting slots. Without this
+   *  the three states are indistinguishable on screen, which is exactly how
+   *  the disabled-hook bug survived a build: it rendered `null`, and so does a
+   *  perfectly healthy trade that changes nothing. */
+  failed: boolean;
 }
 
-const EMPTY: CardImpactState = { loading: false, evaluation: null };
+const EMPTY: CardImpactState = { loading: false, evaluation: null, failed: false };
 
 export function useCardImpact(params: {
   enabled: boolean;
@@ -64,7 +79,7 @@ export function useCardImpact(params: {
       return;
     }
     const controller = new AbortController();
-    setState({ loading: true, evaluation: null });
+    setState({ loading: true, evaluation: null, failed: false });
 
     evaluateTradeInLeague(
       givePlayerIds,
@@ -76,12 +91,13 @@ export function useCardImpact(params: {
     )
       .then((res) => {
         if (activeKey.current !== key) return;   // a newer card is fronted
-        setState({ loading: false, evaluation: res ?? null });
+        setState({ loading: false, evaluation: res ?? null, failed: !res });
       })
       .catch(() => {
         if (activeKey.current !== key) return;
-        // Silent: enrichment, not the card's job. See the header note.
-        setState({ loading: false, evaluation: null });
+        // Quiet on screen, but RECORDED — see `failed`. The card must not
+        // shout, and it must not lie by looking identical to success.
+        setState({ loading: false, evaluation: null, failed: true });
       });
 
     return () => {

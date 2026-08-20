@@ -665,6 +665,7 @@ function TradeCardComp({
         <CardImpactBlock
           loading={cardImpact.loading}
           evaluation={cardImpact.evaluation}
+          failed={cardImpact.failed}
         />
       ) : null}
 
