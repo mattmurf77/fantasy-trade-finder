@@ -148,6 +148,8 @@ further toward rebuilder; and **FFV3, the league in the report, has no `draft_pi
 at all**. Prod Postgres would settle both and was not reachable (the read was denied by the sandbox).
 This is why the flag ships dark and why its graduation criterion is an operator check on prod.
 
+**CORRECTED SAME DAY by a read-only prod query.** The local corpus was the problem, and the conclusion above is BACKWARDS for the league that filed the report. Prod carries 276 round-1 rows across 7 leagues with a traded first; in **Fantasy Football Version 3 (FFV3, `1312140920132497408`) `mattmurf77` holds ZERO firsts having sold all three of his own — net +3**, the strongest all-in reading the term produces, pointing him toward CONTENDER. His other leagues run the other way (La Resistance −5, Lakeview −1). Lesson worth keeping: *a local DB that is missing the subject league is not a small sample, it is the wrong sample* — and it produced a confident, inverted finding that would have argued against shipping the right fix.
+
 **Not run, and owed:** the manual TestFlight pass
 ([testflight-checklist.md](../docs/feedback/items/365-window-signals/testflight-checklist.md)). It is
 the gate on graduating either flag. Note that §C4–C6 (the odds path actually driving) **cannot be

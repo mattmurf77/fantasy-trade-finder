@@ -190,19 +190,35 @@ for exactly two leagues, both named *Lakeview League*:
 | `1101407304802574336` | 48 (2026–29) | 4 | 5 | **0** | 1 | **+1** |
 | `1312076055586050048` | 48 (2026–29) | 4 | 5 | **0** | 1 | **+1** |
 
-Two findings that contradict the plan doc's framing:
+~~Two findings that contradict the plan doc's framing:~~ **SUPERSEDED 2026-08-20 by the prod read
+below. Both findings were artefacts of an incomplete local corpus and the first one was BACKWARDS.**
 
-1. **In both leagues the operator has traded away zero of his own firsts and acquired one.** The
-   signal he asked for, computed on his own data, points him *further toward rebuilder* — the
-   opposite of the correction #365 asks for. The term is directionally correct as a model of intent;
-   it simply may not be the thing misclassifying *him*.
-2. **FFV3 — the league in the report — has no pick rows in the local DB at all**
-   (`Fantasy Football Version 3`, ids `1312140920132497408` / `1181674778942836736`: zero
-   `draft_picks` rows, and a 291-byte `roster_data` stub, so the local score cannot be recomputed
-   either). In that league the term degrades to `provenance: "absent"` and contributes nothing.
+The local DB (`data/trade_finder.db`) carries round-1 provenance for only two leagues, and **FFV3 is
+not one of them** — it has zero `draft_picks` rows locally. Reasoning about #365 from the two leagues
+that *were* present produced the conclusion that the operator's own signal pointed him further toward
+rebuilder. **Prod says the opposite, in the league that actually filed the report.**
 
-Prod Postgres would settle both points and was **not** reachable from this session (the read was
-denied by the sandbox). So: the term is built, tested and dark, and the flag's graduation criterion
+### The prod read (read-only, `DATABASE_URL_PROD`, 2026-08-20)
+
+276 round-1 rows across 7 leagues carrying a traded first. `mattmurf77`'s round-1 ledger:
+
+| League | Name | held | sold | bought | net sold |
+|---|---|---|---|---|---|
+| `1312140920132497408` | **Fantasy Football Version 3 — THE LEAGUE IN THE REPORT** | **0** | **3** | 0 | **+3** |
+| `1312146456701829120` | La Resistance | 8 | 0 | 5 | −5 |
+| `1312076055586050048` | Lakeview League | 4 | 0 | 1 | −1 |
+| `11896` | Newton Dynasty League (ESPN) | 3 | 1 | 0 | +1 |
+| `62846` | The Dependables League (MFL) | 1 | 1 | 0 | +1 |
+
+**In FFV3 the operator holds zero firsts having sold all three of his own.** That is the strongest
+all-in reading the signal can produce, and it points him toward *contender* — exactly the correction
+#365 asked for. The signal is not just directionally sound in the abstract; **it fires correctly on
+the specific case that motivated the report.**
+
+Note also that his leagues genuinely differ (+3 in FFV3, −5 in La Resistance), which is the behaviour
+you want from a per-league intent signal and is invisible to the age heuristic.
+
+**What still gates graduation** (unchanged, and the local-corpus scare does not reduce it): the term
 is an operator check against prod — not a build-session claim. **This is the single most important
 thing to read before lighting `trade.outlook_net_firsts`.**
 
