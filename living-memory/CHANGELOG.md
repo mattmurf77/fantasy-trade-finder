@@ -35,6 +35,32 @@ junk 0.055, 1.8 s @ 5k cap — R-8 says rostering is now an **operator decision*
 (`38806e0`) are MERGED on `origin/main` — earlier HANDOFF/NEXT entries calling them unmerged are
 stale.
 
+## 2026-08-20 — Team Review defect batch: the sell list was inverted, the partners beat was starved (#364/#367/#368)
+
+First operator pass over the Team Review flow shipped 2026-08-19 produced 8 reports. Three built,
+four planned by operator selection ([plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md)).
+
+- **#367 — the sell list selected the wrong players, in two places.** `compute_consensus_gap` kept
+  roster players the USER rated *above* the market; the card then promised *"someone pays you more
+  than you think they're worth"* over exactly the set nobody overpays for. Separately,
+  `_divergence` crossed both field names, so the user's best BUYS rendered under **"Skip these."**
+  Fixed **upstream** by operator call, which repairs mobile Trends too ([D-100](DECISIONS.md)).
+- **#368 — one root cause, both symptoms.** The route computed `pick_share` and `first_rounds` per
+  owner and never passed them, so `_partners` fell back to `{}`: every team read "0 firsts" **and**
+  a contender's sort key was uniformly 0.0, leaving the beat in arbitrary order. Two kwargs.
+- **#364 — the outlook caption now names IDP** and lists the unpriced slots, reading
+  `meta.priced_slot_coverage.unpriced_slots`, on the wire since 2026-08-10 and never read by any client.
+- **Operator asks, same session:** `window.model` ships all seven inference knobs so the beat renders
+  its own inputs ([D-101](DECISIONS.md)) — it had hardcoded *"age 23 and under"* against a `youth_age`
+  of **26**; and completing the flow now minimizes the entry card to a "Team review · done" row.
+- **Docs:** `/api/league/team-review` was **never documented** — added, post-fix contract. New
+  `cross-client-invariants.md` § Consensus-gap direction (three consumers, so the sign is an invariant).
+- **Gates:** pytest **3606 passed, 1 skipped**; tsc clean; 64 `check-*.js` suites green; testid-lint OK.
+  6 new backend tests, **5 sabotage-proven red**; 2 pre-existing tests repaired — one asserted the
+  defect, one had gone **vacuous** under the fix while still passing. TestFlight checklist UNRUN.
+- **No flag reverts #367** — `compute_consensus_gap` is ungated and shared. Rollback is a code revert.
+
+---
 ## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads
 
 **Not shipped — committed to `fix/likes-you-quality-gates`, not pushed, not merged.**

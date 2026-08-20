@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
+- [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
 - [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
@@ -61,6 +62,56 @@ the W1 re-light per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md) (B+D+
 **Blocking:** operator decisions only. **Stale-entry corrections:** the 2026-08-19 entries below
 saying likes-you gates / arm D are unmerged are outdated — `7110af2`, `d755b3b`, `38806e0` are
 all on `origin/main`.
+## 2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
+
+**Branch:** `claude/team-outlook-experience-27a7a1` (worktree of the same name), at `origin/main` `a76498e`.
+**Committed, not pushed, not merged.** Full gates ran — the operator did not declare express.
+[scope](../docs/feedback/items/364-team-review-fixes/scope.md) · [code-walk](../docs/feedback/items/364-team-review-fixes/code-walk.md) ·
+[checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md) · [plan for the rest](../docs/feedback/items/364-team-review-fixes/plan-remaining.md) ·
+[D-100](DECISIONS.md), [D-101](DECISIONS.md).
+
+**What happened.** Team Review shipped 2026-08-19 and the operator ran it for the first time on
+2026-08-20, filing **8 reports (#364–#371)**. Nothing had been picked up. Operator selection this
+session: *"Confirmed defects now, plan the rest"* and *"Fix upstream — repairs Trends too."*
+
+**The finding that matters most.** #367 was not a copy bug. `compute_consensus_gap` selected
+"easiest sells" as roster players the USER rated **above** the market — the set the league will not
+pay up for — and `_divergence` then crossed both field names, so the user's best **buys** rendered
+under *"Skip these — you'd be buying at a price you don't believe."* Two independent errors pointing
+the same wrong way. `easiest_buys` was always correct (it compares against the **owner's** elo), and
+that asymmetry — sell into a market, buy from a person — is now pinned in
+`docs/cross-client-invariants.md` § Consensus-gap direction.
+
+**#368 was one root cause with two symptoms, and both were in the wiring, not the logic.** The route
+computes `pick_share` and `first_rounds` per owner (`server.py:23269-23278`) and never passed them,
+so `_partners` fell back to `{}` — every member read "0 firsts" **and** a contending caller's sort
+key was uniformly 0.0, leaving the list in arbitrary order. No unit test on the pure module could
+see it; the new guard AST-parses the route and asserts both kwargs are present.
+
+**Two operator asks landed mid-session and are built:** `window.model` ships all seven inference
+knobs so the beat renders its own inputs (it had hardcoded *"age 23 and under"* against a `youth_age`
+of **26** — the number shown was never the number used); and finishing the flow minimizes the entry
+card to a **"Team review · done"** row, kept as a separate key from "Not now" so the two states stay
+distinguishable.
+
+**THE SINGLE MOST IMPORTANT THING FOR THE NEXT SESSION: no flag reverts #367.**
+`compute_consensus_gap` is ungated and shared by mobile Trends, web Trends and Team Review, so
+rollback is a **code revert**, not a `features.json` flip. `trades.team_review` and `outlook.odds`
+still kill their own surfaces deploy-free, but neither touches the sell direction. Checklist step 8
+is the one to run first.
+
+**A green suite was hiding a dead test.** `test_divergence_ignores_unjudged_players` went vacuous
+under the fix — both divergence lists came back empty, so its leak assertion proved nothing while
+still passing. Repaired with a non-emptiness assertion. Worth remembering as a class: when a fix
+changes *selection*, re-read the tests that pass, not only the ones that fail.
+
+**What is owed.** (1) Push + merge — nothing is pushed. (2) The 13-step TestFlight checklist is
+**UNRUN**, and the corrected divergence beat has never been seen on a device; it needs a client
+release (the backend half goes live on merge, the copy does not). (3) Four reports are **planned,
+not built** — #365 (window is age-only; it is a bright-line *engine* change via `outlook_alpha`),
+#366 (Handcuff needs an NFL depth chart FTF does not ingest), #369, #371 — plus #367's
+consensus-vs-league toggle and #370 (a TradesHome deck bug, different surface). All specced in
+`plan-remaining.md` with the decision each one needs.
 
 ## 2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override
 

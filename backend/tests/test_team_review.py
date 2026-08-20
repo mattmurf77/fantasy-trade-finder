@@ -113,10 +113,15 @@ def test_divergence_ignores_unjudged_players():
         seed_elo=seed,
         judged_ids={"p1", "p2"},
         board_interactions=BOARD_INTERACTION_BAR,
-        user_roster=["p1", "p3", "p5", "p7"],
+        # p1 is high and NOT owned (a buy); p2 is low and owned (a sell).
+        # Under #367's corrected rule this is what makes both lists non-empty,
+        # which is what keeps the leak assertion below meaningful.
+        user_roster=["p2", "p3", "p5", "p7"],
     )
     d = out["divergence"]
     assert d["source"] == "consensus_seed"
+    assert d["higher_than_market"] and d["lower_than_market"], (
+        "both lists must carry a row or the leak assertion below is vacuous")
     ids = {r["player_id"] for r in d["higher_than_market"]} | {
         r["player_id"] for r in d["lower_than_market"]}
     leaked = ids - {"p1", "p2"}
@@ -254,3 +259,149 @@ def test_payload_carries_no_odds_fields():
 
 def test_unknown_caller_returns_empty_rather_than_guessing():
     assert _build(you_user_id="nobody") == {}
+
+
+# ---------------------------------------------------------------------------
+# #367 — which list is the sell list
+# ---------------------------------------------------------------------------
+
+def test_seed_ladder_buys_are_off_roster_and_sells_are_on_roster():
+    """The shipped screen offered the user's best BUYS under "Skip these".
+
+    `higher_than_market` is where your board sits above the market on a player
+    you do NOT own — you would pay less than you think he is worth. It shipped
+    holding on-roster players you rate above the market, which is the set
+    nobody overpays for.
+    """
+    seed = {"p1": 1500.0, "p2": 1500.0}
+    user = {"p1": 1700.0, "p2": 1300.0}
+    out = _build(
+        user_elo=user, seed_elo=seed, judged_ids={"p1", "p2"},
+        board_interactions=BOARD_INTERACTION_BAR,
+        user_roster=["p2"],
+    )
+    d = out["divergence"]
+    highs = {r["player_id"]: r for r in d["higher_than_market"]}
+    lows = {r["player_id"]: r for r in d["lower_than_market"]}
+
+    assert "p1" in highs, "you rate p1 above the market and do not own him → buy"
+    assert highs["p1"]["on_roster"] is False
+    assert "p2" in lows, "the market rates p2 above you and you own him → sell"
+    assert lows["p2"]["on_roster"] is True
+    assert "p1" not in lows and "p2" not in highs
+
+    # Both sides ship a POSITIVE edge magnitude, matching compute_consensus_gap.
+    assert highs["p1"]["gap"] == 200.0
+    assert lows["p2"]["gap"] == 200.0
+
+
+def test_community_ladder_maps_buys_to_higher_and_sells_to_lower():
+    """The two source ladders must agree on what each field means."""
+    community_gap = {
+        "has_baseline": True,
+        "baseline_user_count": 4,
+        "easiest_sells": [
+            {"player_id": "p2", "gap": 150.0, "community_elo": 1650.0},
+        ],
+        "easiest_buys": [
+            {"player_id": "p1", "gap": 120.0, "owner_elo": 1380.0},
+        ],
+    }
+    out = _build(
+        user_elo={"p1": 1500.0, "p2": 1500.0},
+        seed_elo={"p1": 1500.0, "p2": 1500.0},
+        judged_ids={"p1", "p2"},
+        board_interactions=BOARD_INTERACTION_BAR,
+        community_gap=community_gap,
+        user_roster=["p2"],
+    )
+    d = out["divergence"]
+    assert d["source"] == "league_community"
+    assert [r["player_id"] for r in d["higher_than_market"]] == ["p1"], (
+        "easiest_buys belongs in higher_than_market — it IS the set you are "
+        "higher than the market on")
+    assert [r["player_id"] for r in d["lower_than_market"]] == ["p2"]
+    assert d["higher_than_market"][0]["on_roster"] is False
+    assert d["lower_than_market"][0]["on_roster"] is True
+    # Comparison elo is the OWNER's for a buy, the community's for a sell.
+    assert d["higher_than_market"][0]["comparison_elo"] == 1380.0
+    assert d["lower_than_market"][0]["comparison_elo"] == 1650.0
+
+
+# ---------------------------------------------------------------------------
+# #365 — the inference model travels with its output
+# ---------------------------------------------------------------------------
+
+def test_window_ships_the_model_so_no_client_restates_a_threshold():
+    """The screen rendered "Value age 23 and under" while `youth_age` was 26.
+
+    A client that hardcodes a knob drifts the moment the knob moves, so the
+    thresholds, weights and cuts ride the payload — the same rule that already
+    governs `equal_pick_share`.
+    """
+    from backend.trade_service import infer_team_outlook
+    _outlook, _score, signals = infer_team_outlook([], {}, 0.0, 12)
+    assert "model" in signals
+    out = _build(outlook_signals=signals)
+    model = out["window"]["model"]
+    for key in ("vet_age", "youth_age", "w_vet_share", "w_youth_share",
+                "w_pick_share", "contender_cut", "rebuilder_cut"):
+        assert key in model, f"window.model is missing {key}"
+    assert model["vet_age"] != model["youth_age"] or model["vet_age"] is not None
+
+
+def test_window_model_is_absent_not_faked_when_signals_lack_it():
+    """An older caller passing bare signals gets `{}` — the client hides the
+    breakdown rather than rendering invented numbers."""
+    out = _build(outlook_signals={"vet_share": 0.5, "youth_share": 0.2,
+                                  "pick_share": 0.08, "score": 0.1})
+    assert out["window"]["model"] == {}
+
+
+# ---------------------------------------------------------------------------
+# #368 — the route must actually PASS what it computes
+# ---------------------------------------------------------------------------
+
+def test_partners_carry_first_round_counts_when_supplied():
+    out = _build(
+        teams=_teams(4),
+        inferred_outlook="contender",
+        member_windows={"u2": "rebuilder", "u3": "rebuilder"},
+        first_round_by_owner={"u2": 5, "u3": 1},
+        pick_share_by_owner={"u2": 0.40, "u3": 0.05},
+    )
+    rows = out["partners"]["opposed_window"]
+    assert [r["user_id"] for r in rows] == ["u2", "u3"], (
+        "a contender sorts opposed partners by pick capital, so the team "
+        "holding 40% of the picks leads")
+    assert rows[0]["first_round_picks"] == 5
+    assert rows[1]["first_round_picks"] == 1
+
+
+def test_team_review_route_passes_the_pick_capital_it_computes():
+    """#368 was a DROPPED ARGUMENT, not a logic error.
+
+    `league_team_review_route` builds `pick_share` and `first_rounds` for every
+    member and then called `build_team_review` without them, so `_partners`
+    fell back to `{}`: every team reported "0 firsts" and the contender sort
+    key was uniformly 0.0, leaving the beat in arbitrary order. No unit test on
+    the pure module can see that — the wiring is the defect, so the wiring is
+    what this pins.
+    """
+    import ast
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parents[1] / "server.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    call = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "build_team_review"):
+            call = node
+            break
+    assert call is not None, "build_team_review call not found in server.py"
+    kwargs = {k.arg for k in call.keywords}
+    for name in ("pick_share_by_owner", "first_round_by_owner"):
+        assert name in kwargs, (
+            f"the team-review route computes pick capital but does not pass "
+            f"{name}; _partners then reports 0 firsts for every member (#368)")

@@ -19695,8 +19695,9 @@ def trends_consensus_gap_route():
     GET /api/trends/consensus-gap?league_id=...&top_n=5
     Per-player gap between the user's ELO and the community ELO (for
     non-roster picks: vs the specific owner's ELO).  Returns
-    "easiest_sells" (own roster, over-valued vs market) and
-    "easiest_buys" (not on roster, over-valued vs owner).
+    "easiest_sells" (own roster, the MARKET rates him above your board — the
+    surplus you capture by selling) and "easiest_buys" (not on roster, your
+    board rates him above his OWNER's — the discount you capture by buying).
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -23437,6 +23438,14 @@ def league_team_review_route():
             community_gap=community_gap,
             user_roster=my_roster,
             players=players_meta,
+            # #368 — both of these were computed above and then NOT passed,
+            # so `_partners` fell back to its `{}` defaults: every member
+            # reported "0 firsts", and for a CONTENDING caller the sort key
+            # (`pick_capital_share`) was 0.0 for everyone, leaving the
+            # "pointed the other way" list in arbitrary order. That is the
+            # whole of what made the beat read as nonsense.
+            pick_share_by_owner=pick_share,
+            first_round_by_owner=first_rounds,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404

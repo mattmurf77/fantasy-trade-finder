@@ -77,6 +77,20 @@ export interface TeamReviewWindow {
     equal_pick_share: number;
     score: number;
   };
+  /** #365 — every input the inference actually used. Read these rather than
+   *  hardcoding a threshold in copy: the screen shipped saying "age 23 and
+   *  under" while `youth_age` was 26. Optional so an older payload (or a
+   *  backend rolled back below this change) degrades to hiding the rows
+   *  instead of rendering `undefined`. */
+  model?: {
+    vet_age: number;
+    youth_age: number;
+    w_vet_share: number;
+    w_youth_share: number;
+    w_pick_share: number;
+    contender_cut: number;
+    rebuilder_cut: number;
+  };
   options: OutlookOption[];
 }
 

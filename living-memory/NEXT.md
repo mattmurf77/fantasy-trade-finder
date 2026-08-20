@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
+- [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
 - [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
@@ -47,6 +48,29 @@ Built dark on `claude/trade-suggestions-review-69c9eb` (see HANDOFF + CHANGELOG 
 
 *(Cap note: added while the 7-item cap is already blown — this is the current operative work;
 the 2026-08-08/08-11 sections remain first in line to drop.)*
+## 2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports
+
+Built and unmerged on **`claude/team-outlook-experience-27a7a1`** ([D-100](DECISIONS.md), [D-101](DECISIONS.md),
+[scope](../docs/feedback/items/364-team-review-fixes/scope.md)). *Why now:* #367 is a live user-facing
+defect on two surfaces — the app was telling users to sell the players the market **won't** pay for,
+and offering their best buys under "Skip these."
+
+1. **Operator: run the 13-step TestFlight checklist**
+   ([checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md)). Only runtime
+   evidence available under [D-056](DECISIONS.md). **Step 8** — the sell list holds players you are
+   *lower* on than the league — is the whole change. Step 13 covers Trends, which moved with it.
+2. **Push + merge.** Nothing is pushed. Backend half goes live on merge; the copy needs a client release.
+3. **Know the rollback before you need it:** `trades.team_review` → `false` and `outlook.odds` → `false`
+   are deploy-free, but **neither reverts #367** — `compute_consensus_gap` is ungated and shared, so
+   that one is a code revert.
+4. **Then the four planned reports**, in the order argued in
+   [plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md): the #367
+   consensus-vs-league toggle (smallest, finishes a half-shipped item) → **#370** repro (a live
+   complaint, different surface) → **#365** net-firsts signal (needs two decisions first; it is a
+   bright-line *engine* change) → **#366** re-tier, with Handcuff split out and gated on whether FTF
+   ingests an NFL depth chart → #369 → #371 (decide alongside #365, not before it).
+
+---
 
 ## 2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume
 
