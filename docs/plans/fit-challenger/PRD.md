@@ -1,7 +1,7 @@
 # PRD — Fit challenger (dual 0–100 scores, thin knockouts)
 
 **Date:** 2026-08-19
-**Status:** active, not built
+**Status:** built, not rostered (`bakeoff_include_fit=0`)
 **Owner (product):** operator. **Owner (delivery):** EM, tickets in [README.md](README.md)
 **Scope:** [scope.md](scope.md)
 **Bake-off arm:** `fit` — dark, never the live serving path

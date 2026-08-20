@@ -26,6 +26,14 @@
 > engine. Read `deck_impressions.model_arm = 'baseline'` as the pre-G6
 > reconstruction, exactly as before — never as the challenger.
 
+> **2026-08-19 — a fifth arm exists (D-098), default off.** Arm `fit`
+> ([PRD](../fit-challenger/PRD.md)) is a **new generator**
+> (`backend/trade_gen_fit.py`), not a profile overlay. It is invoked the same
+> way as `gen_v2` (direct call, independent of any serving flag) and stays off
+> the roster until the operator flips `bakeoff_include_fit=1` after a dry run
+> sets the ms bar. Organic `_generate_trades_impl` never imports it. Do not
+> confuse with arm D (`challenger`): that one *is* a profile.
+
 ## 1. What "three models" precisely means
 
 | Arm | Name | What it is | How it is invoked |

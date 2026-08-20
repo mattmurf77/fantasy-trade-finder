@@ -34,19 +34,19 @@ What it is not: live serving, landability knobs, `trade_gen.v2`, dual R5 (F7), l
 
 - [x] **Unit tests (F6):** K1 legal/illegal shapes; K2 identical to `pick_swap_ok` on a shared fixture (2026 1st vs 2027 1st dead; 2-late-2nds-for-1st live); K3 kills a trade that leaves a team with 0 RB; negative consensus surplus still scores (them < 50, not dropped); unranked partner has `board: null`; untouchable still **enumerated** and dropped only in F4; pool cap respected (`enumerated ≤ fit_max_packages_per_pair`).
 - [x] **Code-walk:** `_generate_trades_impl` does not reference `trade_gen_fit` unless a test greps it as forbidden on the organic branch.
-- [ ] **Bake-off dry run:** one fixture league, arm off-roster then on, TEST_LEDGER: ms, enumerated vs Arm B prune size, `one_sided_pct`.
+- [x] **Bake-off dry run:** one fixture league, arm off-roster then on, TEST_LEDGER: ms, enumerated vs Arm B prune size, `one_sided_pct`.
 - Structural mobile guards: **WAIVED v1** — no client render of `fit` required. Additive JSON.
 
 ## 4. Docs scope
 
 | Doc | Updated? |
 |---|---|
-| `docs/config-reference.md` | F5 knobs + `bakeoff_include_fit` |
-| `docs/api-reference.md` | additive `fit` on TradeCard (bake-off only) |
-| `docs/data-dictionary.md` | diagnostics keys |
-| `docs/plans/three-model-bakeoff/PLAN.md` | addendum: arm `fit` |
-| `living-memory/LLD.md` | one convention: preferences filter after score in this arm |
-| ADR | D-095 (proposed): fit-challenger is a generator, not a profile |
+| `docs/config-reference.md` | updated — `bakeoff_include_fit` + `fit_*` knobs |
+| `docs/api-reference.md` | updated — additive `fit` on TradeCard (bake-off only) |
+| `docs/data-dictionary.md` | updated — `arms_json[fit].diagnostics` keys |
+| `docs/plans/three-model-bakeoff/PLAN.md` | updated — fifth-arm addendum |
+| `living-memory/LLD.md` | updated — preferences filter after score |
+| ADR | D-098 / [ADR-013](../../adr/adr-013-fit-challenger-is-a-generator.md) |
 
 ## 5. Ship gate
 

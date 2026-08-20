@@ -131,6 +131,11 @@ def test_every_optional_arm_has_its_own_kill_knob():
                   bakeoff_include_gen_v2=0.0) == ("current",)
     assert roster(bakeoff_include_baseline=1.0) == (
         "baseline", "current", "challenger", "gen_v2")
+    assert roster(bakeoff_include_fit=1.0) == (
+        "current", "challenger", "gen_v2", "fit")
+    assert roster(bakeoff_include_fit=1.0,
+                  bakeoff_include_challenger=0.0,
+                  bakeoff_include_gen_v2=0.0) == ("current", "fit")
 
 
 def test_the_challenger_is_an_engine_arm_and_earns_both_groups():
@@ -143,6 +148,17 @@ def test_the_challenger_is_an_engine_arm_and_earns_both_groups():
                     "challenger_divergence", "challenger_consensus", "gen_v2"]
 
 
+def test_fit_arm_earns_both_groups_and_stays_off_the_default_roster():
+    """Arm `fit` is a generator that still emits both bases, so it gets two
+    groups — but bakeoff_include_fit defaults to 0."""
+    assert bo.ARM_FIT in bo.ENGINE_ARMS
+    with patch.object(bo, "_cfg", lambda key, default: float(default)):
+        assert "fit" not in bo.arm_roster()
+    keys = [g.key for g in bo.groups_for(("current", "fit"))]
+    assert keys == ["current_divergence", "current_consensus",
+                    "fit_divergence", "fit_consensus"]
+
+
 def test_the_challenger_is_never_spelled_baseline():
     """The arm was briefed as "the new arm A" and is not one. `model_arm` is a
     stored column: if the two ever shared a value, neither run would be
@@ -151,7 +167,7 @@ def test_the_challenger_is_never_spelled_baseline():
     assert bo.ARM_CHALLENGER != bo.ARM_BASELINE
     # ARMS stays the historical three so Phase 3's fixtures do not shift.
     assert bo.ARMS == ("baseline", "current", "gen_v2")
-    assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2")
+    assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2", "fit")
     # …and it generates after `current` (which dark mode serves) but before
     # the historical reconstruction.
     order = list(bo.GENERATION_ORDER)

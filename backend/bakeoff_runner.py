@@ -111,6 +111,7 @@ log = logging.getLogger(__name__)
 ARM_BASELINE   = "baseline"
 ARM_CURRENT    = "current"
 ARM_GEN_V2     = "gen_v2"
+ARM_FIT        = "fit"   # D-098 — generator, not a profile. Default off the roster.
 #: Arm D — the landability challenger (D-095,
 #: docs/plans/landability-challenger/PRD.md). Never spell this `baseline`:
 #: the challenger was briefed as "the new arm A" and is emphatically not one
@@ -133,7 +134,7 @@ ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
 #: Every arm the runner knows about, in canonical listing order. This is what
 #: `arm_roster()` filters; `ARMS` is a historical fixture, not a superset.
 ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
-                             ARM_GEN_V2)
+                             ARM_GEN_V2, ARM_FIT)
 
 #: Arms that run the v1/v3 engine and therefore produce BOTH bases —
 #: `divergence` for opponents with real rankings, `consensus` for the
@@ -143,7 +144,10 @@ ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
 #: The challenger is an ENGINE arm — it is the live engine under a config
 #: overlay, not a second generator — so it earns both groups (PRD G2), and
 #: its consensus group is the whole point: 84.5% of cards take that path.
-ENGINE_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER)
+#: Arm `fit` is a different *generator* that still emits both bases
+#: (divergence iff both boarded, else consensus), so it also earns two groups.
+ENGINE_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
+                                ARM_FIT)
 
 # ---------------------------------------------------------------------------
 # Lanes — the "value vs outlook" axis, on the field that already carries it
@@ -187,7 +191,7 @@ INTENT_MODES: frozenset[str] = frozenset(
 #: first (it is what dark mode serves and what the progress bar tracks), and
 #: the challenger — the arm anyone is actually reading right now — runs before
 #: the historical reconstruction, which is off the roster by default anyway.
-GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER,
+GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER, ARM_FIT,
                                      ARM_BASELINE, ARM_GEN_V2)
 
 #: The single arm served in Phase-4 dark validation.
@@ -276,6 +280,7 @@ def arm_roster() -> tuple[str, ...]:
         ARM_CHALLENGER: _cfg("bakeoff_include_challenger", 1.0) >= 1.0,
         ARM_GEN_V2:     _cfg("bakeoff_include_gen_v2", 1.0) >= 1.0,
         ARM_BASELINE:   _cfg("bakeoff_include_baseline", 0.0) >= 1.0,
+        ARM_FIT:        _cfg("bakeoff_include_fit", 0.0) >= 1.0,
     }
     return tuple(a for a in ALL_ARMS if included[a])
 
@@ -1273,6 +1278,105 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     return cards
 
 
+_fit_diag = threading.local()
+
+
+def last_fit_diagnostics() -> dict:
+    """Per-stage counters from the most recent `gen_fit_cards` call on this
+    thread, then CLEARED. Same drain discipline as `last_gen_v2_diagnostics`."""
+    diag = getattr(_fit_diag, "value", None) or {}
+    _fit_diag.value = {}
+    return dict(diag)
+
+
+def gen_fit_cards(trade_service, kwargs: dict) -> list:
+    """Arm `fit` — `trade_gen_fit.generate_league_suggestions` called DIRECTLY.
+
+    Independent of any serving flag. Organic `_generate_trades_impl` must
+    never import this module. Same post-generation intent filter + C4b +
+    lane label as `gen_v2_cards` so the bake-off compares generators, not
+    missing presentment steps.
+    """
+    from .trade_gen_fit import generate_league_suggestions
+    from .trade_service import (_c, _filter_by_trade_intent, cap_give_headliners,
+                                classify_lane, elo_to_value,
+                                signed_lane_shift)
+    from .feature_flags import FLAGS
+
+    _fit_diag.value = {}
+    league = trade_service._leagues.get(kwargs["league_id"])
+    if league is None:
+        _fit_diag.value = {"S0_no_league": 1}
+        return []
+    past_keys = set(getattr(trade_service, "_past_decision_keys", None) or set())
+    past_keys |= set(kwargs.get("exclusion_keys") or set())
+    cards, report = generate_league_suggestions(
+        players              = trade_service._players,
+        league               = league,
+        user_id              = kwargs["user_id"],
+        user_elo             = kwargs["user_elo"],
+        user_roster          = kwargs["user_roster"],
+        seed_elo             = kwargs["seed_elo"],
+        confidence           = kwargs.get("confidence"),
+        max_per_opponent     = kwargs.get("max_per_opponent"),
+        scoring_format       = kwargs.get("scoring_format", "1qb_ppr"),
+        untouchable_ids      = kwargs.get("untouchable_ids"),
+        target_ids           = kwargs.get("target_ids"),
+        not_interested_ids   = kwargs.get("not_interested_ids"),
+        opponent_user_id     = kwargs.get("opponent_user_id"),
+        opponent_outlooks    = kwargs.get("opponent_outlooks"),
+        opponent_pick_shares = kwargs.get("opponent_pick_shares"),
+        past_decision_keys   = past_keys,
+        on_opponent_done     = kwargs.get("on_opponent_done"),
+        outlook              = kwargs.get("outlook"),
+        acquire_positions    = kwargs.get("acquire_positions"),
+        trade_away_positions = kwargs.get("trade_away_positions"),
+        pinned_give_players  = kwargs.get("pinned_give_players"),
+        pinned_receive_players = kwargs.get("pinned_receive_players"),
+        pinned_give_mode     = kwargs.get("pinned_give_mode", "any"),
+        trade_intent         = kwargs.get("trade_intent"),
+        bypass_need_gate     = kwargs.get("bypass_need_gate", False),
+        exclusion_keys       = kwargs.get("exclusion_keys"),
+    )
+    cards = list(cards or [])
+    _kc = getattr(report, "kill_counts", None)
+    diag = dict(_kc()) if callable(_kc) else {}
+
+    seed_elo = kwargs.get("seed_elo") or {}
+    scoring_format = kwargs.get("scoring_format", "1qb_ppr")
+    _n_before = len(cards)
+    cards = _filter_by_trade_intent(
+        cards, effective_trade_intent(kwargs.get("trade_intent")),
+        seed_elo, trade_service._players, scoring_format)
+    diag["S7_intent_filter"] = _n_before - len(cards)
+    _n_before = len(cards)
+    cards = cap_give_headliners(cards, seed_elo, trade_service._players,
+                                int(_c("deck_give_headliner_cap")))
+    diag["S7_headliner_cap"] = _n_before - len(cards)
+    diag["S7_served_to_deck"] = len(cards)
+    _fit_diag.value = diag
+
+    _vs_cache: dict = {}
+
+    def _vs(pid: str) -> float:
+        v = _vs_cache.get(pid)
+        if v is None:
+            v = elo_to_value(seed_elo.get(pid, 1500.0))
+            _vs_cache[pid] = v
+        return v
+
+    outlook = kwargs.get("outlook")
+    for c in cards:
+        c.lane_shift = signed_lane_shift(
+            c.give_player_ids, c.receive_player_ids,
+            trade_service._players, outlook, _vs)
+        if FLAGS.trade_lanes:
+            c.lane = classify_lane(
+                c.give_player_ids, c.receive_player_ids,
+                trade_service._players, outlook, _vs)
+    return cards
+
+
 def restore_order(fixed: list, after: list) -> list:
     """§3.4 Channel 2 — put a bake-off deck back in the interleaver's order
     after a layer that RE-SORTS it.
@@ -1330,6 +1434,7 @@ def run_bakeoff(
     interleave: bool | None = None,
     limit: int | None = None,
     roster: tuple[str, ...] | list[str] | None = None,
+    gen_fit: Callable[..., list] | None = None,
 ) -> BakeoffRun:
     """Run every ROSTERED arm SEQUENTIALLY on this thread, compose the groups
     and interleave them.
@@ -1351,6 +1456,8 @@ def run_bakeoff(
     if roster is None:
         roster = arm_roster()
     roster = tuple(roster)
+    if gen_fit is None:
+        gen_fit = lambda **ov: []
     if interleave is None:
         interleave = serve_interleaved()
     if limit is None:
@@ -1394,6 +1501,9 @@ def run_bakeoff(
             elif arm == ARM_CURRENT:
                 cfg_seen = snapshot_config()
                 cards = list(generate(**quiet) or [])
+            elif arm == ARM_FIT:
+                cfg_seen = snapshot_config()
+                cards = list(gen_fit(**quiet) or [])
             else:
                 cfg_seen = snapshot_config()
                 cards = list(gen_v2(**quiet) or [])
@@ -1403,15 +1513,17 @@ def run_bakeoff(
         # Drained here, immediately after the call that wrote it, and only
         # for arm C — `gen_v2_cards` is the only writer. An arm that raised
         # leaves `{}`, which is the honest reading: no stage completed.
-        diag = last_gen_v2_diagnostics() if arm == ARM_GEN_V2 else {}
+        diag = {}
+        if arm == ARM_GEN_V2:
+            diag = last_gen_v2_diagnostics()
+        elif arm == ARM_FIT:
+            diag = last_fit_diagnostics()
         arms[arm] = ArmResult(
             arm=arm, cards=cards,
             gen_ms=int((time.monotonic() - t0) * 1000),
             error=err,
             diagnostics=diag,
-            # gen_v2 takes no fairness_threshold — recording None is the
-            # honest answer and is itself the fact a reader needs.
-            fairness_threshold=(None if arm == ARM_GEN_V2
+            fairness_threshold=(None if arm in (ARM_GEN_V2, ARM_FIT)
                                 else fairness_threshold),
             trade_intent=intent,
             config=cfg_seen or snapshot_config(),

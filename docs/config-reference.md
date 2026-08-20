@@ -792,6 +792,16 @@ Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` s
 
 | `bakeoff_include_challenger` | 1.0 (**arm D in**) | Arm roster (D-095, [PRD](plans/landability-challenger/PRD.md) §5 A1). `1` = arm `challenger` — the **landability challenger** — is generated, attributed and logged on every organic bake-off job, gaining a `divergence` and a `consensus` group. `0` restores the exact pre-D-095 roster with no deploy, and gives back the arm's whole cost: one extra full `generate_trades` per job, on the same sequential thread. **It is generated, not served.** `bakeoff_serve_interleaved` is 0, so users still see arm `current`; lighting interleaved serving is a separate operator decision. Never confuse this arm with `baseline` — see the arm-D section below. |
 | `bakeoff_include_gen_v2` | 1.0 (**arm C in**) | Arm roster (D-095). `0` drops arm `gen_v2` so the head-to-head is `current` vs `challenger` alone. **Composition only** — it does not change `backend/trade_gen_v2.py`, which is out of the challenger's scope. Useful because arm C currently forfeits everything it generates (see `bakeoff_serve_interleaved`), so its slots are pure deck shrinkage. |
+| `bakeoff_include_fit` | 0.0 (**arm `fit` out**) | Fit-challenger generator ([PRD](plans/fit-challenger/PRD.md), D-098). `1` adds arm `fit` — a **new module** (`backend/trade_gen_fit.py`), not a profile overlay — with both a `divergence` and a `consensus` group. Default **off** until a dry run sets the ms bar. Organic `_generate_trades_impl` never imports it. |
+| `fit_score_scale` | 400.0 | tanh scale for surplus → 0–100. Surplus of `scale` maps to ~84. |
+| `fit_score_even` | 50.0 | Score at surplus 0. |
+| `fit_w_board` / `fit_w_div` / `fit_w_cons` | 0.40 / 0.30 / 0.30 | Boarded mix of L1 / L2 / L3. Unranked partners use L3 only. Renormalized if a lens is omitted. |
+| `fit_pool_consensus` / `_div_seed` / `_div_opp` | 8 / 8 / 8 | Union-pool sizes per roster per pair. |
+| `fit_pool_cap` | 15.0 | Unique ids per roster per pair. Owned picks try to enter first. |
+| `fit_max_packages_per_pair` | 20000.0 | Hard enumeration cap. Illegal K1 shapes do not spend it. |
+| `fit_expand_from` | 25.0 | Top 1-for-1s that seed 2- and 3-asset expansion. |
+| `fit_min_them` | 0.0 | Optional hide of `you_tilt`. **Leave 0** — turning it on recreates `rv ≥ gv`. |
+| `fit_min_aggregate` | 0.0 | Optional floor on `you + them`. Leave 0. |
 
 **Kill values that restore Phase 3 exactly:** `bakeoff_group_size` = 0, `bakeoff_deck_limit` = 0, `bakeoff_include_baseline` = 1, `bakeoff_include_challenger` = 0 — the uncapped three-arm team draft with no group composition. Asserted, not assumed (`test_bakeoff_composition.py::test_phase3_kill_values_restore_the_uncapped_three_arm_draft`).
 

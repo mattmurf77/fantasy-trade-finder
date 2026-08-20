@@ -2,7 +2,8 @@
 
 New bake-off generator: **thin knockouts** (shape, pick-churn, both lineups startable, G6 R1/R2/R3/R5) then **0–100 per team** (board / vs-consensus / consensus), present by **sum**. Preferences filter after scoring.
 
-**Status:** active, not built · 2026-08-19
+**Status:** built, not rostered · 2026-08-19
+**Code:** `backend/trade_gen_fit.py`, bake-off arm `fit` (`bakeoff_include_fit=0`)
 **PRD:** [PRD.md](PRD.md)
 **Build order:** [PLAN.md](PLAN.md)
 **Gate:** [scope.md](scope.md)

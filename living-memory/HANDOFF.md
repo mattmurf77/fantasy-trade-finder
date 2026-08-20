@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Fit challenger built on `feat/fit-challenger`; dry-run bar owed](#2026-08-19--fit-challenger-built-on-featfit-challenger-dry-run-bar-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
 - [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
@@ -34,6 +35,18 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-19 — Fit challenger built on `feat/fit-challenger`; dry-run bar owed
+
+**Branch:** `feat/fit-challenger` off docs commit `52414d8`. Code + tests + docs in this commit. Organic `_generate_trades_impl` is untouched. Arm `fit` is **off the default roster** (`bakeoff_include_fit=0`).
+
+**What shipped in the branch.** `backend/trade_gen_fit.py` (K0–K7 wrappers of live predicates, dual 0–100 scorer, union pool, 1-for-1-then-expand, post-score preference filters). Bake-off wiring: `ARM_FIT`, `gen_fit_cards`, `run_bakeoff` dispatch, `TradeCard.fit` omit-when-absent. Tests in `test_trade_gen_fit.py` + composition/golden updates. [D-098](DECISIONS.md), [ADR-013](../docs/adr/adr-013-fit-challenger-is-a-generator.md).
+
+**Synthetic dry run (one 25-asset boarded pair):** enumerated 20_000 (cap), scored 2_370, 42 after C4/C4b, 2.0 s, `one_sided_pct` 14.3 on scored, `both_high_pct` 25.3, `mixed_pct` 17.8, median aggregate 110.5. K4 is the main kill (16k). Illegal 2-for-2/3-for-3 no longer spend the budget.
+
+**Do not.** Route organic serving through this module. `_cfg_override` live knobs to fake it (that's landability-challenger). Flip `bakeoff_include_fit=1` before the operator sets the ms bar. Dualize R5 (F7). Inject likes-you. Show 0–100 meters on the client.
+
+**Next.** Push + open the code PR. Operator: one real-league bake-off job with the arm still off-roster (cost = 0), then `bakeoff_include_fit=1` in a prod-like env, read `arms_json[fit].diagnostics`, set the fail bar, then leave it dark (`bakeoff_serve_interleaved=0`) until like-rate on `both_high`+`mixed` is not worse than Arm B.
 
 ## 2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override
 
