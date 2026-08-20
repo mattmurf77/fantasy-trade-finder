@@ -56,7 +56,7 @@
   "market.movers": true,
   "trade.picks_in_pool": true,
   "trade.asset_ideas": true,
-  "trade.outlook_direction": true,
+  "trade.outlook_direction": false,
   "trade.pool_calibration": true,
   "trade.divergence_fallback": true,
   "trade_gen.v2": false,

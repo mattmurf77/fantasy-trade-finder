@@ -42,10 +42,12 @@ logger = logging.getLogger(__name__)
 #: Bump on ANY change to _score, weights semantics, or bucket thresholds.
 SCORER_VERSION = "fit-1"
 
-#: K1 (PRD §3, operator-CLOSED): the legal (n_give, n_recv) shapes. Note the
-#: closed list EXCLUDES 2-2 and 3-3 (equal multi-asset swaps) — see LLD §8 R-b.
+#: K1 (PRD §3 + §12.6): the legal (n_give, n_recv) shapes — every 1–3 × 1–3
+#: combination. The PRD's original list omitted 2-2 and 3-3; LLD §8 R-b pinned
+#: that literally and flagged it, and the operator ruled it unintended
+#: (2026-08-20): equal multi-asset swaps are legal.
 _LEGAL_SHAPES: frozenset[tuple[int, int]] = frozenset(
-    {(1, 1), (2, 1), (1, 2), (3, 1), (1, 3), (3, 2), (2, 3)})
+    {(1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (1, 3), (3, 2), (2, 3), (3, 3)})
 
 #: Bucket names, pinned (also the M2 SQL vocabulary).
 _BUCKETS = ("both_high", "mixed", "you_tilt", "them_tilt", "both_ok", "weak")

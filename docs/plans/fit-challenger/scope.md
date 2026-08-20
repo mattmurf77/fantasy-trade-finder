@@ -60,4 +60,4 @@ What it is not: live serving, landability knobs, `trade_gen.v2`, dual R5 (F7), l
 
 - F7 dual R5 — not v1.
 - C4 on/off for this arm — default on.
-- Fail bar for generation ms — after first dry run.
+- ~~Fail bar for generation ms — after first dry run.~~ **Closed 2026-08-20 (operator):** fit per-arm gen_ms ≤ **8 s** at the 5,000 package cap (fixture measured 1.8 s — 4.4× headroom); job p95 ≤ **30 s** (PLAN-v2 S2 bar). Breach → halve `fit_max_packages_per_pair`; repeat breach → `bakeoff_include_fit = 0`.

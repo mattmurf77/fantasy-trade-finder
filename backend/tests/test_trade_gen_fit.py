@@ -122,19 +122,21 @@ def _pinned_defaults():
 # ───────────────────────────── K1 — shapes ─────────────────────────────────
 
 def test_k1_shapes():
-    # The operator-CLOSED list, pinned exactly (LLD §8 R-b): equal
-    # multi-asset swaps (2-2, 3-3) are NOT legal shapes.
+    # PRD §12.6 (operator, 2026-08-20): every 1–3 × 1–3 shape is legal —
+    # the original list's 2-2/3-3 omission was unintended (LLD §8 R-b flag).
     assert tgf._LEGAL_SHAPES == frozenset(
-        {(1, 1), (2, 1), (1, 2), (3, 1), (1, 3), (3, 2), (2, 3)})
+        {(1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (1, 3), (3, 2), (2, 3),
+         (3, 3)})
     for shape in tgf._LEGAL_SHAPES:
         assert tgf._k1_shape_ok(*shape), shape
-    for shape in ((4, 1), (1, 4), (4, 4), (3, 0), (0, 3), (0, 0),
-                  (2, 2), (3, 3)):
+    for shape in ((4, 1), (1, 4), (4, 4), (3, 0), (0, 3), (0, 0)):
         assert not tgf._k1_shape_ok(*shape), shape
-    # Chain guard: a 2-2 swap dies at K1 before any predicate runs…
-    assert tgf._kill(["ur2", "ut2"], ["or2", "ot"], _ctx()) == "K1"
-    # …while the newly-legal 3-for-1 (gone from live v3's |n−m| ≤ 1)
-    # survives the whole chain when startable and gate-clean.
+    # Chain guard: an oversized side dies at K1 before any predicate runs…
+    assert tgf._kill(["uw3", "ur3", "ut2", "uw2"], ["ow1"], _ctx()) == "K1"
+    # …a 2-2 (newly legal per §12.6) gets PAST K1 into the real chain…
+    assert tgf._kill(["ur2", "ut2"], ["or2", "ot"], _ctx()) != "K1"
+    # …and the 3-for-1 (gone from live v3's |n−m| ≤ 1) survives the whole
+    # chain when startable and gate-clean.
     assert tgf._kill(["uw3", "ur3", "ut2"], ["ow1"], _ctx()) is None
 
 
@@ -363,8 +365,12 @@ def test_negative_surplus_scores_not_killed():
     # Boarded pair. give ur2 (1000.0) for or1 (1491.8): the viewer receives
     # MORE consensus value, so live arm B kills it on rv ≥ gv / dual
     # surplus. Fit keeps it and prices the partner's side honestly (<50).
-    cards, report = _gen(user_elo=_USER_BOARD,
-                         league=_league(opp_board=_OPP_BOARD))
+    # C4 off: with the §12.6 shapes (2-2/3-3) enumerated, headliner
+    # crowding would drop this exact 1x1 from the FINAL list — the
+    # mechanism under test is the kill chain, not deck composition.
+    with ts._cfg_override({"deck_headliner_cap": 0.0}):
+        cards, report = _gen(user_elo=_USER_BOARD,
+                             league=_league(opp_board=_OPP_BOARD))
     assert report.boarded_opponents == 1
     card = _find(cards, ["ur2"], ["or1"])
     assert card is not None, "viewer-favored candidate must survive the chain"
@@ -400,27 +406,31 @@ def test_unranked_partner_l3_only():
 def test_unranked_pair_aggregate_mirror():
     cards, _report = _gen(user_elo={})               # neither side boarded
     assert cards
-    ones = [c for c in cards
-            if len(c.give_player_ids) == 1 and len(c.receive_player_ids) == 1]
-    assert len(ones) >= 2
+    # §12.6: the plateau is EQUAL-COUNT shapes (1-1, 2-2, 3-3) — the
+    # waiver-slot cost is symmetric when both sides move the same number of
+    # bodies, so both teams see the same mirrored consensus surplus.
+    equal = [c for c in cards
+             if len(c.give_player_ids) == len(c.receive_player_ids)]
+    assert len(equal) >= 2
+    assert any(len(c.give_player_ids) == 1 for c in equal)
     for c in cards:
         assert c.fit["boards"] == "none"
         assert c.basis == "consensus"
     # Balanced shapes mirror exactly: both sides are the same consensus
     # surplus with opposite sign, so aggregate == 100 (composite_score is
     # round(aggregate, 4)).
-    for c in ones:
+    for c in equal:
         assert abs(c.composite_score - 100.0) < 1e-6
     # Unbalanced shapes pay the waiver-slot cost on the receiving-more side
     # → strictly below the plateau, so the plateau is the deck's prefix.
-    for c in cards[len(ones):]:
+    for c in cards[len(equal):]:
         assert c.composite_score < 100.0
-    assert cards[:len(ones)] == ones
+    assert cards[:len(equal)] == equal
     # Within the plateau the consensus-fairness ratio decides order (C7c)…
-    fairs = [c.fairness_score for c in ones]
+    fairs = [c.fairness_score for c in equal]
     assert fairs == sorted(fairs, reverse=True)
     # …and equal-fairness ties fall to the deterministic tie-break.
-    for a, b in zip(ones, ones[1:]):
+    for a, b in zip(equal, equal[1:]):
         if a.fairness_score == b.fairness_score:
             ka = (a.target_user_id, tuple(sorted(a.give_player_ids)),
                   tuple(sorted(a.receive_player_ids)))
@@ -564,10 +574,13 @@ def test_fit_r5_mode_full_pipeline():
     # lateral, non-upgrade (WR incumbent uw2 1284.0), non-hole primary
     # receive over the floor — the live R5 kill, reached through the whole
     # pipeline this time (PR-F1 proved it at the _kill level only).
-    cards1, rep1 = _gen(outlook="contender")
+    # C4 off in BOTH runs (crowding isolation, §12.6 shapes); the knob
+    # under test is fit_r5_mode alone.
+    with ts._cfg_override({"deck_headliner_cap": 0.0}):
+        cards1, rep1 = _gen(outlook="contender")
     assert rep1.killed["K7"] >= 1
     assert _find(cards1, ["ur2"], ["ow2"]) is None
-    with ts._cfg_override({"fit_r5_mode": 0.0}):
+    with ts._cfg_override({"fit_r5_mode": 0.0, "deck_headliner_cap": 0.0}):
         cards0, rep0 = _gen(outlook="contender")
     assert rep0.killed["K7"] == 0
     assert rep0.r5_fail_scored >= 1
@@ -607,8 +620,10 @@ def test_fit_gate_binding_sabotage_full_pipeline(monkeypatch):
 # ───────────── §1.10 — card field construction ─────────────────────────────
 
 def test_mismatch_and_fairness_fields():
-    cards, _report = _gen(user_elo=_USER_BOARD,
-                          league=_league(opp_board=_OPP_BOARD))
+    # C4 off — same isolation as test_negative_surplus_scores_not_killed.
+    with ts._cfg_override({"deck_headliner_cap": 0.0}):
+        cards, _report = _gen(user_elo=_USER_BOARD,
+                              league=_league(opp_board=_OPP_BOARD))
     card = _find(cards, ["ur2"], ["or1"])
     assert card is not None
     fit = card.fit
@@ -808,18 +823,23 @@ def test_r4_swiped_post_filtered():
 
 
 def test_min_them_and_min_aggregate_floors():
+    # C4 off throughout: the §12.6 equal swaps otherwise crowd the
+    # one-sided tail out of the capped list; the knobs under test are the
+    # two floors alone.
+    _off = {"deck_headliner_cap": 0.0}
     # Defaults 0 = off: the one-sided volume the arm exists to keep.
-    control, rep_c = _gen()
+    with ts._cfg_override(_off):
+        control, rep_c = _gen()
     assert rep_c.post_filtered["min_them"] == 0
     assert rep_c.post_filtered["min_aggregate"] == 0
     assert any(c.fit["them"] < 40.0 for c in control)    # one-sided supply
     # Floors on (presentment knobs, applied FIRST so later counters
     # describe the visible universe — LLD §8 R-i).
-    with ts._cfg_override({"fit_min_them": 40.0}):
+    with ts._cfg_override({"fit_min_them": 40.0, **_off}):
         cards_t, rep_t = _gen()
     assert rep_t.post_filtered["min_them"] >= 1
     assert all(c.fit["them"] >= 40.0 for c in cards_t)
-    with ts._cfg_override({"fit_min_aggregate": 100.0}):
+    with ts._cfg_override({"fit_min_aggregate": 100.0, **_off}):
         cards_a, rep_a = _gen()
     assert rep_a.post_filtered["min_aggregate"] >= 1
     assert all(c.fit["aggregate"] >= 100.0 for c in cards_a)

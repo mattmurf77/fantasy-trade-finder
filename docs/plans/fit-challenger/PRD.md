@@ -275,5 +275,8 @@ Not accepted: serving this arm to users, dualizing R5, or putting PPG/impact int
 3. Pick-swap stays live C3, including inside larger packages.
 4. Startable + G6 are the only value-adjacent knockouts. Surplus/fairness/#108/filler/prune are scores or gone.
 5. Two 0–100 scores, present by combined total.
+6. *(2026-08-20 amendment)* K1 includes **2-2 and 3-3** — the original list's omission of
+   equal multi-asset swaps was unintended (operator: "Not intended", answering LLD §8 R-b).
+   `_LEGAL_SHAPES` is every 1–3 × 1–3 combination.
 
 Open (do not block F1): F7 dual R5; whether C4 stays on for this arm (default on).
