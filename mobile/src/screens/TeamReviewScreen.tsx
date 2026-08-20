@@ -569,14 +569,19 @@ function Depth({
         <ChalkText style={styles.kicker}>Startable bodies by position</ChalkText>
         {CORE.map((pos) => {
           const t = d.tier_depth[pos] || { elite: 0, starter: 0, bench: 0 };
-          const startable = (t.elite || 0) + (t.starter || 0);
           const thin = d.position_needs.includes(pos);
           const deep = d.position_surplus.includes(pos);
+          // #366 — the third layer the report asked for. `replacement` is an
+          // ALIAS the backend adds when `trade.position_tiers` is on; `bench`
+          // is what every build before it sent and is never omitted. Reading
+          // `replacement ?? bench` is what makes this screen render correctly
+          // against BOTH backends, which is the point of shipping the alias.
+          const replacement = t.replacement ?? t.bench ?? 0;
           return (
             <View key={pos} style={styles.line}>
               <ChalkText style={styles.lineLabel}>{pos}</ChalkText>
               <ChalkText style={styles.lineVal}>
-                {t.elite || 0} elite · {t.starter || 0} starter
+                {t.elite || 0} Elite · {t.starter || 0} Starter · {replacement} Replacement
               </ChalkText>
               <ChalkText
                 style={[
@@ -590,6 +595,21 @@ function Depth({
             </View>
           );
         })}
+        {/* #366 — the RB handcuff count, from Sleeper's own depth chart.
+            Rendered on PRESENCE of the key, never `?? 0`: an absent key means
+            the read was not performed (flag off), which is a different claim
+            from "you own none" and must not print as one. The copy states the
+            fact the field carries — RB2 on an NFL depth chart — and makes no
+            usage or value claim, because a committee back can hold order 2. */}
+        {d.handcuff_rb !== undefined ? (
+          <ChalkText style={styles.dim} testID="team-review.depth.handcuff">
+            {d.handcuff_rb === 0
+              ? 'No handcuffs — none of your RBs is the RB2 on his NFL depth chart.'
+              : `${d.handcuff_rb} handcuff${d.handcuff_rb === 1 ? '' : 's'} — ${
+                  d.handcuff_rb === 1 ? 'one of' : `${d.handcuff_rb} of`
+                } your RBs ${d.handcuff_rb === 1 ? 'is' : 'are'} the RB2 on his NFL depth chart.`}
+          </ChalkText>
+        ) : null}
       </View>
 
       {d.weakest_slot ? (

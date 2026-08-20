@@ -151,7 +151,16 @@ export interface TeamReviewWindow {
 }
 
 export interface TeamReviewDepth {
-  tier_depth: Record<string, { elite: number; starter: number; bench: number }>;
+  /** #366 — `replacement` is the report's word for what the wire has always
+   *  called `bench`, and it is an ALIAS: same count, emitted alongside `bench`
+   *  rather than instead of it, so a build older than this one still parses.
+   *  It is therefore OPTIONAL — it appears only when `trade.position_tiers`
+   *  is on. Read it as `replacement ?? bench`, never `replacement` alone, or
+   *  the flag-off payload renders a hole. `bench` stays required: no backend,
+   *  at any flag setting, omits it. */
+  tier_depth: Record<string, {
+    elite: number; starter: number; bench: number; replacement?: number;
+  }>;
   position_needs: string[];
   position_surplus: string[];
   weakest_slot: {
@@ -159,6 +168,15 @@ export interface TeamReviewDepth {
   } | null;
   acquire_positions: string[];
   trade_away_positions: string[];
+  /** #366 — which banding actually produced the counts above, per position.
+   *  `absolute` means the pool was too thin to rank within a position and the
+   *  legacy value cuts ran. Present only when `trade.position_tiers` is on. */
+  tier_basis?: Record<string, 'position_relative' | 'absolute'>;
+  /** #366 — how many of your RBs are the RB2 on their NFL depth chart
+   *  (Sleeper's own `depth_chart_order`, not a value guess). Present only when
+   *  `trade.rb_handcuff` is on. ABSENT and 0 are different claims — "we did
+   *  not look" vs "you have none" — so render on presence, never `?? 0`. */
+  handcuff_rb?: number;
 }
 
 export interface DivergenceRow {

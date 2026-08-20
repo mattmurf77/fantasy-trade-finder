@@ -2000,13 +2000,183 @@ def _bin_player(value: float) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# #366 — position-relative tier bands (flag: trade.position_tiers, default OFF)
+# Scope block: docs/feedback/items/366-tier-ladder/scope.md
+# ---------------------------------------------------------------------------
+#
+# WHY THE ABSOLUTE CUTS ABOVE ARE WRONG, IN ONE PARAGRAPH.
+# `dynasty_value(p) = ktc_max · e^(−ktc_k·(search_rank−1))` is a pure monotone
+# function of Sleeper's OVERALL `search_rank`, so `_TIER_ELITE = 4000` is not a
+# value judgement at all — it is the disguised statement "overall rank <= 73".
+# Against the live pool that admits 33 elite RBs, 33 elite WRs, 17 elite QBs
+# and SEVEN elite TEs. The word means something different at every position
+# while presenting as one word, which is exactly what feedback #366 reported.
+#
+# THE FIX LEAVES VALUE SPACE ENTIRELY. Bands are cut in rank-WITHIN-POSITION,
+# so "elite QB" and "elite TE" mean the same thing by construction and no
+# constant needs recalibrating when the value curve moves. That second property
+# is not hypothetical: #117 retuned ktc_k/ktc_max and moved every one of the
+# absolute bins at once (docs/runbook.md § Trade-engine side effects).
+#
+# NOTE for anyone reading plan-remaining.md §2: it blames "board-wide value
+# inflation". That is not the mechanism — search_rank is an ordinal and cannot
+# inflate. The drift vector is a model_config retune. Same fix, different cause.
+#
+# The cuts, in positional rank, derived from what a league actually starts
+# (1 QB, 2 RB, 2 WR, 1 TE; superflex starts 2 QB), for a 12-team league:
+#   Elite       — top HALF of the league's starting demand: a positional edge
+#   Starter     — inside 1.5x the demand: a genuinely startable body
+#   Replacement — inside 2.5x: above the waiver pool, below a starter
+# `analyze_roster_strengths` is not passed league size and this change does not
+# add a parameter to a signature six call sites depend on, so 12 is assumed.
+_POS_TIER_CUTS: dict[str, tuple[int, int, int]] = {
+    "QB": (6, 18, 32),
+    "RB": (12, 36, 60),
+    "WR": (12, 36, 60),
+    "TE": (6, 18, 32),
+}
+# Superflex starts two quarterbacks, so QB scarcity matches RB/WR scarcity.
+_POS_TIER_CUTS_SF_QB: tuple[int, int, int] = (12, 36, 60)
+
+# Positional rank is only meaningful over a real pool. Below this many ranked
+# players at a position, `players` is a hand-built fixture or a synthetic demo
+# session, not the universal pool, and that position falls back to the absolute
+# cuts. Real Sleeper pools carry 313 QB / 568 RB / 1134 WR / 516 TE. The mode is
+# REPORTED (`tier_basis`), never silent — a hidden mode switch on pool size is
+# how a fixture quietly starts proving something other than production.
+_POS_TIER_MIN_POOL = 40
+
+# Ordered bin names, low index = better. Index i of a _POS_TIER_CUTS tuple.
+_POS_TIER_BINS: tuple[str, str, str] = ("elite", "starter", "bench")
+
+# Memo for the positional-rank map, keyed on the IDENTITY of the `players`
+# dict. Two slots is enough: the engine reuses one pool object across a whole
+# generation run (trade_service `self._players`, trade_gen_v2's `players`), and
+# the routes build one `players_meta` per request. Building the map over the
+# real 2684-player pool measures 1.31 ms, so the memo exists to keep the
+# engine's per-member loops (13 calls per deck) from paying it thirteen times,
+# not because a single build is expensive.
+#
+# The STRONG reference to the pool dict is load-bearing: `id()` is only unique
+# among live objects, so caching on `id(players)` without pinning the object
+# would let a freed pool's address be recycled by a different dict and serve
+# its ranks. Holding the reference makes that impossible.
+_POS_RANK_CACHE: list[tuple[int, dict, dict[str, int]]] = []
+
+
+def _positional_rank_map(players: dict) -> dict[str, int]:
+    """{player_id: 1-based rank among players at the SAME position}.
+
+    Ordered by Sleeper `search_rank` ascending (lower = better), ties broken on
+    player_id so the map is deterministic. Players with no `search_rank` sort
+    last — they are unranked, not rank-1, and `dynasty_value` already treats a
+    missing rank as `ktc_fallback_rank` for the same reason.
+    """
+    key = id(players)
+    for k, _pool, cached in _POS_RANK_CACHE:
+        if k == key:
+            return cached
+
+    buckets: dict[str, list[tuple[int, str]]] = {}
+    for pid, p in players.items():
+        pos = getattr(p, "position", None)
+        if pos not in _POS_TIER_CUTS:
+            continue
+        sr = getattr(p, "search_rank", None)
+        try:
+            sr_i = int(sr) if sr is not None else None
+        except (TypeError, ValueError):
+            sr_i = None
+        # Unranked sorts after every ranked player.
+        buckets.setdefault(pos, []).append(
+            (sr_i if sr_i is not None and sr_i > 0 else 10 ** 9, str(pid)))
+
+    out: dict[str, int] = {}
+    for pos, lst in buckets.items():
+        lst.sort()
+        for i, (_sr, pid) in enumerate(lst, 1):
+            out[pid] = i
+
+    _POS_RANK_CACHE.append((key, players, out))
+    if len(_POS_RANK_CACHE) > 2:
+        _POS_RANK_CACHE.pop(0)
+    return out
+
+
+def _pool_depth_by_position(players: dict) -> dict[str, int]:
+    """How many players at each core position carry a usable `search_rank`.
+    Feeds the `_POS_TIER_MIN_POOL` guard."""
+    depth: dict[str, int] = {pos: 0 for pos in _POS_TIER_CUTS}
+    for p in players.values():
+        pos = getattr(p, "position", None)
+        if pos not in depth:
+            continue
+        sr = getattr(p, "search_rank", None)
+        try:
+            if sr is not None and int(sr) > 0:
+                depth[pos] += 1
+        except (TypeError, ValueError):
+            continue
+    return depth
+
+
+def _bin_player_relative(pos_rank: int | None, pos: str,
+                         is_superflex: bool) -> str | None:
+    """Band a player by his rank within his own position. `None` = unranked or
+    outside the Replacement cut, matching `_bin_player`'s "not worth counting"."""
+    if pos_rank is None:
+        return None
+    cuts = (_POS_TIER_CUTS_SF_QB
+            if (pos == "QB" and is_superflex) else _POS_TIER_CUTS.get(pos))
+    if cuts is None:
+        return None
+    for name, cut in zip(_POS_TIER_BINS, cuts):
+        if pos_rank <= cut:
+            return name
+    return None
+
+
+def _is_handcuff(player) -> bool:
+    """The RB2 on an NFL depth chart — feedback #366, in the operator's words.
+
+    This is Sleeper's OWN depth chart, not an approximation. FTF has ingested
+    it all along and this is simply its first reader:
+      players.depth_chart_position / .depth_chart_order  database.py:970-971
+      written on every sync                              database.py:8769-8770
+      re-synced whenever older than 24h                  database.py:8652
+      carried on the Player model                        ranking_service.py:262
+      hydrated onto every pooled Player                  server.py:1580-1581
+
+    plan-remaining.md §2 asserted no such feed existed and recommended
+    approximating with "second-highest-valued RB on the same NFL team". That
+    assertion is wrong, and the approximation would have been wrong in exactly
+    the committee backfields where the label matters — see D-121.
+
+    What this is NOT: a usage model. In a true committee the order-2 back may
+    be a co-starter. The client renders the FACT ("RB2 on his NFL depth chart")
+    and never a value or workload claim. Coverage is partial by design — only
+    ~149 of 603 RBs sit on a chart at all; the rest are camp bodies and free
+    agents, who are correctly nobody's handcuff.
+    """
+    if getattr(player, "position", None) != "RB":
+        return False
+    dcp = getattr(player, "depth_chart_position", None)
+    if not dcp or str(dcp).strip().upper() != "RB":
+        return False
+    try:
+        return int(getattr(player, "depth_chart_order", None)) == 2
+    except (TypeError, ValueError):
+        return False
+
+
 def analyze_roster_strengths(
     roster_player_ids: list[str],
     players: dict,
     scoring_format: str = "1qb_ppr",
 ) -> dict:
     """
-    Profile a roster's positional depth using dynasty values.
+    Profile a roster's positional depth.
 
     Returns:
         {
@@ -2014,25 +2184,69 @@ def analyze_roster_strengths(
           "position_needs":  [pos, ...],     # below starter threshold
           "position_surplus":[pos, ...],     # at-or-above surplus threshold
         }
+
+    `tier_depth[pos]` is a DISJOINT PARTITION — every counted player lands in
+    exactly one bin. Nothing non-disjoint may be added to it (the #366 handcuff
+    overlay is a separate top-level key for precisely this reason).
+
+    Two flags extend the return, both default OFF, both independently
+    reversible (scope: docs/feedback/items/366-tier-ladder/scope.md):
+
+    `trade.position_tiers` ON
+        Bands are cut in rank-within-position instead of absolute dynasty
+        value (see _POS_TIER_CUTS above). Adds `tier_basis` and mirrors each
+        `bench` count onto a `replacement` key — the report's word — while
+        KEEPING `bench`, so a client built before this change still parses the
+        payload. OFF, this function returns a dict byte-identical to the one it
+        returned before #366; that identity is pinned by
+        backend/tests/test_position_tiers.py and it matters because
+        `position_needs`/`position_surplus` feed EVERY deck (trade_gen_v2:930,
+        :980; trade_service:3413, :3440, :4096, :4172, :4259).
+
+    `trade.rb_handcuff` ON
+        Adds `handcuff_rb`: how many of this roster's RBs are the RB2 on their
+        NFL depth chart. Purely additive — no engine path reads it. OFF, the
+        key is ABSENT (never 0, never null) and no depth_chart_* attribute is
+        read at all.
     """
+    from .feature_flags import is_enabled
+    relative = is_enabled("trade.position_tiers")
+    want_handcuff = is_enabled("trade.rb_handcuff")
+
     tier_depth: dict[str, dict[str, int]] = {
         pos: {"elite": 0, "starter": 0, "bench": 0}
         for pos in ("QB", "RB", "WR", "TE")
     }
     starter_count: dict[str, int] = {pos: 0 for pos in tier_depth}
+    is_superflex = scoring_format.startswith("sf")
 
+    pos_rank: dict[str, int] = {}
+    # Per position: True = banded by positional rank, False = absolute cuts.
+    basis: dict[str, bool] = {pos: False for pos in tier_depth}
+    if relative:
+        depth = _pool_depth_by_position(players)
+        basis = {pos: depth.get(pos, 0) >= _POS_TIER_MIN_POOL for pos in tier_depth}
+        if any(basis.values()):
+            pos_rank = _positional_rank_map(players)
+
+    handcuff_rb = 0
     for pid in roster_player_ids:
         player = players.get(pid)
         if player is None or getattr(player, "position", None) not in tier_depth:
             continue
-        bin_ = _bin_player(dynasty_value(player))
+        pos = player.position
+        if relative and basis.get(pos):
+            bin_ = _bin_player_relative(pos_rank.get(str(pid)), pos, is_superflex)
+        else:
+            bin_ = _bin_player(dynasty_value(player))
+        if want_handcuff and _is_handcuff(player):
+            handcuff_rb += 1
         if bin_ is None:
             continue
-        tier_depth[player.position][bin_] += 1
+        tier_depth[pos][bin_] += 1
         if bin_ in ("elite", "starter"):
-            starter_count[player.position] += 1
+            starter_count[pos] += 1
 
-    is_superflex = scoring_format.startswith("sf")
     needs: list[str] = []
     surplus: list[str] = []
     for pos in tier_depth:
@@ -2044,11 +2258,25 @@ def analyze_roster_strengths(
         if starter_count[pos] >= _SURPLUS_AT[pos]:
             surplus.append(pos)
 
-    return {
+    out = {
         "tier_depth":       tier_depth,
         "position_needs":   needs,
         "position_surplus": surplus,
     }
+    if relative:
+        # `replacement` is an ALIAS, not a fourth bin: same count as `bench`,
+        # emitted so clients can adopt the report's vocabulary without the wire
+        # key changing under a shipped build. `bench` is retained on purpose —
+        # dropping it would break every client older than this commit.
+        for pos, bins in tier_depth.items():
+            bins["replacement"] = bins["bench"]
+        out["tier_basis"] = {
+            pos: ("position_relative" if ok else "absolute")
+            for pos, ok in basis.items()
+        }
+    if want_handcuff:
+        out["handcuff_rb"] = handcuff_rb
+    return out
 
 
 # ---------------------------------------------------------------------------

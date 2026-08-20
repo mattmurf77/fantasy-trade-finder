@@ -25,7 +25,7 @@ The `waivers` display label was renamed **"Waivers" → "FA"** on 2026-07-17 (la
 
 **Locations (colors + labels):** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `chalkline/Badge.tsx` (`TierChalkBadge`) label maps, `mobile/src/utils/tierBands.ts` (`TIERS`/`TIER_LABEL`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches; JS `TIERS`/`TIER_LABELS_SHORT`), `web/profile.html` (inline `:root` vars + `TIER_ORDER`/`TIER_LABELS`), `web/style-guide.html` (badge swatches), `extension/content.css` (`.ftf-badge.ftf-tier-*`) + `extension/content.js` (`TIER_LABELS`), `backend/og_image.py` (`TIER_ORDER`/`TIER_LABELS`/`TIER_TINTS`).
 
-Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. Likewise `trade_service.analyze_roster_strengths`' `tier_depth` profile bins (`elite/starter/bench`, KTC-value thresholds) and the `tier_mult_*` `model_config` keys are backend-internal engine taxonomies that merely reuse the old words — they are NOT the tier enum and were deliberately left untouched by the 2026-07-11/12 ladder migrations. `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
+Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. Likewise `trade_service.analyze_roster_strengths`' `tier_depth` profile bins (`elite/starter/bench`, KTC-value thresholds) and the `tier_mult_*` `model_config` keys are backend-internal engine taxonomies that merely reuse the old words — they are NOT the tier enum and were deliberately left untouched by the 2026-07-11/12 ladder migrations. **That `tier_depth` taxonomy gained a wire alias and a second band mode on 2026-08-20 (#366) — see "Roster-profile depth bins" below.** `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
 
 ---
 
@@ -55,6 +55,91 @@ The two maps agree at **exactly one point, Elo 1548.0**, and diverge in both dir
 Since #313, `1qb_ppr` QB **seed values** are compressed so no quarterback seeds above the `first_1` band (`qb_1qb_cap_elo`, default 1785). The **bands themselves are unchanged and remain position- and format-uniform** — the cap is applied in value space at pool build, so every client's tier walk (`mobile/src/utils/tierBands.ts`, the extension badge, `RankingService.tier_for_elo`) stays a single shared ladder with no per-position fork.
 
 **Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`ORDERED_TIERS` / `tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` (fallback `TIER_CONFIG` mirror), `web/js/app.js` (`_eloToTierLabel` floor mirror), `extension` badge (consumes the backend walk).
+
+---
+
+## Roster-profile depth bins (`tier_depth`) — #366, 2026-08-20
+
+**This is NOT the tier enum above.** It is `trade_service.analyze_roster_strengths`' own
+three-bin roster profile, and the two taxonomies merely reuse two of the same English words.
+Nothing here maps to a tier key, a tier color, or an Elo band, and no client may render a
+`tier_depth` bin with a `TierBadge`.
+
+The bins are a **disjoint partition** — every counted player lands in exactly one. Nothing
+non-disjoint may be added to `tier_depth[pos]` (which is why the handcuff overlay below is a
+separate top-level key).
+
+### Wire keys, and the `bench` → `replacement` alias
+
+| Wire key | Present when | Meaning |
+|---|---|---|
+| `elite` / `starter` / `bench` | **always**, at every flag setting | the three bins as they have always shipped |
+| `replacement` | only when `trade.position_tiers` is ON | **an alias of `bench` — identical count**, carrying the word feedback #366 asked for |
+
+`bench` was **not renamed**, deliberately. A rename would have broken every client older than
+this change, including the shipped TestFlight build; both keys ship instead. **Clients read
+`replacement ?? bench`** — reading `replacement` alone renders a hole against a flag-off
+backend, and that pair is pinned by `mobile/tests/check-team-review-depth.js`. The user-facing
+LABEL is "Replacement" at all times; the word "bench" is never shown.
+
+### The two band modes, and `tier_basis`
+
+| Mode | When | Cut on |
+|---|---|---|
+| `absolute` (legacy) | `trade.position_tiers` OFF, **or** the pool is too thin at that position | `dynasty_value`: elite ≥ 4000, starter ≥ 1500, bench ≥ 500 |
+| `position_relative` | flag ON and the pool is real | rank **within the position** |
+
+The absolute cuts are position-blind and are really a cut on Sleeper's **overall
+`search_rank`** — `dynasty_value(p) = ktc_max·e^(−ktc_k·(search_rank−1))` is monotone in it, so
+4000/1500/500 mean "overall ≤ 73 / ≤ 151 / ≤ 238". Against the live pool that admits 33 elite
+RBs, 33 elite WRs, 17 elite QBs and **7** elite TEs: one word, four meanings. That is the
+defect #366 reported.
+
+The positional cuts, derived from what a 12-team league starts (1 QB, 2 RB, 2 WR, 1 TE;
+superflex starts 2 QB) — **canonical in `trade_service._POS_TIER_CUTS`; clients never
+re-derive them:**
+
+| Band | Definition | QB (1QB) · TE | RB · WR · QB (superflex) |
+|---|---|---|---|
+| Elite | top **half** of the league's starting demand | ≤ 6 | ≤ 12 |
+| Starter | inside **1.5×** the demand | ≤ 18 | ≤ 36 |
+| Replacement | inside **2.5×** | ≤ 32 | ≤ 60 |
+
+Below `_POS_TIER_MIN_POOL` (40) ranked players at a position, positional rank is meaningless
+and that position falls back to the absolute cuts. The mode is **reported, never inferred**:
+`depth.tier_basis` is `{pos: "position_relative" | "absolute"}`. Real Sleeper pools carry
+313 QB / 568 RB / 1134 WR / 516 TE, so production always bands relatively.
+
+**`trade.position_tiers` is not a display flag.** `analyze_roster_strengths` also produces
+`position_needs` / `position_surplus`, consumed by `trade_gen_v2` (`:930`, `:980`) and
+`trade_service` (`:3413`, `:3440`, `:4096`, `:4172`, `:4259`) — flipping it ON changes every
+deck for every user. OFF, the profile is byte-identical to pre-#366
+(`backend/tests/test_position_tiers.py`).
+
+### `handcuff_rb` — the RB2 overlay (flag `trade.rb_handcuff`)
+
+`depth.handcuff_rb` counts the caller's RBs who are the **RB2 on their NFL depth chart**:
+`position == "RB"` ∧ `depth_chart_position == "RB"` ∧ `depth_chart_order == 2`, read from
+Sleeper's own dump (`players.depth_chart_*`, `database.py:970-971`, re-synced every 24 h).
+It is an **overlay, not a fourth bin** — an RB2 is also Elite, Starter or Replacement — so it
+never appears inside `tier_depth[pos]`.
+
+**ABSENT when the flag is off — never `0`, never `null`.** "We did not look" and "you own
+none" are different claims, and the client must render them differently: it gates on key
+presence and must never write `handcuff_rb ?? 0`. Coverage is partial by design (≈149 of 603
+RBs sit on a chart at all); the rest are camp bodies and free agents, correctly nobody's
+handcuff. The label states the fact — *"RB2 on his NFL depth chart"* — and makes no usage or
+value claim, because a committee back can hold order 2.
+
+**Locations:** `backend/trade_service.py` (`_POS_TIER_CUTS`, `_POS_TIER_CUTS_SF_QB`,
+`_POS_TIER_MIN_POOL`, `_bin_player`, `_bin_player_relative`, `_is_handcuff`,
+`analyze_roster_strengths` — canonical), `backend/team_review.py` (`_depth`, pass-through
+only), `mobile/src/api/teamReview.ts` (`TeamReviewDepth`),
+`mobile/src/screens/TeamReviewScreen.tsx` (`Depth`),
+`backend/tests/test_position_tiers.py` + `mobile/tests/check-team-review-depth.js` (guards).
+No web or extension surface consumes `tier_depth` — checked 2026-08-20 by
+`git grep -n "tier_depth"`; `web/css/styles.css`'s `.tier-depth` class is an unrelated
+dynasty-value badge, not this taxonomy.
 
 ---
 

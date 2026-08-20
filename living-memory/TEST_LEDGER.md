@@ -149,6 +149,78 @@ behaviour, so the in-season half of #371 has no runtime evidence yet and must no
 
 ---
 
+## 2026-08-20b — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`
+
+**Branch:** `worktree-agent-a4ab94c51456abb78`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged.**
+Full gates ran — operator did **not** declare express. Both flags ship **OFF** and are **not graduated**.
+Scope: [docs/feedback/items/366-tier-ladder/scope.md](../docs/feedback/items/366-tier-ladder/scope.md).
+Code-walk: [code-walk.md](../docs/feedback/items/366-tier-ladder/code-walk.md).
+Decisions: [D-120](DECISIONS.md), [D-121](DECISIONS.md).
+
+**What ran.**
+
+| Gate | Before | After |
+|---|---|---|
+| `python3 -m pytest backend/tests -q` | 3606 passed, 1 skipped (356s) | **3638 passed, 1 skipped** (352s) |
+| `tsc --noEmit` | clean | **clean** |
+| `mobile/tests/check-*.js` (65 suites) | 64 suites, 0 failed | **65 suites, 0 failed** (new `check-team-review-depth` 8/8; `check-team-review` still 7/7) |
+| `bash mobile/scripts/testid-lint.sh` | OK | **OK** |
+| Sabotage proof | — | **12 of 12 turned their guard red**, restored clean, re-run green |
+
+New tests: `backend/tests/test_position_tiers.py` (**30**), `backend/tests/test_team_review.py` (**+2**),
+`mobile/tests/check-team-review-depth.js` (**8 assertions**). Net +32 backend tests (3606 → 3638).
+
+**Sabotage table.** Every cycle: apply one targeted revert → run → require RED **and** require the
+*named* guard to be the one that failed → `git checkout --` → prove restoration with
+`git diff --quiet` (never with a test result) → re-run → require GREEN.
+`find backend -name __pycache__ -type d -exec rm -rf {} +` ran before **every** invocation, because a
+`git checkout` restore leaves the source older than the sabotage run's `.pyc` and Python will happily
+serve stale bytecode — a correct tree then tests red and the whole table becomes noise.
+
+| # | Sabotage applied | Guard that caught it | Red | Restored clean | Green again |
+|---|---|---|---|---|---|
+| S1 | emit the `replacement` alias unconditionally | `test_flag_off_adds_no_keys_anywhere` | ✅ | ✅ | ✅ |
+| S2 | band boundary `<=` → `<` | `test_relative_band_boundaries` | ✅ | ✅ | ✅ |
+| S3 | drop the superflex QB widening | `test_superflex_widens_qb_and_nothing_else` | ✅ | ✅ | ✅ |
+| S4 | `_POS_TIER_MIN_POOL` 40 → 0 | `test_thin_pool_falls_back_to_absolute_cuts` | ✅ | ✅ | ✅ |
+| S5 | handcuff accepts `order in (1, 2)` | `test_handcuff_rejects_everything_that_is_not_an_rb2` | ✅ | ✅ | ✅ |
+| S6 | reorder so `_is_handcuff` runs before the flag check | `test_flag_off_never_touches_the_depth_chart` | ✅ | ✅ | ✅ |
+| S7 | composer emits `handcuff_rb` unconditionally | `test_depth_omits_366_keys_entirely_when_the_flags_are_off` | ✅ | ✅ | ✅ |
+| S8 | mobile reads `replacement ?? 0` (drops the `bench` fallback) | `check-team-review-depth` #2 | ✅ | ✅ | ✅ |
+| S9 | mobile gates on `(handcuff_rb ?? 0) >= 0` | `check-team-review-depth` #4 | ✅ | ✅ | ✅ |
+| S10 | TS type makes `replacement` required | `check-team-review-depth` #3a | ✅ | ✅ | ✅ |
+| S11 | force `relative = True` (relative path leaks with the flag OFF) | `test_flag_off_bins_follow_the_absolute_cuts_exactly` | ✅ | ✅ | ✅ |
+| S12 | drop the "Replacement" label from the beat | `check-team-review-depth` #5a | ✅ | ✅ | ✅ |
+
+**The finding that matters more than the table: 65 existing engine tests are BLIND to this change.**
+Per the standing instruction to re-read the tests that *pass*, `test_roster_profile`, `test_need_fit`,
+`test_finder_targeting` and `test_presentment_rules` were re-run with `relative` forced `True` in
+source. **All 65 stayed green.** The cause was then confirmed rather than assumed: disabling
+`_POS_TIER_MIN_POOL` as well turns exactly **1 of 65** red, so every fixture in those files is smaller
+than the small-pool guard and cannot distinguish the bands even in principle. They are evidence for
+the flag-**off** path only. Consequence, recorded in the scope block and D-120:
+**`trade.position_tiers` must not graduate on a green suite** — it needs `scripts/deck_eval.py` on real
+leagues plus step 6 of the TestFlight checklist.
+
+**Measurements taken during the build** (not test results — inputs to the design):
+- Absolute cuts against the live pool (`data/trade_finder.db`, 2 684 players): **elite = 33 RB, 33 WR,
+  17 QB, 7 TE.** The reported defect, quantified.
+- The three value thresholds are exactly overall-`search_rank` cuts at **73 / 151 / 238**
+  (`1 + ln(ktc_max/T)/ktc_k`, `ktc_k = 0.0126`).
+- Depth-chart coverage: **149 of 603** RB rows carry a real `depth_chart_order`, matching the 32 actual
+  NFL charts. The nulls are camp bodies and FAs.
+- `_positional_rank_map` build cost: **1.31 ms** over 2 684 players (50 iterations); memoized on pool
+  identity, so ~1 build per request rather than 13 per deck run.
+
+**TestFlight:** checklist written
+([testflight-checklist.md](../docs/feedback/items/366-tier-ladder/testflight-checklist.md), 6 steps),
+**not run** — owed by the operator, and moot until a flag is lit. Step 3 deliberately checks the
+handcuff tag against nfl.com rather than merely checking that something rendered.
+
+**Not covered by anything here:** whether the new bands make decks *better*. That is a judgement call
+and it is the operator's; the flags ship off so it does not have to be made today.
+
+---
 ## 2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`
 
 **Branch:** `claude/team-outlook-experience-27a7a1`, worktree at `origin/main` `a76498e`. **Not pushed, not merged** *(at time of writing — since merged to `origin/main` as PR #152, `bc43b6f`)*.
@@ -1862,6 +1934,8 @@ deliberately decoupled for that reason.
 ## Table of Contents
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
+- [2026-08-20b — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20b--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)
+- [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
 - [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)

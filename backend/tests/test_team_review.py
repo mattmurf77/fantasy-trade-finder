@@ -204,6 +204,43 @@ def test_stored_prefs_come_back_so_controls_render_preselected():
     assert out["depth"]["trade_away_positions"] == ["RB"]
 
 
+def test_depth_passes_through_366_keys_without_recomputing_them():
+    """#366 — `tier_basis` and `handcuff_rb` ride the profile, not this module.
+
+    `team_review` computes nothing new by design (module docstring), so the
+    only correct behaviour is verbatim pass-through. If this beat ever starts
+    DERIVING either value, the depth card and the trade engine acquire two
+    different definitions of the same word — the exact failure the composer
+    exists to prevent.
+    """
+    out = _build(roster_profile={
+        "tier_depth": {"RB": {"elite": 1, "starter": 2, "bench": 3,
+                              "replacement": 3}},
+        "position_needs": ["TE"], "position_surplus": ["RB"],
+        "tier_basis": {"QB": "position_relative", "RB": "position_relative",
+                       "WR": "position_relative", "TE": "absolute"},
+        "handcuff_rb": 2,
+    })
+    assert out["depth"]["handcuff_rb"] == 2
+    assert out["depth"]["tier_basis"]["TE"] == "absolute"
+    # `replacement` is an alias of `bench`, carried through untouched.
+    assert out["depth"]["tier_depth"]["RB"]["replacement"] == 3
+    assert out["depth"]["tier_depth"]["RB"]["bench"] == 3
+
+
+def test_depth_omits_366_keys_entirely_when_the_flags_are_off():
+    """Flags OFF means the profile carries neither key, and the payload must
+    then carry neither — ABSENT, not `null` and not `0`.
+
+    "we did not look" and "you own none" are different claims and the card
+    renders them differently; a defaulted `0` would make the screen assert the
+    second one on the strength of the first.
+    """
+    out = _build()   # the default fixture profile has neither key
+    assert "handcuff_rb" not in out["depth"]
+    assert "tier_basis" not in out["depth"]
+
+
 # ---------------------------------------------------------------------------
 # Partners
 # ---------------------------------------------------------------------------
