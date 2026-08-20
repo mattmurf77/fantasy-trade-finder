@@ -39,7 +39,8 @@
 ## 2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
 
 **Branch:** `claude/team-outlook-experience-27a7a1` (worktree of the same name), at `origin/main` `a76498e`.
-**Committed, not pushed, not merged.** Full gates ran — the operator did not declare express.
+**SHIPPED** — PR #152 merged `bc43b6f`, Render live on it, EAS build 124 submitted to TestFlight and
+awaiting Apple processing. Full gates ran — the operator did not declare express.
 [scope](../docs/feedback/items/364-team-review-fixes/scope.md) · [code-walk](../docs/feedback/items/364-team-review-fixes/code-walk.md) ·
 [checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md) · [plan for the rest](../docs/feedback/items/364-team-review-fixes/plan-remaining.md) ·
 [D-100](DECISIONS.md), [D-101](DECISIONS.md).
@@ -79,7 +80,8 @@ under the fix — both divergence lists came back empty, so its leak assertion p
 still passing. Repaired with a non-emptiness assertion. Worth remembering as a class: when a fix
 changes *selection*, re-read the tests that pass, not only the ones that fail.
 
-**What is owed.** (1) Push + merge — nothing is pushed. (2) The 13-step TestFlight checklist is
+**What is owed.** (1) ~~Push + merge~~ **DONE** — `bc43b6f`, Render live, build 124 submitted.
+(2) The 13-step TestFlight checklist is
 **UNRUN**, and the corrected divergence beat has never been seen on a device; it needs a client
 release (the backend half goes live on merge, the copy does not). (3) Four reports are **planned,
 not built** — #365 (window is age-only; it is a bright-line *engine* change via `outlook_alpha`),
