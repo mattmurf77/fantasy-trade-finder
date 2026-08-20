@@ -97,6 +97,19 @@ exclusion be justified):
 | `bakeoff_group_size`, `bakeoff_group_value_slots`, `bakeoff_fill_policy`, `bakeoff_lane_reallocate`, `bakeoff_include_baseline` | composition, 2026-08-18 / D-086 2026-08-19 | Same class — **deck composition, not generation.** All five are read only by `bakeoff_runner`, after every arm has finished producing its ranked list, and they decide how those lists are narrowed, quota'd and merged. An arm cannot observe them, so a per-arm value would be meaningless. `bakeoff_lane_reallocate` in particular only ever moves a SLOT between lanes inside one already-generated group; it cannot change, add or remove a card any arm proposed. |
 | `fit_r5_mode` | fit challenger PR-F1, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
 | `fit_junk_floor` | fit challenger PR-F1, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_score_scale` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_score_even` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_w_board` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_w_div` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_w_cons` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_pool_consensus` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_pool_div_seed` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_pool_div_opp` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_pool_cap` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_max_packages_per_pair` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_expand_from` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_min_them` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
+| `fit_min_aggregate` | fit challenger PR-F2, 2026-08-20 | Generation knob for `trade_gen_fit`, a module arm A never imports; no effect on MODEL_A_PROFILE output. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag

@@ -860,6 +860,39 @@ _DEFAULT_CFG: dict[str, float] = {
     # filler_ok predicate (kills count under "junk"), each side's value
     # accessor being that team's raw board when boarded, else consensus.
     "fit_junk_floor":             0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — pool / scorer / enumerator knobs (PR-F2, LLD §1.4,
+    # §1.5, §1.7, §1.9 + §4). Same five-registration discipline and the
+    # same "consumed ONLY by backend/trade_gen_fit.py" posture as the
+    # PR-F1 block above.
+    # ------------------------------------------------------------------
+    # Scorer curve (LLD §1.7): score = clamp(even + 50·tanh(s / scale),
+    # 0, 100). scale 400 ⇒ a +400 surplus scores ≈ 88.1; even is the
+    # zero-surplus midpoint.
+    "fit_score_scale":          400.0,
+    "fit_score_even":            50.0,
+    # Per-side lens weights (L1 own-board, L2 board-vs-consensus, L3
+    # consensus), renormalized to sum 1 over the lenses that fired.
+    "fit_w_board":                0.40,
+    "fit_w_div":                  0.30,
+    "fit_w_cons":                 0.30,
+    # Pool builder (LLD §1.4): per-roster sub-pool sizes and the hard cap
+    # on unique asset ids (picks always enter the union but compete under
+    # the cap — LLD §8 R-c).
+    "fit_pool_consensus":         8.0,
+    "fit_pool_div_seed":          8.0,
+    "fit_pool_div_opp":           8.0,
+    "fit_pool_cap":              15.0,
+    # Enumerator budget (LLD §1.5): hard per-pair enumeration ceiling and
+    # the number of top 1-for-1 survivors used as multi-asset expansion
+    # centerpieces.
+    "fit_max_packages_per_pair": 20000.0,
+    "fit_expand_from":           25.0,
+    # Post-score presentment filters (LLD §1.9 step 1) — defaults 0 = off
+    # (PRD §4: defaulting fit_min_them on would recreate rv ≥ gv).
+    "fit_min_them":               0.0,
+    "fit_min_aggregate":          0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

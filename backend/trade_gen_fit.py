@@ -229,7 +229,7 @@ def _kill(give_ids: list[str], recv_ids: list[str], ctx) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Entry point (LLD §1.3) — PR-F2
+# Entry point (LLD §1.3)
 # ---------------------------------------------------------------------------
 
 def generate_league_suggestions(
@@ -255,8 +255,217 @@ def generate_league_suggestions(
 ) -> tuple[list[ts.TradeCard], FitReport]:
     """Fit arm: pool → enumerate → K-chain → dual scorer → rank → post filters.
     Returns (cards, report). Cards are ordinary TradeCards carrying the `fit`
-    payload; `lane`/`lane_shift`/intent/C4b are applied by gen_fit_cards."""
-    raise NotImplementedError("PR-F2 — LLD §1.3 pipeline")
+    payload; `lane`/`lane_shift`/intent/C4b are applied by gen_fit_cards.
+
+    Behavioral spec: LLD §1.3 steps 1–5. Errors are NOT caught here — the
+    per-arm try/except in `run_bakeoff` is the containment layer, same
+    posture as `trade_gen_v2`."""
+    t0 = time.monotonic()
+    report = FitReport(league_id=league.league_id, user_id=user_id)
+    past_decision_keys = past_decision_keys or set()   # consumed by PR-F3's F4
+    _ = (target_ids, on_opponent_done)   # kwarg parity; v1 unused / quiet arm
+
+    # 1. Value accessors — RAW boards (T3, binding): cached dicts,
+    #    elo_to_value fallback at Elo 1500. `_shrink_user_elo` never runs.
+    _cv: dict[str, float] = {}
+
+    def cval(pid: str) -> float:
+        v = _cv.get(pid)
+        if v is None:
+            v = ts.elo_to_value(seed_elo.get(pid, 1500.0))
+            _cv[pid] = v
+        return v
+
+    viewer_boarded = bool(user_elo)
+    uval = None
+    if viewer_boarded:
+        _uv: dict[str, float] = {}
+
+        def uval(pid: str) -> float:
+            v = _uv.get(pid)
+            if v is None:
+                v = ts.elo_to_value(user_elo.get(pid, 1500.0))
+                _uv[pid] = v
+            return v
+
+    # 2. Once-per-job viewer structures (LLD §1.3 step 2).
+    user_profile = ts.analyze_roster_strengths(user_roster, players,
+                                               scoring_format)
+    user_pos_values: dict[str, list] = {}
+    for pid in user_roster:                # players only, QB/RB/WR/TE only —
+        p = players.get(pid)               # the ts.need_gate_ok shape
+        if p is None or ts.is_pick_asset(p):
+            continue
+        pos = getattr(p, "position", None)
+        if pos in ("QB", "RB", "WR", "TE"):
+            user_pos_values.setdefault(pos, []).append((pid, cval(pid)))
+    user_counts = topt._pos_counts(user_roster, players)
+
+    # 3. Eligible opponents — EVERY opponent is a pair, boarded or not (the
+    #    PRD's core difference from gen_v2). Parity narrowing with
+    #    trade_gen_v2 when the job targets one opponent.
+    eligible = [m for m in league.members
+                if m.user_id != user_id and m.roster]
+    if opponent_user_id:
+        eligible = [m for m in eligible if m.user_id == opponent_user_id]
+    report.opponents = len(eligible)
+
+    cap = int(ts._c("fit_max_packages_per_pair"))
+    expand_from = int(ts._c("fit_expand_from"))
+
+    # 4. Per pair: pools → enumerate → kill → score.
+    candidates: list[dict] = []
+    for member in eligible:
+        partner_boarded = bool(member.has_rankings and member.elo_ratings)
+        oval = None
+        if partner_boarded:
+            report.boarded_opponents += 1
+            _ov: dict[str, float] = {}
+            _board = member.elo_ratings
+
+            def oval(pid: str, _board=_board, _ov=_ov) -> float:
+                v = _ov.get(pid)
+                if v is None:
+                    v = ts.elo_to_value(_board.get(pid, 1500.0))
+                    _ov[pid] = v
+                return v
+
+        both = viewer_boarded and partner_boarded
+        user_pool = _build_pool(roster=user_roster, players=players,
+                                cval=cval, board_val=uval,
+                                opp_board_val=oval if both else None)
+        opp_pool = _build_pool(roster=member.roster, players=players,
+                               cval=cval, board_val=oval,
+                               opp_board_val=uval if both else None)
+
+        opp_profile = ts.analyze_roster_strengths(member.roster, players,
+                                                  scoring_format)
+        ctx = _PairCtx(
+            players=players, cval=cval, uval=uval, oval=oval,
+            user_counts=user_counts,
+            opp_counts=topt._pos_counts(member.roster, players),
+            user_pos_values=user_pos_values, user_profile=user_profile,
+            outlook=outlook, scoring_format=scoring_format,
+            bypass_need_gate=bypass_need_gate,
+            viewer_boarded=viewer_boarded, partner_boarded=partner_boarded)
+
+        def kill(g: list, r: list, _ctx=ctx) -> str | None:
+            # The enumerator-side closure owns the killed[] counting —
+            # _kill itself is a pure verdict (its docstring's contract).
+            code = _kill(g, r, _ctx)
+            if code is not None:
+                report.killed[code] += 1
+            return code
+
+        def score(g: list, r: list, _ctx=ctx, _m=member, _oval=oval,
+                  _pb=partner_boarded, _opp_profile=opp_profile) -> dict:
+            # ctx.r5_fail is per-candidate scratch set by the _kill call
+            # immediately preceding this score call (same candidate).
+            r5 = _ctx.r5_fail
+            if r5:
+                report.r5_fail_scored += 1
+            cand = _score_candidate(
+                g, r, cval=cval, uval=uval, oval=_oval,
+                viewer_boarded=viewer_boarded, partner_boarded=_pb,
+                seed_elo=seed_elo, r5_fail=r5)
+            gv, rv = topt._consensus_packages(g, r, cval)
+            fairness = (min(gv, rv) / max(gv, rv)
+                        if gv > 0 and rv > 0 else 1.0)
+            cand.update(give_ids=list(g), recv_ids=list(r), member=_m,
+                        opp_profile=_opp_profile, fairness=fairness,
+                        gv=gv, rv=rv)
+            return cand
+
+        candidates.extend(_enumerate_pair(user_pool, opp_pool, kill, score,
+                                          report, cap, expand_from))
+
+    # 5a. Rank (LLD §1.8): (aggregate, fairness, tiebreak). The aggregate
+    # term is quantized at 1e-9 so the C7c unranked-pair plateau (mirrored
+    # tanh sums, exactly 100 up to float noise ~1e-13) cannot let noise
+    # outrank the fairness term; real score separations are ≥ orders of
+    # magnitude larger. Ranking otherwise uses the unrounded floats.
+    candidates.sort(key=lambda c: (
+        -round(c["aggregate_raw"], 9), -c["fairness"],
+        (c["member"].user_id, tuple(sorted(c["give_ids"])),
+         tuple(sorted(c["recv_ids"])))))
+
+    # 5b. Bucket/character metrics over the SCORED, RANKED, PRE-F4 set
+    # (LLD §8 R-j — they describe the generator, not the viewer's prefs).
+    n = len(candidates)
+    if n:
+        report.one_sided_pct = round(
+            sum(1 for c in candidates if c["them_raw"] < 40.0) / n, 4)
+        _bcount = {b: 0 for b in _BUCKETS}
+        for c in candidates:
+            _bcount[c["bucket"]] += 1
+        report.both_high_pct = round(_bcount["both_high"] / n, 4)
+        report.mixed_pct = round(_bcount["mixed"] / n, 4)
+        report.you_tilt_pct = round(_bcount["you_tilt"] / n, 4)
+        aggs = sorted(c["aggregate_raw"] for c in candidates)
+        mid = n // 2
+        report.median_aggregate = round(
+            aggs[mid] if n % 2 else (aggs[mid - 1] + aggs[mid]) / 2.0, 4)
+        # C5 — top quartile BY AGGREGATE of the same pre-F4 set.
+        q = max(1, math.ceil(n / 4))
+        top = candidates[:q]
+        floor_abs = ts._c("asset_floor_abs")
+        report.top_q_pick_share = round(sum(
+            1 for c in top
+            if any(ts.is_pick_asset(players.get(pid))
+                   for pid in c["give_ids"] + c["recv_ids"])) / q, 4)
+        report.top_q_junk_share = round(sum(
+            1 for c in top
+            if any(cval(pid) < floor_abs
+                   for pid in c["give_ids"] + c["recv_ids"])) / q, 4)
+
+    # 5c. Cards (LLD §1.10).
+    cards: list[ts.TradeCard] = []
+    for c in candidates:
+        member = c["member"]
+        payload = c["payload"]
+        card = ts.TradeCard(
+            trade_id=str(uuid.uuid4())[:8],
+            league_id=league.league_id,
+            proposing_user_id=user_id,
+            target_user_id=member.user_id,
+            target_username=member.username,
+            give_player_ids=c["give_ids"],
+            receive_player_ids=c["recv_ids"],
+            # F-4 ruling: harmonic mean of the two 0–100 team scores —
+            # 0 when either side scores 0, never used for ranking.
+            mismatch_score=round(
+                ts._harmonic_mean(payload["you"], payload["them"]), 1),
+            # Live consensus ratio (PLAN.md note 5) — NOT a fit-lens number.
+            fairness_score=c["fairness"],
+            composite_score=round(c["aggregate_raw"], 4),
+            basis="divergence" if c["boards"] == "both" else "consensus",
+        )
+        card.give_value = round(c["gv"], 1)
+        card.receive_value = round(c["rv"], 1)
+        card.fit = payload
+        # STAMPED for telemetry, never multiplied (PRD §4).
+        card.need_fit = ts.need_fit_score(
+            user_profile, c["opp_profile"], c["give_ids"], c["recv_ids"],
+            players, scoring_format)
+        cards.append(card)
+
+    # 5d. §1.9 post-score filters — PR-F3 callsite (marked, not yet live).
+    # When _apply_post_filters lands, the ranked card list flows through it
+    # HERE, after the pre-F4 metrics above and before emitted is counted:
+    #   cards = _apply_post_filters(
+    #       cards, report,
+    #       untouchable_ids=untouchable_ids,
+    #       not_interested_ids=not_interested_ids,
+    #       acquire_positions=acquire_positions,
+    #       trade_away_positions=trade_away_positions,
+    #       past_decision_keys=past_decision_keys,
+    #       seed_elo=seed_elo, max_per_opponent=max_per_opponent)
+    # Until then the ranked list is returned unfiltered and every
+    # report.post_filtered counter stays 0.
+
+    report.emitted = len(cards)
+    report.ms = int((time.monotonic() - t0) * 1000)
+    return cards, report
 
 
 def _build_pool(*, roster: list[str], players: dict, cval,
@@ -265,8 +474,61 @@ def _build_pool(*, roster: list[str], players: dict, cval,
 
     board_val    — that roster owner's OWN raw board accessor, None if unboarded
     opp_board_val — the pair's OTHER board accessor, None unless BOTH boarded
+
+    Union of: top fit_pool_consensus by cval; top fit_pool_div_seed by
+    |board − seed| (boarded only); top fit_pool_div_opp by |board − opp
+    board| (both boarded only); every owned pick unconditionally. Capped
+    at fit_pool_cap unique ids by max(consensus percentile, |div|
+    percentile), max-tie-rank (1.0 = best) — picks compete under the cap
+    like everything else (LLD §8 R-c). Returned in cap-rank order
+    (descending) so phase-2 expansion draws best-first.
     """
-    raise NotImplementedError("PR-F2 — LLD §1.4 pool builder")
+    ids = list(dict.fromkeys(roster))
+    n_a = max(int(ts._c("fit_pool_consensus")), 0)
+    n_b = max(int(ts._c("fit_pool_div_seed")), 0)
+    n_c = max(int(ts._c("fit_pool_div_opp")), 0)
+    cap = max(int(ts._c("fit_pool_cap")), 0)
+
+    union: set[str] = set()
+    union.update(sorted(ids, key=lambda p: (-cval(p), p))[:n_a])
+    if board_val is not None:
+        union.update(sorted(
+            ids, key=lambda p: (-abs(board_val(p) - cval(p)), p))[:n_b])
+        if opp_board_val is not None:
+            union.update(sorted(
+                ids,
+                key=lambda p: (-abs(board_val(p) - opp_board_val(p)), p))[:n_c])
+    union.update(p for p in ids if ts.is_pick_asset(players.get(p)))
+
+    members = sorted(union)
+    n = len(members)
+    if n == 0:
+        return []
+
+    def _pct(vals: dict[str, float]) -> dict[str, float]:
+        """Fractional rank within the union, ties sharing the MAX
+        percentile (1.0 = best)."""
+        ordered = sorted(vals.values(), reverse=True)
+        return {p: (n - sum(1 for x in ordered if x > v)) / n
+                for p, v in vals.items()}
+
+    cons_pct = _pct({p: cval(p) for p in members})
+    if board_val is not None:
+        def _div(p: str) -> float:
+            d = abs(board_val(p) - cval(p))
+            if opp_board_val is not None:
+                d = max(d, abs(board_val(p) - opp_board_val(p)))
+            return d
+        div_pct = _pct({p: _div(p) for p in members})
+    else:
+        # No board ⇒ no divergence is defined for any asset: div
+        # percentile pinned 0.0 so everything competes on consensus
+        # percentile alone (the LLD's picks rationale, generalized).
+        div_pct = {p: 0.0 for p in members}
+
+    rank = {p: max(cons_pct[p], div_pct[p]) for p in members}
+    ordered = sorted(members, key=lambda p: (-rank[p], p))
+    return ordered[:cap] if n > cap else ordered
 
 
 def _enumerate_pair(user_pool: list[str], opp_pool: list[str],
@@ -276,19 +538,97 @@ def _enumerate_pair(user_pool: list[str], opp_pool: list[str],
     expanded around the top `expand_from` surviving 1-for-1 centerpieces.
     `kill(give, recv) -> str | None`; `score(give, recv) -> dict` (a scored
     candidate). Increments report.enumerated per candidate ENTERING the
-    K-chain; hard stop when a pair's enumerated count reaches `cap`."""
-    raise NotImplementedError("PR-F2 — LLD §1.5 enumerator")
+    K-chain; hard stop when a pair's enumerated count reaches `cap`.
+
+    Phase-2 shape order is pinned (deterministic budget attribution):
+    legal shapes minus (1,1), sorted by (total assets, shape) —
+    (1,2) (2,1) (1,3) (3,1) (2,3) (3,2). A dedupe hit is checked BEFORE
+    the budget and costs nothing. If phase 1 yields zero survivors,
+    phase 2 does not run for the pair. No randomness anywhere."""
+    out: list[dict] = []
+    survivors1: list[tuple[dict, str, str]] = []
+    pair_count = 0
+    capped = False
+
+    def _visit(g_list: list, r_list: list) -> dict | None:
+        nonlocal pair_count
+        pair_count += 1
+        report.enumerated += 1
+        if kill(g_list, r_list) is None:
+            cand = score(g_list, r_list)
+            report.scored += 1
+            out.append(cand)
+            return cand
+        return None
+
+    # Phase 1 — full 1-for-1 cartesian, pool-rank order.
+    for g in user_pool:
+        for r in opp_pool:
+            if pair_count >= cap:
+                capped = True
+                break
+            cand = _visit([g], [r])
+            if cand is not None:
+                survivors1.append((cand, g, r))
+        if capped:
+            break
+
+    # Phase 2 — 2-/3-asset expansion around the top phase-1 centerpieces.
+    if not capped and survivors1:
+        seeds = sorted(
+            survivors1,
+            key=lambda t: (-t[0]["aggregate_raw"], (t[1], t[2])),
+        )[:max(expand_from, 0)]
+        shapes = sorted(_LEGAL_SHAPES - {(1, 1)},
+                        key=lambda s: (s[0] + s[1], s))
+        seen: set[tuple[frozenset, frozenset]] = set()
+        for _cand0, g0, r0 in seeds:
+            if capped:
+                break
+            rest_g = [p for p in user_pool if p != g0]
+            rest_r = [p for p in opp_pool if p != r0]
+            for n_give, n_recv in shapes:
+                if capped:
+                    break
+                for g_add in combinations(rest_g, n_give - 1):
+                    if capped:
+                        break
+                    g_list = [g0, *g_add]
+                    g_key = frozenset(g_list)
+                    for r_add in combinations(rest_r, n_recv - 1):
+                        r_list = [r0, *r_add]
+                        key = (g_key, frozenset(r_list))
+                        if key in seen:
+                            continue        # dedupe hit — not budget
+                        seen.add(key)
+                        if pair_count >= cap:
+                            capped = True
+                            break
+                        _visit(g_list, r_list)
+
+    if capped:
+        report.capped_pairs += 1
+    return out
 
 
 # ---------------------------------------------------------------------------
-# Scorer (LLD §1.7) — PR-F2
+# Scorer (LLD §1.7)
 # ---------------------------------------------------------------------------
 
 def _score(surplus: float) -> float:
     """PRD §4 curve: clamp(even + 50·tanh(s / scale), 0, 100).
-    even = _c("fit_score_even") (50), scale = _c("fit_score_scale") (400)."""
-    raise NotImplementedError("PR-F2 — LLD §1.7 scorer (pin COMPUTED values, "
-                              "never PLAN-v2's rounded 88.4 — HLD F-5)")
+    even = _c("fit_score_even") (50), scale = _c("fit_score_scale") (400).
+    Pinned by computed values (HLD F-5 — never hand-rounded):
+        s=0      → 50.0
+        s=+200   → 50 + 50·tanh(0.5) = 73.105857863…   (−200 → 26.894142137…)
+        s=+400   → 50 + 50·tanh(1)   = 88.079707797…   (−400 → 11.920292202…)
+        s=+800   → 50 + 50·tanh(2)   = 98.201379003…   (−800 → 1.798620996…)
+        s=+1200  → 50 + 50·tanh(3)   = 99.752737684…   (−1200 → 0.247262315…)
+    (The PLAN-v2 F3 note's "88.4/11.6" was itself rounded wrong; the test pins
+    the computed values above with abs tolerance 1e-6.)"""
+    scale = ts._c("fit_score_scale")
+    return max(0.0, min(100.0,
+        ts._c("fit_score_even") + 50.0 * math.tanh(surplus / scale)))
 
 
 def _surplus(recv_ids: list[str], give_ids: list[str], value_of) -> float:
@@ -296,13 +636,110 @@ def _surplus(recv_ids: list[str], give_ids: list[str], value_of) -> float:
     package_value_v2 (trade-wide v_max, other_values crown credit) → waiver
     slot cost on the receiving-more side. Byte-parallel to the live formula at
     trade_service.py:4780–4806 so fit numbers are comparable to live ones."""
-    raise NotImplementedError("PR-F2 — LLD §1.7 surplus")
+    rvals = [value_of(p) for p in recv_ids]
+    gvals = [value_of(p) for p in give_ids]
+    v_max = max(rvals + gvals)
+    recvd = ts.package_value_v2(rvals, v_max, n_other=len(give_ids),
+                                other_values=gvals)
+    sent  = ts.package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                                other_values=rvals)
+    extra = len(recv_ids) - len(give_ids)      # raw id counts, picks included —
+    if extra > 0:                              # identical to live A3
+        recvd -= ts._c("waiver_slot_cost") * extra
+    return recvd - sent
 
 
 def _bucket(you: float, them: float) -> str:
     """PRD §4 presentment buckets. Evaluation order is pinned — the first
     matching row wins (mixed requires the lower side ≥ 40)."""
-    raise NotImplementedError("PR-F2 — LLD §1.7 buckets")
+    if you >= 70 and them >= 70:
+        return "both_high"
+    if (you >= 70 and 40 <= them < 70) or (them >= 70 and 40 <= you < 70):
+        return "mixed"
+    if you >= 70 and them < 40:
+        return "you_tilt"
+    if them >= 70 and you < 40:
+        return "them_tilt"
+    if 40 <= you < 70 and 40 <= them < 70:
+        return "both_ok"
+    return "weak"
+
+
+def _combine(l1: float | None, l2: float | None, l3: float) -> float:
+    """One team's lens combine (PRD §4): weights (fit_w_board, fit_w_div,
+    fit_w_cons) over the FIRED lenses, renormalized to sum 1 (LLD §8 R-e).
+    l1 is None ⇔ the team is unboarded ⇒ 1.0·L3; l2 may be independently
+    None (all traded assets unseeded) ⇒ (w1·L1 + w3·L3)/(w1+w3)."""
+    if l1 is None:
+        return l3
+    w1 = ts._c("fit_w_board")
+    w3 = ts._c("fit_w_cons")
+    num = w1 * l1 + w3 * l3
+    den = w1 + w3
+    if l2 is not None:
+        w2 = ts._c("fit_w_div")
+        num += w2 * l2
+        den += w2
+    return num / den if den > 0 else l3
+
+
+def _r1(x: float | None) -> float | None:
+    return None if x is None else round(x, 1)
+
+
+def _score_candidate(give_ids: list[str], recv_ids: list[str], *,
+                     cval, uval, oval, viewer_boarded: bool,
+                     partner_boarded: bool, seed_elo: dict,
+                     r5_fail: bool = False) -> dict:
+    """Dual 0–100 scores for one candidate, viewer frame (LLD §1.7).
+
+    Lens provenance (T3, binding): `uval`/`oval` are RAW-board accessors,
+    `cval` the seed accessor — `_shrink_user_elo` is never in this path.
+    L2 fires iff the team is boarded AND ≥1 traded asset has a real
+    seed_elo row (LLD §8 R-e). Returns the internal candidate dict:
+    unrounded you/them/aggregate for ranking + the §1.7 `fit` payload
+    (all six lens keys always present, None where a lens did not fire —
+    nulls DO serialize, §8 R-h)."""
+    s_cons_you = _surplus(recv_ids, give_ids, cval)
+    s_cons_them = _surplus(give_ids, recv_ids, cval)
+    seeded = any(pid in seed_elo for pid in list(give_ids) + list(recv_ids))
+
+    l1y = l2y = None
+    if viewer_boarded:
+        s_board_you = _surplus(recv_ids, give_ids, uval)
+        l1y = _score(s_board_you)
+        if seeded:
+            l2y = _score(s_board_you - s_cons_you)
+    l3y = _score(s_cons_you)
+
+    l1t = l2t = None
+    if partner_boarded:
+        s_board_them = _surplus(give_ids, recv_ids, oval)
+        l1t = _score(s_board_them)
+        if seeded:
+            l2t = _score(s_board_them - s_cons_them)
+    l3t = _score(s_cons_them)
+
+    you = _combine(l1y, l2y, l3y)
+    them = _combine(l1t, l2t, l3t)
+    bucket = _bucket(you, them)
+    boards = ("both" if viewer_boarded and partner_boarded else
+              "viewer" if viewer_boarded else
+              "partner" if partner_boarded else "none")
+    payload = {
+        "you": round(you, 1), "them": round(them, 1),
+        "aggregate": round(you + them, 1),          # 0–200
+        "bucket": bucket, "boards": boards, "ver": SCORER_VERSION,
+        "r5_fail": bool(r5_fail),
+        "lenses": {
+            "you":  {"board": _r1(l1y), "vs_consensus": _r1(l2y),
+                     "consensus": round(l3y, 1)},
+            "them": {"board": _r1(l1t), "vs_consensus": _r1(l2t),
+                     "consensus": round(l3t, 1)},
+        },
+    }
+    return {"you_raw": you, "them_raw": them, "aggregate_raw": you + them,
+            "bucket": bucket, "boards": boards, "payload": payload}
 
 
 # ---------------------------------------------------------------------------
@@ -319,20 +756,95 @@ def _apply_post_filters(cards, report, **job):
 
 
 # ---------------------------------------------------------------------------
-# M3 helper (LLD §1.11 — lives here so the scorer has one home) — PR-F2
+# M3 helper (LLD §1.11 — lives here so the scorer has one home)
 # ---------------------------------------------------------------------------
 
 def stamp_fit_diag(arm_lists: dict[str, list], *, players: dict,
                    league: ts.League, user_elo: dict[str, float],
                    seed_elo: dict[str, float]) -> None:
-    """M3/R-11 — set `card.fit_diag = {"you", "them", "bucket", "ver"}` on
-    EVERY card of EVERY arm's ranked list. Fit's own cards reuse `card.fit`
-    (identical numbers by construction). Other arms' cards are scored fresh:
-    resolve the partner via {m.user_id: m for m in league.members}, compute
-    you/them per §1.7 (weights and lenses included), bucket per _bucket.
+    """M3/R-11 — set `card.fit_diag = {"you", "them", "bucket", "ver",
+    "lenses"}` on EVERY card of EVERY arm's ranked list (the `lenses` key is
+    an additive coordinator extension of the LLD's 4-key shape: the readout's
+    lens-calibration queries COALESCE fit.lenses onto fit_diag.lenses and
+    must work across arms; SCORER_VERSION already covers the shape). Fit's
+    own cards reuse `card.fit` (identical numbers by construction). Other
+    arms' cards are scored fresh: resolve the partner via
+    {m.user_id: m for m in league.members}, compute you/them per §1.7
+    (weights and lenses included), bucket per _bucket.
     Per-card try/except: a card that cannot be scored (unknown partner,
     empty sides) gets `card.fit_diag = None` — the key must exist DOWNSTREAM
     (features_json writes it null), absence is impossible (M4 contract).
     Purely attribute-setting: no return, no reordering, no score mutation —
     inertness is enforced by test_fit_diag_inert."""
-    raise NotImplementedError("PR-F2 — LLD §1.11 fit_diag stamp")
+    members = {m.user_id: m for m in league.members}
+    viewer_boarded = bool(user_elo)
+    _cv: dict[str, float] = {}
+
+    def cval(pid: str) -> float:
+        v = _cv.get(pid)
+        if v is None:
+            v = ts.elo_to_value(seed_elo.get(pid, 1500.0))
+            _cv[pid] = v
+        return v
+
+    uval = None
+    if viewer_boarded:
+        _uv: dict[str, float] = {}
+
+        def uval(pid: str) -> float:
+            v = _uv.get(pid)
+            if v is None:
+                v = ts.elo_to_value(user_elo.get(pid, 1500.0))
+                _uv[pid] = v
+            return v
+
+    _ovals: dict[str, object] = {}   # partner uid → cached accessor
+
+    def _oval_for(member) -> object:
+        fn = _ovals.get(member.user_id)
+        if fn is None:
+            _ov: dict[str, float] = {}
+            _board = member.elo_ratings
+
+            def fn(pid: str, _board=_board, _ov=_ov) -> float:
+                v = _ov.get(pid)
+                if v is None:
+                    v = ts.elo_to_value(_board.get(pid, 1500.0))
+                    _ov[pid] = v
+                return v
+            _ovals[member.user_id] = fn
+        return fn
+
+    for cards in arm_lists.values():
+        for card in cards or ():
+            try:
+                fit = getattr(card, "fit", None)
+                if isinstance(fit, dict):
+                    # Fit's own card — identical numbers by construction.
+                    card.fit_diag = {
+                        "you": fit["you"], "them": fit["them"],
+                        "bucket": fit["bucket"], "ver": fit["ver"],
+                        "lenses": fit["lenses"],
+                    }
+                    continue
+                give = list(getattr(card, "give_player_ids", None) or ())
+                recv = list(getattr(card, "receive_player_ids", None) or ())
+                member = members.get(getattr(card, "target_user_id", None))
+                if member is None or not give or not recv:
+                    card.fit_diag = None
+                    continue
+                partner_boarded = bool(member.has_rankings
+                                       and member.elo_ratings)
+                cand = _score_candidate(
+                    give, recv, cval=cval, uval=uval,
+                    oval=_oval_for(member) if partner_boarded else None,
+                    viewer_boarded=viewer_boarded,
+                    partner_boarded=partner_boarded, seed_elo=seed_elo)
+                p = cand["payload"]
+                card.fit_diag = {
+                    "you": p["you"], "them": p["them"],
+                    "bucket": p["bucket"], "ver": p["ver"],
+                    "lenses": p["lenses"],
+                }
+            except Exception:
+                card.fit_diag = None

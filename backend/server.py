@@ -5683,6 +5683,26 @@ def _run_trade_job(
         else:
             final_cards = trade_service.generate_trades(**_generate_kwargs)
 
+        # M3 (R-11) — diagnostic fit stamp on EVERY bake-off card of EVERY
+        # arm, so the readout can bucket-match arm B against fit. Post-
+        # ranking, attribute-only, and inert: nothing downstream reads
+        # fit_diag except the features_json copy in
+        # _log_deck_signal_impressions (test_fit_diag_inert enforces).
+        if bakeoff_run is not None:
+            try:
+                from .trade_gen_fit import stamp_fit_diag  # lazy — the
+                # organic (bakeoff_run is None) path never executes this
+                # import
+                stamp_fit_diag(
+                    {a: r.cards for a, r in bakeoff_run.arms.items()},
+                    players  = players_dict,
+                    league   = g_league,
+                    user_elo = elo_map_rt,
+                    seed_elo = seed_map,
+                )
+            except Exception as fd_err:
+                log.warning("fit_diag stamp failed (non-fatal): %s", fd_err)
+
         # F7 — split the over-generated list into the served deck (top
         # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
         # and the wildcard draw pool, then republish so the trimmed deck

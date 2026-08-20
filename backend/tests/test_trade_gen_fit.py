@@ -3,12 +3,12 @@
 Spec: docs/plans/fit-challenger/LLD.md §1.6 (the K-chain) + §6.1 (the
 knockout rows of the test plan); PRD.md §3 (knockouts, operator-CLOSED).
 
-Scope note: PR-F1 ships the knockout chain only — the enumerator/scorer are
-NotImplementedError stubs until PR-F2 — so every test here drives `_kill`
-directly through a hand-built `_PairCtx`. Kill-count assertions therefore
-read the chain's return code (the enumerator closure that increments
-`report.killed[code]` on that code is PR-F2's); the full-pipeline versions
-of the mode/sabotage tests are owed by the PR-F2/PR-F3 rows of LLD §6.1.
+Scope note: the PR-F1 half (top of file) drives `_kill` directly through a
+hand-built `_PairCtx` and reads the chain's return code; the PR-F2 half
+(below the "full pipeline" banner) covers the enumerator, the dual scorer,
+card construction, the M3 `fit_diag` stamp, and the full-pipeline versions
+of the r5-mode and binding-sabotage tests PR-F1's scope note owed. The
+§1.9 post-score filter rows (untouchable/prefs/C4) are PR-F3's.
 
 Fixture idiom (HANDOVER trap 7): every input is a literal — players, Elos,
 rosters — so these tests isolate the knockout logic from board-computation
@@ -304,3 +304,426 @@ def test_diagnostics_keys_complete():
     d["killed"]["K1"] = 99
     assert rep.killed["K1"] == 0
     assert tgf.SCORER_VERSION == "fit-1"
+
+
+# ═══════════════════════════ PR-F2 — full pipeline ═════════════════════════
+# Enumerator + dual scorer + M3 stamp (LLD §1.3–§1.8, §1.10–§1.11; §6.1
+# scorer rows + the full-pipeline r5-mode / binding-sabotage tests owed by
+# the PR-F1 scope note above). Same literal-fixture idiom.
+
+import backend.bakeoff_runner as bo
+from unittest.mock import patch
+
+
+#: Raw viewer board for the boarded tests — diverges HARD from seed on or1
+#: (1620 vs seed 1580 → value 1822.1 vs 1491.8); everything else falls back
+#: to Elo 1500 through the accessor.
+_USER_BOARD = {"or1": 1620.0}
+
+#: Raw opponent board that MIRRORS seed on the two assets it rates — so the
+#: partner's board lens agrees with consensus and a viewer-favored candidate
+#: keeps them < 50 on every lens.
+_OPP_BOARD = {"ur2": 1500.0, "or1": 1580.0}
+
+
+def _league(opp_board=None, opp_roster=None):
+    """Two-member league over the literal fixture. The opponent is boarded
+    iff `opp_board` is a non-empty dict (the trade_gen_v2.py:925 test)."""
+    return ts.League(
+        league_id="Lfit", name="Fit League", platform="demo",
+        members=[
+            ts.LeagueMember(user_id="user", username="You",
+                            roster=list(_USER_ROSTER), elo_ratings={},
+                            has_rankings=False),
+            ts.LeagueMember(user_id="opp", username="Opp",
+                            roster=list(opp_roster or _OPP_ROSTER),
+                            elo_ratings=dict(opp_board or {}),
+                            has_rankings=bool(opp_board)),
+        ])
+
+
+def _gen(user_elo=None, league=None, **kw):
+    kwargs = dict(players=_PLAYERS, league=league or _league(),
+                  user_id="user", user_elo=dict(user_elo or {}),
+                  user_roster=list(_USER_ROSTER), seed_elo=dict(_SEED),
+                  scoring_format="1qb_ppr")
+    kwargs.update(kw)
+    return tgf.generate_league_suggestions(**kwargs)
+
+
+def _find(cards, give, recv):
+    hits = [c for c in cards if c.give_player_ids == give
+            and c.receive_player_ids == recv]
+    return hits[0] if hits else None
+
+
+# ───────────── the volume unlock — negative surplus scores, not killed ─────
+
+def test_negative_surplus_scores_not_killed():
+    # Boarded pair. give ur2 (1000.0) for or1 (1491.8): the viewer receives
+    # MORE consensus value, so live arm B kills it on rv ≥ gv / dual
+    # surplus. Fit keeps it and prices the partner's side honestly (<50).
+    cards, report = _gen(user_elo=_USER_BOARD,
+                         league=_league(opp_board=_OPP_BOARD))
+    assert report.boarded_opponents == 1
+    card = _find(cards, ["ur2"], ["or1"])
+    assert card is not None, "viewer-favored candidate must survive the chain"
+    assert card.receive_value > card.give_value          # the arm-B kill shape
+    fit = card.fit
+    assert fit["boards"] == "both" and card.basis == "divergence"
+    assert fit["them"] is not None and fit["them"] < 50
+    # Consensus lens: them pays 491.8 → 50 − 50·tanh(491.8/400) ≈ 7.9.
+    assert fit["lenses"]["them"]["consensus"] < 50
+    # And the generator-level diagnostics populated (pre-F4 set, R-j).
+    assert report.median_aggregate is not None
+    assert report.one_sided_pct is not None
+
+
+# ───────────── unranked partner — them side is L3 only ─────────────────────
+
+def test_unranked_partner_l3_only():
+    cards, _report = _gen(user_elo=_USER_BOARD)      # opp has no board
+    assert cards
+    for card in cards:
+        lens_them = card.fit["lenses"]["them"]
+        assert lens_them["board"] is None
+        assert lens_them["vs_consensus"] is None
+        assert lens_them["consensus"] is not None
+        # them-score IS the consensus lens (1.0 · L3 combine).
+        assert card.fit["them"] == lens_them["consensus"]
+        assert card.fit["boards"] == "viewer"
+        assert card.basis == "consensus"
+
+
+# ───────────── unranked PAIR — the C7c aggregate-100 plateau ───────────────
+
+def test_unranked_pair_aggregate_mirror():
+    cards, _report = _gen(user_elo={})               # neither side boarded
+    assert cards
+    ones = [c for c in cards
+            if len(c.give_player_ids) == 1 and len(c.receive_player_ids) == 1]
+    assert len(ones) >= 2
+    for c in cards:
+        assert c.fit["boards"] == "none"
+        assert c.basis == "consensus"
+    # Balanced shapes mirror exactly: both sides are the same consensus
+    # surplus with opposite sign, so aggregate == 100 (composite_score is
+    # round(aggregate, 4)).
+    for c in ones:
+        assert abs(c.composite_score - 100.0) < 1e-6
+    # Unbalanced shapes pay the waiver-slot cost on the receiving-more side
+    # → strictly below the plateau, so the plateau is the deck's prefix.
+    for c in cards[len(ones):]:
+        assert c.composite_score < 100.0
+    assert cards[:len(ones)] == ones
+    # Within the plateau the consensus-fairness ratio decides order (C7c)…
+    fairs = [c.fairness_score for c in ones]
+    assert fairs == sorted(fairs, reverse=True)
+    # …and equal-fairness ties fall to the deterministic tie-break.
+    for a, b in zip(ones, ones[1:]):
+        if a.fairness_score == b.fairness_score:
+            ka = (a.target_user_id, tuple(sorted(a.give_player_ids)),
+                  tuple(sorted(a.receive_player_ids)))
+            kb = (b.target_user_id, tuple(sorted(b.give_player_ids)),
+                  tuple(sorted(b.receive_player_ids)))
+            assert ka < kb
+
+
+# ───────────── scorer curve — computed values, never hand-rounded ──────────
+
+def test_fit_score_curve_pinned():
+    # LLD §1.7 computed table (HLD F-5: NOT PLAN-v2's rounded 88.4/11.6).
+    expected = {
+        0.0:     50.0,
+        200.0:   73.105857863,
+        -200.0:  26.894142137,
+        400.0:   88.079707797,
+        -400.0:  11.920292202,
+        800.0:   98.201379003,
+        -800.0:  1.798620996,
+        1200.0:  99.752737684,
+        -1200.0: 0.247262315,
+    }
+    for s, exp in expected.items():
+        assert abs(tgf._score(s) - exp) < 1e-6, s
+    # Clamp at the rails.
+    assert tgf._score(1e6) == 100.0
+    assert tgf._score(-1e6) == 0.0
+    # fit_score_even moves the midpoint; fit_score_scale rescales the curve.
+    with ts._cfg_override({"fit_score_even": 60.0}):
+        assert abs(tgf._score(0.0) - 60.0) < 1e-9
+    with ts._cfg_override({"fit_score_scale": 200.0}):
+        assert abs(tgf._score(200.0) - 88.079707797) < 1e-6
+
+
+# ───────────── T3 — lens provenance is the RAW board ───────────────────────
+
+def test_fit_lens_provenance_raw(monkeypatch):
+    # Fixture where raw and shrunk diverge: the viewer's board rates or1 at
+    # 1620 (value 1822.1) vs seed 1580 (1491.8). A confidence-0 shrink
+    # would collapse the board onto seed — so raw ≠ shrunk observably.
+    def _boom(*_a, **_kw):
+        raise AssertionError("fit must never call _shrink_user_elo (T3)")
+    monkeypatch.setattr(ts, "_shrink_user_elo", _boom)
+
+    cards, _report = _gen(user_elo=_USER_BOARD)      # sentinel armed
+    card = _find(cards, ["ur2"], ["or1"])
+    assert card is not None
+
+    # Hand-computed L1 from the RAW board accessor (Elo-1500 fallback).
+    def raw_uval(pid):
+        return ts.elo_to_value(_USER_BOARD.get(pid, 1500.0))
+    exp_l1 = round(tgf._score(tgf._surplus(["or1"], ["ur2"], raw_uval)), 1)
+    assert card.fit["lenses"]["you"]["board"] == exp_l1
+    # And it is NOT the shrunk-to-seed (= consensus) score — the lens read
+    # the board, not the shrinkage output.
+    assert exp_l1 != card.fit["lenses"]["you"]["consensus"]
+
+
+# ───────────── pool discipline ─────────────────────────────────────────────
+
+def _pool_world():
+    """30-asset rosters with startable cores; boards built so the three
+    sub-pools are DISJOINT and the union (24 ids) exceeds fit_pool_cap."""
+    players, seed = {}, {}
+    user_roster, opp_roster = [], []
+    core = [("qA", "QB"), ("qB", "QB"), ("rA", "RB"), ("rB", "RB"),
+            ("rC", "RB"), ("tA", "TE"), ("tB", "TE")]
+    for side, roster in (("u", user_roster), ("o", opp_roster)):
+        for stem, pos in core:
+            pid = side + stem
+            players[pid] = _Player(pid, pos)
+            seed[pid] = 1500.0
+            roster.append(pid)
+        for i in range(23):
+            pid = f"{side}w{i:02d}"
+            players[pid] = _Player(pid, "WR")
+            seed[pid] = 1500.0 + 2.0 * i
+            roster.append(pid)
+    # Viewer board: big |board − seed| on uw05..uw12; opp's view of the
+    # user's assets diverges on uw13..uw20 (→ |board − opp_board| there).
+    uboard = {f"uw{i:02d}": seed[f"uw{i:02d}"] + 150.0 for i in range(5, 13)}
+    oboard = {f"uw{i:02d}": seed[f"uw{i:02d}"] - 150.0 for i in range(13, 21)}
+    oboard.update({f"ow{i:02d}": seed[f"ow{i:02d}"] + 150.0
+                   for i in range(5, 13)})
+    return players, seed, user_roster, opp_roster, uboard, oboard
+
+
+def test_pool_cap_respected():
+    players, seed, user_roster, opp_roster, uboard, oboard = _pool_world()
+
+    def cv(pid):
+        return ts.elo_to_value(seed[pid])
+
+    def bv(pid):
+        return ts.elo_to_value(uboard.get(pid, 1500.0))
+
+    def ov(pid):
+        return ts.elo_to_value(oboard.get(pid, 1500.0))
+
+    # Direct pool check: union = 8 consensus ∪ 8 div-seed ∪ 8 div-opp
+    # (disjoint by construction) = 24 unique ids → hard-capped to 15.
+    pool = tgf._build_pool(roster=user_roster, players=players, cval=cv,
+                           board_val=bv, opp_board_val=ov)
+    assert len(pool) == 15
+    assert len(set(pool)) == 15 and set(pool) <= set(user_roster)
+    # Unboarded: only the consensus sub-pool exists (no picks here).
+    pool_dark = tgf._build_pool(roster=user_roster, players=players, cval=cv)
+    assert len(pool_dark) == 8
+
+    # Full pipeline under a tight budget: the pair hard-stops at 500.
+    league = ts.League(
+        league_id="Lpool", name="Pool", platform="demo",
+        members=[
+            ts.LeagueMember(user_id="user", username="You",
+                            roster=user_roster, elo_ratings={},
+                            has_rankings=False),
+            ts.LeagueMember(user_id="opp", username="Opp",
+                            roster=opp_roster, elo_ratings=dict(oboard),
+                            has_rankings=True),
+        ])
+    with ts._cfg_override({"fit_max_packages_per_pair": 500.0}):
+        _cards, report = tgf.generate_league_suggestions(
+            players=players, league=league, user_id="user",
+            user_elo=dict(uboard), user_roster=user_roster,
+            seed_elo=dict(seed), scoring_format="1qb_ppr")
+    assert report.enumerated == 500          # hard stop AT the budget
+    assert report.capped_pairs == 1
+    assert report.scored > 0                 # phase 1 survivors existed
+
+
+# ───────────── K7 knob — full-pipeline version (owed by PR-F1) ─────────────
+
+def test_fit_r5_mode_full_pipeline():
+    # give ur2 (RB 1000.0) for ow2 (WR 818.7) under a contender window:
+    # lateral, non-upgrade (WR incumbent uw2 1284.0), non-hole primary
+    # receive over the floor — the live R5 kill, reached through the whole
+    # pipeline this time (PR-F1 proved it at the _kill level only).
+    cards1, rep1 = _gen(outlook="contender")
+    assert rep1.killed["K7"] >= 1
+    assert _find(cards1, ["ur2"], ["ow2"]) is None
+    with ts._cfg_override({"fit_r5_mode": 0.0}):
+        cards0, rep0 = _gen(outlook="contender")
+    assert rep0.killed["K7"] == 0
+    assert rep0.r5_fail_scored >= 1
+    assert len(cards0) > len(cards1)                 # the unlock is real
+    tagged = _find(cards0, ["ur2"], ["ow2"])
+    assert tagged is not None and tagged.fit["r5_fail"] is True
+    # No score change in v1 (LLD §8 R-d): every candidate present in both
+    # runs carries an identical fit payload.
+    def key(c):
+        return (tuple(c.give_player_ids), tuple(c.receive_player_ids))
+    f1 = {key(c): c.fit for c in cards1}
+    f0 = {key(c): c.fit for c in cards0}
+    common = set(f1) & set(f0)
+    assert common
+    for k in common:
+        assert f1[k] == f0[k]
+
+
+# ───────────── T1 — binding sabotage, full-pipeline version ────────────────
+
+def test_fit_gate_binding_sabotage_full_pipeline(monkeypatch):
+    cards, rep = _gen()
+    assert cards and rep.scored > 0
+    # Rebind the MODULE attribute — had fit bound the predicate by value at
+    # import, this would be a perfect no-op and the asserts below would
+    # fail the build. Monkeypatch auto-restores.
+    monkeypatch.setattr(ts, "overpay_ok", lambda *a, **kw: False)
+    cards2, rep2 = _gen()
+    assert cards2 == []
+    assert rep2.scored == 0 and rep2.emitted == 0
+    # Every K1/K2 survivor died at K4 — nothing leaked past the rebind.
+    assert rep2.killed["K4"] == (rep2.enumerated - rep2.killed["K1"]
+                                 - rep2.killed["K2"])
+    assert rep2.killed["K4"] > 0
+
+
+# ───────────── §1.10 — card field construction ─────────────────────────────
+
+def test_mismatch_and_fairness_fields():
+    cards, _report = _gen(user_elo=_USER_BOARD,
+                          league=_league(opp_board=_OPP_BOARD))
+    card = _find(cards, ["ur2"], ["or1"])
+    assert card is not None
+    fit = card.fit
+    # mismatch = harmonic mean of the two 0–100 team scores (F-4 ruling).
+    assert card.mismatch_score == round(
+        ts._harmonic_mean(fit["you"], fit["them"]), 1)
+    # fairness = the live consensus ratio from _consensus_packages.
+    gv, rv = topt._consensus_packages(["ur2"], ["or1"], _cval)
+    assert card.fairness_score == min(gv, rv) / max(gv, rv)
+    assert card.give_value == round(gv, 1)
+    assert card.receive_value == round(rv, 1)
+    # composite = round(aggregate, 4), 0–200 (payload values are 1-dp).
+    assert abs(card.composite_score - (fit["you"] + fit["them"])) <= 0.11
+    assert card.basis == "divergence"                    # both boarded
+    assert fit["ver"] == tgf.SCORER_VERSION
+    # need_fit is STAMPED for telemetry (never multiplied): the helper's
+    # own output for this package, verbatim.
+    exp_nf = ts.need_fit_score(
+        ts.analyze_roster_strengths(_USER_ROSTER, _PLAYERS, "1qb_ppr"),
+        ts.analyze_roster_strengths(_OPP_ROSTER, _PLAYERS, "1qb_ppr"),
+        ["ur2"], ["or1"], _PLAYERS, "1qb_ppr")
+    assert card.need_fit == exp_nf
+
+
+# ───────────── M3 — fit_diag stamp is inert ────────────────────────────────
+
+class _StubCard:
+    """Minimal bake-off card for runner-level fixtures (the FakeCard
+    idiom from test_bakeoff_runner.py)."""
+    def __init__(self, give, recv, target="opp"):
+        self.give_player_ids = list(give)
+        self.receive_player_ids = list(recv)
+        self.target_user_id = target
+
+
+def _stub_run():
+    """Deterministic run_bakeoff over stub arms (challenger-test idiom)."""
+    def generate(**_ov):
+        return [_StubCard([f"bg{i}"], [f"br{i}"]) for i in range(3)]
+
+    def gen_v2(**_ov):
+        return [_StubCard([f"cg{i}"], [f"cr{i}"]) for i in range(2)]
+
+    knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0,
+             "bakeoff_include_baseline": 1.0}
+    with patch.object(bo, "draft_order_for",
+                      lambda parts, lid, wk=None: list(parts)), \
+            patch.object(bo, "_cfg",
+                         lambda key, default: float(knobs.get(key, default))):
+        return bo.run_bakeoff(generate=generate, gen_v2=gen_v2,
+                              league_id="Lstamp", interleave=True,
+                              limit=None, roster=bo.ARMS)
+
+
+def test_fit_diag_inert():
+    league = ts.League(
+        league_id="Lstamp", name="Stamp", platform="demo",
+        members=[ts.LeagueMember(user_id="opp", username="Opp",
+                                 roster=["x1"], elo_ratings={},
+                                 has_rankings=False)])
+    run = _stub_run()
+    baseline_deck = [(tuple(c.give_player_ids), tuple(c.receive_player_ids))
+                     for c in run.served_deck()]
+    all_cards = [c for arm in run.arms.values() for c in arm.cards]
+    assert all_cards
+    before = [dict(vars(c)) for c in all_cards]
+
+    tgf.stamp_fit_diag({a: r.cards for a, r in run.arms.items()},
+                       players={}, league=league, user_elo={}, seed_elo={})
+
+    for card in all_cards:
+        diag = card.fit_diag
+        assert set(diag) == {"you", "them", "bucket", "ver", "lenses"}
+        assert diag["ver"] == tgf.SCORER_VERSION
+        # Blank world: every asset prices at Elo-1500 fallback → even trade.
+        assert diag["you"] == 50.0 and diag["them"] == 50.0
+        assert diag["bucket"] == "both_ok"
+        assert diag["lenses"]["you"]["board"] is None    # unboarded viewer
+    # Attribute-only: nothing else on any card changed.
+    for card, snap in zip(all_cards, before):
+        after = dict(vars(card))
+        after.pop("fit_diag")
+        assert after == snap
+    # THE contract: delete the stamp from every card → served outcome
+    # byte-identical (the stamp fed nothing the serving path reads).
+    for card in all_cards:
+        delattr(card, "fit_diag")
+    assert [(tuple(c.give_player_ids), tuple(c.receive_player_ids))
+            for c in run.served_deck()] == baseline_deck
+    # And a fresh unstamped run drafts the same deck.
+    run2 = _stub_run()
+    assert [(tuple(c.give_player_ids), tuple(c.receive_player_ids))
+            for c in run2.served_deck()] == baseline_deck
+
+
+def test_fit_diag_unscorable_cards_get_none():
+    league = ts.League(
+        league_id="Lstamp", name="Stamp", platform="demo",
+        members=[ts.LeagueMember(user_id="opp", username="Opp",
+                                 roster=["x1"], elo_ratings={},
+                                 has_rankings=False)])
+    ghost = _StubCard(["g"], ["r"], target="nobody")     # unknown partner
+    empty = _StubCard([], ["r"])                         # empty give side
+    ok = _StubCard(["g"], ["r"])
+    tgf.stamp_fit_diag({"current": [ghost, empty, ok]},
+                       players={}, league=league, user_elo={}, seed_elo={})
+    assert ghost.fit_diag is None
+    assert empty.fit_diag is None
+    assert isinstance(ok.fit_diag, dict)
+    # Fit's own cards reuse the fit payload verbatim (identical numbers).
+    own = _StubCard(["g"], ["r"])
+    own.fit = {"you": 61.0, "them": 55.5, "aggregate": 116.5,
+               "bucket": "both_ok", "boards": "both",
+               "ver": tgf.SCORER_VERSION, "r5_fail": False,
+               "lenses": {"you": {"board": 61.0, "vs_consensus": None,
+                                  "consensus": 61.0},
+                          "them": {"board": None, "vs_consensus": None,
+                                   "consensus": 55.5}}}
+    tgf.stamp_fit_diag({"fit": [own]}, players={}, league=league,
+                       user_elo={}, seed_elo={})
+    assert own.fit_diag == {"you": 61.0, "them": 55.5, "bucket": "both_ok",
+                            "ver": tgf.SCORER_VERSION,
+                            "lenses": own.fit["lenses"]}
