@@ -873,3 +873,154 @@ def test_gen_v2_diagnostics_are_drained_so_they_cannot_leak_between_runs():
     bo._gen2_diag.value = {"S2_considered": 42}
     assert bo.last_gen_v2_diagnostics() == {"S2_considered": 42}
     assert bo.last_gen_v2_diagnostics() == {}
+
+
+# ---------------------------------------------------------------------------
+# PR-S — serving-readiness guards for the W1 re-light
+# (fit-challenger PLAN-v2 §2 S1b + §5 W1; HLD finding F-6; LLD §6.2;
+#  scope block docs/plans/fit-challenger/scope-serving.md)
+#
+# The 2026-08-18 shrink, inverted into a regression test. What happened: with
+# interleaved serving lit under COMPOSITION, arm C zero-carded (`gen_v2:
+# cards=0, forfeits=9` against `current: cards=40`) and the leave-short lane
+# quotas turned that into a 10-card deck from a 40-card pool — see the
+# `serve_interleaved()` docstring in bakeoff_runner.py. The W1 posture pins
+# `bakeoff_group_size = 0` precisely so the live draft path is the plain
+# per-arm `team_draft` fallback (HLD F-6: bakeoff_runner.py:1424-1427), where
+# a zero-card arm forfeits its rotation slots and the surviving arms backfill
+# the deck to `bakeoff_deck_limit`. These tests pin BOTH halves: the fallback
+# fills (the guard), and composition today does not (the reason W1 is 0).
+# ---------------------------------------------------------------------------
+
+#: W1 fixture, inputs pinned as literals: the shape of the 08-18 incident.
+#: One arm zero-cards; the other two hold 40 distinct trades — comfortably
+#: more than `bakeoff_deck_limit` = 30 combined.
+_W1_DECK_LIMIT = 30
+_W1_CUR_CARDS  = 20
+_W1_CHAL_CARDS = 20
+
+
+def _w1_fixture():
+    cur  = [_card([f"cur_g{i}"],  [f"cur_r{i}"])  for i in range(_W1_CUR_CARDS)]
+    chal = [_card([f"chal_g{i}"], [f"chal_r{i}"]) for i in range(_W1_CHAL_CARDS)]
+    v2: list = []                                  # the zero-card arm
+    return cur, chal, v2
+
+
+def _w1_run(*, group_size: float, interleave: bool = True):
+    """`run_bakeoff` directly, stub generators (the challenger-test idiom),
+    on the W1 roster (current + challenger + gen_v2) at the W1 knob values:
+    `bakeoff_deck_limit = 30`, `bakeoff_group_size` as given. The same
+    `generate` callable serves arms B and D; the thread-local overlay the
+    runner enters is what distinguishes them, exactly as in production."""
+    from backend.bakeoff_profiles import MODEL_CHALLENGER_PROFILE
+    from backend.trade_service import _cfg_local
+
+    cur, chal, v2 = _w1_fixture()
+
+    def generate(**ov):
+        overlay = getattr(_cfg_local, "map", None) or {}
+        is_chal = bool(MODEL_CHALLENGER_PROFILE) and all(
+            overlay.get(k) == v for k, v in MODEL_CHALLENGER_PROFILE.items())
+        return list(chal if is_chal else cur)
+
+    knobs = {"bakeoff_deck_limit": float(_W1_DECK_LIMIT),
+             "bakeoff_group_size": float(group_size)}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        return bo.run_bakeoff(
+            generate=generate, gen_v2=lambda **ov: list(v2),
+            league_id="league_w1", iso_week="2026-W34",
+            interleave=interleave,
+            roster=(bo.ARM_CURRENT, bo.ARM_CHALLENGER, bo.ARM_GEN_V2))
+
+
+def test_zero_card_arm_deck_still_fills():
+    """S1b — the regression guard for the W1 re-light. Under
+    `bakeoff_group_size = 0` (the W1 posture; HLD F-6 says this makes the
+    `team_draft` fallback the live path for the whole program), an arm that
+    produces ZERO cards must cost the deck nothing: it forfeits its rotation
+    slots — counted, on the record — and the surviving arms fill the deck all
+    the way to `bakeoff_deck_limit`."""
+    run = _w1_run(group_size=0)
+
+    # F-6: this IS the team_draft fallback, not compose_deck.
+    assert run.groups == {}, "group_size=0 must kill composition entirely"
+
+    # The deck fills to the limit despite the zero-card arm.
+    assert len(run.draft.deck) == _W1_DECK_LIMIT
+    assert [id(c) for c in run.served_deck()] == \
+        [id(c) for c in run.draft.deck], "interleaved serve = the draft deck"
+
+    # The empty arm is DATA, never silence: recorded empty, forfeits counted.
+    assert run.arms["gen_v2"].cards == []
+    assert run.draft.forfeits["gen_v2"] > 0
+    row = run.run_row(job_id="j", user_id="u", league_id="league_w1")
+    arms = json.loads(row["arms_json"])
+    assert arms["gen_v2"]["empty"] is True
+    assert arms["gen_v2"]["cards"] == 0
+    assert arms["gen_v2"]["forfeits"] > 0
+    assert row["deck_size"] == _W1_DECK_LIMIT
+
+    # Every served card came from a surviving arm.
+    credited = {run.draft.attribution[id(c)][0] for c in run.draft.deck}
+    assert credited == {bo.ARM_CURRENT, bo.ARM_CHALLENGER}
+
+
+def test_zero_card_arm_composed_deck_shrinks_under_group_quotas():
+    """The companion, same fixture, composition ON (`bakeoff_group_size` at
+    its live default 10) — documenting WHY W1 pins it to 0.
+
+    Under composition the per-group quota caps each group at `group_size`
+    cards, and a group whose (arm, basis) pool is empty composes zero. Here
+    the two engine arms' cards are all divergence-basis, so both consensus
+    groups compose 0, the gen_v2 group composes 0, and the deck tops out at
+    20 of its 30 slots — the 08-18 shrink in miniature (the operator's
+    10-card deck from a 40-card arm-B pool). Not a bug in composition: the
+    under-fill is recorded per group, by design (D-078). But it is the
+    behavior the W1 screen round must NOT serve, which is what makes
+    `group_size = 0` a load-bearing W1 knob value rather than a stylistic
+    one. If this test ever starts filling to 30, composition's supply
+    behavior changed and the W1 posture should be re-decided, not silently
+    kept."""
+    run = _w1_run(group_size=10)
+
+    assert run.groups, "group_size=10 must compose groups"
+    by_key = {k: gr.summary() for k, gr in run.groups.items()}
+    assert by_key["current_divergence"]["composed"] == 10      # capped at size
+    assert by_key["challenger_divergence"]["composed"] == 10   # capped at size
+    assert by_key["current_consensus"]["composed"] == 0        # empty basis
+    assert by_key["challenger_consensus"]["composed"] == 0     # empty basis
+    assert by_key["gen_v2"]["composed"] == 0                   # zero-card arm
+
+    # 20 composed cards < deck_limit 30: the same inputs that fill the
+    # team-draft deck leave a third of the composed deck empty.
+    assert len(run.draft.deck) == 20
+    assert len(run.draft.deck) < _W1_DECK_LIMIT
+
+    # …and the shrink is on the record, not silent (D-078's contract).
+    assert by_key["current_consensus"]["short"] == {"value": 5, "outlook": 5}
+    assert by_key["gen_v2"]["short"] == {"value": 5, "outlook": 5}
+
+
+def test_run_row_serving_mode_is_served_arm_not_a_bypass_marker():
+    """PR-S finding, pinned: an interleaved run carries NO dedicated
+    re-ranker-bypass marker. The only serving-mode state the run row records
+    is `served_arm` — NULL means interleaved (the interleaver owned the
+    order, so `bypass_rerankers()` was True for every card of this deck),
+    `'current'` means dark (the normal presentation stack ran). The M4
+    "re-ranker bypass assertion" tripwire therefore has to key on
+    `served_arm IS NULL`, joined against `deck_impressions.model_arm`
+    distribution — asserted here so that contract cannot drift silently. If
+    a dedicated marker is ever wanted, it is new schema, not a new test."""
+    interleaved = _w1_run(group_size=0, interleave=True)
+    row = interleaved.run_row(job_id="j", user_id="u", league_id="league_w1")
+    assert row["served_arm"] is None
+
+    dark = _w1_run(group_size=0, interleave=False)
+    dark_row = dark.run_row(job_id="j", user_id="u", league_id="league_w1")
+    assert dark_row["served_arm"] == bo.DARK_SERVED_ARM
+
+    # No bypass-named key exists anywhere on the row — the finding itself.
+    assert not any("bypass" in k for k in row), \
+        "a bypass marker appeared on the run row — update the M4 tripwire " \
+        "and scope-serving.md, which document served_arm as the only signal"
