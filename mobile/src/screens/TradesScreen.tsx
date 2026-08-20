@@ -33,6 +33,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
+import { useCardImpact, type CardImpactState } from '../state/useCardImpact';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -2663,6 +2664,22 @@ export default function TradesScreen({ navigation, route }: any) {
   // carries the MODIFIED package into every payload.
   const rawTopCard = sortedDeck[deckIdx];
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
+
+  // #357 — lineup movement + playoff-odds shift for the FRONTED card only
+  // (operator, 2026-08-19: "compute on the fronted card only"). The with-trade
+  // re-simulation is ~112 ms server-side; fetching it for all ~30 deck cards
+  // would add ~3.4 s to deck generation and discard most of it, because the
+  // median card is passed in under a second. Keyed on trade_id, so it fires
+  // exactly once per card the user actually stops on.
+  const topCardImpact = useCardImpact({
+    enabled: !!topCard,
+    tradeId: topCard?.trade_id ?? null,
+    leagueId: topCard?.league_id ?? leagueId,
+    opponentUserId: topCard?.opponent_user_id ?? null,
+    givePlayerIds: topCard?.give_player_ids ?? [],
+    receivePlayerIds: topCard?.receive_player_ids ?? [],
+    format: activeFormat,
+  });
   const nextCard = sortedDeck[deckIdx + 1];
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
@@ -5977,6 +5994,7 @@ export default function TradesScreen({ navigation, route }: any) {
               <SwipableTopCard
                 key={topCard.trade_id}
                 card={topCard}
+                cardImpact={topCardImpact}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
@@ -6712,6 +6730,9 @@ function PackageToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) 
 
 // ── SwipableTopCard — Tinder-style gesture on the top card only ─────
 interface SwipableProps {
+  /** #357 — host-fetched impact for the fronted card (see useCardImpact).
+   *  Only SwipableTopCard receives it; peek cards render without it. */
+  cardImpact?: CardImpactState | null;
   card: TradeCard;
   // #107/#110 — reports the card's laid-out height so the deck can clip
   // the behind-card peek to the top card's bounds. onLayout height is the
@@ -6752,6 +6773,7 @@ interface SwipableProps {
 
 function SwipableTopCard({
   card,
+  cardImpact,
   onCardLayout,
   onLike,
   onPass,
@@ -6863,6 +6885,7 @@ function SwipableTopCard({
           onKeepSide={onKeepSide}
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
+          cardImpact={cardImpact}
         />
       </Animated.View>
     </GestureDetector>

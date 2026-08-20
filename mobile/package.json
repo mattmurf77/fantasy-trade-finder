@@ -50,7 +50,8 @@
     "test:settings-ia": "node tests/check-settings-ia.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",
-    "test:outlook-bands": "node tests/check-outlook-bands.js"
+    "test:outlook-bands": "node tests/check-outlook-bands.js",
+    "test:card-impact": "node tests/check-card-impact-order.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
