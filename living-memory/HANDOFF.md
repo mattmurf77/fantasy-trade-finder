@@ -37,11 +37,14 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions
+## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 
 **Where:** the full fit-challenger program (new generator arm `fit` + measurement rail +
-serving guards) is BUILT, tested (**3645p/1s**), committed in 6 commits on
-`claude/trade-suggestions-review-69c9eb`, **not pushed, not merged**. Doc suite:
+serving guards) is BUILT, tested (**3651p/1s** post-merge with PR #152), and **SHIPPED to
+`main` 2026-08-20** (operator: "merge and deploy"). Operator rulings taken same day: K1
+widened (2-2/3-3 legal, PRD §12.6); `trade.outlook_direction` OFF; ms bar set; fit rosters
+dark at W3 (`bakeoff_include_fit = 1`, `bakeoff_serve_fit` stays 0). No EAS build needed —
+zero mobile files changed. Doc suite:
 [docs/plans/fit-challenger/](../docs/plans/fit-challenger/) (PRD → PLAN-v2 → HLD → LLD →
 PRD-build + drafts/critiques as the reasoning record) and
 [docs/plans/trade-engine-accuracy/PLAN.md](../docs/plans/trade-engine-accuracy/PLAN.md).

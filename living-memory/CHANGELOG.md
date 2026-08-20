@@ -10,7 +10,7 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
-## 2026-08-20 — Fit-challenger arm BUILT + measurement rail + serving guards (dark; on `claude/trade-suggestions-review-69c9eb`, not pushed)
+## 2026-08-20 — Fit-challenger arm BUILT + measurement rail + serving guards (dark; SHIPPED to `main` 2026-08-20)
 
 **Session arc:** re-reviewed the trade-suggestion research corpus against fresh read-only prod
 pulls (position curve INVERTED — like-rate 16.9% top-of-deck → 50%+ past card 25; `propose` = 0
@@ -30,7 +30,11 @@ code-walk: all 7 layers covered; finding: serving-mode state is `served_arm` alo
 ADR-013/014. Fixture dry run: fit **253 distinct ideas vs arm B 12** (~21×), one_sided 0.48,
 junk 0.055, 1.8 s @ 5k cap — R-8 says rostering is now an **operator decision**
 ([register, 9 items](../docs/plans/fit-challenger/PRD-build.md)). Everything dark:
-`bakeoff_include_fit` = 0, `bakeoff_serve_fit` = 0, `bakeoff_serve_interleaved` untouched at 0.
+`bakeoff_include_fit` = 0 (operator: flip to 1 at W3), `bakeoff_serve_fit` = 0,
+`bakeoff_serve_interleaved` untouched at 0. Same-day operator rulings shipped with it:
+K1 widened to include 2-2/3-3 (PRD §12.6), `trade.outlook_direction` OFF (experiment #1 —
+watch `fit_outlook` pass-reason share), ms bar set (scope.md §6). No client build needed:
+zero mobile files changed.
 **Corrections:** D-096 likes-you gates (`7110af2`), balanced-claim fix (`d755b3b`), and arm D
 (`38806e0`) are MERGED on `origin/main` — earlier HANDOFF/NEXT entries calling them unmerged are
 stale.
