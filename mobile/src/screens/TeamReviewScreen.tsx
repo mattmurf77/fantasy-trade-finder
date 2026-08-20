@@ -382,6 +382,16 @@ function Window({
   const w = data.window;
   const m = w.model;
   const pickVsEven = w.signals.pick_share - w.signals.equal_pick_share;
+  // #365 — the ledger card and the arithmetic row are driven by the PAYLOAD,
+  // never by a flag the client holds: `signals.firsts` and `model.w_net_firsts`
+  // ship together or not at all, so there is no state in which the beat can
+  // show a ledger it did not score, or score a term it did not show.
+  const f = w.signals.firsts;
+  const wFirsts = m?.w_net_firsts;
+  const firstsScored = !!f && f.applied && typeof wFirsts === 'number';
+  // #371 — `source` is absent while `trades.window_from_odds` is off, and the
+  // beat then reads exactly as it did before, off the roster heuristic.
+  const fromOdds = w.source === 'odds';
   return (
     <View testID="team-review.beat.window">
       <Bubble pose="thinking">
@@ -393,8 +403,33 @@ function Window({
       </Bubble>
 
       <View style={styles.card}>
-        <ChalkText style={styles.kicker}>Your window · inferred from roster shape</ChalkText>
+        <ChalkText style={styles.kicker}>
+          {fromOdds
+            ? 'Your window · from your playoff odds'
+            : 'Your window · inferred from roster shape'}
+        </ChalkText>
         <ChalkText style={styles.headline}>{OUTLOOK_LABEL[w.inferred]}</ChalkText>
+        {/* #371 — when the odds drove, the roster model's own answer stays on
+            screen. Two models disagreeing is information; hiding one is not. */}
+        {fromOdds && w.odds ? (
+          <ChalkText style={styles.read}>
+            {`Your playoff odds read ${BAND_LABEL[w.odds.band].toLowerCase()}, `}
+            {`so that is the call. Roster shape alone said `}
+            {`${OUTLOOK_LABEL[w.roster_inferred ?? w.inferred].toLowerCase()}.`}
+          </ChalkText>
+        ) : null}
+        {!fromOdds && w.odds_reason === 'preseason' && w.odds ? (
+          <ChalkText style={styles.fine}>
+            {`Your playoff odds read ${BAND_LABEL[w.odds.band].toLowerCase()}, but `}
+            {'nobody has played a game yet, so we are not letting a preseason '}
+            {'simulation set your window. Roster shape below.'}
+          </ChalkText>
+        ) : null}
+        {!fromOdds && w.odds_reason === 'odds_unavailable' ? (
+          <ChalkText style={styles.fine}>
+            We do not have playoff odds for this league, so this is roster shape only.
+          </ChalkText>
+        ) : null}
         {/* #365 — the age thresholds come from the payload. Hardcoding them is
             how this shipped saying "23 and under" against a youth_age of 26. */}
         <Row
@@ -411,6 +446,39 @@ function Window({
         />
       </View>
 
+      {/* #365 — "number of 1sts owned vs traded away". The counts are shown
+          whenever the backend computed them, INCLUDING when it refused to
+          score them: a league whose pick history predates capture must read
+          as "we cannot see this", never as a confident zero. */}
+      {f ? (
+        <View style={styles.card} testID="team-review.window.firsts">
+          <ChalkText style={styles.kicker}>First-round picks</ChalkText>
+          <Row label="You hold" value={`${f.held}`} />
+          <Row label="Yours, traded away" value={`${f.traded_away}`} />
+          <Row label="Acquired from others" value={`${f.acquired}`} />
+          {f.provenance === 'observed' ? (
+            <ChalkText style={styles.fine}>
+              {f.net === 0
+                ? 'Net even — you have replaced every first you moved.'
+                : f.net > 0
+                  ? `Net +${f.net}: you are collecting firsts, which reads as building for later.`
+                  : `Net ${f.net}: you have spent firsts, which reads as going for it now.`}
+            </ChalkText>
+          ) : f.provenance === 'none_traded' ? (
+            <ChalkText style={styles.fine}>
+              No first-round pick in this league is recorded as having changed
+              hands. That could mean none has, or that the trade history predates
+              what we can see — so we are not counting this signal.
+            </ChalkText>
+          ) : (
+            <ChalkText style={styles.fine}>
+              We have no draft-pick records for this league, so this signal is not
+              counted.
+            </ChalkText>
+          )}
+        </View>
+      ) : null}
+
       {m ? (
         <View style={styles.card} testID="team-review.window.inputs">
           <ChalkText style={styles.kicker}>Every input behind that call</ChalkText>
@@ -426,17 +494,41 @@ function Window({
             label={`Pick capital ${signed(pickVsEven)} vs even × −${m.w_pick_share}`}
             value={signed(-m.w_pick_share * pickVsEven)}
           />
+          {/* #365 — a term that scores must also appear here. D-101 exists
+              because the beat once described a model it was not running. */}
+          {firstsScored && f ? (
+            <Row
+              label={`Net firsts ${f.net >= 0 ? '+' : '−'}${Math.abs(f.net)} of ${f.own_total} × −${wFirsts}`}
+              value={signed(-(wFirsts as number) * f.net_share)}
+            />
+          ) : null}
           <Row label="Total score" value={signed(w.signals.score)} accent />
           <ChalkText style={styles.fine}>
             {`Contending at ${signed(m.contender_cut)} or above, rebuilding at `}
             {`${signed(m.rebuilder_cut)} or below, anything between is "not sure".`}
           </ChalkText>
-          <ChalkText style={styles.fine}>
-            That is the whole model — roster age and pick capital. It does not read
-            your record, your starting lineup, or which picks you have already traded
-            away, so a young team going all-in reads as rebuilding here. You have the
-            final say below.
-          </ChalkText>
+          {/* This sentence becomes a lie the moment the net-firsts term is
+              scored, so it is conditional on the term rather than fixed copy. */}
+          {firstsScored ? (
+            <ChalkText style={styles.fine}>
+              That is the whole model — roster age, pick capital, and the firsts you
+              have moved. It still does not read your record or your starting lineup.
+              You have the final say below.
+            </ChalkText>
+          ) : (
+            <ChalkText style={styles.fine}>
+              That is the whole model — roster age and pick capital. It does not read
+              your record, your starting lineup, or which picks you have already traded
+              away, so a young team going all-in reads as rebuilding here. You have the
+              final say below.
+            </ChalkText>
+          )}
+          {fromOdds ? (
+            <ChalkText style={styles.fine}>
+              Your playoff odds outrank this arithmetic while the season is running —
+              the numbers above are what roster shape alone says.
+            </ChalkText>
+          ) : null}
         </View>
       ) : null}
 

@@ -57,6 +57,60 @@ OUTLOOK_OPTIONS: tuple[str, ...] = (
     "championship", "contender", "rebuilder", "jets", "not_sure",
 )
 
+# #371 — the playoff band → window map. A CROSS-CLIENT ENCODING: the client
+# renders `window.odds.implied`, it never re-derives "likely means contender"
+# (docs/cross-client-invariants.md § Playoff band → inferred window). The
+# extremes stay unreachable here for the same reason `infer_team_outlook`
+# refuses them — a simulated 71 % does not justify α = 1.00.
+WINDOW_FROM_BAND: dict[str, str] = {
+    "likely":   "contender",
+    "tossup":   "not_sure",
+    "unlikely": "rebuilder",
+}
+
+def resolve_window_from_odds(
+    outlook_band: dict | None, completed_weeks: int,
+) -> tuple[str, dict | None, str | None]:
+    """#371 — decide whether the simulated playoff band may drive the window.
+
+    Returns `(source, odds, reason)` where `source` is `"odds"` or `"roster"`,
+    `odds` is the band block to ship (present even when it is refused), and
+    `reason` names the refusal. The CALLER decides whether to call this at all;
+    it is only reached while `trades.window_from_odds` is on.
+
+    It lives here rather than inline in the route because it is the whole of
+    the operator's ruling, and a rule that only exists inside a Flask handler
+    is a rule nothing can test.
+
+    Two refusals, both deliberate:
+
+      odds_unavailable  no band to read — `outlook.odds` is off, the league is
+                        not Sleeper (`backend/outlook/league_state.py` registers
+                        every other platform as a NotImplemented stub), or the
+                        simulator failed. The heuristic works anywhere a roster
+                        exists, which is exactly why it stays the fallback.
+      preseason         a band EXISTS and is refused anyway. `completed_weeks
+                        == 0` is the simulator's weakest window (D-094:
+                        preseason skill lower CI bound +2.9 %), and preseason
+                        is when window-setting matters most. The band still
+                        ships, so the card can show what was available and say
+                        why it was not used.
+    """
+    if not outlook_band:
+        return "roster", None, "odds_unavailable"
+    implied = WINDOW_FROM_BAND.get(outlook_band.get("band"))
+    odds = {
+        "band": outlook_band.get("band"),
+        "playoff_pct": outlook_band.get("playoff_pct"),
+        "implied": implied,
+    }
+    if int(completed_weeks or 0) <= 0:
+        return "roster", odds, "preseason"
+    if implied is None:
+        return "roster", odds, "odds_unavailable"
+    return "odds", odds, None
+
+
 CORE_POSITIONS: tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
 # Caps. Small on purpose: a beat is one finding, and a list of ten is a
@@ -124,8 +178,25 @@ def _standing(teams: list[dict], me: dict, scoring: dict | None) -> dict:
 
 
 def _window(inferred: str, signals: dict, declared: str | None,
-            num_teams: int) -> dict:
-    return {
+            num_teams: int, *,
+            source: str | None = None,
+            roster_inferred: str | None = None,
+            odds: dict | None = None,
+            odds_reason: str | None = None) -> dict:
+    """The window beat.
+
+    #371 — `source` is the FLAG'S FOOTPRINT and the shape switch in one. It is
+    None whenever `trades.window_from_odds` is off, and then this function
+    returns exactly the dict it returned before #371: no `source`, no
+    `roster_inferred`, no `odds`, no `odds_reason`. A client on an older build
+    therefore sees an unchanged payload rather than four keys it will not read.
+
+    When the flag IS on, all four ship together, whichever path won. That is
+    the point: `inferred` is the verdict the beat acts on and `roster_inferred`
+    is always the roster heuristic's own answer, so the payload carries BOTH
+    definitions of "contender" instead of one silently replacing the other.
+    """
+    out = {
         "inferred": inferred,
         "declared": declared,
         "signals": {
@@ -148,6 +219,19 @@ def _window(inferred: str, signals: dict, declared: str | None,
         "model": dict(signals.get("model") or {}),
         "options": list(OUTLOOK_OPTIONS),
     }
+    # #365 — the net-firsts ledger, present only when the engine flag put it
+    # in `signals`. Passed through whole (never re-derived) so the card can
+    # state the counts, the contribution AND the provenance: a league whose
+    # pick history predates capture must read as "we cannot see this", never
+    # as a confident zero.
+    if signals.get("firsts") is not None:
+        out["signals"]["firsts"] = dict(signals["firsts"])
+    if source is not None:
+        out["source"] = source
+        out["roster_inferred"] = roster_inferred or inferred
+        out["odds"] = odds
+        out["odds_reason"] = odds_reason
+    return out
 
 
 def _depth(profile: dict, weakest_slot: dict | None,
@@ -392,6 +476,13 @@ def build_team_review(
     pos_rank_of: Callable[[str], int | None] | None = None,
     pick_share_by_owner: dict[str, float] | None = None,
     first_round_by_owner: dict[str, int] | None = None,
+    # #371 — all four default to None, and `window_source` being None is what
+    # makes the flag-off payload byte-identical (see `_window`). The route is
+    # the only caller that fills them.
+    window_source: str | None = None,
+    window_roster_inferred: str | None = None,
+    window_odds: dict | None = None,
+    window_odds_reason: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the six beats. Returns the full payload including
     `meta.beats_skipped`, which is AUTHORITATIVE: the client renders
@@ -446,7 +537,11 @@ def build_team_review(
         },
         "standing": _standing(teams, me, scoring),
         "window": _window(inferred_outlook, outlook_signals or {},
-                          prefs.get("team_outlook"), num_teams),
+                          prefs.get("team_outlook"), num_teams,
+                          source=window_source,
+                          roster_inferred=window_roster_inferred,
+                          odds=window_odds,
+                          odds_reason=window_odds_reason),
         "depth": _depth(roster_profile or {}, weakest_slot,
                         prefs.get("acquire_positions") or [],
                         prefs.get("trade_away_positions") or []),

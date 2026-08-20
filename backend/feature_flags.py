@@ -512,6 +512,29 @@ FLAG_KEYS: tuple[str, ...] = (
     # #357/#358/#359 — the six-beat Team Review flow (client surface in the
     # Trades tab, hence the `trades.*` namespace; `trade.*` is the engine).
     "trades.team_review",
+    # #365 — the net first-round-pick term inside `infer_team_outlook`
+    # ("number of 1sts owned vs traded away"). NAMED `trade.*` ON PURPOSE:
+    # this one lives in the ENGINE's classifier, whose verdict feeds
+    # outlook_alpha for trade_gen_v2, the mock draft and the outlook seed.
+    # OFF (default) ⇒ the kwarg is accepted and IGNORED, so
+    # `infer_team_outlook` is byte-identical for every caller (INV-365) and
+    # the Team Review route never even reads the pick ledger. ON ⇒ the term
+    # applies ONLY where a ledger is supplied, and today only the Team Review
+    # route supplies one — so lighting this moves the WINDOW BEAT and no deck
+    # (INV-365b). Knobs: `infer_w_net_firsts` (0.10),
+    # `infer_net_firsts_cap` (1.0); either at 0 neutralises the term without
+    # changing the payload shape.
+    "trade.outlook_net_firsts",
+    # #371 — let the simulated PLAYOFF BAND drive the Team Review window
+    # instead of the roster heuristic. `trades.*` because it composes in the
+    # route and changes no engine value: `infer_team_outlook` still runs, and
+    # its verdict still ships as `window.roster_inferred` whichever path wins.
+    # Sleeper-only by construction (backend/outlook/league_state.py registers
+    # the other platforms as NotImplemented stubs) and REFUSED in preseason,
+    # `completed_weeks == 0` being the odds engine's weakest window (D-094).
+    # OFF (default) ⇒ `window` carries none of the source/odds keys and the
+    # payload is byte-identical.
+    "trades.window_from_odds",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:

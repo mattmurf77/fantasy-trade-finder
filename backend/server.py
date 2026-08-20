@@ -23172,6 +23172,73 @@ def league_power_rankings_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+def _first_round_ledgers(league_id: str) -> dict[str, dict]:
+    """#365 — per-owner round-1 pick provenance for one league.
+
+    {owner_or_original_user_id: {held, own_total, traded_away, acquired,
+                                 league_any_traded}}
+
+    The operator's ask was *"number of 1sts owned vs traded away"*, and both
+    halves are already in `draft_picks`: `owner_user_id` is who holds the pick
+    now, `original_user_id` is whose pick it was (`database.py:1050-1052`,
+    shipped since #158). No new source, no new column, no platform call — the
+    same `load_draft_picks` read `_power_picks_by_owner` already performs, run
+    once for the whole league rather than per member.
+
+    THE ONLY SUBTLE PART IS `league_any_traded`, and it is the honesty gate.
+    A league synced before pick provenance was captured has
+    `original_user_id == owner_user_id` on every row and is therefore
+    indistinguishable, from here, from a league where nobody has traded a
+    first. Rather than let that read as "you have traded nothing" — a
+    confident claim built on absent data — the flag rides every member's
+    ledger and `trade_service.first_round_signal` refuses to score the term,
+    labelling it `none_traded` so the card can say so.
+
+    Called ONLY when `trade.outlook_net_firsts` is on, so a flag-off request
+    costs exactly the reads it costs today.
+    """
+    try:
+        rows = load_draft_picks(league_id=league_id, source=_pick_read_source())
+    except Exception as e:
+        log.warning("team-review: first-round ledger load failed (omitted): %s", e)
+        return {}
+    firsts = [p for p in rows if int(p.get("round") or 0) == 1]
+    if not firsts:
+        return {}
+    any_traded = False
+    out: dict[str, dict] = {}
+
+    def _slot(uid: str) -> dict:
+        return out.setdefault(uid, {
+            "held": 0, "own_total": 0, "traded_away": 0, "acquired": 0,
+            "league_any_traded": False,
+        })
+
+    for p in firsts:
+        cur = str(p.get("owner_user_id") or "")
+        # A NULL original owner is un-attributable, not evidence of a trade:
+        # fall back to the current owner so the row reads as "never moved"
+        # rather than inventing a counterparty.
+        orig = str(p.get("original_user_id") or "") or cur
+        if not cur and not orig:
+            continue
+        moved = bool(cur and orig and cur != orig)
+        any_traded = any_traded or moved
+        if cur:
+            s = _slot(cur)
+            s["held"] += 1
+            if moved:
+                s["acquired"] += 1
+        if orig:
+            s = _slot(orig)
+            s["own_total"] += 1
+            if moved:
+                s["traded_away"] += 1
+    for s in out.values():
+        s["league_any_traded"] = any_traded
+    return out
+
+
 # #14/#21 rank chips — per-league consensus-rank cache so a fan of home
 # league cards costs one power-rankings computation per league per minute,
 # not one per card render. In-process only (fine across Render restarts —
@@ -23221,7 +23288,7 @@ def league_team_review_route():
 
     try:
         from .power_rankings import compute_power_rankings, optimal_starter_slots
-        from .team_review import build_team_review
+        from .team_review import build_team_review, resolve_window_from_odds
 
         members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
         if members is None:
@@ -23277,12 +23344,25 @@ def league_team_review_route():
                 1 for p in owned if "1st" in str(p.get("label") or ""))
         if total_pick_value > 0:
             pick_share = {k: v / total_pick_value for k, v in pick_share.items()}
+        # #365 — round-1 pick provenance per member, read ONCE for the league
+        # and only while `trade.outlook_net_firsts` is on. Flag off ⇒ this is
+        # `{}`, every `.get()` below yields None, and `infer_team_outlook` is
+        # called with the same four arguments it has always taken (INV-365).
+        firsts_ledgers: dict[str, dict] = {}
+        if is_enabled("trade.outlook_net_firsts"):
+            firsts_ledgers = _first_round_ledgers(league_id)
+
         for m in members:
             uid = str(m.get("user_id"))
             pids = [str(x) for x in (m.get("player_ids") or [])]
             try:
+                # League-mates get the ledger too, deliberately: the `partners`
+                # beat pits your window against theirs, and two different
+                # definitions of "contender" inside one payload is exactly the
+                # failure this whole build is arranged to avoid.
                 w, _score, _sig = _trade_service_mod.infer_team_outlook(
-                    pids, players_meta, pick_share.get(uid, 0.0), len(members))
+                    pids, players_meta, pick_share.get(uid, 0.0), len(members),
+                    firsts_ledgers.get(uid))
                 member_windows[uid] = w
             except Exception:
                 member_windows[uid] = "not_sure"
@@ -23292,7 +23372,8 @@ def league_team_review_route():
         my_profile = _trade_service_mod.analyze_roster_strengths(
             my_roster, players_meta, fmt) if my_roster else {}
         my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
-            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members))
+            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
+            firsts_ledgers.get(me_league_id))
 
         # Weakest starting slot — lowest-valued filled slot in the caller's
         # value-optimal lineup. None when the template is unknown.
@@ -23373,6 +23454,62 @@ def league_team_review_route():
                 reason = "platform_unsupported"
                 log.warning("team-review: scoring read failed (degraded): %s", sc_err)
 
+        # #357 — the playoff BAND for the caller's team, composed here so the
+        # pure module stays free of the outlook flag. Absent (never null-filled)
+        # when `outlook.odds` is off, the league is not Sleeper, or the
+        # simulator fails: the band is enrichment, the review is the feature.
+        #
+        # #371 HOISTED IT ABOVE `build_team_review` — same computation, same
+        # guards, same try/except, and it is still assigned onto
+        # `payload["standing"]["outlook"]` below. It moved because the band may
+        # now DRIVE the window, and the window is built inside the composer.
+        outlook_band = None
+        try:
+            if is_enabled("outlook.odds") and platform == "sleeper":
+                bundle = _outlook_impact_baseline(league_id, basis, sess)
+                if bundle is not None:
+                    from .outlook.trade_delta import playoff_band
+                    _st, base_payload, _pv, _pp, _stype, _fmt = bundle
+                    rid_of = {str(t.user_id): t.roster_id for t in _st.teams}
+                    mine = rid_of.get(str(me_league_id))
+                    row = next((t for t in (base_payload.get("teams") or [])
+                                if t.get("roster_id") == mine), None)
+                    if row is not None:
+                        meta = base_payload.get("meta") or {}
+                        outlook_band = {
+                            "band": playoff_band(float(row["odds"]["playoff_pct"])),
+                            "playoff_pct": round(float(row["odds"]["playoff_pct"]), 4),
+                            "projected_seed": row["odds"].get("projected_seed"),
+                            "beta": bool(meta.get("beta")),
+                            "is_preseason": bool(meta.get("is_preseason")),
+                            "priced_slot_coverage": meta.get("priced_slot_coverage"),
+                        }
+        except Exception as ob_err:
+            log.warning("team-review: outlook band failed (omitted): %s", ob_err)
+
+        # #371 — "we should primarily use the playoff outlook value as the
+        # decision maker". It INFORMS the window; it does not replace the
+        # heuristic, and the ruling is load-bearing rather than timid. The odds
+        # engine is Sleeper-only (`backend/outlook/league_state.py` registers
+        # the other platforms as NotImplemented stubs) while
+        # `infer_team_outlook` works anywhere a roster exists, so a straight
+        # replacement strands every ESPN and MFL league with no window at all.
+        # And `completed_weeks == 0` is the simulator's weakest window (D-094),
+        # which is precisely when a manager is setting his window.
+        #
+        # So the odds drive only when every one of five things holds, and when
+        # they do not, `window.odds_reason` NAMES which one failed. The roster
+        # verdict rides the payload either way as `window.roster_inferred`.
+        window_source = None
+        window_odds = None
+        window_odds_reason = None
+        roster_window = my_window
+        if is_enabled("trades.window_from_odds"):
+            window_source, window_odds, window_odds_reason = \
+                resolve_window_from_odds(outlook_band, completed_weeks)
+            if window_source == "odds":
+                my_window = window_odds["implied"]
+
         payload = build_team_review(
             teams=teams,
             you_user_id=me_league_id,
@@ -23404,6 +23541,12 @@ def league_team_review_route():
             # whole of what made the beat read as nonsense.
             pick_share_by_owner=pick_share,
             first_round_by_owner=first_rounds,
+            # #371 — None-by-default, and `window_source` being None is what
+            # keeps the flag-off `window` block byte-identical.
+            window_source=window_source,
+            window_roster_inferred=roster_window,
+            window_odds=window_odds,
+            window_odds_reason=window_odds_reason,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404
@@ -23411,33 +23554,8 @@ def league_team_review_route():
         payload["league_id"] = league_id
         payload["platform"] = platform
         payload["basis"] = basis
-
-        # #357 — the playoff BAND for the caller's team, composed here so the
-        # pure module stays free of the outlook flag. Absent (never null-filled)
-        # when `outlook.odds` is off, the league is not Sleeper, or the
-        # simulator fails: the band is enrichment, the review is the feature.
-        try:
-            if is_enabled("outlook.odds") and platform == "sleeper":
-                bundle = _outlook_impact_baseline(league_id, basis, sess)
-                if bundle is not None:
-                    from .outlook.trade_delta import playoff_band
-                    _st, base_payload, _pv, _pp, _stype, _fmt = bundle
-                    rid_of = {str(t.user_id): t.roster_id for t in _st.teams}
-                    mine = rid_of.get(str(me_league_id))
-                    row = next((t for t in (base_payload.get("teams") or [])
-                                if t.get("roster_id") == mine), None)
-                    if row is not None:
-                        meta = base_payload.get("meta") or {}
-                        payload["standing"]["outlook"] = {
-                            "band": playoff_band(float(row["odds"]["playoff_pct"])),
-                            "playoff_pct": round(float(row["odds"]["playoff_pct"]), 4),
-                            "projected_seed": row["odds"].get("projected_seed"),
-                            "beta": bool(meta.get("beta")),
-                            "is_preseason": bool(meta.get("is_preseason")),
-                            "priced_slot_coverage": meta.get("priced_slot_coverage"),
-                        }
-        except Exception as ob_err:
-            log.warning("team-review: outlook band failed (omitted): %s", ob_err)
+        if outlook_band is not None:
+            payload["standing"]["outlook"] = outlook_band
 
         return jsonify(payload)
     except Exception as e:
