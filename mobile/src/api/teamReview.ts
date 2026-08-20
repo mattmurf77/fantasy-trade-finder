@@ -197,9 +197,20 @@ export interface TeamReviewDivergence {
    *  of the Elo map, which covers the whole pool regardless. */
   board_judged_players: number;
   board_interactions: number;
-  /** You rate them ABOVE the market ⇒ your easiest SELLS. The inversion is the
-   *  point of the beat and the copy must not reverse it. */
+  /** #367 / [D-100] — your BUY list: players you rate above the market whom you
+   *  do NOT own, so you would pay less than you think they are worth. Sourced
+   *  from `easiest_buys` (your board vs the OWNER's).
+   *
+   *  This comment previously read "you rate them ABOVE the market ⇒ your
+   *  easiest SELLS … the copy must not reverse it", which asserted the exact
+   *  inversion D-100 fixed and told the next reader to preserve it. A player
+   *  you rate above the market is the one nobody overpays for. */
   higher_than_market: DivergenceRow[];
+  /** #367 / [D-100] — your SELL list: players you OWN whom the market rates
+   *  above your board, so someone pays you more than they are worth to you.
+   *  Sourced from `easiest_sells` (your board vs the community mean).
+   *  `gap` is a POSITIVE edge magnitude on BOTH lists — never infer the
+   *  direction from the sign. See docs/cross-client-invariants.md. */
   lower_than_market: DivergenceRow[];
 }
 

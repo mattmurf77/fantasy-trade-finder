@@ -21,7 +21,7 @@ Scope: [docs/feedback/items/365-window-signals/scope.md](../docs/feedback/items/
 Decisions: [D-110](DECISIONS.md), [D-111](DECISIONS.md).
 
 **Flags, both default OFF and neither graduated:** `trade.outlook_net_firsts`, `trades.window_from_odds`.
-## 2026-08-20b — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`
+## 2026-08-20e — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`
 
 **Branch:** `worktree-agent-a7bed877f805980b0`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged** — parent agent integrates.
 Full gates ran — operator did **not** declare express.
@@ -156,7 +156,7 @@ behaviour, so the in-season half of #371 has no runtime evidence yet and must no
 
 ---
 
-## 2026-08-20b — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`
+## 2026-08-20d — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`
 
 **Branch:** `worktree-agent-a4ab94c51456abb78`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged.**
 Full gates ran — operator did **not** declare express. Both flags ship **OFF** and are **not graduated**.
@@ -1977,8 +1977,8 @@ deliberately decoupled for that reason.
 ## Table of Contents
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
-- [2026-08-20b — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20b--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)
-- [2026-08-20b — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`](#2026-08-20b--team-review-plan-beat-rebuilt-369--full-gates-not-merged-on-worktree-agent-a7bed877f805980b0)
+- [2026-08-20d — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20d--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)
+- [2026-08-20e — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`](#2026-08-20e--team-review-plan-beat-rebuilt-369--full-gates-not-merged-on-worktree-agent-a7bed877f805980b0)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
 - [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)
