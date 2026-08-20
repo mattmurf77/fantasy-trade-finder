@@ -21,6 +21,13 @@ Scope: [docs/feedback/items/365-window-signals/scope.md](../docs/feedback/items/
 Decisions: [D-110](DECISIONS.md), [D-111](DECISIONS.md).
 
 **Flags, both default OFF and neither graduated:** `trade.outlook_net_firsts`, `trades.window_from_odds`.
+## 2026-08-20b — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`
+
+**Branch:** `worktree-agent-a7bed877f805980b0`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged** — parent agent integrates.
+Full gates ran — operator did **not** declare express.
+Scope: [docs/feedback/items/369-plan-beat/scope.md](../docs/feedback/items/369-plan-beat/scope.md) ·
+Code-walk: [code-walk.md](../docs/feedback/items/369-plan-beat/code-walk.md) ·
+Decisions: [D-130](DECISIONS.md), [D-131](DECISIONS.md).
 
 **What ran, and what it proves.**
 
@@ -219,6 +226,42 @@ handcuff tag against nfl.com rather than merely checking that something rendered
 
 **Not covered by anything here:** whether the new bands make decks *better*. That is a judgement call
 and it is the operator's; the flags ship off so it does not have to be made today.
+| `python3 -m pytest backend/tests -q` | **3606 passed, 1 skipped** (339s) — unchanged from baseline; no backend code was touched |
+| `tsc --noEmit` | **clean** |
+| 64 `mobile/tests/check-*.js` suites | **0 failed**; `check-team-review` went **7 → 13 assertions**, all green |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — 9 of 9 | **every one turned its guard red on the EXPECTED assertion**, sources restored, guard re-run green after each |
+
+**Sabotages, individually.** (5b) render `{o.playoff_pct}` as visible text → RED;
+(6) source the plan chips from `data.depth.acquire_positions`, the stale mount-time snapshot → RED;
+(6b) drop `refetchOnMount: 'always'` → RED;
+(7) gate a plan-beat lever on `done.current` again → RED;
+(8) rename the "Trade fairness" lever off the page → RED;
+(9) add a second `asset_preferences` writer to the screen → RED;
+(10) remove the `team_outlook` backfill, i.e. reinstate the shipped bug → RED;
+(11a) stop handing the scoped partner to the #330 store → RED;
+(11b) delete the deck-side handoff consumption in `TradesScreen.tsx` → RED.
+
+**Two findings recorded because they are worth more than the pass count.**
+- **A shipped write has never once succeeded.** The depth beat posted a positions-only body and
+  `POST /api/league/preferences` **400s without `team_outlook`** (`server.py:15788-15790`);
+  `apiRequest` throws on non-2xx, so `done.current.add('positions_set')` on the next line never ran and
+  the empty `catch` hid it. `team_review_action_taken{action:'positions_set'}` has therefore **never been
+  emitted in production** — do not read its history as a baseline. Now pinned by assertion 10.
+- **An existing green assertion was about to go vacuous — the same failure mode as 2026-08-20a.**
+  Assertion 5b guarded "never render a bare playoff percentage" with a whole-FILE escape hatch
+  (`… && !/accessibilityLabel/.test(s)`). `TeamReviewScreen.tsx` at `HEAD` contained **zero**
+  `accessibilityLabel` occurrences, which is the only reason the clause held; the plan beat's chips add
+  three, so from this commit the condition could never be true and 5b would have kept passing while
+  proving nothing. Rewritten per-occurrence in the same commit and sabotage-proven. *Two batches
+  running, two dead-test escapes — re-reading the tests that PASS is now the cheapest gate we have.*
+
+**What is NOT proven.** The manual TestFlight checklist
+([testflight-checklist.md](../docs/feedback/items/369-plan-beat/testflight-checklist.md), 9 steps) is
+**UNRUN**. Under [D-056](DECISIONS.md) it is the only runtime evidence this gets, and the central claim
+— that the beat shows what is *actually saved* — is a network read whose failure mode is a stale but
+entirely plausible page. Steps 2, 3 and 7 are the load-bearing ones. **Requires a client release**; none
+of this is in build 122.
 
 ---
 ## 2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`
@@ -1935,6 +1978,7 @@ deliberately decoupled for that reason.
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
 - [2026-08-20b — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20b--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)
+- [2026-08-20b — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`](#2026-08-20b--team-review-plan-beat-rebuilt-369--full-gates-not-merged-on-worktree-agent-a7bed877f805980b0)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
 - [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)

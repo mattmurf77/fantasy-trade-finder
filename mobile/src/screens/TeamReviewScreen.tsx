@@ -1,16 +1,22 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
 
 import ChalkText from '../components/chalkline/Text';
 import { AnalystAvatar } from '../components/analyst';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
+import { useFinderTargets } from '../state/useFinderTargets';
 import { track } from '../api/events';
-import { saveLeaguePreferences } from '../api/league';
+import {
+  saveLeaguePreferences, getLeaguePreferences, getAssetPrefs,
+} from '../api/league';
+import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
 import {
   getTeamReview, type BeatId, type OutlookOption, type TeamReviewResponse,
@@ -74,6 +80,17 @@ const BAND_COLOR: Record<PlayoffBand, string> = {
 
 const CORE = ['QB', 'RB', 'WR', 'TE'] as const;
 
+// #369 — the `plan` beat's position levers. WIDER than CORE on purpose: the
+// trade engine and the Trade DNA sheet both accept `PICK` in
+// acquire/trade_away_positions (`TradeDnaSheet.tsx` DNA_POSITIONS), and a
+// summary that claims to show every lever cannot silently drop one. The depth
+// beat still offers only CORE because it is talking about STARTABLE BODIES,
+// which picks are not.
+const PLAN_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'PICK'] as const;
+const PLAN_POS_LABEL: Record<string, string> = {
+  QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', PICK: 'Picks',
+};
+
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 // #365 — model numbers are small and signed; the sign is the whole point
 // (a positive term pushes you toward contending, a negative one away).
@@ -125,26 +142,45 @@ export default function TeamReviewScreen() {
     });
   }, [beats, emit]);
 
+  // Returns whether the write LANDED. The window and depth beats ignore the
+  // result (they advance either way, by design); the `plan` beat uses it to
+  // show the inline failure the LLD's §4 always called for.
   const savePrefs = useCallback(async (
     patch: Record<string, unknown>, action: string,
-  ) => {
-    if (!leagueId) return;
+  ): Promise<boolean> => {
+    if (!leagueId) return false;
     setSaving(true);
     try {
-      await saveLeaguePreferences(leagueId, patch as any);
+      // #369 ROOT CAUSE. `POST /api/league/preferences` REQUIRES `team_outlook`
+      // and 400s on a body without one (`backend/server.py:15788-15790`);
+      // `apiRequest` throws on non-2xx (`mobile/src/api/client.ts:553`). The
+      // depth beat posted a positions-only body, so its write threw every
+      // time, `done.current.add('positions_set')` on the next line never ran,
+      // the catch swallowed it, and no analytics fired — which is why the plan
+      // beat could only ever show the window. Backfill the field here, in the
+      // one place every beat writes through: session choice, then the stored
+      // declaration, then the inference. An explicit value in `patch` still
+      // wins, because the spread comes second.
+      const fallbackOutlook: OutlookOption =
+        outlook ?? data?.window.declared ?? data?.window.inferred ?? 'not_sure';
+      await saveLeaguePreferences(
+        leagueId, { team_outlook: fallbackOutlook, ...patch } as any,
+      );
       done.current.add(action);
       emit('team_review_action_taken', { beat, action });
       // The shared adoption receipt — deliberately the SAME event the guide and
       // the Trade DNA sheet fire, with a `review` source, so this surface joins
       // the existing series instead of splitting it.
       if (action === 'outlook_set') emit('outlook_saved', { source: 'review' });
+      return true;
     } catch {
-      // A failed write surfaces nothing and emits NO action event — the flow
-      // continues rather than trapping the user on a beat.
+      // A failed write emits NO action event — the flow continues rather than
+      // trapping the user on a beat.
+      return false;
     } finally {
       setSaving(false);
     }
-  }, [leagueId, beat, emit]);
+  }, [leagueId, beat, emit, outlook, data]);
 
   if (!leagueId) {
     return (
@@ -215,10 +251,11 @@ export default function TeamReviewScreen() {
         )}
         {beat === 'plan' && (
           <Plan
-            outlook={done.current.has('outlook_set') ? declared : null}
-            acquire={done.current.has('positions_set') ? acquire : []}
-            shed={done.current.has('positions_set') ? shed : []}
+            data={data}
+            leagueId={leagueId}
             scoped={scoped}
+            onSave={savePrefs}
+            saving={saving}
           />
         )}
       </ScrollView>
@@ -259,6 +296,22 @@ export default function TeamReviewScreen() {
               emit('team_review_exited', {
                 beat, index: step + 1, outcome: 'completed',
               });
+              // #369 — APPLY the scoped partner. The partners beat recorded a
+              // manager in local state and emitted `partner_scoped`, but
+              // nothing ever handed it to the deck, so the plan beat's "I've
+              // already pointed the finder at it" was a false claim and the
+              // "Scoped to" row was decoration. The LLD (§4, writes table)
+              // always specified the #330 handoff store for this; it was
+              // simply never wired. Same contract LeagueSummaryScreen.tsx:1193
+              // uses, consumed one-shot on focus by TradesScreen.tsx:2382-2393
+              // — no new state layer, no new route, and nothing fires when the
+              // user never scoped anyone.
+              if (scoped) {
+                useFinderTargets.getState().setHandoff({
+                  opponent: { userId: scoped.id, name: scoped.name },
+                  autoRun: true,
+                });
+              }
               // Operator 2026-08-20 — completion is recorded so TradesHome
               // shows the minimized row from here on. Deliberately NOT awaited:
               // the write is local and the navigation must not wait on it, and
@@ -761,36 +814,270 @@ function Partners({
   );
 }
 
+// #369 — THE PLAN BEAT IS A STANDING SUMMARY, NOT A SESSION RECEIPT (D-130).
+//
+// Operator: *"The plan summary page only shows window.. it's a good page intent
+// but needs more detail. I think we just show the full set of adjustments a
+// user can make with the trade finder."*
+//
+// The old version rendered `outlook` only if `done.current.has('outlook_set')`,
+// positions only if `positions_set`, and the scoped partner — i.e. only what
+// the user changed in THIS mount. Skip a beat and it showed nothing for it, and
+// `positions_set` could never be true at all (see the savePrefs comment). So
+// the page is rebuilt around a different question: every lever the trade finder
+// exposes, and where you stand on each, read from the SAVED preferences rather
+// than session-local React state.
+//
+// WHAT IS EDITABLE HERE, AND WHY NOT EVERYTHING (D-131). The three
+// `league_preferences` levers — outlook, chasing, shopping — are edited in
+// place, through the SAME `saveLeaguePreferences` path the flow already writes
+// with (no new route, autosave per tap, exactly the #236 contract Trade DNA
+// uses). Everything else is shown with its home named: the asset lists would
+// need a second `asset_preferences` writer beside the deck's own toggles, and
+// fairness / trade idea / focus / pinned players live in TradesScreen's own
+// state, which cannot be written across a navigation boundary without
+// inventing a shared store. Naming the lever and where it lives answers the
+// operator's ask; duplicating four controls to do it does not.
+//
+// Levers 9 and 10 (trade idea, focus) are `TradesScreen` useState and reset on
+// every deck mount, so this beat states where they live rather than claiming a
+// current value it cannot read. That honesty is deliberate — a fabricated
+// "None" would read as a setting.
 function Plan({
-  outlook, acquire, shed, scoped,
+  data, leagueId, scoped, onSave, saving,
 }: {
-  outlook: OutlookOption | null;
-  acquire: string[]; shed: string[];
+  data: TeamReviewResponse;
+  leagueId: string;
   scoped: { id: string; name: string } | null;
+  onSave: (patch: Record<string, unknown>, action: string) => Promise<boolean>;
+  saving: boolean;
 }) {
-  const nothing = !outlook && !acquire.length && !shed.length && !scoped;
+  const qc = useQueryClient();
+  // Read-only flag consumption, so a lever that is dark is never advertised.
+  const listsOn = useFlag('trade.preference_lists');
+  const intentOn = useFlag('trades.intent_modes');
+  const pinnedGive = useFinderTargets((s) => s.pinnedGive);
+  const pinnedReceive = useFinderTargets((s) => s.pinnedReceive);
+
+  // SOURCE OF TRUTH. The saved preferences, re-read on entry to this beat —
+  // NOT `data.depth.acquire_positions` (a 60s-stale snapshot taken at screen
+  // mount, before this session's own writes) and not the session refs. Same
+  // query key TradeDnaSheet uses, so the two surfaces share one cache entry
+  // and one invalidation. `refetchOnMount: 'always'` is the whole point: "where
+  // you stand" must mean now.
+  const prefsQ = useQuery({
+    queryKey: ['league-prefs', leagueId],
+    queryFn: () => getLeaguePreferences(leagueId),
+    enabled: !!leagueId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
+  const assetsQ = useQuery({
+    queryKey: ['asset-prefs', leagueId],
+    queryFn: () => getAssetPrefs(leagueId),
+    enabled: !!leagueId && listsOn,
+    staleTime: 60_000,
+  });
+
+  // Device-local, so it is readable from here without touching the deck.
+  const [fairnessOn, setFairnessOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(FAIRNESS_PREF_KEY)
+      .then((raw) => { if (alive) setFairnessOn(fairnessOnFromPref(raw)); })
+      .catch(() => { if (alive) setFairnessOn(fairnessOnFromPref(null)); });
+    return () => { alive = false; };
+  }, []);
+
+  const saved = prefsQ.data;
+  const [draft, setDraft] = useState<{
+    outlook: OutlookOption; acquire: string[]; shed: string[];
+  } | null>(null);
+  useEffect(() => {
+    if (!saved) return;
+    setDraft({
+      outlook: saved.team_outlook ?? data.window.declared ?? data.window.inferred,
+      acquire: saved.acquire_positions ?? [],
+      shed: saved.trade_away_positions ?? [],
+    });
+  }, [saved, data]);
+
+  const [failed, setFailed] = useState(false);
+
+  // Every tap posts the FULL triple — last-write-wins, the same autosave shape
+  // the Trade DNA sheet uses (#236). Sending all three is also what makes a
+  // positions edit safe: the body can never be missing `team_outlook`.
+  const commit = async (
+    next: { outlook: OutlookOption; acquire: string[]; shed: string[] },
+    action: string,
+  ) => {
+    setDraft(next);
+    const ok = await onSave({
+      team_outlook: next.outlook,
+      acquire_positions: next.acquire,
+      trade_away_positions: next.shed,
+    }, action);
+    setFailed(!ok);
+    if (ok) qc.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+  };
+
+  const toggle = (list: string[], v: string) =>
+    list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+
+  const assets = assetsQ.data;
+  const pinned = pinnedGive.length + pinnedReceive.length;
+
   return (
     <View testID="team-review.beat.plan">
       <Bubble pose="celebrate">
-        {nothing
-          ? "No changes — your deck stays as it was."
-          : "Here's the plan. I've already pointed the finder at it."}
+        Here&apos;s every dial the finder has, and where you stand on each.
       </Bubble>
-      <View style={styles.card}>
-        <ChalkText style={styles.kicker}>Your plan</ChalkText>
-        {outlook ? <Row label="Window" value={OUTLOOK_LABEL[outlook]} accent /> : null}
-        {acquire.length ? <Row label="Chasing" value={acquire.join(', ')} accent /> : null}
-        {shed.length ? <Row label="Shopping" value={shed.join(', ')} accent /> : null}
-        {scoped ? <Row label="Scoped to" value={scoped.name} accent /> : null}
-        {nothing ? (
-          <ChalkText style={styles.dim}>You skipped every step — that&apos;s fine.</ChalkText>
-        ) : null}
+
+      <View style={styles.card} testID="team-review.plan.levers">
+        <ChalkText style={styles.kicker}>What the finder uses · change any of it here</ChalkText>
+
+        {!draft ? (
+          <ChalkText style={styles.dim}>Reading your saved settings…</ChalkText>
+        ) : (
+          <>
+            <ChalkText style={styles.planLbl}>Window</ChalkText>
+            <View style={styles.chips}>
+              {data.window.options.map((o) => (
+                <Pressable
+                  key={o}
+                  testID={`team-review.plan.outlook.${o}`}
+                  disabled={saving}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: draft.outlook === o }}
+                  accessibilityLabel={OUTLOOK_LABEL[o]}
+                  onPress={() => commit({ ...draft, outlook: o }, 'outlook_set')}
+                  style={[styles.chip, draft.outlook === o && styles.chipSel]}
+                >
+                  <ChalkText
+                    style={[styles.chipText, draft.outlook === o && styles.chipTextSel]}
+                  >
+                    {OUTLOOK_LABEL[o]}
+                  </ChalkText>
+                </Pressable>
+              ))}
+            </View>
+
+            <ChalkText style={styles.planLbl}>Chasing · want more of</ChalkText>
+            <View style={styles.chips}>
+              {PLAN_POSITIONS.map((p) => (
+                <Pressable
+                  key={p}
+                  testID={`team-review.plan.chase.${p}`}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: draft.acquire.includes(p) }}
+                  accessibilityLabel={`Chase ${PLAN_POS_LABEL[p]}`}
+                  onPress={() => commit(
+                    { ...draft, acquire: toggle(draft.acquire, p) }, 'positions_set',
+                  )}
+                  style={[styles.chip, draft.acquire.includes(p) && styles.chipSel]}
+                >
+                  <ChalkText
+                    style={[styles.chipText, draft.acquire.includes(p) && styles.chipTextSel]}
+                  >
+                    {PLAN_POS_LABEL[p]}
+                  </ChalkText>
+                </Pressable>
+              ))}
+            </View>
+
+            <ChalkText style={styles.planLbl}>Shopping · happy to move</ChalkText>
+            <View style={styles.chips}>
+              {PLAN_POSITIONS.map((p) => (
+                <Pressable
+                  key={p}
+                  testID={`team-review.plan.shop.${p}`}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: draft.shed.includes(p) }}
+                  accessibilityLabel={`Shop ${PLAN_POS_LABEL[p]}`}
+                  onPress={() => commit(
+                    { ...draft, shed: toggle(draft.shed, p) }, 'positions_set',
+                  )}
+                  style={[styles.chip, draft.shed.includes(p) && styles.chipSel]}
+                >
+                  <ChalkText
+                    style={[styles.chipText, draft.shed.includes(p) && styles.chipTextSel]}
+                  >
+                    {PLAN_POS_LABEL[p]}
+                  </ChalkText>
+                </Pressable>
+              ))}
+            </View>
+
+            {failed ? (
+              <ChalkText style={styles.planErr} testID="team-review.plan.save-error">
+                That didn&apos;t save. Tap it again — your other settings are untouched.
+              </ChalkText>
+            ) : null}
+          </>
+        )}
       </View>
-      <ChalkText style={styles.fine}>
-        You can change any of this later in Trade DNA.
-      </ChalkText>
+
+      {listsOn ? (
+        <View style={styles.card} testID="team-review.plan.assets">
+          <ChalkText style={styles.kicker}>Player rules</ChalkText>
+          <Row
+            label="Never trade away"
+            value={countLabel(assets?.untouchables?.length, 'player')}
+          />
+          <Row
+            label="Targeting"
+            value={countLabel(assets?.targets?.length, 'player')}
+          />
+          <Row
+            label="Not interested in"
+            value={countLabel(assets?.not_interested?.length, 'player')}
+          />
+          <ChalkText style={styles.fine}>
+            Set these on a player in the deck — tap a name on any trade card.
+          </ChalkText>
+        </View>
+      ) : null}
+
+      <View style={styles.card} testID="team-review.plan.search">
+        <ChalkText style={styles.kicker}>This search</ChalkText>
+        <Row
+          label="Trade with"
+          value={scoped ? scoped.name : 'Anyone in the league'}
+          accent={!!scoped}
+        />
+        <Row
+          label="Trade fairness"
+          value={fairnessOn === null
+            ? '—'
+            : fairnessOn ? 'Balanced trades' : 'Ranked by mismatch'}
+        />
+        {intentOn ? (
+          <Row label="Trade idea" value="Consolidate · tier up · tier down" />
+        ) : null}
+        <Row label="Focus" value="Team-fit or value moves" />
+        <Row
+          label="Specific players"
+          value={pinned ? `${pinned} pinned` : 'None pinned'}
+          accent={pinned > 0}
+        />
+        <ChalkText style={styles.fine}>
+          Fairness sticks on this device. The rest of this card is set on the
+          deck and starts fresh each time you open it — everything above is
+          saved for this league.
+        </ChalkText>
+      </View>
     </View>
   );
+}
+
+// A count we have not loaded yet is an em-dash, never a fabricated zero — the
+// same rule the standing beat applies to a missing PPG.
+function countLabel(n: number | undefined, noun: string) {
+  if (n === undefined) return '—';
+  if (n === 0) return 'None';
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
 function Row({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
@@ -850,6 +1137,13 @@ const styles = StyleSheet.create({
   lineLabel: { ...type.bodySm, color: chalk.faint, width: 34 },
   lineVal: { ...type.bodySm, color: chalk.base, flex: 1 },
   tag: { ...type.bodySm, color: chalk.dim },
+
+  // #369 plan beat — a lever's own label, above its chip row. `dim` reads as
+  // body copy next to a card kicker; this is a control label, so it takes the
+  // label type without the kicker's uppercase (the kicker stays the one
+  // all-caps line per card).
+  planLbl: { ...type.label, color: chalk.dim, marginTop: space.xs },
+  planErr: { ...type.bodySm, color: semantic.neg },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {
