@@ -509,6 +509,9 @@ FLAG_KEYS: tuple[str, ...] = (
     # Summary surface, this one gates the per-trade DELTA. Either may be on
     # without the other, and each is its own kill switch.
     "outlook.trade_impact",
+    # #357/#358/#359 — the six-beat Team Review flow (client surface in the
+    # Trades tab, hence the `trades.*` namespace; `trade.*` is the engine).
+    "trades.team_review",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:

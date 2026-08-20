@@ -91,6 +91,17 @@ NON_INTENT_EVENTS = frozenset({
     #     league_team_opened itself stays INTENT, untouched.
     "lineup_impact_unavailable",
     "league_team_closed",
+    # Team Review (#357/#358/#359), added in the SAME commit that registered
+    # them, for the reason at the top of this block.
+    #   team_review_beat_viewed — an IMPRESSION, the league_view /
+    #     tab_selected class. The user already emitted team_review_opened to
+    #     get here; admitting beat views would let ONE flow mint six user-days.
+    #   team_review_exited — a TERMINATOR, the league_team_closed class. Every
+    #     exit is preceded by an open, which is already intent.
+    # team_review_opened and team_review_action_taken are deliberately ABSENT:
+    # both are intent, the peers of find_trades_tapped and league_candidate_pinned.
+    "team_review_beat_viewed",
+    "team_review_exited",
     # Feedback #300, 2026-08-12 — added in the SAME commit that added it to
     # ALLOWED_CLIENT_EVENTS, for the reason stated at the top of this block.
     # Tracking plan:

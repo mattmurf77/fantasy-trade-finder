@@ -63,6 +63,7 @@
   "trade.presentment_rules": true,
   "outlook.odds": true,
   "outlook.trade_impact": true,
+  "trades.team_review": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,

@@ -119,6 +119,7 @@ import { ApiError, getBaseUrl } from '../api/client';
 import { resolveShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
+import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
@@ -620,6 +621,8 @@ export default function TradesScreen({ navigation, route }: any) {
   const fullSheetOn = useFlag('trades.edit_full_sheet');
   // #172 — trade intent modes chip row (full sheet only).
   const intentModesOn = useFlag('trades.intent_modes');
+  // #357/#358/#359 — Team Review entry (dark until the operator flips it).
+  const teamReviewOn = useFlag('trades.team_review');
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
@@ -4873,6 +4876,28 @@ export default function TradesScreen({ navigation, route }: any) {
             leagueName={league?.league_name}
             username={user?.username}
             total={coverage!.total}
+          />
+        ) : null}
+
+        {/* #357/#358/#359 — Team Review entry. Placed HERE and not as a
+            seventh chip in TradeFinderModeBar, on that component's own
+            measurement: its shipped chips already run ~402pt against ~361pt of
+            usable width, so the strip is genuinely scrolled and an APPENDED
+            chip would sit off-screen and never be seen. The user who most
+            needs this feature is the least likely to scroll a chip rail to
+            find it. #359 was filed against TradesHome, which is exactly here.
+            Dismissing COLLAPSES it to a one-line row rather than removing it
+            (the D-025 collapsed-strip pattern) — a permanently dismissible
+            entry means one accidental tap loses the feature forever. */}
+        {teamReviewOn && leagueId ? (
+          <TeamReviewEntryCard
+            leagueId={leagueId}
+            onOpen={(source) => {
+              try {
+                track('team_review_opened', { league_id: leagueId, source });
+              } catch { /* analytics must never block navigation */ }
+              navigation.navigate('TeamReview' as never);
+            }}
           />
         ) : null}
 

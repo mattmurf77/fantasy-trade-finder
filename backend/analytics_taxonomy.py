@@ -410,6 +410,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # admitting them would step-change DAU at the emitter's ship date.
     "guide_step_suppressed",
     "outlook_saved", "finder_target_pinned", "quickset_started",
+    # ── Team Review (#357/#358/#359, flag `trades.team_review`) ──────────
+    # Registered in the SAME commit as the emitters (the NULL-`platform`
+    # lesson). `team_review_beat_viewed` and `team_review_exited` are
+    # impression/terminator class and are classified in
+    # analytics_queries.NON_INTENT_EVENTS — INTENT is a deny-list, so leaving
+    # them out would let one flow mint six user-days and step-change DAU on
+    # ship day. `team_review_opened` and `team_review_action_taken` ARE intent
+    # and are deliberately absent from that set: the first is "I asked for a
+    # read of my team", the second changes engine configuration.
+    "team_review_opened", "team_review_beat_viewed",
+    "team_review_exited", "team_review_action_taken",
     "awaiting_segment_viewed",
     # ── Decline-reason capture, 2026-08-17 ──────────────────────────────
     # Spec: docs/plans/decline-reason-capture/SPEC.md §6 (operator-approved;
@@ -1119,7 +1130,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # (guide hand-off vs. organic), so adoption can be attributed without
     # a session join: outlook_saved ∈ guide | sheet | strip;
     # awaiting_segment_viewed ∈ guide | tab | push.
+    # `source` gains `review` (#357): Team Review's window beat makes the SAME
+    # write the guide and the Trade DNA sheet make, so it joins this adoption
+    # series rather than splitting it with a private event.
     "outlook_saved":           frozenset({"source"}),
+    "team_review_opened":      frozenset({"league_id", "source"}),
+    "team_review_beat_viewed": frozenset({"league_id", "beat", "index"}),
+    "team_review_exited":      frozenset({"league_id", "beat", "index", "outcome"}),
+    "team_review_action_taken": frozenset({"league_id", "beat", "action"}),
     # `side` ∈ give | receive — the targeting board half the pin landed on
     # (the same vocabulary as player_menu_opened.side).
     "finder_target_pinned":    frozenset({"side", "source"}),

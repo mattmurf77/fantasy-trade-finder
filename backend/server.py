@@ -23175,6 +23175,267 @@ def league_power_rankings_route():
 # league cards costs one power-rankings computation per league per minute,
 # not one per card render. In-process only (fine across Render restarts —
 # it just recomputes).
+@app.route("/api/league/team-review")
+@_gate_unverified_read
+def league_team_review_route():
+    """GET /api/league/team-review?league_id=...&basis=consensus|personal
+
+    Feedback #357 / #358 / #359 — the six-beat guided read of the CALLER's own
+    team. Contract: `docs/feedback/items/357-team-review/lld-delta.md` §2.
+
+    Gated wholesale by `@_gate_unverified_read`, unlike
+    `/api/league/power-rankings` (which cannot be, because its consensus basis
+    is league-shared by design). Team Review is per-user by construction — your
+    team, your board, your preferences — so the wholesale gate is correct and
+    matches its nearest sibling, `GET /api/league/preferences`.
+
+    404 while `trades.team_review` is off, checked before any session work.
+
+    The odds band on the `standing` beat is composed HERE rather than in
+    `backend/team_review.py`: that module is a pure composer over existing
+    service outputs, and reaching into the outlook pipeline from inside it
+    would entangle two feature flags. Here the outlook read is its own
+    try/except, so a dark `outlook.odds`, a non-Sleeper league or a simulator
+    hiccup costs the band and never the review.
+    """
+    if not is_enabled("trades.team_review"):
+        return jsonify({"error": "not_found"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    basis = (request.args.get("basis") or "consensus").strip().lower()
+    if basis == "redraft":
+        return jsonify({
+            "error":   "not_available",
+            "message": ("Redraft team review isn't available — FTF values are "
+                        "dynasty-only. Use basis=consensus or basis=personal."),
+        }), 501
+    if basis not in ("consensus", "personal"):
+        return jsonify({"error": "basis must be one of consensus, personal, redraft"}), 400
+
+    try:
+        from .power_rankings import compute_power_rankings, optimal_starter_slots
+        from .team_review import build_team_review
+
+        members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
+        if members is None:
+            return jsonify({"error": "league_not_found"}), 404
+
+        me_league_id = _league_user_id(sess)
+
+        # Board — the caller's own Elo plus which players they have actually
+        # JUDGED. `get_rankings` returns the WHOLE pool (see team_review's
+        # `_divergence` docstring), so the judged set comes from each row's
+        # win/loss counts, never from the map's length.
+        board_elo = None
+        judged: set[str] = set()
+        interactions = 0
+        service = sess.get("service")
+        if service is not None:
+            rs = service.get_rankings(position=None)
+            board_elo = {rp.player.id: rp.elo for rp in rs.rankings}
+            judged = {rp.player.id for rp in rs.rankings
+                      if (rp.wins or 0) + (rp.losses or 0) > 0}
+            interactions = int(rs.interaction_count or 0)
+
+        picks_by_owner = _power_picks_by_owner(league_id, fmt)
+        teams = compute_power_rankings(
+            members, seed, players_meta,
+            board_elo=(board_elo if basis == "personal" else None),
+            picks_by_owner=picks_by_owner,
+            lineup_slots=_league_lineup_slots(league_id),
+        )
+
+        # Per-member roster profiles and inferred windows — the SAME pure
+        # functions the engine and /api/league/preferences already use, so a
+        # league-mate's window here can never disagree with the one the deck
+        # reasons about.
+        member_profiles: dict[str, dict] = {}
+        member_windows: dict[str, str] = {}
+        pick_share: dict[str, float] = {}
+        first_rounds: dict[str, int] = {}
+        total_pick_value = 0.0
+        for m in members:
+            uid = str(m.get("user_id"))
+            pids = [str(x) for x in (m.get("player_ids") or [])]
+            try:
+                member_profiles[uid] = _trade_service_mod.analyze_roster_strengths(
+                    pids, players_meta, fmt)
+            except Exception:
+                member_profiles[uid] = {}
+            owned = picks_by_owner.get(uid) or []
+            v = sum(float(p.get("value") or 0.0) for p in owned)
+            pick_share[uid] = v
+            total_pick_value += v
+            first_rounds[uid] = sum(
+                1 for p in owned if "1st" in str(p.get("label") or ""))
+        if total_pick_value > 0:
+            pick_share = {k: v / total_pick_value for k, v in pick_share.items()}
+        for m in members:
+            uid = str(m.get("user_id"))
+            pids = [str(x) for x in (m.get("player_ids") or [])]
+            try:
+                w, _score, _sig = _trade_service_mod.infer_team_outlook(
+                    pids, players_meta, pick_share.get(uid, 0.0), len(members))
+                member_windows[uid] = w
+            except Exception:
+                member_windows[uid] = "not_sure"
+
+        # The caller's own window + roster profile.
+        my_roster = [str(x) for x in (sess.get("user_roster") or [])]
+        my_profile = _trade_service_mod.analyze_roster_strengths(
+            my_roster, players_meta, fmt) if my_roster else {}
+        my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
+            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members))
+
+        # Weakest starting slot — lowest-valued filled slot in the caller's
+        # value-optimal lineup. None when the template is unknown.
+        weakest = None
+        try:
+            slots_tpl = _league_lineup_slots(league_id)
+            if slots_tpl and my_roster:
+                rows = [{"player_id": pid,
+                         "position": getattr(players_meta.get(pid), "position", None),
+                         "value": _trade_service_mod.elo_to_value(seed.get(pid, 0.0))}
+                        for pid in my_roster if pid in players_meta]
+                filled = [r for r in optimal_starter_slots(rows, slots_tpl)
+                          if r.get("player")]
+                if filled:
+                    low = min(filled, key=lambda r: float(r["player"].get("value") or 0.0))
+                    pl = players_meta.get(str(low["player"]["player_id"]))
+                    weakest = {
+                        "slot": low["slot"],
+                        "player_id": str(low["player"]["player_id"]),
+                        "name": getattr(pl, "name", None) or "",
+                        "position": getattr(pl, "position", None) or "?",
+                    }
+        except Exception as ws_err:
+            log.warning("team-review: weakest-slot build failed (omitted): %s", ws_err)
+
+        # League-community divergence, when enough members have ranked.
+        community_gap = None
+        try:
+            community = load_community_elo_for_league(
+                league_id=league_id, exclude_user_id=sess["user_id"],
+                scoring_format=fmt)
+            if community and board_elo:
+                community_gap = _trends_service_mod.compute_consensus_gap(
+                    user_elo=board_elo, community_rankings=community,
+                    user_roster=my_roster,
+                    league_members=[{"user_id": m.get("user_id"),
+                                     "username": m.get("username"),
+                                     "roster": m.get("player_ids") or []}
+                                    for m in members],
+                    players_by_id=_players_by_id_for(sess.get("players") or []))
+        except Exception as cg_err:
+            log.warning("team-review: consensus-gap build failed (omitted): %s", cg_err)
+
+        # Retrospective scoring (#358 "11th in PPG this year"). REAL points
+        # already scored — never a projection. Sleeper-only and empty before
+        # week 1, and the reason is named rather than hidden.
+        scoring = None
+        reason = None
+        platform = (get_league_draft_context(league_id) or {}).get("platform") or "sleeper"
+        completed_weeks = 0
+        if platform != "sleeper":
+            reason = "platform_unsupported"
+        else:
+            try:
+                from . import outlook as outlook_pkg
+                state = outlook_pkg.build_league_state(
+                    league_id, platform=platform, fetch=_outlook_sleeper_fetch({}))
+                completed_weeks = int(state.completed_weeks or 0)
+                if completed_weeks <= 0:
+                    reason = "preseason"
+                else:
+                    rid_of = {str(t.user_id): t.roster_id for t in state.teams}
+                    ppg = {t.roster_id: (t.points_for / completed_weeks)
+                           for t in state.teams if completed_weeks}
+                    mine = rid_of.get(str(me_league_id))
+                    if mine is not None and mine in ppg:
+                        order = sorted(ppg.items(), key=lambda kv: kv[1], reverse=True)
+                        scoring = {
+                            "ppg": round(ppg[mine], 1),
+                            "ppg_rank": next(i + 1 for i, (r, _) in enumerate(order)
+                                             if r == mine),
+                            "record": next(
+                                ({"w": t.wins, "l": t.losses, "t": t.ties}
+                                 for t in state.teams if t.roster_id == mine),
+                                None),
+                        }
+            except Exception as sc_err:
+                reason = "platform_unsupported"
+                log.warning("team-review: scoring read failed (degraded): %s", sc_err)
+
+        payload = build_team_review(
+            teams=teams,
+            you_user_id=me_league_id,
+            num_teams=len(members),
+            scoring_format=fmt,
+            completed_weeks=completed_weeks,
+            scoring=scoring,
+            scoring_unavailable_reason=reason,
+            inferred_outlook=my_window,
+            outlook_signals=my_signals,
+            stored_prefs=(load_league_preference(user_id=sess["user_id"],
+                                                 league_id=league_id) or {}),
+            roster_profile=my_profile,
+            member_profiles=member_profiles,
+            member_windows=member_windows,
+            weakest_slot=weakest,
+            user_elo=board_elo,
+            board_interactions=interactions,
+            judged_ids=judged,
+            seed_elo=seed,
+            community_gap=community_gap,
+            user_roster=my_roster,
+            players=players_meta,
+        )
+        if not payload:
+            return jsonify({"error": "league_not_found"}), 404
+
+        payload["league_id"] = league_id
+        payload["platform"] = platform
+        payload["basis"] = basis
+
+        # #357 — the playoff BAND for the caller's team, composed here so the
+        # pure module stays free of the outlook flag. Absent (never null-filled)
+        # when `outlook.odds` is off, the league is not Sleeper, or the
+        # simulator fails: the band is enrichment, the review is the feature.
+        try:
+            if is_enabled("outlook.odds") and platform == "sleeper":
+                bundle = _outlook_impact_baseline(league_id, basis, sess)
+                if bundle is not None:
+                    from .outlook.trade_delta import playoff_band
+                    _st, base_payload, _pv, _pp, _stype, _fmt = bundle
+                    rid_of = {str(t.user_id): t.roster_id for t in _st.teams}
+                    mine = rid_of.get(str(me_league_id))
+                    row = next((t for t in (base_payload.get("teams") or [])
+                                if t.get("roster_id") == mine), None)
+                    if row is not None:
+                        meta = base_payload.get("meta") or {}
+                        payload["standing"]["outlook"] = {
+                            "band": playoff_band(float(row["odds"]["playoff_pct"])),
+                            "playoff_pct": round(float(row["odds"]["playoff_pct"]), 4),
+                            "projected_seed": row["odds"].get("projected_seed"),
+                            "beta": bool(meta.get("beta")),
+                            "is_preseason": bool(meta.get("is_preseason")),
+                            "priced_slot_coverage": meta.get("priced_slot_coverage"),
+                        }
+        except Exception as ob_err:
+            log.warning("team-review: outlook band failed (omitted): %s", ob_err)
+
+        return jsonify(payload)
+    except Exception as e:
+        log.error("league/team-review error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 _RANK_CHIP_TTL_S = 60.0
 _rank_chip_cache: dict[str, tuple[float, dict]] = {}
 
