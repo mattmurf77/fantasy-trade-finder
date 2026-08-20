@@ -11,6 +11,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { useSession } from '../state/useSession';
 import { track } from '../api/events';
 import { saveLeaguePreferences } from '../api/league';
+import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
 import {
   getTeamReview, type BeatId, type OutlookOption, type TeamReviewResponse,
   type PlayoffBand,
@@ -74,6 +75,12 @@ const BAND_COLOR: Record<PlayoffBand, string> = {
 const CORE = ['QB', 'RB', 'WR', 'TE'] as const;
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+// #365 — model numbers are small and signed; the sign is the whole point
+// (a positive term pushes you toward contending, a negative one away).
+// #364 — the unpriced slots, named. `unpriced_slots` repeats a slot once per
+// lineup seat (2 DL, 2 LB, ...), so collapse to distinct names in roster order.
+const slotList = (slots: string[]) => Array.from(new Set(slots)).join(', ');
+const signed = (n: number) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}`;
 
 export default function TeamReviewScreen() {
   const nav = useNavigation<any>();
@@ -252,6 +259,16 @@ export default function TeamReviewScreen() {
               emit('team_review_exited', {
                 beat, index: step + 1, outcome: 'completed',
               });
+              // Operator 2026-08-20 — completion is recorded so TradesHome
+              // shows the minimized row from here on. Deliberately NOT awaited:
+              // the write is local and the navigation must not wait on it, and
+              // a storage failure costs the minimization, never the exit.
+              // No new analytics event: `team_review_exited` with
+              // outcome='completed' IS the completion signal and is already
+              // registered + classified. A `team_review_completed` peer would
+              // split the terminator series, which is exactly what the
+              // taxonomy comment on this block warns against.
+              void markTeamReviewCompleted(leagueId as string);
               nav.navigate('TradesHome');
             }}
           >
@@ -326,9 +343,12 @@ function Standing({ data }: { data: TeamReviewResponse }) {
             {BAND_LABEL[o.band]}
           </ChalkText>
           {cov && cov.affects_strength && cov.fraction < 1 ? (
-            <ChalkText style={styles.fine}>
-              Based on your offensive starters — we can price {cov.priced_slots} of
-              your {cov.total_slots} starting slots.
+            <ChalkText style={styles.fine} testID="team-review.standing.coverage">
+              Offensive positions only. We rank QB, RB, WR and TE — we do not rank
+              IDP or kickers, so {cov.total_slots - cov.priced_slots} of your{' '}
+              {cov.total_slots} starting slots
+              {cov.unpriced_slots.length ? ` (${slotList(cov.unpriced_slots)})` : ''}
+              {' '}carry no value here. This outlook reads your offense.
             </ChalkText>
           ) : null}
         </View>
@@ -360,6 +380,8 @@ function Window({
   onSelect: (o: OutlookOption) => void;
 }) {
   const w = data.window;
+  const m = w.model;
+  const pickVsEven = w.signals.pick_share - w.signals.equal_pick_share;
   return (
     <View testID="team-review.beat.window">
       <Bubble pose="thinking">
@@ -373,13 +395,50 @@ function Window({
       <View style={styles.card}>
         <ChalkText style={styles.kicker}>Your window · inferred from roster shape</ChalkText>
         <ChalkText style={styles.headline}>{OUTLOOK_LABEL[w.inferred]}</ChalkText>
-        <Row label="Value age 27+" value={pct(w.signals.vet_share)} />
-        <Row label="Value age 23 and under" value={pct(w.signals.youth_share)} />
+        {/* #365 — the age thresholds come from the payload. Hardcoding them is
+            how this shipped saying "23 and under" against a youth_age of 26. */}
+        <Row
+          label={m ? `Value age ${m.vet_age} and over` : 'Veteran value share'}
+          value={pct(w.signals.vet_share)}
+        />
+        <Row
+          label={m ? `Value age ${m.youth_age} and under` : 'Young value share'}
+          value={pct(w.signals.youth_share)}
+        />
         <Row
           label="Pick capital vs an even split"
           value={`${(w.signals.pick_share / Math.max(w.signals.equal_pick_share, 1e-6)).toFixed(1)}×`}
         />
       </View>
+
+      {m ? (
+        <View style={styles.card} testID="team-review.window.inputs">
+          <ChalkText style={styles.kicker}>Every input behind that call</ChalkText>
+          <Row
+            label={`Veteran share ${pct(w.signals.vet_share)} × ${m.w_vet_share}`}
+            value={signed(m.w_vet_share * w.signals.vet_share)}
+          />
+          <Row
+            label={`Young share ${pct(w.signals.youth_share)} × −${m.w_youth_share}`}
+            value={signed(-m.w_youth_share * w.signals.youth_share)}
+          />
+          <Row
+            label={`Pick capital ${signed(pickVsEven)} vs even × −${m.w_pick_share}`}
+            value={signed(-m.w_pick_share * pickVsEven)}
+          />
+          <Row label="Total score" value={signed(w.signals.score)} accent />
+          <ChalkText style={styles.fine}>
+            {`Contending at ${signed(m.contender_cut)} or above, rebuilding at `}
+            {`${signed(m.rebuilder_cut)} or below, anything between is "not sure".`}
+          </ChalkText>
+          <ChalkText style={styles.fine}>
+            That is the whole model — roster age and pick capital. It does not read
+            your record, your starting lineup, or which picks you have already traded
+            away, so a young team going all-in reads as rebuilding here. You have the
+            final say below.
+          </ChalkText>
+        </View>
+      ) : null}
 
       <ChalkText style={styles.dim}>Is that right? This steers every trade we show you.</ChalkText>
       <View style={styles.chips}>
@@ -493,8 +552,30 @@ function Divergence({ data }: { data: TeamReviewResponse }) {
         Your board disagrees with the market. That&apos;s where trades come from.
       </Bubble>
 
+      {/* #367 — SELLS FIRST, and each list says what it is for. This shipped
+          crossed: the buy list sat under "Skip these". You sell the players
+          the market rates ABOVE your board, and buy the ones it rates below. */}
       <View style={styles.card}>
-        <ChalkText style={styles.kicker}>You&apos;re higher than the market on</ChalkText>
+        <ChalkText style={styles.kicker}>Sell — you&apos;re lower than the market</ChalkText>
+        {d.lower_than_market.length === 0 ? (
+          <ChalkText style={styles.dim}>Nothing stands out yet.</ChalkText>
+        ) : d.lower_than_market.map((r) => (
+          <View key={r.player_id} style={styles.line}>
+            <ChalkText style={styles.lineLabel}>{r.position}</ChalkText>
+            <ChalkText style={styles.lineVal}>{r.name}</ChalkText>
+            <ChalkText style={[styles.tag, { color: semantic.pos }]}>
+              +{Math.round(r.gap)}
+            </ChalkText>
+          </View>
+        ))}
+        <ChalkText style={styles.fine}>
+          Yours, and the market likes them more than you do — someone pays you
+          more than you think they&apos;re worth.
+        </ChalkText>
+      </View>
+
+      <View style={styles.card}>
+        <ChalkText style={styles.kicker}>Buy — you&apos;re higher than the market</ChalkText>
         {d.higher_than_market.length === 0 ? (
           <ChalkText style={styles.dim}>Nothing stands out yet.</ChalkText>
         ) : d.higher_than_market.map((r) => (
@@ -507,26 +588,8 @@ function Divergence({ data }: { data: TeamReviewResponse }) {
           </View>
         ))}
         <ChalkText style={styles.fine}>
-          These are your easiest sells — someone pays you more than you think
-          they&apos;re worth.
-        </ChalkText>
-      </View>
-
-      <View style={styles.card}>
-        <ChalkText style={styles.kicker}>You&apos;re lower than the market on</ChalkText>
-        {d.lower_than_market.length === 0 ? (
-          <ChalkText style={styles.dim}>Nothing stands out yet.</ChalkText>
-        ) : d.lower_than_market.map((r) => (
-          <View key={r.player_id} style={styles.line}>
-            <ChalkText style={styles.lineLabel}>{r.position}</ChalkText>
-            <ChalkText style={styles.lineVal}>{r.name}</ChalkText>
-            <ChalkText style={[styles.tag, { color: semantic.neg }]}>
-              {Math.round(r.gap)}
-            </ChalkText>
-          </View>
-        ))}
-        <ChalkText style={styles.fine}>
-          Skip these — you&apos;d be buying at a price you don&apos;t believe.
+          Not yours, and their owner rates them below you — you&apos;d be paying
+          less than you think they&apos;re worth.
         </ChalkText>
       </View>
 

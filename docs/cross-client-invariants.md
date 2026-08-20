@@ -247,6 +247,40 @@ Row **order** is a sibling encoding: a surface presenting the rows as projected 
 
 ---
 
+## Consensus-gap direction — which list is the sell list (#367, D-100, 2026-08-20)
+
+`GET /api/trends/consensus-gap` has **three consumers** — mobile Trends
+(`TrendsScreen.tsx`), the web Trends panel (`web/js/app.js`), and
+`GET /api/league/team-review`'s `divergence` beat — so the sign convention is a
+cross-client encoding, not an implementation detail. It shipped inverted on one
+side and is pinned here so it cannot drift back.
+
+| List | Roster test | Comparison | Sign | Means |
+|---|---|---|---|---|
+| `easiest_sells` | **on** the caller's roster | league **community mean** elo | `gap = community_elo − user_elo > 0` | the market rates him above your board — selling captures the surplus |
+| `easiest_buys` | **not** on the caller's roster | the **owner's** own elo | `gap = user_elo − owner_elo > 0` | you rate him above the man who has him — buying captures the discount |
+
+**Both sides ship `gap` and `rank_gap` as POSITIVE edge magnitudes.** Clients render
+`+{gap}` on both lists; a client must never infer the direction from the sign.
+
+**The buys side compares against the OWNER, the sells side against the COMMUNITY.**
+That asymmetry is deliberate — you buy from one specific person, but you sell into a
+market — and it is why `easiest_buys` was correct while `easiest_sells` was not.
+
+**Team Review field mapping** (`divergence`), which follows from the table above and
+was shipped crossed:
+
+- `higher_than_market` ← `easiest_buys` — you are higher than the market, he is not yours → **buy**
+- `lower_than_market` ← `easiest_sells` — the market is higher than you, he is yours → **sell**
+
+The consensus-seed fallback ladder obeys the same rule (`gap > 0 and not on roster`
+→ buy; `gap < 0 and on roster` → sell, magnitude negated). Before D-100 the two
+ladders disagreed about what the same field meant.
+
+**Copy rule.** A client may not describe a sell list as "players you rate highly" or a
+buy list as something to skip. The shipped defect was exactly this: the buy list sat
+under *"Skip these — you'd be buying at a price you don't believe."*
+
 ## Deck disposition (Pass / Like) (#169)
 
 The trade deck's disposition control pair is named **Pass / Like** — operator

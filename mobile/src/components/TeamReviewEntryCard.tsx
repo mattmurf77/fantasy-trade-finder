@@ -20,6 +20,43 @@ import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 
 const KEY = 'ftf_team_review_collapsed';
 
+// Operator, 2026-08-20: "track user completion of the experience. Once they've
+// gone through it, it should be minimized by default."
+//
+// KEPT SEPARATE FROM `KEY` ON PURPOSE. Collapsing is "not now" — a deferral the
+// user may reverse. Completing is "I have read this" — a fact about the flow.
+// Folding them into one flag would make a completed review indistinguishable
+// from a dismissed one, and the row copy below needs to tell them apart. Both
+// render the same minimized row; only the label differs.
+const DONE_KEY = 'ftf_team_review_completed';
+
+type LeagueFlags = Record<string, true>;
+
+const readMap = async (key: string): Promise<LeagueFlags> => {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as LeagueFlags) : {};
+  } catch {
+    return {};
+  }
+};
+
+/** Record that this league's review was run to the end. Called from the
+ *  `plan` beat's finish action, so the entry is minimized next time
+ *  TradesHome renders. Fire-and-forget: a storage failure costs the
+ *  minimization, never the navigation. */
+export async function markTeamReviewCompleted(leagueId: string): Promise<void> {
+  if (!leagueId) return;
+  try {
+    const map = await readMap(DONE_KEY);
+    if (map[leagueId]) return;
+    map[leagueId] = true;
+    await AsyncStorage.setItem(DONE_KEY, JSON.stringify(map));
+  } catch {
+    /* quota or serialization failure is not fatal */
+  }
+}
+
 export default function TeamReviewEntryCard({
   leagueId,
   onOpen,
@@ -28,14 +65,18 @@ export default function TeamReviewEntryCard({
   onOpen: (source: 'trades_home_card' | 'collapsed_row') => void;
 }) {
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
+  const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
     let dead = false;
-    AsyncStorage.getItem(KEY)
-      .then((raw) => {
+    Promise.all([readMap(KEY), readMap(DONE_KEY)])
+      .then(([collapsedMap, doneMap]) => {
         if (dead) return;
-        const map = raw ? (JSON.parse(raw) as Record<string, true>) : {};
-        setCollapsed(!!map[leagueId]);
+        const isDone = !!doneMap[leagueId];
+        setCompleted(isDone);
+        // A completed review minimizes by default; an explicit "Not now" still
+        // minimizes on its own. Either one is enough.
+        setCollapsed(!!collapsedMap[leagueId] || isDone);
       })
       .catch(() => { if (!dead) setCollapsed(false); });
     return () => { dead = true; };
@@ -43,9 +84,8 @@ export default function TeamReviewEntryCard({
 
   const persist = (next: boolean) => {
     setCollapsed(next);
-    AsyncStorage.getItem(KEY)
-      .then((raw) => {
-        const map = raw ? (JSON.parse(raw) as Record<string, true>) : {};
+    readMap(KEY)
+      .then((map) => {
         if (next) map[leagueId] = true;
         else delete map[leagueId];
         return AsyncStorage.setItem(KEY, JSON.stringify(map));
@@ -62,9 +102,11 @@ export default function TeamReviewEntryCard({
         style={styles.row}
         onPress={() => onOpen('collapsed_row')}
         accessibilityRole="button"
-        accessibilityLabel="Open team review"
+        accessibilityLabel={completed ? 'Run team review again' : 'Open team review'}
       >
-        <ChalkText style={styles.rowText}>Team review</ChalkText>
+        <ChalkText style={styles.rowText}>
+          {completed ? 'Team review · done' : 'Team review'}
+        </ChalkText>
         <ChalkText style={styles.rowChevron}>›</ChalkText>
       </Pressable>
     );

@@ -143,8 +143,19 @@ def test_pick_assets_never_occupy_a_riser_or_faller_row():
 
 # ── Consensus gap ───────────────────────────────────────────────────────────
 
-def test_consensus_gap_sells_expose_rank_gap():
-    # User values a RB far above the community → easiest sell, with a rank gap.
+def test_consensus_gap_sells_are_where_the_market_is_higher_than_you():
+    """#367 — the sell edge is the MARKET above your board, not below it.
+
+    This test asserted the inverse until 2026-08-20: it took player "a", whom
+    the user rates 300 above the community, and called him an "easiest sell".
+    That is the player the league will NOT pay up for — and it is how the Team
+    Review card came to promise "someone pays you more than you think they're
+    worth" over exactly the players nobody would overpay for.
+
+    Both roster players are held here so the test proves a SELECTION, not just
+    a sign: "c" (market 200 above you) is a sell, "a" (you 300 above market) is
+    excluded from the same call.
+    """
     user_elo = {"a": 1800.0, "b": 1600.0, "c": 1500.0}
     community = {
         "u1": {"username": "x", "elo_ratings": {"a": 1500, "b": 1600, "c": 1700}},
@@ -154,19 +165,23 @@ def test_consensus_gap_sells_expose_rank_gap():
     out = compute_consensus_gap(
         user_elo=user_elo,
         community_rankings=community,
-        user_roster=["a"],
+        user_roster=["a", "c"],
         league_members=[],
         players_by_id=_players(),
     )
     assert out["has_baseline"] is True
     sells = {r["player_id"]: r for r in out["easiest_sells"]}
-    assert "a" in sells
-    a = sells["a"]
+    assert "c" in sells, "the market rates c 200 above your board — that is the sell"
+    assert "a" not in sells, (
+        "you rate a 300 ABOVE the market; nobody overpays for him. Selecting "
+        "him here is the #367 inversion."
+    )
+    c = sells["c"]
     # User overall: a#1, b#2, c#3. Community mean: c#1, b#2, a#3.
-    assert a["user_rank"] == 1
-    assert a["comparison_rank"] == 3
-    assert a["rank_gap"] == 2          # 3 - 1, you rank them 2 spots higher
-    assert a["user_pos_rank"] == 1     # RB1 for the user
-    assert a["pos_rank_gap"] == 2
-    # ELO gap still present.
-    assert a["gap"] == 300.0
+    assert c["user_rank"] == 3
+    assert c["comparison_rank"] == 1
+    assert c["rank_gap"] == 2          # 3 - 1, the market ranks him 2 spots higher
+    assert c["user_pos_rank"] == 3     # RB3 for the user
+    assert c["pos_rank_gap"] == 2
+    # `gap` is a POSITIVE edge magnitude, same convention as easiest_buys.
+    assert c["gap"] == 200.0
