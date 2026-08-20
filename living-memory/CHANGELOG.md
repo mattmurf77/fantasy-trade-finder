@@ -10,6 +10,23 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-20 — Playoff-odds SHIFT on trades + Team Review, both built and lit
+
+**Shipped** (PRs #148 #149 #150 #151). Three flags now live: `outlook.odds`, `outlook.trade_impact`, `trades.team_review`.
+
+**The odds shift (#357) reversed [D-025](DECISIONS.md), which deferred the card odds block on a backend cost that was never measured.** Measured, it was a **~20x overestimate for a delta**. The simulator seeds off `stable_hash(league_id)`, not the rosters, so both runs draw one random stream — common random numbers. Two measured consequences: an unchanged roster yields a delta of **exactly 0.0** (bit-identical, so a trade that changes nothing can never show a spurious shift), and the delta is **more stable than either absolute it comes from** (0.4pp of movement across a 10x sim reduction vs 1.05pp). Hence `DELTA_SIM_COUNT = 2000`, with the baseline cached per league so a 30-card deck pays 31 sims, not 60.
+
+**Team Review (#357/#358/#359)** — six stepped beats, four of which write the `league_preferences` fields the engine already reads, through the existing route. `backend/team_review.py` composes five existing functions and computes **no new number**.
+
+**Three defects were caught by sabotaging my own tests, not by them passing.** (1) A docstring claiming two tests guarded CRN — only one does, since a roster-derived seed is unchanged under an empty trade. (2) A judged-filter test that passed with the filter *deleted*, because its fixture used exact zeros; real Elo recomputes pool-wide, so the fixture now carries drift. (3) An identity bug using the account id where `LeagueState` keys on `owner_id`.
+
+**One bug reached a build and hid there.** `useCardImpact` got the raw `activeFormat` (legitimately null in several states) instead of the `calcFormat` fallback three lines away, which nulled its key and disabled the fetch entirely. It survived because every failure resolved to `evaluation: null` — **byte-identical on screen to a healthy trade that moves no slots**. Fixed; `failed` now separates them. *Quiet on a swipe card was right; invisible was not.*
+
+**Gates:** pytest **3600 passed / 1 skipped** · tsc clean · **64** structural suites · testid-lint OK. Build 122 (odds shift, TestFlight confirmed) and 123 (fix + Team Review).
+
+**Watch:** the first fronted card of a session pays the LeagueState build + baseline, so a cold deck is slower than a warm one; `meta.priced_slot_coverage` is rendered by Team Review but still not by League Summary, so IDP bands there read as whole-lineup on 7-of-15 priced slots.
+
+---
 ## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads
 
 **Not shipped — committed to `fix/likes-you-quality-gates`, not pushed, not merged.**
