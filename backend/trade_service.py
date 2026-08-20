@@ -834,6 +834,32 @@ _DEFAULT_CFG: dict[str, float] = {
     # head-to-head is `current` vs `challenger` (composition only — it does
     # NOT change backend/trade_gen_v2.py, which is out of the arm's scope).
     "bakeoff_include_gen_v2":     1.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — bake-off arm `fit` K-chain knobs (PR-F1,
+    # docs/plans/fit-challenger/LLD.md §1.6 + §4). Consumed ONLY by
+    # backend/trade_gen_fit.py, a module arm A never imports and
+    # trade_service never calls. They live here because _c() is the
+    # accessor the fit K-chain reads (thread-local overrides and
+    # reload_config() both work) and snapshot_config() must capture them
+    # per run. Five registrations per key, same commit as the consumer
+    # (LLD §4): this dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS
+    # in test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row.
+    # ------------------------------------------------------------------
+    # K7 (G6 R5 need gate) mode inside the fit K-chain. 1.0 (default) =
+    # the live predicate kills exactly as written (PRD §3 K7). 0.0 = the
+    # predicate still RUNS but a failure does not kill: the candidate is
+    # tagged `r5_fail` and counted `r5_fail_scored`, with NO score change
+    # in v1 (LLD §8 R-d). Flipping to 0 is F7's pre-registered iterate
+    # action at the S4 verdict, never a build-time default.
+    "fit_r5_mode":                1.0,
+    # Junk-filler kill inside the fit K-chain. 0.0 (default) = no junk
+    # knockout — this arm deliberately lets junk score badly instead
+    # (PRD §3 "explicitly not knockouts"). >= 1.0 arms the live
+    # filler_ok predicate (kills count under "junk"), each side's value
+    # accessor being that team's raw board when boarded, else consensus.
+    "fit_junk_floor":             0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
