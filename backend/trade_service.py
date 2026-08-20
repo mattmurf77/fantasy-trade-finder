@@ -403,6 +403,20 @@ _DEFAULT_CFG: dict[str, float] = {
     # value on is an insult, not an opportunity. Set very negative to
     # restore pre-D-055 behavior (no floor).
     "likes_you_min_user_delta": -500.0,
+    # D-096 (2026-08-19) — the likes-you quality ladder, read by
+    # server._likes_you_gate_level. 0 = pre-D-096 behaviour EXACTLY (the
+    # raw-sum floor above, no presentment gates); 1 = the floor moves to
+    # `likes_you_min_user_gain` on PACKAGE-ADJUSTED values (the numbers the
+    # TradeValueBar renders); 2 = level 1 plus directional R1 (overpay_ok)
+    # and filler_ok. `likes_you_gate_level = 0` is the one-value deploy-free
+    # revert; `likes_you_min_user_delta` above is deliberately unchanged so
+    # that revert is exact.
+    "likes_you_gate_level":        2.0,
+    # The floor at gate level >= 1, in package-adjusted v2 value space.
+    # 0.0 == `user_gain_epsilon`: the identical rule the gated generators
+    # already apply to the consensus package delta, so the likes-you
+    # surface now obeys the same user-gain rule as the rest of the deck.
+    "likes_you_min_user_gain":     0.0,
     # Deck composition (verified against real data 2026-06-09)
     "v3_diversity_max_overlap":   0.4,   # max asset Jaccard between two cards of one pair
     "consensus_score_scale":      0.3,   # consensus fallback cards rank below divergence finds
@@ -760,6 +774,66 @@ _DEFAULT_CFG: dict[str, float] = {
     "pick_year_decay_r2":         0.85,
     "pick_year_decay_r3":         0.85,
     "pick_year_decay_r4":         0.85,
+
+    # ------------------------------------------------------------------
+    # D-095 (2026-08-19) — LANDABILITY CHALLENGER (bake-off arm D,
+    # docs/plans/landability-challenger/PRD.md §4). Three knobs, every one
+    # defaulting to the **live identity**, so the live engine — arm B, what
+    # users actually see — is byte-identical whether or not these exist.
+    # The challenger is an OVERLAY: `bakeoff_profiles.MODEL_CHALLENGER_
+    # PROFILE` turns them on inside `model_challenger()` and nowhere else.
+    #
+    # The arm asks a different question of the same engine: show trades two
+    # sides could BOTH take, rather than only the side where the viewer
+    # wins. Measured on the live engine: 84.5% of cards never see a partner
+    # board, 96.3% of 1-for-1s exist in only one direction, and on the
+    # consensus path the user receives more than they give on 86.3% of them.
+    #
+    # These keys are deliberately **excluded from `MODEL_A_PROFILE`** — see
+    # docs/plans/three-model-bakeoff/scope-phase2.md § Excluded. Their
+    # DEFAULTS are the pre-challenger engine, so pinning a kill value would
+    # make historical arm A skip shrinkage and emit both directions, which
+    # the pre-wave engine never did. They are pinned in `_PINNED_KNOBS`
+    # (backend/tests/test_bakeoff_arm_a_golden.py) like every other knob.
+    # ------------------------------------------------------------------
+    # Confidence shrinkage of the USER's board toward the consensus seed
+    # (`_shrink_user_elo`). 1.0 = live: blend by comparison count. 0.0 = the
+    # challenger's shrink-NEITHER stance — price the user's board raw, as the
+    # partner's `elo_ratings` already are. That asymmetry (shrunk user vs raw
+    # partner) is what makes 86.9% of boarded-pair cards one-directional.
+    # A switch, not a dial: only 0.0 and 1.0 are meaningful, and
+    # `shrink_pseudocount = 0` is NOT a substitute — n/(n+0) is NaN at n=0.
+    # Shrink-BOTH is out of scope: `LeagueMember` carries no confidence map,
+    # so the partner's counts do not exist to plumb (PRD N8).
+    "user_elo_shrink":            1.0,
+    # Consensus-path direction (`_generate_consensus_for_pair._emit`).
+    # 0.0 = live: the hard `rv - gv >= user_gain_epsilon` sign test, i.e.
+    # the user's side must come out ahead, which is the viewer-wins identity.
+    # >= 1 = the challenger: drop the sign test so BOTH directions of an even
+    # trade can emit, and enumerate 1-for-2 as the sibling of 2-for-1 so
+    # partner-favourable consolidation is representable at all (production
+    # holds 6,635 `1x1` and 459 `2x1` packages and exactly zero `1x2`).
+    # Only safe alongside a real fairness floor — see the next knob.
+    "consensus_both_ways":        0.0,
+    # Consensus-path fairness FLOOR. 0.0 = live: whatever threshold the
+    # caller passed (often 0.50 from the client toggle). > 0 raises it via
+    # `max(requested, floor)`, so it can only ever tighten. The challenger
+    # sets 0.75: opening both directions on a 0.50 floor is a 2:1 user-pays
+    # flood, and at 0.75 the worst either side can be out is exactly
+    # 1 - 0.75 = 25%. Consensus path only — the divergence path has
+    # `fairness_floor_divergence` and a real dual-surplus gate.
+    "consensus_fairness_floor":   0.0,
+    # ------------------------------------------------------------------
+    # Bake-off arm roster (read by bakeoff_runner.arm_roster()).
+    # ------------------------------------------------------------------
+    # 1 (default) = arm `challenger` is generated, logged and drafted. 0
+    # restores the exact pre-challenger roster with no deploy — the kill
+    # switch for the extra `generate_trades` per organic job.
+    "bakeoff_include_challenger": 1.0,
+    # 1 (default) = arm `gen_v2` stays in the roster. 0 drops arm C so the
+    # head-to-head is `current` vs `challenger` (composition only — it does
+    # NOT change backend/trade_gen_v2.py, which is out of the arm's scope).
+    "bakeoff_include_gen_v2":     1.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1260,8 +1334,23 @@ def _shrink_user_elo(
 
     placements=None, an empty map, or `placement_tier_clamp` at 0 ⇒ the
     pre-D-085 blend, byte for byte.
+
+    D-095 — `user_elo_shrink` (landability challenger, bake-off arm D). At 0
+    this whole function is skipped: the user's board is returned RAW, exactly
+    as the partner's `elo_ratings` already are. The shrink is user-only, and
+    that asymmetry — shrunk user vs raw partner — is what makes 86.9% of
+    boarded-pair cards exist in only one direction. The challenger's stance is
+    shrink-NEITHER; shrink-both would need `comparison_counts` on
+    `member_rankings`, which do not exist (PRD N8). At the live default of 1.0
+    nothing below changes, byte for byte.
+
+    Deliberately an early return rather than `w = 1`: at 0 the challenger
+    prices the raw board, so the D-085 placement clamp — a bound on the BLEND
+    — has nothing left to bound. A raw personal Elo already is the user's own
+    stated number; clamping it to the band of the tier they placed him in
+    would be re-deriving their opinion from their opinion.
     """
-    if confidence is None:
+    if confidence is None or _c("user_elo_shrink") <= 0:
         return dict(user_elo)
     n0 = _c("shrink_pseudocount")
     bands = placements if (placements and _c("placement_tier_clamp") > 0) else None
@@ -4908,6 +4997,20 @@ class TradeService:
         pinned_set = set(pinned_give_players) if pinned_give_players else None
         # #174 — "all" ⇒ every pinned give player must be in the give side.
         pinned_all = pinned_set is not None and pinned_give_mode == "all"
+        # D-095 — the landability challenger's two consensus knobs. This path
+        # is 84.5% of served cards and the only one that never sees a partner
+        # board, so it is where the viewer-wins identity actually lives.
+        #
+        # `consensus_both_ways` drops the one-way sign test below and opens
+        # 1-for-2; `consensus_fairness_floor` raises the bar via max(), so it
+        # can only tighten. They travel together on purpose: opening both
+        # directions at the live 0.50 floor is a 2:1 user-pays flood, while at
+        # 0.75 the worst either side can be out is exactly 1 - 0.75 = 25%.
+        # Both at their live defaults (0.0) ⇒ this generator is byte-identical.
+        _both_ways = _c("consensus_both_ways") >= 1.0
+        _floor = _c("consensus_fairness_floor")
+        _thr = max(fairness_threshold, _floor) if _floor > 0 \
+            else fairness_threshold
 
         def _pos(pid: str) -> Optional[str]:
             p = players.get(pid)
@@ -4984,7 +5087,17 @@ class TradeService:
             # the user's side must come out ahead (receive − give ≥ ε).
             # Fairness alone allowed the user to be the side paying up to
             # (1 − threshold) more consensus value (TC-CFG-001 gap).
-            if rv - gv < _c("user_gain_epsilon"):
+            #
+            # D-095 — this single line IS the viewer-wins identity on 84.5%
+            # of the deck, and `consensus_both_ways` is what removes it. With
+            # it off the card must favour the user; with it on the card need
+            # only be FAIR, in either direction, and `_thr` (>= 0.75 under the
+            # challenger profile) is what stops that becoming a fleece in the
+            # other direction. Note the two sides are priced by the same
+            # `seed_value` functional, so user surplus and partner surplus are
+            # exact negatives — a symmetric epsilon > 0 is unsatisfiable and
+            # is deliberately NOT what this does.
+            if not _both_ways and rv - gv < _c("user_gain_epsilon"):
                 return
             # Deck-eval 2026-07-17 — the adjusted delta above can flip
             # positive on a consensus-lopsided consolidation (gamma depth
@@ -5015,7 +5128,7 @@ class TradeService:
                     and not presentment_ok_fn(give_ids, recv_ids):
                 return
             fairness = min(gv, rv) / max(gv, rv)
-            if fairness < fairness_threshold:
+            if fairness < _thr:
                 return
             seen.add(key)
             # consensus_score_scale keeps fallback cards (no divergence
@@ -5058,6 +5171,22 @@ class TradeService:
                     if len(cards) >= max_cards:
                         break
                     _emit([g1, g2], [recv_id])
+        # D-095 — 1-for-2, the mirror of the 2-for-1 above. Only reachable
+        # under `consensus_both_ways`: the shape the user RECEIVES two for one
+        # is a consolidation in the PARTNER's favour, so every one of them
+        # died on the `rv >= gv` sign test that the knob removes. Production
+        # holds 6,635 `1x1` and 459 `2x1` packages and exactly zero `1x2` —
+        # partner-favourable consolidation is currently unrepresentable, not
+        # merely rare. Enumerated last so it can only use budget the existing
+        # shapes left, which keeps the shape mix stable when the deck is full.
+        if _both_ways and len(cards) < max_cards:
+            for give_id in give_pool:
+                if len(cards) >= max_cards:
+                    break
+                for r1, r2 in combinations(recv_pool, 2):
+                    if len(cards) >= max_cards:
+                        break
+                    _emit([give_id], [r1, r2])
         return cards
 
     def get_pending_trades(self, user_id: str, league_id: Optional[str] = None) -> list[TradeCard]:

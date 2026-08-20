@@ -64,8 +64,15 @@ def _strip_new_columns(capture: dict) -> dict:
 #: Phase 3's serving shape as knob KILL values: no group composition, no deck
 #: cap, arm A in the roster. The tests written for Phase 3 keep asserting it,
 #: which is what proves the kill values still restore it.
+#:
+#: D-095 adds `bakeoff_include_challenger` = 0 for the same reason the other
+#: three are here: arm D joined the DEFAULT roster, and these tests are about
+#: Phase 3's three-arm serving shape, not about which arms exist today. Its
+#: presence here is itself the assertion that the challenger's kill knob
+#: restores the pre-D-095 roster exactly (PRD §5 A1).
 PHASE3_KNOBS = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0,
-                "bakeoff_include_baseline": 1.0}
+                "bakeoff_include_baseline": 1.0,
+                "bakeoff_include_challenger": 0.0}
 
 
 def _bakeoff_patches(*, enabled: bool, interleaved: bool = False,
@@ -527,7 +534,12 @@ def test_served_deck_is_composed_of_groups_and_every_row_carries_its_group():
 
 def test_arm_baseline_never_reaches_a_served_deck():
     """Arm A is out of the roster: it must not generate, must not be drafted,
-    and must not appear on any impression row."""
+    and must not appear on any impression row.
+
+    D-095: the engine now runs TWICE on the live default roster — once as
+    `current`, once as `challenger` under `model_challenger()`. That is the
+    fan-out cost the challenger's kill knob exists to give back, and it is
+    asserted here rather than left implicit."""
     calls = []
 
     def fake_generate(self, *a, **kw):
@@ -541,11 +553,43 @@ def test_arm_baseline_never_reaches_a_served_deck():
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
                                            composed=True))
 
-    assert len(calls) == 1, "the engine must run once, not twice"
+    assert len(calls) == 2, "the engine runs for `current` and `challenger`"
     assert all(r["model_arm"] != "baseline" for r in capture["impressions"])
     with eng.connect() as conn:
         run = conn.execute(select(bakeoff_runs_table)).fetchone()
-    assert set(json.loads(run.arms_json)) == {"current", "gen_v2"}
+    assert set(json.loads(run.arms_json)) == {"current", "challenger",
+                                              "gen_v2"}
+
+
+def test_the_challenger_generates_and_logs_but_is_never_served():
+    """PRD G7 / §9.1 — the dark-mode contract, end to end. With the flag on
+    and `bakeoff_serve_interleaved` = 0, arm D must appear in `arms_json` and
+    `groups_json` while every served impression still reads `current`."""
+    def fake_generate(self, *a, **kw):
+        return [_lane_card(["qb1"], ["rb2"], basis="divergence", lane="value")]
+
+    with patch("backend.trade_service.TradeService.generate_trades",
+               fake_generate), \
+            patch.object(bo, "gen_v2_cards", lambda svc, kw: []):
+        capture, _job, eng = H.run_capture(
+            extra_patches=_bakeoff_patches(enabled=True, interleaved=False,
+                                           composed=True))
+
+    assert capture["impressions"]
+    assert all(r["model_arm"] == "current" for r in capture["impressions"]), \
+        "a challenger card reached a user — bakeoff_serve_interleaved is 0"
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    assert run.served_arm == "current"
+    assert "challenger" in json.loads(run.arms_json)
+    assert {"challenger_divergence", "challenger_consensus"} \
+        <= set(json.loads(run.groups_json))
+    # …and the config snapshot proves the overlay was actually entered.
+    from backend.bakeoff_profiles import MODEL_CHALLENGER_PROFILE
+    delta = json.loads(run.config_json)["arm_delta"]["challenger"]
+    assert delta and set(delta) <= set(MODEL_CHALLENGER_PROFILE)
+    for key, val in delta.items():
+        assert val == MODEL_CHALLENGER_PROFILE[key], key
 
 
 def test_run_row_records_the_per_group_under_fill_through_the_real_path():
@@ -593,7 +637,9 @@ def test_composition_is_bypassed_for_a_dark_mode_deck():
     with eng.connect() as conn:
         run = conn.execute(select(bakeoff_runs_table)).fetchone()
     groups = json.loads(run.groups_json)
-    assert set(groups) == {"current_divergence", "current_consensus", "gen_v2"}
+    assert set(groups) == {"current_divergence", "current_consensus",
+                           "challenger_divergence", "challenger_consensus",
+                           "gen_v2"}
     for summary in groups.values():
         assert set(summary["short"]) == {"value", "outlook"}
 

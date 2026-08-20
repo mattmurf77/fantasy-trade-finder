@@ -103,27 +103,47 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .bakeoff_profiles import model_a
+from .bakeoff_profiles import model_a, model_challenger
 from .feature_flags import is_enabled
 
 log = logging.getLogger(__name__)
 
-ARM_BASELINE = "baseline"
-ARM_CURRENT  = "current"
-ARM_GEN_V2   = "gen_v2"
+ARM_BASELINE   = "baseline"
+ARM_CURRENT    = "current"
+ARM_GEN_V2     = "gen_v2"
+#: Arm D — the landability challenger (D-095,
+#: docs/plans/landability-challenger/PRD.md). Never spell this `baseline`:
+#: the challenger was briefed as "the new arm A" and is emphatically not one
+#: (PRD §1, N1). `baseline` is a pinned reconstruction of the past; this is a
+#: proposal about the future, and conflating them in a stored `model_arm`
+#: value would make both unreadable after the fact.
+ARM_CHALLENGER = "challenger"
 
 #: Every arm that EXISTS. Not every arm that runs — see `arm_roster()`, which
 #: is what the fan-out and the draft actually iterate. Order here is the
 #: canonical listing order, not the generation order (see GENERATION_ORDER)
 #: and not the served order (the rotation is shuffled per deck).
+#:
+#: **Deliberately still the historical three.** Phase 3's tests pin `bo.ARMS`
+#: as the full-roster fixture, and widening it here would silently rewrite
+#: what those tests assert about the three-arm draft. `ALL_ARMS` below is the
+#: superset for anyone who needs one (PRD §5 A1).
 ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
+
+#: Every arm the runner knows about, in canonical listing order. This is what
+#: `arm_roster()` filters; `ARMS` is a historical fixture, not a superset.
+ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
+                             ARM_GEN_V2)
 
 #: Arms that run the v1/v3 engine and therefore produce BOTH bases —
 #: `divergence` for opponents with real rankings, `consensus` for the
 #: never-ranked fallback path. Each contributes two groups. Arm `gen_v2` is
 #: divergence-only by construction (backend/trade_gen_v2.py stamps
 #: basis="divergence" on everything it emits), so it contributes one.
-ENGINE_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT)
+#: The challenger is an ENGINE arm — it is the live engine under a config
+#: overlay, not a second generator — so it earns both groups (PRD G2), and
+#: its consensus group is the whole point: 84.5% of cards take that path.
+ENGINE_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER)
 
 # ---------------------------------------------------------------------------
 # Lanes — the "value vs outlook" axis, on the field that already carries it
@@ -163,7 +183,12 @@ INTENT_MODES: frozenset[str] = frozenset(
 #: deck falls back to if the interleave yields nothing. Arms A and C run with
 #: progress streaming suppressed — publishing arm-A cards mid-job would show
 #: the user un-interleaved, un-attributed baseline cards.
-GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_BASELINE, ARM_GEN_V2)
+#: The challenger sits after `current` and before `baseline`: arm B still runs
+#: first (it is what dark mode serves and what the progress bar tracks), and
+#: the challenger — the arm anyone is actually reading right now — runs before
+#: the historical reconstruction, which is off the roster by default anyway.
+GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER,
+                                     ARM_BASELINE, ARM_GEN_V2)
 
 #: The single arm served in Phase-4 dark validation.
 DARK_SERVED_ARM = ARM_CURRENT
@@ -208,7 +233,7 @@ def serve_interleaved() -> bool:
     arm C), only arm B is served, and the normal presentation stack runs
     untouched. Re-light with 1.0 once arm C stops forfeiting AND the outlook
     lane fills — both are visible in `bakeoff_runs.groups_json`."""
-    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 0.0) >= 1.0
+    return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 1.0) >= 1.0
 
 
 def deck_limit() -> int | None:
@@ -233,10 +258,26 @@ def arm_roster() -> tuple[str, ...]:
     measured as the SLOWEST arm (4.19 s of the 7.36 s three-arm fixture run —
     its profile zeroes every gate, so more candidates survive), so a two-arm
     roster roughly halves the job cost Phase 4 was told to watch.
+
+    D-095 adds arm D (`challenger`) at `bakeoff_include_challenger` = 1, so
+    the DEFAULT roster is `(current, challenger, gen_v2)`. Every arm now has
+    its own kill knob and each is a one-value, no-deploy round trip:
+
+        bakeoff_include_challenger = 0   -> the exact pre-D-095 roster
+        bakeoff_include_gen_v2     = 0   -> `current` vs `challenger` alone
+        bakeoff_include_baseline   = 1   -> arm A back, with its two groups
+
+    `current` has no knob on purpose: it is what dark mode serves
+    (`DARK_SERVED_ARM`) and what the deck falls back to, so a roster without
+    it is not a configuration, it is an outage.
     """
-    if _cfg("bakeoff_include_baseline", 0.0) >= 1.0:
-        return (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
-    return (ARM_CURRENT, ARM_GEN_V2)
+    included = {
+        ARM_CURRENT:    True,                       # never optional
+        ARM_CHALLENGER: _cfg("bakeoff_include_challenger", 1.0) >= 1.0,
+        ARM_GEN_V2:     _cfg("bakeoff_include_gen_v2", 1.0) >= 1.0,
+        ARM_BASELINE:   _cfg("bakeoff_include_baseline", 0.0) >= 1.0,
+    }
+    return tuple(a for a in ALL_ARMS if included[a])
 
 
 def group_size() -> int:
@@ -1337,6 +1378,17 @@ def run_bakeoff(
                     # gone and arm A would be recorded as if it ran on live
                     # defaults, which is the exact confusion this exists to
                     # prevent.
+                    cfg_seen = snapshot_config()
+                    cards = list(generate(**quiet) or [])
+            elif arm == ARM_CHALLENGER:
+                # D-095 — arm D runs the SAME `generate` callable as arm B;
+                # the only difference is the thread-local overlay, which is
+                # the whole design (PRD §4: "same engine, thread-local
+                # overlay"). No R4 bypass — that is arm A's, not this arm's.
+                with model_challenger():
+                    # Snapshot INSIDE the context, same reason as arm A: the
+                    # overlay is what makes this arm a different model, so
+                    # recording it from outside would record arm B.
                     cfg_seen = snapshot_config()
                     cards = list(generate(**quiet) or [])
             elif arm == ARM_CURRENT:

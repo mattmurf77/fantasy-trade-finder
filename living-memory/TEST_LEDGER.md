@@ -78,6 +78,245 @@ unmodified and were already covered by `backend/tests/test_outlook_odds.py` and 
   lose to climatology outright, one with an ordering correlation of +0.022. Bands are immune to being
   *precisely* wrong, not to being wrong.
 
+## 2026-08-19h — likes-you injector quality gates (D-096, NOT SHIPPED, on `fix/likes-you-quality-gates`)
+
+**Branch:** `fix/likes-you-quality-gates`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+No feature flag: `trade.likes_you` already gates the surface. Knob-only, default **ON** at
+`likes_you_gate_level = 2` (its OFF state, level 0, is the defect).
+Scope + code-walk + checklist: [docs/plans/likes-you-quality-gates/](../docs/plans/likes-you-quality-gates/).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q -p no:randomly` | **3540 passed, 1 skipped, 0 failed** |
+| Baseline on the same branch point (`50e0451`), before any edit | **3524 passed, 1 skipped** — reproduced exactly, in a separate detached worktree |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The 10-step operator TestFlight checklist + 2-step rollback rehearsal are UNRUN.** |
+
+**Net +16 tests, all new** (`backend/tests/test_likes_you_gates.py`): the raw-vs-package unit split
+(including a guard on the fixture itself, so the file cannot silently stop proving anything), the
+gate-level ladder, `likes_you_gate_level = 0` as an exact revert, directional R1 in both directions,
+`filler_ok` and its documented kill switch, the no-cap-slot-consumed semantics, that a gated-out
+*existing* card keeps its organic deck position, that the card's bar values are the same objects the
+gate compared, knob defaults, garbage-level clamping, `likes_you_min_user_gain == user_gain_epsilon`,
+and a pin that R2/R3/R5 are deliberately NOT run.
+
+**4 pre-existing tests touched, none loosened:**
+- `test_trade_match_flow.py` ×3 (`..._floor_blocks_below_threshold_injection`,
+  `..._floor_passes_above_threshold_injection`, `..._floor_knob_override_respected`) — the D-055
+  floor block is **kept in full** and re-pinned to `likes_you_gate_level = 0` via `_inject_floor_deck`,
+  so every assertion in it now stands guard over D-096's documented revert path instead of being
+  deleted. Two docstrings updated to say which level they describe.
+- `test_bakeoff_arm_a_golden.py` ×1 — the two new knobs added to `_PINNED_KNOBS`. Arm A is
+  **not** pinned to level 0; the exclusion and its reason are recorded in
+  [`scope-phase2.md`](../docs/plans/three-model-bakeoff/scope-phase2.md) § Excluded. `bakeoff_profiles.py`
+  was **not** touched (a sibling session owns it).
+
+### Prod measurement (READ-ONLY, `SET TRANSACTION READ ONLY`, SELECT only)
+
+Population: **198 served likes-you impressions / 51 distinct cards**, one league, 2026-08-11 → 08-19
+(`trade_impressions` for the asset ids, `deck_impressions.features_json` for prod's own logged bar
+values). Per-card consensus values reconstructed from `player_value_history` daily snapshots +
+`draft_picks.pool_value`; **reconstruction validated at median abs error 2.9** against 83 rows where
+prod logged both the assets and the bar values, and it reproduces the audit's worst card to the
+decimal (−6,019.4 on the recorded values).
+
+| Option | Impressions surviving | Distinct cards | User-pays | Worst bar delta |
+|---|---|---|---|---|
+| **As served today** | 198 / 198 | 51 / 51 | **115** | **−5,571** |
+| Package floor ≥ 0 only (level 1) | 83 (41.9%) | 16 | 0 | +32 |
+| **Package floor ≥ 0 + directional R1 + `filler_ok` (level 2, SHIPPED)** | **83 (41.9%)** | **16** | **0** | **+32** |
+| Package floor ≥ 0 + **blanket** R1 | 25 (12.6%) | 9 | 0 | +32 |
+| Package floor ≥ 0 + blanket R1 + fairness ≥ 0.75 | 25 (12.6%) | 9 | 0 | +32 |
+| Fairness ≥ 0.75 alone | 115 (58.1%) | — | 90 | −2,436 |
+| R1 (blanket) alone | 120 (60.6%) | — | 95 | −2,136 |
+| `filler_ok` alone | 191 (96.5%) | — | 108 | −5,571 |
+
+Restricted to the 145 impressions served **after** the D-055 floor went live (2026-08-15), where the
+old floor was already active: as served 145, user-pays **76**, worst **−4,672**; level 2 → **69
+(47.6%)**, 15 distinct, user-pays **0**. Loosening the package floor to −500 was measured and
+rejected: 74 survivors instead of 69, but 60 of them still show the user paying.
+
+**The finding that shaped the design:** blanket R1 kills 58 of the 83 floor-surviving cards and
+**58 of 58 of those kills are cards where the USER is the one being overpaid** — the largest a
+**+6,325 one-for-one that the counterparty had already liked**. Directional R1 kills **0** of the 83.
+On the post-D-055 slice the same shape holds: 55 of 69, all 55 user-favourable, 0 killed directionally.
+
+### Sabotage tests (D-056 requirement) — all reverted
+
+| Mutation | Result |
+|---|---|
+| Floor compared against the raw delta again (undo the unit fix) | 2 failed |
+| Directional guard `g > r` removed (blanket R1) | 4 failed |
+| `if gate_level <= 0:` → `if False:` (level 0 stops reverting) | 4 failed, incl. all 3 re-pinned D-055 tests |
+| `filler_ok` call replaced with `return True` | 1 failed |
+| Reverted | 49 passed |
+
+**Files touched:** `backend/server.py`, `backend/trade_service.py` (`_DEFAULT_CFG` only, +14 lines,
+no logic), `backend/tests/test_likes_you_gates.py` (new), `backend/tests/test_trade_match_flow.py`,
+`backend/tests/test_bakeoff_arm_a_golden.py`, `docs/config-reference.md`,
+`docs/plans/three-model-bakeoff/scope-phase2.md`, `docs/plans/likes-you-quality-gates/` (new),
+`living-memory/{DECISIONS,LLD,TEST_LEDGER,CHANGELOG,NEXT,HANDOFF}.md`.
+
+## 2026-08-19h — The "balanced trade" claim gets a fairness gate (audit bug 2, NOT SHIPPED, on `fix/balanced-claim-fairness-gate`)
+
+**Branch:** `fix/balanced-claim-fairness-gate`, worktree off a freshly fetched `origin/main` **`50e0451`**.
+**Not pushed, not merged.** Ships **unflagged** — a flag's OFF state here would re-enable a false
+statement (see [D-097](DECISIONS.md)).
+Scope: [docs/plans/consensus-balance-claim/scope.md](../docs/plans/consensus-balance-claim/scope.md)
+(code-walk proof §7, TestFlight checklist §8).
+
+| Gate | Result |
+|---|---|
+| `mobile/tests/check-*.js` (all) | **61 / 61 passed, 0 failed** (60 pre-existing + 1 new) |
+| `mobile/tests/check-consensus-balance-claim.js` (new) | **36 / 36 assertions passed** |
+| `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
+| `npx tsc --noEmit` (mobile) | **1 error, pre-existing + environmental, NOT from this diff** — `ImportRankingsSheet.tsx(11,33): TS2307 Cannot find module 'expo-document-picker'`. `mobile/node_modules` is **empty in the main checkout**, so it was symlinked from `ftf-test-clone`, whose install predates that dependency. **Proven, not assumed:** stashing this branch's `.tsx` + `package.json` edits and re-running produced byte-identical output. My diff adds **zero** type errors. |
+| `pytest backend/tests -q` | **3524 passed, 1 skipped, 0 failed** — insurance only; **zero backend files touched** (`git status -- backend/` empty). No route, schema, migration, or engine line moves. |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md). No flow authored, none run, no `screens/` capture. |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The scope §8 operator TestFlight checklist is UNRUN.** |
+
+**Prod measurement (read-only, `SET TRANSACTION READ ONLY`, SELECT only, `deck_impressions`).**
+Reproduces the audit's 805 / 7,282 exactly; the denominator moved to 7,293 because eleven more cards
+were served between the audit snapshot and this run.
+
+| Metric | Value |
+|---|---|
+| Consensus cards served | **7,293** |
+| …carrying a non-NULL `fairness_score` | **7,293 (100%)** — this is the proof the field reaches the clients, not an inference |
+| …**below the app's own 0.75 bar** while claiming "balanced" | **805 (11.04%)** |
+| …below the 0.50 generation floor | **0** |
+| Fairness distribution | min **0.5010**, p10 **0.7302**, p25 0.7890, p50 **0.8590**, p90 0.9750, max 1.0000 |
+
+**Sabotage test — the check is only evidence if it goes red without the fix.** Four independent
+reverts, each applied, measured, restored; final `git diff --stat` byte-identical to pre-sabotage:
+
+| # | Sabotage | Result |
+|---|---|---|
+| S1 | Revert the gate — `balanced` forced `true`, i.e. always claim balanced | **RED, 14 failures**, exit 1 |
+| S2 | Flip the fail-safe — unknown fairness returns the balanced claim | **RED, 7 failures**, exit 1 |
+| S3a | Fix mobile, leave web stale — web ternary collapsed to the unconditional string | **RED, 5 failures**, exit 1 |
+| S3b | **The subtle one** — web keeps its gate but *drifts the wording* (`— no rankings on file.`) | **RED, 2 failures**, exit 1 |
+| S4 | Re-inline the literal into `TradeCard.tsx` JSX, bypassing `consensusNote` | **RED, 2 failures**, exit 1 |
+| S5 | Re-add value prose below the bar (the copy the operator struck) | **RED, 12 failures**, exit 1 |
+| — | Restore all | **GREEN, exit 0**, diff byte-identical to pre-sabotage |
+
+**What the 36 assertions pin**, rather than "the string changed": the gate at the real band edges
+(0.75 → balanced; 0.7499, 0.7302 = prod p10, 0.55, 0.501 = prod min → **truncated**); the fail-safe
+direction for `undefined`/`null`/`NaN`/`±Infinity`; that the function yields **exactly two** distinct
+strings and only the at-or-above-bar one contains the word "balanced"; that **every** state keeps the
+`hasn't ranked players yet` explanation (the fix removes the claim — it does **not** hide the line);
+that **no value prose is re-added** below the bar (`priced from public values` / `even split` /
+`leans` must appear nowhere — this is the assertion that holds the operator's 2026-08-19 amendment in
+place); that **no** state names a winner; that all **four** spellings of 0.75 agree (`NORMAL_LOW`,
+`FAIRNESS_ON_THRESHOLD`, `CONSENSUS_BALANCED_MIN`, and web's `FAIRNESS_BALANCED_MIN` parsed back out
+of `web/js/app.js`).
+
+**The cross-client half is the most valuable part and is built to survive rewording.** §3 does not
+look for remembered strings: it **extracts** web's `prefix` literal and both tooltip templates from
+`web/js/app.js`, expands them, and compares the results **byte for byte against the mobile module's
+own output**. That is why S3b — web still gating correctly but saying something different — goes red
+at all. Those assertions are deliberately **not** wrapped in an `if (extraction succeeded)` guard: a
+failed extraction means web no longer has the shape the parity depends on, which is itself the
+divergence being guarded against, so it must fail rather than skip.
+
+**Note on `mobile/package.json`:** the only edit is registering
+`"test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js"`. No dependency added,
+removed, or bumped — `living-memory/DEPENDENCIES.md` needs no entry.
+
+**Operator amendment, same day.** The first revision of this fix put replacement copy below the bar
+(*"priced from public values, not an even split"*). The operator struck it — *"We don't need to add
+the copy suggested.. We already have already features that provide the value summary/snap assessment
+on trade valuation"* — and is right: `TradeValueBar` already renders `favors`/`gap` on these cards.
+The sub-threshold line now **truncates** to `This league-mate hasn't ranked players yet.` and stops.
+The gate, the fail-safe, the constant and the cross-client parity are unchanged; the replacement prose
+is gone from both clients and from the module, and S5 exists to keep it gone. Directional wording
+("leans your way"/"leans theirs") is settled as duplication and should not be re-opened.
+
+**Not tested, and deliberately so:** `tradePresentation.counterpartyStatement()` asserts partner
+interest unconditionally (same defect class) but is dark behind `trades.presentation_v2: false` and
+belongs to a surface under separate review. Recorded in D-097 and scope §9; **not** touched.
+
+## 2026-08-19h — Landability challenger, bake-off arm D (D-095, NOT SHIPPED, on `feat/bakeoff-arm-a-challenger`)
+
+**Branch:** `feat/bakeoff-arm-a-challenger`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+Spec: [docs/plans/landability-challenger/PRD.md](../docs/plans/landability-challenger/PRD.md) §5 Track A (A1–A4).
+No feature flag: `trade.bakeoff` already gates the fan-out and `bakeoff_serve_interleaved` stays **0**, so the arm is dark.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3554 passed, 1 skipped, 0 failed** |
+| Baseline re-measured on the same branch point before any edit | **3524 passed, 1 skipped** — reproduced exactly |
+| PRD A4 done-when set | `test_bakeoff_challenger.py test_bakeoff_arm_a_golden.py test_bakeoff_composition.py test_bakeoff_runner.py test_user_gain_gate.py` — **120 passed** (the sabotage matrix ran a wider set including `test_bakeoff_serving.py`: 148) |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE, and none is owed** — the arm generates and logs but is never served (PRD G7). The dark contract is asserted in tests instead: `test_the_challenger_generates_and_logs_but_is_never_served`. |
+
+**Net +30 tests** — 25 new in `backend/tests/test_bakeoff_challenger.py`, 5 new in
+`test_bakeoff_composition.py` / `test_bakeoff_serving.py`.
+
+**The load-bearing invariant — arm B is byte-identical — is PROVED, not asserted.**
+`test_bakeoff_challenger.py` carries two goldens captured by checking out `origin/main`
+`50e0451` into a second worktree, copying the test file in, and running its capture mode
+there: code that had never heard of the three new knobs. Today's live-defaults run must
+reproduce both byte for byte. Surfaces: a full `generate_trades` deck (covers dedup, deck
+caps, v2 orchestration) and `_generate_consensus_for_pair` called directly and uncapped —
+the latter because deck-assembly caps hide most of the consensus path, so measured through
+a deck alone the two consensus knobs would read as inert while being perfectly alive.
+Backed by `test_every_new_knob_is_inert_at_its_default`, which sets each knob *explicitly*
+to the value `_DEFAULT_CFG` already carries — that catches a knob inert only because some
+other guard skips its code path, which a golden cannot distinguish.
+
+**Arm A is byte-identical too**, per PRD N1: `MODEL_A_PROFILE`, `model_a()`,
+`MODEL_A_REFERENCE_SHA` and the golden's captured deck are unchanged. The only edit to
+`test_bakeoff_arm_a_golden.py` is five names added to `_PINNED_KNOBS` plus one sentence of
+remedy text; its 10 tests pass unmodified.
+
+**Code-walk proof** (file:line on this branch):
+
+| Lever | Site | Live identity |
+|---|---|---|
+| `user_elo_shrink` | `trade_service.py:1339` — `if confidence is None or _c("user_elo_shrink") <= 0: return dict(user_elo)` | 1.0 ⇒ the early return never fires; the blend below is untouched |
+| `consensus_both_ways` | `trade_service.py:5086` — `if not _both_ways and rv - gv < _c("user_gain_epsilon")` | 0.0 ⇒ `_both_ways` False ⇒ the original predicate, unchanged |
+| 1-for-2 loop | `trade_service.py:5168` — `if _both_ways and len(cards) < max_cards` | 0.0 ⇒ loop never entered |
+| `consensus_fairness_floor` | `trade_service.py:4998` (`_thr = max(requested, floor)`), read at `:5117` | 0.0 ⇒ `_thr is fairness_threshold` |
+| profile entry point | `bakeoff_profiles.py` `model_challenger()` — `_cfg_override(MODEL_CHALLENGER_PROFILE)`, **no** `r4_bypass` | inert until entered |
+| fan-out | `bakeoff_runner.py` `run_bakeoff` `elif arm == ARM_CHALLENGER:` — snapshot taken INSIDE the overlay | arm B's branch untouched |
+| roster | `bakeoff_runner.arm_roster()` — `ALL_ARMS` filtered by four include knobs | `bakeoff_include_challenger` = 0 restores the pre-D-095 roster |
+
+**Import-time binding checked, not assumed.** `trade_optimizer.py:51` and
+`trade_gen_v2.py:112` import `_c` and `_shrink_user_elo` **by value**. All three knobs
+are read *inside* existing function bodies rather than by wrapping or rebinding them, so
+every bound site sees the change — the class of no-op that cost an audit agent a
+perfect-zero measurement on a gate firing 1.17M times cannot occur here.
+
+**Sabotage-tested: 13 deliberate breakages, 13 caught.** Each mutation applied, the A4
+pytest set run, the mutation reverted:
+
+| # | Sabotage | Caught by |
+|---|---|---|
+| 1 | `user_elo_shrink` ignored (shrink always off) | arm-B goldens, both shrink tests, **arm-A golden**, `test_user_gain_gate` Maye-for-Dart repro (v2 + v3) |
+| 2 | sign test dropped for every arm | both arm-B goldens, `test_live_never_emits_a_card_the_user_pays_for` |
+| 3 | both-ways knob never read | `test_both_ways_emits_the_user_pays_direction`, `test_one_for_two_exists_only_under_both_ways` |
+| 4 | floor knob never read | 3 floor tests |
+| 5 | floor OVERRIDES instead of tightening | `test_the_floor_only_ever_tightens` |
+| 6 | 1-for-2 enumeration removed | `test_one_for_two_exists_only_under_both_ways` |
+| 7 | overlay entered for arm B as well | 7 tests incl. both config-snapshot tests |
+| 8 | `model_challenger` gains arm A's R4 bypass | `test_model_challenger_does_not_bypass_r4` |
+| 9 | a challenger knob leaks into `MODEL_A_PROFILE` | **arm-A golden**, `test_the_two_profiles_do_not_collide`, `test_model_a_still_sees_the_live_identity_for_the_new_knobs` |
+| 10 | tier ladder left uncompressed | both ladder tests |
+| 11 | challenger dropped from the default roster | 8 tests across composition/serving/challenger |
+| 12 | challenger stops being an engine arm (loses its consensus group) | 3 tests incl. the dark-mode group assertion |
+| 13 | a new knob vanishes from `_PINNED_KNOBS` | the arm-A inventory guard **and** its cross-check |
+
+**Known gap:** Track C's `measurement.md` (the offline four-cell count) is not written by
+this work — C1 was run elsewhere and its numbers (0.75 both-ways = 200.5% of the one-way
+baseline, 61.2% user-pays, damage capped at 25.0%) are quoted in the profile and
+config-reference on that authority, not re-derived here.
+
 ---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)
 

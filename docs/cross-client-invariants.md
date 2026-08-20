@@ -168,11 +168,39 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 | String | Shown when |
 |---|---|
 | `They're interested` (preceded by the Chalkline `eye` icon, not an emoji — changed from `👀 They're interested` 2026-07-02, ADR-004) | card has `likes_you: true` (likes-you pill) |
-| `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) |
-| `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` | consensus-card explainer (mobile body text; web `title` tooltip on the tag) |
+| `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) — names the PRICING BASIS, unconditional |
+| the consensus-card explainer, **two states** — see § Consensus balance claim below | card has `basis: "consensus"` (mobile body text; web `title` tooltip on the tag) |
 | `+ {player name} added to balance the deal` | card has a `sweetener` (Tier 3) — name interpolated from the referenced player |
 
 **Locations:** `mobile/src/components/TradeCard.tsx`, `web/js/app.js` (search "likes-you-pill" / "consensus-tag" / "trade-sweetener").
+
+## Consensus balance claim — the 0.75 bar (D-097, 2026-08-19)
+
+**The app may not call a trade balanced below its own definition of balanced.** Until 2026-08-19 the consensus explainer asserted `…this is a balanced trade by consensus value.` gated on `basis === 'consensus'` **alone**, with no fairness check. The app's bar for balanced is **0.75**, but the mobile fairness default flipped OFF on 2026-08-17 so the live generation floor is **0.50** and cards ship down to 0.501. Measured read-only against prod `deck_impressions` on 2026-08-19: **805 of 7,293 served consensus cards (11.0%)** carried that sentence while below the bar (band `[0.501, 0.75)`; p10 0.7302, p50 0.8590, min 0.5010, and 7,293/7,293 carried a non-NULL `fairness_score`).
+
+**The claim is REMOVED, not replaced.** Below the bar the sub-line truncates to its true half and stops. Two character-identical strings on both clients, keyed on `fairness_score`:
+
+| `fairness_score` | String |
+|---|---|
+| `>= 0.75` | `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` |
+| `< 0.75`, or absent / non-finite | `This league-mate hasn't ranked players yet.` |
+
+Three rules that are not negotiable:
+
+- **No replacement prose below the bar** (operator, 2026-08-19). The card already renders `TradeValueBar` with `give_value` / `receive_value` / `favors` / `gap` — direction *and* magnitude are on screen from the component whose own comment calls it the universal value verdict. A sentence about value here would restate the bar. This also settles the directional-wording question ("leans your way" / "leans theirs"): it is duplication, and on web it would additionally require plumbing `give_value` / `receive_value` into `web/js/app.js`, which has neither today. **Do not re-open it.**
+- **The explanation half is never dropped.** `This league-mate hasn't ranked players yet` is the one thing on the card that says *why this is a fair-value idea rather than a divergence card*. Nothing else conveys it, so the fix truncates — it does not hide the line.
+- **Fail-safe direction is DOWN.** Unknown fairness renders the truncated string, never the balanced claim. Both clients compute `balanced` as a single conjunct (`typeof === 'number' && Number.isFinite(…) && … >= 0.75`), so this is structural rather than merely tested. `Number.isFinite`, **not** the coercing global `isFinite` — `isFinite('0.9')` is `true` and a stringified payload would then compare as a string.
+
+**The 0.75 threshold is a constant, not a server knob** — matching the two constants it mirrors. It is the *definition* of balanced, deliberately **not** the generation floor (which is 0.50 today and moves with the fairness toggle). Four spellings of the same number, all pinned to each other by `mobile/tests/check-consensus-balance-claim.js` §2:
+
+| Spelling | Location |
+|---|---|
+| `NORMAL_LOW` | `mobile/src/utils/tradePresentation.ts` (canonical for mobile) |
+| `FAIRNESS_ON_THRESHOLD` | `mobile/src/api/tradePregen.ts` (the `fairness_threshold` sent to the generator in balanced mode) |
+| `CONSENSUS_BALANCED_MIN` | `mobile/src/utils/consensusNote.ts` — **re-exports** `NORMAL_LOW`, never redeclares it |
+| `FAIRNESS_BALANCED_MIN` | `web/js/app.js` — the one unavoidable literal (vanilla JS, no import from TS) |
+
+**Locations to update together:** `mobile/src/utils/consensusNote.ts` (the only place the copy is authored), `mobile/src/components/TradeCard.tsx` (renders `note.label` / `note.body`), `web/js/app.js` (`consensus-tag` tooltip + `FAIRNESS_BALANCED_MIN`), and this table. Guard: `npm run test:consensus-balance-claim` in `mobile/` — §3 **reconstructs both web strings from web source and compares them byte for byte** against the mobile module's output, so it catches wording drift, not just a missing gate.
 
 ## Fairness meter semantics
 

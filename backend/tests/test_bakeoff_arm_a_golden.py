@@ -455,11 +455,13 @@ _PINNED_KNOBS = frozenset("""
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
 bakeoff_group_value_slots bakeoff_fill_policy bakeoff_include_baseline
+bakeoff_include_challenger bakeoff_include_gen_v2
 bakeoff_lane_reallocate
 asset_ideas_lateral_band audition_like_rate_frac audition_min_views
 audition_retire_days bench_credit_qb bench_credit_qb_sf bench_credit_rate
 bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr
-block_boost_weight boost_moderate boost_strong consensus_score_scale
+block_boost_weight boost_moderate boost_strong consensus_both_ways
+consensus_fairness_floor consensus_score_scale
 consolidation_raw_loss_frac crown_elite_value crown_rate crown_rate_market
 crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net
 deck_give_headliner_cap deck_headliner_cap deck_max_per_target
@@ -482,7 +484,8 @@ gen2_give_pool gen2_meso_band gen2_meso_max_variants gen2_min_divergence
 gen2_recv_extra_pool gen2_youth_age ghost_holdout_one_in infer_contender_cut
 infer_rebuilder_cut infer_w_pick_share infer_w_vet_share infer_w_youth_share
 jets_age ktc_fallback_rank ktc_k ktc_max lane_shift_frac
-likes_you_min_user_delta max_candidates max_overpay_frac max_overpay_min_value
+likes_you_gate_level likes_you_min_user_delta likes_you_min_user_gain
+max_candidates max_overpay_frac max_overpay_min_value
 max_value_ratio min_mismatch_score min_package_band min_side_surplus
 min_side_surplus_marginal mismatch_confidence_damp mismatch_weight
 mutual_gain_cap need_fit_weight need_gate_min_value need_gate_upgrade_margin
@@ -508,7 +511,8 @@ taste_dwell_ms taste_epsilon taste_eta_long taste_eta_short
 taste_prior_ref_delta taste_prior_scale taste_prior_shrink taste_tau_long_days
 taste_tau_short_days thompson_decay_gamma thompson_prior_base_rate
 tier_mult_bench tier_mult_depth tier_mult_elite tier_mult_solid
-tier_mult_starter trade_elo_gap_max user_gain_epsilon v3_diversity_max_overlap
+tier_mult_starter trade_elo_gap_max user_elo_shrink user_gain_epsilon
+v3_diversity_max_overlap
 v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
 """.split())
 
@@ -520,6 +524,9 @@ def test_no_generation_knob_was_added_without_an_arm_a_decision():
         f"trade_service._DEFAULT_CFG drifted: added={added} removed={removed}."
         "\nA new knob is a new way for arm A to stop being the pre-wave "
         "engine. Decide, in docs/plans/three-model-bakeoff/scope-phase2.md:"
+        "\n  (D-095 precedent: the five landability-challenger knobs are "
+        "EXCLUDED — their defaults ARE the pre-wave engine, so pinning a "
+        "kill value would change arm A rather than preserve it.)"
         "\n  • generation logic that post-dates "
         f"{MODEL_A_REFERENCE_SHA} -> add its kill value to MODEL_A_PROFILE "
         "and re-capture the golden;"
