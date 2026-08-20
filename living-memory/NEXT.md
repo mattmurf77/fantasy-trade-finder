@@ -40,7 +40,8 @@ and offering their best buys under "Skip these."
    ([checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md)). Only runtime
    evidence available under [D-056](DECISIONS.md). **Step 8** — the sell list holds players you are
    *lower* on than the league — is the whole change. Step 13 covers Trends, which moved with it.
-2. **Push + merge.** Nothing is pushed. Backend half goes live on merge; the copy needs a client release.
+2. ~~**Push + merge.**~~ **DONE 2026-08-20** — PR #152 merged `bc43b6f`, Render live on it, EAS build 124
+   submitted to TestFlight. The payload half is serving now; the corrected copy needs build 124 to land.
 3. **Know the rollback before you need it:** `trades.team_review` → `false` and `outlook.odds` → `false`
    are deploy-free, but **neither reverts #367** — `compute_consensus_gap` is ungated and shared, so
    that one is a code revert.

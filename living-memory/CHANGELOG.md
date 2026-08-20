@@ -34,6 +34,10 @@ four planned by operator selection ([plan-remaining.md](../docs/feedback/items/3
   6 new backend tests, **5 sabotage-proven red**; 2 pre-existing tests repaired — one asserted the
   defect, one had gone **vacuous** under the fix while still passing. TestFlight checklist UNRUN.
 - **No flag reverts #367** — `compute_consensus_gap` is ungated and shared. Rollback is a code revert.
+- **SHIPPED.** PR #152 merged `bc43b6f`; CI green on the pushed sha (backend-tests, mobile-typecheck,
+  testid-lint). Render **live on `bc43b6f`**, so the divergence/partners/caption fixes are serving now.
+  EAS **build 124 (v1.15.0)** from that sha submitted to App Store Connect and accepted, awaiting Apple
+  processing — the corrected COPY and the window inputs card need the build; the payload half did not.
 
 ---
 ## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads

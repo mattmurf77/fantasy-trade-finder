@@ -1,6 +1,6 @@
 # Status — Team Review defect batch (#364 / #367 / #368)
 
-**Status:** `built` — committed on `claude/team-outlook-experience-27a7a1`, **not pushed, not merged**, TestFlight pass owed.
+**Status:** `shipped-pending-verification` — PR #152 merged `bc43b6f`, Render live, EAS build 124 submitted to TestFlight. **The 13-step checklist is still UNRUN.**
 **Date:** 2026-08-20
 **Covered feedback IDs:** #364, #367, #368 built · #365, #366, #369, #370, #371 **planned only** (canonical folder = lowest built id, 364)
 **Flags:** none added. Lands inside the already-lit `trades.team_review`; `outlook.odds` gates the #364 surface.

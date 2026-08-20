@@ -249,11 +249,11 @@
 | 357 | team-review | planned | 2026-08-19 | **canonical** for #357/#358/#359 — full doc set, build not started; blocked on Q-025 waivers. `trades.team_review` specced, not yet in features.json |
 | 358 | team-review-link | planned | 2026-08-19 | canonical `357-team-review/` |
 | 359 | team-review-link | planned | 2026-08-19 | canonical `357-team-review/` |
-| 364 | team-review-fixes | in-progress | 2026-08-20 | built on `claude/team-outlook-experience-27a7a1`, unmerged; IDP disclaimer names the unpriced slots |
+| 364 | team-review-fixes | shipped | 2026-08-20 | PR #152 `bc43b6f`, Render live, EAS build 124; IDP disclaimer names the unpriced slots |
 | 365 | team-review-window-signals | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §1 — bright-line ENGINE change (`outlook_alpha`), needs 3 decisions |
 | 366 | team-review-tier-ladder | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §2 — Handcuff needs an NFL depth chart FTF does not ingest |
-| 367 | consensus-gap-direction | in-progress | 2026-08-20 | canonical `364-team-review-fixes/`; sell direction fixed UPSTREAM (D-100) — toggle half still planned §4 |
-| 368 | team-review-partners | in-progress | 2026-08-20 | canonical `364-team-review-fixes/`; route dropped the pick capital it computed |
+| 367 | consensus-gap-direction | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; sell direction fixed UPSTREAM (D-100), PR #152 — toggle half still planned §4 |
+| 368 | team-review-partners | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; route dropped the pick capital it computed, PR #152 |
 | 369 | team-review-plan-beat | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §3 |
 | 370 | deck-repeat-liked-trades | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §6 — TradesHome deck, NOT Team Review; needs a repro |
 | 371 | outlook-as-window-driver | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §5 — decide with #365 |

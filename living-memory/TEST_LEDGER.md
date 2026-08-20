@@ -48,6 +48,11 @@ that is the more useful finding.**
 and the restored tree tests red. `find backend -name __pycache__ -type d -exec rm -rf {} +` between
 cycles; verify restoration with `git diff`, not with a test result.
 
+**Post-merge, on the pushed sha.** GitHub Actions on PR #152: `backend-tests` **pass** (6m33s),
+`mobile-typecheck` **pass** (52s), `maestro-testid-lint` **pass** (8s). Merged `bc43b6f`; Render deploy
+**live** on that sha (verified via the Render API, not by assumption). EAS build **124** (v1.15.0,
+commit `bc43b6f`) finished and was **accepted by App Store Connect**; Apple processing pending.
+
 **What is NOT proven.** The manual TestFlight checklist
 ([testflight-checklist.md](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md), 13 steps)
 is **UNRUN** — under [D-056](DECISIONS.md) it is the only runtime evidence this gets, and **nobody has
