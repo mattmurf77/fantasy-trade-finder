@@ -16653,8 +16653,10 @@ def admin_config_list():
 def admin_config_update(key: str):
     """
     PUT /api/admin/config/<key>
-    Body: {"value": <float>}
-    Updates the config value, reloads both service modules, returns {key, value}.
+    Body: {"value": <float>, "source": <optional str, default "admin-api">}
+    Updates the config value, stamps model_config.updated_at, appends a
+    model_config_changes row attributed to `source` (M1 knob log), reloads
+    both service modules, returns {key, value, old_value}.
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
@@ -16665,7 +16667,8 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
-        result = set_config(key, new_value)
+        source = str(body.get("source") or "admin-api")[:64]
+        result = set_config(key, new_value, source=source)
 
         # Reload live config in both service modules so the change takes
         # effect immediately (no server restart required).

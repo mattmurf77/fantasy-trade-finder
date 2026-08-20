@@ -94,6 +94,12 @@ C2/C5 fields and numeric bars) are adopted as written except:
 - Window handling per R-5 (censor at logged timestamp; discard only re-ranker/unlogged).
 - Small-n honesty rules verbatim: Wilson intervals; deltas < 3pp read "did not move";
   nothing called before its pre-registered n.
+- **Lens calibration (added 2026-08-20, operator ask):** the readout pack carries a
+  lens-calibration section (per-lens outcome correlation; lens-disagreement quartiles vs
+  `value_giving` share — the direct test of the dual-board thesis; weight-sensitivity
+  re-aggregation under alternative `fit_w_*` vectors). Weights are never changed
+  mid-window; a **promote** verdict includes a lens-calibration pass before the
+  0.40/0.30/0.30 weights are declared final.
 
 Failure-mode table = draft B §6 **plus** A's four rows (serve-bit leak; cross-round arm-B
 drift check; `fit_diag` null-share per arm; max single-tester share) **with** the R-9
