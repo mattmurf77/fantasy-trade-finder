@@ -447,7 +447,15 @@ def test_r4_bypass_is_thread_local():
 
 # ── drift alarm: a new knob must not slip past the profile ─────────────────
 
-#: Every key in `trade_service._DEFAULT_CFG` as of 2026-08-18. This is the
+#: Every key in `trade_service._DEFAULT_CFG` as of 2026-08-18 (plus later
+#: additions, each DECIDED below and in scope-phase2.md's exclusion table —
+#: 2026-08-20 added `infer_w_net_firsts` / `infer_net_firsts_cap`, D-110:
+#: excluded from MODEL_A_PROFILE because they cannot reach generation at all.
+#: The term they weight is gated on BOTH `trade.outlook_net_firsts` AND a
+#: caller supplying `first_round_ledger`, and the only caller that does is
+#: GET /api/league/team-review — trade_gen_v2, the mock draft and the outlook
+#: seed all still pass four positional arguments. Pinning a kill value would
+#: imply the knobs matter to a deck; they provably do not.) This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -482,7 +490,8 @@ gen2_centerpiece_top_k gen2_consol_floor gen2_consol_gamma gen2_dedup_jaccard
 gen2_epsilon gen2_exposure_cap gen2_exposure_floor gen2_featured_count
 gen2_give_pool gen2_meso_band gen2_meso_max_variants gen2_min_divergence
 gen2_recv_extra_pool gen2_youth_age ghost_holdout_one_in infer_contender_cut
-infer_rebuilder_cut infer_w_pick_share infer_w_vet_share infer_w_youth_share
+infer_net_firsts_cap infer_rebuilder_cut infer_w_net_firsts
+infer_w_pick_share infer_w_vet_share infer_w_youth_share
 jets_age ktc_fallback_rank ktc_k ktc_max lane_shift_frac
 likes_you_gate_level likes_you_min_user_delta likes_you_min_user_gain
 max_candidates max_overpay_frac max_overpay_min_value

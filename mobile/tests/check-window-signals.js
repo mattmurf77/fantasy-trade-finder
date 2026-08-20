@@ -81,19 +81,33 @@ if (!win) bad('0. the Window beat exists', 'no `function Window(` in TeamReviewS
 }
 
 // 2 — a term that scores is a term that shows
+//
+// NOTE ON THIS CHECK'S OWN HISTORY: it first read `/w_net_firsts/.test(win)`
+// and was VACUOUS. The weight is destructured near the top of the component
+// (`const wFirsts = m?.w_net_firsts`), so the identifier is present whether or
+// not the contribution row exists — deleting the row left this green. What
+// makes the claim real is requiring the PRODUCT: the weight multiplied by
+// `net_share` is the contribution, and nothing else in the beat computes it.
 {
   const rendersLedger = /signals\.firsts/.test(win);
-  const rendersTerm = /w_net_firsts/.test(win);
+  const weightAlias = /const\s+(\w+)\s*=\s*m\?\.w_net_firsts/.exec(win);
+  const weightRef = weightAlias ? weightAlias[1] : 'w_net_firsts';
+  // The contribution: <weight> * …net_share, in either order, on one line.
+  const product = new RegExp(
+    `(${weightRef}[^\\n]*\\*[^\\n]*net_share)|(net_share[^\\n]*\\*[^\\n]*${weightRef})`,
+  );
   if (!rendersLedger) {
     bad('2. the net-firsts ledger is rendered',
       'the Window beat never reads window.signals.firsts, so the #365 signal is '
       + 'computed by the backend and never shown');
-  } else if (!rendersTerm) {
+  } else if (!product.test(win)) {
     bad('2. the net-firsts CONTRIBUTION is itemised',
-      'the beat reads signals.firsts but never model.w_net_firsts, so it shows '
-      + 'the ledger without showing what the ledger did to the score. That is '
-      + 'exactly the defect D-101 was written to prevent.');
-  } else ok('2. the ledger and its contribution are both rendered');
+      `the beat shows the ledger but never renders ${weightRef} × net_share, so `
+      + 'it displays a total it did not itemise. That is exactly the defect '
+      + 'D-101 was written to prevent — and referencing the weight somewhere in '
+      + 'the component does not count, which is how this very check was once '
+      + 'vacuous.');
+  } else ok('2. the ledger and its contribution × weight are both rendered');
 }
 
 // 3 — the "does not read traded picks" sentence is conditional

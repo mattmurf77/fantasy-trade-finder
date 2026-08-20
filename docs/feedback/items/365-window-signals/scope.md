@@ -19,9 +19,9 @@ doc left open (§7 below) and declared **full gates, not express**.
 
 ## 0. The bright line, and how this build respects it
 
-`infer_team_outlook` (`backend/trade_service.py:2546`) is **not** a Team Review function. Its verdict
+`infer_team_outlook` (`backend/trade_service.py:2615`) is **not** a Team Review function. Its verdict
 feeds `outlook_alpha`, which the **trade engine** consumes (`backend/trade_gen_v2.py:986`,
-`backend/trade_service.py:4250`), the **mock draft** reads (`backend/server.py:14013`), and the
+`backend/trade_service.py:4381`), the **mock draft** reads (`backend/server.py:14013`), and the
 **outlook seed** reads (`backend/server.py:5320`). Changing its score changes every deck for every
 user.
 
@@ -103,17 +103,20 @@ as `window.roster_inferred` no matter which path drives.
       Pins the four client claims no typecheck or backend test can see:
       1. the screen never hardcodes a weight, a cut or an age threshold — every number in the window
          beat's arithmetic is read from `window.model` (D-101, generalised to the new term);
-      2. the beat renders the net-firsts contribution **whenever it renders the term's inputs** —
-         a shipped card that shows the ledger but omits it from the arithmetic is the exact defect
-         D-101 was written to prevent;
+      2. the beat renders the net-firsts contribution **as the weight × `net_share` product**
+         whenever it renders the term's inputs — a card that shows the ledger but omits it from the
+         arithmetic is the exact defect D-101 was written to prevent;
       3. the "we do not read which picks you have traded away" sentence is **conditional** on the
          term being inactive — it is a lie the moment the flag is lit;
       4. the degraded case is *stated*, not silent: a `provenance` other than `observed` renders a
          reason string (operator decision 3).
-- [x] **Unit tests:** `backend/tests/test_window_signals.py` — 21 tests, 9 sabotage-proven. Covers
-      INV-365 (golden byte-identity against `origin/main` values), INV-365b, the ledger arithmetic,
-      the three provenance states, the clamp, the band→window map, the preseason refusal, the
-      non-Sleeper fallback, and the `window` payload's flag-off shape identity.
+- [x] **Unit tests:** `backend/tests/test_window_signals.py` — **40 tests**. Covers INV-365 (byte
+      identity against goldens CAPTURED from the `bc43b6f` tree, not re-derived), INV-365b, the
+      ledger arithmetic, the three provenance states, the clamp, the zero-weight lever, the
+      band→window map at every boundary, the preseason refusal, the non-Sleeper fallback, the
+      route's ledger reader, and the `window` payload's flag-off shape identity.
+- [x] **Sabotage:** **20 of 20** guards proven red then green — table in `code-walk.md` §5.
+      One of them (S15) found a **vacuous assertion in this batch's own client guard**; §5.1.
 - [x] **Code-walk proof:** `docs/feedback/items/365-window-signals/code-walk.md`, file:line cited.
 - [x] **Manual TestFlight checklist:** `docs/feedback/items/365-window-signals/testflight-checklist.md`.
       Runtime proof genuinely matters here: both flags change what a real user is told about their
@@ -159,6 +162,16 @@ as `window.roster_inferred` no matter which path drives.
   #370 repeats). Untouched.
 - **`_bin_player`, `analyze_roster_strengths`, `_depth`, the `Depth` and `Plan` components.** Owned
   by a concurrent sibling session.
+
+## 6b. Three pre-existing structural guards fired, and each was resolved rather than suppressed
+
+All three are working exactly as designed. Recorded here so the resolutions are auditable.
+
+| Guard | Why it fired | Resolution |
+|---|---|---|
+| `test_bakeoff_arm_a_golden::test_no_generation_knob_was_added_without_an_arm_a_decision` | two new `_DEFAULT_CFG` knobs | **Excluded from `MODEL_A_PROFILE`**, with the reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md`'s exclusion table: the knobs weight a term gated on a ledger **no generator supplies** (INV-365b), so no arm can observe them at any flag setting. Pinning a kill value would imply they matter to a deck; they provably do not. Knobs added to `_PINNED_KNOBS` so the inventory alarm still fires on a third. Arm-A golden re-run green |
+| `test_pick_assignment::test_w3_02_ast_only_sanctioned_call_sites_name_source` | `_first_round_ledgers` names `source=` | Added as the **eighth** engine read site with the rationale inline: it must count the same picks `_power_picks_by_owner` prices two lines away in the same route, so a literal `platform` would make the firsts card and the pick-capital row disagree on any ESPN league with `picks.assign_tradeable` on. It is also the only one of the eight reached solely behind a feature flag |
+| `test_seed_ui_test_db` (×3) | flag fixtures mirror `config/features.json` | Both flags added `false` to `release.json`, `onboarding-v2.json` and `profiles-on.json` (asserted to share a key set). Deliberately **not** added to `all-on.json`, a client overlay rather than a full map — the `outlook.odds` precedent |
 
 ## 7. Open decisions the operator pre-ruled — and what the data says about them
 
