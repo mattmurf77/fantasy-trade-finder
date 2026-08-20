@@ -201,6 +201,18 @@ so the engine's per-member loops (13 calls per deck run) pay it once, not thirte
       the flag is off. `backend/tests/test_team_review.py` gains 2 tests for the payload keys.
 - [x] **Code-walk proof:** `docs/feedback/items/366-tier-ladder/code-walk.md` — file:line trace
       from the Sleeper dump to the rendered line, for both flags, in both states.
+- [x] **Measured coverage gap — a graduation blocker, found while building.** The
+      pre-existing engine-facing suite (`test_roster_profile`, `test_need_fit`,
+      `test_finder_targeting`, `test_presentment_rules` — 65 tests) is **completely
+      insensitive** to this change: forcing `relative = True` in source leaves all 65 green.
+      The cause was confirmed, not guessed — disabling `_POS_TIER_MIN_POOL` *as well* turns
+      exactly 1 of the 65 red, so every one of those fixtures is smaller than the guard and
+      cannot distinguish the bands even in principle. Those tests are therefore evidence for
+      the flag-**off** path only. **`trade.position_tiers` must not graduate on a green
+      suite** — it needs a deck-quality read on real leagues (`scripts/deck_eval.py`) plus
+      step 6 of the TestFlight checklist. Recorded here rather than quietly fixed because
+      widening those fixtures to production scale is its own change with its own blast
+      radius, and it belongs to whoever graduates the flag.
 - [x] **Manual TestFlight checklist:** `docs/feedback/items/366-tier-ladder/testflight-checklist.md`
       — 6 numbered steps. Runtime proof matters here because the flag-on path changes numbers
       the operator will read as truth, and one step deliberately verifies a *known* roster
