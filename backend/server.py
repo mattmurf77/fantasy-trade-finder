@@ -5537,6 +5537,8 @@ def _run_trade_job(
                     **{**_generate_kwargs, **ov}),
                 gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
                     trade_service, {**_generate_kwargs, **ov}),
+                gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
+                    trade_service, {**_generate_kwargs, **ov}),
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
                 # client and were persisted nowhere else. The trade settings
@@ -10914,6 +10916,9 @@ def trade_card_to_dict(card, players: dict) -> dict:
     match_context = getattr(card, "match_context", None)
     if match_context:
         out["match_context"] = match_context
+    fit = getattr(card, "fit", None)
+    if fit:
+        out["fit"] = fit
     # FB-147 — tag involved players the Sleeper trade block flags. Additive,
     # omit-when-absent: rows gain `on_block: true` only when the flag is on
     # AND the league has synced block data naming that player, so flag-off /

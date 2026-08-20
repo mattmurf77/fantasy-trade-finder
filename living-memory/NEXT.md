@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-19 — Fit challenger: PR, then operator dry-run bar](#2026-08-19--fit-challenger-pr-then-operator-dry-run-bar)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
 - [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
@@ -25,6 +26,16 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-08-19 — Fit challenger: PR, then operator dry-run bar
+
+Built on **`feat/fit-challenger`** ([D-098](DECISIONS.md), [PRD](../docs/plans/fit-challenger/PRD.md)). *Why now:* it is the only arm that can score a market-loser instead of deleting it. Organic serving is unchanged.
+
+1. **Push + open the code PR** (docs PR #146 already exists). `bakeoff_include_fit` stays 0.
+2. **Operator: one real-league job with the arm still off**, then `=1` in a prod-like env. Read `bakeoff_runs.arms_json[fit].diagnostics` (`enumerated`, `scored`, `one_sided_pct`, `generation_ms`). Set the fail bar. Synthetic 25-asset pair was **2.0 s / 20k enumerated / 2.4k scored**.
+3. **Do not** light `bakeoff_serve_interleaved` for this arm, dualize R5 (F7), or turn on `fit_min_them`.
 
 ---
 

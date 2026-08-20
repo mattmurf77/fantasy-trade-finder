@@ -32,6 +32,7 @@
 - [Derived league state belongs to the writer, not the reader (2026-08-19, D-091)](#derived-league-state-belongs-to-the-writer-not-the-reader-2026-08-19-d-091)
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
+- [Fit-challenger preferences filter after score (2026-08-19, D-098)](#fit-challenger-preferences-filter-after-score-2026-08-19-d-098)
 
 ---
 
@@ -250,7 +251,7 @@ The likes-you injector (`server._inject_likes_you_cards_impl`) synthesizes `Trad
 
 `backend/bakeoff_runner.py` ([plan](../docs/plans/three-model-bakeoff/PLAN.md), [scope](../docs/plans/three-model-bakeoff/scope-phase3.md), [composition](../docs/plans/three-model-bakeoff/scope-composition.md)) sets the conventions for anything that runs models side by side:
 
-- **A generator arm is a config context, not a code branch.** Arm `baseline` is the live engine inside `_cfg_override(MODEL_A_PROFILE)` plus a thread-local R4 bypass; there is no forked engine and no duplicated enumeration. Arms run **sequentially on the job's own daemon thread** — the seam is a `threading.local()`, so a sibling thread would silently read live defaults. Never parallelise the arms without giving each thread its own context first.
+- **A generator arm is a config context, not a code branch — except when it isn't.** Arm `baseline` and arm `challenger` (D-095) are the live engine inside `_cfg_override(...)`. Arm `gen_v2` and arm `fit` (D-098) are **separate modules** called directly by the runner. Never `_cfg_override` the live knobs to fake `fit`; that is the landability-challenger pattern and it cannot drop `rv ≥ gv`, dual surplus, or `|n−m| ≤ 1`.
 - **A flag that gates a serving path is not a module guard.** `trade_gen.v2` decides whether `_generate_trades_impl` ROUTES a deck through the v2 pipeline; the bake-off calls `trade_gen_v2.generate_league_suggestions` directly as a third generator with that flag false. Read a flag's docstring for what it gates before assuming a module is unreachable while it is off.
 - **Attribution columns are written on EVERY row of a batch, never conditionally.** `save_deck_impressions` inserts with `executemany`, which compiles the statement from the FIRST row's keys — a deck led by an unattributed card (a likes-you injection) would otherwise drop `model_arm` / `arm_rank` for the whole deck, silently. Any future per-card nullable column on this spine follows the same rule.
 - **Record the gate a row passed, never the gate that was requested.** `fairness_threshold` arrived per-request from the client and was persisted nowhere, while the engine composed it per card (divergence floor, relaxed band) — so the recorded intent and the applied bar were different numbers, and the applied one was unrecoverable. Any request-scoped parameter that a generator then transforms is stored **as applied, per row**, resolved against the config that row's producer ran under. Corollary: the config itself is snapshotted with the run, because `model_config` has no `updated_at`.
@@ -415,3 +416,8 @@ conventions that fall out generalise past picks.
   `_SANCTIONED_SOURCE_CALLERS` rather than its seven engine sites — because what "1.05" means must not
   change when a *pricing* flag moves, or a trade card and the assignment screen would disagree about the
   same slot.
+
+## Fit-challenger preferences filter after score (2026-08-19, D-098)
+
+Arm `fit` (`backend/trade_gen_fit.py`) enumerates and scores **before** it reads untouchables, not-interested, pins, acquire/trade-away positions, or intent. Those lists hide a card from this viewer; they do not shrink the partner's search. Construction knockouts are only K0–K7. Rank overlays (`_tier_mult_v2`, `need_fit` multiplier, `block_boost`, outlook-direction, aggression) do not run. `TradeCard.fit` is omit-when-absent; organic `_generate_trades_impl` never imports the module.
+

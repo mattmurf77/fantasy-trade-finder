@@ -323,7 +323,18 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                 // different in shape. Absent on non-top cards + other paths.
                        { "shape": "consolidation"|"pick_heavy"|"youth_heavy"|"balanced",
                          "give_player_ids": ["...", ...],
-                         "recipient_value_delta_pct": float } ]
+                         "recipient_value_delta_pct": float } ],
+  "fit":             {                          // OPTIONAL — bake-off arm `fit` only (D-098). Dual 0–100
+                                                // team scores. Omit-when-absent; organic Arm B cards never
+                                                // stamp it. Clients ignore unknown keys in v1.
+                       "you": float,            // 0–100 viewer score
+                       "them": float,           // 0–100 partner score
+                       "aggregate": float,      // you + them (0–200); TradeCard.composite_score
+                       "bucket": "both_high"|"mixed"|"you_tilt"|"them_tilt"|"both_ok"|"weak",
+                       "lenses": {
+                         "you":  {"board": float|null, "vs_consensus": float|null, "consensus": float},
+                         "them": {"board": float|null, "vs_consensus": float|null, "consensus": float}
+                       } }
 }
 ```
 
@@ -333,6 +344,7 @@ Notes:
 - `basis: "consensus"` cards are fair-by-consensus ideas generated for opponents with no rankings; clients show the "Fair-value idea" label.
 - The job snapshot additionally sets `real_opponent` (bool) and `outlook` per card.
 - **FB-147** (flag `sleeper.trade_block`): player objects inside `give`/`receive` gain `"on_block": true` when the league's synced Sleeper trade block names that player. Omit-when-absent — never `false`, and flag-off payloads are byte-identical to pre-147. Mobile renders the "ON THE BLOCK" badge from it.
+- **`fit`** (bake-off arm `fit` only, D-098): dual 0–100 team scores. Present only on cards that generator stamped; organic `_generate_trades_impl` never sets it. v1 clients ignore the key.
 
 ## Open trade calculator (public — no auth)
 

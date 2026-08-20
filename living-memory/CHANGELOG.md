@@ -10,6 +10,23 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-19 — Fit challenger built, not rostered (D-098)
+
+**Branch `feat/fit-challenger`. Organic serving unchanged. `bakeoff_include_fit=0`.**
+
+New generator `backend/trade_gen_fit.py`, bake-off arm `fit`. Thin knockouts
+(K0–K7 wrap live C3/G6), dual 0–100 team scores (board / vs-consensus /
+consensus), rank by sum. Preferences filter after scoring. Union pool cap 15
++ 1-for-1-then-expand + 20k pair budget. `TradeCard.fit` omit-when-absent.
+
+Not a profile overlay — that is D-095's landability-challenger. Do not
+`_cfg_override` this. `_generate_trades_impl` grepped clean.
+
+Synthetic 25-asset pair: enumerated 20_000, scored 2_370, 42 after C4,
+2.0 s, `one_sided_pct` 14.3 on scored. Operator sets the ms bar before
+rostering. [ADR-013](../docs/adr/adr-013-fit-challenger-is-a-generator.md),
+[PRD](../docs/plans/fit-challenger/PRD.md).
+
 ## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads
 
 **Not shipped — committed to `fix/likes-you-quality-gates`, not pushed, not merged.**

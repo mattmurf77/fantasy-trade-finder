@@ -834,6 +834,23 @@ _DEFAULT_CFG: dict[str, float] = {
     # head-to-head is `current` vs `challenger` (composition only — it does
     # NOT change backend/trade_gen_v2.py, which is out of the arm's scope).
     "bakeoff_include_gen_v2":     1.0,
+    # Fit-challenger (docs/plans/fit-challenger/PRD.md). Arm `fit` is a
+    # NEW generator, not a profile overlay. Default 0 — off the roster —
+    # until a dry run sets the ms bar. Organic serving never imports it.
+    "bakeoff_include_fit":        0.0,
+    "fit_score_scale":            400.0,
+    "fit_score_even":              50.0,
+    "fit_w_board":                  0.40,
+    "fit_w_div":                    0.30,
+    "fit_w_cons":                   0.30,
+    "fit_pool_consensus":           8.0,
+    "fit_pool_div_seed":            8.0,
+    "fit_pool_div_opp":             8.0,
+    "fit_pool_cap":                15.0,
+    "fit_max_packages_per_pair": 20000.0,
+    "fit_expand_from":             25.0,
+    "fit_min_them":                 0.0,
+    "fit_min_aggregate":            0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -3044,6 +3061,9 @@ class TradeCard:
     meso_variants: Optional[list] = None
     health: Optional[dict] = None
     tier: Optional[str] = None
+    # Fit-challenger (arm `fit`) — dual 0–100 team scores. Additive,
+    # omit-when-absent; organic cards never stamp it.
+    fit: Optional[dict] = None
 
 
 @dataclass

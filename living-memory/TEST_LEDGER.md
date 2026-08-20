@@ -10,6 +10,32 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-19i — Fit challenger unit + synthetic dry run (D-098, NOT ROSTERED)
+
+**Branch:** `feat/fit-challenger`. Organic path never imports the module.
+
+| Gate | Result |
+|---|---|
+| `python -m pytest backend/tests/test_trade_gen_fit.py backend/tests/test_bakeoff_composition.py backend/tests/test_bakeoff_arm_a_golden.py -q` | **75 passed** |
+| Organic import guard | `_generate_trades_impl` source contains no `trade_gen_fit` |
+| Default roster | `fit` absent (`bakeoff_include_fit` default 0); present when set to 1, with both groups |
+
+**Synthetic dry run** — two 25-asset boarded rosters (4 pos × 5 + 2 picks), one pair, live G6 knobs:
+
+| Field | Value |
+|---|---|
+| enumerated | 20_000 (cap) |
+| scored | 2_370 |
+| killed | K1=0, K2=4, K3=0, K4=16_293, K5=848, K6=485, K7=0 |
+| filtered | C4=2_317, C4b=11 → **42 cards** |
+| one_sided_pct / both_high_pct / mixed_pct | 14.3 / 25.3 / 17.8 (of scored) |
+| median_aggregate | 110.5 |
+| generation_ms | 2_042 |
+| served buckets | both_high 34, mixed 2, you_tilt 4, weak 2 |
+| shapes in deck | (1,1), (2,3) |
+
+K1 illegal shapes no longer spend the pair budget (pre-fix: 14_801 of 20_000 were 2-for-2/3-for-3). Operator sets the fail bar on a real league before `bakeoff_include_fit=1`. F7 dual R5 not in this pass.
+
 ## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
 
 **Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
