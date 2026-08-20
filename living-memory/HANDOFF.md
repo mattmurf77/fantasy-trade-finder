@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
@@ -36,6 +37,34 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
+## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
+
+**Where:** the full fit-challenger program (new generator arm `fit` + measurement rail +
+serving guards) is BUILT, tested (**3651p/1s** post-merge with PR #152), and **SHIPPED to
+`main` 2026-08-20** (operator: "merge and deploy"). Operator rulings taken same day: K1
+widened (2-2/3-3 legal, PRD §12.6); `trade.outlook_direction` OFF; ms bar set; fit rosters
+dark at W3 (`bakeoff_include_fit = 1`, `bakeoff_serve_fit` stays 0). No EAS build needed —
+zero mobile files changed. Doc suite:
+[docs/plans/fit-challenger/](../docs/plans/fit-challenger/) (PRD → PLAN-v2 → HLD → LLD →
+PRD-build + drafts/critiques as the reasoning record) and
+[docs/plans/trade-engine-accuracy/PLAN.md](../docs/plans/trade-engine-accuracy/PLAN.md).
+
+**Nothing serves.** `bakeoff_include_fit` 0 · `bakeoff_serve_fit` 0 · `bakeoff_serve_interleaved`
+still 0. Every flip is the operator's, via `scripts/set_knob.py` (logged), per
+[PRD-build's 9-item decision register](../docs/plans/fit-challenger/PRD-build.md) — headline
+items: K1's literal shape list excludes 2-2/3-3 (confirm or widen, one line);
+`trade.outlook_direction` W0 flip (operator said "remove it for now" mid-session, then pivoted
+to the review — still awaiting their confirm); R-8 rostering call (fixture dry run: fit 253 vs
+arm B 12 ideas); the ms fail bar.
+
+**Next session:** (1) prod replay-board dry run for league `1312140920132497408` + baseline M2
+readout snapshot (read-only; fixture-only dry run is in TEST_LEDGER); (2) on operator confirms,
+the W1 re-light per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md) (B+D+C screen round);
+(3) push/PR when the operator says ship.
+
+**Blocking:** operator decisions only. **Stale-entry corrections:** the 2026-08-19 entries below
+saying likes-you gates / arm D are unmerged are outdated — `7110af2`, `d755b3b`, `38806e0` are
+all on `origin/main`.
 ## 2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
 
 **Branch:** `claude/team-outlook-experience-27a7a1` (worktree of the same name), at `origin/main` `a76498e`.

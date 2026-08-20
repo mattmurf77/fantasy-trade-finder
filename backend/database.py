@@ -1490,7 +1490,38 @@ model_config_table = Table("model_config", metadata,
     Column("key",         String, primary_key=True),
     Column("value",       Float,  nullable=False),
     Column("description", String),
+    # ── M1 (fit-challenger measurement rail, LLD §5.1) ───────────────────
+    # ISO UTC instant of the last write that went through set_config().
+    # NULL on rows never touched since the column landed (additive, no
+    # backfill). A raw-SQL bypass write leaves it stale — the per-run
+    # config_json snapshot diff is what catches those (PLAN-v2 R-5).
+    Column("updated_at",  String),
 )
+
+# ---------------------------------------------------------------------------
+# model_config_changes — append-only log of every funneled knob write (M1).
+# One row per set_config() call, written in the SAME transaction as the
+# value update, so a knob's change date is knowable after the fact and every
+# measurement window can be censored at the logged timestamp (PLAN-v2 R-5).
+#
+# key:        the model_config key that changed
+# old_value:  prior value (NULL on the first logged write of a key)
+# new_value:  the value written
+# changed_at: ISO UTC
+# source:     who/what wrote it — 'operator' (set_knob.py), 'admin-api'
+#             (PUT /api/admin/config default), 'operator-local', tests, …
+# ---------------------------------------------------------------------------
+
+model_config_changes_table = Table("model_config_changes", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("key",        String,  nullable=False),
+    Column("old_value",  Float),                    # NULL on first logged write
+    Column("new_value",  Float,   nullable=False),
+    Column("changed_at", String,  nullable=False),  # ISO UTC
+    Column("source",     String),                   # 'operator' | 'admin-api' | …
+)
+Index("ix_model_config_changes_key",
+      model_config_changes_table.c.key, model_config_changes_table.c.changed_at)
 
 # ---------------------------------------------------------------------------
 # Agent 6 additions — wrapped_events  ***FROZEN (analytics P0 cutover)***
@@ -2368,6 +2399,27 @@ _MODEL_CONFIG_DEFAULTS = [
     ("pick_year_decay_r2", 0.85, "D-079: per-year value multiplier for a 2nd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r3", 0.85, "D-079: per-year value multiplier for a 3rd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r4", 0.85, "D-079: per-year value multiplier for a 4th-round pick and deeper (KTC 1QB crowd rate 0.856)"),
+    # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
+    # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
+    # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.
+    # Generation knobs are dark: arm A never imports the fit module.
+    ("fit_score_scale",           400.0, "fit arm: tanh surplus scale — surplus 400 → score ≈ 88.1"),
+    ("fit_score_even",             50.0, "fit arm: score of a zero-surplus (even) trade — the tanh curve midpoint"),
+    ("fit_w_board",                0.40, "fit arm: lens weight L1 (own-board surplus) in the per-side combine"),
+    ("fit_w_div",                  0.30, "fit arm: lens weight L2 (board-vs-consensus divergence) in the combine"),
+    ("fit_w_cons",                 0.30, "fit arm: lens weight L3 (consensus surplus) in the combine"),
+    ("fit_pool_consensus",          8.0, "fit arm pool: top-N roster assets by consensus value"),
+    ("fit_pool_div_seed",           8.0, "fit arm pool: top-N assets by viewer-board-over-seed divergence"),
+    ("fit_pool_div_opp",            8.0, "fit arm pool: top-N assets by opponent-board divergence"),
+    ("fit_pool_cap",               15.0, "fit arm pool: hard cap on unique asset ids per roster (picks compete under it)"),
+    ("fit_max_packages_per_pair", 20000.0, "fit arm: enumeration ceiling per viewer-opponent pair — the ms relief valve"),
+    ("fit_expand_from",            25.0, "fit arm: top-N 1-for-1 survivors used as seeds for multi-asset expansion"),
+    ("fit_min_them",                0.0, "fit arm post-score filter: min them-score to surface; 0 = off (PRD default)"),
+    ("fit_min_aggregate",           0.0, "fit arm post-score filter: min you+them aggregate to surface; 0 = off"),
+    ("fit_r5_mode",                 1.0, "fit arm K7: 1 = R5 need-gate failure kills (live-as-written); 0 = score + tag r5_fail"),
+    ("fit_junk_floor",              0.0, "fit arm: 1 = kill sides padded below asset_floor_abs; 0 = lens 3 tanks junk instead"),
+    ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
+    ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
 ]
 
 
@@ -2580,6 +2632,9 @@ def _migrate_db() -> None:
         ("deck_impressions",   "lane_slot",             "VARCHAR"),
         ("deck_impressions",   "trade_intent",          "VARCHAR"),
         ("bakeoff_runs",       "groups_json",           "TEXT"),
+        # M1 (fit-challenger measurement rail) — stamp of the last funneled
+        # write; NULL until a key's first set_config() after this landed.
+        ("model_config",       "updated_at",            "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4117,11 +4172,13 @@ def get_wrapped_cutover_iso() -> str:
     return ""
 
 
-def set_config(key: str, value: float) -> dict:
+def set_config(key: str, value: float, source: str = "unspecified") -> dict:
     """
-    Update a single model_config value.  Returns the updated row as a dict.
-    Raises KeyError if the key doesn't exist (we don't allow ad-hoc keys).
+    Update one model_config value, stamping updated_at and appending a
+    model_config_changes row — one transaction (M1, fit-challenger LLD §5.1).
+    Raises KeyError for unknown keys (unchanged contract — no ad-hoc keys).
     """
+    now = datetime.now(timezone.utc).isoformat()
     with engine.begin() as conn:
         existing = conn.execute(
             select(model_config_table).where(model_config_table.c.key == key)
@@ -4131,9 +4188,12 @@ def set_config(key: str, value: float) -> dict:
         conn.execute(
             update(model_config_table)
             .where(model_config_table.c.key == key)
-            .values(value=value)
+            .values(value=value, updated_at=now)
         )
-    return {"key": key, "value": value}
+        conn.execute(insert(model_config_changes_table).values(
+            key=key, old_value=existing.value, new_value=value,
+            changed_at=now, source=source))
+    return {"key": key, "value": value, "old_value": existing.value}
 
 
 def list_config() -> list[dict]:

@@ -792,6 +792,8 @@ Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` s
 
 | `bakeoff_include_challenger` | 1.0 (**arm D in**) | Arm roster (D-095, [PRD](plans/landability-challenger/PRD.md) §5 A1). `1` = arm `challenger` — the **landability challenger** — is generated, attributed and logged on every organic bake-off job, gaining a `divergence` and a `consensus` group. `0` restores the exact pre-D-095 roster with no deploy, and gives back the arm's whole cost: one extra full `generate_trades` per job, on the same sequential thread. **It is generated, not served.** `bakeoff_serve_interleaved` is 0, so users still see arm `current`; lighting interleaved serving is a separate operator decision. Never confuse this arm with `baseline` — see the arm-D section below. |
 | `bakeoff_include_gen_v2` | 1.0 (**arm C in**) | Arm roster (D-095). `0` drops arm `gen_v2` so the head-to-head is `current` vs `challenger` alone. **Composition only** — it does not change `backend/trade_gen_v2.py`, which is out of the challenger's scope. Useful because arm C currently forfeits everything it generates (see `bakeoff_serve_interleaved`), so its slots are pure deck shrinkage. |
+| `bakeoff_include_fit` | 0.0 (**arm fit out**) | Arm roster (fit challenger, [LLD](plans/fit-challenger/LLD.md) §2.1). `1` = arm `fit` (`backend/trade_gen_fit.py` via `bakeoff_runner.gen_fit_cards`) is generated, logged to `arms_json` and M3-stamped on every organic bake-off job — the W3 dark-roster flip, an operator `scripts/set_knob.py` write gated on the W0 dry-run ms bar. `0` (default) = never generated. Rostering is NOT serving — see the next bit. |
+| `bakeoff_serve_fit` | 0.0 (**fit dark**) | Serve bit (F5b, fit-only by design — generalize on the second consumer). With fit rostered: `0` = fit generates, logs and registers agreement, but is **excluded from the draft participants on BOTH draft paths** (`compose_deck` and the `bakeoff_group_size` = 0 `team_draft` fallback — HLD F-6), so no fit card can reach a served deck; `1` = fit drafts like any arm (the W4 flip). The M4 serve-bit-leak tripwire (`scripts/bakeoff_readout.sql` §7a) is the standing check that `deck_impressions.model_arm = 'fit'` rows never appear while this is 0. |
 
 **Kill values that restore Phase 3 exactly:** `bakeoff_group_size` = 0, `bakeoff_deck_limit` = 0, `bakeoff_include_baseline` = 1, `bakeoff_include_challenger` = 0 — the uncapped three-arm team draft with no group composition. Asserted, not assumed (`test_bakeoff_composition.py::test_phase3_kill_values_restore_the_uncapped_three_arm_draft`).
 
@@ -800,6 +802,30 @@ Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` s
 **Measured lane supply (18 live runs, 2026-08-19, 527 pooled cards).** `window` is **24.7%** of live supply overall — `current_consensus` 28.1% (114/405), `gen_v2` 16.2% (16/99), `current_divergence` **0%** (0/23). A 5/5 split asks each group for 50% outlook, so the outlook quota is unfillable by arithmetic, not by defect: the label itself is healthy (every pooled card carried a lane; the `(none)` bucket was empty in all 54 group-runs). This is why the fix was `bakeoff_lane_reallocate` rather than a re-tuned `bakeoff_group_value_slots` — reallocation reaches the same 16.0 cards/deck at **every** split from 5/5 to 10/0, so no magic number has to be maintained against drifting supply.
 
 **Not a knob, but part of the same hygiene contract:** while `trade.bakeoff` is on, `trade_k_like` and `trade_k_pass` are forced to 0 at the swipe path (PLAN.md §3.4 Channel 1) regardless of their `model_config` values, so a swipe on one arm's card cannot teach the board the next deck's arms read. `elo_k` (ranking votes) is deliberately untouched.
+
+#### Fit challenger — arm `fit` generation knobs (`backend/trade_gen_fit.py`)
+
+Fifteen keys, consumed **only** by `trade_gen_fit` — a module arm A never imports and `trade_service` never calls (the organic path is proven byte-identical by `test_organic_never_imports_fit` + the flag-off golden). All read through `trade_service._c`, so thread-local overrides, `reload_config()`, and the per-run `config_json` snapshot all work; all inert unless `bakeoff_include_fit` = 1. Spec: [plans/fit-challenger/LLD.md](plans/fit-challenger/LLD.md) §4 (the full 17-key table, dispositions in [plans/three-model-bakeoff/scope-phase2.md](plans/three-model-bakeoff/scope-phase2.md)). PRD defaults; every operator change goes through `scripts/set_knob.py` so it lands in `model_config_changes`.
+
+| Key | Default | Role (consumer) |
+|---|---|---|
+| `fit_score_scale` | 400.0 | Scorer curve `clamp(even + 50·tanh(s/scale), 0, 100)` — surplus +400 scores ≈ 88.1 (`_score`) |
+| `fit_score_even` | 50.0 | The zero-surplus (even-trade) midpoint of the same curve (`_score`) |
+| `fit_w_board` | 0.40 | Lens weight L1 — own-board surplus (`_score_candidate` combine, renormalized over fired lenses) |
+| `fit_w_div` | 0.30 | Lens weight L2 — board-vs-consensus divergence (same combine) |
+| `fit_w_cons` | 0.30 | Lens weight L3 — consensus surplus (same combine) |
+| `fit_pool_consensus` | 8.0 | Pool sub-pool A: top-N roster assets by consensus value (`_build_pool`) |
+| `fit_pool_div_seed` | 8.0 | Pool sub-pool B: top-N by \|board − seed\| (boarded rosters only) |
+| `fit_pool_div_opp` | 8.0 | Pool sub-pool C: top-N by \|board − opponent board\| (both boarded) |
+| `fit_pool_cap` | 15.0 | Hard cap on unique asset ids per roster pool — picks always enter the union but compete under the cap (LLD §8 R-c) |
+| `fit_max_packages_per_pair` | 20000.0 | Per-pair enumeration ceiling — the ms relief valve; W3 rosters at 5000 first (`_enumerate_pair`) |
+| `fit_expand_from` | 25.0 | Top-N 1-for-1 survivors seeding the multi-asset expansion (`_enumerate_pair`) |
+| `fit_min_them` | 0.0 (**off**) | Post-score presentment floor on the them-score (`_apply_post_filters` step 1). Defaulting it on would recreate the `rv ≥ gv` deletion this arm exists to remove |
+| `fit_min_aggregate` | 0.0 (**off**) | Post-score presentment floor on you+them (same step) |
+| `fit_r5_mode` | 1.0 | K7 (G6 R5 need gate) mode: `1` = live-as-written kill; `0` = predicate still runs, failure tags `r5_fail` + counts `r5_fail_scored`, no score change (LLD §8 R-d). Flipping to 0 is F7's pre-registered iterate action, never a build default |
+| `fit_junk_floor` | 0.0 (**off**) | `≥ 1` arms the live `filler_ok` junk knockout (kills count under `"junk"`); default lets junk score badly instead (PRD §3) |
+
+**Knob-change log (M-rail, PR-M).** `PUT /api/admin/config/<key>` accepts an optional body `source` (string, ≤64 chars, default `"admin-api"`), stamps `model_config.updated_at`, appends a `model_config_changes` row in the same transaction, and returns `old_value` in the response (all additive). `scripts/set_knob.py KEY VALUE` is the blessed operator CLI (`source='operator'`; goes through the route because only the route triggers the live `reload_config()` pair). See [data-dictionary.md](data-dictionary.md) → `model_config_changes`.
 
 ### F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)
 

@@ -323,7 +323,18 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                 // different in shape. Absent on non-top cards + other paths.
                        { "shape": "consolidation"|"pick_heavy"|"youth_heavy"|"balanced",
                          "give_player_ids": ["...", ...],
-                         "recipient_value_delta_pct": float } ]
+                         "recipient_value_delta_pct": float } ],
+  "fit":             {                          // OPTIONAL — bake-off arm `fit` only (flag trade.bakeoff +
+                                                // knob bakeoff_include_fit; docs/plans/fit-challenger/LLD.md
+                                                // §1.7/§3.4). The dual 0–100 payload; additive, clients
+                                                // ignore it in v1 (no mobile/web render — scope waiver).
+                       "you": float, "them": float,   // 0–100 each, 1-dp
+                       "aggregate": float,            // you + them, 0–200
+                       "bucket": "both_high"|"mixed"|"you_tilt"|"them_tilt"|"both_ok"|"weak",
+                       "boards": "both"|"viewer"|"partner"|"none",  // data-availability — the analysis key
+                       "ver": "fit-1", "r5_fail": false,
+                       "lenses": { "you":  { "board": float|null, "vs_consensus": float|null, "consensus": float },
+                                   "them": { "board": float|null, "vs_consensus": float|null, "consensus": float } } }
 }
 ```
 
@@ -693,7 +704,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/admin/config` | Read all `model_config` entries. **Auth: X-Cron-Secret** |
-| PUT | `/api/admin/config/<key>` | Update one `model_config` value (hot-reloads ranking + trade math). **Auth: X-Cron-Secret** |
+| PUT | `/api/admin/config/<key>` | Update one `model_config` value (hot-reloads ranking + trade math). **M-rail (fit-challenger PR-M, additive):** optional body `source` (string, truncated to 64 chars, default `"admin-api"`) attributes the write; the route funnels through `database.set_config`, which stamps `model_config.updated_at` and appends a `model_config_changes` row in the same transaction; the response gains `old_value`. `scripts/set_knob.py` is the blessed operator CLI (`source='operator'`) — it goes through this route because only the route triggers the live `reload_config()` pair. **Auth: X-Cron-Secret** |
 | GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`). **Auth: X-Cron-Secret** |
 | PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`). **Auth: X-Cron-Secret** |
 | GET | `/api/trades/flags/admin` | Operator readback of bad-trade flags (`?since_id=N&limit=M`, max 500) → `{items, count, next_since_id}` — same paging contract as `/api/feedback/admin`. **Auth: X-Cron-Secret** |

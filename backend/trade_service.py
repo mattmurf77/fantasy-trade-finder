@@ -834,6 +834,82 @@ _DEFAULT_CFG: dict[str, float] = {
     # head-to-head is `current` vs `challenger` (composition only — it does
     # NOT change backend/trade_gen_v2.py, which is out of the arm's scope).
     "bakeoff_include_gen_v2":     1.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — bake-off arm `fit` K-chain knobs (PR-F1,
+    # docs/plans/fit-challenger/LLD.md §1.6 + §4). Consumed ONLY by
+    # backend/trade_gen_fit.py, a module arm A never imports and
+    # trade_service never calls. They live here because _c() is the
+    # accessor the fit K-chain reads (thread-local overrides and
+    # reload_config() both work) and snapshot_config() must capture them
+    # per run. Five registrations per key, same commit as the consumer
+    # (LLD §4): this dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS
+    # in test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row.
+    # ------------------------------------------------------------------
+    # K7 (G6 R5 need gate) mode inside the fit K-chain. 1.0 (default) =
+    # the live predicate kills exactly as written (PRD §3 K7). 0.0 = the
+    # predicate still RUNS but a failure does not kill: the candidate is
+    # tagged `r5_fail` and counted `r5_fail_scored`, with NO score change
+    # in v1 (LLD §8 R-d). Flipping to 0 is F7's pre-registered iterate
+    # action at the S4 verdict, never a build-time default.
+    "fit_r5_mode":                1.0,
+    # Junk-filler kill inside the fit K-chain. 0.0 (default) = no junk
+    # knockout — this arm deliberately lets junk score badly instead
+    # (PRD §3 "explicitly not knockouts"). >= 1.0 arms the live
+    # filler_ok predicate (kills count under "junk"), each side's value
+    # accessor being that team's raw board when boarded, else consensus.
+    "fit_junk_floor":             0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — pool / scorer / enumerator knobs (PR-F2, LLD §1.4,
+    # §1.5, §1.7, §1.9 + §4). Same five-registration discipline and the
+    # same "consumed ONLY by backend/trade_gen_fit.py" posture as the
+    # PR-F1 block above.
+    # ------------------------------------------------------------------
+    # Scorer curve (LLD §1.7): score = clamp(even + 50·tanh(s / scale),
+    # 0, 100). scale 400 ⇒ a +400 surplus scores ≈ 88.1; even is the
+    # zero-surplus midpoint.
+    "fit_score_scale":          400.0,
+    "fit_score_even":            50.0,
+    # Per-side lens weights (L1 own-board, L2 board-vs-consensus, L3
+    # consensus), renormalized to sum 1 over the lenses that fired.
+    "fit_w_board":                0.40,
+    "fit_w_div":                  0.30,
+    "fit_w_cons":                 0.30,
+    # Pool builder (LLD §1.4): per-roster sub-pool sizes and the hard cap
+    # on unique asset ids (picks always enter the union but compete under
+    # the cap — LLD §8 R-c).
+    "fit_pool_consensus":         8.0,
+    "fit_pool_div_seed":          8.0,
+    "fit_pool_div_opp":           8.0,
+    "fit_pool_cap":              15.0,
+    # Enumerator budget (LLD §1.5): hard per-pair enumeration ceiling and
+    # the number of top 1-for-1 survivors used as multi-asset expansion
+    # centerpieces.
+    "fit_max_packages_per_pair": 20000.0,
+    "fit_expand_from":           25.0,
+    # Post-score presentment filters (LLD §1.9 step 1) — defaults 0 = off
+    # (PRD §4: defaulting fit_min_them on would recreate rv ≥ gv).
+    "fit_min_them":               0.0,
+    "fit_min_aggregate":          0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — roster + serve bits (PR-F3, LLD §2.1 + §4).
+    # Disposition B: arm roster / serving bits, not generation — read only
+    # by bakeoff_runner before or after any arm runs; an arm cannot
+    # observe them. Same five-registration discipline as the fit_* keys.
+    # ------------------------------------------------------------------
+    # 0 (default) = arm `fit` is not rostered: never generated, never
+    # drafted, never logged. 1 = fit generates + logs on every organic
+    # bake-off job (W3's dark-roster flip — an operator set_knob write).
+    "bakeoff_include_fit":        0.0,
+    # 0 (default) = a rostered fit generates, logs to arms_json, and is M3-
+    # stamped, but is EXCLUDED from the draft participants on BOTH draft
+    # paths (HLD F-6) — no fit card can reach a served deck. 1 = fit
+    # drafts like any arm (W4's serving flip). Fit-only bit by design
+    # (PLAN-v2 F5b): generalize on the second consumer, not the first.
+    "bakeoff_serve_fit":          0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

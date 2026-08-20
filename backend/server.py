@@ -4194,6 +4194,16 @@ def _log_deck_signal_impressions(
             _agree = bakeoff_run.also_proposed_by(card)
             if _agree:
                 features["also_proposed_by"] = _agree
+            # Fit challenger (LLD §3.3, T2): BOTH keys on EVERY bake-off
+            # row, null-valued when absent — the M4 null-share tripwire
+            # needs absence to be impossible. They ride INSIDE features_json
+            # (one column), so the executemany first-row-keys trap
+            # (save_deck_impressions) cannot drop them. `fit` is non-null
+            # only on served fit-arm cards; `fit_diag` on every card the M3
+            # stamp reached. Flag-off rows are byte-identical — both lines
+            # sit inside the `bakeoff_run is not None` guard.
+            features["fit"]      = getattr(card, "fit", None)
+            features["fit_diag"] = getattr(card, "fit_diag", None)
         if getattr(card, "wildcard", False):
             features["wildcard"] = True
             features["wildcard_pool_size"] = getattr(
@@ -5671,6 +5681,8 @@ def _run_trade_job(
                     **{**_generate_kwargs, **ov}),
                 gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
                     trade_service, {**_generate_kwargs, **ov}),
+                gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
+                    trade_service, {**_generate_kwargs, **ov}),
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
                 # client and were persisted nowhere else. The trade settings
@@ -5682,6 +5694,26 @@ def _run_trade_job(
             final_cards = bakeoff_run.served_deck()
         else:
             final_cards = trade_service.generate_trades(**_generate_kwargs)
+
+        # M3 (R-11) — diagnostic fit stamp on EVERY bake-off card of EVERY
+        # arm, so the readout can bucket-match arm B against fit. Post-
+        # ranking, attribute-only, and inert: nothing downstream reads
+        # fit_diag except the features_json copy in
+        # _log_deck_signal_impressions (test_fit_diag_inert enforces).
+        if bakeoff_run is not None:
+            try:
+                from .trade_gen_fit import stamp_fit_diag  # lazy — the
+                # organic (bakeoff_run is None) path never executes this
+                # import
+                stamp_fit_diag(
+                    {a: r.cards for a, r in bakeoff_run.arms.items()},
+                    players  = players_dict,
+                    league   = g_league,
+                    user_elo = elo_map_rt,
+                    seed_elo = seed_map,
+                )
+            except Exception as fd_err:
+                log.warning("fit_diag stamp failed (non-fatal): %s", fd_err)
 
         # F7 — split the over-generated list into the served deck (top
         # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
@@ -11019,6 +11051,13 @@ def trade_card_to_dict(card, players: dict) -> dict:
     need_fit = getattr(card, "need_fit", None)
     if need_fit is not None:
         out["need_fit"] = need_fit
+    # Fit challenger (bake-off arm `fit`, LLD §3.4) — the dual-score payload
+    # {you, them, aggregate, bucket, boards, ver, r5_fail, lenses}, only ever
+    # present on fit-arm cards inside a bake-off deck. Additive: clients
+    # ignore unknown keys (no mobile/web render in v1 — scope.md §3 waiver).
+    _fit = getattr(card, "fit", None)
+    if _fit is not None:
+        out["fit"] = _fit
     # Interview phase 2 — two-lane label ("window" | "value"), only when
     # trade.lanes stamped it (user has a resolved window).
     lane = getattr(card, "lane", None)
@@ -16653,8 +16692,10 @@ def admin_config_list():
 def admin_config_update(key: str):
     """
     PUT /api/admin/config/<key>
-    Body: {"value": <float>}
-    Updates the config value, reloads both service modules, returns {key, value}.
+    Body: {"value": <float>, "source": <optional str, default "admin-api">}
+    Updates the config value, stamps model_config.updated_at, appends a
+    model_config_changes row attributed to `source` (M1 knob log), reloads
+    both service modules, returns {key, value, old_value}.
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
@@ -16665,7 +16706,8 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
-        result = set_config(key, new_value)
+        source = str(body.get("source") or "admin-api")[:64]
+        result = set_config(key, new_value, source=source)
 
         # Reload live config in both service modules so the change takes
         # effect immediately (no server restart required).
