@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
 - [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
@@ -27,6 +28,25 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
+
+Built dark on `claude/trade-suggestions-review-69c9eb` (see HANDOFF + CHANGELOG same date).
+*Why now:* the whole serving program is gated on operator calls, not engineering.
+
+1. **Operator: work the [PRD-build decision register](../docs/plans/fit-challenger/PRD-build.md)** —
+   9 items; K1 2-2/3-3 reading, `trade.outlook_direction` flip, R-8 rostering, ms bar are the
+   live ones.
+2. **Prod replay-board dry run** (league `1312140920132497408`, read-only) + baseline readout
+   snapshot before any serving flip.
+3. **W1 re-light** per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md): screen round
+   B+D+C, `bakeoff_group_size=0`, daily deck tripwires (investigate <22, revert <18 ×2 days).
+4. Tester onboarding per [tester-protocol.md](../docs/plans/trade-engine-accuracy/tester-protocol.md)
+   — boards ≥100 votes, declared outlooks; program goal ≥2 leagues with 3+ boards (gen_v2's
+   re-entry condition).
+
+*(Cap note: added while the 7-item cap is already blown — this is the current operative work;
+the 2026-08-08/08-11 sections remain first in line to drop.)*
 
 ## 2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume
 
