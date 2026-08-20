@@ -12,6 +12,8 @@ import { TickLabel, Button, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
+import CardImpactBlock from './CardImpactBlock';
+import type { CardImpactState } from '../state/useCardImpact';
 import SendInSleeperButton from './SendInSleeperButton';
 import DeclineReasonPanel, {
   type DeclineReasonPanelProps,
@@ -49,6 +51,12 @@ interface Props {
   // edited card's /api/trade/evaluate round-trip re-prices the package.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
+  // #357 — per-card lineup + playoff-odds impact, fetched by the HOST for the
+  // fronted card only (operator: "compute on the fronted card only"). Absent
+  // on peek cards, match/awaiting mounts and read-only cards, which is what
+  // keeps a 30-card deck at one simulation rather than thirty. Prop-driven
+  // rather than self-fetching, per the components/ convention.
+  cardImpact?: CardImpactState | null;
   // Player context menu (teardown S3 PRD-02, flag ux.player_context_menu).
   // When set (screens pass it only while the flag is on), long-pressing ANY
   // player row opens the shared context menu instead of the legacy
@@ -141,6 +149,7 @@ function TradeCardComp({
   onToggleUntouchable,
   onSwapPlayer,
   repricing = false,
+  cardImpact = null,
   onPlayerMenu,
   fitTargetPositions,
   onKeepSide,
@@ -645,6 +654,19 @@ function TradeCardComp({
           themLabel={`@${data.opponent_username}`}
         />
       )}
+
+      {/* #357 — lineup movement + playoff-odds shift for THIS trade.
+          Mounted here on purpose: D-025 fixed the card's vertical order as
+          disposition pair -> TradeValueBar -> "any future card odds block",
+          and this is that block. Host-fetched (see useCardImpact) and only
+          for the fronted card, so a peek/match/read-only mount passes
+          nothing and costs nothing. */}
+      {cardImpact ? (
+        <CardImpactBlock
+          loading={cardImpact.loading}
+          evaluation={cardImpact.evaluation}
+        />
+      ) : null}
 
       {/* Edited-card re-price in flight — the value bar above is hidden
           (give/receive cleared on swap) until fresh numbers land. */}

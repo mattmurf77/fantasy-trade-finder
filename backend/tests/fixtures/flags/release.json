@@ -62,6 +62,7 @@
   "trade_gen.v2": false,
   "trade.presentment_rules": true,
   "outlook.odds": true,
+  "outlook.trade_impact": true,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,
@@ -197,9 +198,9 @@
   "trades.player_offers_calc": true,
   "_comment_obs_api_events": "2026-08-09 operator-directed API observability (backend/api_observability.py): inbound + outbound API event capture into user_events (server-fired api_call/api_request rows), errors always + successes 1-in-N sampled (model_config obs_success_sample_n), 30d retention purge (FTF_OBS_RETENTION_DAYS). Ships ON; this key is the kill switch. OFF = zero event writes, zero overhead beyond a flag check, byte-identical responses.",
   "obs.api_events": true,
-  "_comment_feedback_decline_reasons": "2026-08-17 decline-reason capture (docs/plans/decline-reason-capture/SPEC.md). Mirrors config/features.json — see the note there. Ships ON for all users; this key is the one-line kill switch.",
+  "_comment_feedback_decline_reasons": "2026-08-17 decline-reason capture (docs/plans/decline-reason-capture/SPEC.md). Mirrors config/features.json \u2014 see the note there. Ships ON for all users; this key is the one-line kill switch.",
   "feedback.decline_reasons": true,
-  "_comment_trade_bakeoff": "2026-08-18 three-model bake-off Phase 3 (docs/plans/three-model-bakeoff/PLAN.md). Mirrors config/features.json — see the note there. Ships OFF: the runner fans an organic trade job out into three arms, interleaves them team-draft and attributes every card, but nothing generates or serves differently until this key is flipped.",
+  "_comment_trade_bakeoff": "2026-08-18 three-model bake-off Phase 3 (docs/plans/three-model-bakeoff/PLAN.md). Mirrors config/features.json \u2014 see the note there. Ships OFF: the runner fans an organic trade job out into three arms, interleaves them team-draft and attributes every card, but nothing generates or serves differently until this key is flipped.",
   "trade.bakeoff": true,
   "trades.presentation_v2": false
 }
