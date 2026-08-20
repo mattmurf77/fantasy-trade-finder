@@ -247,6 +247,44 @@ Row **order** is a sibling encoding: a surface presenting the rows as projected 
 
 ---
 
+## Playoff band → inferred window (#371, flag `trades.window_from_odds`, D-111)
+
+A second, narrower encoding riding the same bands as the section above. When `trades.window_from_odds` is on and the league qualifies, the Team Review window beat's verdict is derived from the band — and the derivation is **server-side**. A client renders `window.odds.implied`; it must never map a band to a window itself, for the same reason it must never map a percentage to a band.
+
+| `standing.outlook.band` | `window.odds.implied` |
+|---|---|
+| `likely` | `contender` |
+| `tossup` | `not_sure` |
+| `unlikely` | `rebuilder` |
+
+Three rules travel with the map and are part of the invariant:
+
+- **The extremes are unreachable.** `championship` and `jets` never appear, exactly as `infer_team_outlook` refuses them: a simulated 71 % does not justify α = 1.00, and those two stay reserved for self-declaration (see § Team outlook modes).
+- **An unmapped band is `null`, never a silent `not_sure`.** If `playoff_band` ever gains a fourth value, the server returns `implied: null` and falls back to the roster heuristic with `odds_reason: "odds_unavailable"`. A client that defaults an unknown band to a window would invent an opinion.
+- **`window.source` is the authority on which model spoke**, and `window.roster_inferred` always carries the roster heuristic's own verdict. Both ship together so the two definitions of "contender" are visible at once rather than one silently replacing the other. A client must not infer the source from whether `odds` is present — the band is also shipped when it was **refused** (preseason).
+
+**Locations to update together:** `backend/team_review.py` (`WINDOW_FROM_BAND`, `resolve_window_from_odds`), `mobile/src/api/teamReview.ts` (`TeamReviewWindow.odds` / `.source` / `.odds_reason`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat). Backend owns the mapping; no client holds a copy.
+
+---
+
+## Net first-round capital — `provenance` and `applied` (#365, flag `trade.outlook_net_firsts`, D-110)
+
+`window.signals.firsts` carries the net-first-round-pick signal. Two of its fields are cross-client contracts rather than data, because both encode *absence of knowledge*, and absence of knowledge is exactly what a client is most likely to render as a confident zero.
+
+| `provenance` | Meaning | May the client show a number as a signal? |
+|---|---|---|
+| `observed` | at least one round-1 pick in this league sits under an owner other than its original | yes |
+| `none_traded` | round-1 rows exist, but none is recorded as having moved — **either** nobody has traded a first **or** the trade history predates capture, and the two are indistinguishable from the data | no — state both possibilities |
+| `absent` | no round-1 rows for this league at all (ESPN without asserted picks, an MFL crosswalk gap, demo, unsynced) | no — state that there are no records |
+
+- **`applied` is read, never derived.** It says whether the term actually entered `score`. It is *not* recoverable from `provenance` (the weight knob may be 0) and it is *not* recoverable from `net_share == 0` (a genuine net of zero is a real, scored signal). A client that infers it will eventually disagree with the score it is printing.
+- **The counts are shown even when the term is refused.** `held` / `own_total` / `traded_away` / `acquired` are facts about the league; only their *interpretation* is withheld.
+- **A NULL original owner is not a trade.** The server reads an un-attributable row as "never moved" rather than inventing a counterparty; no client should apply a different rule to any pick provenance it renders.
+
+**Locations to update together:** `backend/trade_service.py` (`first_round_signal`), `backend/server.py` (`_first_round_ledgers`), `mobile/src/api/teamReview.ts` (`FirstsProvenance`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat's firsts card).
+
+---
+
 ## Consensus-gap direction — which list is the sell list (#367, D-100, 2026-08-20)
 
 `GET /api/trends/consensus-gap` has **three consumers** — mobile Trends

@@ -65,9 +65,24 @@ export interface TeamReviewStanding {
   };
 }
 
+/** #365 — why the net-first-round term is or is not being counted. NEVER infer
+ *  this from a zero `net`: `none_traded` and a genuine net of 0 look identical
+ *  in the numbers and mean completely different things.
+ *    observed     at least one first in this league is recorded under an owner
+ *                 other than its original — the ledger is real, the term counts
+ *    none_traded  rows exist but nothing is recorded as having moved: either
+ *                 nobody has traded a first, or the history predates capture.
+ *                 Not counted, and the card must say so
+ *    absent       no round-1 rows for this league at all (ESPN without asserted
+ *                 picks, MFL crosswalk gap, demo, unsynced). Not counted */
+export type FirstsProvenance = 'observed' | 'none_traded' | 'absent';
+
 export interface TeamReviewWindow {
   /** Only ever contender | rebuilder | not_sure — inference never claims an
-   *  extreme. `options` still offers all five, because a user may DECLARE one. */
+   *  extreme. `options` still offers all five, because a user may DECLARE one.
+   *  Under `trades.window_from_odds` this is the verdict the beat ACTS ON,
+   *  which may have come from the playoff band rather than the roster — read
+   *  `source` to know which, and `roster_inferred` for the heuristic's answer. */
   inferred: OutlookOption;
   declared: OutlookOption | null;
   signals: {
@@ -76,6 +91,23 @@ export interface TeamReviewWindow {
     pick_share: number;
     equal_pick_share: number;
     score: number;
+    /** #365 "number of 1sts owned vs traded away". Present only while
+     *  `trade.outlook_net_firsts` is on, so the whole ledger card is
+     *  conditional on this object rather than on any flag the client holds. */
+    firsts?: {
+      held: number;
+      own_total: number;
+      traded_away: number;
+      acquired: number;
+      /** acquired − traded_away. */
+      net: number;
+      /** net / own_total, clamped to ±`model.net_firsts_cap`. */
+      net_share: number;
+      provenance: FirstsProvenance;
+      /** Whether the term actually entered `score`. Read this — do not derive
+       *  it from `provenance`, and never from `net_share === 0`. */
+      applied: boolean;
+    };
   };
   /** #365 — every input the inference actually used. Read these rather than
    *  hardcoding a threshold in copy: the screen shipped saying "age 23 and
@@ -90,7 +122,31 @@ export interface TeamReviewWindow {
     w_pick_share: number;
     contender_cut: number;
     rebuilder_cut: number;
+    /** Present only alongside `signals.firsts` — the same flag ships both, so
+     *  the beat can never render a ledger without the weight that scored it. */
+    w_net_firsts?: number;
+    net_firsts_cap?: number;
   };
+  /** #371 — which model produced `inferred`. Absent entirely while
+   *  `trades.window_from_odds` is off, which is what keeps the flag-off payload
+   *  identical to what build 122 already parses. */
+  source?: 'roster' | 'odds';
+  /** The roster heuristic's own verdict, ALWAYS — even when the odds drove.
+   *  Both definitions of "contender" ship together rather than one silently
+   *  replacing the other. */
+  roster_inferred?: OutlookOption;
+  /** The simulated band and what it implies. Present when the sim produced a
+   *  band, even in preseason — when it is shown but deliberately not obeyed. */
+  odds?: {
+    band: PlayoffBand;
+    playoff_pct: number;
+    implied: OutlookOption | null;
+  } | null;
+  /** Why the odds did NOT drive, when they did not. `preseason` means the band
+   *  exists and was refused (completed_weeks === 0 is the sim's weakest
+   *  window); `odds_unavailable` means there was no band to read — the league
+   *  is not Sleeper, `outlook.odds` is off, or the sim failed. */
+  odds_reason?: 'odds_unavailable' | 'preseason' | null;
   options: OutlookOption[];
 }
 

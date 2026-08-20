@@ -267,6 +267,18 @@ _DEFAULT_CFG: dict[str, float] = {
     "infer_w_pick_share":         2.00,
     "infer_contender_cut":        0.08,
     "infer_rebuilder_cut":       -0.08,
+    # #365 — net first-round-pick capital (flag: trade.outlook_net_firsts).
+    # Weight on clamp((firsts acquired − firsts traded away) / firsts
+    # originally yours). Calibrated on the only real pick corpus available
+    # (docs/feedback/items/365-window-signals/scope.md §7.1): across 24
+    # member-league pairs |net_share| <= 0.75, so at 0.10 the observed
+    # contribution range is ±0.075 against a not_sure band ±0.08 wide — the
+    # term can move an extreme team ONE bucket and can never move any team
+    # two. Set to 0 to keep the card showing the ledger while it stops
+    # scoring it. The cap binds only a team that shipped more firsts than it
+    # originally owned in the horizon.
+    "infer_w_net_firsts":         0.10,
+    "infer_net_firsts_cap":       1.00,
     # ------------------------------------------------------------------
     # Tier 2 amendment A6 — league-wide deck diversification
     # (flag: trade.deck_diversity — consumed by server._order_deck)
@@ -2619,11 +2631,69 @@ def fit_premium_1for1(
     return True, round(loss, 1)
 
 
+def first_round_signal(ledger: dict | None) -> dict:
+    """#365 — turn a raw first-round-pick ledger into the scoring term's
+    inputs. Pure, and ALWAYS fully shaped: every key is present in every
+    branch, so no client ever has to distinguish "missing" from "zero".
+
+    `ledger` is the four counts a caller derived from `draft_picks` for ONE
+    member, plus one league-wide fact:
+
+        held         round-1 picks this member currently owns
+        own_total    round-1 picks ORIGINALLY this member's (the baseline)
+        traded_away  originally theirs, now someone else's
+        acquired     theirs now, originally someone else's
+        league_any_traded  any round-1 pick ANYWHERE in the league whose
+                     current owner differs from its original owner
+
+    `net = acquired − traded_away` is exactly the operator's ask — *"number of
+    1sts owned vs traded away"* — because `held − own_total` reduces to it:
+    both sides share the "own firsts retained" count, which cancels.
+
+    THE LAST INPUT IS THE HONESTY GATE, and it is why this is not a one-liner.
+    A league whose pick history predates capture shows `original_user_id ==
+    owner_user_id` on every row and therefore reads as "nobody has traded
+    anything" — indistinguishable, from inside this function, from a league
+    where nobody has. So `league_any_traded` gates the term: when nothing in
+    the league is recorded as having moved we refuse to score the member's
+    zero, and `provenance` says which of the three worlds we are in
+    (`observed` / `none_traded` / `absent`) so the card can state it rather
+    than render a confident 0. Operator ruling, 2026-08-20: degrade honestly
+    and say so on the card.
+    """
+    out = {
+        "held": 0, "own_total": 0, "traded_away": 0, "acquired": 0,
+        "net": 0, "net_share": 0.0,
+        "provenance": "absent", "applied": False,
+    }
+    if not ledger:
+        return out
+    out["held"]        = int(ledger.get("held") or 0)
+    out["own_total"]   = int(ledger.get("own_total") or 0)
+    out["traded_away"] = int(ledger.get("traded_away") or 0)
+    out["acquired"]    = int(ledger.get("acquired") or 0)
+    out["net"]         = out["acquired"] - out["traded_away"]
+
+    if out["own_total"] <= 0 and out["held"] <= 0:
+        return out                                  # provenance stays "absent"
+    if not ledger.get("league_any_traded"):
+        out["provenance"] = "none_traded"
+        return out
+
+    out["provenance"] = "observed"
+    cap = abs(_c("infer_net_firsts_cap"))
+    raw = out["net"] / max(out["own_total"], 1)
+    out["net_share"] = round(max(-cap, min(cap, raw)), 4)
+    out["applied"] = bool(FLAGS.trade_outlook_net_firsts)
+    return out
+
+
 def infer_team_outlook(
     roster_ids: list[str],
     players: dict,
     pick_share: float = 0.0,
     num_teams: int = 12,
+    first_round_ledger: dict | None = None,
 ) -> tuple[str, float, dict]:
     """Infer a team's contend↔rebuild window from observable roster shape
     (backlog #1). Pure function: no DB, no I/O — feeds the same
@@ -2635,11 +2705,33 @@ def infer_team_outlook(
       • pick capital share — this team's draft-pick value / league total, centred
                              on an equal split (1/num_teams) so an average pick
                              holder contributes 0
+      • net first-round capital (#365, flag `trade.outlook_net_firsts`) —
+        firsts acquired minus firsts traded away, over the firsts originally
+        yours. Only present when a caller supplies `first_round_ledger`.
 
-    Score (higher = more contending) = w_vet·vet − w_youth·youth − w_pick·(pick − equal).
+    Score (higher = more contending)
+        = w_vet·vet − w_youth·youth − w_pick·(pick − equal) − w_firsts·net_share.
     Buckets into contender / not_sure / rebuilder. The extreme labels
     (championship / jets) are deliberately NOT inferred — inference confidence
     rarely justifies α = 1.00 / 0.10; those stay reserved for self-declaration.
+
+    #365 — TWO INVARIANTS THIS FUNCTION OWES THE REST OF THE APP.
+    Its verdict is not a Team Review number: it feeds `outlook_alpha`, which
+    the engine (`trade_gen_v2.py:986`, `trade_service.py:4250`), the mock draft
+    (`server.py:14013`) and the outlook seed (`server.py:5320`) all consume.
+    Changing the score changes every deck for every user. So:
+
+      INV-365   flag OFF ⇒ `first_round_ledger` is accepted and IGNORED. The
+                returned tuple — outlook, score, and every key of `signals` —
+                equals what this function returned before #365, for every
+                caller, even one that passes a ledger. That is why the two new
+                `model` keys are added INSIDE the flag branch: `model` is
+                rendered on screen, so an unconditional key would advertise a
+                term that is not being applied.
+      INV-365b  flag ON but no ledger ⇒ the score is STILL unchanged. Only the
+                Team Review route builds a ledger today, so lighting the flag
+                moves the window beat and not one deck. Wiring the other three
+                callers is a separate change with its own evidence.
 
     Returns (outlook, score, signals).
     """
@@ -2681,9 +2773,25 @@ def infer_team_outlook(
     }
     signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share,
                "model": model}
+
+    # #365 — the net-firsts term. Gated on the flag AND on a ledger actually
+    # being supplied (INV-365 / INV-365b above). `firsts` and the two extra
+    # `model` keys ride the payload ONLY inside this branch, so a flag-off
+    # caller's `signals` dict is key-for-key what it was before #365.
+    firsts = None
+    if FLAGS.trade_outlook_net_firsts and first_round_ledger is not None:
+        firsts = first_round_signal(first_round_ledger)
+        signals["firsts"] = firsts
+        model["w_net_firsts"]   = _c("infer_w_net_firsts")
+        model["net_firsts_cap"] = _c("infer_net_firsts_cap")
+
     # No roster value to read ⇒ no opinion. Guard before the pick-centering
     # term, which would otherwise read "owns zero picks" as a contend signal.
+    # The firsts term is suppressed here too: a team with no readable roster
+    # has no window, and half a model is not an opinion.
     if total <= 0:
+        if firsts is not None:
+            firsts["applied"] = False
         signals["score"] = 0.0
         return "not_sure", 0.0, signals
     signals["vet_share"]   = vet_val / total
@@ -2695,6 +2803,11 @@ def infer_team_outlook(
         - _c("infer_w_youth_share") * signals["youth_share"]
         - _c("infer_w_pick_share")  * (pick_share - equal_share)
     )
+    # Same sign convention as the pick-capital term above: ACCUMULATING pick
+    # capital reads as rebuilding, so a positive net (more firsts acquired
+    # than shipped) subtracts, and a manager who has sold his firsts gains.
+    if firsts is not None and firsts["applied"]:
+        score -= _c("infer_w_net_firsts") * firsts["net_share"]
     signals["score"] = score
 
     if score >= _c("infer_contender_cut"):

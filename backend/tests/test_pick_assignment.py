@@ -201,6 +201,18 @@ _SEVEN_READ_SITES = frozenset({
     "_roster_eveners", "_user_pick_share", "_run_trade_job",
     "_trade_evaluate_impl", "get_league_picks", "_owned_pick_assets",
     "_power_picks_by_owner",
+    # #365 / D-110, 2026-08-20 — the EIGHTH engine read site, DECIDED here
+    # rather than silently added. `_first_round_ledgers` derives each member's
+    # round-1 pick provenance (held / originally-yours / traded away /
+    # acquired) for the Team Review window beat, and it belongs with the seven
+    # rather than with the assignment surface below for one reason: it must
+    # count the SAME picks `_power_picks_by_owner` prices two lines away in the
+    # same route. A literal `platform` here would make the card say a manager
+    # holds four firsts while the beat above it prices five, on any ESPN league
+    # with `picks.assign_tradeable` on. Hence `_pick_read_source()`, exactly as
+    # its seven neighbours use it. It is also the only site of the eight that
+    # is reached ONLY behind a feature flag (`trade.outlook_net_firsts`, off).
+    "_first_round_ledgers",
 })
 
 #: The assignment surface's own reads. These name a LITERAL provenance

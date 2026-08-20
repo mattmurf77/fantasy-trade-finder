@@ -13,6 +13,14 @@
 ## 2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run (SHIPPED to `main` 2026-08-20)
 
 **Branch:** `claude/trade-suggestions-review-69c9eb` (worktree), on top of PR-F2 `d8a80a5`. **Not committed, not merged** — the finishing package of the fit-challenger build ([PRD-build](../docs/plans/fit-challenger/PRD-build.md) PR-F3 + deferred docs rows).
+## 2026-08-20c — Window signals #365 (net firsts) + #371 (playoff odds) — full gates, BOTH FLAGS DARK, NOT MERGED, on `worktree-agent-a3ea3b1d38e084930`
+
+**Branch:** `worktree-agent-a3ea3b1d38e084930`, cut from `origin/main` at `bc43b6f`. **Not pushed, not merged.**
+Full gates ran — operator did **not** declare express, and explicitly ruled the change outside the express lane (it adds two feature flags and two API fields).
+Scope: [docs/feedback/items/365-window-signals/scope.md](../docs/feedback/items/365-window-signals/scope.md) · code-walk: [code-walk.md](../docs/feedback/items/365-window-signals/code-walk.md) · checklist: [testflight-checklist.md](../docs/feedback/items/365-window-signals/testflight-checklist.md).
+Decisions: [D-110](DECISIONS.md), [D-111](DECISIONS.md).
+
+**Flags, both default OFF and neither graduated:** `trade.outlook_net_firsts`, `trades.window_from_odds`.
 
 **What ran, and what it proves.**
 
@@ -52,6 +60,95 @@ Emitted bucket mix (b, defaults): both_high 47 · mixed 101 · them_tilt 24 · y
 **What is NOT proven, and is owed.** Prod replay boards (league `1312140920132497408`) + baseline M2 readout snapshot — operator, needs prod read access. Constructed-league Elo/boards are synthetic (rank-ladder + hash offsets), so bucket mixes and junk shares are directional, not calibrated. `bakeoff_include_fit` stays 0 (decision 4) until the operator sets the ms bar and answers R-8; `bakeoff_serve_fit` stays 0 regardless.
 
 ---
+| `python3 -m pytest backend/tests -q` | **3646 passed, 1 skipped** (259 s). Baseline before this work on the same tree: **3606 passed, 1 skipped** — +40, all in the new `backend/tests/test_window_signals.py` |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | **clean** |
+| `mobile/tests/check-*.js` — **65** suites (64 pre-existing + the new `check-window-signals.js`) | **0 failed**. `check-window-signals` 10/10, `check-team-review` 7/7 still green |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — **20 of 20** | every one turned its **named** guard red, each source restored with `git checkout --` and verified **by content** (`git diff --quiet`), `__pycache__` cleared before every run, and re-run green |
+
+**The load-bearing evidence is the flag-off invariant, and it is a golden, not a re-derivation.**
+`infer_team_outlook` feeds `outlook_alpha` for the trade engine, the mock draft and the outlook seed,
+so a score change is a deck change for every user. The goldens in `test_window_signals.py` were
+captured by extracting the `bc43b6f` backend tree (`git archive`) and running the same fixtures
+against it — code that had never heard of the new kwarg — rather than by re-deriving the formula the
+module now contains, which would have proved nothing. Two invariants pinned:
+**INV-365** flag OFF ⇒ the ledger kwarg is accepted and ignored, whole tuple equal;
+**INV-365b** flag ON but no ledger ⇒ score still unchanged, because only the Team Review route
+builds a ledger. Together they mean lighting `trade.outlook_net_firsts` moves the window beat and
+**not one deck**.
+
+**Sabotage table — 20 cases.** Harness `scratchpad/sabotage_365_371.py`; per case: apply one targeted
+revert → clear `__pycache__` → run → require red **and** require the *named* guard to be the one that
+failed → `git checkout --` → `git diff --quiet` → clear `__pycache__` → re-run → require green.
+
+| # | Behaviour reverted | Guard | Red | Clean | Green |
+|---|---|---|---|---|---|
+| S1 | term applies with the flag OFF | `test_flag_off_ignores_a_supplied_ledger_entirely` | yes | yes | yes |
+| S2 | term applies with the flag on but no ledger | `test_flag_on_without_a_ledger_is_still_the_golden` | yes | yes | yes |
+| S3 | sign flipped (hoarding reads as contending) | `test_selling_firsts_raises_the_score_and_hoarding_lowers_it` | yes | yes | yes |
+| S4 | `net_share` clamp removed | `test_net_share_is_clamped_by_the_knob` | yes | yes | yes |
+| S5 | uncaptured pick history scores as a confident zero | `test_a_league_with_no_recorded_trades_is_none_traded_not_a_confident_zero` | yes | yes | yes |
+| S6 | empty roster still reports the term applied | `test_empty_roster_never_reports_an_applied_term` | yes | yes | yes |
+| S7 | `window.model` advertises unused knobs | `test_model_carries_the_new_knobs_whenever_the_term_is_live` | yes | yes | yes |
+| S8 | NULL original owner read as a trade | `test_ledger_reader_treats_a_null_original_owner_as_never_moved` | yes | yes | yes |
+| S9 | ledger counts every round, not just firsts | `test_ledger_reader_splits_held_owned_traded_and_acquired` | yes | yes | yes |
+| S20 | ledger stops attributing acquisitions | `test_ledger_reader_splits_held_owned_traded_and_acquired` | yes | yes | yes |
+| S19 | ledger computed then not passed through | `test_window_passes_the_firsts_ledger_through_untouched` | yes | yes | yes |
+| S10 | preseason odds obeyed instead of refused | `test_preseason_refuses_the_band_but_still_reports_it` | yes | yes | yes |
+| S11 | empty band dict treated as a real band | `test_no_band_falls_back_and_names_it` | yes | yes | yes |
+| S12 | #371 keys ship with the flag off | `test_window_is_shape_identical_when_both_flags_are_off` | yes | yes | yes |
+| S13 | heuristic verdict lost when odds override | `test_window_reports_which_model_drove_and_keeps_the_other_one` | yes | yes | yes |
+| S14 | beat hardcodes an age threshold again | `check-window-signals` 1 | yes | yes | yes |
+| S15 | ledger shown but contribution not itemised | `check-window-signals` 2 | yes | yes | yes |
+| S16 | "we ignore traded picks" becomes fixed copy | `check-window-signals` 3 | yes | yes | yes |
+| S17 | `none_traded` no longer distinguished | `check-window-signals` 4 | yes | yes | yes |
+| S18 | a flag-gated field made required in the type | `check-window-signals` 7 | yes | yes | yes |
+
+**One guard in this batch was vacuous, and the sabotage is what found it — recorded because it is the
+more useful finding.** `check-window-signals` claim 2 originally asserted only that the identifier
+`w_net_firsts` appeared somewhere in the `Window` component. It does, unconditionally: the weight is
+destructured at `TeamReviewScreen.tsx:390`. So **S15 deleted the contribution row outright and the
+check stayed green.** It now requires the *product* — the weight × `net_share` on one line, with the
+alias discovered from the source rather than assumed. This is the same class of failure the
+2026-08-20a batch hit (`test_divergence_ignores_unjudged_players` went vacuous while passing), which
+is why the harness requires the **named** guard to fail rather than merely a red run.
+
+**Three pre-existing structural guards fired on this change and were each resolved deliberately, not
+suppressed.** All three are working exactly as designed and are recorded so the resolutions are
+auditable:
+- `test_bakeoff_arm_a_golden::test_no_generation_knob_was_added_without_an_arm_a_decision` — two new
+  `_DEFAULT_CFG` knobs. **Excluded from `MODEL_A_PROFILE`**, with the reason recorded in
+  `docs/plans/three-model-bakeoff/scope-phase2.md`'s exclusion table: they cannot reach generation at
+  all, because the term is gated on a ledger no generator supplies (INV-365b). Pinning a kill value
+  would imply they matter to a deck; they provably do not. Arm-A golden re-run green.
+- `test_pick_assignment::test_w3_02_ast_only_sanctioned_call_sites_name_source` — `_first_round_ledgers`
+  is the **eighth** sanctioned `load_draft_picks` opt-in, added to `_SEVEN_READ_SITES` with the
+  rationale inline: it must count the same picks `_power_picks_by_owner` prices two lines away in the
+  same route, so a literal `platform` would make the card and the beat above it disagree on any ESPN
+  league with `picks.assign_tradeable` on.
+- `test_seed_ui_test_db` (three assertions) — the flag fixtures. Both flags added `false` to
+  `release.json`, `onboarding-v2.json` and `profiles-on.json`, which are asserted to share a key set;
+  deliberately **not** added to `all-on.json` (a client overlay, not a full map), matching the
+  `outlook.odds` precedent.
+
+**Calibration evidence, and the finding that cuts against the feature.** `infer_w_net_firsts = 0.10`
+was set against the only real pick corpus reachable from the session (`data/trade_finder.db`): across
+24 member-league pairs in the two leagues that carry round-1 provenance, `|net_share| ≤ 0.75`, so the
+contribution range is ±0.075 against a `not_sure` band of ±0.08 — one bucket at most, never two,
+pinned by `test_the_term_can_move_one_bucket_and_never_two`. **In both of those leagues the operator
+has traded away zero of his own firsts and acquired one**, so the signal he asked for points *him*
+further toward rebuilder; and **FFV3, the league in the report, has no `draft_picks` rows in that DB
+at all**. Prod Postgres would settle both and was not reachable (the read was denied by the sandbox).
+This is why the flag ships dark and why its graduation criterion is an operator check on prod.
+
+**Not run, and owed:** the manual TestFlight pass
+([testflight-checklist.md](../docs/feedback/items/365-window-signals/testflight-checklist.md)). It is
+the gate on graduating either flag. Note that §C4–C6 (the odds path actually driving) **cannot be
+walked until week 1 is played** — `completed_weeks == 0` today, and the refusal is the designed
+behaviour, so the in-season half of #371 has no runtime evidence yet and must not be claimed.
+
+---
+
 ## 2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`
 
 **Branch:** `claude/team-outlook-experience-27a7a1`, worktree at `origin/main` `a76498e`. **Not pushed, not merged** *(at time of writing — since merged to `origin/main` as PR #152, `bc43b6f`)*.
