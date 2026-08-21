@@ -100,10 +100,14 @@ def test_sub_elite_pieces_earn_nothing():
 
 def test_credit_is_per_elite_piece():
     # Both pieces elite → both earn; sum of credits = rate × Σ elite values
-    # × phase (skew 0 here → phase 1).
+    # × phase (skew 0 here → phase 1). Asserted as the DELTA over the
+    # crown-free value so the pin is independent of the depth benchmark
+    # (which the 2026-08-21 cross-package fix deliberately changed for
+    # this shape — the side no longer holds the trade's best asset).
     v = _market([6500.0, 6500.0], other=[13000.0])
-    # own-best depth: equal pieces → no discount; credit on both pieces.
-    assert v == pytest.approx(13000.0 * (1 + 0.08), rel=1e-6)
+    ts._cfg["crown_rate_market"] = 0.0
+    base = _market([6500.0, 6500.0], other=[13000.0])
+    assert v - base == pytest.approx(13000.0 * 0.08, rel=1e-4)
 
 
 def test_credit_count_independent_on_equal_counts():
@@ -123,8 +127,12 @@ def test_single_asset_side_never_depth_discounted():
     assert v == pytest.approx(3000.0, rel=1e-6)
 
 
-def test_depth_benchmarks_own_best_not_trade_max():
+def test_depth_benchmarks_own_best_at_kill_value():
+    # 2026-08-21 amendment: the original #214 own-max benchmark survives
+    # only at package_bench_trade_wide ≤ 0 (arm A's pin). At the kill
+    # value the pre-fix shape must hold byte-for-byte.
     ts._cfg["crown_rate_market"] = 0.0
+    ts._cfg["package_bench_trade_wide"] = 0.0
     vals = [4000.0, 2000.0]
     # Same package, wildly different other side → identical depth math.
     assert _market(vals, other=[9000.0]) == _market(vals, other=[4500.0])
@@ -132,6 +140,17 @@ def test_depth_benchmarks_own_best_not_trade_max():
     floor, gamma = 0.70, 0.5
     expected = 4000.0 + 2000.0 * (floor + (1 - floor) * (2000.0 / 4000.0) ** gamma)
     assert _market(vals, other=[9000.0]) == pytest.approx(expected, abs=0.1)
+
+
+def test_depth_benchmarks_trade_best_at_default():
+    # …and at the live default the benchmark IS the trade's best asset:
+    # the same package prices LOWER against a 9000 stud than against a
+    # 4500 headliner (docs/reviews/2026-08-21-market-curve-comparison.md
+    # §3b — the four-quarters-buy-a-dollar fix). Full shape pins live in
+    # test_package_benchmark.py.
+    ts._cfg["crown_rate_market"] = 0.0
+    vals = [4000.0, 2000.0]
+    assert _market(vals, other=[9000.0]) < _market(vals, other=[4500.0])
 
 
 def test_total_discount_capped():

@@ -5,12 +5,29 @@ Scope block: docs/plans/three-model-bakeoff/scope-phase3.md.
 
 Contract under test, in `server._run_trade_job`:
 
-  • Flag OFF ⇒ the generation path is byte-identical to pre-bake-off
-    `origin/main`. Proven against a CAPTURED golden
-    (backend/tests/fixtures/bakeoff/flag_off_golden.json, produced by running
+  • Flag OFF ⇒ the generation path is the non-bake-off path, and the only
+    admitted difference from it is the additive NULL columns. Proven
+    against backend/tests/fixtures/bakeoff/flag_off_golden.json.
+    PROVENANCE, and what the golden does and does NOT prove today —
+    the original capture came from running
     backend/tests/support/bakeoff_harness.py inside a worktree at the
-    pre-bake-off SHA), not against an assertion about ourselves. The only
-    admitted difference is the two additive NULL columns.
+    pre-bake-off SHA, so it was EXTERNAL evidence: flag-off output equalled
+    real pre-bake-off `origin/main` output. It has since been RE-CAPTURED
+    from this repo's own code twice, both on 2026-08-21: (1) the
+    operator-approved package-benchmark fix (`package_bench_trade_wide`,
+    docs/reviews/2026-08-21-market-curve-comparison.md §3b) deliberately
+    moved generation for every arm, so the flag-off deck moved with it
+    (2 cards → 1 on this fixture — the receive side of the dropped
+    1-for-2 now prices out of band); (2) the gap auto-sweetener stamps a
+    `gap_sweetener` key (null when unsweetened) on every impression row's
+    features_json. So `test_flag_off_is_byte_identical_to_the_captured_golden`
+    is now a DRIFT DETECTOR against a self-capture, not independent
+    evidence of parity with the pre-bake-off SHA — that historical claim
+    died with the re-capture and is not re-provable without a worktree at
+    that SHA. What still holds independently is the live contract:
+    `test_dark_mode_serves_the_flag_off_deck` compares the flag-ON deck to
+    the SAME golden, so flag-off and bake-off-dark are still proven to
+    serve identical decks through two different code paths.
   • Phase 4 (dark, the default inside the flag): three arms generate and log,
     only arm `current` is served, and the served deck is still the flag-off
     deck.

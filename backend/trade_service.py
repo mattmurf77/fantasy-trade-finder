@@ -92,6 +92,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "package_floor_market":      0.70,
     "package_adj_gamma_market":  0.5,
     "package_discount_cap":      0.35,
+    # 2026-08-21 cross-package benchmark fix (operator-approved; evidence
+    # docs/reviews/2026-08-21-market-curve-comparison.md §3b: the own-max
+    # benchmark let 4 mids buy a stud at ~5% haircut — the served
+    # Rice+Etienne+Swift+Corum → Nacua card scored 0.939/fair vs
+    # FantasyCalc 1.362 / KTC 2.260). > 0 ⇒ a multi-asset side that does
+    # NOT hold the trade's best asset is depth-benchmarked against the
+    # TRADE's best asset (v_max) at package_floor_cross; ≤ 0 ⇒ the
+    # pre-fix own-max math, byte-identical (arm A's pin).
+    "package_bench_trade_wide":  1.0,
+    # Contribution floor used ONLY on the cross-benchmarked side above —
+    # lower than package_floor_market because the whole point is that
+    # pieces small relative to the stud being bought stop holding ≥ 70%
+    # of face. 0.40 prices the Nacua 4-for-1 at 0.709, between
+    # FantasyCalc (0.734) and the pre-#214 heavy shape (0.692). Inert
+    # while package_bench_trade_wide ≤ 0.
+    "package_floor_cross":       0.40,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -440,6 +456,17 @@ _DEFAULT_CFG: dict[str, float] = {
     "v3_pool_size":              12.0,   # per-side candidate pool for exact enumeration
     "sweetener_band":             0.15,  # fairness shortfall band eligible for a sweetener
     "sweetener_max_cards":        2.0,   # max sweetened cards per opponent pair
+    # 2026-08-21 gap auto-sweetener (operator-commissioned; the ratio gate
+    # is scale-blind, so a "fair" 0.85 on a big package can still be a
+    # late-1st of absolute consensus gap — CHANGELOG 2026-08-21: 15% of
+    # served cards carried gap > a late 1st). When a candidate card's
+    # |give_value − receive_value| exceeds this threshold (value units;
+    # 1539 = one late 1st, the operator's agreed line), generation tries
+    # to close it by ADDING the smallest sufficient asset from the richer
+    # side's roster (trade_optimizer.close_value_gap). Runs at generation
+    # time per-arm, never post-draft. ≤ 0 disables the pass entirely
+    # (arm A's pin — the pre-wave engine had no sweetener).
+    "sweetener_gap_threshold": 1539.0,
     "cycle_edge_min_gain":      100.0,   # min per-transfer marginal gain for a cycle edge
     "cycle_min_net":            200.0,   # min net gain per team for a 3-team cycle
     "cycle_max_results":          3.0,   # max 3-team cycles returned per league
@@ -553,7 +580,14 @@ _DEFAULT_CFG: dict[str, float] = {
     # Ghost holdout: withhold ~1-in-N organic deck cards from display
     # (logged with is_ghost=1). ≤0 disables ghosting without touching the
     # flag — the deploy-free rollback lever.
-    "ghost_holdout_one_in":       10,
+    # OPERATOR RULING 2026-08-21 (batch-wide, living-memory/CHANGELOG.md
+    # 2026-08-21): "I still am against the ghost cards" — ghosts are ruled
+    # out entirely, not merely paused. Ghost accumulation was also the
+    # amplifier behind the 6-card-repeat deck (a ghost can never be
+    # decided, so it never leaves the FFV3 pool; one hash ghost-served
+    # 35x). The prod model_config row is already 0; this default makes the
+    # code agree with the ruling instead of relying on a live DB row.
+    "ghost_holdout_one_in":        0,
     # Executed-trade matcher: only suggestions served within this many days
     # BEFORE the trade executed are match candidates.
     "suggestion_match_lookback_days": 14,
@@ -1368,9 +1402,14 @@ def package_value_v2(values: list[float], v_max: float,
     _package_value_market. ``other_values`` (the OTHER side's raw values,
     same value space) enables the both-sides elite crown credit + the
     naive-skew phase-out; callers that omit it get the depth math only.
-    ``v_max``/``n_other`` are ignored in this mode (kept for signature
-    compatibility — the depth benchmark is the package's OWN best asset,
-    and crown eligibility is count-independent).
+    ``n_other`` is ignored in this mode (crown eligibility is
+    count-independent). ``v_max`` — the best single-asset value in the
+    WHOLE trade — feeds the 2026-08-21 cross-package depth benchmark
+    (knob `package_bench_trade_wide`; see _package_value_market): a
+    multi-asset side that does NOT hold the trade's best asset is
+    discounted against that asset, not against its own headliner. At
+    `package_bench_trade_wide` ≤ 0 the pre-fix own-max benchmark applies
+    byte-identically and ``v_max`` is ignored as before.
 
     'heavy' — the pre-#214 legacy math, byte-identical:
 
@@ -1405,7 +1444,7 @@ def package_value_v2(values: list[float], v_max: float,
     if mode == "off":
         return round(sum(values), 1)
     if mode == "market":
-        return _package_value_market(values, other_values)
+        return _package_value_market(values, other_values, v_max)
 
     # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
@@ -1434,14 +1473,30 @@ def package_value_v2(values: list[float], v_max: float,
 
 
 def _package_value_market(values: list[float],
-                          other_values: list[float] | None) -> float:
-    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3).
+                          other_values: list[float] | None,
+                          v_max: float | None = None) -> float:
+    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3), amended
+    2026-08-21 by the cross-package benchmark fix (shape 1a below).
 
-    1. Depth discount benchmarks each piece against the package's OWN best
-       asset — contribution(v) = v · (floor + (1−floor) · (v/own_max)^γ)
-       with floor = package_floor_market, γ = package_adj_gamma_market —
-       and the side's TOTAL discount is capped at package_discount_cap ×
-       the naive sum. A single-asset side is never depth-discounted.
+    1. Depth discount — contribution(v) = v · (floor + (1−floor) ·
+       (v/bench)^γ) with γ = package_adj_gamma_market, and the side's
+       TOTAL discount capped at package_discount_cap × the naive sum.
+       A single-asset side is never depth-discounted.
+    1a. THE BENCHMARK (2026-08-21 fix, operator-approved; evidence
+       docs/reviews/2026-08-21-market-curve-comparison.md §3b). The
+       original #214 shape benchmarked every piece against the package's
+       OWN best asset, so four similar mid-tier players took a ~5%
+       haircut while buying a stud — the served Rice+Etienne+Swift+Corum
+       → Nacua card scored 0.939 (fair) against FantasyCalc 1.362 / KTC
+       2.260. With `package_bench_trade_wide` > 0 (the default) a
+       multi-asset side that does NOT hold the trade's best asset is
+       benchmarked against ``v_max`` — the best asset in the WHOLE trade,
+       KTC's own published shape — with the floor switched to
+       `package_floor_cross` (the own-side floor 0.70 would leave four
+       quarters worth ≥ 70¢ of a dollar regardless of benchmark). A side
+       that holds the trade's best asset, a single-asset side, and every
+       call at `package_bench_trade_wide` ≤ 0 (arm A's pin) keep the
+       original own-max math byte-for-byte.
     2. Crown credit per elite asset (value ≥ crown_elite_value) on EITHER
        side, count-independent, at crown_rate_market per piece (flag
        trade.crown_asset still the kill-switch; needs `other_values` to
@@ -1459,7 +1514,12 @@ def _package_value_market(values: list[float],
     own_max = max(values)
     gamma = _c("package_adj_gamma_market")
     floor = _c("package_floor_market")
-    contrib = sum(v * (floor + (1.0 - floor) * (v / own_max) ** gamma)
+    bench = own_max
+    if (len(values) > 1 and v_max is not None and v_max > own_max
+            and _c("package_bench_trade_wide") > 0):
+        bench = v_max
+        floor = _c("package_floor_cross")
+    contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
                   for v in values)
     cap = _c("package_discount_cap")
     total = max(contrib, naive * (1.0 - cap))
@@ -3718,6 +3778,15 @@ class TradeCard:
     # otherwise-unfair trade: {"player_id": str, "side": "give"|"receive"}.
     # The player is already included in that side's id list. None otherwise.
     sweetener: Optional[dict] = None
+    # 2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`) — set when a
+    # card's absolute consensus gap exceeded the threshold and an equalizer
+    # asset from the richer side's roster closed it: {"player_id": str,
+    # "side": "give"|"receive", "gap_before": float, "gap_after": float}.
+    # The player is already included in that side's id list. Distinct from
+    # `sweetener` (the 3.4 fairness-band rescue) so measurement can split
+    # them; also stamped into features_json on EVERY impression row (null
+    # when absent). None otherwise.
+    gap_sweetener: Optional[dict] = None
     # FB-47 (flag trade.finder_targeting) — counterparty positional fit for
     # the user's stated targets, 0..1 (1 = ideal partner). None when the
     # flag is off or the user expressed no targets. Serialized when set.
@@ -5039,6 +5108,7 @@ class TradeService:
                 not_interested_ids   = not_interested_ids,
                 raw_user_elo         = user_elo,
                 presentment_ok_fn    = _presentment_ok,
+                scoring_format       = scoring_format,
             )
 
             if member.has_rankings and member.elo_ratings:
@@ -5485,6 +5555,76 @@ class TradeService:
             elif composite > heap[0][0]:
                 heapq.heapreplace(heap, entry)
 
+        def _pair_surpluses(give_ids: list[str],
+                            recv_ids: list[str]) -> tuple[float, float]:
+            """(user_surplus, opp_surplus) — extracted 2026-08-21 from
+            `_consider` (byte-identical math; `_uv(p)` == the former
+            `user_value[p]` for every pid `_consider` can reach) so the gap
+            auto-sweetener can re-gate sweetened combos through the exact
+            same formulas.
+
+            Package values in EACH side's own value space (Change 2).
+            Tier 2 (2.1): with the marginal flag on, each side's packages
+            are built from over-replacement values against THAT side's own
+            pre-trade roster — clogger packages collapse, need-fillers
+            keep their value. Same package_value_v2 + waiver math after."""
+            if MARGINAL:
+                uvals_give = [_mu(p) for p in give_ids]
+                uvals_recv = [_mu(p) for p in recv_ids]
+            else:
+                uvals_give = [_uv(p) for p in give_ids]
+                uvals_recv = [_uv(p) for p in recv_ids]
+            u_max = max(uvals_give + uvals_recv)
+            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
+                                             other_values=uvals_recv)
+            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
+                                             other_values=uvals_give)
+
+            if MARGINAL:
+                ovals_give = [_mo(p) for p in give_ids]
+                ovals_recv = [_mo(p) for p in recv_ids]
+            else:
+                ovals_give = [_vo(p) for p in give_ids]
+                ovals_recv = [_vo(p) for p in recv_ids]
+            o_max = max(ovals_give + ovals_recv)
+            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
+                                            other_values=ovals_recv)  # opp receives
+            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
+                                            other_values=ovals_give)  # opp gives
+
+            # Waiver-slot cost (A3): the side receiving MORE players drops a
+            # waiver-level player per extra slot — subtract from that side's
+            # received package value. Replaces the clogger tax in v2.
+            extra = len(recv_ids) - len(give_ids)
+            if extra > 0:        # user receives more players
+                recv_val_user -= WAIVER * extra
+            elif extra < 0:      # opponent receives more players
+                give_val_opp -= WAIVER * (-extra)
+
+            return (recv_val_user - give_val_user,
+                    give_val_opp - recv_val_opp)
+
+        def _composite_v2(hm: float, fairness: float, give_ids: list[str],
+                          recv_ids: list[str]) -> float:
+            """Extracted 2026-08-21 from `_consider`, byte-identical.
+            C1/C5 (2026-08-18) — the RANKING terms only. The card still
+            stamps the real full-package `fairness`, and every gate ran on
+            the real package."""
+            composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
+                         * mismatch_damp(give_ids + recv_ids, seed_value,
+                                         confidence)
+                         + W_FAIR * rank_fairness(fairness, give_ids, recv_ids,
+                                                  seed_value, _uv, _vo))
+            composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
+            # Backlog #2 — reward cards that LAND a target on the receive side.
+            # Applied after the mutual-gain gates (a target never rescues a
+            # non-mutual-gain trade), capped by pos_multiplier_cap.
+            if target_ids:
+                n_t = len(set(recv_ids) & target_ids)
+                if n_t:
+                    composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+            return composite
+
         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
             if pinned_set:
                 if pinned_all:
@@ -5526,46 +5666,7 @@ class TradeService:
                     and not presentment_ok_fn(give_ids, recv_ids):
                 return
 
-            # Package values in EACH side's own value space (Change 2).
-            # Tier 2 (2.1): with the marginal flag on, each side's packages
-            # are built from over-replacement values against THAT side's own
-            # pre-trade roster — clogger packages collapse, need-fillers
-            # keep their value. Same package_value_v2 + waiver math after.
-            if MARGINAL:
-                uvals_give = [_mu(p) for p in give_ids]
-                uvals_recv = [_mu(p) for p in recv_ids]
-            else:
-                uvals_give = [user_value[p] for p in give_ids]
-                uvals_recv = [user_value[p] for p in recv_ids]
-            u_max = max(uvals_give + uvals_recv)
-            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
-                                             other_values=uvals_recv)
-            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
-                                             other_values=uvals_give)
-
-            if MARGINAL:
-                ovals_give = [_mo(p) for p in give_ids]
-                ovals_recv = [_mo(p) for p in recv_ids]
-            else:
-                ovals_give = [_vo(p) for p in give_ids]
-                ovals_recv = [_vo(p) for p in recv_ids]
-            o_max = max(ovals_give + ovals_recv)
-            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
-                                            other_values=ovals_recv)  # opp receives
-            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
-                                            other_values=ovals_give)  # opp gives
-
-            # Waiver-slot cost (A3): the side receiving MORE players drops a
-            # waiver-level player per extra slot — subtract from that side's
-            # received package value. Replaces the clogger tax in v2.
-            extra = len(recv_ids) - len(give_ids)
-            if extra > 0:        # user receives more players
-                recv_val_user -= WAIVER * extra
-            elif extra < 0:      # opponent receives more players
-                give_val_opp -= WAIVER * (-extra)
-
-            user_surplus = recv_val_user - give_val_user
-            opp_surplus  = give_val_opp - recv_val_opp
+            user_surplus, opp_surplus = _pair_surpluses(give_ids, recv_ids)
             # True mutual gain (Change 3): BOTH sides must clear the bar.
             if user_surplus < MIN_SIDE or opp_surplus < MIN_SIDE:
                 return
@@ -5575,22 +5676,7 @@ class TradeService:
                 return
 
             hm = _harmonic_mean(user_surplus, opp_surplus)   # A1 ranking
-            # C1/C5 (2026-08-18) — the RANKING terms only. The card still
-            # stamps the real full-package `fairness` below, and every gate
-            # above already ran on the real package.
-            composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
-                         * mismatch_damp(give_ids + recv_ids, seed_value,
-                                         confidence)
-                         + W_FAIR * rank_fairness(fairness, give_ids, recv_ids,
-                                                  seed_value, _uv, _vo))
-            composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
-            # Backlog #2 — reward cards that LAND a target on the receive side.
-            # Applied after the mutual-gain gates (a target never rescues a
-            # non-mutual-gain trade), capped by pos_multiplier_cap.
-            if target_ids:
-                n_t = len(set(recv_ids) & target_ids)
-                if n_t:
-                    composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+            composite = _composite_v2(hm, fairness, give_ids, recv_ids)
             _offer(composite, hm, fairness, give_ids, recv_ids, _fit_paid)
 
         # ------------------------------------------------------------------
@@ -5692,10 +5778,70 @@ class TradeService:
         # space the manual calculator uses, so a deck card and the calculator
         # show identical numbers for the same players. Lazy import: the
         # optimizer imports this module (top-level would cycle).
-        from .trade_optimizer import _consensus_packages
+        from .trade_optimizer import _consensus_packages, close_value_gap
+
+        # 2026-08-21 gap auto-sweetener (sweetener_gap_threshold): a selected
+        # card whose absolute consensus gap exceeds the threshold is
+        # re-balanced by adding the smallest sufficient equalizer from the
+        # richer side's roster — re-earning this path's own gates via
+        # `_gap_extra_ok` (junk filler, pick swap, presentment, Elo-gap
+        # guard, both-sides surplus) plus lineup feasibility inside the
+        # helper. An unclosable card is kept unsweetened: this pass narrows
+        # gaps, it never shrinks the deck. ≤ 0 disables (arm A's pin).
+        _GAP_THR = _c("sweetener_gap_threshold")
+
+        def _gap_extra_ok(g: list[str], r: list[str]) -> bool:
+            if not filler_ok(g, r, _uv, _vo):
+                return False
+            if not pick_swap_ok(g, r, players, seed_value):
+                return False
+            if presentment_ok_fn is not None \
+                    and not presentment_ok_fn(g, r):
+                return False
+            if not _gap_ok(g, r):
+                return False
+            u_s, o_s = _pair_surpluses(g, r)
+            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+
         cards: list[TradeCard] = []
+        _picked_keys = {(frozenset(e[5]), frozenset(e[6]))
+                        for e in ranked[:max_cards]}
         for composite, _sz, _t, hm, fairness, give_ids, recv_ids, fit_paid \
                 in ranked[:max_cards]:
+            _gap_info = None
+            if _GAP_THR > 0:
+                closed = close_value_gap(
+                    give_ids, recv_ids, seed_value=seed_value,
+                    gap_threshold=_GAP_THR,
+                    fairness_threshold=fairness_threshold,
+                    user_roster=user_roster, opp_roster=opponent.roster,
+                    players=players, scoring_format=scoring_format,
+                    untouchable_ids=untouchable_ids,
+                    not_interested_ids=not_interested_ids,
+                    extra_ok_fn=_gap_extra_ok)
+                if closed is not None:
+                    s_pid, side, new_give, new_recv, _ngv, _nrv, n_ratio \
+                        = closed
+                    new_key = (frozenset(new_give), frozenset(new_recv))
+                    if new_key not in _picked_keys:
+                        _gv0, _rv0 = _consensus_packages(
+                            give_ids, recv_ids, seed_value)
+                        _gap_info = {
+                            "player_id": s_pid, "side": side,
+                            "gap_before": round(abs(_gv0 - _rv0), 1),
+                            "gap_after": round(abs(_ngv - _nrv), 1),
+                        }
+                        _picked_keys.discard(
+                            (frozenset(give_ids), frozenset(recv_ids)))
+                        _picked_keys.add(new_key)
+                        give_ids, recv_ids = new_give, new_recv
+                        fairness = n_ratio
+                        u_s, o_s = _pair_surpluses(give_ids, recv_ids)
+                        hm = _harmonic_mean(u_s, o_s)
+                        composite = _composite_v2(hm, fairness, give_ids,
+                                                  recv_ids)
+                        if fit_paid is not None:
+                            fit_paid = None   # no longer a 1-for-1 shape
             _gv, _rv = _consensus_packages(give_ids, recv_ids, seed_value)
             card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
@@ -5718,6 +5864,8 @@ class TradeService:
                     "value_paid": fit_paid,
                     "position": getattr(p, "position", None) if p else None,
                 }
+            if _gap_info is not None:
+                card.gap_sweetener = _gap_info
             cards.append(card)
         return cards
 
@@ -5744,6 +5892,7 @@ class TradeService:
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
         presentment_ok_fn=None,              # G6 rules R1/R2/R3/R5; None = off
+        scoring_format: str = "1qb_ppr",     # gap-sweetener lineup feasibility
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -5826,6 +5975,41 @@ class TradeService:
         cards: list[TradeCard] = []
         seen: set[tuple] = set()
 
+        # 2026-08-21 gap auto-sweetener (sweetener_gap_threshold). Lazy
+        # import — the optimizer imports this module (top-level would
+        # cycle). `_gap_gates_ok` re-earns THIS path's gate stack for a
+        # sweetened combo; the helper itself checks gap, fairness band and
+        # lineup feasibility. ≤ 0 disables (arm A's pin).
+        _GAP_THR = _c("sweetener_gap_threshold")
+        from .trade_optimizer import close_value_gap as _close_gap
+
+        def _gap_gates_ok(g: list[str], r: list[str]) -> bool:
+            gvals2 = [seed_value(p) for p in g]
+            rvals2 = [seed_value(p) for p in r]
+            v_max2 = max(gvals2 + rvals2)
+            gv2 = package_value_v2(gvals2, v_max2, n_other=len(r),
+                                   other_values=rvals2)
+            rv2 = package_value_v2(rvals2, v_max2, n_other=len(g),
+                                   other_values=gvals2)
+            if gv2 <= 0 or rv2 <= 0:
+                return False
+            if not _both_ways and rv2 - gv2 < _c("user_gain_epsilon"):
+                return False
+            _f2 = _c("consolidation_raw_loss_frac")
+            if _f2 > 0 and len(g) > len(r):
+                raw_g = sum(gvals2)
+                if raw_g - sum(rvals2) > _f2 * raw_g:
+                    return False
+            if not user_gain_ok_1for1(g, r, raw_user_elo):
+                return False
+            if not pick_swap_ok(g, r, players, seed_value):
+                return False
+            if not filler_ok(g, r, _uval_raw, seed_value):
+                return False
+            if presentment_ok_fn is not None and not presentment_ok_fn(g, r):
+                return False
+            return True
+
         def _emit(give_ids: list[str], recv_ids: list[str]) -> None:
             # #174 package mode — the give pool is already restricted to
             # pinned players; 'all' additionally requires the FULL set in
@@ -5892,13 +6076,53 @@ class TradeService:
             if fairness < _thr:
                 return
             seen.add(key)
+            # 2026-08-21 gap auto-sweetener: this card passed every gate,
+            # but the ratio gate is scale-blind — close an absolute gap
+            # above the threshold by adding the smallest sufficient
+            # equalizer from the richer side's roster. An unclosable card
+            # is emitted as-is (the pass narrows gaps, never shrinks the
+            # deck).
+            _gap_info = None
+            if _GAP_THR > 0 and abs(gv - rv) > _GAP_THR:
+                closed = _close_gap(
+                    give_ids, recv_ids, seed_value=seed_value,
+                    gap_threshold=_GAP_THR, fairness_threshold=_thr,
+                    user_roster=user_roster,
+                    opp_roster=opponent.roster,
+                    players=players, scoring_format=scoring_format,
+                    untouchable_ids=untouchable_ids,
+                    not_interested_ids=not_interested_ids,
+                    # Round-2 review 2026-08-21: this path PRUNES its pools
+                    # (#174 pinned give players, FB-47 pinned acquire
+                    # targets, need-position receive filter) instead of
+                    # gating per combo, so the equalizer must come from the
+                    # SAME pools — otherwise a pinned "trade away G" job
+                    # could hand the user a card that also ships an
+                    # unpinned player, and an "acquire RB" job could hand
+                    # back an off-need receive asset. The full rosters
+                    # above still drive the 3.2 feasibility counts.
+                    give_candidates=give_pool,
+                    recv_candidates=recv_pool,
+                    extra_ok_fn=_gap_gates_ok)
+                if closed is not None:
+                    s_pid, side, n_give, n_recv, n_gv, n_rv, n_ratio = closed
+                    n_key = (frozenset(n_give), frozenset(n_recv))
+                    if n_key not in seen:
+                        _gap_info = {
+                            "player_id": s_pid, "side": side,
+                            "gap_before": round(abs(gv - rv), 1),
+                            "gap_after": round(abs(n_gv - n_rv), 1),
+                        }
+                        seen.add(n_key)
+                        give_ids, recv_ids = n_give, n_recv
+                        gv, rv, fairness = n_gv, n_rv, n_ratio
             # consensus_score_scale keeps fallback cards (no divergence
             # signal, mismatch 0) from outranking genuine divergence finds —
             # the two composites would otherwise live on different scales
             # (fairness×tier ≈ 1.6 vs surplus-blend ≈ 0.3–0.7).
             composite = (fairness * self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
                          * _c("consensus_score_scale"))
-            cards.append(TradeCard(
+            card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
                 proposing_user_id = user_id,
@@ -5914,7 +6138,10 @@ class TradeService:
                 # value space as the calculator) — drive the TradeValueBar.
                 give_value        = round(gv, 1),
                 receive_value     = round(rv, 1),
-            ))
+            )
+            if _gap_info is not None:
+                card.gap_sweetener = _gap_info
+            cards.append(card)
 
         # 1-for-1 first (most acceptable shape), then 2-for-1.
         for recv_id in recv_pool:

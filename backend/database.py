@@ -2298,6 +2298,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Trade engine Tier 3 (flags trade_engine.v3, trade.three_team) ────
     ("v3_pool_size",            12.0,   "v3: per-side candidate pool size for exact enumeration"),
     ("sweetener_band",           0.15,  "v3: fairness shortfall band eligible for a sweetener rescue"),
+    ("sweetener_gap_threshold",  1539.0, "2026-08-21 gap auto-sweetener: close absolute consensus gaps above this (value units; 1539 = one late 1st) by adding the smallest sufficient asset from the richer side's roster; <=0 disables"),
     ("sweetener_max_cards",      2.0,   "v3: max sweetened cards per opponent pair"),
     ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
     ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),
@@ -2328,6 +2329,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("package_floor_market",     0.70,  "#214: market-mode depth-discount contribution floor (piece contributes at least this fraction of face value)"),
     ("package_adj_gamma_market", 0.5,   "#214: market-mode depth-discount exponent, benchmarked against the package's OWN best asset"),
     ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
+    ("package_bench_trade_wide", 1.0,   "2026-08-21 benchmark fix: >0 = depth-discount a multi-asset side that lacks the trade's best asset against the TRADE's best asset (v_max); <=0 = pre-fix own-max benchmark (arm A's pin)"),
+    ("package_floor_cross",      0.40,  "2026-08-21 benchmark fix: contribution floor on the cross-benchmarked (stud-buying) side; inert while package_bench_trade_wide <= 0"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
@@ -2433,7 +2436,10 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
     ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
     ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
-    ("ghost_holdout_one_in",       10.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting"),
+    # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
+    # entirely, so the SEED default is 0 — a fresh DB must not start
+    # ghosting. <=0 disables ghosting inside the flag.
+    ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
     # ── Counterparty-breaker knobs (docs/plans/counterparty-breaker/LLD.md §4) ─

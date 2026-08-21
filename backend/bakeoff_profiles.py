@@ -84,6 +84,19 @@ MODEL_A_PROFILE: dict[str, float] = {
     # braces: bakeoff_runner does not pass `placements`, so the clamp is
     # already inert on every arm — see the D-085 note in living-memory.)
     "placement_tier_clamp":      0.0,   # D-085 off
+    # Package-math wave — 2026-08-21 (operator-approved fix, evidence
+    # docs/reviews/2026-08-21-market-curve-comparison.md §3b). Post-dates
+    # the reference SHA and changes generation, so arm A pins it at its
+    # kill value; the pre-wave own-max package math is byte-identical at
+    # this setting, so the golden stands un-recaptured (verified: 10/10
+    # green with the pin in place). Companion knob `package_floor_cross`
+    # is deliberately absent — _package_value_market never reads it while
+    # the benchmark knob is ≤ 0 (same rule as `max_overpay_min_value`).
+    "package_bench_trade_wide":  0.0,   # own-max benchmark (pre-fix math)
+    # Same wave: the gap auto-sweetener post-dates the reference SHA; at
+    # ≤ 0 every generator skips the pass entirely (byte-identical), and
+    # the pre-wave engine had no sweetener.
+    "sweetener_gap_threshold":   0.0,   # gap auto-sweetener off
 }
 
 
