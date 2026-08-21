@@ -1,6 +1,6 @@
 # HLD: Negative-results memory
 
-**Version:** candidate v2 (round-2 fixes applied; round-3 verification pending)
+**Version:** candidate v3 (round-3 M2×strength decision applied; round-4 verification pending)
 **Date:** 2026-08-21 · Serves: [PRD.md](PRD.md) (FINAL — R/NG/C/GR/§8.3 are requirements) ·
 Facts: [research-verification.md](research-verification.md) ("memo") ·
 Drafts: [HLD-draft-A.md](HLD-draft-A.md) (coherence), [HLD-draft-B.md](HLD-draft-B.md) (failure-modes)
@@ -72,7 +72,7 @@ line-verified):
 |---|---|---|
 | serving engine (v2-pair, v3, consensus fallback) | the per-member bounded-multiplier stack, `trade_service.py:4943-5196` | joins block-boost/outlook-dir's `_m != 1.0` skip pattern (`:5125`) |
 | gen_v2 | pair-constant multiplier in the per-pair loop, `trade_gen_v2.py:939-975` | distinct from M2's `acceptance_stats` (different math, same map) |
-| fit | rank-key multiplier in the ranker (post-score, pre-C7c tie-break; `trade_gen_fit.py:384-392` sort key, `composite_score` set separately at `:442`) | ordering only — fit's aggregate payload stays pure. LLD: apply the multiplier BEFORE the 1e-9 quantization so plateau noise (~1e-13) scaled by m stays below the quantum and the C7c same-partner tie survives. Fragility: this path depends on per-arm order surviving to serve — `_restore_interleaved_order` (`bakeoff_runner.py:1416-1428`) undoing the likes-you composite re-sort; end-to-end test required (§7) |
+| fit | rank-key multiplier in the ranker (post-score, pre-C7c tie-break; `trade_gen_fit.py:384-392` sort key, `composite_score` set separately at `:442`) | ordering only — fit's aggregate payload stays pure. LLD: apply the multiplier BEFORE the 1e-9 quantization so plateau noise (~1e-13) scaled by m stays below the quantum and the C7c same-partner tie survives. Fragility: this path depends on per-arm order surviving to serve — `restore_order` (`bakeoff_runner.py:1415`, called `server.py:5766`) undoing the likes-you composite re-sort; end-to-end test required (§7) |
 
 **Rejected shared seams** (draft A D-4, cited): a post-generation multiplier step
 (violates GR3 — interleaved decks bypass post-gen layers, `server.py:5890-5910`, so the
@@ -174,8 +174,16 @@ likes-you injection (the exact model_arm scar scenario) retains the key batch-wi
 `acceptance_stats` rides the map (D-9); both gen_v2 call sites receive it only when the
 map exists. At n=0 (today's reality — the decline route has essentially never fired)
 the E-B math must return the global prior, not 0/0 — **guard placement rule: the
-aggregation never emits zero-response keys and the feed returns `{}` on `m ≤ 0`; the
-guard lives in the FEED, never inside the ratified `acceptance_prior` math (NG9)**.
+aggregation never emits zero-response keys and the feed returns `{}` when
+`gen2_accept_prior_strength ≤ 0` (the E-B pseudo-count `m` in the memo §2f formula IS
+that knob); the guard lives in the FEED, never inside the ratified `acceptance_prior`
+math (NG9)**. **M2 strength governance (the round-3 decision): `negmem_strength` is an
+M1-ONLY lever. M2's strength is governed by the EXISTING seeded knobs
+`gen2_accept_prior_strength` / `gen2_accept_global_prior` (PRD R5), and its independent
+deploy-free kill is `gen2_accept_prior_strength = 0` — which the feed-guard above makes
+structural (feed returns `{}`).** Arm A never invokes M2 in any case — it is the v1/v3
+engine and gen_v2's acceptance prior runs only inside arm C — so arm A remains a clean
+M1 comparator under any knob state.
 The parity test (C4) includes the empty-table case explicitly; S4 is annotated
 expected-null. Relaxed/targeted passes need no special case: same map, same strength
 via `_c`; and a soft multiplier cannot trigger the `not cards` relaxed rerun (NG1,
@@ -226,12 +234,17 @@ structural — `trade_service.py:4271-4318`).
 ### 5.1 C1 byte-identical-off proof, per path
 Flag OFF (or league not allowlisted) ⇒ map never built, kwarg never passed, stamp key
 never written, M2 kwarg absent — byte-identical in full, including features_json.
-`negmem_strength = 0` is scoped differently, deliberately: **deck content, scores and
-order are byte-identical** (seam skip ⇒ no multiply, no round()), but stamps FOLLOW THE
-TRICHOTOMY — every row carries `{m: 1.0}` while flag ON ∧ allowlisted, because the
-stamp-absence tripwire (§3.2) depends on it. This is an HLD strengthening over PRD R7
-(which requires stamps only on influenced rows) — stated as such. The arm-A golden is
-specified accordingly: arm-A rows carry `{m: 1.0}`, never absence, never a live m.
+`negmem_strength = 0` is scoped differently, deliberately: **the M1 seams produce
+byte-identical deck content, scores and order on every path** (seam skip ⇒ no multiply,
+no round()) — with ONE stated exception: arm C's decks may still differ via the M2
+acceptance-prior feed, which `negmem_strength` does not govern (§3.5 decision; M2's own
+kill is `gen2_accept_prior_strength = 0`). Stamps FOLLOW THE TRICHOTOMY — every row
+carries `{m: 1.0}` while flag ON ∧ allowlisted, because the stamp-absence tripwire
+(§3.2) depends on it. This is an HLD strengthening over PRD R7 (which requires stamps
+only on influenced rows) — stated as such. The golden set is scoped to match: (a)
+serving-engine + fit fixtures assert FULL byte-equality at `negmem_strength = 0`; (b)
+arm-C parity is asserted separately at `gen2_accept_prior_strength = 0`; (c) the arm-A
+golden expects `{m: 1.0}` on every row — never absence, never a live m.
 
 ### 5.2 The T1 rule (from the fit-challenger scar, now doctrine)
 No module-global map, ever — `from .negmem import current_map` would freeze the
@@ -252,9 +265,10 @@ runbook triage order: stamp rate → degraded notes → knob triple · degraded-
 stamp-rate runbook lines with numeric thresholds (~60 bytes/row stamp residue is the
 accepted storage cost) ·
 rollback ladder, all deploy-free, nothing left behind at any rung (derive-on-read):
-`trade.negmem` off (everything, incl. M2) → `negmem_strength = 0` (M1 inert, M2 still
-feeds, map still builds for readout) → `negmem_floor = 1.0` (clamp to identity;
-diagnostic posture — stamps keep flowing). Flag/knob flips at round boundaries only
+`trade.negmem` off (everything, incl. M2) → `negmem_strength = 0` (M1 inert; M2 still
+feeds, with its OWN deploy-free kill `gen2_accept_prior_strength = 0` — §3.5; map still
+builds for readout) → `negmem_floor = 1.0` (clamp to identity; diagnostic posture —
+stamps keep flowing). Flag/knob flips at round boundaries only
 (GR3; operator procedure in the rollout runbook).
 
 ### 5.4 10x and the materialization fallback
@@ -298,11 +312,24 @@ tester_allowlist precedent) · the GR4 computability decision (score-ratio pollu
 accepted vs stamping fatigue_m/taste_m) · the read-horizon constant (4·halflife) and
 the S6 seed numbers (2× fatigue p95, 250ms ceiling) · the fit end-to-end ordering
 assertion (a downstream composite-score sort must not erase negmem ordering;
-_restore_interleaved_order dependency) · the fit quantization order (multiply before
+`restore_order` dependency) · the fit quantization order (multiply before
 the 1e-9 round) · the M2 id-space fixture check (trade_matches.user_a/b_id vs league
 member space) · co-owner canonicalization call sites (ADR-012) · the streaming-callback
 golden fixture · the operator TestFlight checklist text (D-056) · the arm-A `{m: 1.0}`
 stamp test and the B2 provenance test.
+Round-3 additions: the GR4 SQL must define base/final so the score ratio EXCLUDES
+negmem's own multiply on the serving/gen_v2 paths (else the joint reads m² —
+conservative, but false-tripping) and must state where Thompson propensity enters the
+joint (it is captured in telemetry) · the stamp-rate tripwire's denominator is
+allowlist-scoped (partial rollout must not read as build failures) · fixture-power
+rule: the arm-A golden, B2 provenance test, and T1 sabotage test all run against a
+fixture producing m < 1.0 on at least one non-A arm in the same job (no vacuous
+passes) · degraded-map BEHAVIOR rule: seams treat a degraded map as identity even when
+the build was slow-but-valid (discarded by design, not just stamped) · the build-time
+knob read path: negmem reads `model_config` via `database.get_config()` directly
+(leaf-legal) OR the server reads via `_c` and passes values into `build_map` — LLD
+picks ONE and notes the two-read-paths drift surface (the knobs also live in
+`_DEFAULT_CFG` for D-8 snapshots).
 Signatures + NegmemMap dataclass; the admission SQL fragment + predicate pair; decay/
 shrinkage formulas and the D-5 combine rule (product vs min) with fixtures; netting
 magnitude + decrement-vs-reset; the R1(d) join path (impression↔decision; asymmetric
