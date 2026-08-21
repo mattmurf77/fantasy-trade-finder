@@ -127,6 +127,12 @@ def _set_flags(**kw):
 def _reset_cfg(**cfg):
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
+    # 2026-08-21 package-benchmark fix post-dates CHALLENGER_BASE_SHA and
+    # deliberately moves arm B, so it is pinned to its kill value here:
+    # these goldens exist to prove the CHALLENGER knobs are no-ops, and at
+    # the kill value the pre-fix own-max math is byte-identical (proven by
+    # test_package_benchmark.py::test_kill_value_is_byte_identical_to_pre_fix_math).
+    ts._cfg["package_bench_trade_wide"] = 0.0
     ts._cfg.update(cfg)
 
 

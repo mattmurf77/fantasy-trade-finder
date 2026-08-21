@@ -77,6 +77,12 @@ def _set_flags(**kw):
 def _reset_cfg(**cfg):
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
+    # 2026-08-21 package-benchmark fix post-dates the 90fb19a capture and
+    # deliberately moves these fixtures, so it is pinned to its kill value:
+    # this file proves the C1–C5 kill values restore the pre-WAVE deck, and
+    # at the pin the pre-fix own-max package math is byte-identical (proven
+    # by test_package_benchmark.py).
+    ts._cfg["package_bench_trade_wide"] = 0.0
     ts._cfg.update(cfg)
 
 

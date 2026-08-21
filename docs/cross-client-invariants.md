@@ -259,6 +259,17 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 
 **Locations:** `mobile/src/components/TradeCard.tsx`, `web/js/app.js` (search "likes-you-pill" / "consensus-tag" / "trade-sweetener").
 
+## Counterparty-breaker objection codes — **deliberately NOT a cross-client invariant in v1** (2026-08-21, flags `trade.breaker` / `trade.breaker_narrative`)
+
+Recorded here so the absence is a decision on the record rather than an omission. The breaker's objection-code enum (`fit_outlook`, `fit_new_weakness`, `fit_duplicate`, `value_giving`, `other_player_keep`, `roster_crunch` — see [glossary](glossary.md) and [data-dictionary § `deck_impressions`](data-dictionary.md#deck_impressions)) is a **server-internal** vocabulary in v1 and imposes **no client obligation**:
+
+- The one user-visible artefact is the **hesitation line**, a complete sentence composed on the server (`trade_narrative.hesitation_line`, template version `brt-1`). It arrives as `breaker.sentence` and is rendered **verbatim**. Clients contribute no copy of their own — not even the "Their likely hesitation:" lead-in, which lives inside the sentence.
+- **No client may switch on `breaker.code`**, map it to a label, or derive an icon, colour or ordering from it. `code` and `severity` ride the payload for inspectability and debugging only. `mobile/tests/check-breaker-card.js` asserts the mobile element reads only `sentence` — a client that starts branching on codes turns a server-internal enum into a wire contract, and that is precisely the change this row exists to make deliberate.
+- **Payload presence IS the gate.** The server serializes the `breaker` object only for a card that actually narrated, so the client re-checks no flag and needs no knowledge of the dark-stamp window. Web and the extension render nothing at all in v1 and ignore the key; that is parity by omission, not drift.
+- The full objection vector and `breaker_shadow` **never** leave the server (`features_json` only).
+
+**When this row must change:** the moment any client branches on a code — a per-code icon, a filter chip, an "objections" detail sheet, or client-composed copy. At that point the enum becomes a real cross-client contract and gets a proper table here (keys, exact labels, and the rule that an unknown code degrades silently rather than rendering raw). Product outcome 1 (filter/demote the deck on a breaker verdict) is v2 and would arrive with its own scope block.
+
 ## Consensus balance claim — the 0.75 bar (D-097, 2026-08-19)
 
 **The app may not call a trade balanced below its own definition of balanced.** Until 2026-08-19 the consensus explainer asserted `…this is a balanced trade by consensus value.` gated on `basis === 'consensus'` **alone**, with no fairness check. The app's bar for balanced is **0.75**, but the mobile fairness default flipped OFF on 2026-08-17 so the live generation floor is **0.50** and cards ship down to 0.501. Measured read-only against prod `deck_impressions` on 2026-08-19: **805 of 7,293 served consensus cards (11.0%)** carried that sentence while below the bar (band `[0.501, 0.75)`; p10 0.7302, p50 0.8590, min 0.5010, and 7,293/7,293 carried a non-NULL `fairness_score`).

@@ -334,7 +334,20 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                        "boards": "both"|"viewer"|"partner"|"none",  // data-availability — the analysis key
                        "ver": "fit-1", "r5_fail": false,
                        "lenses": { "you":  { "board": float|null, "vs_consensus": float|null, "consensus": float },
-                                   "them": { "board": float|null, "vs_consensus": float|null, "consensus": float } } }
+                                   "them": { "board": float|null, "vs_consensus": float|null, "consensus": float } } },
+  "breaker":         {                          // OPTIONAL — counterparty breaker, NARRATION-GATED
+                                                // (flags trade.breaker + trade.breaker_narrative;
+                                                // docs/plans/counterparty-breaker/LLD.md §1.5). Present
+                                                // ONLY on a card whose predicted objection was actually
+                                                // narrated: during the dark-stamp window (trade.breaker on,
+                                                // trade.breaker_narrative off) the key is ABSENT entirely.
+                                                // Payload presence IS the client gate — the client never
+                                                // re-checks a flag and never switches on `code`.
+                       "code": "fit_outlook"|"fit_new_weakness"|"fit_duplicate"|"value_giving"|"roster_crunch",
+                       "severity": float,             // 0–1, 3-dp
+                       "sentence": "..." }            // server-composed copy; the ONLY string the client renders
+                                                // The full objection vector and `breaker_shadow` NEVER
+                                                // serialize — they ride deck_impressions.features_json only.
 }
 ```
 
