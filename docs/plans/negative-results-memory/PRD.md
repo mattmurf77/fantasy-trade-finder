@@ -1,6 +1,6 @@
 # PRD: Negative-results memory
 
-**Version:** candidate v3 (round-3 revisions applied; round-4 verification pending)
+**Version:** FINAL — dual sign-off, round 4 of 4 (reconciliation log: [reconciliation-log.md](reconciliation-log.md))
 **Date:** 2026-08-21 · **Home:** docs/plans/negative-results-memory/ · Facts: [research-verification.md](research-verification.md) ("memo") · Gates: [scope.md](scope.md) · Drafts: [PRD-draft-A.md](PRD-draft-A.md), [PRD-draft-B.md](PRD-draft-B.md)
 
 ---
@@ -23,7 +23,7 @@ serve, every absence reconstructable as-of any timestamp.
 
 ### 2.1 The user problem
 
-Testers are asked to decide ≥40 cards/week each; the base currently produces **~400
+Testers are asked to decide ≥40 cards/week each; the base is budgeted at **~400
 decided cards/week** across ~10 testers, with a recent peak of ~200 decisions across
 4 days from 5 testers (memo §8; `docs/plans/trade-engine-accuracy/PLAN.md` appendix). When they
 pass, they file reasons: **208 coded rows in the first days — 40% `value_giving`, 33%
@@ -108,7 +108,7 @@ anchored on shipped `trade_pass_reasons` codes + PRODUCER column).
 - **G2:** gen_v2's `acceptance_prior` is fed real per-league-mate response stats at both
   call sites; the stub debt is retired with parity-tested math.
 - **G3:** Every influence is observable: stamped at serve; the prior map reconstructable
-  as-of any timestamp (on admission timestamps — see R6's upsert caveat); dumpable on
+  as-of any timestamp (on admission and netting-event timestamps — see R6); dumpable on
   demand. No silent effects.
 - **G4:** Flag off / strength 0 is byte-identical to today (golden). D-067's principle
   honored structurally: soft, clamped, floored, decaying — never an exclusion.
@@ -260,8 +260,9 @@ promotion rule lives in §8.3.
   row are read at admission time from serve-time-frozen card state: `lane` and
   `user_value_basis` from `features_json`; `trade_intent` from the
   `deck_impressions.trade_intent` COLUMN (it is not a `features_json` key — it is
-  populated only on bake-off-attributed rows and is expected NULL elsewhere, which the
-  readout annotates rather than treats as a bug). Nothing is recomputed and nothing is
+  NULL unless the card's own arm ran under an intent lens — non-bake-off rows always,
+  and bake-off rows whose arm had no intent; the readout annotates rather than treats
+  NULL as a bug). Nothing is recomputed and nothing is
   written at rejection time (NG6-consistent). v1 semantics: recorded in
   evidence rows and surfaced in the readout **only**; no behavioral use. They exist so
   the P2 refinements and the breaker coupling have context to condition on without a
@@ -374,6 +375,9 @@ once at window close (never mid-window; knobs frozen for the window):
 - **Shelve:** CI includes zero at adequate n (pre-registered power: the n at which a
   25% true reduction would be detected with 80% power — computed in the LLD from the
   pre-registered baseline).
-- **Extend the window:** n inadequate for the above — extend, never fabricate.
+- **Extend the window:** n inadequate for the above — extend, never fabricate; the LLD
+  sets a max-extension review trigger (operator review at 2× the planned window, in
+  the D-099 review-trigger style) so an underpowered window cannot extend silently
+  forever.
 Any guardrail breach at any time → `negmem_strength = 0` (deploy-free), window
 censored at the flip timestamp.
