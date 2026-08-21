@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-054 | A blanket decision-ID find-and-replace rewrites headings but not their anchors | Living-memory / doc hygiene |
 | G-053 | `measure_gap_distribution.py` reports different numbers run-to-run unless `PYTHONHASHSEED` is pinned | Bake-off measurement / determinism |
 | G-052 | A pick badges one tier too high: the wrong value→Elo inverse, silent near a 1st, worse downward | Pick badges / value scales |
 | G-051 | A tier-band edit that looks backend-only silently drifts `web/js/app.js`, which fetches nothing | Tier bands / client mirrors |
@@ -488,3 +489,9 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Cause:** "next ID = max existing + 1 — grep first" was run against the checked-out branch's copy of the file. This repo runs many concurrent sessions; the checkout is routinely days stale, and living-memory files advance on `main` between sessions.
 - **Fix:** compute IDs against **`origin/main` after a fetch** — `git fetch origin && git show origin/main:living-memory/DECISIONS.md | grep -oE '^## D-[0-9]+' | sort -V | tail -1` — never against the working tree or checkout branch.
 - **Prevention:** same discipline for every ID'd file (D-/G-/M-/Q-). If the working tree's copy of an ID'd file differs from `origin/main`'s, the working tree is not evidence of anything.
+
+### G-054 — a blanket decision-ID find-and-replace rewrites headings but not their anchors
+- **Symptom:** an `LLD.md` section heading credited D-147 while its own TOC anchor still read `#…-d-144`. The heading text was wrong *and* the anchor was wrong, in two different ways, and the section actually belonged to D-146.
+- **Cause:** two stacked edits, neither verified against `DECISIONS.md`. (1) The slot-pricing session drafted its decision as D-144, renumbered the DECISIONS.md entry to D-146 ([G-048](GOTCHAS.md) again) and missed the LLD heading it had already written. (2) PR #168 then ran a blanket `D-144` → `D-147` replace over LLD.md to stamp the negmem section, silently converting the already-wrong D-144 into a differently-wrong D-147 — and, because it authored the new negmem TOC row by copying the neighbouring one, carried the stale `d-144` anchor into a brand-new entry too.
+- **Fix:** never blanket-replace an ID across a living-memory doc. Change one heading at a time, and re-derive each section's owner from `DECISIONS.md` by *what the decision says it decided*, not by adjacency or date. Corrected 2026-08-21: both "Retiring a per-user setting" and "Pricing waterfalls" → D-146 (the decision that retired `pick_pricing_mode`); "Append-only, version-stamped measurement tables" stays D-144 (receipts); the negmem heading stays D-147 and only its anchor moved.
+- **Prevention:** **a heading/anchor mismatch is the fingerprint of a blanket replace** — a markdown TOC anchor is a frozen copy of the heading at authoring time, so when they disagree, some later edit touched the text and not the link. Cheap detector, run it after any ID edit: slug every `^## ` heading and assert each `](#…)` target resolves and equals the slug of its own link text. It also catches the copy-a-neighbouring-TOC-row habit that produced the second defect here.
