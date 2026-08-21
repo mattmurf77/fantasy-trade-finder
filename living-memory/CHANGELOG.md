@@ -28,9 +28,12 @@ scope · PLAN · HLD · LLD · PRD, each dual-agent converged (4 rounds each), f
 - **Binding constraints recorded:** operator NO-ghost ruling; interleave discipline (v1 zero
   ordering effect); Monday `fix/package-benchmark-sweetener` ship = named measurement boundary
   (arm A byte-invariant — knobs pinned 0.0 in its profile; `gap_sweetener` key).
-- **Build began** same session per operator instruction (Opus subagents, wave 1: module/knobs/
-  templates/mobile element), everything behind `trade.breaker` + `trade.breaker_narrative`, both
-  **false**. 20-item operator register in PRD §9 — defaults ship, register is post-build tuning.
+- **Build COMPLETE same session** per operator instruction (Opus subagents, 3 waves: module+knobs+
+  templates+mobile → server seam → docs/evidence). Everything behind `trade.breaker` +
+  `trade.breaker_narrative`, both **false**; suite at tip **3872p/1s**; 25 knobs ×5; taxonomy
+  v1.1.1 landed; calibration spec committed pre-flag-on; [D-142](DECISIONS.md);
+  **[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open — merge is the
+  operator's.** 20-item register in PRD §9 — defaults ship, register is post-build tuning.
 
 ## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
 

@@ -38,46 +38,41 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-21 — Counterparty-breaker planning: PLAN+HLD converged, LLD mid-merge; session limit stopped the loop
+## 2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge
 
-**Where:** branch `claude/counterparty-breaker-plan` (worktree `trading-engine-eval-8ab7bc`), tip
-`0eb5f60` + one uncommitted rulings file at stop. **Planning only — nothing builds until the
-operator approves the suite.** Operator brief: "Counterparty breaker" (adversarial pass that
-evaluates each suggestion from the OTHER manager's seat and surfaces their strongest objection),
-full gates, dual-agent-doc-review as the vehicle, coordinate with the Receipts and
-negative-results-memory sibling sessions.
+**Where:** branch `claude/counterparty-breaker-plan`, tip `da23921`, **pushed** —
+**[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open, merge is the
+operator's call.** Suite complete AND v1 built dark in one session (operator authorized build
+post-PRD mid-session; Opus build agents, 3 waves).
 
-**DONE and dual-signed:** `docs/plans/counterparty-breaker/` — `scope.md` (full gates, no
-waivers), `PLAN.md` (sibling-reconciled: producer-column vocabulary boundary, F-1/F-2/F-3
-folded, A-1+A-2 closed), **`HLD.md` CONVERGED** (4 rounds; final blocker was a payload-layer
-privacy leak — the client payload is now narration-gated: the dark-stamp window serves NO
-`breaker` key). `reconciliation-log.md` is complete through LLD round 2 and is the fastest
-cold-start read.
+**What exists:** `docs/plans/counterparty-breaker/` — scope · PLAN · HLD · LLD · PRD (each
+dual-agent converged, 4 rounds) · reconciliation-log (the cold-start read) ·
+calibration-readout-spec.md (preregistered, committed pre-flag-on) · code-walk.md · drafts/.
+Code: `backend/trade_breaker.py` (+67 tests) · server seam post-F9/pre-ghost-split with
+narration-gated payload + seam republish (+35 integration tests incl. the T-13 flag matrix) ·
+`trade_narrative.hesitation_line` (brt-1, incl. `roster_crunch.one` pluralization) · 25 knobs
+×5 registrations · `trade.breaker` + `trade.breaker_narrative` both **false** · mobile
+hesitation element + `check-breaker-card.js` (12 sabotage-proven assertions) · shared taxonomy
+v1.1.1 landed. Suite at tip **3872 passed / 1 skipped**; testid-lint OK; `tsc` rides CI
+(no local node_modules — pre-existing). [D-142](DECISIONS.md), TEST_LEDGER 2026-08-21.
 
-**IN FLIGHT — resume here:** the LLD. Drafts A (implementer) and B (reviewer) are complete in
-`drafts/`; the merge agent died on the session usage limit (resets 05:10 ET). **Every merge
-decision is already made** — execute
-[`drafts/LLD-merge-rulings.md`](../docs/plans/counterparty-breaker/drafts/LLD-merge-rulings.md)
-(M-1…M-12) to write `LLD.md`, then cross-review (adjudicate M-8's `fit_outlook` scalar — the
-one deliberately unsettled call), sign-off, then the three HLD errata named in that file, then
-the PRD loop, then taxonomy 1.1.0 authoring + final sibling reconciliation (the Receipts
-session runs the batch check) and operator delivery.
+**Operator-owed next (in order):** (1) merge PR #161 when CI is green; (2) the PRD §8.3 launch
+sequence — P1 `trade.breaker` on (dark stamp) → calibration readout per the preregistered spec
+→ per-class graduation (`breaker_narrate_<class>` via `set_knob`) → operator-only narrative
+first light (single allowlisted device, readout-excluded) → the **19-step TestFlight checklist
+(UNRUN — the only runtime evidence under D-056; needs a build cut)**; (3) the 20-item register
+in PRD §9 — defaults ship, all post-build tuning. **Sequencing:** dry run + calibration cohort
+start at/after the Monday `fix/package-benchmark-sweetener` merge (a code-ship boundary the M1
+rail cannot censor).
 
-**Binding constraints a resuming session must not re-derive:** operator ruled **NO ghost cards,
-full stop** (batch-wide; recorded PLAN §7/§6, HLD §2.3) · interleaved serving is LIVE since
-2026-08-21T00:43Z — v1 has zero ordering effect by design · cost basis is **60** cards
-(`bakeoff_deck_limit` doubled at that boundary) · objection vocabulary anchors on
-`trade_pass_reasons` codes; `roster_crunch` is the only breaker extension
-(`shape_aversion` = negmem's, producer column enforces it) · no client renders
-`TradeCard.narrative` (verified) — the hesitation line is a distinct mobile element ·
-fit-challenger operator rulings stand untouched.
+**Binding constraints (do not re-derive):** NO ghost cards (operator, batch-wide) · v1 zero
+ordering effect (interleaved serving live) · narration derives from public state only; dark
+window serves no payload key · vocabulary anchors on `trade_pass_reasons` (+`roster_crunch`;
+`shape_aversion`=negmem via producer column) · fit-challenger rulings untouched.
 
-**Sibling state at stop:** Receipts suite COMPLETE (contract at `docs/plans/receipts/PLAN.md`
-§7 in its worktree `agent-af95ea98f982612d6`; taxonomy seed v1.0.0 at
-`docs/plans/shared/trade-shape-taxonomy.md` there, §5 reserved for my vocabulary section);
-negmem memo landed (`docs/plans/negative-results-memory/research-verification.md`, its
-worktree); both signed off on my PLAN. They await my finished suite for the three-way batch
-delivery.
+**Sibling batch:** Receipts suite final + batch check PASS; negmem HLD final (their LLD was
+resuming); three-way taxonomy closed at v1.1.1. The three suites go to the operator as one
+batch — mine is delivered via PR #161.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 
