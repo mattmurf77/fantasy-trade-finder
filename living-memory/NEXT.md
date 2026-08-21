@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — negmem LLD after the limit reset, then three-way batch delivery](#2026-08-21--negmem-lld-after-the-limit-reset-then-three-way-batch-delivery)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
@@ -29,6 +30,15 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-21 — negmem LLD after the limit reset, then three-way batch delivery
+
+*Why now:* PRD+HLD are FINAL; the LLD is the only artifact between this and the
+operator's three-plan review batch. 1. Run the dual-agent LLD per the HANDOFF resume
+recipe (HLD §7 is the checklist; decided questions stay decided). 2. On dual sign-off:
+extend reconciliation-log, update the plans README row, ping
+`trade-suggestions-review-69c9eb-f4` for batch delivery. 3. The three operator
+decisions (negmem scope §6) ride the batch — nothing builds before they're answered.
 
 ## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
 

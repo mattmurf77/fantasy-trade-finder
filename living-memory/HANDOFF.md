@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — negmem planning: PRD+HLD FINAL; LLD blocked on session limit](#2026-08-21--negmem-planning-prdhld-final-lld-blocked-on-session-limit)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
@@ -36,6 +37,31 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-21 — negmem planning: PRD+HLD FINAL; LLD blocked on session limit
+
+**Where:** the "Negative-results memory" planning assignment (operator product-gap item 2,
+dispatched cross-session) is 4/6 done on branch `claude/vigilant-spence-8583f5`, all
+committed: research-verification memo → scope.md (3 operator decisions in §6) → PLAN.md →
+**PRD.md FINAL** (dual-agent, sign-off round 4/4) → **HLD.md FINAL** (dual-agent, round
+4/4) → reconciliation-log.md (both documents' full round trail). Planning ONLY — no build.
+
+**Blocked:** the LLD. Both dual-agent draft subagents died on the session usage limit
+(resets 5:10am ET 2026-08-22). No partial drafts exist (LLD-draft-A/B.md were never
+written).
+
+**Resume recipe:** dual-agent-doc-review skill, LLD doc type. Agent A (implementer) and
+B (reviewer) draft independently against **HLD §7 "Handed to the LLD"** — that section is
+the complete work-order checklist, including the round-3/round-4 additions (dual-kill
+golden (b), GR4 ratio-excludes-m, knob-read tilt, degraded⇒M2-{} rule). Binding decisions
+already made (do NOT reopen): reconciliation-log.md both sections; the M2×strength
+decision (negmem_strength is M1-only; M2 kill = gen2_accept_prior_strength=0).
+
+**Sibling state (three-way batch delivery):** Receipts suite COMPLETE, my reconciliation
+against their PLAN §7 contract CONFIRMED and closed on their ledger; breaker HLD
+converged, LLD in flight; operator ghost ruling (no ghost cards) absorbed by all three.
+Batch delivery to the operator = my LLD + breaker's suite, then ping
+trade-suggestions-review-69c9eb-f4. Taxonomy v1.1.0 agreed pending breaker's §5 text.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 

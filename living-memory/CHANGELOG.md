@@ -10,6 +10,20 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21 — negmem planning suite: memo, scope, plan, PRD FINAL, HLD FINAL (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Operator product-gap item 2 ("Negative-results memory") taken through full gates,
+planning only. Code-truth memo (518 lines: every existing rejection-consumer cited; the
+gen_v2 `acceptance_prior` unfed-stub finding; D-067 soft-only constraint) → scope block
+(3 operator decisions) → PLAN → dual-agent **PRD FINAL** (9 blockers fixed across 4
+rounds; v1 = soft prior keyed (partner × {value,fit}), 22 cells, floor 0.6 + feed the
+stub; privacy rec = aggregate-only derive-on-read) → dual-agent **HLD FINAL** (8+1
+blockers across 4 rounds; pure `effective_mult`, kwarg threading, stamp trichotomy,
+M2×strength decision: `negmem_strength` M1-only, M2 kill = `gen2_accept_prior_strength=0`).
+Three-way reconciliation with Receipts CONFIRMED (their contract §7; two data boundaries
+inherited); breaker boundary agreed (shape_aversion producer=negmem); operator ghost
+ruling absorbed (checked NOT load-bearing). **LLD pending — session limit** (see HANDOFF).
+
 ## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
 
 Operator ran the flow end-to-end and filed **thirteen reports**. All closed in code across
