@@ -2418,6 +2418,22 @@ _MODEL_CONFIG_DEFAULTS = [
     ("fit_min_aggregate",           0.0, "fit arm post-score filter: min you+them aggregate to surface; 0 = off"),
     ("fit_r5_mode",                 1.0, "fit arm K7: 1 = R5 need-gate failure kills (live-as-written); 0 = score + tag r5_fail"),
     ("fit_junk_floor",              0.0, "fit arm: 1 = kill sides padded below asset_floor_abs; 0 = lens 3 tanks junk instead"),
+    # ── Bake-off serving knobs (seeded 2026-08-20, W1 re-light) ─────────────
+    # These pre-date the fit build but were NEVER seeded, so `set_config`
+    # KeyError'd on them and every "deploy-free flip" of the serving posture
+    # was actually a code-default edit + deploy (the 2026-08-18/19 dance).
+    # Values here MATCH trade_service._DEFAULT_CFG exactly — seeding is
+    # behavior-neutral; it only makes the knobs remotely settable (HLD F-1).
+    ("bakeoff_serve_interleaved",   0.0, "bake-off serving: 1 = interleaved deck served; 0 = dark (arm B only)"),
+    ("bakeoff_deck_limit",         30.0, "bake-off: max cards in the served interleaved deck (0 = uncapped)"),
+    ("bakeoff_group_size",         10.0, "bake-off composition: cards per group; 0 kills the composition layer (plain per-arm draft)"),
+    ("bakeoff_group_value_slots",   5.0, "bake-off composition: value-lane slots per group (outlook = remainder)"),
+    ("bakeoff_fill_policy",         0.0, "bake-off: 1 = backfill residual lane slots cross-lane (flagged); 0 = leave short"),
+    ("bakeoff_lane_reallocate",     1.0, "bake-off: 1 = lanes may spill into slots the other lane cannot fill (own bucket only)"),
+    ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
+    ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
+    ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
+    ("ghost_holdout_one_in",       10.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
 ]
