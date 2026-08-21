@@ -86,7 +86,11 @@ const ROWS = [
   { row: 'Disconnect MFL sign-in',        marker: 'settings.mfl-disconnect',            owner: 'PlatformDisconnectSection.tsx', moved: 'Account' },
   { row: 'SteerSlider + hint',            marker: '<SteerSlider',                       owner: 'RankingSection.tsx' },
   { row: 'Stud tax segmented',            marker: 'settings.stud-tax.',                 owner: 'TradeValuesSection.tsx' },
-  { row: 'Pick pricing segmented',        marker: 'settings.pick-pricing.',             owner: 'TradeValuesSection.tsx' },
+  // 'Pick pricing segmented' was the row below Stud tax. REMOVED 2026-08-21
+  // (D-144): the operator ruled market pick pricing "not an opt-in or even an
+  // option to flip", so the control is deleted rather than moved, and §4's
+  // left-hand column is one row shorter. `check-settings-testids.js` holds the
+  // inverse assertion (settings.pick-pricing.* generates nothing).
   { row: 'The Analyst toggle',            marker: 'settings.guided-tour-toggle',        owner: 'GuideSection.tsx', moved: 'Guided tour' },
   { row: 'Denied-permission banner',      marker: 'settings.notif-denied-banner',       owner: 'NotificationsSection.tsx' },
   { row: 'Trade matches toggle',          marker: 'title="Trade matches"',              owner: 'NotificationsSection.tsx' },

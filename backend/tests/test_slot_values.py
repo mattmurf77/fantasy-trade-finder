@@ -288,20 +288,57 @@ def test_m6_02_slot_values_do_not_reach_the_valuation_lanes(module):
     assert "PICK_VALUES_URL" not in source
 
 
+# The ONLY functions in `pick_values.py` permitted to reach DynastyProcess.
+# Adding a name here is a deliberate widening of the M6b seam and must come
+# with a reason; the list is short so that reason is easy to demand.
+#
+#   market_pick_pool_value  M6b — the ROUND curve (mid-tercile basis)
+#   market_pick_slot_value  D-144 — the PER-SLOT price for a resolved slot
+_DP_READERS = {"market_pick_pool_value", "market_pick_slot_value"}
+
+
 def test_m6_02b_pick_values_reads_dp_only_through_the_m6b_seam():
-    """The M6b replacement for `pick_values.py`'s structural bound: the module
-    may reach `load_pick_slot_values`, but ONLY from
-    `market_pick_pool_value`, and it must never hold the URL itself."""
+    """`pick_values.py`'s structural bound: the module may reach
+    `load_pick_slot_values`, but ONLY from the market pricing functions, and
+    it must never hold the URL itself.
+
+    **Widened on purpose by D-144 (2026-08-21)**, which added per-slot pricing
+    and therefore a second legitimate reader. The guarantee is unchanged in
+    kind — DP reaches the engine through named pricing functions and nowhere
+    else — so the test was made STRICTER rather than merely permissive: it now
+    walks the AST and asserts the reader set is EXACTLY `_DP_READERS`, in both
+    directions. The old form compared a list of source lines, which a
+    reformat could break and which said nothing about a third function
+    sneaking in a call with different whitespace.
+    """
+    import ast
     source = (REPO / "backend" / "pick_values.py").read_text()
-    assert "PICK_VALUES_URL" not in source
-    code = [ln for ln in source.splitlines()
-            if "load_pick_slot_values" in ln and not ln.lstrip().startswith("#")
-            and "`" not in ln]
-    assert code == ["    from .data_loader import load_pick_slot_values",
-                    "    slot_map = load_pick_slot_values(scoring_format)"], code
-    # …and both lines sit inside market_pick_pool_value.
-    body = source.split("def market_pick_pool_value")[1].split("\ndef ")[0]
-    assert all(ln.strip() in body for ln in code)
+    assert "PICK_VALUES_URL" not in source, "the URL belongs to data_loader"
+
+    tree = ast.parse(source)
+    readers, module_level = set(), []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for sub in ast.walk(node):
+            hit = (isinstance(sub, ast.Name) and sub.id == "load_pick_slot_values") \
+                or (isinstance(sub, ast.ImportFrom)
+                    and any(a.name == "load_pick_slot_values" for a in sub.names))
+            if hit:
+                readers.add(node.name)
+                break
+
+    # A module-level reference would run at import time and escape the
+    # per-function check entirely, so it is refused separately.
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and any(
+                a.name == "load_pick_slot_values" for a in node.names):
+            module_level.append(node.lineno)
+    assert not module_level, f"module-level DP import at line(s) {module_level}"
+
+    assert readers == _DP_READERS, (
+        f"unexpected DP readers {readers - _DP_READERS} / "
+        f"missing {_DP_READERS - readers}")
 
 
 # ── T-M6-03 — fetch failure ──────────────────────────────────────────────

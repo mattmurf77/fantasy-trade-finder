@@ -605,16 +605,27 @@ FLAG_KEYS: tuple[str, ...] = (
     # order entry (never null), no `slot_value_approx` key, and values.csv is
     # never fetched. A fetch failure with the flag ON degrades the same way.
     "picks.slot_values",
-    # M6b — DynastyProcess market slot values IN THE TRADE ENGINE (plan
-    # operator decision O2, which reverses hld KD-9 / lld §4.7). Gates the
-    # per-user `pick_pricing_mode` setting ('tier_ladder' default |
-    # 'market_slots'): the /api/settings/pick-pricing route and the mode
-    # resolution in trade_service.pick_pricing_mode_for_user.
-    # OFF (default) ⇒ pick_pricing_mode_for_user returns 'tier_ladder' for
-    # EVERY user without reading the DB, /api/settings/pick-pricing 404s, and
-    # every owned pick prices at its stored `draft_picks.pool_value` exactly
-    # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
-    # byte-unchanged in BOTH modes — this flag reprices owned picks only.
+    # ⚠️ RETIRED 2026-08-21 (D-144) — REGISTERED BUT NEVER READ. Zero call
+    # sites: `git grep 'trade.slot_pricing' backend mobile web extension`
+    # returns this line, config/features.json, the fixture mirrors and docs,
+    # and nothing else. Setting it either way changes nothing.
+    #
+    # It gated M6b: the per-user `pick_pricing_mode` setting ('tier_ladder' |
+    # 'market_slots'), the /api/settings/pick-pricing route, and the mode
+    # resolution in trade_service.pick_pricing_mode_for_user. The operator
+    # ruling of 2026-08-21 — "Market slots should be default and not an opt-in
+    # or even an option to flip" — made market pricing unconditional, so there
+    # is no longer anything to gate.
+    #
+    # THE KEY IS KEPT ON PURPOSE, at `true`, and this is the disposition to
+    # copy for the next retired flag. Deleting it from FLAG_KEYS would force a
+    # matching delete in config/features.json and all five flag fixtures (the
+    # test_release_flags_mirror_features_json exact-equality test), would make
+    # every client build in the field that reads the key see it vanish from
+    # /api/feature-flags, and would silently reinterpret any stored override
+    # row as an unknown key. Keeping it is additive, free, and honest: the
+    # flag reads `true` because market pricing IS on. Removal, if ever, is its
+    # own change once no shipped build reads the key.
     "trade.slot_pricing",
     # draft-extensions W1 — per-player ACTIONS on the Draft Room's undrafted
     # rows (docs/plans/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a

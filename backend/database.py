@@ -233,11 +233,15 @@ users_table = Table("users", metadata,
     # trade_service.stud_tax_mode_for_user for /api/trade/evaluate and
     # deck generation.
     Column("stud_tax_mode",         String),
-    # ── M6b draft-pick pricing mode (flag `trade.slot_pricing`) ───────────
-    # 'tier_ladder' (default/NULL — today's shipped ladder, unchanged) |
-    # 'market_slots' (DynastyProcess per-slot market curve). Read at pick
-    # PRICING time by trade_service.pick_pricing_mode_for_user; it never
-    # rewrites draft_picks.pool_value, which is league-shared.
+    # ── ⚠️ DEAD DATA since 2026-08-21 (D-144) ─────────────────────────────
+    # Was M6b's per-user draft-pick pricing mode ('tier_ladder' |
+    # 'market_slots'). The operator ruled market pricing "not an opt-in or an
+    # option to flip", so trade_service.pick_pricing_mode_for_user now returns
+    # 'market_slots' unconditionally WITHOUT reading this column, and
+    # /api/settings/pick-pricing no longer writes it (PUT is 410 Gone).
+    # Every row still holds 'tier_ladder' or NULL. Ignore it.
+    # NOT DROPPED, on purpose: additive-schema rule, and keeping it means a
+    # restore of the per-user axis would need no migration.
     Column("pick_pricing_mode",     String),
 )
 
@@ -4539,10 +4543,13 @@ PICK_PRICING_MODES = ("tier_ladder", "market_slots")
 
 
 def get_pick_pricing_mode(user_id: str) -> str:
-    """M6b — the user's stored pick-pricing mode. Missing row / NULL /
-    unknown value = 'tier_ladder' (today's shipped behaviour). Callers go
-    through trade_service.pick_pricing_mode_for_user, which also applies the
-    `trade.slot_pricing` flag gate."""
+    """⚠️ NO PRODUCTION CALLERS since 2026-08-21 (D-144) — the column is dead
+    data and `trade_service.pick_pricing_mode_for_user` returns 'market_slots'
+    without reading it. Kept, with its setter, so a restore of the per-user
+    axis would need no migration; pinned by
+    `test_db_accessors_survive_as_dead_data`.
+
+    Missing row / NULL / unknown value = 'tier_ladder', as it always did."""
     with engine.connect() as conn:
         row = conn.execute(
             select(users_table.c.pick_pricing_mode).where(

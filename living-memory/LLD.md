@@ -33,6 +33,8 @@
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
+- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
+- [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-144)
 
 ---
 
@@ -467,6 +469,66 @@ conventions for any future layer that **predicts something a user will later tel
   ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
   a silent dependency on whoever ran before you.
 
+## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)
+
+The operator deleted a setting — pick pricing — rather than changing its default. This repo had **no
+precedent for retiring a route**: `git grep "410" backend/server.py` returned nothing before this change.
+The shape chosen, and the reasoning, so the next one does not have to re-derive it:
+
+- **The write verb answers 410 Gone, not 404.** A 404 is what the route already meant last week (it 404d
+  while its flag was dark), so reusing it says "wrong URL / not deployed yet" to a client that is actually
+  looking at a resource that existed and was deliberately withdrawn. The body names the replacement state
+  (`{error: "gone", message, mode}`), so a human reading a log learns the answer without opening the code.
+  Body validation is **removed, not kept**: a once-valid mode and a garbage mode get the same 410, because
+  there is nothing left to validate against and a 400 would imply some body would work.
+- **The read verb keeps answering, with the FIXED state — never the stored column.** Builds in the field
+  still call GET on screen open. Serving `{mode: "market_slots", retired: true}` makes an old build render
+  the honest answer; serving the dead `users.pick_pricing_mode` would tell it the setting still means
+  something, and 404ing would make the shipped client hide the control as though the feature were dark.
+  The extra `retired: true` key is additive and costs an old client nothing.
+- **Auth posture does not change.** Retirement is not a reason to make a route public; `_require_session()`
+  still runs first on both verbs, so a caller without a session still gets 401 before it gets 410.
+- **The column is not dropped, and the flag is not deleted.** Additive-schema rule for the column
+  (`users.pick_pricing_mode` becomes dead data); for the flag, `trade.slot_pricing` stays in `FLAG_KEYS` at
+  `true` and is simply never read — deleting it would force a six-file change to satisfy
+  `test_release_flags_mirror_features_json`, make the key vanish from `/api/feature-flags` for shipped
+  builds, and reinterpret any stored override row as an unknown key.
+- **The client is deleted, not flag-hidden.** The Settings row, its state, its fetch, its optimistic PUT and
+  its analytics emitter all go. What stays behind is an **absence assertion** in the structural suite
+  (`check-settings-testids.js` `DELETED_PREFIXES`), so a well-meaning revert that re-adds the control fails
+  loudly instead of quietly restoring a setting the operator removed. The analytics EVENT stays registered
+  in the taxonomy so historical rows remain queryable — retire the emitter, never the name.
+
+## Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)
+
+Per-slot pick pricing needed a per-league fact (the resolved draft order) inside a per-pick function.
+The shape that worked, and generalises to any read-time enrichment:
+
+- **Resolve at the widest scope that owns the fact, pass the narrow value down.** The order is looked
+  up once per league (`server._league_slot_order`, DB-backed with a 60s cache); `pick_slots.slot_for`
+  turns it into one integer per pick; `pick_values.priced_pool_value` takes that integer and resolves
+  NOTHING itself. A pricing function that reached for a DB-backed lookup per pick would be correct and
+  unshippable.
+- **Reuse the existing resolver rather than re-deriving the rule.** `slot_for` already refuses future
+  seasons, unknown rosters, malformed blobs and unverifiable snake reversals. Every one of those
+  refusals is a pricing safety property now, obtained for free. A second implementation would have had
+  to re-earn all four, and would drift.
+- **Derive the price and the label from the same resolution.** A card that says "2026 1.03" while
+  charging for a generic first is worse than one that says neither. Where a shared helper cannot yet
+  take the precomputed value, say so at the call site and explain why the two agree anyway (purity +
+  identical arguments) rather than leaving the reader to assume it.
+- **Fall soft in named steps, and clamp in exactly one of them.** Slot price -> round curve -> stored
+  value, each step returning None to mean "I have nothing honest to say". Round clamping lives only in
+  the round-curve step; the per-slot step deliberately does not clamp, because a round-9 slot has no
+  published row and no honest analogue. Two clamps would drift apart.
+- **Prefer a fallback that falls out of the DATA over one that falls out of a BRANCH.** "Future picks
+  stay default" needed no `if season > current` anywhere: DP publishes per-slot rows only for the
+  current class, so the lookup misses and the waterfall does the rest. A branch encoding the same rule
+  would be a second source of truth about what DP publishes.
+- **When a structural guard has to widen, make it stricter in the same edit.** The guard pinning which
+  functions may read DP grew a second permitted reader; it was rewritten from a source-line comparison
+  to an AST reader-set equality check with a module-level-import refusal, and sabotage-verified. A
+  widened guard that is not also tightened is how a bound quietly becomes decorative.
 ## Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)
 
 A table-family convention introduced by Receipts, worth reusing for anything that grades our

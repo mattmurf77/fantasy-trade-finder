@@ -18,11 +18,12 @@
 //    entirely. A settings page that lies about a setting is worse than one
 //    that says nothing.
 //
-// Consequence worth stating: the Trade values row has no subtitle. Stud tax
-// and pick pricing are read by TradeValuesSection through plain fetches in a
-// useEffect (getStudTaxMode / getPickPricingMode), not through React Query,
-// so there is no cache for the hub to peek at and no way to know them for
-// free. Per rule 2 the line is omitted rather than defaulted — showing
+// Consequence worth stating: the Trade values row has no subtitle. Stud tax —
+// the only control left on that page since D-144 removed pick pricing — is
+// read by TradeValuesSection through a plain fetch in a useEffect
+// (getStudTaxMode), not through React Query, so there is no cache for the hub
+// to peek at and no way to know it for free. Per rule 2 the line is omitted
+// rather than defaulted — showing
 // "Stud tax: Market" because 'market' happens to be the code default is
 // exactly the lie rule 2 forbids.
 //
