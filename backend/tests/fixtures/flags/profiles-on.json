@@ -203,6 +203,6 @@
   "feedback.decline_reasons": true,
   "trade.bakeoff": true,
   "trades.presentation_v2": false,
-  "trade.position_tiers": false,
-  "trade.rb_handcuff": false
+  "trade.position_tiers": true,
+  "trade.rb_handcuff": true
 }
