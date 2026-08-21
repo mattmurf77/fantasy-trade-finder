@@ -190,6 +190,72 @@ are (5) — the halves are not independently shippable — and the arm-C deepeni
 not a blocker.
 
 ---
+## 2026-08-21 — Counterparty breaker waves 1+2 (module · seam · narration · mobile element) — full gates, BOTH FLAGS DARK, NOT MERGED, on `claude/counterparty-breaker-plan`
+
+**Branch:** `claude/counterparty-breaker-plan` (worktree `trading-engine-eval-8ab7bc`), tip `fdd1683`
+(wave 1 `0b808b5` → wave 2 `9806d01` → taxonomy v1.1.1 `fdd1683`). **Not pushed, not merged.**
+Full gates — the operator explicitly declared **NOT express**, and the change is outside the express
+lane by the bright-line rule regardless (two new feature flags, 25 new `model_config` keys, a new
+API payload field, two new `features_json` keys).
+Scope: [docs/plans/counterparty-breaker/scope.md](../docs/plans/counterparty-breaker/scope.md) ·
+code-walk: [code-walk.md](../docs/plans/counterparty-breaker/code-walk.md) ·
+readout spec: [calibration-readout-spec.md](../docs/plans/counterparty-breaker/calibration-readout-spec.md) ·
+checklist: [PRD](../docs/plans/counterparty-breaker/PRD.md) §8.3.
+Decision: [D-142](DECISIONS.md).
+
+**Flags, both default OFF and NEITHER graduated:** `trade.breaker` (compute + stamp),
+`trade.breaker_narrative` (the on-card hesitation line; structurally requires the first).
+
+**What ran, and what it proves.** Counts below were re-verified by collection in this checkout on
+2026-08-21, not quoted from the commit messages.
+
+| Gate | Result |
+|---|---|
+| `backend/tests/test_trade_breaker.py` | **67 collected, 67 passed** — predicates, determinism, vocabulary + evidence-key closure, degenerate inputs, tie-break, the whole rung ladder, budget, shadow, knob-snapshot freezing |
+| `backend/tests/test_breaker_seam.py` | **30 collected, 30 passed** — seam placement, zero ordering effect (parametrized `bakeoff_group_size ∈ {0, N}` + organic), D-11 seam-creep grep guard, flag-off non-import + byte-identity, dark-window payload absence, the full republish matrix |
+| `backend/tests/test_trade_narrative.py` | **22 collected, 22 passed** (file total; **10 of them new**) — the narration gate chain, repetition suppression, template snapshot + `brt-1` version pin, honesty (missing **or present-but-null** evidence ⇒ silence) |
+| `backend/tests/test_bakeoff_serving.py` | **+4 collected rows / 3 new functions** (`test_impressions_breaker_uniform_keys` parametrized ×2, `test_midjob_flag_flip_no_crash`, `test_flag_off_features_json_carries_no_breaker_key`); file 42 passed. **Correction to the wave-2 hand-off, which said "+5"** — the true figure is 4 collected rows |
+| three breaker files together, re-run 2026-08-21 | **119 passed** |
+| `python3 -m pytest backend/tests -q` (full suite) | **3872 passed, 1 skipped, 0 failed** in 264 s — measured at tip `fdd1683` this session. (Wave 1 reported 3835/1, wave 2 reported 3869/1. The +3 over wave 2 is **explained**: wave 2 ran `-k "not calibration_gate"` and reported "3 deselected" — 3869 + 3 deselected = 3872 collected. Same suite, no discrepancy) |
+| `mobile/tests/check-breaker-card.js` | **12 assertions, 12 passed / 0 failed**, re-run in this checkout. Sabotage-proven at build |
+| `mobile/scripts/testid-lint.sh` | **OK**, re-run in this checkout (2 new testIDs: `trade-card.breaker-hesitation`, `trade-card.breaker-hesitation.body`) |
+| `cd mobile && npx tsc --noEmit` | **NOT RUN LOCALLY — deferred to CI's `mobile-typecheck` job.** `mobile/node_modules` is absent in this worktree; this is pre-existing and not a property of the change |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything above plus the code-walk |
+
+**Named sabotages that are permanent tests, not one-off cycles.** These landed as tests, so the
+proof re-runs on every CI pass rather than living in a session log: `test_breaker_binding_sabotage`
+(monkeypatch a `ts` knob ⇒ the next `stamp_breaker` verdict moves — T1 module-import discipline;
+plus a module-attribute swap of `ts.package_value_v2` to a sentinel, which a value-binding
+implementation would no-op on) · `test_knob_snapshot_frozen_within_job` (mutate `ts._cfg` between
+pass 1 and pass 2 ⇒ stamps unchanged) · `test_per_class_exception_contained` (one predicate raises ⇒
+that class stamps `skipped:"predicate_error"`, the other five score, card stays rung 0) ·
+`test_budget_ladder_labeling` (tiny `breaker_ms_budget` + a slowed predicate ⇒ the correct rung at
+each of three trip points, incl. mid-pass-2 buffered work **discarded**) · `test_exception_rungs`
+(context-assembly raise ⇒ rung 4 for that card only; `stamp_breaker` monkeypatched to raise at the
+seam ⇒ rung-5 marker on **every** card — `test_breaker_seam.py:111` is the injected failure) ·
+`test_breaker_zero_ordering_effect` (delete-attribute variant included) ·
+`test_flag_off_never_imports_breaker`. The mobile guard was likewise sabotage-proven at build
+(each of its 12 assertions driven red by an edit to `TradeCard.tsx`, then restored).
+
+**Gap in this record, stated rather than papered over:** wave 2's commit message reports "4 named
+sabotages red→green" and wave 1's reports the guard as "sabotage-proven", but the **individual
+wave-2 sabotage names and their red-run output were not written down in-session**. The permanent
+sabotage tests above are re-runnable evidence and cover the same seams; the four cycles themselves
+are not independently reconstructable from the repo. Recorded as a documentation miss.
+
+**Not run — the load-bearing absence.** The [PRD](../docs/plans/counterparty-breaker/PRD.md) §8.3
+manual TestFlight checklist (**19 numbered steps**; steps 1–4 are the dark-window sub-checklist)
+is **UNRUN**. It is **operator-owed** and needs a build cut containing the hesitation element, which
+does not exist. Per D-056 this checklist is the **only** runtime evidence this feature will ever get,
+so as of today **no runtime evidence exists for the counterparty breaker at all** — everything above
+is static. `trade.breaker_narrative` must not light before it passes.
+
+**Also owed before `trade.breaker` lights** (preconditions, not stretch items): the TBD-operator
+cells in the [calibration-readout spec](../docs/plans/counterparty-breaker/calibration-readout-spec.md)
+§4.1 (per-class min n and margins), the §2.4 `fix/package-benchmark-sweetener` deploy timestamp (a
+code-ship boundary that `model_config_changes` **cannot** see), the reviewed `scripts/`-style readout
+SQL artifact, and the dry-run `ms` number to the operator.
+
 ## 2026-08-20f — Composite window model #372 (starter value + playoff likelihood + age at 40 %) — full gates, FLAG DARK, NOT MERGED, on `claude/372-window-composite`
 
 **Branch:** `claude/372-window-composite`, cut from `origin/main` at `c00a9a6`. **Not pushed, not merged** — parent agent integrates.

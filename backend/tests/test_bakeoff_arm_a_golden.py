@@ -472,7 +472,14 @@ def test_r4_bypass_is_thread_local():
 #: makes. trade_gen_v2, the mock draft and the outlook seed still pass four
 #: positional arguments, so with the flag lit they score the LEGACY vector
 #: (INV-372b, pinned by test_window_composite.py). Excluded rather than
-#: pinned: a kill value would assert these reach a deck.) This is the
+#: pinned: a kill value would assert these reach a deck.)
+#: 2026-08-21 added the 25 `breaker_*` knobs (counterparty breaker,
+#: docs/plans/counterparty-breaker/LLD.md §4): excluded from MODEL_A_PROFILE
+#: because they are EVALUATION-layer, not generation. `backend/trade_breaker.py`
+#: is imported by no generator and no ranker; it runs after the deck-mutation
+#: stack completes and mutates only a new card attribute, so no arm can observe
+#: one. Dispositions in scope-phase2.md. `waiver_slot_cost`, which the breaker
+#: reuses, is an existing engine knob and was already pinned below.) This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -485,7 +492,20 @@ bakeoff_lane_reallocate bakeoff_serve_fit
 asset_ideas_lateral_band audition_like_rate_frac audition_min_views
 audition_retire_days bench_credit_qb bench_credit_qb_sf bench_credit_rate
 bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr
-block_boost_weight boost_moderate boost_strong consensus_both_ways
+block_boost_weight boost_moderate boost_strong
+breaker_board_div_min breaker_board_min_divergent
+breaker_budget_checkpoint_frac breaker_crunch_scale
+breaker_degraded_share_max breaker_floor_fit_duplicate
+breaker_floor_fit_new_weakness breaker_floor_fit_outlook
+breaker_floor_other_player_keep breaker_floor_roster_crunch
+breaker_floor_value_giving breaker_floor_value_giving_consensus
+breaker_max_repeat_frac breaker_min_severity breaker_ms_budget
+breaker_narrate_fit_duplicate breaker_narrate_fit_new_weakness
+breaker_narrate_fit_outlook breaker_narrate_other_player_keep
+breaker_narrate_roster_crunch breaker_narrate_value_giving
+breaker_outlook_haircut_legacy breaker_outlook_narrate_margin
+breaker_shadow_run breaker_value_scale
+consensus_both_ways
 consensus_fairness_floor consensus_score_scale
 consolidation_raw_loss_frac crown_elite_value crown_rate crown_rate_market
 crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net

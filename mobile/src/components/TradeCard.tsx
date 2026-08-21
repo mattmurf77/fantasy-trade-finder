@@ -457,6 +457,27 @@ function TradeCardComp({
         </View>
       )}
 
+      {/* Counterparty breaker — "their likely hesitation" (flag
+          trade.breaker_narrative; the server serializes `breaker` only for
+          narrated cards, so payload presence IS the gate — a client-side
+          flag check would add a second gate that can only disagree, fit
+          precedent). The fixed lead-in label "Their likely hesitation:" is
+          part of the server-composed sentence (LLD §1.6 template table);
+          the client holds no copy of its own and never switches on
+          `code`/`severity`. Optional chaining is the null-safety: an absent
+          or malformed `breaker` renders nothing, so older payloads and
+          flag-off decks are byte-identical to today.
+          Chalkline: type tokens + flare for the informational dot
+          (ADR-005) — no new colors, no emoji, radius within spec. */}
+      {data.breaker?.sentence && (
+        <View style={styles.breakerRow} testID="trade-card.breaker-hesitation">
+          <View style={styles.breakerDot} />
+          <Text style={type.bodySm} testID="trade-card.breaker-hesitation.body">
+            {data.breaker.sentence}
+          </Text>
+        </View>
+      )}
+
       {/* Consensus basis — subtle label so users know this card isn't
           built on real ranking disagreement. No tooltip pattern in the
           app, so the hint renders inline as a muted sub-line.
@@ -814,6 +835,20 @@ const styles = StyleSheet.create({
     height: 6,
     borderWidth: 1,
     borderColor: chalk.dim,
+  },
+  // Counterparty-breaker hesitation line: same hint-tier row construction as
+  // fitRow, with the 6px square marker filled in flare — informational
+  // highlight only (ADR-005); ice stays reserved for actions. Colors by token
+  // reference; check-breaker-card.js bans hex literals here.
+  breakerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  breakerDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: flare.base,
   },
   nameRow: {
     flexDirection: 'row',

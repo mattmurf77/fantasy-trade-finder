@@ -994,6 +994,64 @@ _DEFAULT_CFG: dict[str, float] = {
     # drafts like any arm (W4's serving flip). Fit-only bit by design
     # (PLAN-v2 F5b): generalize on the second consumer, not the first.
     "bakeoff_serve_fit":          0.0,
+
+    # ------------------------------------------------------------------
+    # Counterparty breaker — 25 evaluation-layer knobs
+    # (docs/plans/counterparty-breaker/LLD.md §4). Consumed ONLY by
+    # backend/trade_breaker.py, a module no generator or ranker imports:
+    # it runs AFTER the deck-mutation stack completes and mutates only a
+    # new card attribute, so none of these can move a generated deck.
+    # They live here because _c() is the accessor the breaker's per-job
+    # config snapshot (§3.0) reads — thread-local overrides and
+    # reload_config() both work, and snapshot_config() captures them per
+    # run. Five registrations per key, same logical change as the
+    # consumer (see the fit block above): this dict,
+    # database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row. `waiver_slot_cost` is
+    # REUSED by the breaker (_SHARED_ENGINE_KNOB_KEYS, §1.1) and is an
+    # existing engine registration — it is not part of the 25.
+    # ------------------------------------------------------------------
+    # Budget + degradation (LLD §3.9, §5.1).
+    "breaker_ms_budget":                    250.0,
+    "breaker_budget_checkpoint_frac":         0.6,
+    "breaker_degraded_share_max":            0.05,
+    # Narration policy bars (LLD §3.8).
+    "breaker_min_severity":                  0.60,
+    "breaker_max_repeat_frac":               0.34,
+    # Viewer-seat shadow evaluation (operator decision 5, LLD §2.5).
+    "breaker_shadow_run":                     1.0,
+    # fit_outlook window handling (LLD §3.3, D-8).
+    "breaker_outlook_haircut_legacy":        0.70,
+    "breaker_outlook_narrate_margin":        0.06,
+    # Board-authenticity thresholds (LLD §3.4 F-3). SEMANTICS are
+    # BREAKER_VERSION-pinned: a threshold change worth making is a
+    # `ver`-bump conversation first (LLD §4).
+    "breaker_board_div_min":                 25.0,
+    "breaker_board_min_divergent":           10.0,
+    # Severity curve scales (LLD §3.4, §3.5).
+    "breaker_value_scale":                  400.0,
+    "breaker_crunch_scale":                 850.0,
+    # Per-class top-selection floors. Floors shape the stamp
+    # distribution, never narration policy (D-6). `value_giving` is split
+    # by basis because the consensus basis is a near-tautology at the
+    # board floor (D-7: 86.3%).
+    "breaker_floor_fit_outlook":             0.35,
+    "breaker_floor_fit_new_weakness":        0.30,
+    "breaker_floor_fit_duplicate":           0.30,
+    "breaker_floor_value_giving":            0.30,
+    "breaker_floor_value_giving_consensus":  0.75,
+    "breaker_floor_other_player_keep":       0.50,
+    "breaker_floor_roster_crunch":           0.40,
+    # Per-class narration switches — ALL default 0 (D-6 maturity ladder).
+    # Graduation is an operator `scripts/set_knob.py` flip, logged in
+    # `model_config_changes`; it is never a build-time default.
+    "breaker_narrate_fit_outlook":            0.0,
+    "breaker_narrate_fit_new_weakness":       0.0,
+    "breaker_narrate_fit_duplicate":          0.0,
+    "breaker_narrate_value_giving":           0.0,
+    "breaker_narrate_other_player_keep":      0.0,
+    "breaker_narrate_roster_crunch":          0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
