@@ -774,12 +774,29 @@ function Partners({
   onScope: (id: string, name: string) => void;
 }) {
   const p = data.partners;
+  // #374 — "Still unclear what 'pointed the other way' means". It was a phrase
+  // the beat never defined: the user has to hold their OWN window in their head
+  // and infer the complement. Name both sides instead, in the user's own terms.
+  const mine = data.window.declared ?? data.window.inferred;
+  const youContend = mine === 'contender' || mine === 'championship';
+  const youRebuild = mine === 'rebuilder' || mine === 'jets';
+  const heading = youContend
+    ? 'Rebuilding teams — they want picks, you want players'
+    : youRebuild
+      ? 'Contending teams — they want players, you want picks'
+      : 'Teams pointed the other way from you';
   return (
     <View testID="team-review.beat.partners">
-      <Bubble pose="neutral">Deal with the teams pointed the other way.</Bubble>
+      <Bubble pose="neutral">
+        {youContend
+          ? "You're going for it. The teams who aren't are your best partners."
+          : youRebuild
+            ? "You're building. The teams going for it are your best partners."
+            : 'Trades happen between teams that want different things.'}
+      </Bubble>
 
       <View style={styles.card}>
-        <ChalkText style={styles.kicker}>Pointed the other way</ChalkText>
+        <ChalkText style={styles.kicker}>{heading}</ChalkText>
         {p.opposed_window.length === 0 ? (
           <ChalkText style={styles.dim}>Nobody obvious right now.</ChalkText>
         ) : p.opposed_window.map((m) => (
@@ -795,6 +812,14 @@ function Partners({
             </ChalkText>
           </Pressable>
         ))}
+        <ChalkText style={styles.fine}>
+          {youContend
+            ? 'These teams are building for later, so this year\u2019s production is worth less to them than it is to you \u2014 and their picks are worth less to you than they are to them. That gap is the trade.'
+            : youRebuild
+              ? 'These teams are trying to win now, so their picks are worth less to them than they are to you \u2014 and your veterans are worth more to them than they are to you. That gap is the trade.'
+              : 'When two teams want different things, each can give up what it values less. That gap is the trade.'}
+          {' Tap a team to point the finder at them.'}
+        </ChalkText>
       </View>
 
       {p.fills_your_need.length > 0 ? (
