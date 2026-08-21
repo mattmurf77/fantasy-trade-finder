@@ -1568,7 +1568,8 @@ class-entropy of `top.code` (D-7 red line before any narration graduation), per-
 rate, degraded share by rung (incl. `flag_flip_or_unstamped`) and per-class
 `skipped: "predicate_error"` share (F6 — durable, countable from `features_json`), `ms`
 p50/p95, mirrored-serve narration-divergence count (R-6 monitor), and an optional cut on the
-auto-sweetener's `features_json` key (PLAN A-1(b) / §5.5 E-23 — sweetened vs unsweetened
+auto-sweetener's `features_json.gap_sweetener` key (name confirmed 2026-08-21, sibling tip
+`0e04d30`; present on every row, null when absent) (PLAN A-1(b) / §5.5 E-23 — sweetened vs unsweetened
 cards reported separately when the operator asks).
 
 ---

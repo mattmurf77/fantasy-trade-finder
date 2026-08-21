@@ -269,8 +269,13 @@ design or measurement may create or consume ghost impressions.
   read as post-fix semantics; (b) a generation-time **auto-sweetener** adds an equalizer asset
   at consensus gap > 1539 and stamps a `features_json` key — sweetened cards are ordinary
   cards to the breaker (evaluated as-is), and the calibration readout gains an optional cut on
-  the sweetened key rather than ignoring the state silently; (c) the **arm-A golden is
-  re-captured** at that ship — nothing here cites the old golden SHA; the knob-inventory
+  the sweetened key rather than ignoring the state silently — *[corrected 2026-08-21, Receipts
+  precision pack at tip `0e04d30`: the key is `features_json.gap_sweetener`, present on every
+  row, null when absent]*; (c) ~~the arm-A golden is re-captured at that ship~~ *[superseded
+  2026-08-21: NO re-capture — `package_bench_trade_wide` and `package_floor_cross` are pinned
+  0.0 in MODEL_A_PROFILE, so arm A is byte-invariant across the code-ship boundary; per-arm
+  measurement cuts may treat arm A as the fixed reference while arms B/C/fit change]* —
+  nothing here cites the old golden SHA; the knob-inventory
   mechanism (fails by name) is unaffected. Retrospective studies additionally inherit Receipts' verified
   boundaries: the gradeable cohort starts 2026-08-16 (`assets_json` landed with telemetry, no
   backfill — ~7.7k earlier impressions permanently ungradeable) and picks carry NO value

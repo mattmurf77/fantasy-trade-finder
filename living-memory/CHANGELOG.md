@@ -10,6 +10,28 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21 — Counterparty-breaker suite CONVERGED (dual-agent, three-way reconciled); build started dark
+
+Full planning suite for the "Counterparty breaker" (evaluates every trade suggestion from the
+OTHER manager's seat; predicts their decline reason in `trade_pass_reasons` vocabulary; v1 =
+stamp + hesitation narrative, zero ordering effect) completed on `claude/counterparty-breaker-plan`
+(tip `c14680a`+): [docs/plans/counterparty-breaker/](../docs/plans/counterparty-breaker/) —
+scope · PLAN · HLD · LLD · PRD, each dual-agent converged (4 rounds each), full
+[reconciliation-log](../docs/plans/counterparty-breaker/reconciliation-log.md).
+
+- **Three-way reconciled** with Receipts + negative-results-memory; shared taxonomy **v1.1.1**
+  closed on `plan/receipts` (`5572604`, producer column enforces the breaker/negmem boundary);
+  Receipts batch check **PASS**.
+- **Review caught real defects pre-build:** false seam claim (likes-you cards injected after the
+  fit-stamp site), payload-layer privacy leak (dark window now serves NO breaker key), rung-5
+  handler crash, picks-in-lean contradiction, lost flag-off MUST — all fixed in-loop.
+- **Binding constraints recorded:** operator NO-ghost ruling; interleave discipline (v1 zero
+  ordering effect); Monday `fix/package-benchmark-sweetener` ship = named measurement boundary
+  (arm A byte-invariant — knobs pinned 0.0 in its profile; `gap_sweetener` key).
+- **Build began** same session per operator instruction (Opus subagents, wave 1: module/knobs/
+  templates/mobile element), everything behind `trade.breaker` + `trade.breaker_narrative`, both
+  **false**. 20-item operator register in PRD §9 — defaults ship, register is post-build tuning.
+
 ## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
 
 Operator ran the flow end-to-end and filed **thirteen reports**. All closed in code across
