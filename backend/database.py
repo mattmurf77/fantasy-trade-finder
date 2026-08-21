@@ -2328,6 +2328,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("package_floor_market",     0.70,  "#214: market-mode depth-discount contribution floor (piece contributes at least this fraction of face value)"),
     ("package_adj_gamma_market", 0.5,   "#214: market-mode depth-discount exponent, benchmarked against the package's OWN best asset"),
     ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
+    ("package_bench_trade_wide", 1.0,   "2026-08-21 benchmark fix: >0 = depth-discount a multi-asset side that lacks the trade's best asset against the TRADE's best asset (v_max); <=0 = pre-fix own-max benchmark (arm A's pin)"),
+    ("package_floor_cross",      0.40,  "2026-08-21 benchmark fix: contribution floor on the cross-benchmarked (stud-buying) side; inert while package_bench_trade_wide <= 0"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),

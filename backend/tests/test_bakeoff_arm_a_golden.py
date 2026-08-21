@@ -409,12 +409,20 @@ def test_pick_pair_strip_kill_value_is_load_bearing():
 def test_r4_bypass_restores_a_card_the_flag_would_exclude():
     """R4 (#336 windowless awaiting/matched exclusion) has no kill knob, so
     arm A needs the thread-local bypass. Feed the engine an exclusion key for
-    a card the golden contains: arm B must drop it, arm A must keep it."""
+    a card the golden contains: arm A must keep it. Arm B's R4-respect half
+    uses a victim from arm B's OWN current deck — since the 2026-08-21
+    package-benchmark fix, arm B no longer emits GOLDEN[0]'s shape on this
+    fixture (the cross-benchmarked receive side prices out of band), so a
+    golden victim would never reach R4 there."""
     victim = GOLDEN[0]
     key = {(frozenset(victim[0]), frozenset(victim[1]))}
 
-    svc_b, arm_b = _deck(presentment=True, exclusion_keys=key)
-    assert [r[:2] for r in arm_b].count(victim[:2]) == 0
+    _, arm_b_full = _deck(presentment=True, exclusion_keys=set())
+    assert arm_b_full, "fixture yields no arm-B deck at live defaults"
+    b_victim = arm_b_full[0]
+    b_key = {(frozenset(b_victim[0]), frozenset(b_victim[1]))}
+    svc_b, arm_b = _deck(presentment=True, exclusion_keys=b_key)
+    assert [r[:2] for r in arm_b].count(b_victim[:2]) == 0
     assert svc_b.presentment_kill_counts()["R4"] == 1
 
     svc_a, arm_a = _deck(presentment=True, exclusion_keys=key, arm_a=True)
@@ -518,7 +526,8 @@ neutral outlook_alpha_championship outlook_alpha_contender outlook_alpha_jets
 outlook_alpha_not_sure outlook_alpha_rebuilder outlook_dir_age_gap_mult
 outlook_dir_age_tolerance outlook_dir_boost outlook_dir_contend_weight
 outlook_dir_penalty outlook_dir_rescue_frac package_adj_gamma
-package_adj_gamma_market package_discount_cap package_floor_market
+package_adj_gamma_market package_bench_trade_wide package_discount_cap
+package_floor_cross package_floor_market
 package_weight_1 package_weight_2 package_weight_3 package_weight_4
 package_weight_5 pass_cooldown_days pass_cooldown_start_epoch penalty_heavy
 penalty_mod penalty_soft pick_gap_frac pick_gap_min_value pick_pair_strip_frac

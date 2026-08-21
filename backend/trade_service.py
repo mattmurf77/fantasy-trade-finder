@@ -92,6 +92,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "package_floor_market":      0.70,
     "package_adj_gamma_market":  0.5,
     "package_discount_cap":      0.35,
+    # 2026-08-21 cross-package benchmark fix (operator-approved; evidence
+    # docs/reviews/2026-08-21-market-curve-comparison.md §3b: the own-max
+    # benchmark let 4 mids buy a stud at ~5% haircut — the served
+    # Rice+Etienne+Swift+Corum → Nacua card scored 0.939/fair vs
+    # FantasyCalc 1.362 / KTC 2.260). > 0 ⇒ a multi-asset side that does
+    # NOT hold the trade's best asset is depth-benchmarked against the
+    # TRADE's best asset (v_max) at package_floor_cross; ≤ 0 ⇒ the
+    # pre-fix own-max math, byte-identical (arm A's pin).
+    "package_bench_trade_wide":  1.0,
+    # Contribution floor used ONLY on the cross-benchmarked side above —
+    # lower than package_floor_market because the whole point is that
+    # pieces small relative to the stud being bought stop holding ≥ 70%
+    # of face. 0.40 prices the Nacua 4-for-1 at 0.709, between
+    # FantasyCalc (0.734) and the pre-#214 heavy shape (0.692). Inert
+    # while package_bench_trade_wide ≤ 0.
+    "package_floor_cross":       0.40,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -1310,9 +1326,14 @@ def package_value_v2(values: list[float], v_max: float,
     _package_value_market. ``other_values`` (the OTHER side's raw values,
     same value space) enables the both-sides elite crown credit + the
     naive-skew phase-out; callers that omit it get the depth math only.
-    ``v_max``/``n_other`` are ignored in this mode (kept for signature
-    compatibility — the depth benchmark is the package's OWN best asset,
-    and crown eligibility is count-independent).
+    ``n_other`` is ignored in this mode (crown eligibility is
+    count-independent). ``v_max`` — the best single-asset value in the
+    WHOLE trade — feeds the 2026-08-21 cross-package depth benchmark
+    (knob `package_bench_trade_wide`; see _package_value_market): a
+    multi-asset side that does NOT hold the trade's best asset is
+    discounted against that asset, not against its own headliner. At
+    `package_bench_trade_wide` ≤ 0 the pre-fix own-max benchmark applies
+    byte-identically and ``v_max`` is ignored as before.
 
     'heavy' — the pre-#214 legacy math, byte-identical:
 
@@ -1347,7 +1368,7 @@ def package_value_v2(values: list[float], v_max: float,
     if mode == "off":
         return round(sum(values), 1)
     if mode == "market":
-        return _package_value_market(values, other_values)
+        return _package_value_market(values, other_values, v_max)
 
     # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
@@ -1376,14 +1397,30 @@ def package_value_v2(values: list[float], v_max: float,
 
 
 def _package_value_market(values: list[float],
-                          other_values: list[float] | None) -> float:
-    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3).
+                          other_values: list[float] | None,
+                          v_max: float | None = None) -> float:
+    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3), amended
+    2026-08-21 by the cross-package benchmark fix (shape 1a below).
 
-    1. Depth discount benchmarks each piece against the package's OWN best
-       asset — contribution(v) = v · (floor + (1−floor) · (v/own_max)^γ)
-       with floor = package_floor_market, γ = package_adj_gamma_market —
-       and the side's TOTAL discount is capped at package_discount_cap ×
-       the naive sum. A single-asset side is never depth-discounted.
+    1. Depth discount — contribution(v) = v · (floor + (1−floor) ·
+       (v/bench)^γ) with γ = package_adj_gamma_market, and the side's
+       TOTAL discount capped at package_discount_cap × the naive sum.
+       A single-asset side is never depth-discounted.
+    1a. THE BENCHMARK (2026-08-21 fix, operator-approved; evidence
+       docs/reviews/2026-08-21-market-curve-comparison.md §3b). The
+       original #214 shape benchmarked every piece against the package's
+       OWN best asset, so four similar mid-tier players took a ~5%
+       haircut while buying a stud — the served Rice+Etienne+Swift+Corum
+       → Nacua card scored 0.939 (fair) against FantasyCalc 1.362 / KTC
+       2.260. With `package_bench_trade_wide` > 0 (the default) a
+       multi-asset side that does NOT hold the trade's best asset is
+       benchmarked against ``v_max`` — the best asset in the WHOLE trade,
+       KTC's own published shape — with the floor switched to
+       `package_floor_cross` (the own-side floor 0.70 would leave four
+       quarters worth ≥ 70¢ of a dollar regardless of benchmark). A side
+       that holds the trade's best asset, a single-asset side, and every
+       call at `package_bench_trade_wide` ≤ 0 (arm A's pin) keep the
+       original own-max math byte-for-byte.
     2. Crown credit per elite asset (value ≥ crown_elite_value) on EITHER
        side, count-independent, at crown_rate_market per piece (flag
        trade.crown_asset still the kill-switch; needs `other_values` to
@@ -1401,7 +1438,12 @@ def _package_value_market(values: list[float],
     own_max = max(values)
     gamma = _c("package_adj_gamma_market")
     floor = _c("package_floor_market")
-    contrib = sum(v * (floor + (1.0 - floor) * (v / own_max) ** gamma)
+    bench = own_max
+    if (len(values) > 1 and v_max is not None and v_max > own_max
+            and _c("package_bench_trade_wide") > 0):
+        bench = v_max
+        floor = _c("package_floor_cross")
+    contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
                   for v in values)
     cap = _c("package_discount_cap")
     total = max(contrib, naive * (1.0 - cap))

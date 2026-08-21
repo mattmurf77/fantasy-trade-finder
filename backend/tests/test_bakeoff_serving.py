@@ -7,10 +7,17 @@ Contract under test, in `server._run_trade_job`:
 
   • Flag OFF ⇒ the generation path is byte-identical to pre-bake-off
     `origin/main`. Proven against a CAPTURED golden
-    (backend/tests/fixtures/bakeoff/flag_off_golden.json, produced by running
-    backend/tests/support/bakeoff_harness.py inside a worktree at the
-    pre-bake-off SHA), not against an assertion about ourselves. The only
+    (backend/tests/fixtures/bakeoff/flag_off_golden.json, originally produced
+    by running backend/tests/support/bakeoff_harness.py inside a worktree at
+    the pre-bake-off SHA), not against an assertion about ourselves. The only
     admitted difference is the two additive NULL columns.
+    RE-CAPTURED 2026-08-21: the operator-approved package-benchmark fix
+    (`package_bench_trade_wide`, docs/reviews/2026-08-21-market-curve-
+    comparison.md §3b) deliberately moved generation for every arm, so the
+    flag-off deck moved with it (2 cards → 1 on this fixture — the receive
+    side of the dropped 1-for-2 now prices out of band). The golden is the
+    post-fix flag-off output; it still proves flag OFF serves exactly the
+    non-bake-off path, which is its contract.
   • Phase 4 (dark, the default inside the flag): three arms generate and log,
     only arm `current` is served, and the served deck is still the flag-off
     deck.
