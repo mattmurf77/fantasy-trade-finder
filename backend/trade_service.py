@@ -30,6 +30,11 @@ from typing import Optional
 
 from .feature_flags import FLAGS
 from .trade_narrative import build_narrative
+# trade.negmem — MODULE import, attribute calls only (T1, LLD §6.2). A value
+# import (`from .negmem import effective_mult`) would freeze the binding and
+# is exactly the form §10 N-11 sabotages. negmem is a LEAF (it imports only
+# database + feature_flags), so this cannot cycle.
+from . import negmem as _negmem
 
 
 # ---------------------------------------------------------------------------
@@ -4121,6 +4126,21 @@ class TradeService:
                                                # for THIS league. Overwrites the
                                                # stored set every call; None ⇒
                                                # empty set, never keep-previous.
+        negmem=None,                           # trade.negmem — the job's
+                                               # negmem.NegmemMap (LLD §2.1).
+                                               # Travels ONLY as this kwarg:
+                                               # deliberately NO self._negmem
+                                               # slot, so a concurrent
+                                               # same-session job has nothing
+                                               # to overwrite (H-4; stronger
+                                               # than the _exclusion_keys
+                                               # overwrite-per-call precedent
+                                               # it was modelled on). None (the
+                                               # default, and the value on every
+                                               # flag-off / non-allowlisted job)
+                                               # ⇒ every seam short-circuits
+                                               # before any arithmetic and the
+                                               # deck is byte-identical (C1).
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -4148,6 +4168,12 @@ class TradeService:
         # REPLACES the stored set on every call; None ⇒ empty set, never
         # "keep previous". Kill counters reset per job alongside it.
         self._exclusion_keys = set(exclusion_keys) if exclusion_keys else set()
+        # trade.negmem — read the kwarg ONCE into a call-local (LLD §6.2).
+        # Same overwrite-per-call semantics as _exclusion_keys above, except
+        # there is no instance slot at all: `_nm` dies with this call, so no
+        # later call can inherit a previous job's map. Every downstream site
+        # reads `_nm`, never the kwarg name, so there is exactly one read.
+        _nm = negmem
         self._job_seed_elo = seed_elo or {}      # C4 centerpiece derivation
         self._presentment_kills = {"R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys = set()
@@ -4196,6 +4222,18 @@ class TradeService:
                 past_decision_keys=(
                     self._past_decision_keys if r4_bypassed()
                     else self._past_decision_keys | self._exclusion_keys),
+                # trade.negmem (LLD §6.3) — M1 map + the M2 feed. Which one
+                # is conditional matters: `negmem_map` is passed
+                # UNCONDITIONALLY (a plain kwarg carrying None when negmem is
+                # off; the seam guards on `is not None`, never on the kwarg's
+                # presence), while `acceptance_stats` is added ONLY when a map
+                # exists — that splat is what keeps the flag-off call
+                # byte-identical (C1). Do not tidy the two into one form.
+                # m2_feed() returns {} on a degraded map and {} when
+                # gen2_accept_prior_strength ≤ 0 (the sanctioned M2 kill).
+                negmem_map=_nm,
+                **({"acceptance_stats": _nm.m2_feed()}
+                   if _nm is not None else {}),
                 on_opponent_done=on_opponent_done,
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
@@ -4243,6 +4281,13 @@ class TradeService:
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
                 bypass_need_gate     = bypass_need_gate,
+                # trade.negmem — ONE key, in the ONE dict (LLD §6.2). This
+                # dict is both splatted into _generate_trades_v2 below and
+                # handed whole to _relaxed_targeted_pass, so the relaxed
+                # re-run consults the SAME map at the same _c-read strength
+                # with zero special-casing — and there is no duplicate-keyword
+                # hazard because there is only ever one assignment.
+                negmem_map           = _nm,
             )
             cards = self._generate_trades_v2(**_v2_kwargs)
             # #189 — a targeted job (pinned players and/or acquire /
@@ -4940,6 +4985,9 @@ class TradeService:
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
         bypass_need_gate: bool = False,
+        negmem_map=None,                # trade.negmem — the job's NegmemMap
+                                        # (LLD §6.2). None ⇒ the seam below is
+                                        # never entered.
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -5362,6 +5410,35 @@ class TradeService:
                     c.aggression_variant = _variant
                     c.composite_score = round(
                         c.composite_score * max(mult, 0.0), 3)
+            # trade.negmem (D-4/D-10, LLD §6.2) — partner-constant soft prior
+            # from the viewer's OWN past reasoned rejections of this
+            # counterparty. LAST in the per-member multiplier stack and, like
+            # every multiplier above it, applied AFTER all gates: it reorders
+            # acceptable trades and never rescues or removes one (NG1 is
+            # structural here — the seam cannot change membership, so it can
+            # never trigger the #189 `not cards` relaxed rerun either).
+            # Covers v2-pair, v3 and consensus-fallback cards uniformly, since
+            # all three flow through this loop. The seam owns the eff != 1.0
+            # skip (the `_m != 1.0` idiom of the outlook block above): at
+            # identity there is no multiply and no round, which is what makes
+            # negmem_strength = 0 a byte-identical M1 disable (C1).
+            # `member.user_id` is league_members.user_id — the canonical
+            # roster-owner id (ADR-012), the same space the map is keyed in
+            # and the same id the evidence side wrote as
+            # features_json.partner_user_id, so no aliasing happens here.
+            # The stamp rides the CARD (B2): the features assembly copies it
+            # and never recomputes, because by logging time this arm's
+            # _cfg_override has exited.
+            if negmem_map is not None:
+                _eff = _negmem.effective_mult(negmem_map, member.user_id,
+                                              strength=_c("negmem_strength"),
+                                              floor=_c("negmem_floor"))
+                if _eff != 1.0:
+                    _stamp = _negmem.stamp_payload(negmem_map, member.user_id,
+                                                   _eff)
+                    for c in cards:
+                        c.negmem_stamp = _stamp
+                        c.composite_score = round(c.composite_score * _eff, 3)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)

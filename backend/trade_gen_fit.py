@@ -34,6 +34,12 @@ from itertools import combinations
 
 from . import trade_service as ts        # T1 — MODULE import; call ts.overpay_ok(...)
 from . import trade_optimizer as topt    # T1 — same discipline for _feasible_after
+from . import negmem as _negmem          # T1 — trade.negmem, same discipline
+                                         # (never `from .negmem import ...`:
+                                         # a value import freezes the binding,
+                                         # which is the form §10 N-11 sabotages
+                                         # and fit is one of the two paths that
+                                         # test asserts changes under a rebind)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +259,11 @@ def generate_league_suggestions(
     opponent_user_id: str | None = None,
     past_decision_keys: set | None = None,
     max_per_opponent: int | None = None,    # None = full ranked list (gen_v2 contract)
+    negmem_map=None,                        # trade.negmem — the job's NegmemMap
+                                            # (LLD §6.4). ORDERING ONLY here:
+                                            # fit's composite_score payload is
+                                            # a published diagnostic and stays
+                                            # pure. None ⇒ no seam.
     on_opponent_done=None,                  # accepted, IGNORED (fit is a quiet arm)
 ) -> tuple[list[ts.TradeCard], FitReport]:
     """Fit arm: pool → enumerate → K-chain → dual scorer → rank → post filters.
@@ -386,8 +397,30 @@ def generate_league_suggestions(
     # tanh sums, exactly 100 up to float noise ~1e-13) cannot let noise
     # outrank the fairness term; real score separations are ≥ orders of
     # magnitude larger. Ranking otherwise uses the unrounded floats.
+    # trade.negmem (D-4, LLD §6.4) — ordering-only rank-key multiplier. The
+    # aggregate is multiplied BEFORE the 1e-9 quantization, and that order is
+    # load-bearing: the C7c plateau ties are SAME-partner (mirrored-tanh sums
+    # equal up to ~1e-13), so both tied candidates carry the same `eff`, the
+    # scaled noise is ~1e-13·eff < 0.5e-9, and the round still collapses them
+    # onto one quantum so the deterministic tie-break survives. Multiplying
+    # AFTER the round would compare unquantized products and let float noise
+    # outrank the tie-break. Memoized per partner: the multiplier is
+    # partner-constant, and the sort lambda is evaluated per comparison.
+    _nm_cache: dict[str, float] = {}
+
+    def _nm_eff(uid: str) -> float:
+        m = _nm_cache.get(uid)
+        if m is None:
+            m = (_negmem.effective_mult(negmem_map, uid,
+                                        strength=ts._c("negmem_strength"),
+                                        floor=ts._c("negmem_floor"))
+                 if negmem_map is not None else 1.0)
+            _nm_cache[uid] = m
+        return m
+
     candidates.sort(key=lambda c: (
-        -round(c["aggregate_raw"], 9), -c["fairness"],
+        -round(c["aggregate_raw"] * _nm_eff(c["member"].user_id), 9),
+        -c["fairness"],
         (c["member"].user_id, tuple(sorted(c["give_ids"])),
          tuple(sorted(c["recv_ids"])))))
 
@@ -449,6 +482,14 @@ def generate_league_suggestions(
         card.need_fit = ts.need_fit_score(
             user_profile, c["opp_profile"], c["give_ids"], c["recv_ids"],
             players, scoring_format)
+        # trade.negmem — the stamp rides even though `composite_score` above
+        # is untouched (ordering only), so the influence stays observable and
+        # the GR4 joint multiplier stays computable. On bake-off decks
+        # `final_score` falls back to base (rerankers bypassed), so fit's GR4
+        # joint equals `m` exactly.
+        if negmem_map is not None and _nm_eff(member.user_id) != 1.0:
+            card.negmem_stamp = _negmem.stamp_payload(
+                negmem_map, member.user_id, _nm_eff(member.user_id))
         cards.append(card)
 
     # 5d. §1.9 post-score filters (F4, the module half) — applied HERE,
