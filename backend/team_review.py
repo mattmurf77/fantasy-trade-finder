@@ -111,6 +111,40 @@ def resolve_window_from_odds(
     return "odds", odds, None
 
 
+def resolve_window_precedence(
+    composite_applied: bool,
+    odds_source: str | None,
+    odds_implied: str | None,
+    roster_window: str,
+) -> tuple[str | None, str]:
+    """#372 — decide which model owns `window.inferred` when BOTH
+    `trade.outlook_composite` and `trades.window_from_odds` are lit.
+
+    Returns `(source, inferred)`.
+
+    THE RULE: a signal drives once or not at all. `trades.window_from_odds`
+    (#371/D-111) makes the playoff band REPLACE the verdict; #372 makes the
+    same band a WEIGHTED TERM inside the score. Doing both would count one
+    simulation twice — once at weight 0.40 and again at infinity — so when the
+    composite actually applied, the band has already been heard and the
+    replacement is suppressed. `source` reads `"composite"`, and `inferred`
+    equals `roster_inferred` by construction because nothing replaced anything.
+
+    When the composite did NOT apply — the flag is off, or the league has no
+    lineup template so there is no starting lineup to value — #371's behaviour
+    is untouched, down to `source` staying None while its flag is off.
+
+    It lives here rather than inline in the route for the same reason
+    `resolve_window_from_odds` does: a precedence rule that only exists inside
+    a Flask handler is a rule nothing can test.
+    """
+    if composite_applied:
+        return "composite", roster_window
+    if odds_source == "odds" and odds_implied:
+        return "odds", odds_implied
+    return odds_source, roster_window
+
+
 CORE_POSITIONS: tuple[str, ...] = ("QB", "RB", "WR", "TE")
 
 # Caps. Small on purpose: a beat is one finding, and a list of ten is a
@@ -195,6 +229,12 @@ def _window(inferred: str, signals: dict, declared: str | None,
     the point: `inferred` is the verdict the beat acts on and `roster_inferred`
     is always the roster heuristic's own answer, so the payload carries BOTH
     definitions of "contender" instead of one silently replacing the other.
+
+    #372 — `source` gains a third value, `"composite"`. It means the playoff
+    band was SCORED AS A TERM inside `infer_team_outlook` rather than used to
+    overwrite the verdict, so `inferred == roster_inferred` by construction:
+    nothing replaced anything. The band still ships as `odds` (with
+    `odds_reason` naming any refusal) because the card shows it either way.
     """
     out = {
         "inferred": inferred,
@@ -226,6 +266,16 @@ def _window(inferred: str, signals: dict, declared: str | None,
     # as a confident zero.
     if signals.get("firsts") is not None:
         out["signals"]["firsts"] = dict(signals["firsts"])
+    # #372 — the composite's two signal blocks, passed through whole for the
+    # same reason: each carries its own `provenance` and `applied`, and the
+    # card must be able to say "we could not read your starting lineup" or
+    # "your odds say likely but nobody has played a game" rather than render
+    # an unscored term as a confident zero. Present only when the engine flag
+    # put them in `signals`, so a flag-off payload is key-for-key unchanged.
+    if signals.get("starters") is not None:
+        out["signals"]["starters"] = dict(signals["starters"])
+    if signals.get("playoff") is not None:
+        out["signals"]["playoff"] = dict(signals["playoff"])
     if source is not None:
         out["source"] = source
         out["roster_inferred"] = roster_inferred or inferred

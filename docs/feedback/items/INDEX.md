@@ -257,6 +257,7 @@
 | 369 | team-review-plan-beat | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §3 |
 | 370 | deck-repeat-liked-trades | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §6 — TradesHome deck, NOT Team Review; needs a repro |
 | 371 | outlook-as-window-driver | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §5 — decide with #365 |
+| 372 | window-composite | planned | 2026-08-20 | third report on the window beat (#365 → #371 → #372); composite re-weighting behind `trade.outlook_composite`, DARK, committed not merged on `claude/372-window-composite` |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |
