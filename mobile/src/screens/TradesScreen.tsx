@@ -4744,6 +4744,14 @@ export default function TradesScreen({ navigation, route }: any) {
                     ? () => navigation?.navigate?.('TodaysTrade')
                     : undefined
                 }
+                // #376 — the finder's conditions, back on the surface that
+                // replaced the mode bar. Gated on `consolidateOn` for the same
+                // reason `hideTeamAndPlayer` is: that flag is what makes the
+                // full sheet exist, so passing the handler without it would
+                // open a DNA-only sheet and quietly not be "the filters".
+                onConditions={
+                  consolidateOn ? () => setDnaSheetOpen(true) : undefined
+                }
               />
             ) : (
               <TradeFinderModeBar
