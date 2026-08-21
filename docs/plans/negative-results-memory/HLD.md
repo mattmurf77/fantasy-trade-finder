@@ -1,6 +1,6 @@
 # HLD: Negative-results memory
 
-**Version:** candidate v1 (dual-agent synthesis; cross-review pending)
+**Version:** candidate v2 (round-2 fixes applied; round-3 verification pending)
 **Date:** 2026-08-21 · Serves: [PRD.md](PRD.md) (FINAL — R/NG/C/GR/§8.3 are requirements) ·
 Facts: [research-verification.md](research-verification.md) ("memo") ·
 Drafts: [HLD-draft-A.md](HLD-draft-A.md) (coherence), [HLD-draft-B.md](HLD-draft-B.md) (failure-modes)
@@ -26,17 +26,30 @@ measurement discipline (re-ranker bypass, config snapshots, round boundaries —
 
 ```
 backend/negmem.py  (LEAF — imports feature_flags + database ONLY; suggestion_telemetry
-                    precedent. Engines never import it; the map arrives as data.)
+                    precedent. negmem imports NO engine module; engines import negmem
+                    via `import negmem` + attribute call (the T1 rule) — no cycle. The
+                    MAP arrives as data; the helper is called, never passed around.)
   ├─ ADMISSION           one shared implementation of PRD R1's closed list:
   │                      a SQL WHERE fragment + a Python predicate PAIR, consumed by
   │                      the builder, the readout, and the RFPS metric SQL — one
   │                      definition so map and metric cannot drift (H-1 fix;
   │                      deck_centerpiece discipline, server.py:4405-4412)
-  ├─ build_map(user_id, league_id, as_of=None) -> NegmemMap
+  ├─ build_map(user_id, league_id, as_of=None) -> NegmemMap | None
+  │     Returns None for a non-allowlisted (user, league) — the PRD §8.2 league
+  │     scoping seam (mechanism = the tester_allowlist pattern; LLD finalizes).
+  │     None is indistinguishable from flag-off downstream: no kwarg, NO stamps.
+  │     Build-time knobs (halflife, min_evidence) are read ONCE here, globally —
+  │     acceptable because arm-A's opt-out is strength-only (D-6), stated here so
+  │     nobody "fixes" it into the overlay.
   │     NegmemMap: cells{(partner_league_id, family): {n_raw, n_decayed, mult}},
   │               acceptance_stats{partner: (responses, accepts)},   # M2, same read
   │               degraded: bool, as_of, ver
-  ├─ effective_mult(nm_map, partner, cfg) -> float     # THE one multiply (D-10)
+  ├─ effective_mult(nm_map, partner, *, strength, floor) -> float   # PURE (D-10):
+  │     no config access, no defaults inside negmem. Each SEAM reads strength/floor
+  │     via its own `ts._c(...)` AT THE CALL SITE, inside the arm's overlay context,
+  │     and passes numbers — this is what makes arm A's MODEL_A_PROFILE pin of
+  │     negmem_strength=0 actually apply. (A build-time or job-start frozen read is
+  │     overlay-blind and would contaminate arm A while every golden passes.)
   ├─ negmem_readout(user_id, league_id, as_of=None)    # R8; same builder
   └─ (module-global map: FORBIDDEN — see T1 rule, §5.2)
 
@@ -59,7 +72,7 @@ line-verified):
 |---|---|---|
 | serving engine (v2-pair, v3, consensus fallback) | the per-member bounded-multiplier stack, `trade_service.py:4943-5196` | joins block-boost/outlook-dir's `_m != 1.0` skip pattern (`:5125`) |
 | gen_v2 | pair-constant multiplier in the per-pair loop, `trade_gen_v2.py:939-975` | distinct from M2's `acceptance_stats` (different math, same map) |
-| fit | rank-key multiplier in the ranker (post-score, pre-C7c tie-break) | ordering only — fit's aggregate payload stays pure (the 0–100 scores are a display contract) |
+| fit | rank-key multiplier in the ranker (post-score, pre-C7c tie-break; `trade_gen_fit.py:384-392` sort key, `composite_score` set separately at `:442`) | ordering only — fit's aggregate payload stays pure. LLD: apply the multiplier BEFORE the 1e-9 quantization so plateau noise (~1e-13) scaled by m stays below the quantum and the C7c same-partner tie survives. Fragility: this path depends on per-arm order surviving to serve — `_restore_interleaved_order` (`bakeoff_runner.py:1416-1428`) undoing the likes-you composite re-sort; end-to-end test required (§7) |
 
 **Rejected shared seams** (draft A D-4, cited): a post-generation multiplier step
 (violates GR3 — interleaved decks bypass post-gen layers, `server.py:5890-5910`, so the
@@ -91,17 +104,24 @@ deck_outcomes(likes) ─► netting events ─► folded in timestamp order vs (
 trade_matches ────────► acceptance_stats (M2; count-based, 180d lookback in-query)
                               │
                               ▼
-        NegmemMap ──(kwarg)──► arms: eff = effective_mult(map, partner, _c)
-                              │        · skip when eff == 1.0
+        NegmemMap ──(kwarg)──► arms: eff = effective_mult(map, partner,
+                              │          strength=_c("negmem_strength"),
+                              │          floor=_c("negmem_floor"))   # seam-side reads
+                              │        · the SEAM owns the eff == 1.0 skip
                               ▼
         features_json.negmem stamp (every row while ON — §3.4 trichotomy)
 ```
 
 ### 3.1 The bulk read
 One query set per job over the spine (league-scoped, indexed by the existing
-`ix_deck_outcomes_impression` join path; volumes memo §8 — thousands of rows at 10x).
-Cost measured by S6; the p95 budget and the exact SQL are LLD. The read happens once,
-after the flag check, before the arm fan-out.
+`ix_deck_outcomes_impression` join path), bounded by the READ HORIZON
+`max(clean_epoch_floor, as_of − 4·negmem_halflife_days)` — evidence older than four
+half-lives contributes < 6.25% of an event, below the shrinkage floor's resolution, so
+the bound changes nothing the clamp can see while keeping the read O(window), not
+O(lifetime): worst case ~10k–40k rows at 10x under the default 45d half-life (≈180d
+cap). Cost measured by S6 — budget seeded at p95 ≤ 2× the fatigue read's measured p95,
+absolute ceiling 250ms (LLD may tighten, not loosen silently). One read per job, after
+the flag+allowlist check, before the arm fan-out.
 
 ### 3.2 Failure behavior: fail-open to identity, loudly (draft B §3.2)
 The job NEVER dies for negmem — identity is always a legal output (C1/NG1; the F3
@@ -131,7 +151,17 @@ fail-closed, in-job retry, stale-map reuse (violates C5).
 ### 3.4 Stamps: the trichotomy, enforced not hoped (draft B §3.4)
 `features_json.negmem = {m, keys, ev, ver}` INSIDE features_json (fit/fit_diag
 precedent — the Text column always present, so first-row-keys compilation cannot drop
-it). Rules: flag OFF ⇒ no row anywhere carries the key (byte-identical features_json);
+it). **Provenance rule (B2): the multiplier and its keys/ev are computed at CONSULT
+time and ride the card; features assembly COPIES card state and computes nothing** —
+it only applies the `{m: 1.0, exempt}` / `{m: 1.0}` / degraded defaults for cards with
+no consult site. By logging time every arm's `_cfg_override` context has exited, so an
+assembly-side recompute would stamp arm-A rows with the live arm's m and silently
+poison per-arm attribution — hence the rule, plus a test asserting arm-A rows in a
+bake-off deck stamp exactly `{m: 1.0}`. The trichotomy's ON-condition is
+**flag ON ∧ league allowlisted** (a non-allowlisted league's build_map returns None ⇒
+no stamps, so the stamp-rate tripwire never false-alarms on it). Rules:
+flag OFF ∨ not allowlisted ⇒ no row anywhere carries the key (byte-identical
+features_json);
 flag ON + non-degraded ⇒ **every row the job writes** carries it (influenced: real
 m; uninfluenced: `{m: 1.0}`; likes-you-exempt: `{m: 1.0, exempt}`) — stated as
 "every row" rather than "served and ghost" since the ghost holdout is disabled and
@@ -143,8 +173,13 @@ likes-you injection (the exact model_arm scar scenario) retains the key batch-wi
 ### 3.5 M2 flow and edges (draft B §3.5)
 `acceptance_stats` rides the map (D-9); both gen_v2 call sites receive it only when the
 map exists. At n=0 (today's reality — the decline route has essentially never fired)
-the E-B math must return the global prior, not 0/0 — the parity test (C4) includes the
-empty-table case explicitly; S4 is annotated expected-null.
+the E-B math must return the global prior, not 0/0 — **guard placement rule: the
+aggregation never emits zero-response keys and the feed returns `{}` on `m ≤ 0`; the
+guard lives in the FEED, never inside the ratified `acceptance_prior` math (NG9)**.
+The parity test (C4) includes the empty-table case explicitly; S4 is annotated
+expected-null. Relaxed/targeted passes need no special case: same map, same strength
+via `_c`; and a soft multiplier cannot trigger the `not cards` relaxed rerun (NG1,
+structural — `trade_service.py:4271-4318`).
 
 ## 4. Key Design Decisions (mini-ADR; full rationale in draft A §4)
 
@@ -165,11 +200,14 @@ empty-table case explicitly; S4 is annotated expected-null.
   (structural short-circuit at 0; the thread-local overlay makes arm A's disposition a
   plain profile pin `MODEL_A_PROFILE["negmem_strength"] = 0.0` — no bespoke bypass).
 - **D-10 (new at synthesis; resolves A's own D-6 worry + B's triplication attack):**
-  the effective-multiplier computation — strength scaling, clamp, skip predicate —
-  lives in ONE function, `negmem.effective_mult(map, partner, cfg)`, called at all
-  three seams; the seams contribute one line each. C2's invariants are tested against
-  the single implementation; a seam cannot drift the math. (Seams import the MODULE,
-  `import negmem` + attribute call — the T1 rule.)
+  the effective-multiplier computation — strength scaling and clamp — lives in ONE
+  PURE function, `negmem.effective_mult(map, partner, *, strength, floor)`: no config
+  access and no defaults inside negmem. Each seam reads strength/floor via its own
+  `ts._c(...)` at the call site (inside the arm's overlay context — the arm-A opt-out
+  mechanism) and owns the `eff != 1.0` skip; seams contribute two lines each. C2's
+  invariants are tested against the single implementation; a seam cannot drift the
+  math. Seams import the MODULE (`import negmem` + attribute call — T1); the helper
+  is never passed around as a value.
 - **D-7 Like-netting lives in the builder** as events in the as-of domain (R6 purity;
   netting anywhere else splits the domain and makes the readout lie).
 - **D-8 Bake-off citizenship = knob registration; mechanism verified:**
@@ -186,10 +224,14 @@ empty-table case explicitly; S4 is annotated expected-null.
 ## 5. Cross-Cutting
 
 ### 5.1 C1 byte-identical-off proof, per path
-Flag OFF ⇒ map never built, kwarg never passed, stamp key never written, M2 kwarg
-absent. Structural: grep the kwarg to enumerate consumers; goldens per path (serving
-engine + arm-C harness + fit fixture); `negmem_strength = 0` proves the soft revert on
-the same fixtures (skip predicate ⇒ no multiply, no round(), no stamp delta).
+Flag OFF (or league not allowlisted) ⇒ map never built, kwarg never passed, stamp key
+never written, M2 kwarg absent — byte-identical in full, including features_json.
+`negmem_strength = 0` is scoped differently, deliberately: **deck content, scores and
+order are byte-identical** (seam skip ⇒ no multiply, no round()), but stamps FOLLOW THE
+TRICHOTOMY — every row carries `{m: 1.0}` while flag ON ∧ allowlisted, because the
+stamp-absence tripwire (§3.2) depends on it. This is an HLD strengthening over PRD R7
+(which requires stamps only on influenced rows) — stated as such. The arm-A golden is
+specified accordingly: arm-A rows carry `{m: 1.0}`, never absence, never a live m.
 
 ### 5.2 The T1 rule (from the fit-challenger scar, now doctrine)
 No module-global map, ever — `from .negmem import current_map` would freeze the
@@ -200,8 +242,15 @@ the module and call functions; the map moves only as an argument. Sabotage test:
 
 ### 5.3 Observability & operability
 R7 stamps (§3.4) · R8 readout (same builder; powers the operator TestFlight checklist)
-· GR4 joint-multiplier audit SQL (negmem × taste × fatigue × propensity from stamps,
-p5 ≥ 0.15) · degraded-rate and stamp-rate runbook lines with numeric thresholds ·
+· GR4 joint-multiplier audit — COMPUTABILITY (draft B §3.6, restored): taste and
+fatigue multipliers are NOT individually stamped today, so the joint is computed as
+`negmem_stamp.m × (final_score / base_score)` on non-bake-off rows (works uniformly,
+incl. fit, since the stamp's m is explicitly multiplied in); the LLD chooses between
+accepting the diversity-penalty pollution of that ratio (the 0.15 bar has margin) or
+adding `fatigue_m`/`taste_m` keys to features_json under the same uniformity rule ·
+runbook triage order: stamp rate → degraded notes → knob triple · degraded-rate and
+stamp-rate runbook lines with numeric thresholds (~60 bytes/row stamp residue is the
+accepted storage cost) ·
 rollback ladder, all deploy-free, nothing left behind at any rung (derive-on-read):
 `trade.negmem` off (everything, incl. M2) → `negmem_strength = 0` (M1 inert, M2 still
 feeds, map still builds for readout) → `negmem_floor = 1.0` (clamp to identity;
@@ -244,6 +293,16 @@ nothing persisted per-person, deletion structural.
   v1 grain; P2's shape keys refine it when the data earns it.
 
 ## 7. Handed to the LLD (explicitly)
+Additions from cross-review: the league-allowlist mechanism (build_map's None seam;
+tester_allowlist precedent) · the GR4 computability decision (score-ratio pollution
+accepted vs stamping fatigue_m/taste_m) · the read-horizon constant (4·halflife) and
+the S6 seed numbers (2× fatigue p95, 250ms ceiling) · the fit end-to-end ordering
+assertion (a downstream composite-score sort must not erase negmem ordering;
+_restore_interleaved_order dependency) · the fit quantization order (multiply before
+the 1e-9 round) · the M2 id-space fixture check (trade_matches.user_a/b_id vs league
+member space) · co-owner canonicalization call sites (ADR-012) · the streaming-callback
+golden fixture · the operator TestFlight checklist text (D-056) · the arm-A `{m: 1.0}`
+stamp test and the B2 provenance test.
 Signatures + NegmemMap dataclass; the admission SQL fragment + predicate pair; decay/
 shrinkage formulas and the D-5 combine rule (product vs min) with fixtures; netting
 magnitude + decrement-vs-reset; the R1(d) join path (impression↔decision; asymmetric
