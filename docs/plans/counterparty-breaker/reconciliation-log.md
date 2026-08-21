@@ -160,7 +160,42 @@ co-owner degrade-and-mark, atomic pass-2 discard, pinned curve constants). Three
 recorded for post-convergence amendment (impression-copy sketch, cost claim, "already loaded"
 data claim). `fit_outlook` scalar choice left flagged for cross-review adjudication.
 
-*(cross-review and sign-off rounds appended below)*
+### Round 3 — cross-review (both lenses on candidate v1)
+
+**Raised by BOTH lenses (independent convergence — the strongest signal in the whole loop):**
+- §3.10's fit_outlook cell excluded picks from the lean mean, contradicting the §3.3
+  byte-parallel definition (picks ride at −0.25 via `_now_lean`'s PICK short-circuit) and
+  making the parity test and the "contender receiving picks fires" row unsatisfiable —
+  merge-introduced, fixed by restoring pick inclusion.
+- `cfg["waiver_slot_cost"]` KeyError under the frozen knob snapshot (engine knob, not among
+  the 25 registered breaker keys) — fixed via `_SHARED_ENGINE_KNOB_KEYS` union.
+- The Monday `fix/package-benchmark-sweetener` ship was absent from the LLD: §3.4 now reads as
+  post-fix semantics with the dead-in-'market'-mode params annotated; §8 gains the Monday
+  merge as a NAMED code-ship boundary (invisible to `model_config_changes` — the M1 rail
+  cannot censor it) plus the 11:48Z QB seam and the sweetened-key cut; sequencing vs the
+  golden re-capture pinned.
+- E-14's per-class containment narrowing promoted to declared HLD erratum E-D (the errata
+  registry claimed exactly three; silent narrowing would have left the HLD misleading).
+
+**Lens B additionally:** the §1.2 rung-5 failure handler itself crashed — it called
+`trade_service._c(...)` where `trade_service` is the per-format **instance** (no `_c`), a live
+knob read inside the one path that must never fail; fixed to stamp both markers
+unconditionally with no knob read. And predicate crashes stamped an unattributable
+`not_applicable` — now a durable `predicate_error` skip mark counted in degraded share.
+
+**Adjudications (both lenses agreed):** M-8 CONFIRMED — unweighted `_give_side_now_lean`,
+conditional on the picks fix; the provable XOR coherence with `_opponent_frame` outweighs
+value-weighting, and the failure mode under-fires (a missed hesitation, never a wrong
+sentence). T-2 BreakerReport raises-nothing posture confirmed; T-4 evidence enums confirmed
+with `tier_basis` restored; T-5 3dp confirmed.
+
+**T-1 split, orchestrator-ruled:** A wanted the demo skip required; B called it a product
+question. Ruling: both skips ship in v1 (`league_demo` for consistency with every neighboring
+layer; `_job_superseded` as cheap compute avoidance); the "narrate on demo decks as demo
+material" option is recorded as a PRD open question — a deliberate product lift, not a default.
+
+### Round 4 — revision + sign-off
+*(appended after the sign-off run)*
 
 ---
 
