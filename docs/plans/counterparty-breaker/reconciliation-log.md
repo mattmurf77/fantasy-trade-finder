@@ -246,7 +246,42 @@ preregistered bar, with A's safety argument and B's throughput argument both rec
 register item. Both drafts independently recommended v2 seam (a) and keeping the demo skip —
 adopted. Registers consolidated into one table.
 
-*(cross-review and sign-off appended below)*
+### Round 3 — cross-review (both lenses on candidate v1)
+- **A (2 blocking):** taxonomy status drift resolved in the wrong document (PRD superseding the
+  tighter-binding PLAN inverts the hierarchy) with 7a/7b's "ruled — closed" overstating sibling
+  sign-off as operator ratification; and M-G5's enforcement state below n=130/side undefined —
+  an ambiguous gate on general lighting.
+- **B (2 blocking):** the flag-off byte-identity requirement (draft B's FR-1.5) silently lost
+  MUST status in the merge — the exact loss-mode B was tasked to hunt; and the taxonomy
+  contradiction confirmed on disk (stale v1.1.0-pending text outranking the PRD's correction).
+- **Adjudications (convergent):** min-n=50/+10 endorsed as ship defaults with a consequence
+  note (provisional at ~1–1.4 SE, re-read at n≈100, horizons scale with min-n, the n=130 claim
+  bar independent); M-G5 = report-only below 130 with a n≥30 tripwire (< ½ concurrent rate ⇒
+  operator review + logged widening hold), blocking-on-widening only past 130; errata mechanic =
+  dated log entry + bracketed pointers, no body rewrites; checklist step 10 kept conditional
+  with a logged-deferral rule (class-agnostic wording folded in); the register-9/P2 calendar
+  clash dissolved by splitting graduation (dark, off-calendar) from narration plus an
+  operator-only single-device middle rung, worst case 4–5 weeks bounded and named.
+
+### Round 4 — revision + sign-off
+All fixes applied (R-2b restored with its four named tests; Errata E-1 + pointers at four stale
+spots incl. one the reviser found beyond the ratified list; M-G5 rule verbatim in §4.2 +
+register item 20; 7a/7b reworded "operator ratifies with PRD approval"; PLAN status line
+updated). **Both lenses verified and signed off — A: yes, B: yes.** Six cosmetic nits from the
+sign-off round folded post-convergence (M-G1/M-G2 label fix, E-1 index completeness, §8.2
+middle-rung parenthetical, 21-rows note, src-column legend).
+
+### Unresolved disagreements (PRD)
+None — both lenses signed off.
+
+---
+
+## Suite status: COMPLETE
+
+All four artifacts converged with dual sign-off: PLAN (sibling-reconciled) · HLD (4 rounds) ·
+LLD (4 rounds) · PRD (4 rounds). Consolidated operator decision register: PRD §9 (20 items;
+defaults ship — the operator authorized building post-PRD, register is post-build tuning).
+Build follows on this branch per operator instruction.
 
 ---
 
@@ -256,7 +291,7 @@ adopted. Registers consolidated into one table.
 
 Taxonomy **v1.1.1 landed at commit `5572604` on `plan/receipts` (three-way signed)**,
 superseding all pending-v1.1.0-PR language in this suite (PLAN §8 taxonomy bullet, PLAN §9
-items 7a/7b, HLD §5.7). The breaker build **cherry-picks the seed + taxonomy through
+items 7a/7b, HLD §5.7, HLD D-1's "pending operator decision 7a"). The breaker build **cherry-picks the seed + taxonomy through
 `5572604` at landing**. The shared file (`docs/plans/shared/trade-shape-taxonomy.md`) is not
 present in this worktree — it lives on the sibling branch until the cherry-pick. Stale spots
 carry one-line bracketed pointers to this entry; no body rewrites, no renumbering. Register

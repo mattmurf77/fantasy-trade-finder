@@ -180,8 +180,8 @@ register — never a readout footnote** (ruling M-1).
   like-on-viewed < ½ the concurrent non-narrated rate triggers an operator review + a logged
   HOLD on allowlist widening (not an auto-rollback, not a "degradation" finding), resolved at
   the n=130 read. M-G5 becomes a blocking gate on FURTHER WIDENING only after either side
-  reaches 130. Below that, the blocking protections remain M-G4's entropy red line and M1
-  coverage/perf. Tripwire numbers registered as §9 item 20.
+  reaches 130. Below that, the blocking protections remain M-G4's entropy red line and M-G1
+  coverage/degradation and M-G2 perf. Tripwire numbers registered as §9 item 20.
 - **M-G6 — Cross-seat divergence** (R-6 monitor): mirrored-serve narration-divergence count
   rides per-job diagnostics; re-read at the A-5 cadence.
 
@@ -609,7 +609,9 @@ Operator-only via the device-unit allowlist/experiment mechanism (`onboarding_v2
 precedent; allowlist ships via `config/tester_allowlist.json` — Render ignores `render.yaml`
 envVars). No tester sees a hesitation line before the operator has run §8.3 on their own
 device. Narration-flip timing vs the live bake-off window: register item 9 — default dark
-until the current serving round reaches its verdict.
+until the current serving round reaches its verdict (with the item-9 middle rung: operator-only
+first light on one allowlisted device, that device-unit excluded from arm readouts, does not
+count as mid-window lighting).
 
 Exposure := `narrated != null` AND platform = mobile. The narration readout is three-cell:
 narrated / suppressed (reason-enumerated) / no-objection. All joins served-cards-only,
@@ -671,8 +673,9 @@ converges — **open items do not block the build; their listed defaults ship.**
 is the post-build tuning worklist: each row is a call the operator can revisit with data in
 hand, and the "where flagged" column says where the full argument lives. Anything whose
 non-default answer requires new code is marked **[v1.1+]**. Sources merged and renumbered
-transparently: items 1–15 keep the PLAN §9 / HLD §6.3 numbering both drafts used (the `src`
-column maps to draft A / draft B item numbers); 16–20 are PRD additions.
+transparently: 20 numbered items (21 rows; item 7 is split 7a/7b). Items 1–15 keep the PLAN §9 /
+HLD §6.3 numbering both drafts used (the `src` column maps to draft A / draft B item numbers; "—
+(M-n)" = a PRD-merge ruling, "— (BF-n)" = round-3 blocking feedback); 16–20 are PRD additions.
 
 | # | Question | Default shipped | Status | Where flagged | src |
 |---|---|---|---|---|---|
