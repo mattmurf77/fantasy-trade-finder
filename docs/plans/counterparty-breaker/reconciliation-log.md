@@ -224,4 +224,26 @@ variant is a v2 conversation gated on a replacement coherence proof.
 
 ## PRD loop
 
-*(appended after the PRD rounds)*
+### Round 1 — independent drafts
+- **A (product)**: evidence-grounded problem framing, 20 traced R-rows, five user stories
+  (incl. counterparty protection), 13-row observable-states table, worked copy per class with
+  six binding tone rules, 12-step TestFlight checklist, 17-item consolidated register.
+  Contestable calls flagged: v2 seam (a) recommended; first graduated class =
+  `fit_new_weakness` (safety-first); user-invisible suppression; fixed lead-in label;
+  deck-level like-rate guardrail.
+- **B (feasibility)**: expected-n table with KEEP/DEMOTE/KILL verdicts — counterparty-seat
+  calibration (n≈0–2/month at the 3.7% mirror rate) and like→propose (funnel fired zero times
+  ever) DEMOTED to counted-never-gated; graduation realism (only `fit_outlook` + consensus
+  `value_giving` reach min-n inside v1; `roster_crunch` has no filed-reason anchor —
+  reported-never-gated by plan); FR-3.x undefined-user-states block (absence-is-silence: no
+  "no red flags" variant); 14-step checklist; 15-item scope-tripwire list; 18-item register.
+
+### Round 2 — orchestrator merge (rulings M-1…M-10)
+B's metric honesty and states-block adopted wholesale; A's voice, copy, and guardrail
+rationale kept. The one direct A/B conflict — first graduated class — resolved by B's
+realism data: the mechanism stays evidence-bars-per-class, default = first class to clear its
+preregistered bar, with A's safety argument and B's throughput argument both recorded in the
+register item. Both drafts independently recommended v2 seam (a) and keeping the demo skip —
+adopted. Registers consolidated into one table.
+
+*(cross-review and sign-off appended below)*
