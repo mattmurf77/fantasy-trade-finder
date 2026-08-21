@@ -10,6 +10,95 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-21b — Gap auto-sweetener extended to bake-off arm C (`trade_gen_v2`) — full gates, NOT PUSHED, NOT MERGED, on `feat/gap-sweetener-arm-c`
+
+**Branch:** `feat/gap-sweetener-arm-c`, **stacked on `fix/package-benchmark-sweetener` @ `480cce0`** — NOT cut from `origin/main`. `close_value_gap` does not exist on `origin/main` at all, so this work is unbuildable there; the operator chose the stacked branch over waiting for the Monday window (2026-08-21). **Merge order is load-bearing: the parent lands first, then this.**
+Full gates ran — operator did **not** declare express.
+Scope + code-walk: [docs/plans/package-benchmark-sweetener/scope-arm-c.md](../docs/plans/package-benchmark-sweetener/scope-arm-c.md) ·
+ship-time entries **drafted, not applied**: [decisions-draft-arm-c.md](../docs/plans/package-benchmark-sweetener/decisions-draft-arm-c.md).
+
+**No feature flag, no new knob.** Arm C reuses the parent's `sweetener_gap_threshold` (1539.0); ≤ 0 remains the deploy-free rollback and arm A's pin.
+
+**Why it was needed, measured.** Arm C inherited the parent's trade-wide package benchmark — which WIDENS absolute consensus gaps — through `_consensus_packages` at card-build time, but did not run the closer. Its deck is card-for-card identical across the parent (the parent moves its *prices*, not its *selections*), so the entire rise is mispricing. Reproduced on this tree: **12-team 3/22 over the line (13.6 %), 16-team 2/19 (10.5 %)**, `sweetened: 0` in both, against 0–5.3 % for every other served arm.
+## 2026-08-21b — Receipts (graded suggestion track record) built dark — full gates, NOT PUSHED, NOT MERGED, on `feat/receipts`
+
+**Branch:** `feat/receipts` (worktree `agent-a60b48a57928d5895`), cut from `origin/main` at `eb9c1de`, then `plan/receipts` merged in (that merge IS the shared taxonomy's repo landing) and `origin/main` re-merged at `d42872f` after PRs #161/#162 landed mid-build. **Not pushed, not merged.**
+Full gates — the operator did not declare express, and the change is outside the express lane by the bright-line rule anyway (2 new tables, 3 new routes, 2 new flags, 5 new knobs, 3 new analytics events).
+Spec: [docs/plans/receipts/](../docs/plans/receipts/) (dual-agent reviewed, 3 adversarial rounds) · code-walk: [code-walk.md](../docs/plans/receipts/code-walk.md) · operator checklist: [testflight-checklist.md](../docs/plans/receipts/testflight-checklist.md).
+
+**Everything ships dark.** `receipts.grading` and `receipts.screen` both default false; env kill switch `FTF_RECEIPTS_GRADE=0`.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3795 passed, 1 skipped, 0 failed** (340 s). Baseline measured on this same tree at the parent tip `480cce0`: **3786 passed, 1 skipped**. The +9 are the new `test_gap_sweetener_arm_c.py`; no other delta, nothing removed, nothing newly skipped |
+| `cd mobile && tsc --noEmit` · `check-*.js` · `testid-lint.sh` | **not run in this worktree** (no `node_modules`); **zero mobile files touched** — `git diff --stat <parent> -- mobile/` is empty, so the mobile CI jobs are byte-identical to the parent's |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**Verify-by-revert on all nine new tests, three trees.** With `backend/trade_gen_v2.py` reverted to the parent, **8 of 9 go red**; with the *contained-pools* variant (equalizer drawn from `give_pool`/`extras` rather than the semantic universes) exactly **1 goes red** — `test_arm_c_equalizer_reaches_past_the_budget_slice`, the test that pins the §0b decision. Shipped tree: 9/9 green. The ninth test, `test_arm_c_kill_value_is_a_byte_identical_no_op`, passes on the parent **by design** — it asserts the threshold-0 deck IS the pre-sweetener deck, so a green there is the claim, not a gap in coverage. It pins the organic card's exact literals (`["G"] → ["R"]`, 10000.0 / 11600.0, band 0.862, gap 1600.0) so drift in the disabled path cannot be silently rebaselined.
+
+**Two defects found by reading arm C rather than copying the other three hooks** (both would have shipped had this been a copy-paste; details in scope-arm-c.md §0):
+
+1. **Placement.** The gap is only computable at the card-build call to `_consensus_packages`, but ten derived fields — `_dedup_batch` keys, `_meso_variants`, `_rationale`, `classify_package_shape` (whose `"consolidation"` label is literally `len(ids) == 1`), `card.health`'s seven entries, `mismatch_score`, `fairness_score`, `composite_score` and the Stage 6/7 exposure + tier ranking — are computed earlier from the `_Candidate`. Sweetening at the obvious site leaves every one of them describing the unsweetened trade: arm C's much larger analogue of the v3 stale-`fit_premium` defect. Fixed by hooking inside `_pair_survivors` and rebuilding the whole `_Candidate`.
+2. **`past_decision_keys` was re-checkable and unchecked.** A sweetened combo is a different trade with a different key; the enumeration only ever tested the unsweetened shape. Without the re-test the pass could ship a combo the user had already rejected. Pinned by `test_arm_c_sweetened_combo_respects_past_decisions`.
+
+**Pool containment — the round-2 lesson applied, and where it stops.** Arm C prunes in two layers and only one is semantic. `user_assets` (on BOTH boards, not untouchable) and `extras_all` (divergence-positive, not not-interested) encode real rules and are the equalizer universe. `[:gen2_give_pool]` / `[:gen2_recv_extra_pool]` are enumeration budget — documented as bounding "SEARCH BREADTH, never output length" alongside `gen2_centerpiece_top_k` — and the sweetener deliberately reaches past them. **Measured justification:** wired to the budget slices the pass fires but the deck metric does not move (3/22 and 2/19 unchanged), because **78 of 112 and 63 of 86 rejected equalizers are undershoot** — nothing in the slice is big enough — against only 8 and 13 killed by arm C's own gates. Reaching the semantic universe moves the 12-team fixture **3 → 1 over the line (13.6 % → 4.6 %), p90 1665 → 951**; the 16-team stays at 2 but its mean gap falls 551 → 488. Operator chose the widened reading with the numbers in front of them. This is NOT the `49c1d76` defect relaxed: that one crossed a semantic line (a #174 pinned "trade away G" job smuggling in an unpinned player — a broken user instruction).
+
+**Golden disposition — re-verified deliberately, and they did NOT move. No re-capture, no kill-value pin.** The brief expected the gen2 goldens to move. Instrumented rather than assumed, with a probe counting arm-C sweetener invocations per file:
+
+| File | `generate_league_suggestions` calls | arm-C cards | sweetener fired | verdict |
+|---|---|---|---|---|
+| `test_bakeoff_arm_a_golden.py` | 0 | 0 | 0 | never enters arm C — arm A is the v2/consensus path, and pins the knob at 0 besides |
+| `test_engine_quality_golden.py` · `test_engine_quality.py` | 0 | 0 | 0 | never enters arm C |
+| `test_bakeoff_runner.py` · `test_bakeoff_composition.py` · `test_bakeoff_challenger.py` | 0 | 0 | 0 | never enters arm C |
+| `test_bakeoff_serving.py` | 10 | **0 cards** | 0 | enters, but the fixture yields empty arm-C decks |
+| `test_trade_gen_v2.py` (arm C's own suite, not a golden) | 36 | 57 | **10 fired, 10 closed** | all 40 assertions still green |
+
+Confirmed by forcing the gap line to **1.0** — a threshold every nonzero gap exceeds: still **0 invocations** in every golden file. So the goldens are stable because arm C's generator is not reached in them, not because the threshold happens to sit above their gaps. There is no baseline to re-capture and nothing to pin.
+
+**Where the sweetener does real work, proven by the same probe on three trees** — `test_trade_gen_v2.py`, all 40 pre-existing tests green throughout:
+
+| Tree | cards | max gap | over 1539 |
+|---|---|---|---|
+| parent (`480cce0`) | 58 | 1861.5 | **2** |
+| contained pools | 57 | 1234.2 | 0 |
+| shipped (widened) | 57 | 1234.2 | 0 |
+
+**Known effect, deliberately accepted — for arm C the pass CAN shrink the deck by one, unlike the other three paths.** D-143 states the sweetener "narrows gaps, never shrinks the deck". That holds where it was written, but arm C is the only path with `_dedup_batch` downstream, and its bucket key is `(opponent, centerpiece, "{len(give)}x{len(recv)}")`. Sweetening changes a card's SHAPE, so it can land in an occupied bucket and the lower-ranked occupant is dropped. Diffed card-for-card on `test_trade_gen_v2.py` deck #11: parent held `u_rb1 → o_wr1` (gap 1671, over) and `u_rb2+u_wr1 → o_wr1` (gap 1861, over); shipped sweetens the first into a 2×1 (`+u_wr1`, gap 1234) which collides with the second's bucket and evicts it. Net 3 cards → 2, and **both over-the-line cards are gone**. Acceptable: the bucket rule exists precisely to stop two near-duplicate shapes serving together, and arm C emits its full survivor set with no truncation, so the loss is one near-dup rather than a suppressed idea.
+
+**Harness determinism — see [G-053](GOTCHAS.md).** The first before/after run showed arm D moving, which cannot happen from a `trade_gen_v2` edit. Two consecutive runs on the identical tree reproduced the flip: the harness is seed-dependent. Every number in this entry was produced with `PYTHONHASHSEED=0` on both sides, verified byte-identical across two seeded runs. This retroactively qualifies single-card deltas in 2026-08-21a, which was measured unseeded.
+
+**Not covered / owed at ship.** No runtime evidence: arm C serves quota-capped bake-off slots and rides the parent's [testflight-checklist.md](../docs/plans/package-benchmark-sweetener/testflight-checklist.md) rather than adding a second manual pass. Deck-level effects above are fixture-only and DIRECTIONAL — synthetic boards, `max_per_opponent=5` (the engine default is None, so production decks are larger than the harness's).
+| `python3 -m pytest backend/tests -q` | **3951 passed, 1 skipped, 0 failed** (301 s), measured on the merged tree. Exactly **54** of those are the new `backend/tests/test_receipts_grading.py`, so the merged tree's pre-existing count is 3897 — no existing test was changed, removed, or newly skipped, and the only test file this branch adds is the receipts one. (The brief's 3651 baseline predates PRs #161/#162, which landed mid-build and brought their own suites.) |
+| `cd mobile && npx tsc --noEmit` | **green** (`npm ci` first — the worktree had no `node_modules`) |
+| `node tests/check-receipts.js` (`npm run test:receipts`) | **12 passed, 0 failed** |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK** |
+| Knob-inventory guard | green and **correctly silent**: the five `receipts_*` knobs are deliberately NOT in `trade_service._DEFAULT_CFG`, so `_PINNED_KNOBS` does not apply. A test asserts they never enter it, and each has an arm-A disposition sentence in `docs/plans/three-model-bakeoff/scope-phase2.md` |
+
+**Sabotage discipline — 21 named sabotages, all confirmed RED then green on revert.**
+Backend (12): edge sign flip · D-8 floor imputation dropped · serve anchor allowing a post-serve snapshot · pick weights read live from `GENERIC_PICK_SEEDS` · Wilson centre shift dropped · valuation leaking from the frozen card · ghosts entering the queue · queue ignoring existing grades · min-n gate removed · an UPDATE path on `receipts_grades` · pre-telemetry rows queued · dedup keeping the latest serve.
+Mobile (9): FeedbackFAB removed from one render branch · FAB given tab-stack props · a second per-window fetch · worst call dropped while best call kept · route wrapped in the flag · entry point ungated · ledger state deleted · disclosure not rendered · give-side delta dropped.
+
+**Six guards were BLIND on the first pass and were strengthened rather than logged as passing** — this is the part worth reading:
+- **T-4 (deploy invariance)** compared two rows that BOTH became `pick_majority` under the sabotage, so a field-by-field equality check passed while proving nothing. Now pins `status == "graded"` on both sides, plus a direct assertion that the frozen weights survive `GENERIC_PICK_SEEDS` being emptied entirely.
+- **T-1 (pre-telemetry)** ran against an empty cohort, so the run short-circuited and the test passed because *nothing happened at all*. Now seeds a gradeable neighbour and asserts the run did real work.
+- **FAB check** passed with one of three render branches stripped — the error branch, i.e. the user with the most to report and no way to report it. Now counts mounts against render branches and prop-checks every mount.
+- **Unconditional-route check** searched for the flag NAME, so `{true ? <Stack.Screen…}` slipped through. Now inspects the token before the tag.
+- **Both-sides check** matched `give_delta` surviving inside a style callback after the rendered number was deleted. Now asserts the rendered value.
+
+**Two real defects the discipline caught (not test bugs).**
+1. `_dedup_earliest` was keeping the LATEST serve instead of the earliest — masked by a **stale `.pyc`**: the sabotage swapped `<`→`>`, identical byte length inside one mtime-second, so Python reused cached bytecode and `inspect.getsource` disagreed with what was actually running. Sabotage runs now clear bytecode between steps. **Worth remembering: a same-length edit inside one second is invisible to Python's import cache.**
+2. The daily-tick guard serialized `receipts_grade_started` unconditionally, changing the flag-off tick payload — caught by `test_deck_replenishment`'s byte-identical assertion, fixed, and now pinned from the receipts side too.
+
+**Backfill exercised end to end** against a synthetic fixture DB (420 impressions across 3 leagues / 2 formats / 3 users, 8 640 snapshot rows, a deliberate 2-day supply gap, 23 ghosts, 49 pre-telemetry rows): 565 resolvable → **542 graded + 23 ungradeable = 565 exactly**, terminating on two consecutive zero-work runs; re-run wrote 0; ledger showed 6 complete start/end pairs and 0 unmatched starts; **0 ghost rows graded**; 47 floor-imputed (D-8) rows retained. Win/loss landed at 283/259 on drift-only synthetic data — near the 50% null, which is what an unbiased grader should produce on random walks. `effective_window` for 28d: min 27, max 30, median 28.
+The **real dev DB dry-run reports 0** and that is correct, not a failure: `data/trade_finder.db` holds zero `deck_impressions` rows, so there is nothing local to grade. The prod cohort is the P0 read, still outstanding.
+
+**Code-ship boundary, examined rather than assumed (coordinator note).** `d42872f` (2026-08-22, package pricing + sweetener) changes package-value SEMANTICS in the engine. It does **not** affect grades: the grader reads only `player_value_history` consensus snapshots and never computes a package value, so no grade moves across that boundary — HL-4 recalibration immunity holds by construction. What it *does* affect is attribution: impressions served before and after `d42872f` come from different engine behaviour, and that is already carried by the `policy_version` slice key stamped on every impression and copied onto every grade row. No action; recorded so it is not re-examined.
+
+**Not run:** anything on a device. Receipts has never rendered on real hardware — that is the operator's checklist above, and it is the only runtime evidence this feature will get.
+
+---
 ## 2026-08-21a — Package-benchmark fix + gap auto-sweetener + ghost default, round-2 reviewed — full gates, NOT PUSHED, NOT MERGED, on `fix/package-benchmark-sweetener`
 
 **Branch:** `fix/package-benchmark-sweetener` (worktree `agent-a8f35b1a442cb2147`), cut from `origin/main` at `eb9c1de`. **Not pushed, not merged** — the merge is the operator's Monday-boundary call (change-control rule, trade-engine-accuracy PLAN Phase 0.4).

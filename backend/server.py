@@ -8288,6 +8288,54 @@ def suggestion_telemetry_ratio_route():
     })
 
 
+@app.route("/api/admin/receipts/metrics", methods=["GET"])
+def receipts_admin_metrics_route():
+    """GET /api/admin/receipts/metrics — per-taxonomy-cell grading accuracy.
+
+    Receipts' internal readout (docs/plans/receipts/LLD.md §2.3). Operator-only
+    (X-Cron-Secret, the `suggestion-telemetry/ratio` pattern above). Cells are
+    (window × shape_bucket × basis × model_arm); each carries `n`, win share, a
+    **Wilson 95% interval** in its centre-shifted form, median `edge_pct`, and
+    `gradeable_share` with a `flag_low_share` marker below 70%.
+
+    No bare percentages: at the single-digit per-cell n this feature will live
+    at for months, a point estimate without its interval is a claim the data
+    cannot support. Cells here deliberately SKIP the user surface's coverage
+    filter — the admin read wants every graded row plus the disclosure, not a
+    tidier subset — and the `n == rows used` invariant holds per surface.
+
+    `effective_window` reports the real span of `window_snap_date −
+    serve_snap_date`: a nominal 14-day window lands at roughly 11–20 days once
+    both anchors resolve, and the operator should read the number knowing it.
+
+    Optional filters: `window`, `shape_bucket`, `basis`, `model_arm`,
+    `league_id`, `dedup` (default 1 — the same earliest-serve rule as the user
+    surface; `dedup=0` includes re-serves and the response says so).
+
+    Available regardless of `receipts.screen`; 404 `feature_disabled` while
+    `receipts.grading` is off.
+    """
+    _require_cron_auth()
+    from .receipts_service import admin_metrics, grading_enabled
+    if not grading_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    window = request.args.get("window")
+    try:
+        window_days = int(window) if window else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "window must be an integer"}), 400
+
+    return jsonify(admin_metrics(
+        window=window_days,
+        shape_bucket=request.args.get("shape_bucket") or None,
+        basis=request.args.get("basis") or None,
+        model_arm=request.args.get("model_arm") or None,
+        league_id=request.args.get("league_id") or None,
+        dedup=request.args.get("dedup", "1") != "0",
+    ))
+
+
 @app.route("/api/admin/analytics/<report>", methods=["GET"])
 def analytics_report_route(report):
     """GET /api/admin/analytics/<report> — the P2 report catalog (LLD §2.3;
@@ -16102,6 +16150,65 @@ def set_asset_prefs():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/league/<league_id>/receipts")
+@_gate_unverified_read
+def league_receipts_route(league_id):
+    """GET /api/league/<league_id>/receipts — the viewer's graded track record.
+
+    Receipts (docs/plans/receipts/LLD.md §2.2). One payload carries ALL THREE
+    windows (14/28/56d) plus the fixed 28d headline: making every window
+    present is what stops any surface — this one or a later one — from
+    selecting the best-looking number. There is no per-window endpoint on
+    purpose.
+
+    A path segment rather than `?league_id=` (the older league routes' shape),
+    because the LLD specifies this path and the mobile client is built to it.
+
+    Scoping is a WHERE, not a post-filter: rows are `user_id = the session's
+    ACCOUNT id` (what `_log_deck_signal_impressions` stamps, `server.py:6102`)
+    AND this league. A non-member therefore sees an empty payload rather than
+    a permission error, and cross-user receipts are unreachable by
+    construction (PLAN NG-3). Ghost rows are filtered again here as defense in
+    depth — the queue predicate means none can exist (operator ruling
+    2026-08-21) — and re-serves of one card collapse to their earliest serve
+    so a deck regeneration cannot give one call two votes.
+
+    Names are resolved server-side for DISPLAY ONLY and never enter the math.
+
+    404 `feature_disabled` while `receipts.screen` is off — the client hides
+    the entry point on that response rather than showing an error.
+    """
+    from .receipts_service import league_receipts, screen_enabled
+    if not screen_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    viewer = sess.get("user_id")
+    if not viewer:
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = league_receipts(str(viewer), str(league_id))
+
+    # Display enrichment, after the fact: collect the player ids the payload
+    # actually renders and name them in one batched query. A lookup failure
+    # costs names, never the route.
+    try:
+        ids = {a["id"] for row in payload.get("rows", [])
+               for side in ("give", "receive")
+               for a in row[side]["assets"] if not a["is_pick"]}
+        names = _player_names_by_id(ids) if ids else {}
+        for row in payload.get("rows", []):
+            for side in ("give", "receive"):
+                for a in row[side]["assets"]:
+                    if not a["is_pick"]:
+                        a["name"] = names.get(a["id"]) or a["name"]
+    except Exception as e:
+        log.warning("receipts: name resolution failed (continuing): %s", e)
+
+    return jsonify(payload)
+
+
 @app.route("/api/league/summary")
 def league_summary_route():
     """GET /api/league/summary?league_id=XXX
@@ -19645,6 +19752,32 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
 
+    # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
+    # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
+    # service is provisioned for it (operator ruling Q-4) — and the one
+    # value-snapshot "provisioned cron" this repo believed in turned out to be
+    # fictional (reverted in commit 1e50d3e). So grading rides the same
+    # three-trigger pattern roster_history uses (database.py:1320-1336): the
+    # dedicated endpoint, this guard, and the backfill script all call ONE
+    # idempotent writer. The guard is what actually fires day to day.
+    #
+    # Fire-and-forget on a daemon thread: a grading run must never lengthen
+    # the tick or be able to fail the push work above (and vice versa). Single-
+    # flight inside the service means an overlap with the dedicated endpoint
+    # no-ops rather than duplicating. No-op while `receipts.grading` is off.
+    #
+    # The counter is serialized ONLY when `receipts.grading` is on, so a
+    # flag-off tick payload stays byte-identical to today — the
+    # `_run_weekly_replenishment` convention, pinned by
+    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
+    receipts_grade_started: bool | None = None
+    try:
+        from .receipts_service import grading_enabled as _receipts_on
+        if _receipts_on():
+            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
+    except Exception as e:
+        log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
+
     log.info("daily-tick: %s", counters)
     extra: dict = {}
     # Serialized only when the flag is on — flag-off tick payloads stay
@@ -19654,6 +19787,8 @@ def cron_daily_tick():
         extra["roster_snapshot"] = roster_snapshot_stats
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
+    if receipts_grade_started is not None:
+        extra["receipts_grade_started"] = receipts_grade_started
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
         return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
@@ -19677,6 +19812,75 @@ def cron_value_snapshot():
     _require_cron_auth()
     today, counters = _write_daily_value_snapshots()
     return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
+def _kickoff_receipts_grading(trigger: str, batch: int | None = None) -> bool:
+    """Start a Receipts grading run on a daemon thread. Returns whether a run
+    was actually started.
+
+    Render "cron" is an HTTP POST into the single-worker web service, so the
+    grading loop must NEVER run inline — same constraint, same answer, as
+    `_refresh_players_cache_async` (`cron_players_refresh` below). Single-
+    flight lives inside `receipts_service`, so a double-fire (dedicated
+    endpoint + daily-tick guard on the same day) is a no-op, not a duplicate.
+    """
+    from .receipts_service import grading_enabled, is_running, run_grading
+    if not grading_enabled() or is_running():
+        return False
+    t = threading.Thread(
+        target=lambda: run_grading(trigger=trigger, batch=batch),
+        name=f"receipts-grade-{trigger}", daemon=True)
+    t.start()
+    return True
+
+
+@app.route("/api/cron/receipts-grade", methods=["POST"])
+def cron_receipts_grade():
+    """Grade elapsed suggestion windows against consensus movement.
+
+    Receipts (docs/plans/receipts/). The serve-time `deck_impressions` row is
+    the preregistered prediction; this job marks it to market at 14/28/56 days
+    and appends immutable `receipts_grades` rows. It reads only frozen data
+    (`deck_impressions`, `player_value_history`) and writes only
+    `receipts_*` tables, so it cannot affect serving in any flag state.
+
+    Returns **202 immediately** and grades on a daemon thread — never inline,
+    because one gunicorn worker serves every request (`render.yaml:16`).
+    `started=false` means a run was already in flight (single-flight, not a
+    queue). `remaining_resolvable` is a cheap COUNT of work that can reach a
+    TERMINAL row today — impressions still waiting on a future snapshot are
+    excluded, so the number never looks like a stuck backlog.
+
+    `?batch=N` (1..5000) overrides `receipts_grade_batch` for one run — what
+    `scripts/receipts_backfill.py` drives the launch-day drain with.
+
+    Flag `receipts.grading` off → `200 {"ok": true, "skipped": "flag"}` and
+    NO writes. Env kill switch `FTF_RECEIPTS_GRADE=0` → the same, without a
+    flag write. Auth: X-Cron-Secret, same as every other /api/cron/*.
+    """
+    _require_cron_auth()
+    from .receipts_service import grading_enabled, remaining_resolvable
+    if not grading_enabled():
+        return jsonify({"ok": True, "skipped": "flag"})
+
+    batch = None
+    raw = request.args.get("batch")
+    if raw:
+        try:
+            batch = max(1, min(5000, int(raw)))
+        except (TypeError, ValueError):
+            return jsonify({"error": "batch must be an integer 1..5000"}), 400
+
+    # Computed BEFORE the thread starts, so the number in the 202 describes
+    # the backlog the caller is about to work on rather than a race.
+    try:
+        left = remaining_resolvable()
+    except Exception as e:
+        log.warning("receipts-grade: backlog count failed (continuing): %s", e)
+        left = None
+    started = _kickoff_receipts_grading("cron", batch)
+    return jsonify({"ok": True, "started": started,
+                    "remaining_resolvable": left}), 202
 
 
 @app.route("/api/cron/players-refresh", methods=["POST"])

@@ -226,10 +226,12 @@ New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader 
 
 ## Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)
 
-`backend/trade_gen_v2.py` (flag `trade_gen.v2`, dark) sets three conventions:
+`backend/trade_gen_v2.py` (flag `trade_gen.v2`, dark) sets five conventions:
 - **`gen2_*` config namespace** — every tunable of the staged pipeline lives in `trade_service._DEFAULT_CFG` under a `gen2_` prefix (read through the same `_c()` accessor / model_config overlay as every other engine knob). New pipeline knobs go there, never as module constants.
 - **Dual-board ε extends #108 to both sides.** `gen2_epsilon` gates BOTH sides' own-board gain on every generated package (consolidation-discounted, `trade_gen_v2.side_gain`) — the two-sided generalization of `user_gain_epsilon`. The directed `side_gain(in, out, value_of)` decomposition is the unit a future 3-team-cycle layer reuses; don't collapse it into a pairwise-only formula.
 - **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
+- **A pass that rewrites a card's assets belongs in `_pair_survivors`, and must rebuild the whole `_Candidate`.** (2026-08-21, [D-145](DECISIONS.md).) The gap sweetener is the worked example: the absolute gap it acts on is only computable from `_consensus_packages`, which `generate_league_suggestions` calls at card-build time — but TEN downstream values are derived from the `_Candidate` before that point (`_dedup_batch`'s exact/bucket/jaccard keys, `_meso_variants`, `_rationale`, `classify_package_shape` — whose `"consolidation"` label is literally `len(ids) == 1` — `card.health`'s seven entries, `mismatch_score`, `fairness_score`, `composite_score`, and the Stage 6/7 exposure + tier ranking). Mutating ids at the card-build site leaves every one of them describing a trade that is no longer being offered. This is the general shape of the v3 stale-`fit_premium` defect, and arm C's surface for it is the largest in the codebase. Two corollaries: **(a)** re-earn the gate stack via an `extra_ok_fn` that touches no `report` counter — a sweetened combo that fails a gate is not a rejected candidate, it is a candidate that ships unsweetened — and re-test `past_decision_keys`, since the rewritten combo is a different trade with a different key that the enumeration never saw; **(b)** arm C is the only generator with `_dedup_batch` downstream, and its bucket key contains the give×receive SHAPE, so a pass that changes a card's shape CAN shrink the deck by evicting a bucket occupant. Invariants asserted by the other generators ("never shrinks the deck") do not transfer here — re-verify them rather than inheriting them.
+- **Pruned pools have two layers, and only one of them binds a rewriting pass.** (2026-08-21, [D-146](DECISIONS.md).) When handing a candidate universe to a helper like `trade_optimizer.close_value_gap`, separate the **semantic** pools (`user_assets` = ranked on both boards and not untouchable; `extras_all` = divergence-positive and not not-interested — these encode real rules, and crossing one produces an asset the engine could never legitimately trade) from the **enumeration-budget** slices (`[:gen2_give_pool]`, `[:gen2_recv_extra_pool]`, `gen2_centerpiece_top_k` — documented as bounding search breadth, never output length). Pass the semantic universe; reaching past a budget slice is not the pool-containment defect that `49c1d76` fixed, which crossed a *user instruction* (a #174 pinned give job smuggling in an unpinned player). Confusing the two layers makes the pass a measured no-op: wired to arm C's budget slices, 78 of 112 rejected equalizers were undershoot rather than gate kills.
 
 Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.
 
@@ -527,3 +529,36 @@ The shape that worked, and generalises to any read-time enrichment:
   functions may read DP grew a second permitted reader; it was rewritten from a source-line comparison
   to an AST reader-set equality check with a module-level-import refusal, and sabotage-verified. A
   widened guard that is not also tightened is how a bound quietly becomes decorative.
+## Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)
+
+A table-family convention introduced by Receipts, worth reusing for anything that grades our
+own past output.
+
+- **The prefix owns the writer.** `receipts_*` tables are written by exactly one module
+  (`backend/receipts_service.py`) and read by that module's two read surfaces. Sibling efforts
+  take their own prefixes (`negmem_`, `breaker_`), so "who wrote this row" is answerable from
+  the table name.
+- **INSERT + SELECT helpers only.** `database.py` deliberately exposes no UPDATE or DELETE
+  path for these tables, and a test greps for one. That is what makes "we can't move the
+  goalposts" a mechanism rather than a promise — a correction is a `grader_version` bump plus
+  a regrade, with the superseded rows retained.
+- **Version suffixes are NUMERIC, and reads must sort them that way.** `receipts-10` beats
+  `receipts-2`; lexicographic ordering silently pins reads to a stale version the moment a
+  tenth correction ships. `receipts_service.parse_grader_version` is the one comparator.
+- **The work queue is defined by ABSENCE, never by a progress marker.** "Rows with no grade at
+  this `(window, grader_version)`" makes the job idempotent by construction: a crash loses at
+  most one batch, a double-fire no-ops, and there is no cursor to corrupt. The corollary bites —
+  *pending* states must not be persisted, because a row written for "not ready yet" would
+  permanently hide that work from its own queue.
+- **Denormalize the slice keys at write time.** Grade rows copy `shape_bucket` / `basis` /
+  `model_arm` / `policy_version` from the impression rather than re-deriving them, so a per-cell
+  read is one GROUP BY and no read-time recomputation can drift from what was frozen at serve.
+- **Constants that encode honesty rules stay constants, not knobs.** The junk-for-junk midpoint
+  floor, the window set, the headline window and the frozen pick weights are pinned under
+  `grader_version` — a tunable pick weight would let a config write flip existing rows between
+  `graded` and `pick_majority` with no regrade and no audit trail.
+- **Cross-format work queues take the UNION and skip in-loop.** Where a predicate depends on
+  per-format data (here, snapshot coverage), build the queue from the union across formats and
+  skip rows whose own format has not resolved — *without* consuming the batch cap. Folding
+  resolvability into the WHERE is what stops a head-of-queue block of unresolvable rows
+  starving every run.

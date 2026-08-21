@@ -128,6 +128,7 @@ from .trade_optimizer import (
     _feasible_after,
     _pos_counts,
     _subset_pos_delta,
+    close_value_gap,
 )
 
 logger = logging.getLogger(__name__)
@@ -361,6 +362,12 @@ class _Candidate:
     give_val_opp: float      # opp-board discounted value of the give side
                              # (the RECIPIENT's valuation of the return —
                              # the MESO equivalence metric)
+    #: 2026-08-21 gap auto-sweetener — {player_id, side, gap_before,
+    #: gap_after} when this candidate was equalized, else None. Carried on
+    #: the CANDIDATE (not stamped on the card later) because the sweetener
+    #: runs inside `_pair_survivors`: every derived field above is rebuilt
+    #: from the sweetened ids, so the record has to travel with them.
+    gap_sweetener: dict | None = None
 
 
 @dataclass
@@ -393,6 +400,10 @@ class GenerationReport:
     feasibility_rejects: int = 0
     ir_rejects: int = 0          # dual-board ε-gate failures
     band_rejects: int = 0        # consensus fairness-band failures
+    #: 2026-08-21 gap auto-sweetener — survivors whose absolute consensus
+    #: gap was closed by an added equalizer. Not a kill counter: these
+    #: candidates survived either way, the pass only narrowed the gap.
+    gap_sweetened: int = 0
     survivors: int = 0
     emitted: int = 0
     ir_rate: float = 0.0         # survivors of gate b / entrants to gate b
@@ -475,6 +486,7 @@ class GenerationReport:
             "feasibility_rejects": self.feasibility_rejects,
             "ir_rejects": self.ir_rejects,
             "band_rejects": self.band_rejects,
+            "gap_sweetened": self.gap_sweetened,
             "survivors": self.survivors,
             "emitted": self.emitted,
             "ir_rate": round(self.ir_rate, 4),
@@ -563,6 +575,50 @@ def _pair_survivors(
     user_counts = _pos_counts(user_roster, players)
     opp_counts = _pos_counts(opponent.roster, players)
 
+    # 2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`), arm C.
+    # `_gap_gates_ok` re-earns THIS path's ENTIRE hard-gate stack for a
+    # sweetened combo, in the same order the enumeration applies it. It
+    # deliberately touches no `report` counter: a sweetened combo that
+    # fails a gate is not a rejected candidate, it is a candidate that
+    # ships unsweetened. `close_value_gap` itself covers the absolute-gap
+    # test and 3.2 lineup feasibility (same `_feasible_after`/`_pos_counts`
+    # helpers this loop uses), so neither is repeated here.
+    _GAP_THR = _c("sweetener_gap_threshold")
+
+    def _gap_gates_ok(g: list[str], r: list[str]) -> bool:
+        # A sweetened combo is a DIFFERENT trade, so the past-decision
+        # ban has to be re-tested against its own key — the enumeration's
+        # check only ever saw the unsweetened shape.
+        if (frozenset(g), frozenset(r)) in past_decision_keys:
+            return False
+        if not filler_ok(g, r, uval, oval):
+            return False
+        if not pick_swap_ok(g, r, players):
+            return False
+        if not g6_pos_net_ok(g, r, players):
+            return False
+        if not g6_pick_gap_ok(g, r, cval, players):
+            return False
+        # Gate b — dual-board ε-gain. Load-bearing here: an equalizer
+        # added to the give side moves user_gain DOWN and opp_gain UP
+        # (and the reverse for a receive-side one), so either side can
+        # fall through ε that the organic combo cleared.
+        if side_gain(r, g, uval) < epsilon:
+            return False
+        if side_gain(g, r, oval) < epsilon:
+            return False
+        # Gate c — arm C's OWN consensus fairness band, over
+        # `consolidated_value`. This is why `close_value_gap` is called
+        # with fairness_threshold=0.0: its built-in ratio gate is the
+        # v2/v3 `_consensus_packages` notion, a different functional that
+        # arm C has never gated on. The native band test binds instead.
+        _gc = consolidated_value([cval(p) for p in g])
+        _rc = consolidated_value([cval(p) for p in r])
+        _hi = max(_gc, _rc)
+        if _hi > 0 and min(_gc, _rc) / _hi < 1.0 - band:
+            return False
+        return True
+
     survivors: list[_Candidate] = []
     iters = 0
     ir_entrants = 0
@@ -648,6 +704,114 @@ def _pair_survivors(
                 band_pos = 0.0 if hi <= 0 or band <= 0 \
                     else (rc - gc) / (band * hi)
 
+                # ---- 2026-08-21 gap auto-sweetener, arm C --------------
+                # This combo passed every gate, but the band gate above is
+                # a RATIO and therefore scale-blind: 1 − gen2_band on a
+                # five-figure package still leaves more than a late 1st of
+                # consensus value on the table. Arm C inherited the
+                # parent's trade-wide package benchmark (which WIDENS
+                # absolute gaps) without the closer, so its measured
+                # over-the-line share rose to 13.6% / 10.5% on the two
+                # fixtures while every other served arm sits at 0–5.3%.
+                #
+                # Placement is deliberate. The gap is only computable from
+                # `_consensus_packages`, which the card builder calls much
+                # later — but sweetening THERE would leave `_dedup_batch`,
+                # `_meso_variants`, `_rationale`, `classify_package_shape`
+                # (whose "consolidation" label is literally `len(ids) == 1`),
+                # `card.health`, `mismatch_score`, `fairness_score`,
+                # `composite_score` and the Stage 6/7 exposure+tier ranking
+                # all describing the UNSWEETENED trade — arm C's much
+                # larger analogue of the v3 stale-`fit_premium` defect.
+                # Sweetening here instead, and rebuilding every derived
+                # field below from the sweetened ids, keeps one coherent
+                # trade all the way to the card.
+                #
+                # New names, not a rebind: `recv_ids` is the OUTER loop
+                # variable and reassigning it would corrupt every later
+                # give-side iteration for this centerpiece.
+                s_give, s_recv, _gap_info = give_ids, recv_ids, None
+                if _GAP_THR > 0:
+                    _gv, _rv = _consensus_packages(give_ids, recv_ids, cval)
+                    if abs(_gv - _rv) > _GAP_THR:
+                        _closed = close_value_gap(
+                            give_ids, recv_ids, seed_value=cval,
+                            gap_threshold=_GAP_THR,
+                            # 0.0 = the helper's own consensus-ratio gate
+                            # is inert; `_gap_gates_ok` applies arm C's
+                            # native `consolidated_value` band instead.
+                            fairness_threshold=0.0,
+                            user_roster=user_roster,
+                            opp_roster=opponent.roster,
+                            players=players,
+                            scoring_format=scoring_format,
+                            untouchable_ids=untouchable_ids,
+                            not_interested_ids=not_interested_ids,
+                            # Arm C PRUNES rather than gating per combo, so
+                            # the equalizer universe must be passed — drawing
+                            # from the raw roster is the round-2 consensus
+                            # defect (49c1d76). But arm C prunes in TWO
+                            # layers, and only one of them is semantic:
+                            #
+                            #   semantic  `user_assets` = on BOTH boards and
+                            #             not untouchable; `extras_all` =
+                            #             divergence-positive and not
+                            #             not-interested. These encode real
+                            #             rules — an equalizer violating one
+                            #             would be an asset arm C could never
+                            #             legitimately trade.
+                            #   budget    `[:gen2_give_pool]` /
+                            #             `[:gen2_recv_extra_pool]` — pure
+                            #             enumeration cost, documented as
+                            #             bounding "SEARCH BREADTH, never
+                            #             output length" alongside
+                            #             gen2_centerpiece_top_k.
+                            #
+                            # So we pass the SEMANTIC universes, not the
+                            # budget slices. This is not the 49c1d76 defect
+                            # relaxed: that one crossed a semantic line (a
+                            # #174 pinned "trade away G" job smuggling in an
+                            # unpinned player — a broken user instruction).
+                            # A rank-11 give asset breaks no rule; it is
+                            # simply one the combinatorial search had no
+                            # budget to enumerate as a PRIMARY piece, and
+                            # the sweetener adds at most one asset to an
+                            # already-gated card. Measured: the budget slice
+                            # was the binding constraint — 78/112 and 63/86
+                            # rejected equalizers were undershoot (nothing in
+                            # the pool big enough), against 8 and 13 killed
+                            # by arm C's own gates. Widening moves the
+                            # 12-team fixture 3 -> 1 cards over the line.
+                            # `close_value_gap` still takes the CHEAPEST
+                            # sufficient equalizer, so this buys reach, not
+                            # a licence to overpay. Full rosters above still
+                            # drive the 3.2 feasibility counts.
+                            give_candidates=user_assets,
+                            recv_candidates=extras_all,
+                            extra_ok_fn=_gap_gates_ok)
+                        if _closed is not None:
+                            _s_pid, _side, _ng, _nr, _ngv, _nrv, _ = _closed
+                            _gap_info = {
+                                "player_id": _s_pid, "side": _side,
+                                "gap_before": round(abs(_gv - _rv), 1),
+                                "gap_after": round(abs(_ngv - _nrv), 1),
+                            }
+                            s_give, s_recv = _ng, _nr
+                            # Rebuild every derived field from the
+                            # sweetened ids. Gate b/c already re-passed
+                            # inside `_gap_gates_ok`; these are the same
+                            # quantities, kept for the candidate record.
+                            user_gain = side_gain(s_recv, s_give, uval)
+                            opp_gain = side_gain(s_give, s_recv, oval)
+                            gc = consolidated_value(
+                                [cval(p) for p in s_give])
+                            rc = consolidated_value(
+                                [cval(p) for p in s_recv])
+                            hi = max(gc, rc)
+                            band_pos = 0.0 if hi <= 0 or band <= 0 \
+                                else (rc - gc) / (band * hi)
+                            report.gap_sweetened += 1
+
                 joint = user_gain + opp_gain
                 mx = max(user_gain, opp_gain)
                 symmetry = (min(user_gain, opp_gain) / mx) if mx > 0 else 1.0
@@ -657,8 +821,9 @@ def _pair_survivors(
                 survivors.append(_Candidate(
                     opponent_id=opponent.user_id,
                     centerpiece=cp,
-                    give_ids=list(give_ids),
-                    recv_ids=list(recv_ids),
+                    give_ids=list(s_give),
+                    recv_ids=list(s_recv),
+                    gap_sweetener=_gap_info,
                     user_gain=round(user_gain, 1),
                     opp_gain=round(opp_gain, 1),
                     joint_gain=round(joint, 1),
@@ -670,7 +835,7 @@ def _pair_survivors(
                     accept_prior=round(accept_prior, 4),
                     score=round(score, 2),
                     give_val_opp=round(
-                        consolidated_value([oval(p) for p in give_ids]), 1),
+                        consolidated_value([oval(p) for p in s_give]), 1),
                 ))
 
     if ir_entrants:
@@ -1014,6 +1179,15 @@ def generate_league_suggestions(
             )
             card.give_value = round(gv, 1)
             card.receive_value = round(rv, 1)
+            # 2026-08-21 gap auto-sweetener — the equalizer was chosen back
+            # in `_pair_survivors` (so that dedup, MESO, the rationale and
+            # the tier ranking all saw the sweetened ids); this only moves
+            # the record onto the card. `server.py` already reads
+            # `card.gap_sweetener` generically for both the
+            # `deck_impressions.features_json` spine and the card payload,
+            # so arm C needs no serving-layer change — it simply stops
+            # being null there.
+            card.gap_sweetener = cand.gap_sweetener
             card.rationale = _rationale(cand, players, cval, user_profile,
                                         opp_profile, opp_outlook)
             card.health = {

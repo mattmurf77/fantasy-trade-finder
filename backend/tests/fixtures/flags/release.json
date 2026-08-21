@@ -209,6 +209,9 @@
   "trades.presentation_v2": false,
   "trade.position_tiers": true,
   "trade.rb_handcuff": true,
+  "_comment_receipts": "2026-08-21 Receipts (docs/plans/receipts/). Mirrors config/features.json - see the note there. Both keys ship OFF: the grader writes nothing and the user route 404s until the operator flips them, grading first (PRD DR-11).",
+  "receipts.grading": true,
+  "receipts.screen": false,
   "trade.breaker": false,
   "trade.breaker_narrative": false
 }
