@@ -102,8 +102,12 @@ def test_m6b_04_generic_ladder_byte_unchanged_in_every_mode(mode):
     """Tier bands are ABSOLUTE Elo mirrored across five clients
     (docs/cross-client-invariants.md). The 12 generic rungs are RANKABLE POOL
     assets whose seeds anchor those bands — repricing them would repaint tier
-    colours everywhere for a PER-USER setting. They must not move in either
-    mode."""
+    colours on every client. They must not move in either mode.
+
+    D-144 raised the stakes rather than lowering them: `market_slots` is no
+    longer an opt-in cohort, so a rung that moved with the mode would now move
+    for everybody. Owned-pick BADGES move (they reflect the served value,
+    D-320-2); these rungs, and the BANDS they anchor, do not."""
     _flag_on()
     with ts.pick_pricing_override(mode):
         assert pv.GENERIC_PICK_SEEDS == SHIPPED_SEEDS
