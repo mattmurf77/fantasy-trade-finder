@@ -2436,7 +2436,10 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
     ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
     ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
-    ("ghost_holdout_one_in",       10.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting"),
+    # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
+    # entirely, so the SEED default is 0 — a fresh DB must not start
+    # ghosting. <=0 disables ghosting inside the flag.
+    ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
 ]

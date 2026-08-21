@@ -775,7 +775,7 @@ Read via `suggestion_telemetry._cfg` (the `_deck_cfg` pattern — `trade_service
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ghost_holdout_one_in` | 10 | Ghost withholding rate: an organic deck card ghosts when `sha256("ghost\|league\|iso_week\|trade_hash") % N == 0`. **≤ 0 disables ghosting without touching the flag** — the deploy-free rollback lever. Exempt always: likes-you, wildcard, F3-retest cards; pinned/opponent-targeted decks; demo league |
+| `ghost_holdout_one_in` | **0** | **Operator ruling 2026-08-21 — ghosts are ruled out entirely** ("I still am against the ghost cards"); ghost accumulation also amplified the 6-card-repeat deck, since a ghost can never be decided and so never leaves the FFV3 pool. Default flipped 10 → 0 in `trade_service._DEFAULT_CFG`, `database._MODEL_CONFIG_DEFAULTS` and the `suggestion_telemetry.ghost_one_in` inline fallback, so no lookup path can resurrect ghosting; the prod row was already 0. Ghost withholding rate when re-enabled: an organic deck card ghosts when `sha256("ghost\|league\|iso_week\|trade_hash") % N == 0`. **≤ 0 disables ghosting without touching the flag** — the deploy-free rollback lever. Exempt always: likes-you, wildcard, F3-retest cards; pinned/opponent-targeted decks; demo league |
 | `suggestion_match_lookback_days` | 14 | Executed-trade matcher window: only suggestions served within this many days BEFORE `traded_at` are candidates |
 | `suggestion_match_min_overlap` | 0.5 | Partial-match floor: matched-token share of the larger asset set (with ≥1 matched asset required on each side) |
 

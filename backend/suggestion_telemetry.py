@@ -19,7 +19,8 @@ Three responsibilities:
 
 1. **Ghost predicate** — `is_ghost_suggestion(league_id, trade_hash)`:
    deterministic per (league, ISO week, card identity), ~1-in-N with
-   N = model_config `ghost_holdout_one_in` (default 10, ≤0 disables).
+   N = model_config `ghost_holdout_one_in` (default **0** since the
+   operator ruling 2026-08-21 — ghosts ruled out entirely; ≤0 disables).
    Deterministic-per-week on purpose: a deck regeneration inside the same
    week re-withholds the same card, so a ghost can never leak via refresh.
 
@@ -99,8 +100,14 @@ def _cfg(key: str, default: float) -> float:
 
 def ghost_one_in() -> int:
     """1-in-N ghost withholding rate. ≤0 disables ghosting entirely — the
-    deploy-free rollback lever inside the flag."""
-    return int(_cfg("ghost_holdout_one_in", 10))
+    deploy-free rollback lever inside the flag.
+
+    OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
+    entirely, so the inline fallback is 0 and matches
+    `trade_service._DEFAULT_CFG` / `database._MODEL_CONFIG_DEFAULTS`. A
+    non-zero fallback here would have quietly re-enabled ghosting for any
+    caller whose cfg lookup missed."""
+    return int(_cfg("ghost_holdout_one_in", 0))
 
 
 def match_lookback_days() -> int:
