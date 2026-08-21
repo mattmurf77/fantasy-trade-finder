@@ -10,6 +10,78 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-22 — Negative-results memory v1 (leaf · registration · four seams · runner forwarding · readout pack) — full gates, FLAG DARK + ALLOWLIST EMPTY, NOT MERGED, on `claude/vigilant-spence-8583f5`
+
+**Branch:** `claude/vigilant-spence-8583f5`, cut from `origin/main`. Not pushed, not merged.
+Full gates — the operator did **not** declare express, and the change is outside the express
+lane by the bright-line rule anyway (new flag surface, six `model_config` keys, a new
+`features_json` key).
+Spec: [LLD](../docs/plans/negative-results-memory/LLD.md) §10 (the 27-test N-plan) ·
+scope [§6-RULINGS](../docs/plans/negative-results-memory/scope.md) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-147](DECISIONS.md).
+
+**Flag `trade.negmem` = false AND `config/negmem_leagues.json` = `[]`.** The ON-condition is
+both, so nothing in this entry is runtime evidence of the feature working — it is evidence that
+the feature is correctly inert and internally correct.
+
+| Gate | Result |
+|---|---|
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest backend/tests -q` | **4025 passed, 1 skipped, 0 failed** (345 s). Wave-2 tip baseline on this tree: **4016 passed, 1 skipped**. The +9 are this wave's additions (5 through-the-runner + 4 pack-SQL); nothing removed, nothing newly skipped. Local interpreter is **3.14.4**; CI is 3.12.3 — check CI before attributing any red to this branch (the standing version-skew caveat) |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK**. `git diff --stat -- mobile/` is **empty** — zero mobile files touched on the whole branch, so the mobile CI jobs are byte-identical to `origin/main`'s |
+| `cd mobile && tsc --noEmit` · `check-*.js` | not run in this worktree (no `node_modules`); moot per the line above |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) + `test_model_a_profile_only_names_real_knobs` | green with all six `negmem_*` keys in `_PINNED_KNOBS` + disposition sentences, and `MODEL_A_PROFILE`'s `negmem_strength = 0.0` naming a real knob |
+| Arm-A golden | **UNMOVED on first run, no recapture** (wave 2). The profile pin changes `snapshot_config` output and not deck bytes — which is the claim, asserted directly in `test_n7_serving_golden_strength0_is_stamp_inclusive_identity` |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence is this entry |
+
+**Negmem test totals: 128** — `test_negmem.py` **87** (the leaf: admission closed list, undo
+replay, decay/shrinkage worked examples incl. the five OQ-4b threshold assertions, MIN combine,
+`effective_mult` invariants, netting/retraction/revive, determinism + immutability, M2 E-B
+parity + feed guard, degraded taxonomy, identity hygiene, horizon/epoch boundaries, SQL
+dialect, leaf-import contract, readout format) and `test_negmem_seams.py` **41** (the four
+seams, the stamp trichotomy, the two goldens, T1, the relaxed pass, arm A, and this wave's
+runner half).
+
+**Sabotage discipline, by wave.** `PYTHONDONTWRITEBYTECODE=1` plus a `backend/__pycache__`
+clear between every cycle — stale `.pyc` gave wave 1 a false GREEN, and that is the reason the
+discipline is written down rather than assumed.
+
+- **B1 (leaf):** 26/26 named sabotages RED-then-restored; LLD worked examples reproduced exact.
+  One substitution recorded in-code: N-5's named sabotage is unreachable because the
+  strength-0 short-circuit precedes the upper clamp, so an equivalent was used.
+- **B2 (registration):** no behavioural sabotage — the inventory tests ARE the alarm, and they
+  fail by name. Values in `_DEFAULT_CFG` and `_MODEL_CONFIG_DEFAULTS` verified identical.
+- **B3 (seams):** 6 sabotage families RED-then-restored across the four seams and the stamp.
+- **This wave (runner + pack):** 4 cycles, each RED then restored:
+  1. delete `negmem_map = _nm` from `gen_v2_cards` → `test_runner_gen_v2_cards_forwards_the_map_and_the_m2_feed`,
+     `..._carry_negmem_influence_to_arm_c` and `test_runner_bakeoff_job_carries_negmem_into_arm_c_and_arm_fit` RED;
+  2. delete the `acceptance_stats` splat alone → the forwarding test RED, the rest green (the
+     asymmetry is separable, which is the point of testing both);
+  3. delete `negmem_map = kwargs.get("negmem")` from `gen_fit_cards` → the two fit runner tests
+     + the bake-off test RED;
+  4. paste `json_extract(...)` into `negmem-gr4-joint.sql`'s executable SQL → the pack
+     banned-token scan RED.
+
+**What the through-the-runner tests exist for.** `bakeoff_runner.gen_v2_cards` / `gen_fit_cards`
+are the ONLY callers of their generators inside a bake-off job. Every pre-existing seam test
+calls those generators directly, so a runner that dropped the forwarding would have left all 33
+of them green while arms C and fit ran negmem-blind. Sabotage 1 and 3 above are the proof that
+gap was real. The end-to-end test assembles the fan-out exactly as `server._run_trade_job` does
+(one map, splatted into every arm's lambda) over the direct-engine world rather than the
+bake-off harness world — the harness's opponents are unranked, so arms C and fit legitimately
+emit zero cards there and the assertion would have been vacuous.
+
+**Pack SQL is executed, not just scanned.** Both shipped files run against the seeded in-memory
+SQLite engine with real binds, so a renamed column fails here rather than in the operator's
+hands; the banned-token scan runs over the **executable** half (comments stripped) because both
+files document their Postgres-only variant in a comment, per the `bakeoff_readout.sql`
+convention. Comments are stripped before binding too — SQLAlchemy's `text()` harvests `:name`
+binds out of comment prose, and both files name their binds there.
+
+**Runtime evidence: NONE, and that is the honest state.** The
+[TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is written
+and **UNRUN**; no deck has ever been generated with this flag on for a real league. Its step 0
+(the before-readout) must run before the flip or the baseline is unrecoverable.
+
 ## 2026-08-21b — Gap auto-sweetener extended to bake-off arm C (`trade_gen_v2`) — full gates, NOT PUSHED, NOT MERGED, on `feat/gap-sweetener-arm-c`
 
 **Branch:** `feat/gap-sweetener-arm-c`, **stacked on `fix/package-benchmark-sweetener` @ `480cce0`** — NOT cut from `origin/main`. `close_value_gap` does not exist on `origin/main` at all, so this work is unbuildable there; the operator chose the stacked branch over waiting for the Monday window (2026-08-21). **Merge order is load-bearing: the parent lands first, then this.**

@@ -36,6 +36,9 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [Flags — Counterparty breaker (2026-08-21, ships **OFF**)](#flags-counterparty-breaker-2026-08-21-ships-off)
+- [Flags — Negative-results memory (2026-08-22, ships **OFF**)](#flags-negative-results-memory-2026-08-22-ships-off)
+  - [The allowlist is the OTHER half of the ON-condition](#the-allowlist-is-the-other-half-of-the-on-condition)
+  - [Killing M2 — the GLOBAL knob, never an arm overlay](#killing-m2--the-global-knob-never-an-arm-overlay)
 - [Analytics events — Guided Onboarding v2 addendum (2026-08-15)](#analytics-events-guided-onboarding-v2-addendum-2026-08-15)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
@@ -65,6 +68,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Draft-pick year decay (D-079) — `pick_values.py`, DB-seeded](#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
   - [Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded)
+  - [Negative-results memory (flag `trade.negmem`) — `trade_service._DEFAULT_CFG`, DB-seeded](#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
 ---
@@ -534,6 +538,34 @@ Plan + doc suite: [docs/plans/counterparty-breaker/](plans/counterparty-breaker/
 **Rollback ladder** (LLD §6), bluntest last: `trade.breaker_narrative` → false (hot reload) → `breaker_min_severity` = 1.1 or a per-class `breaker_narrate_*` switch to 0 (`scripts/set_knob.py`, logged in `model_config_changes`) → `trade.breaker` → false (compute gone, key gone) → revert commit. Nothing persisted needs cleanup: old `features_json.breaker` blobs are version-stamped inert serve-time facts — never re-stamped, never backfilled.
 
 **Product outcome 1 (filter/demote) is v2 and is NOT flagged here.** It changes deck composition and gets its own scope block if the operator elects it.
+
+---
+
+## Flags — Negative-results memory (2026-08-22, ships **OFF**)
+
+Plan + doc suite: [docs/plans/negative-results-memory/](plans/negative-results-memory/) (PLAN · PRD · HLD · LLD · [scope](plans/negative-results-memory/scope.md) · [TestFlight checklist](plans/negative-results-memory/testflight-checklist.md)). Decision record: [ADR-015](adr/adr-015-negmem-soft-prior-not-fourth-filter.md). One flag, default **false**. The six `negmem_*` `model_config` knobs are [below](#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.negmem` | **false** | ON ⇒ `server._run_trade_job` builds **one** `negmem.NegmemMap` per trade job — a derive-on-read soft prior over the viewer's own past rejections, keyed `(partner × reason-family)` where family ∈ {`value`, `fit`}, ≤22 cells, **no new tables and nothing persisted** — and threads it into generation as a kwarg. Two layers ride the one map. **M1:** the four generation seams (v1/v3 serving stack, gen_v2, fit, and both bake-off adapters) consult it as a pure multiplier on `composite_score`, clamped at `negmem_floor`, so a card the viewer has already turned down from this partner for this reason ranks lower. It never adds, removes, or hard-filters a card ([ADR-015](adr/adr-015-negmem-soft-prior-not-fourth-filter.md)). **M2:** the same map feeds the `trade_gen_v2.acceptance_prior` stub that has shipped unfed since it was written. Every influenced card is stamped: `deck_impressions.features_json.negmem`. OFF (default) ⇒ no map is built, the `negmem` kwarg never enters `_generate_kwargs`, no seam executes, no stamp is written — decks, scores, order, payloads and rows byte-identical to today (invariant C1, pinned by `test_n13_flag_off_and_unallowlisted_are_byte_identical`). **Graduation criterion:** the pre-registered RFPS rule in [PRD](plans/negative-results-memory/PRD.md) §8.3, evaluated once at window close. |
+
+### The allowlist is the OTHER half of the ON-condition
+
+`trade.negmem` alone activates **nothing**. `negmem.build_map` returns `None` — indistinguishable from flag-off — unless the league is allowlisted. This is the `config/tester_allowlist.json` precedent: feature flags are global (`config/features.json`), and a per-league rollout needs league scoping the flag system does not provide.
+
+| Source | Form | Notes |
+|---|---|---|
+| `config/negmem_leagues.json` | JSON **array** of league-id strings | Ships as `[]`. Not an array ⇒ warned and ignored. Missing file ⇒ fine, env alone is a valid configuration. Unreadable ⇒ warned and treated as **empty** (flag-on with an empty allowlist is inert by construction, never fail-open). |
+| `FTF_NEGMEM_LEAGUES` (env) | comma-separated league ids | **Unioned** with the file, not overriding it. |
+| `"*"` — the **wildcard** | either source | Means **every league**. Global rollout is the one-line diff `["*"]`. `negmem_league_allowed` short-circuits on it; the readout SQL pack's runner then substitutes no league filter at all, so denominators cover every flag-era row. |
+
+Loaded by `negmem.load_negmem_league_allowlist()` behind a **60 s cache** — a rollout edit takes up to a minute to take effect, and shrinking the allowlist is the finest-grained (deploy-free, per-league) rollback rung. The readout pack uses the **same loader** as the build, so a partial rollout can never read as build failures.
+
+### Killing M2 — the GLOBAL knob, never an arm overlay
+
+`negmem_strength` governs **M1 only**. The one sanctioned M2 kill is `gen2_accept_prior_strength = 0`, and it must be set **globally** (`PUT /api/admin/config/gen2_accept_prior_strength`, i.e. `scripts/set_knob.py`). A per-arm overlay pin does **not** work and looks like it did: the feed guard fires on the job-level global read taken before the bake-off fan-out, so an overlay with a nonzero global leaves the feed populated and `acceptance_prior` computing the raw unshrunk ratio. Asserted as documented behaviour by `test_n8_the_m2_kill_is_global_never_an_arm_overlay`.
+
+**Rollback ladder** ([LLD](plans/negative-results-memory/LLD.md) §6), bluntest last: shrink or empty `config/negmem_leagues.json` (per-league, deploy-free) → `negmem_strength = 0` via `scripts/set_knob.py` (the documented byte-identical M1 disable) **and** `gen2_accept_prior_strength = 0` for M2 → `trade.negmem` off (map gone, stamps gone) → revert commit. **Every flip lands at a bake-off round boundary** (GR3 / [ADR-014](adr/adr-014-bakeoff-serving-rounds.md)) — mid-round censors the measurement window. Nothing persisted needs cleanup: `features_json.negmem` blobs are version-stamped inert serve-time facts, never re-stamped, never backfilled.
 
 ---
 
@@ -1206,6 +1238,28 @@ Twenty-five keys, consumed **only** by `backend/trade_breaker.py` — an **evalu
 | `breaker_narrate_value_giving` | 0.0 | `0` | 〃 — governs the **consensus** basis only; the board basis is ineligible for narration outright (D-7) |
 | `breaker_narrate_other_player_keep` | 0.0 | `0` | Registered for symmetry only. **The D-6 whitelist blocks this class even at 1 — flipping it alone renders nothing.** Graduating it needs a whitelist change, which is a `ver` bump |
 | `breaker_narrate_roster_crunch` | 0.0 | `0` | 〃 — the new-logic class, last to graduate (HLD §2.7) |
+
+---
+
+### Negative-results memory (flag `trade.negmem`) — `trade_service._DEFAULT_CFG`, DB-seeded
+
+Six keys, consumed **only** by `backend/negmem.py` and its four generation seams. Full derivation: [LLD](plans/negative-results-memory/LLD.md) §3.4. Two structural facts govern how they are read:
+
+- **`backend/negmem.py` holds no default literals (DE-3).** Every knob is read by the *caller* — `server._run_trade_job` for the build-time four, the seams via `trade_service._c` for the consult-time two — and passed in. The module raises `KeyError("negmem seed rows missing — run init_db")` rather than substituting a default, so a missing seed row fails loudly instead of silently pricing the memory differently from what the config table says.
+- **Build-time vs consult-time is load-bearing.** `negmem_halflife_days`, `negmem_min_evidence`, `negmem_sat_k` and `negmem_like_net` are read **once per job, before the bake-off fan-out** — so all arms share one map and an arm overlay cannot change them. `negmem_strength` and `negmem_floor` are read **inside each arm's overlay**, which is what lets `MODEL_A_PROFILE` pin arm A at strength 0 while a live arm runs at 1.0.
+
+| Key | Default | Disable | Role |
+|---|---|---:|---|
+| `negmem_strength` | 1.0 | `0` | **M1 only.** Linear scale on the cell multiplier: `eff = clamp(1 − strength·(1 − mult), floor, 1)`. `0` ⇒ `effective_mult` returns exactly `1.0` before any other knob is read, seams skip without multiplying or rounding, and generation is byte-identical (stamps still ride, reading `{m: 1.0}`). The deploy-free M1 revert rung. **Does NOT govern M2** — that is `gen2_accept_prior_strength`, globally. Arm-A disposition: pinned to `0.0` in `MODEL_A_PROFILE` (the baseline is the pre-negmem engine) |
+| `negmem_floor` | 0.6 | `1.0` | Clamp floor for the effective multiplier **and** the asymptote of the evidence curve — a prior can sink a card, never zero it (NG1 / [ADR-015](adr/adr-015-negmem-soft-prior-not-fourth-filter.md)). Raising it toward `1.0` weakens the memory continuously; `1.0` is a full soft disable. The GR4 remedy knob |
+| `negmem_min_evidence` | 3.0 | `1e9` | Shrinkage threshold. Cells with decayed evidence **below** it are exactly identity — the anti-noise floor at current volumes. The curve steps at the crossing, so a partner whose cards move once and then settle is a threshold crossing, not a bug (runbook § negmem, line 8). **Build-time** |
+| `negmem_halflife_days` | 45.0 | — | Exponential-decay half-life of one rejection's evidence mass. Also sets the **read horizon** at `4 × halflife` (bounded in-query, so old rows are never loaded). Lowering it makes the memory forgive faster *and* narrows the read window. **Build-time** |
+| `negmem_sat_k` | 3.0 | — | Saturation pseudo-count of the evidence curve: `mult = 1 − (1 − floor)·n_eff/(n_eff + k)`. Governs the **size of the step at `min_evidence`**: `(1 − floor)/(1 + k)` = 0.10 at k=3, 0.05 at k=7, 0.02 at k=19. Raise it to soften the step — noting a higher k also flattens mid-range damping. **Build-time** |
+| `negmem_like_net` | 1.0 | `0` | Evidence mass one admitted **viewed like** nets against every `(partner, ✱)` cell. The fold is chronological and clamps at zero after every step — no banked credit, cells never go negative. `0` ⇒ likes stop forgiving. **Build-time** |
+
+**Two knobs this feature reuses rather than re-registers.** `gen2_accept_prior_strength` and `gen2_accept_prior_global` are the seeded gen_v2 keys documented under the [trade-generation pipeline v2](#trade-generation-pipeline-v2-flag-trade_genv2-dark-trade_service_default_cfg-consumed-by-backendtrade_gen_v2py) section; M2 feeds the existing stub and adds no key of its own. `gen2_accept_prior_strength` is read at **build time, globally** — see [the M2 kill note above](#killing-m2--the-global-knob-never-an-arm-overlay).
+
+Every operator change goes through `scripts/set_knob.py` so it lands in `model_config_changes`, **and lands at a bake-off round boundary** (GR3). Observability: `backend/scripts/negmem_readout.py` prints the resolved knobs alongside every cell; `scripts/negmem-stamp-rate.sql` and `scripts/negmem-gr4-joint.sql` are the two tripwire queries.
 
 ---
 

@@ -161,6 +161,27 @@ exclusion be justified):
 | `breaker_narrate_other_player_keep` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
 | `breaker_narrate_roster_crunch` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
 
+> **2026-08-22 — the six `negmem_*` keys.** Negative-results memory
+> ([LLD](../negative-results-memory/LLD.md) §3.4) is a **generation** feature, so unlike
+> the `breaker_*` block above it does not get a blanket exclusion. It splits: the one
+> knob arm A can actually observe, `negmem_strength`, is **pinned at 0.0 in
+> `MODEL_A_PROFILE`**; the other five shape the map that `negmem.build_map` produces and
+> are unreachable once the gate is closed, so they are excluded on the same rule as
+> `package_floor_cross` and `max_overpay_min_value` — a companion knob the predicate
+> never reads at the kill value is not pinned. M2's strength is the **existing**
+> `gen2_accept_prior_strength`, already pinned below; it is deliberately not re-dispositioned
+> here, and per [HLD](../negative-results-memory/HLD.md) §5.3 M2's kill is a GLOBAL knob
+> write, never an arm overlay pin.
+
+| Key | Added | Arm A's disposition |
+|---|---|---|
+| `negmem_strength` | negative-results memory, 2026-08-22 | Pinned in MODEL_A_PROFILE at 0.0 — negmem post-dates MODEL_A_REFERENCE_SHA and its seam multiplies composite_score inside generation; 0.0 is the documented byte-identical M1 disable, so the pin preserves the pre-wave engine exactly (golden re-run and verified unchanged after the pin). |
+| `negmem_floor` | negative-results memory, 2026-08-22 | Excluded from MODEL_A_PROFILE — inert to arm A by construction: with negmem_strength pinned at 0.0, negmem.effective_mult returns exactly 1.0 before any of these is consulted (they shape the map, not the gate), so pinning a kill value would falsely assert they reach an arm-A deck; they provably do not. |
+| `negmem_min_evidence` | negative-results memory, 2026-08-22 | Excluded from MODEL_A_PROFILE — inert to arm A by construction: with negmem_strength pinned at 0.0, negmem.effective_mult returns exactly 1.0 before any of these is consulted (they shape the map, not the gate), so pinning a kill value would falsely assert they reach an arm-A deck; they provably do not. |
+| `negmem_halflife_days` | negative-results memory, 2026-08-22 | Excluded from MODEL_A_PROFILE — inert to arm A by construction: with negmem_strength pinned at 0.0, negmem.effective_mult returns exactly 1.0 before any of these is consulted (they shape the map, not the gate), so pinning a kill value would falsely assert they reach an arm-A deck; they provably do not. |
+| `negmem_sat_k` | negative-results memory, 2026-08-22 | Excluded from MODEL_A_PROFILE — inert to arm A by construction: with negmem_strength pinned at 0.0, negmem.effective_mult returns exactly 1.0 before any of these is consulted (they shape the map, not the gate), so pinning a kill value would falsely assert they reach an arm-A deck; they provably do not. |
+| `negmem_like_net` | negative-results memory, 2026-08-22 | Excluded from MODEL_A_PROFILE — inert to arm A by construction: with negmem_strength pinned at 0.0, negmem.effective_mult returns exactly 1.0 before any of these is consulted (they shape the map, not the gate), so pinning a kill value would falsely assert they reach an arm-A deck; they provably do not. |
+
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag
 would disable R4 for arms B and C and for every other user of the process.

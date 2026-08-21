@@ -2581,6 +2581,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("breaker_narrate_value_giving",          0.0, "breaker: 1 = value_giving may narrate (CONSENSUS basis only — D-7); 0 = off"),
     ("breaker_narrate_other_player_keep",     0.0, "breaker: symmetry only — the D-6 whitelist blocks this class even at 1"),
     ("breaker_narrate_roster_crunch",         0.0, "breaker: 1 = roster_crunch may narrate; 0 (default) = stamp only"),
+    # ── Negative-results memory (docs/plans/negative-results-memory/LLD.md §3.4) ─
+    # All 6 seeded here so `set_config` / PUT /api/admin/config never KeyError on
+    # them — a knob with no row cannot be flipped remotely, which is what makes
+    # the LLD §6 kill ladder (negmem_strength = 0 for M1) real rather than
+    # theater. Values MATCH trade_service._DEFAULT_CFG exactly; seeding is
+    # behavior-neutral. M2's strength knob is the existing
+    # `gen2_accept_prior_strength`, not one of these 6.
+    ("negmem_strength",       1.0,  "negmem M1 strength; 0 = byte-identical M1 disable (M1-only — M2 is governed by gen2_accept_prior_strength)"),
+    ("negmem_floor",          0.6,  "negmem clamp floor for the effective multiplier; also the evidence-curve asymptote"),
+    ("negmem_min_evidence",   3.0,  "negmem shrinkage threshold: cells with decayed evidence below this are identity"),
+    ("negmem_halflife_days", 45.0,  "negmem evidence exponential-decay half-life (days); read horizon = 4x this"),
+    ("negmem_sat_k",          3.0,  "negmem evidence-curve saturation pseudo-count (mult = 1 - (1-floor)*n_eff/(n_eff+k))"),
+    ("negmem_like_net",       1.0,  "negmem: evidence mass one admitted viewed like nets against every (partner, *) cell"),
 ]
 
 

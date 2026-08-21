@@ -33,7 +33,8 @@
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
-- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
+- [Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)](#consulting-a-leaf-from-inside-an-engine-live-module-bindings-one-kwarg-copy-at-log-2026-08-22-d-144)
+- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
 - [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-144)
 
 ---
@@ -469,7 +470,47 @@ conventions for any future layer that **predicts something a user will later tel
   ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
   a silent dependency on whoever ran before you.
 
-## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)
+## Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)
+
+`backend/negmem.py` ([plan suite](../docs/plans/negative-results-memory/),
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), [D-147](DECISIONS.md)) sets four
+conventions for any future **leaf that the generators consult**, as opposed to `trade_breaker.py`'s leaf that
+reads the finished deck. The difference matters: a consulted leaf runs *inside* the thing under test, so its
+plumbing has to be provably inert when off.
+
+- **T1 — a seam holds a live MODULE binding, never a value import.** Every seam writes `from . import negmem as
+  _negmem` and calls `_negmem.effective_mult(...)`. `from .negmem import effective_mult` freezes the binding at
+  import time, which silently defeats monkeypatch-based tests and, worse, defeats them *quietly* — the test
+  passes, asserting nothing. The rule is enforced two ways rather than trusted: an AST scan over all four seam
+  files rejects any `ImportFrom` of the module, and a behavioural test rebinds `negmem.effective_mult` and
+  asserts the engines' output actually changes. This is the same trap that produced a measured no-op in the
+  2026-08-19 arm-B audit.
+- **One kwarg, one dict, no instance slot.** The job's map is threaded as a plain keyword argument, read **once**
+  into a call-local, and — where a dict of generator kwargs already exists — assigned as exactly **one key** in
+  that one dict. No `self._negmem`: a per-call value that lives on the service can be inherited by the next
+  call, and the overwrite-per-call semantics would have to be re-established at every entry point. Because the
+  dict is both splatted into the normal generator and handed whole to the relaxed re-run, the relaxed pass
+  consults the same map at the same strength with **no special case** — and there is no duplicate-keyword
+  hazard, because there is only ever one assignment.
+- **The asymmetry between "always passed" and "conditionally spliced" is deliberate, and is a test.** `negmem_map=`
+  rides **unconditionally**, carrying `None` when the feature is off, because every seam guards on the *value*
+  (`is not None`), never on the kwarg's presence. The M2 feed (`acceptance_stats`) is spliced in **only** when a
+  map exists — `**({...} if nm is not None else {})` — and that splat is what makes the flag-off call
+  byte-identical. Tidying the two into one form breaks one half or the other, so both call sites assert the
+  shape. The general rule: **when a call must be byte-identical while off, say in the code which arguments are
+  load-bearing for that identity, and pin it with a test rather than a comment.**
+- **A stamp written at log time is a COPY of what the consult site decided — it never recomputes.** By logging
+  time every bake-off arm's config overlay has exited, so a recompute at assembly would stamp arm-A rows with the
+  *live* arm's multiplier: the provenance would be plausible and wrong. The assembly block therefore contains no
+  call into the leaf and no knob read at all, and the recompute is a named sabotage in the suite. Generalises to:
+  **any value that depends on a scoped context must be captured inside that scope and carried, never re-derived
+  downstream.**
+- **Corollary — where a multiplier lands decides whether it changes membership.** The same multiplier applied to
+  a candidate's internal score changes what survives selection; applied to the emitted card's published score it
+  changes only order. Where the effect is meant to be ordering-only, the multiplication also has to land on the
+  correct side of any quantization — inside the rounding that collapses float noise, not after it — or the
+  deterministic tie-break loses to the noise the rounding exists to erase.
+## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)
 
 The operator deleted a setting — pick pricing — rather than changing its default. This repo had **no
 precedent for retiring a route**: `git grep "410" backend/server.py` returned nothing before this change.

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
 - [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
@@ -31,6 +32,25 @@
 
 ---
 
+## 2026-08-22 — negmem: BUILT dark; rollout is two operator flips
+
+v1 is complete on `claude/vigilant-spence-8583f5` and lit nowhere ([D-147](DECISIONS.md),
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), CHANGELOG same date).
+*Why now:* the remaining work is operator actions and a measurement window, not engineering.
+
+1. **Merge the branch** when the operator wants it on main. Merging lights nothing — the
+   ON-condition is flag **∧** allowlist, and both ship off/empty.
+2. **Rollout, per [PRD](../docs/plans/negative-results-memory/PRD.md) §8.2 — at a bake-off
+   ROUND BOUNDARY** (GR3; mid-round censors the window): add the operator's league to
+   `config/negmem_leagues.json` → flip `trade.negmem` → ≥4-week arm-attributed read.
+3. **The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+   is UNRUN** — the only runtime evidence this feature gets under D-056. Step 0 (the
+   before-readout) has to happen *before* the flip or the baseline is gone.
+4. **P2 gates, none of them started:** the RFPS baseline freeze + frozen-cohort artifact
+   (`rfps-baseline-<date>.json`) must be committed at pre-registration, before the window
+   opens; layer-2 tendency modeling stays behind the data-volume gate; and any future
+   *persistence* of per-person profiles — which ruling D3(a) permits — carries its own scope
+   block with the `delete_user_data` partner-keyed deletion path as a named requirement.
 ## 2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen
 
 Built dark on `feat/receipts` (see CHANGELOG + TEST_LEDGER same date). Nothing is pushed.
