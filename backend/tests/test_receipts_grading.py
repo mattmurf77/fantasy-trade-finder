@@ -1061,6 +1061,24 @@ def test_t9_cron_route_rejects_a_nonsense_batch(client):
     assert res.status_code == 400
 
 
+def test_t9_daily_tick_payload_is_byte_identical_while_grading_is_dark(
+        client, monkeypatch):
+    """The daily-tick guard must be INVISIBLE while dark.
+
+    The tick's response payload is a contract other tests pin
+    (test_deck_replenishment.py). Adding a `receipts_grade_started: false` key
+    to every flag-off tick would be a payload change shipped by a dark
+    feature — the exact thing the `_run_weekly_replenishment` convention
+    exists to prevent. The counter appears only once grading is ON."""
+    from backend import server
+    c, _token, _server = client
+    monkeypatch.setattr(ff, "_flags_cache", dict(ff.DEFAULT_FLAGS))
+    monkeypatch.setattr(server, "load_all_signed_up_users", lambda: [])
+    res = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
+    assert res.status_code == 200
+    assert "receipts_grade_started" not in res.get_json()
+
+
 def test_t9_admin_route_404s_while_grading_is_dark(client, monkeypatch):
     c, _token, server = client
     monkeypatch.setattr(ff, "_flags_cache", dict(ff.DEFAULT_FLAGS))

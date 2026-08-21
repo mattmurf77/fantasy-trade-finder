@@ -58,7 +58,8 @@
     "test:window-composite": "node tests/check-window-composite.js",
     "test:team-review-depth": "node tests/check-team-review-depth.js",
     "test:finder-conditions": "node tests/check-finder-conditions-reachable.js",
-    "test:breaker-card": "node tests/check-breaker-card.js"
+    "test:breaker-card": "node tests/check-breaker-card.js",
+    "test:receipts": "node tests/check-receipts.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

@@ -19737,9 +19737,16 @@ def cron_daily_tick():
     # the tick or be able to fail the push work above (and vice versa). Single-
     # flight inside the service means an overlap with the dedicated endpoint
     # no-ops rather than duplicating. No-op while `receipts.grading` is off.
+    #
+    # The counter is serialized ONLY when `receipts.grading` is on, so a
+    # flag-off tick payload stays byte-identical to today — the
+    # `_run_weekly_replenishment` convention, pinned by
+    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
     receipts_grade_started: bool | None = None
     try:
-        receipts_grade_started = _kickoff_receipts_grading("daily_tick")
+        from .receipts_service import grading_enabled as _receipts_on
+        if _receipts_on():
+            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
     except Exception as e:
         log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
 

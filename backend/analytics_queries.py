@@ -266,6 +266,12 @@ NON_INTENT_EVENTS = frozenset({
     # `receipts_window_changed` (navigation, the `tab_selected` class) lands
     # here with the screen that emits it.
     "receipts_grade_run",
+    # `receipts_window_changed` — navigation, the `tab_selected` class, added
+    # in the SAME commit as its emitter. Every emission is preceded on the
+    # same screen by `receipts_opened`, which IS intent and already counts the
+    # user, so no user-day exists for this to add. `receipts_opened` itself
+    # stays deliberately ABSENT from this deny-list.
+    "receipts_window_changed",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

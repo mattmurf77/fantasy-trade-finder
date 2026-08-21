@@ -660,6 +660,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // handler is omitted, the chip does not exist, and the strip renders
   // byte-identically to today. Pinned by mobile/tests/check-presentation-v2.js.
   const presentationV2On = useFlag('trades.presentation_v2');
+  // Receipts (docs/plans/receipts/, flag `receipts.screen`). Same shape as the
+  // flag above and changes nothing else in this file: off ⇒ the handler is
+  // omitted, the utility row has no Track-record control, and ReceiptsScreen
+  // is unreachable even though its route is registered. Pinned by
+  // mobile/tests/check-receipts.js.
+  const receiptsOn = useFlag('receipts.screen');
   // #269 — sheet-local team-targeting selection (declared ahead of
   // `scopedOpponent` below, which reads it). Single-select; `null` = no
   // opponent chosen (unscoped, today's behavior).
@@ -4751,6 +4757,15 @@ export default function TradesScreen({ navigation, route }: any) {
                 // open a DNA-only sheet and quietly not be "the filters".
                 onConditions={
                   consolidateOn ? () => setDnaSheetOpen(true) : undefined
+                }
+                // Receipts (docs/plans/receipts/) — same optional-prop
+                // convention as onTodaysTrade above: the handler's presence IS
+                // the control, so with `receipts.screen` dark this row renders
+                // exactly as it does today and the screen is unreachable.
+                onTrackRecord={
+                  receiptsOn
+                    ? () => navigation?.navigate?.('Receipts')
+                    : undefined
                 }
               />
             ) : (
