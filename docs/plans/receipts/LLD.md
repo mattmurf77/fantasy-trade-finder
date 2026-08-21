@@ -44,6 +44,8 @@ EDGE_PCT_MIN_MIDPOINT = 100.0     # value units; below -> edge_pct = NULL (junk-
 # pick_majority under one grader version — HLD D-7). Owned picks map to their round's
 # Mid rung. Any change bumps GRADER_VERSION.
 RECEIPTS_PICK_WEIGHTS = {1: <lit>, 2: <lit>, 3: <lit>, 4: <lit>}   # round -> value units
+# Rounds > 4 clamp to the round-4 weight (mirrors pick_values.py:284-285's clamp) — the
+# owned-pick regex admits any round; a KeyError here would re-queue the row forever.
 ```
 
 `model_config` knobs (seeded via `_MODEL_CONFIG_DEFAULTS`, flipped via `scripts/set_knob.py`):
@@ -68,15 +70,17 @@ the thread starts); grading proceeds in a daemon thread (precedent `cron_players
 `backend/server.py:19512-19531`). Query `?batch=N` overrides the knob for one run
 (bounded 1..5000). Env kill switch `FTF_RECEIPTS_GRADE=0` → always `skipped`.
 Also invoked (same function, fire-and-forget) from the **daily-tick guard** and from
-`scripts/receipts_backfill.py`, which loops while `remaining_resolvable > 0` **and** the
-previous run graded > 0, and terminates after two consecutive zero-work runs —
-retry-pending rows are the daily job's business, not the backfill's (no hot-loop).
+`scripts/receipts_backfill.py`, which loops until **two consecutive zero-work runs**,
+where zero-work = zero TERMINAL rows written (graded + ungradeable both 0) — a run that
+writes 500 ungradeable rows is progress and the loop continues; retry-pending rows are
+the daily job's business, not the backfill's (no hot-loop, no early stop).
 
 ### 2.2 `GET /api/league/<league_id>/receipts`
 Session auth (viewer = session user); flag `receipts.screen` off → `404 {"error":
 "feature_disabled"}`. Viewer-scoped: rows where `user_id = viewer`, `is_ghost` falsy,
 league matches; deduped by `(league_id, trade_hash)` keeping earliest serve; grader_version
-pinned to max present. Response (one payload, all windows — anti-cherry-pick by construction):
+pinned to max present — ordering by the parsed numeric suffix (`receipts-10` >
+`receipts-2`), never lexicographic. Response (one payload, all windows — anti-cherry-pick by construction):
 
 ```json
 {
@@ -100,8 +104,9 @@ pinned to max present. Response (one payload, all windows — anti-cherry-pick b
                  "28": null, "56": null},
      "has_picks": true, "coverage": {"give": 1.0, "receive": 0.62}}
   ],
-  "disclosure": {"gradeable_share": 0.74,
-                 "excluded": {"pick_majority": 4, "missing_snapshot": 1, "no_serve_snapshot": 1},
+  "disclosure": {"gradeable_share": 0.74, "ties": 1, "null_edge_pct": 1,
+                 "excluded": {"low_coverage": 2, "pick_majority": 4,
+                              "missing_snapshot": 1, "no_serve_snapshot": 1},
                  "methodology": "Graded against market consensus at serve time; picks held constant; predictions locked when shown."}
 }
 ```
@@ -122,7 +127,10 @@ response footnoted as correlated) — all optional. Returns per-cell rows: `{cel
 win_share, wilson_low, wilson_high, median_edge_pct, gradeable_share, flag_low_share}`,
 a `served_vs_ghost` block (same stats split by `is_ghost`, ghost date range labeled), and
 an `effective_window` block — the distribution of `window_snap_date − serve_snap_date`,
-since snapshot tolerance makes a nominal 14d window span roughly 11–17d. Available regardless of
+since the anchors make a nominal 14d window span roughly 11–20d (serve nearest-≤ up to
+3d earlier; window ±3d). Admin cells do **not** apply the user-surface coverage filter —
+they include all graded rows and report `gradeable_share` / `flag_low_share` instead; the
+`n == rows used` invariant holds on both surfaces over their respective row sets. Available regardless of
 `receipts.screen`; requires `receipts.grading` on (404 `feature_disabled` while fully dark).
 
 Route additions land in `docs/api-reference.md` in the same PR (mandatory docs gate).
@@ -222,7 +230,10 @@ Date arithmetic is shown PG-flavored; the implementation computes cutoff dates i
 so the identical query runs on SQLite (tests) and Postgres (prod). Retry-pending
 impressions (window endpoint not yet resolvable, §4.3 step 4) are **skipped in-loop
 without consuming the batch cap** (skip-and-fill) — a head-of-queue block of unresolvable
-rows cannot starve a run.
+rows cannot starve a run. Implementation note: the LIMIT above bounds candidate rows, so
+the loop either streams past it until the cap in TERMINAL rows is reached, or folds the
+resolvability predicate into the WHERE — the `remaining_resolvable` COUNT (§2.1) proves
+that predicate is expressible in SQL.
 
 ### 4.2 Snapshot prefetch
 One query per run: all `player_value_history` rows for the distinct
@@ -258,6 +269,9 @@ def side(ids):
     # Weights are for coverage / pick-share ONLY — never edge arithmetic:
     #   graded player     → cv0[p]
     #   unresolved player → floor_value(fmt, serve_snap_date)  (flagged, direction-neutral)
+    #     serve_snap_date here is FORMAT-wide: nearest-≤ serve_date snapshot date for the
+    #     format (same anchor rule), defined even when zero package players resolved;
+    #     no format history at all → the row is ungradeable/no_serve_snapshot anyway
     #   pick              → RECEIPTS_PICK_WEIGHTS[round]        (frozen value units, §1)
     denom      = Σ weight(a) over ALL assets       # > 0 whenever the side is non-empty
     coverage   = Σ cv0[graded] / denom
@@ -351,8 +365,11 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
   receipts. Proves PLAN §7.3.
 - **T-2 honesty theorem (as actually true):** uniform additive drift on
   equal-cardinality synthetics → edge **exactly 0**; uniform multiplicative drift on
-  serve-sum-balanced synthetics → edge ≈ 0; and the disclosed residual pinned: additive
-  drift `d` on a 2x1 → edge = d. Proves D-1's cancellation claims as stated — no more.
+  serve-sum-balanced synthetics → edge ≈ 0; the disclosed residual pinned WITH ITS SIGN:
+  additive drift `d` on a 2x1 (give 2, receive 1 — taxonomy §2.1 direction convention) →
+  edge = **−d**; and one explicit directional case: receive side gains `d`, give side
+  flat → edge = **+d**, a win. The sign convention is test-pinned, not example-pinned —
+  T-2 is the matrix's only sign-sensitive test. Proves D-1's claims as stated — no more.
 - **T-3 anchor independence:** perturb `features_json` values → byte-identical grades.
   Proves D-2.
 - **T-4 pick rules:** Δ=0; frozen value-unit weights; `pick_majority` threshold;

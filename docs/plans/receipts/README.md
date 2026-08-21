@@ -37,8 +37,10 @@ grades its own advice.
 
 ## Reconciliation log
 
-**Document type:** full planning suite · **Rounds run:** 2 (parallel independent drafts →
-synthesis → cross-review) · **Converged:** see final report to operator.
+**Document type:** full planning suite · **Rounds run:** 3 (parallel independent drafts →
+synthesis → cross-review → re-review) · **Converged:** YES — dual sign-off at round 3
+(both lenses' round-3 review of the amended tree found the SAME single defect — the T-2
+sign pin — independently; fixed, plus 13 non-blocking folds, in the closing commit).
 
 ### Round 1 (independent drafts → synthesis)
 Both lens drafts are preserved in the session scratchpad (draft-A author/feasibility,
@@ -109,6 +111,26 @@ accepted and fixed in the amendment commit:
 param defaults to the user-surface rule; `EDGE_PCT_MIN_MIDPOINT` constant chosen over a
 knob to keep the honesty rules version-pinned rather than tunable). Round-3 re-review
 requested from both lenses on the amended commit.
+
+### Round 3 (re-review of commit `3e57305`) — CONVERGED
+Both reviewers verified all eight round-2 blockers genuinely closed (Wilson recomputed
+independently; deploy-invariance, positive denominators, ledger pairs, n-semantics all
+confirmed) and **independently converged on one identical new blocker**: the amended T-2
+pinned the disclosed additive-drift residual with the wrong sign — under the taxonomy
+§2.1 direction convention a 2x1 (give 2, receive 1) has `n_receive − n_give = −1`, so
+`edge = −d`, not `+d`. T-2 was the matrix's only sign-sensitive test, so the mis-pin
+could have shipped every win rendered as a loss. Fixed: pin restated as `−d` plus an
+explicit directional win case (`receive +d, give flat → edge = +d`). Thirteen further
+non-blocking folds: single backfill-termination rule (zero TERMINAL rows, twice); round
+≥5 owned-pick clamp to the round-4 weight; format-wide floor-date fallback; effective
+window restated 11–20d; admin surfaces exempted from the user coverage filter (invariant
+`n == rows used` holds per surface); skip-and-fill vs LIMIT implementation note;
+disclosure example completed (`ties`, `null_edge_pct`, `low_coverage`); numeric-suffix
+ordering for `grader_version`; HLD import-line sweep.
+
+### Unresolved disagreements
+None — both lenses signed off. Two synthesis positions stand as recorded above (admin
+dedup default; constant-over-knob for the midpoint guard).
 
 ## Sibling coordination (three-plan batch)
 

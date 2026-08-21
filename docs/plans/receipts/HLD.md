@@ -57,8 +57,9 @@ daily consensus snapshots (exists)     + scripts/receipts_backfill.py        └
 
 Components:
 - **`backend/receipts_service.py` (new, leaf):** grader + read queries. Imports
-  `database` + `feature_flags` only — no engine modules (mirrors the
-  `suggestion_telemetry.py` leaf pattern, its module docstring).
+  `database` + `feature_flags` + `pick_values.parse_generic_pick_id` (import-safe by
+  design) only — no engine modules (mirrors the `suggestion_telemetry.py` leaf pattern,
+  its module docstring; exact contract in LLD §1).
 - **`server.py`:** three thin routes + the daily-tick guard call.
 - **`mobile/src/screens/ReceiptsScreen.tsx`:** root-stack push (FeedbackFAB rule #188);
   renders one payload containing all windows.
