@@ -10,6 +10,23 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-22b — negmem SHIPPED to `main` (PR #168) — deployed dark to Render
+
+**Merged:** squash PR [#168](https://github.com/mattmurf77/fantasy-trade-finder/pull/168) → `main` `7b7c314`; branch tip `71f63da` ledgered ([recovery](../docs/recovery/2026-08-22-negmem-ship.md)) before the remote delete.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` (local, merged tree) | **4097 passed, 1 skipped, 0 failed** |
+| CI `backend-tests` (Python 3.12.3) | **pass** (9m27s) |
+| CI `mobile-typecheck` | **pass** |
+| CI `maestro-testid-lint` | **pass** |
+| Mobile diff vs main | **empty** — zero mobile files; no EAS/TestFlight build cut or needed |
+| Simulator gate | **`FTF_SKIP_SIM_GATE=1`** — the standing D-056 posture. Evidence run instead: the full suite above + 30+ named sabotages RED-then-restored + CI. No simulator exists to run; this is the documented replacement, not a waiver of evidence. |
+
+**Post-deploy verification:** polled `GET /api/feature-flags` on Render — `trade.negmem` moved **ABSENT → false**, which is itself the proof the new build is live (the old build did not know the key). Deployed state: flag **false**, `config/negmem_leagues.json` **empty**, `MODEL_A_PROFILE` pins `negmem_strength = 0.0`. **The ON-condition is BOTH the flag and the allowlist, so nothing generates differently for anyone.**
+
+**Owed, unchanged by the ship:** the [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is **UNRUN** — the feature has structural evidence only and must not be described as validated.
+
 ## 2026-08-22 — Negative-results memory v1 (leaf · registration · four seams · runner forwarding · readout pack) — full gates, FLAG DARK + ALLOWLIST EMPTY, NOT MERGED, on `claude/vigilant-spence-8583f5`
 
 **Branch:** `claude/vigilant-spence-8583f5`, cut from `origin/main`. Not pushed, not merged.

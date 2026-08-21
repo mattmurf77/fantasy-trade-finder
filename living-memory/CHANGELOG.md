@@ -10,6 +10,20 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-22c — negmem SHIPPED dark: merged to `main`, deployed to Render (PR #168)
+
+The negative-results-memory branch merged (`7b7c314`) after re-merging `origin/main`
+(Receipts #165, arm-C sweetener #166, slot pricing #167 — no code conflicts; my
+`trade_gen_v2` seam and the new arm-C sweetener coexist, suite 4097 green). **D-number
+collision caught and fixed at merge:** Receipts landed D-144 first, so the negmem entry
+renumbered **D-144 → D-147** with every negmem cross-reference repointed — renumber the
+newcomer, never someone else's landed entry. CI green on 3.12.3; zero mobile files, so no
+TestFlight build was cut (operator instruction: GH + Render only). Render deploy verified
+by `trade.negmem` moving ABSENT → false on `/api/feature-flags`. **Everything is dark:**
+flag false ∧ allowlist empty (ON needs both) ∧ arm A pinned to 0. Rollout remains two
+operator flips at a bake-off round boundary; the TestFlight checklist is UNRUN and is the
+only runtime evidence this feature can get (D-056).
+
 ## 2026-08-22 — negmem BUILT DARK: the whole v1 is on the branch, nothing is lit (`claude/vigilant-spence-8583f5`, not merged)
 
 Build gate opened by the operator's three §6 rulings (D1 yes · D2 seed-only · D3 (a) full
