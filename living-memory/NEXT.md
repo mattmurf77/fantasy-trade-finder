@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
@@ -29,6 +30,27 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen
+
+Built dark on `feat/receipts` (see CHANGELOG + TEST_LEDGER same date). Nothing is pushed.
+*Why now:* the grading clock only starts once the flag is on, and every week dark is cohort
+lost — the 56d window cannot mature before ~Oct 11 given the 2026-08-16 telemetry start.
+
+1. **P0 prod counts** ([LLD §8](../docs/plans/receipts/LLD.md), read-only via
+   `backend/tools/prod_analytics.py`): gradeable impressions + per-league histogram,
+   pick-involvement share, snapshot gap rate since 2026-07-26, per-user×league counts. This is
+   the A-1 gate; the local dev DB has zero impressions, so nothing about cohort size is known
+   yet.
+2. **Merge + flip `receipts.grading`**, then drain with `scripts/receipts_backfill.py`. The
+   grader is inert until this happens.
+3. **A-2 operator checkpoint** on `GET /api/admin/receipts/metrics` — the first real numbers.
+   Pre-committed: a bad number changes **copy**, never the cohort, window or metric.
+4. **TestFlight pass** ([testflight-checklist.md](../docs/plans/receipts/testflight-checklist.md),
+   12 steps) — the only runtime evidence this feature gets — then flip `receipts.screen`.
+5. **Three-way taxonomy reconciliation** still open (PLAN §7 Q-6): confirm sibling prefix
+   claims with negmem + breaker now that `docs/plans/shared/trade-shape-taxonomy.md` v1.1.1 is
+   on `main`.
 
 ## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
 

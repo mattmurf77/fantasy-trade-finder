@@ -496,6 +496,26 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # (card, guard) with a 50-row session cap — six rows per trapped card,
     # never unbounded. Analysis reads max(blocked_n), NEVER count(rows).
     "swipe_guard_blocked",
+    # ── Receipts, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ────────────
+    # Registered in the SAME commit as the emitters
+    # (mobile/src/screens/ReceiptsScreen.tsx), the default-deny rule this
+    # file's docstring states: a name that arrives after its track() call is
+    # dropped behind a 200 and the data is unrecoverable.
+    #
+    # `receipts_opened` is INTENT — deliberately ABSENT from
+    # analytics_queries.NON_INTENT_EVENTS. Opening your own track record is a
+    # deliberate feature engagement, the peer of `find_trades_tapped`, and it
+    # is the one number this surface exists to produce (PRD §8.2 makes unique
+    # openers per week the primary success metric). Fires once per RESOLVED
+    # payload, not per render, so a re-render cannot inflate it.
+    #
+    # `receipts_window_changed` IS in NON_INTENT_EVENTS (that row lands in
+    # this same commit) — it is navigation, the `tab_selected` class. Every
+    # emission is preceded on the same screen by receipts_opened, which is
+    # already intent, so there is no user-day it could add. It also cannot be
+    # a cohort switch: the chips select a field of a payload already in
+    # memory and never refetch.
+    "receipts_opened", "receipts_window_changed",
 })
 
 # ---------------------------------------------------------------------------
@@ -606,6 +626,27 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # audit trail, and the import-time disjointness assert below would raise
     # (taking the app down at boot) if someone added it to both.
     "pick_assignment_changed",
+    # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
+    # Registered in the SAME commit as its emitter
+    # (`receipts_service._emit_run_event`), the house rule this file's
+    # docstring states and the NULL-`platform` incident is the reason for.
+    #
+    # SERVER-fired and unforgeable by design: a grading run is an OPERATIONAL
+    # fact about a background job, not a user gesture. Rows carry
+    # user_id="system:receipts" (never a real user), so it must never appear
+    # in ALLOWED_CLIENT_EVENTS — the import-time disjointness assert below
+    # would raise at boot if someone added it to both.
+    #
+    # NON_INTENT in analytics_queries (that row lands in this same commit):
+    # the job fires daily whether or not a human touched the app, so
+    # admitting it would mint a user-day out of a cron tick and break
+    # DAU/WAU at the seam, permanently and silently.
+    #
+    # Props: graded, ungradeable, cap_hit, duration_ms, trigger. Server-fired
+    # names need no CLIENT_EVENT_PROPS row — that registry is the client
+    # allowlist's prop filter, and the import-time completeness check below
+    # is scoped to ALLOWED_CLIENT_EVENTS.
+    "receipts_grade_run",
 })
 
 # ---------------------------------------------------------------------------
@@ -676,6 +717,15 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # out), so a non-zero find_trades_tapped{mode:single_pin} count IS the
     # regression fix's telemetry.
     "find_trades_tapped":   frozenset({"source", "mode"}),
+    # Receipts. `status` is ledger | ready — which of the two designed screen
+    # states the user actually saw, so "did anyone see a number?" is
+    # answerable without joining grades. `headline_bucket` is neg | flat | pos,
+    # the 28d win share against the explicit 50% null, BUCKETED on purpose:
+    # the raw share is a league-identifying value at n around 10 and belongs
+    # in the admin readout, not in an event stream. `window_days` is 14|28|56.
+    "receipts_opened":        frozenset({"league_id", "status",
+                                         "n_graded_28d", "headline_bucket"}),
+    "receipts_window_changed": frozenset({"league_id", "window_days"}),
     # `mode` mirrors find_trades_tapped's — the OUTCOME half of the pair. A
     # find_trades_tapped{mode:single_pin} with no following
     # trade_card_viewed{mode:single_pin} is #298 reappearing: a deck
