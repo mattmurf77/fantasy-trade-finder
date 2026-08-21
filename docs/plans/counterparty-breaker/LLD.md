@@ -1,7 +1,8 @@
 # LLD — Counterparty breaker
 
-**Date:** 2026-08-21 · **Status:** MERGED CANDIDATE (synthesis of drafts A + B under the
-orchestrator's merge rulings M-1..M-12; awaiting cross-review).
+**Date:** 2026-08-21 · **Status:** REVISED POST-CROSS-REVIEW (synthesis of drafts A + B under
+the orchestrator's merge rulings M-1..M-12; the cross-review round's consolidated fixes —
+blocking F1–F6, ruling T-1, and all accepted non-blocking items — applied 2026-08-21).
 **Binds under:** [PLAN.md](PLAN.md) (AMENDED, authoritative) → [HLD.md](HLD.md) (CONVERGED —
 not contradicted here except where §0.2 records a ruled erratum) → this LLD. Drafts preserved
 at [drafts/LLD-draft-A.md](drafts/LLD-draft-A.md) / [drafts/LLD-draft-B.md](drafts/LLD-draft-B.md);
@@ -36,7 +37,7 @@ new routes, no migrations (`breaker_` table prefix stays reserved-unused).
 
 ### 0.2 HLD ERRATA (ruled during LLD merge — apply to HLD.md after LLD convergence)
 
-Three places where this LLD deliberately contradicts the HLD's literal text, each a recorded
+Four places where this LLD deliberately contradicts the HLD's literal text, each a recorded
 orchestrator ruling; the HLD's *intent* survives in every case:
 
 | # | HLD text | Erratum (ruling) |
@@ -44,6 +45,7 @@ orchestrator ruling; the HLD's *intent* survives in every case:
 | E-A (M-2) | §3.3 impression-copy sketch: `if flags.trade_breaker: features["breaker"] = card.breaker` — flag-gated bare-attribute read, "no getattr default" | The copy is **ATTRIBUTE-gated with a synthetic degradation-marker fallback** (§1.4). The HLD's version has a live crash path: a mid-job hot flag flip (`POST /api/feature-flags/reload` is a route) or an injected-card race makes the bare read raise, and because the impression row loop has **no per-row try/except** (`server.py:4122-4233`), one AttributeError loses the *entire deck's* impressions to the outer catch (`:6129`). The HLD's real invariant — never a bare null, absence impossible on a flag-on row — is preserved by the synthetic marker `{ver: null, degraded: "flag_flip_or_unstamped", objections: null}` and enforced in tests (§7.3) |
 | E-B (M-3) | §5.4 cost model: "~30 served cards" | `bakeoff_deck_limit` was raised 30→60 at the A-1 boundary (`model_config_changes`, 2026-08-21 00:43:33Z — PLAN §10 A-1). **All ms budgets, checkpoint math, the size budget (§2.7), and the pre-flag-on dry-run contract use 60** as the bake-off deck bound |
 | E-C (M-4) | §2.5/§5.4: PartnerContext built "over data the job already loaded" | True for rosters, boards, and league state; **false for partner `asset_preferences` and declared `league_preferences`** — the job loads only the VIEWER's untouchables (`server.py:5546-5556`). Fixed by two read-only bulk readers (§2.2), one `IN (...)` select each per job — not per-partner query loops |
+| E-D (cross-review) | §2.6 rung-4 row: a per-card exception ⇒ whole-card rung-4 marker | **Per-CLASS containment** (§5.1 field-level row / E-14): an exception inside ONE class's predicate stamps that class alone `severity: null, skipped: "predicate_error"`; the card stays rung 0 with the other classes scored. Whole-card rung 4 is reserved for failures outside any class predicate. One flaky predicate must not zero the coverage metric for all six classes — the narrowing preserves the HLD's degrade-and-mark intent |
 
 ### 0.3 Verified anchor table (the build re-cites all of these)
 
@@ -175,10 +177,20 @@ NARRATABLE_CLASSES = frozenset({"fit_outlook", "fit_new_weakness",
 ENVELOPE_CLASSES = frozenset({"fit_new_weakness", "fit_duplicate",
                               "roster_crunch"})
 
-#: The closed knob list, read ONCE per stamp_breaker call into a frozen
-#: per-job snapshot (§3.0 — M-5). Enumerated to match §4 exactly; the
-#: knob-inventory guard pins the two lists equal.
+#: The closed breaker-owned knob list, read ONCE per stamp_breaker call into
+#: a frozen per-job snapshot (§3.0 — M-5). Enumerated to match the 25 §4
+#: registrations exactly; the knob-inventory guard pins those two lists
+#: equal. The SNAPSHOT key set is the union of this list and
+#: _SHARED_ENGINE_KNOB_KEYS below — the inventory guard still pins exactly
+#: the 25 registrations; the snapshot list pins the union.
 _BREAKER_KNOB_KEYS: tuple[str, ...]
+
+#: Engine-owned knobs the breaker also reads (§3.4 waiver adjustment, §3.5
+#: roster_crunch). ALREADY five-registered as engine keys — they need NO new
+#: registration and are not counted in §4's 25 — but they MUST be in the
+#: frozen snapshot: reading them live via ts._c mid-job would reintroduce
+#: the §3.0 hot-flip hazard, and leaving them out of `cfg` is a KeyError.
+_SHARED_ENGINE_KNOB_KEYS: tuple[str, ...] = ("waiver_slot_cost",)
 ```
 
 ```python
@@ -199,7 +211,7 @@ def stamp_breaker(
                                          # off — the bulk reader then resolves
                                          # declared prefs itself, §2.2/§3.2)
     pick_shares: dict[str, float] | None = None,      # opponent_pick_shares
-) -> "BreakerReport":
+) -> "BreakerJob":
     """Evaluate every card from the counterparty's seat and set
     `card.breaker` (+ `card.breaker_shadow` when breaker_shadow_run >= 1).
     Attribute-setting only; two deck-wide passes under breaker_ms_budget with
@@ -210,11 +222,13 @@ def stamp_breaker(
     belt-and-braces for the import line and a bug in the marker path itself.
     Idempotent: a second call overwrites card.breaker wholesale. `cards` may
     be empty (F3 can empty a deck) — no-op, zeroed report. Returns the
-    per-job diagnostics report (HLD §5.5, FitReport precedent — no DB)."""
+    per-job holder (§3.0): the frozen knob snapshot plus the diagnostics
+    report (HLD §5.5, FitReport precedent — no DB)."""
 ```
 
 ```python
-def compose_narration(cards: list, *, players: dict) -> int:
+def compose_narration(cards: list, *, players: dict,
+                      job: "BreakerJob") -> int:
     """Deck-level narration pass (flag trade.breaker_narrative, checked at the
     CALLSITE — this function assumes it is wanted). For each card with a
     scored vector: apply the eligibility chain (§3.8 — per-class switch,
@@ -228,8 +242,10 @@ def compose_narration(cards: list, *, players: dict) -> int:
     card without card.breaker stamps nothing and is counted in diagnostics
     (defensive — reachable only via a bug, never an exception). Per-card
     internal exceptions stamp `suppressed: "template_error"` (§5.5 E-15),
-    never raise. Reads the SAME §3.0 knob snapshot as stamp_breaker (held
-    per-job, not re-read)."""
+    never raise. `job` is stamp_breaker's return: this function reads
+    job.cfg — the SAME §3.0 knob snapshot, held per-job, never a re-read —
+    and UPDATES job.report's narration counters (narrated /
+    suppressed_by_reason)."""
 ```
 
 ```python
@@ -244,6 +260,14 @@ class BreakerReport:               # FitReport precedent — per-job diagnostics
     partner_ctx_built: int; partner_ctx_failed: int
     ms_total: float; ms_p50_card: float; ms_p95_card: float
     pass2_ran: bool                # False ⇒ rung-2 fired
+
+
+@dataclass
+class BreakerJob:                  # the §3.0 per-job holder — stamp_breaker's
+    cfg: dict                      # return value. Carries the frozen knob
+    report: BreakerReport          # snapshot AND the report; compose_narration
+                                   # receives it and updates report in place.
+                                   # Ephemeral (job diagnostics only, no DB).
 ```
 
 Private per-class predicate functions (§3.3–§3.6), each
@@ -275,12 +299,25 @@ breaker reads is in scope: `g_league`, `players_dict`, `seed_map`, `active_forma
         # degradation (LLD §5) — never a bare null, never a missing key on
         # a flag-on deck. Ghost split below is inert (no-ghost ruling):
         # served_final == final_cards.
-        if FLAGS.trade_breaker:
+        # Both flags read ONCE, up front (§5.5 E-8): the pair the whole
+        # block acts on is one coherent read. (Flags read at call time
+        # INSIDE engine helpers — e.g. trade_crown_asset in
+        # _package_value_market — are the accepted engine-wide residual.)
+        # Skips (T-1 ruling, §9 Q-10): the demo league (consistent with
+        # every neighboring mutation layer, server.py:5631-:5981, and the
+        # demo-guarded impressions block :6066/:6092; a PRD open question
+        # records the "narrate on demo as demo material" lift option) and
+        # superseded jobs (pure wasted-compute avoidance — no correctness
+        # dependency either way, §5.5 E-13).
+        _bk_on   = FLAGS.trade_breaker
+        _bk_narr = FLAGS.trade_breaker_narrative
+        if (_bk_on and league_id != "league_demo"
+                and not _job_superseded(job_id)):
             try:
                 from .trade_breaker import stamp_breaker, compose_narration
                 # lazy — flag-off never imports (NFR-3,
                 # test_flag_off_never_imports_breaker)
-                stamp_breaker(
+                _bk_job = stamp_breaker(
                     final_cards,
                     league            = g_league,
                     players           = players_dict,
@@ -295,9 +332,10 @@ breaker reads is in scope: `g_league`, `players_dict`, `seed_map`, `active_forma
                     pick_shares       = opponent_pick_shares,
                 )
                 _n_narrated = 0
-                if FLAGS.trade_breaker_narrative:
+                if _bk_narr:
                     _n_narrated = compose_narration(final_cards,
-                                                    players=players_dict)
+                                                    players=players_dict,
+                                                    job=_bk_job)
                 if _n_narrated:
                     # M-1 republish contract: republish iff narrated_count
                     # > 0, so the narrated payload reaches the snapshot the
@@ -325,10 +363,17 @@ breaker reads is in scope: `g_league`, `players_dict`, `seed_map`, `active_forma
                 # test_rung5_marker_version_pinned.
                 _mark = {"ver": "brk-1", "degraded": "exception_outer",
                          "objections": None}
+                # BOTH markers stamped with NO knob read and NO module
+                # reference: in _run_trade_job the local `trade_service` is
+                # the per-format TradeService INSTANCE (server.py:5440),
+                # which has no `_c` — and a live knob read at failure time
+                # would violate the §3.0 one-job-one-knob-state rule anyway.
+                # A shadow marker on a shadow-off deck is harmless (readouts
+                # treat markers as degraded either way); an existing shadow
+                # stamp is preserved.
                 for _bc in final_cards:
                     _bc.breaker = dict(_mark)
-                    if (trade_service._c("breaker_shadow_run") >= 1.0
-                            and getattr(_bc, "breaker_shadow", None) is None):
+                    if getattr(_bc, "breaker_shadow", None) is None:
                         _bc.breaker_shadow = dict(_mark)
 ```
 
@@ -349,12 +394,15 @@ Contract points the build is held to (converged, B §2.3):
 3. The rung-5 outer marker is constructed inline with **no breaker-module dependency** — the
    import line is one of the failure modes it must cover (NFR-2's "constructible with no
    breaker state" made literal).
-4. The seam block carries **no demo-league or superseded-job skip** in this candidate (A's
-   verbatim block per M-1). Superseded jobs already skip the signal block (`:6092-6093`) and
-   every publish is `_job_live`-blocked, so no wrong rows and no wrong renders are possible —
-   the residual is wasted stamp compute on a deck nobody sees, and a stamped-but-unmeasured
-   demo deck. Both skips are cheap one-line adds; **whether to add them is an unresolved
-   cross-review item (§9 Q-10)**.
+4. The seam block carries **both skips** — `league_id != "league_demo"` and
+   `not _job_superseded(job_id)` — per the T-1 cross-review ruling (§9 Q-10, closed). Neither
+   is load-bearing for correctness: superseded jobs already skip the signal block
+   (`:6092-6093`) and every publish is `_job_live`-blocked, so no wrong rows and no wrong
+   renders were possible without them. The demo skip buys consistency with every neighboring
+   mutation layer (`server.py:5631-:5981`) and the demo-guarded impressions calls
+   (`:6066`/`:6092`) — and avoids narrating synthetic demo partners; a PRD open question
+   records the deliberate "narrate on demo as demo material" lift option as a product call.
+   The superseded skip is pure wasted-compute avoidance.
 
 ### 1.3 Snapshot-republish analysis — every flag combination (M-1)
 
@@ -378,7 +426,7 @@ That finding is why the seam block owns a republish:
 | breaker on, narrative on, ≥1 narrated, `deck.signal_v2` **off** | yes | **the seam republish is the only carrier** — this row is why the block owns one |
 | breaker on, narrative on, 0 narrated | no key | no republish (guard False); correct and cheap |
 | narrated but impressions insert failed (`imp_by_card` falsy) | yes | sentence already published by the seam republish; measurement lost for that deck (existing failure class), exposure NOT lost; the A/B readout excludes such decks (no outcome rows to join) |
-| job superseded mid-run | n/a | `_job_live` guard inside the republish — same posture as every other publish site |
+| job superseded mid-run | n/a | job superseded BEFORE the seam ⇒ the T-1 guard skips the whole block (no stamp, no publish); superseded DURING the block ⇒ the `_job_live` guard inside the republish blocks it — same posture as every other publish site |
 
 The republish precedes the ghost split, so it uses the `_served_cards(final_cards, …)` idiom
 exactly like F7/F9 (`ghost_on` is False in prod under the no-ghost ruling; the helper is kept
@@ -420,6 +468,10 @@ before the wildcard block (`:4207`):
                                    "objections": None}
             features["breaker_shadow"] = None
 ```
+
+`_BK_SENTINEL` is a module-level `object()` in `server.py`, defined beside `_served_cards`
+(`server.py:4007`) — a fresh sentinel (never `None`) so "attribute absent" stays
+distinguishable from any stamped value.
 
 Flag off at both sites ⇒ no key ⇒ rows byte-identical (NFR-3). Uniform at the JSON level on
 every row of a flag-on deck, both draft paths (`test_impressions_breaker_uniform_keys` extends
@@ -470,8 +522,11 @@ def hesitation_line(objection: dict, players: dict) -> str | None:
     objection["evidence"] (§2.4 enumerates the keys per code); player names
     resolve from evidence ids via `players` at render time — the sentence can
     never name what the analysis didn't produce. Returns None on an unknown
-    code, a non-narratable code, or any missing evidence key (never guesses,
-    never substitutes). Raises nothing (any internal error → None; the caller
+    code, a non-narratable code, or any missing evidence key the template
+    renders — and a present-but-NULL value in such a key counts as missing
+    (a null `age` must return None, never render "None-year-old"; never
+    guesses, never substitutes; a template that renders no evidence fields
+    is unaffected by nulls). Raises nothing (any internal error → None; the caller
     stamps suppressed="template_error", §5.5 E-15). Pure; no flag reads, no
     knob reads — eligibility lives in trade_breaker.compose_narration, the
     flag at the server seam. Inherits the positional-honesty covenant
@@ -572,7 +627,11 @@ every scored stamp (M4: absence impossible):
      "severity": null, "skipped": "format_gap", "evidence": {}},
     …                              // severity: float 0–1 rounded to 3 dp | null
   ],                               // skipped ∈ "format_gap"|"budget"|
-                                   //   "not_applicable"|"partner_snapshot"
+                                   //   "not_applicable"|"partner_snapshot"|
+                                   //   "predicate_error" (E-14: this class's
+                                   //   predicate crashed — durable, so the
+                                   //   §8 degraded-share readout can count
+                                   //   unattributable crashes from data)
   "them": 41.3,                    // float|null — card.fit_diag them-score
                                    // PASSTHROUGH (D-3); null on organic decks
                                    // and likes-you-injected cards
@@ -715,8 +774,8 @@ how a private-state leak sneaks past the whitelist (§7.1).
 | code | evidence keys (all mandatory when scored) |
 |---|---|
 | `fit_outlook` | `outlook` (enum), `lean` (float, §3.3 quantity), `asset` (pid of the highest-consensus-value incoming player driving the lean; null for all-pick packages), `age` (int\|null), `pos` (enum\|null) |
-| `fit_new_weakness` | `pos` (enum), `before` (int), `after` (int), `need` (int), `asset` (pid of the highest-value outgoing player at `pos`) |
-| `fit_duplicate` | `pos` (enum), `bench_n` (int), `value_share` (float), `asset` (pid of the highest-value incoming player at `pos`) |
+| `fit_new_weakness` | `pos` (enum), `before` (int), `after` (int), `need` (int), `asset` (pid of the highest-value outgoing player at `pos`), `tier_basis` ("positional"\|"absolute" for `pos` — distinguishes production positional bands from the `_POS_TIER_MIN_POOL` absolute-cut fallback, `trade_service.py:2086/:2266`; fallback rows must be distinguishable in data) |
+| `fit_duplicate` | `pos` (enum), `bench_n` (int), `value_share` (float), `asset` (pid of the highest-value incoming player at `pos`), `tier_basis` (same as `fit_new_weakness`) |
 | `value_giving` | `basis` ("board"\|"consensus"), `margin` (float, their-seat surplus), `n_give` (int), `n_recv` (int) — **board-basis rows stamp dark; the margin still stamps for calibration** |
 | `other_player_keep` | `asset` (pid), `list` ("untouchable") — **private; stamps dark, never renders (D-6)** |
 | `roster_crunch` | `extra` (int), `slot_cost` (float), `pileup` (list of pos enums, possibly empty) |
@@ -728,7 +787,9 @@ Same schema as §2.1 evaluated from the **viewer's** seat (no give/receive swap)
 partner quantity). Present on every card of a flag-on deck when `breaker_shadow_run ≥ 1`
 (minimal marker on degraded paths — unlabeled shadow missingness would corrupt the §8 primary
 calibration population exactly as breaker missingness would); permitted null only when the
-shadow knob is off. Shadow evaluation is **interleaved per card after the primary stamp**,
+shadow knob is off — with one exception: the rung-5 seam handler stamps a shadow minimal
+marker unconditionally (it cannot read the knob at failure time, §1.2), so a shadow-off deck
+that hits rung 5 carries markers; harmless, readouts treat markers as degraded either way. Shadow evaluation is **interleaved per card after the primary stamp**,
 never a second loop — budget exhaustion degrades primary and shadow *together*, keeping their
 coverage correlated, which R-3's proxy-population argument needs (uncorrelated shadow
 missingness would bias the viewer-seat calibration cut). **Never serialized**
@@ -758,9 +819,13 @@ regression nobody would otherwise notice. The §2.1 rounding rules are part of t
 
 ### 3.0 Per-job config snapshot + value-mode pin (M-5)
 
-`stamp_breaker` begins with `cfg = {k: ts._c(k) for k in _BREAKER_KNOB_KEYS}` and reads **only
-`cfg`** thereafter — both passes AND `compose_narration` (which receives the same dict via a
-per-job holder, never a re-read). Three verified hazards this kills:
+`stamp_breaker` begins with
+`cfg = {k: ts._c(k) for k in _BREAKER_KNOB_KEYS + _SHARED_ENGINE_KNOB_KEYS}` — the 25
+§4-registered `breaker_*` keys ∪ the shared engine list (`waiver_slot_cost`, already an engine
+registration; §1.1) — and reads **only `cfg`** thereafter, both passes AND `compose_narration`
+(which receives the same dict via the `BreakerJob` per-job holder, §1.1 — never a re-read; the
+holder also carries the `BreakerReport`, which `compose_narration` updates). Three verified
+hazards this kills:
 
 1. **Hot knob flip mid-job**: `PUT /api/admin/config` → `reload_config()`
    (`trade_service.py:969`) mutates `_cfg` in place; without the snapshot, pass 1 and pass 2 —
@@ -845,7 +910,11 @@ shows the seam date in the data — D-8). Both values + the score are retained i
 **Quantity:** `lean` = arithmetic mean of `ts._now_lean(pos, age)` (`trade_service.py:2648`)
 over the assets the partner would **receive** (`view.recv_ids` = the viewer's give side) —
 byte-parallel to `trade_narrative._give_side_now_lean` (`trade_narrative.py:71-83`),
-deliberately NOT the value-weighted `ts.signed_lane_shift`. Why: `_opponent_frame`
+deliberately NOT the value-weighted `ts.signed_lane_shift`. Picks stay **IN** the mean at
+`_now_lean`'s PICK short-circuit constant −0.25 (`trade_service.py:2648-2656`) — exactly as
+`_give_side_now_lean` counts them, which is what keeps the parity below byte-provable; an
+all-pick incoming side therefore means lean = −0.25, never a skip (§3.10). Why the unweighted
+mean: `_opponent_frame`
 (`trade_narrative.py:86-100`) asserts window-FIT from exactly this quantity at |lean| ≥ 0.05;
 computing the breaker's window-PUSH from the same number with mirrored thresholds makes the
 §7.1 coherence test a *proof* (the two writers cannot disagree about the same scalar) instead
@@ -886,11 +955,21 @@ value space, byte-parallel to the fit `_surplus` shape (fit LLD §1.7), inside t
 stud-tax pin:
 
 ```python
+def _net_player_bodies(view: "_CardView", players: dict) -> int:
+    """Net PLAYER bodies the partner absorbs (recv − give), picks excluded
+    (ts.is_pick_asset, trade_service.py:1764 — Sleeper picks occupy no
+    roster slot). The ONE computation behind both value_giving's waiver-slot
+    adjustment and roster_crunch's `extra` (§3.5): shared so the two can
+    never diverge."""
+    recv = sum(1 for p in view.recv_ids if not ts.is_pick_asset(p))
+    give = sum(1 for p in view.give_ids if not ts.is_pick_asset(p))
+    return recv - give
+
 rvals = [val(p) for p in view.recv_ids]; gvals = [val(p) for p in view.give_ids]
 v_max = max(rvals + gvals)
 recvd = ts.package_value_v2(rvals, v_max, n_other=len(gvals), other_values=gvals)
 sent  = ts.package_value_v2(gvals, v_max, n_other=len(rvals), other_values=rvals)
-extra = len(view.recv_ids) - len(view.give_ids)
+extra = _net_player_bodies(view, players)
 if extra > 0: recvd -= cfg["waiver_slot_cost"] * extra
 margin = recvd - sent
 sev = min(1.0, max(0.0, -margin) / cfg["breaker_value_scale"])
@@ -899,7 +978,24 @@ sev = min(1.0, max(0.0, -margin) / cfg["breaker_value_scale"])
 `val` = `oval` when `pctx.board_auth == "board"`, else `cval` (board_suspect and unboarded
 both fall to consensus optics — PLAN F-3 — with `board_auth` recording why);
 `basis` = "board"/"consensus" accordingly in evidence. `fit_diag` never feeds this number
-(passthrough only, D-3).
+(passthrough only, D-3). The class's **argmax floor is basis-dependent** — the §3.9 FINALIZE
+top selection reads `breaker_floor_value_giving` on the board basis and
+`breaker_floor_value_giving_consensus` on the consensus basis (the same split §3.8 step 5
+applies at narration time).
+
+> **Read the sketch above as POST-fix semantics (PLAN §10 A-1, amended text authoritative).**
+> As shipped today, `'market'` mode **ignores `v_max` and `n_other`** — they are dead
+> parameters "kept for signature compatibility" (`package_value_v2` docstring,
+> `trade_service.py:1298`) — and the depth discount benchmarks each package against its OWN
+> best asset; the sketch's `v_max` argument reads as `'heavy'`-mode math and has no effect in
+> v1's pinned `'market'` mode. The operator-approved `fix/package-benchmark-sweetener` branch
+> (merge held for the Monday window boundary) changes exactly that benchmarked quantity: the
+> depth discount re-benchmarks to the **trade's best asset** (the "4-mids-for-a-stud scored
+> fair" defect, `docs/reviews/2026-08-21-market-curve-comparison.md`). Breaker severities
+> inherit the fix automatically through the module-level `ts.package_value_v2` call — no
+> breaker code change. Sequencing: the pre-flag-on dry run, the calibration cohort (§8), and
+> the arm-A golden re-capture (PLAN A-1(c)) all start **at/after** that Monday merge — nothing
+> breaker-side cites the pre-fix golden SHA or pools severities across the merge.
 
 **`other_player_keep`.** `hits = set(view.give_ids) ∩ set(pctx.prefs["untouchables"])`
 (what they'd send away ∩ their untouchable list — `ASSET_PREF_LISTS`, `database.py:8657`).
@@ -947,7 +1043,9 @@ they demonstrably value" limb from the PLAN's definition is **not computable in 
 recorded as an evidence gap (§9 Q-4), not approximated:
 
 ```python
-extra = len(view.recv_ids) - len(view.give_ids)       # net bodies they absorb
+extra = _net_player_bodies(view, players)   # §3.4's shared helper — net PLAYER
+                                            # bodies they absorb, picks excluded;
+                                            # one computation for both classes
 if extra <= 0: sev = 0.0
 else:
     pileup = [pos for pos in incoming_positions
@@ -1041,7 +1139,7 @@ if budget <= 0: every card gets the minimal marker {ver, degraded:
 PASS 1 — for each card in served order: build/fetch PartnerContext (rung 1 on
     failure); evaluate PASS_1_CLASSES, then the shadow pass-1 for the same
     card when the shadow knob is on (interleaved — §2.5); per-class exception
-    ⇒ that class alone stamps skipped: "not_applicable" + predicate_errors
+    ⇒ that class alone stamps skipped: "predicate_error" + predicate_errors
     counter (§5.5 E-14); per-card context exception ⇒ rung-4 marker for that
     card. If elapsed() > budget mid-pass: every REMAINING card gets the
     minimal marker (rung 3 — rank-correlated by construction, therefore
@@ -1078,7 +1176,7 @@ test per cell (§7.1).
 
 | Class | All-picks give side (partner sends picks) | All-picks receive side (partner gets picks) | Partner roster empty | K/DEF/IDP asset in package (G-026: prices 0.0) |
 |---|---|---|---|---|
-| `fit_outlook` | scored — lean computed over what the partner RECEIVES; picks carry no age ⇒ excluded from the mean; all-pick incoming ⇒ `asset: null`, lean over players only, else `not_applicable` when no aged asset exists on the incoming side | same rule (it evaluates the incoming side only) | scored (outlook still inferable — pick share + empty-roster vet/youth shares; evidence shows the inputs) | zero-priced assets carry ages and stay in the unweighted mean (M-8 scalar is value-blind); if ALL incoming assets are zero-priced players ⇒ `not_applicable` |
+| `fit_outlook` | scored — lean evaluates the incoming side only; what the partner sends never enters the mean | scored — picks stay **IN** the mean at `ts._now_lean`'s PICK constant −0.25 (`trade_service.py:2648-2656`, byte-parallel to `_give_side_now_lean` — §3.3; the parity test covers pick-carrying cards); all-pick incoming ⇒ lean = −0.25 with `asset`/`age`/`pos` null: the contender/championship branch CAN fire (its template renders no evidence fields, §1.6), the rebuilder/jets branch cannot fire on a negative lean (push zeroes) so the null asset never renders; `not_applicable` ONLY when no incoming asset resolves at all | scored (outlook still inferable — pick share + empty-roster vet/youth shares; evidence shows the inputs) | zero-priced assets carry ages and stay in the unweighted mean (M-8 scalar is value-blind); scored even when every incoming asset is zero-priced — `not_applicable` stays reserved for the no-incoming-asset-resolves case |
 | `fit_new_weakness` | `not_applicable` (a pick leaving opens no lineup hole) | n/a — evaluates what the partner SENDS (their give side) | `not_applicable` (no lineup to break) | K/DEF/IDP positions are outside `_POS_TIER_CUTS` ⇒ invisible to slot math; if the vacated slot IS such a position ⇒ `format_gap` |
 | `fit_duplicate` | n/a (evaluates what the partner RECEIVES) | `not_applicable` (picks stack no position) | `not_applicable` (nothing to duplicate against) | incoming K/IDP ⇒ excluded; mixed package uses priced players only; all-excluded ⇒ `not_applicable` |
 | `value_giving` | scored — picks price via pick values on both bases | scored | scored (board/consensus math is roster-free) | **hazard**: zero-priced assets make the partner's give side look free ⇒ margin inflates. Rule: any zero-`cval` PLAYER asset on either side in a non-envelope league ⇒ `format_gap` (§3.7 item 4); in-envelope leagues cannot hit it (no such rosters pass item 4) |
@@ -1103,7 +1201,9 @@ five-registration rule **in the consumer's commit** (discipline comment
 `:4191`, and the rollback ladder is theater) · `_PINNED_KNOBS`
 (`test_bakeoff_arm_a_golden.py:471`; inventory guard `:546-547` fails BY NAME) · the
 disposition sentence in `docs/plans/three-model-bakeoff/scope-phase2.md` · the
-`docs/config-reference.md` row. All 25 are read exclusively through the §3.0 per-job snapshot.
+`docs/config-reference.md` row. All 25 are read exclusively through the §3.0 per-job snapshot,
+whose key set is these 25 ∪ `_SHARED_ENGINE_KNOB_KEYS` (`waiver_slot_cost` — an existing
+engine registration, needing NO five-registration here and not counted in the 25; §1.1).
 
 Disposition sentence, all 25 keys (the D-095 wording pattern): *"Evaluation-layer knob for
 `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the
@@ -1146,7 +1246,8 @@ deliberately NOT knobs — **`BREAKER_VERSION`-pinned semantics (ruled, M-6)**; 
 across classes is what the floor knobs are for (D-4). The board-authenticity thresholds ARE
 knobs (above) but their *semantics* are version-pinned: calibration must not chase a moving
 authenticity definition, so a threshold change worth making is a `ver`-bump conversation
-first.
+first. That warning sentence is carried **verbatim** into the `docs/config-reference.md` rows
+for `breaker_board_div_min` and `breaker_board_min_divergent`.
 
 ---
 
@@ -1159,17 +1260,19 @@ Bare null is never stamped; an absent key means flag-off, nothing else. Marker s
 | Rung | Trigger | Stamp on affected cards | Scope |
 |---|---|---|---|
 | 0 | normal | full §2.1 payload | all |
-| 0 (field-level) | one class's predicate raises (E-14) or a bulk read fails (§2.2) | scored vector; the affected class alone stamps `severity: null, skipped: "not_applicable"`; `predicate_errors` counted | that class, that card (or all cards for a bulk-read failure) |
+| 0 (field-level) | one class's predicate raises (E-14, erratum E-D) or a bulk read fails (§2.2) | scored vector; a raising predicate stamps its class alone `severity: null, skipped: "predicate_error"` (durable — §8 counts it), `predicate_errors` counted; a failed bulk read stamps the dependent class(es) `skipped: "not_applicable"` (prefs absence is a legitimate state, not an error) | that class, that card (or all cards for a bulk-read failure) |
 | 1 | PartnerContext build fails (G-045 pruned partner, unknown `target_user_id`, profile exception) | scored vector for computable classes; classes needing the failed input stamp `severity: null, skipped: "partner_snapshot"`; whole-context failure ⇒ minimal marker `degraded: "partner_snapshot"` | that partner's cards |
 | 2 | checkpoint trips after pass 1 | pass-1 vector + `skipped: {"classes": ["fit_new_weakness","roster_crunch"], "reason": "budget"}` | every card (deck-uniform) |
 | 3 | budget exhausted mid-pass-1 | minimal marker `degraded: "budget_exhausted"` | remaining cards (rank-correlated ⇒ labeled; readouts exclude the deck). Mid-pass-2 exhaustion: §3.9 atomic-discard (M-9) — pass-1 kept, deck-uniform skip marker + `degraded: "budget_exhausted"` |
 | 4 | per-card exception outside any class predicate (context assembly, finalize) | minimal marker `degraded: "exception_card"` (or `"self_partner"` for the §3.10 guard); logged + counted | that card |
-| 5 | outer exception (incl. import failure) | seam handler stamps minimal marker `degraded: "exception_outer"` on EVERY card (§1.2) + warning log | all |
+| 5 | outer exception (incl. import failure) | seam handler stamps minimal markers on EVERY card — BOTH `breaker` and `breaker_shadow`, `degraded: "exception_outer"`, no knob read (§1.2) + warning log | all |
 | log-time | flag on at log time, attribute absent (M-2) | §1.4 synthetic marker `{ver: null, degraded: "flag_flip_or_unstamped", objections: null}` — written by the impressions block, not the module | that row |
 
 The per-class containment refinement (E-14, from B): one flaky predicate must not zero the
 coverage metric for all six classes — whole-card rung 4 is reserved for failures outside any
-class. This narrows the HLD §2.6 rung-4 row's population; recorded here, not silently.
+class. This narrows the HLD §2.6 rung-4 row's population; it is a **declared HLD erratum —
+E-D in the §0.2 registry** (the LLD's binding rule permits contradicting the HLD only via
+that registry).
 
 ### 5.2 Input-wrongness table (degrade-and-mark is normative — HLD §3.5)
 
@@ -1215,13 +1318,13 @@ Every row is a contract; §7 maps each to a test.
 | # | Case | Contract |
 |---|---|---|
 | E-1 | Deck of 0 cards (F3 can empty one; `_log_deck_signal_impressions` early-returns `:4060-4061`) | `stamp_breaker`/`compose_narration` no-op; report `cards_seen=0`; no republish; no crash |
-| E-8 | Hot flag reload mid-job (`POST /api/feature-flags/reload` between seam and impression block) | Stamp site reads the flag once at the seam. Impression copy is attribute-gated with the M-2 synthetic marker (§1.4). Flip on→off mid-job: stamps land in `features_json` (correct — they existed at serve); serializer re-reads nothing (narration already composed). Flip off→on: no stamp ⇒ synthetic marker rows, no crash |
-| E-9 | Hot KNOB change mid-job (`PUT /api/admin/config`) | §3.0 snapshot: one job, one knob-state; `model_config_changes` censors the readout window (M1) |
+| E-8 | Hot flag reload mid-job (`POST /api/feature-flags/reload` between seam and impression block) | Stamp site reads both breaker flags ONCE, into locals at the top of the seam block (§1.2). Impression copy is attribute-gated with the M-2 synthetic marker (§1.4). Flip on→off mid-job: stamps land in `features_json` (correct — they existed at serve); serializer re-reads nothing (narration already composed). Flip off→on: no stamp ⇒ synthetic marker rows, no crash. **Honesty note:** feature FLAGS read at call time INSIDE engine helpers (e.g. `trade_crown_asset` in `_package_value_market`, `trade_service.py:1357/:1409`) are NOT covered by the §3.0 knob snapshot — an accepted intra-deck determinism hole shared with the whole engine, not breaker-specific |
+| E-9 | Hot KNOB change mid-job (`PUT /api/admin/config`) | §3.0 snapshot: one job, one knob-state (knobs only — engine-internal flag reads are the E-8 residual); `model_config_changes` censors the readout window (M1) |
 | E-10 | `_cfg_override` overlay / bake-off arm profile | Verified inactive at the post-F9 seam (contextmanager exits with the arm's `with` block, `trade_service.py:995`); §3.0 snapshot makes it moot; binding-sabotage test pins module-import discipline across calls |
 | E-11 | Stud-tax thread-local unpinned at seam | Explicit `ts.stud_tax_override("market")` around all breaker valuations, `value_mode` stamped (§3.0, M-5) |
 | E-12 | Two concurrent jobs, same league, different viewers | No shared mutable state: `PartnerContext` cache is per-call (local dict); knob reads are snapshot-per-call; report is per-call. Nothing to lock |
-| E-13 | Superseded jobs (`force_supersedes_running`) | This candidate stamps them (A's verbatim seam block, M-1 — see §1.2 point 4 and §9 Q-10); superseded jobs skip the signal block (`:6092-6093`) so no rows are written, and every publish is `_job_live`-blocked so no render occurs — wasted compute only, no wrong data |
-| E-14 | Exception inside ONE class's predicate | Per-CLASS try/except in the per-card loop: that class stamps `skipped: "not_applicable"`, `predicate_errors` counted; the CARD stays rung 0 with the other classes scored (§5.1) |
+| E-13 | Superseded jobs (`force_supersedes_running`) | The seam block SKIPS them (`not _job_superseded(job_id)` — T-1 ruling, §1.2 point 4 / §9 Q-10): pure wasted-compute avoidance, no correctness dependency either way. Belt regardless: superseded jobs skip the signal block (`:6092-6093`) so no rows are written, and every publish is `_job_live`-blocked so no render occurs. A supersede landing DURING the block is the mid-run case — §1.3's superseded row |
+| E-14 | Exception inside ONE class's predicate | Per-CLASS try/except in the per-card loop: that class stamps `skipped: "predicate_error"` (durable in `features_json` — the §8 degraded-share readout counts it), `predicate_errors` counted in the ephemeral report; the CARD stays rung 0 with the other classes scored (§5.1, erratum E-D) |
 | E-15 | Exception inside `compose_narration` after stamps landed | Caught per card: `narrated: null, suppressed: "template_error"`; stamps untouched; counted. `hesitation_line` itself returns None on any internal error (§1.6) |
 | E-16 | Exception in the outer server block (incl. the import line) | Inline rung-5 marker with no breaker-module dependency (§1.2 point 3) |
 | E-17 | Budget exactly at a boundary | Strict `>` comparisons (§3.9): exactly-at-checkpoint runs pass 2; exactly-at-budget finishes the card. Pinned so the boundary is testable |
@@ -1229,7 +1332,8 @@ Every row is a contract; §7 maps each to a test.
 | E-19 | `imp_by_card` falsy with narration on (impressions insert failed) | Sentence already published by the seam republish; measurement lost for that deck (existing failure class), exposure NOT lost; A/B readout excludes such decks (no outcome rows to join) |
 | E-20 | Likes-you-injected cards | Present at the seam (injected `:5747`, before F9) — stamped like any card; `them` null (no `fit_diag`, D-3); no special path |
 | E-21 | Ghost rows (robustness only — M-12 says none exist) | The impression loop iterates ghost entries (`:4120-4122`); the attribute-gated copy stamps them uniformly; every breaker readout filters `is_ghost = 0` regardless |
-| E-22 | Multi-format sessions (`sess["trade_svcs"]`, `server.py:5438-5440`) | The job's `active_format` is the ONLY format the breaker sees (`scoring_format` into `analyze_roster_strengths`; `seed_map` is already per-format). The per-format `TradeService` INSTANCE is irrelevant — the breaker uses module-level `ts` helpers + explicit args, never instance state. Format flips between jobs produce per-job-consistent stamps keyed to the format their deck served under |
+| E-22 | Multi-format sessions (`sess["trade_svcs"]`, `server.py:5438-5440`) | The job's `active_format` is the ONLY format the breaker sees (`scoring_format` into `analyze_roster_strengths`; `seed_map` is already per-format). The per-format `TradeService` INSTANCE is irrelevant — the breaker uses module-level `ts` helpers + explicit args, never instance state (and the rung-5 handler makes no module reference at all, §1.2 — the local `trade_service` name IS that instance). Format flips between jobs produce per-job-consistent stamps keyed to the format their deck served under |
+| E-23 | Auto-sweetened cards (`fix/package-benchmark-sweetener`, PLAN A-1(b)) | Ordinary cards at the seam: present pre-ghost-split, stamped like any card — the breaker evaluates the sweetened package as-is. The sweetener's `features_json` key and the `breaker`/`breaker_shadow` keys coexist without collision (distinct keys in one JSON object). §8 gains an optional readout cut on the sweetened key |
 
 (E-2..E-7 — partner-absent, co-owner, degenerate packages, K/DEF, self-partner — are the §3.10
 and §5.2 rows; numbering kept sparse to match draft B's ledger for cross-review diffing.)
@@ -1294,7 +1398,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 |---|---|
 | `test_breaker_deterministic` | two identical runs ⇒ deep-equal payloads, every card, incl. rounding rules (NFR-4) |
 | `test_breaker_vocabulary_closure` | every emitted `code` ∈ the 9 coded `PASS_REASON_LAYER2` codes ∪ {`roster_crunch`}; **`other_text` never emitted**; `shape_aversion` never emitted in any field (producer-column enforcement, D-2); codes cross-checked against `database.PASS_REASON_LAYER2` by import, not by copy; **every evidence key ⊆ the §2.4 enums per code** (an unlisted key is how a private-state leak sneaks past the whitelist) |
-| `test_fit_outlook_predicate` | rebuilder receiving a 29-y/o RB fires with the §3.3 severity; contender receiving picks fires; `not_sure` ⇒ 0.0; legacy haircut applied (knob override moves it) |
+| `test_fit_outlook_predicate` | rebuilder receiving a 29-y/o RB fires with the §3.3 severity; contender receiving picks fires (all-pick incoming ⇒ lean = −0.25 via the `_now_lean` PICK constant — satisfiable per the §3.10 F1 cell; evidence `asset`/`age`/`pos` null, template renders no evidence fields); `not_sure` ⇒ 0.0; legacy haircut applied (knob override moves it) |
 | `test_fit_new_weakness_predicate` | `_OPP_THIN_TE` sending its only startable TE ⇒ 1.0 with `{pos:"TE", before, after, need}`; slack-1 fixture ⇒ 0.30; receive-side can't fire; precondition `tier_basis == "positional"` |
 | `test_fit_duplicate_predicate` | surplus-position incoming fires with `value_share`/`bench_n` per §3.4; non-surplus ⇒ 0.0; precondition `tier_basis == "positional"` |
 | `test_value_giving_one_code_path` | boarded-authentic partner ⇒ `basis:"board"` margin from `oval`; unboarded AND clone-board ⇒ `basis:"consensus"` from `cval`; the severity function is the same object on both paths (one helper, asserted by call) |
@@ -1302,7 +1406,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 | `test_roster_crunch_predicate` | 1-for-2 from their seat ⇒ extra=1, sev 0.50 at defaults; pile-up bonus caps at +0.30; extra ≤ 0 ⇒ 0.0; picks occupy no slot |
 | `test_degenerate_inputs_per_class` | one parametrized case per §3.10 cell: all-picks × each class, empty roster, empty sides, K/DEF assets — every cell returns its contracted scored/`not_applicable`/`format_gap` result, never raises |
 | `test_board_auth_heuristic` | divergent-row counts on both sides of `breaker_board_min_divergent` ⇒ `board`/`board_suspect`; no board ⇒ `consensus` |
-| `test_lean_quantity_parity` | breaker lean == `trade_narrative._give_side_now_lean` for shared fixtures (coherence precondition — M-8 flagged) |
+| `test_lean_quantity_parity` | breaker lean == `trade_narrative._give_side_now_lean` for shared fixtures **including pick-carrying and all-pick packages** (picks in the mean at −0.25 — F1; coherence precondition — M-8 flagged) |
 | `test_opponent_frame_breaker_coherence` (characterization) | over a fixture grid (outlook × lean ∈ {−0.2, −0.05, 0, +0.05, +0.2}): never both `_opponent_frame` non-None and breaker `fit_outlook` fired for the same (card, outlook value); pins today's `:96-99` thresholds; asserts both writers consumed the same outlook value or fails (HLD §2.4 precondition) |
 | `test_mirrored_card_cross_seat_coherence` (HLD §2.7) | mirrored fixture: high breaker `fit_new_weakness` from seat B ⟺ B's own viewer-seat `need_gate_ok`/feasibility view flags the mirror |
 | `test_breaker_binding_sabotage` (sabotage) | monkeypatch a `ts` knob (e.g. `waiver_slot_cost`) ⇒ the NEXT `stamp_breaker` call's verdict moves (T1 discipline + §3.0 per-call snapshot boundary); module-attribute monkeypatch of `ts.package_value_v2` to a sentinel ⇒ verdicts move — value-binding would no-op and fail |
@@ -1310,7 +1414,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 | `test_them_is_passthrough` | sentinel `fit_diag.them` rides through untouched; absent `fit_diag` ⇒ `them` null (likes-you fixture) |
 | `test_partner_snapshot_rung1` | unknown `target_user_id` ⇒ rung-1 marker, other partners' cards unaffected |
 | `test_bulk_reader_failure_field_level` | sabotaged bulk prefs read ⇒ `other_player_keep` stamps `not_applicable` on every card, rung stays 0 (§2.2 — not rung 1) |
-| `test_per_class_exception_contained` (sabotage) | one predicate raising ⇒ that class `not_applicable`, other 5 scored, card rung 0, `predicate_errors` counted (E-14) |
+| `test_per_class_exception_contained` (sabotage) | one predicate raising ⇒ that class stamps `skipped: "predicate_error"` (durable, in `features_json`), other 5 scored, card rung 0, `predicate_errors` counted (E-14, erratum E-D) |
 | `test_budget_ladder_labeling` (sabotage) | tiny `breaker_ms_budget` + a slowed predicate: checkpoint trip ⇒ deck-uniform rung-2 skips; mid-pass-1 exhaust ⇒ rung-3 markers on remaining cards only; **mid-pass-2 exhaust ⇒ buffered pass-2 DISCARDED, deck-uniform skip + `budget_exhausted`, pass-1 kept (M-9)**; `breaker_ms_budget=0` ⇒ minimal markers everywhere; E-17 strict-`>` boundary |
 | `test_exception_rungs` (sabotage) | context-assembly raise ⇒ rung-4 marker for that card, rung 0 elsewhere; `stamp_breaker` monkeypatched to raise at the seam ⇒ rung-5 marker on EVERY card (server-level fixture) |
 | `test_rung5_marker_version_pinned` | the seam literal == `trade_breaker.BREAKER_VERSION` |
@@ -1324,6 +1428,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 | `test_stud_tax_pinned_market` | an ambient `stud_tax_override("balanced")` around the call does NOT move breaker valuations; `value_mode == "market"` stamped (§3.0, M-5) |
 | `test_shadow_run` | knob on ⇒ `breaker_shadow` §2.5 shape on every card, viewer-seat verdicts (unswapped fixture check); knob off ⇒ attribute absent/None; shadow `narrated` always null; budget exhaustion degrades primary and shadow together (interleave pin) |
 | `test_outlook_declared_vs_inferred` | declared present ⇒ `outlook_src "declared"`, pair records both; declared absent ⇒ `legacy`; resolution shape asserted against `trade_service.py:4948-4956` semantics (declared wins); bulk-reader path exercised when `declared_outlooks` is empty |
+| `test_default_knob_ordering` | the shipped §4 defaults respect the D-8 "narration bar above stamp bar" ordering: for every class (both `value_giving` bases), the effective narration threshold `max(class floor, breaker_min_severity)` per §3.8 step 5 exceeds that class's top-selection floor whenever `breaker_min_severity` sits above it — concretely, `breaker_min_severity` (0.60) is pinned ≥ every default floor except the deliberately-higher `breaker_floor_value_giving_consensus` (0.75), which is pinned ≥ `breaker_min_severity` — the testable half of §7.6 item 4 |
 
 ### 7.2 Narration + composition
 
@@ -1336,7 +1441,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 | `test_repetition_suppression` | 5 same-(partner, code) candidates on one deck at frac 0.34 ⇒ only max-severity card narrates, rest `suppressed: "repetition"` |
 | `test_narration_template_error_contained` | `hesitation_line` monkeypatched to raise ⇒ `suppressed: "template_error"`, stamps untouched, no exception (E-15) |
 | `test_hesitation_templates_snapshot` | every §1.6 template string pinned; `HESITATION_TMPL_VERSION` pinned |
-| `test_hesitation_line_honesty` | missing evidence key ⇒ None; unknown code ⇒ None; rendered names resolve from evidence ids only (D-053); no template contains "FTF" or an unhedged mental-state verb |
+| `test_hesitation_line_honesty` | missing evidence key ⇒ None; **present-but-null evidence value in a rendered key ⇒ None** (never "None-year-old" — §1.6); unknown code ⇒ None; rendered names resolve from evidence ids only (D-053); no template contains "FTF" or an unhedged mental-state verb |
 | `test_tmpl_ver_stamped` | narrated card carries `tmpl_ver == "brt-1"`; un-narrated carries null |
 
 ### 7.3 Impressions (server-level; M-2 rows)
@@ -1400,9 +1505,10 @@ Four HLD invariants that are not mechanically testable as stated, and their test
    biconditional (`test_mirrored_card_cross_seat_coherence`) + binding sabotage (a knob move
    moves both seats together).
 4. **D-8 "narration bar above stamp bar"** — knobs are floats with no cross-key validation
-   machinery; the shipped *defaults* respect the ordering (test-pinned) and the §8 readout
-   asserts it at readout time. Residual: an operator can mis-set knobs; the answer is
-   `model_config_changes` attribution, not prevention.
+   machinery; the shipped *defaults* respect the ordering (test-pinned:
+   `test_default_knob_ordering`, §7.1) and the §8 readout asserts it at readout time.
+   Residual: an operator can mis-set knobs; the answer is `model_config_changes` attribution,
+   not prevention.
 
 ---
 
@@ -1421,10 +1527,16 @@ caveat. (c) The HLD §2.7 cross-seat consistency check — population-independen
 **Join.** `deck_impressions.features_json` ⨝ `trade_pass_reasons` on `impression_id`;
 `ver` filter mandatory (`ver: null` synthetic rows are degraded, never covered, never
 joined); filed `other_text` rows are unmatched-by-construction and excluded from every
-per-class precision denominator (D-1). Boundaries restated verbatim from PLAN §6: **no ghost
-rows ever** (M-12; ended 2026-08-21 00:43Z; `is_ghost = 0` filter regardless); D-091 window
-(2026-08-16→08-19) excluded; QB value-optics not comparable across the 04:46Z 1QB repricing
-seam; `model_config_changes` censors windows (M1).
+per-class precision denominator (D-1). Boundaries restated verbatim from PLAN §6/§10 A-1:
+**no ghost rows ever** (M-12; ended 2026-08-21 00:43Z; `is_ghost = 0` filter regardless);
+D-091 window (2026-08-16→08-19) excluded; QB value-optics not comparable across **either**
+1QB repricing seam — `qb_1qb_cap_elo` 1785→1644 @04:46Z **and** 1644→1717 @11:48Z;
+`model_config_changes` censors windows (M1). **Plus one NAMED code-ship boundary:** the
+`fix/package-benchmark-sweetener` Monday merge (§3.4 note — the package-benchmark re-fix that
+moves `value_giving` severities). It is a code deploy, **invisible to
+`model_config_changes` — the M1 rail will NOT censor it**; the readout censors at its deploy
+timestamp explicitly, and per the §3.4 sequencing sentence the calibration cohort starts
+at/after it (pre-merge severities are never pooled with post-merge ones).
 
 **Per-class gate table (all classes; a class graduates only from its own row):**
 
@@ -1443,8 +1555,11 @@ min-n print "insufficient" — never pooled silently. **Coverage criteria restat
 scored coverage ≥99% of served impressions AND rung-1..3 share < `breaker_degraded_share_max`
 — rung-marked and `ver: null` rows are never "covered". **Also reported, never a gate:**
 class-entropy of `top.code` (D-7 red line before any narration graduation), per-class fire
-rate, degraded share by rung (incl. `flag_flip_or_unstamped`), `ms` p50/p95,
-mirrored-serve narration-divergence count (R-6 monitor).
+rate, degraded share by rung (incl. `flag_flip_or_unstamped`) and per-class
+`skipped: "predicate_error"` share (F6 — durable, countable from `features_json`), `ms`
+p50/p95, mirrored-serve narration-divergence count (R-6 monitor), and an optional cut on the
+auto-sweetener's `features_json` key (PLAN A-1(b) / §5.5 E-23 — sweetened vs unsweetened
+cards reported separately when the operator asks).
 
 ---
 
@@ -1457,13 +1572,13 @@ question (registered-dark per A's table, M-5).
 
 | # | Question | Merged-candidate position |
 |---|---|---|
-| Q-1 | `num_teams` source at the seam (§3.2) — `len(league.members)+1` vs the job's own value | re-verify against `trade_service._num_teams` at build; a wrong count only shifts the pick-centering term |
+| Q-1 | `num_teams` source at the seam (§3.2) — `len(league.members)+1` vs the job's own value | re-verify at build against `trade_service._num_teams`'s source, **including the `league.members` inclusion convention** — the demo builder (`server.py:362-431`) constructs `members` WITHOUT the viewer (the `+1` assumes that shape); confirm every platform's league sync follows it before trusting the formula. A wrong count only shifts the pick-centering term |
 | Q-2 | Board staleness (A-6): is last-ranked-at recoverable? | not handled in v1; `board_auth` does not encode staleness (inherited open item) |
 | Q-3 | Co-owner union (§2.3): HLD §3.4's union is unimplementable without persisting `co_owners` at sync | ruled (M-7): v1 = owner-id-only + `identity_src` marker + fixture pin; union is an explicit non-goal pending a data-path change — a named v1.1 candidate needing its own (tiny) scope block |
 | Q-4 | `roster_crunch` forced-drop limb needs a bench-size model that doesn't exist | omitted, not approximated; evidence gap documented; class stays last in the maturity ladder |
 | Q-8 | testID spelling: repo dot-idiom `trade-card.breaker-hesitation` vs scope.md's hyphen example | dot idiom; scope example treated as illustrative |
 | Q-9 | Shadow `outlook_src` cannot distinguish declared from #8-seeded viewer outlook (§2.2) | stamped "declared" either way; shadow is never serialized and the §8 readout notes it |
-| Q-10 | **Seam skip conditions (cross-review):** should the §1.2 block skip `league_demo` (stamp is unmeasurable compute; a narrated sentence about a synthetic demo partner is a product absurdity) and/or `_job_superseded` jobs (wasted budget, benign race)? | A's verbatim block (M-1) has neither; correctness holds without them (§5.5 E-13); both are one-line adds — cross-review/PRD decides |
+| Q-10 | **CLOSED — T-1 orchestrator ruling (lenses split; both positions logged).** Should the §1.2 block skip `league_demo` and/or `_job_superseded` jobs? | **Both skips ADDED** (§1.2). Lens for: the demo skip matches every neighboring mutation layer (`server.py:5631-:5981`) and the demo-guarded impressions calls (`:6066`/`:6092`), and a narrated sentence about a synthetic demo partner is a product absurdity; the superseded skip is pure wasted-compute avoidance. Lens against: neither skip is correctness-load-bearing (§5.5 E-13 — no wrong rows, no wrong renders were possible without them), and demo narration could be deliberate demo material. Disposition: skips ship; a PRD open question records the "narrate on demo as demo material" lift option as a product call |
 | Q-11 | §2.2 bulk readers: negmem may want equivalents — shared-reader ownership | whichever plan lands first owns them; the other reuses (sibling reconciliation note) |
 | Q-12 | Can `asset_preferences` rows reference pick ids? (`other_player_keep` §3.10 row) | verify at build; table stores player ids today — pick ids simply never match |
 | Q-13 | Roster-spot semantics of incoming picks on MFL/ESPN (both platforms are live) | mooted by the Sleeper-only §3.7 envelope — but the PRD says so explicitly |
