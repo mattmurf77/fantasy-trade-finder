@@ -1,4 +1,4 @@
-"""D-147 (2026-08-21) — league surfaces price picks exactly like the engine.
+"""D-148 (2026-08-21) — league surfaces price picks exactly like the engine.
 
 Closes Q-026. Operator ruling: *"I want the league values to reflect the same
 pick values."* D-146 had put the per-slot waterfall into the ENGINE only, so
@@ -104,14 +104,14 @@ def test_priced_pool_value_is_called_from_exactly_one_place(server_tree):
 def test_the_seam_serves_exactly_the_known_surfaces(server_tree):
     """Bidirectional. A NEW pricing surface that forgets to be listed fails
     the first half; a listed surface that quietly stops pricing (regressing
-    to `p["pool_value"]`, the pre-D-147 line) fails the second."""
+    to `p["pool_value"]`, the pre-D-148 line) fails the second."""
     found = _callers_of(server_tree, _PRICING_SEAM)
     assert not found - _SEAM_CALLERS, f"unlisted pricing surface: {found - _SEAM_CALLERS}"
     assert not _SEAM_CALLERS - found, f"surface stopped pricing: {_SEAM_CALLERS - found}"
 
 
 def test_no_league_surface_reads_the_stored_column_as_a_price(server_tree):
-    """The specific regression D-147 fixes, refused structurally.
+    """The specific regression D-148 fixes, refused structurally.
 
     `_power_picks_by_owner` and `get_league_picks` may still MENTION
     `pool_value` — the first re-derives a legacy NULL into a row copy, the
@@ -217,7 +217,7 @@ def test_non_twelve_team_boards_disagree_and_that_is_pinned_not_fixed():
     it by percentile within the round (`_basis_slot`, plan O3), so a 10-team
     league's last first is priced as the 1.12. `market_pick_slot_value` does
     NOT: it has no league size to map with, so it looks up "2026 Pick 1.10"
-    literally. The engine and every surface D-147 aligned therefore price a
+    literally. The engine and every surface D-148 aligned therefore price a
     small league's late firsts ABOVE what its own board displays.
 
     Fixing it means threading league size into `priced_pool_value`, which
@@ -251,7 +251,7 @@ def test_non_twelve_team_boards_disagree_and_that_is_pinned_not_fixed():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_legacy_null_pool_value_keeps_its_ladder_floor_under_the_waterfall(monkeypatch):
-    """INV-5's NULL branch survives D-147 rather than collapsing to zero.
+    """INV-5's NULL branch survives D-148 rather than collapsing to zero.
 
     `_power_picks_by_owner` re-derives a pre-`pool_value`-column row from the
     ladder BEFORE running the waterfall, so that number is the row's step 3.

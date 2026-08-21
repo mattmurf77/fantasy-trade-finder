@@ -1208,6 +1208,10 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     past_keys = set(getattr(trade_service, "_past_decision_keys", None) or set())
     past_keys |= set(kwargs.get("exclusion_keys") or set())
     mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(kwargs.get("user_id"))
+    # trade.negmem (LLD §6.3) — the job's NegmemMap, read ONCE from the
+    # splatted `_generate_kwargs` (server.py sets the key only when a map
+    # exists, so `.get` yields None on the flag-off / not-allowlisted path).
+    _nm = kwargs.get("negmem")
     with stud_tax_override(mode):
         cards, _report = generate_league_suggestions(
             players              = trade_service._players,
@@ -1228,6 +1232,17 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
             opponent_outlooks    = kwargs.get("opponent_outlooks"),
             opponent_pick_shares = kwargs.get("opponent_pick_shares"),
             past_decision_keys   = past_keys,
+            # trade.negmem (LLD §6.3) — the same asymmetric pair the serving
+            # path uses (trade_service.py, v2 branch): `negmem_map` rides
+            # UNCONDITIONALLY as a plain kwarg carrying None when negmem is
+            # off (the seam guards on `is not None`, never on the kwarg's
+            # presence), while `acceptance_stats` is spliced in ONLY when a
+            # map exists — that splat is what keeps the flag-off call
+            # byte-identical (C1). Do not tidy the two into one form.
+            # `m2_feed()` returns {} on a degraded map and {} when
+            # gen2_accept_prior_strength <= 0 (the sanctioned M2 kill).
+            negmem_map           = _nm,
+            **({"acceptance_stats": _nm.m2_feed()} if _nm is not None else {}),
             on_opponent_done     = kwargs.get("on_opponent_done"),
         )
     cards = list(cards or [])
@@ -1359,6 +1374,11 @@ def gen_fit_cards(trade_service, kwargs: dict) -> list:
             trade_away_positions = kwargs.get("trade_away_positions"),
             opponent_user_id     = kwargs.get("opponent_user_id"),
             past_decision_keys   = past_keys,
+            # trade.negmem (LLD §6.4) — plain kwarg, always present, carrying
+            # None when negmem is off; fit's seam guards on `is not None`.
+            # No M2 feed here: `acceptance_prior` is a gen_v2 mechanism and
+            # trade_gen_fit has no acceptance_stats parameter.
+            negmem_map           = kwargs.get("negmem"),
             # Operator decision 2026-08-16 / LLD §8 R-g — no engine
             # truncation, same as gen_v2_cards.
             max_per_opponent     = None,

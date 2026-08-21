@@ -237,6 +237,8 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
+from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
+                                              # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 # Aliased: the likes-you injector's own parameter is named `trade_service`
@@ -1043,7 +1045,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     carries `tier`; picks and 2-piece packages never do (a pick's own label
     already reads as a ladder rung, and a package sum has no single tier).
 
-    **D-147 — picks are priced, not read off the stored column.** Both call
+    **D-148 — picks are priced, not read off the stored column.** Both call
     sites live inside `_trade_evaluate_impl`, whose `gap_value` is computed
     from the ENGINE's priced picks; sizing the candidates against the stored
     ladder meant a one-tap "add their 2026 1.01" was offered as closing a
@@ -4054,6 +4056,11 @@ def _log_deck_signal_impressions(
     # flag-off caller value) ⇒ no model_arm / arm_rank / agreement stamping
     # anywhere, so rows stay byte-identical to pre-bake-off.
     bakeoff_run=None,
+    # trade.negmem — the job's NegmemMap, or None (flag off, league not
+    # allowlisted, or hard build failure). It is the ON-CONDITION of the
+    # §3.4 stamp trichotomy, not a data source: the stamp itself is COPIED
+    # off the card. None ⇒ no `negmem` key on any row (C1).
+    nm_map=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4180,6 +4187,38 @@ def _log_deck_signal_impressions(
             "last_board_update_at": last_board_update,
             "user_value_basis":     "personal" if ranked_count > 0 else "consensus",
         }
+        # trade.negmem — the §3.4 stamp trichotomy. ON-condition is
+        # `nm_map is not None` (flag ON *and* the league allowlisted), and it
+        # is checked here, not per card, so the key exists on EVERY row this
+        # job writes — served and ghost, every arm. Absence therefore means
+        # exactly one thing: negmem was not on for this job.
+        #
+        # This block COPIES card state and computes NOTHING (B2 provenance).
+        # By logging time every arm's _cfg_override context has exited, so a
+        # recompute here would stamp arm-A rows with the LIVE arm's m — the
+        # named sabotage of §10 N-10. There is deliberately no
+        # `effective_mult` call and no `_c` read anywhere in this assembly.
+        #
+        # Precedence: a consult-time stamp on the card always rides. The
+        # `exempt` default applies only to cards with no consult site —
+        # likes-you INJECTIONS, which the injector builds after generation
+        # (the R4 exemption). An organic card the injector merely boosted was
+        # consulted before its like status was known, so its real stamp is the
+        # honest record. Rides INSIDE features_json (one Text column), so the
+        # save_deck_impressions executemany first-row-keys trap cannot drop it.
+        if nm_map is not None:
+            if nm_map.degraded:
+                features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER,
+                                      "degraded": True}
+            else:
+                _nm_st = getattr(card, "negmem_stamp", None)
+                if _nm_st is not None:
+                    features["negmem"] = _nm_st
+                elif features["likes_you"]:
+                    features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER,
+                                          "exempt": True}
+                else:
+                    features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER}
         # F10 — deck provenance ("replenish" for cron-pre-generated decks).
         # Key added only when a source marker exists, so pull-generated
         # decks' features_json stays byte-identical to pre-F10.
@@ -5690,6 +5729,47 @@ def _run_trade_job(
                 gen_kwargs["max_per_opponent"] = (
                     _EXPLORATION_BASE_PER_OPP + _overgen)
 
+        # trade.negmem (D-3, LLD §4.2/§6.1) — build the job's negative-results
+        # map ONCE, here on the job thread, BEFORE any arm context is entered.
+        # That placement is deliberate, not incidental: build-time knobs are
+        # overlay-BLIND by design (HLD §2.1), so every arm shares one frozen
+        # map (H-3) and arm A's opt-out is strength-only, applied at the seam.
+        # Nobody should "fix" this by moving the reads inside the fan-out.
+        # Knobs are read through the trade_service MODULE object (imported at
+        # the top of this file) rather than a fresh `from .trade_service
+        # import _c`, which would freeze the binding (the T1 hazard) and add a
+        # second way to reach one accessor. gen2_accept_prior_strength rides
+        # along because it governs the M2 feed guard, and negmem — a leaf that
+        # cannot import trade_service — must not keep a copy of its default.
+        _ts_c = _trade_service_mod._c        # readability alias only; resolved
+                                             # at call time, per job
+        nm_map = None
+        if FLAGS.trade_negmem and league_id != "league_demo":
+            try:
+                nm_map = _negmem.build_map(
+                    g_user_id, league_id,
+                    halflife_days         = _ts_c("negmem_halflife_days"),
+                    min_evidence          = _ts_c("negmem_min_evidence"),
+                    sat_k                 = _ts_c("negmem_sat_k"),
+                    like_net              = _ts_c("negmem_like_net"),
+                    floor_b               = _ts_c("negmem_floor"),
+                    accept_prior_strength = _ts_c("gen2_accept_prior_strength"),
+                    # owner_alias: NOT PASSED in v1 (DE-5) — identity default.
+                    # No server-side co-owner source exists to build one from,
+                    # and M1's evidence path needs no mapping at all.
+                )
+            except Exception as nm_err:      # belt — build_map never raises
+                log.warning("negmem build failed hard (no stamps this job): %s",
+                            nm_err)
+                nm_map = None
+            if nm_map is not None:
+                with _trade_jobs_lock:       # the suppression_note pattern
+                    _jn = _trade_jobs.get(job_id)
+                    if _jn is not None:
+                        _jn["negmem_note"] = {"degraded": nm_map.degraded,
+                                              "build_ms": round(nm_map.build_ms, 1),
+                                              "cells": len(nm_map.cells)}
+
         _generate_kwargs = dict(
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
@@ -5718,6 +5798,14 @@ def _run_trade_job(
             exclusion_keys       = exclusion_keys,
             **gen_kwargs,
         )
+        # trade.negmem — the key is ABSENT when there is no map (flag off, not
+        # allowlisted, or a hard build failure), so flag-off kwargs are
+        # byte-identical (C1). Both bake-off fan-out lambdas and the organic
+        # call below splat this same dict, so one frozen map reaches every arm
+        # (H-3); the arms differ only through each one's overlay-read
+        # negmem_strength.
+        if nm_map is not None:
+            _generate_kwargs["negmem"] = nm_map
         if bakeoff_on:
             # Three generations, SEQUENTIAL on this thread (PLAN.md §3.1 —
             # the config seam is thread-local). Arm A rides
@@ -6241,6 +6329,7 @@ def _run_trade_job(
                     seed_map       = seed_map,   # F3 — centerpiece stamping
                     first_deck     = fs_first_deck,   # F9 — frozen features stamp
                     bakeoff_run    = bakeoff_run,     # trade.bakeoff — arm attribution
+                    nm_map         = nm_map,          # trade.negmem — stamp ON-condition
                     **telemetry_kw,
                 )
                 if imp_by_card:
@@ -10394,7 +10483,7 @@ def get_league_picks():
         # RANK-EQUIVALENCE issue against the outside market, not the cause of
         # the wrong badge. See docs/reviews/2026-08-19-pick-badge-scale.md.
         #
-        # ── D-147 (2026-08-21, closes Q-026) — THE VALUE THIS BADGES IS NOW
+        # ── D-148 (2026-08-21, closes Q-026) — THE VALUE THIS BADGES IS NOW
         # THE ENGINE'S. `pool_value` on the wire is `_priced_pick_value`, the
         # same own-slot → round-curve → stored-ladder waterfall under the same
         # D-090 resolution a trade card charges, so this list, the in-league
@@ -10778,7 +10867,7 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
-# ── D-147 — ONE priced value for an owned pick, engine and league alike ───
+# ── D-148 — ONE priced value for an owned pick, engine and league alike ───
 #
 # D-146 shipped the per-slot waterfall into the ENGINE only and left the two
 # league SURFACES on the stored ladder, knowingly (slot-pricing scope §6
@@ -23315,7 +23404,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     rows — both yield {} so every team gets an empty picks group and totals
     stay players-only.
 
-    **Value is the ENGINE's price (D-147, 2026-08-21, closes Q-026).** Each
+    **Value is the ENGINE's price (D-148, 2026-08-21, closes Q-026).** Each
     row goes through `_priced_pick_value` — the same three-step waterfall
     (own slot → round curve → stored ladder) and the same D-090 resolution a
     trade card charges, so the Power Rankings screen and a trade card can no
@@ -23365,7 +23454,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             # would land here and silently re-derive the price the rule exists
             # to withhold.
             #
-            # D-147 — re-derive INTO a row copy rather than short-circuiting
+            # D-148 — re-derive INTO a row copy rather than short-circuiting
             # the waterfall, so a legacy NULL row is priced by the same three
             # steps as every other row and still keeps this ladder value as
             # its step-3 floor. The copy is local; the loaded row (and the

@@ -130,6 +130,8 @@ from .trade_optimizer import (
     _subset_pos_delta,
     close_value_gap,
 )
+# trade.negmem — MODULE import, attribute calls only (T1, LLD §6.3).
+from . import negmem as _negmem
 
 logger = logging.getLogger(__name__)
 
@@ -1027,6 +1029,10 @@ def generate_league_suggestions(
     acceptance_stats: dict[str, tuple[int, int]] | None = None,
     priority_weights: dict[str, float] | None = None,
     past_decision_keys: set | None = None,
+    negmem_map=None,                    # trade.negmem — the job's NegmemMap
+                                        # (LLD §6.3). Distinct from
+                                        # `acceptance_stats` above: different
+                                        # math, same map. None ⇒ no seam.
     on_opponent_done=None,
 ) -> tuple[list[TradeCard], GenerationReport]:
     """Full staged pipeline for one user against one league.
@@ -1115,6 +1121,22 @@ def generate_league_suggestions(
 
         prior = acceptance_prior(member.user_id, acceptance_stats)
         weight = max(priority_weights.get(member.user_id, 1.0), 0.0)
+        # trade.negmem (D-4, LLD §6.3) — the pair-constant M1 multiplier.
+        # Distinct from the acceptance prior on the line above: different
+        # math, same map (HLD §2.2). Resolved ONCE per pair here and applied
+        # at card creation below — deliberately NOT inside _Candidate.score:
+        # a pair-constant factor cannot change within-pair selection anyway,
+        # and keeping it out of the candidate score leaves _pair_survivors,
+        # the exposure/dedup machinery and the MESO layer byte-identical
+        # (membership is never affected, R4).
+        _nm_eff, _nm_stamp = 1.0, None
+        if negmem_map is not None:
+            _nm_eff = _negmem.effective_mult(negmem_map, member.user_id,
+                                             strength=_c("negmem_strength"),
+                                             floor=_c("negmem_floor"))
+            if _nm_eff != 1.0:
+                _nm_stamp = _negmem.stamp_payload(negmem_map, member.user_id,
+                                                  _nm_eff)
 
         # survivors_raw keeps every gate-passer: the MESO layer needs the
         # near-equivalent alternates that batch dedup (deliberately)
@@ -1177,6 +1199,14 @@ def generate_league_suggestions(
                 composite_score=round(cand.score / 1500.0, 4),
                 basis="divergence",
             )
+            # trade.negmem — the pair-constant multiplier resolved above, on
+            # the EMITTED card's composite only. Rounding is pinned at 4 dp
+            # because that is the precision this constructor publishes one
+            # line up; any other precision would change the formatting of
+            # rows that must be byte-identical when the flag is off.
+            if _nm_stamp is not None:
+                card.negmem_stamp = _nm_stamp
+                card.composite_score = round(card.composite_score * _nm_eff, 4)
             card.give_value = round(gv, 1)
             card.receive_value = round(rv, 1)
             # 2026-08-21 gap auto-sweetener — the equalizer was chosen back

@@ -426,7 +426,7 @@ SEED_SF = {  # superflex pool seed — QBs pumped relative to 1QB
 # route consumes, pool_value written the way sync writes it (pick_pool_value
 # with years_out = season - current season; current season 2026 here).
 #
-# ⚠️  D-147 (2026-08-21, closes Q-026) — the STORED value below is no longer
+# ⚠️  D-148 (2026-08-21, closes Q-026) — the STORED value below is no longer
 # what the route SERVES. `_power_picks_by_owner` now prices each row through
 # `_priced_pick_value`, the same own-slot → round-curve → stored-ladder
 # waterfall the trade engine charges, so Power Rankings and a trade card can
@@ -587,9 +587,9 @@ def test_route_superflex_uses_sf_seed(client):
 # (d) picks group == sum(priced_pool_value) == /api/league/picks data -------
 
 def test_route_picks_group_matches_priced_pool_value_and_picks_route(client):
-    """D-147 (Q-026) — THE CROSS-SURFACE AGREEMENT TEST.
+    """D-148 (Q-026) — THE CROSS-SURFACE AGREEMENT TEST.
 
-    The second half was already here and already passed before D-147, because
+    The second half was already here and already passed before D-148, because
     both surfaces read the same stored column. Its teeth are new: the two now
     have to agree on a number NEITHER of them stores, produced by the same
     waterfall the engine charges. The first half pins that number literally,
@@ -941,7 +941,7 @@ _PICKS_306 = [
     # within 0.001 of the #285 literal weight of 1/3.5 = 0.286, so two 2nds
     # now agree in BOTH scales and no longer trap anything.
     #
-    # D-147 (2026-08-21) WIDENED THE GAP THIS FIXTURE HAS TO CROSS. The
+    # D-148 (2026-08-21) WIDENED THE GAP THIS FIXTURE HAS TO CROSS. The
     # market curve deflates a current-year 2nd (606.5 → 434.0) and 3rd
     # (406.6 → 262.3) while the "firsts" denominator stays the ladder's Mid
     # 1st, so ONE 3rd no longer separates the scales: 2 seconds + 1 third is
@@ -976,7 +976,7 @@ def test_picks_value_label_literal_count(client):
     yields "≈1 firsts" for u_a here, not the literal "≈0.5 firsts" — the
     divergence is carried by his three 3rds, which the literal scale prices
     at 0 apiece and the dollar scale at 262.3 apiece (see the fixture note
-    on _PICKS_306, re-derived at D-147)."""
+    on _PICKS_306, re-derived at D-148)."""
     with patch.object(server, "load_draft_picks",
                       lambda league_id=None, **kw:
                       [dict(p) for p in _PICKS_306]
@@ -997,7 +997,7 @@ def test_picks_value_label_literal_count(client):
     # the client's count>0 gate decides whether the segment renders).
     assert b["picks"]["value_label"] == "≈0 firsts"
 
-    # And the dollar-priced `picks.value` is the PRICED sum (D-147), not the
+    # And the dollar-priced `picks.value` is the PRICED sum (D-148), not the
     # stored ladder — pinned literally so a regression to either the ladder
     # or a different fixture shape fails here rather than silently.
     assert a["picks"]["value"] == round(

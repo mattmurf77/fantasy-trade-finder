@@ -993,6 +993,26 @@ FLAG_KEYS: tuple[str, ...] = (
     # Graduation criterion (scope.md §2): operator TestFlight pass + the A/B
     # readout in PLAN §6.
     "trade.breaker_narrative",
+    # ── Negative-results memory (docs/plans/negative-results-memory/LLD.md §3.5) ─
+    # ON ⇒ `server._run_trade_job` builds one `negmem.NegmemMap` per job (a
+    # derive-on-read soft prior over the viewer's own past rejections, keyed
+    # partner × reason-family) and passes it into generation as a kwarg. The
+    # engines consult it as a pure multiplier on `composite_score`, floored at
+    # `negmem_floor` — it re-weights cards the viewer has already turned down
+    # from this partner for this reason; it never adds, removes or hard-filters
+    # one. Two layers: M1 (the multiplier, governed by `negmem_strength`) and
+    # M2 (feeding the gen_v2 `acceptance_prior` stub, governed by the existing
+    # `gen2_accept_prior_strength`).
+    #
+    # The flag is only HALF the ON-condition: `build_map` also requires the
+    # league to be in `config/negmem_leagues.json` (or `FTF_NEGMEM_LEAGUES`),
+    # which ships EMPTY — flipping this key alone activates nothing, by design.
+    #
+    # OFF (default) ⇒ the map is never built, the `negmem` kwarg never reaches
+    # `generate_trades`, no seam executes, and no `features_json.negmem` stamp
+    # is written — decks, scores, order and rows byte-identical to today. The
+    # not-allowlisted case is deliberately indistinguishable from OFF.
+    "trade.negmem",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

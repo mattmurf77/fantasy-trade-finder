@@ -10,6 +10,66 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-22c — negmem SHIPPED dark: merged to `main`, deployed to Render (PR #168)
+
+The negative-results-memory branch merged (`7b7c314`) after re-merging `origin/main`
+(Receipts #165, arm-C sweetener #166, slot pricing #167 — no code conflicts; my
+`trade_gen_v2` seam and the new arm-C sweetener coexist, suite 4097 green). **D-number
+collision caught and fixed at merge:** Receipts landed D-144 first, so the negmem entry
+renumbered **D-144 → D-147** with every negmem cross-reference repointed — renumber the
+newcomer, never someone else's landed entry. CI green on 3.12.3; zero mobile files, so no
+TestFlight build was cut (operator instruction: GH + Render only). Render deploy verified
+by `trade.negmem` moving ABSENT → false on `/api/feature-flags`. **Everything is dark:**
+flag false ∧ allowlist empty (ON needs both) ∧ arm A pinned to 0. Rollout remains two
+operator flips at a bake-off round boundary; the TestFlight checklist is UNRUN and is the
+only runtime evidence this feature can get (D-056).
+
+## 2026-08-22 — negmem BUILT DARK: the whole v1 is on the branch, nothing is lit (`claude/vigilant-spence-8583f5`, not merged)
+
+Build gate opened by the operator's three §6 rulings (D1 yes · D2 seed-only · D3 (a) full
+layer 2, knowingly against the recommendation). Built in **three waves**: B1 the leaf
+`backend/negmem.py` (83 tests, 26/26 sabotages RED-then-restored, LLD worked examples exact)
+→ B2 the registration surface (flag + 6 knobs ×3 registrations, arm-A pin, allowlist file;
+arm-A golden UNMOVED, no recapture) → B3 the four consultation seams + threading + the stamp
+trichotomy (33 seam tests, 6 sabotage families) → this wave: the `bakeoff_runner` forwarding
+that B3 left, 5 through-the-runner tests, the two readout SQL files, the TestFlight checklist,
+and every docs row. Suite **4025 passed / 1 skipped / 0 failed** (wave-2 baseline 4016; +9 this wave); testid-lint OK; zero mobile files touched.
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) + [D-147](DECISIONS.md)
+record the soft-prior-not-a-filter shape and the build-complete state.
+
+**Known gap, deliberate:** nothing is lit. `trade.negmem` is false and
+`config/negmem_leagues.json` is empty — the ON-condition is BOTH — so no deck has ever been
+generated with this on. The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+is written and **unrun**. Rollout is two operator flips at a bake-off round boundary, not code.
+
+## 2026-08-21b — negmem LLD FINAL: the planning suite is COMPLETE (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Resumed post-limit-reset; LLD authored via drafts (Fable) → merge agent under an 11-point
+ruling sheet → rounds 2–3 on **Opus** (operator-directed model switch). Dual sign-off
+round 3/4. The round-2 review killed a merge-adopted mechanism outright (`owner_alias`:
+unbuildable AND unnecessary — M1 needed no aliasing; M2 ships identity + a real
+tripwire), fixed the like-leg retraction to honor the schema's revive path, made a
+vacuous sabotage falsifiable, and resolved OQ-4b by independent convergence (keep the
+shrinkage-gate discontinuity; `negmem_sat_k` is the deploy-free flap lever). 27
+sabotage-pinned tests; 7 HLD/PRD deltas logged. **Suite: memo · scope · PLAN · PRD FINAL
+· HLD FINAL · LLD FINAL · reconciliation-log (3 sections) — planning only, zero code.**
+Shared taxonomy closed at v1.1.1 (three-way + my admission-list footnote). Batch
+delivery to the operator: pinged Receipts; rides with the breaker suite. The three
+operator decisions (negmem scope §6) remain the build gate.
+
+## 2026-08-21 — negmem planning suite: memo, scope, plan, PRD FINAL, HLD FINAL (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Operator product-gap item 2 ("Negative-results memory") taken through full gates,
+planning only. Code-truth memo (518 lines: every existing rejection-consumer cited; the
+gen_v2 `acceptance_prior` unfed-stub finding; D-067 soft-only constraint) → scope block
+(3 operator decisions) → PLAN → dual-agent **PRD FINAL** (9 blockers fixed across 4
+rounds; v1 = soft prior keyed (partner × {value,fit}), 22 cells, floor 0.6 + feed the
+stub; privacy rec = aggregate-only derive-on-read) → dual-agent **HLD FINAL** (8+1
+blockers across 4 rounds; pure `effective_mult`, kwarg threading, stamp trichotomy,
+M2×strength decision: `negmem_strength` M1-only, M2 kill = `gen2_accept_prior_strength=0`).
+Three-way reconciliation with Receipts CONFIRMED (their contract §7; two data boundaries
+inherited); breaker boundary agreed (shape_aversion producer=negmem); operator ghost
+ruling absorbed (checked NOT load-bearing). **LLD pending — session limit** (see HANDOFF).
 ## 2026-08-21b — Triple ship: Receipts LIVE (grading lit) · arm C unbenched with its sweetener · TRUE PER-SLOT pick pricing
 
 Three merges, all operator-driven same-day, each a value/measurement boundary:

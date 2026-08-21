@@ -479,7 +479,18 @@ def test_r4_bypass_is_thread_local():
 #: is imported by no generator and no ranker; it runs after the deck-mutation
 #: stack completes and mutates only a new card attribute, so no arm can observe
 #: one. Dispositions in scope-phase2.md. `waiver_slot_cost`, which the breaker
-#: reuses, is an existing engine knob and was already pinned below.) This is the
+#: reuses, is an existing engine knob and was already pinned below.)
+#: 2026-08-22 added the six `negmem_*` knobs (negative-results memory,
+#: docs/plans/negative-results-memory/LLD.md §3.4). `negmem_strength` is
+#: INCLUDED in MODEL_A_PROFILE at 0.0 — negmem post-dates the reference SHA and
+#: its seam multiplies `composite_score` inside generation, so 0.0 (the
+#: documented byte-identical M1 disable) is what preserves the pre-wave engine;
+#: the golden was re-run with the pin in place and did NOT need re-capturing.
+#: The other five (`negmem_floor`, `negmem_min_evidence`, `negmem_halflife_days`,
+#: `negmem_sat_k`, `negmem_like_net`) are EXCLUDED: at strength 0.0
+#: `negmem.effective_mult` returns exactly 1.0 before any of them is consulted —
+#: they shape the map, not the gate — so pinning a kill value would falsely
+#: assert they reach an arm-A deck. Dispositions in scope-phase2.md. This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -542,6 +553,8 @@ max_candidates max_overpay_frac max_overpay_min_value
 max_value_ratio min_mismatch_score min_package_band min_side_surplus
 min_side_surplus_marginal mismatch_confidence_damp mismatch_weight
 mutual_gain_cap need_fit_weight need_gate_min_value need_gate_upgrade_margin
+negmem_floor negmem_halflife_days negmem_like_net negmem_min_evidence
+negmem_sat_k negmem_strength
 neutral outlook_alpha_championship outlook_alpha_contender outlook_alpha_jets
 outlook_alpha_not_sure outlook_alpha_rebuilder outlook_dir_age_gap_mult
 outlook_dir_age_tolerance outlook_dir_boost outlook_dir_contend_weight

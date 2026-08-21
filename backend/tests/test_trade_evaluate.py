@@ -301,7 +301,7 @@ def test_mode_b_eveners_from_callers_roster_when_caller_wins(monkeypatch):
 
 
 def test_mode_b_eveners_include_owned_picks(monkeypatch):
-    """D-147 (2026-08-21, Q-026) — an evener pick is priced by the ENGINE's
+    """D-148 (2026-08-21, Q-026) — an evener pick is priced by the ENGINE's
     waterfall, not by the stored `draft_picks.pool_value`.
 
     Both call sites of `_roster_eveners` sit inside `_trade_evaluate_impl`,
@@ -333,8 +333,8 @@ def test_mode_b_eveners_include_owned_picks(monkeypatch):
     assert pick_row["is_pick"] is True
     assert pick_row["position"] == "PICK"
     assert pick_row["name"] == "2028 1st"
-    # THE D-147 ASSERTION: the market curve, re-derived from the pricing
-    # function, and NOT the stored column the pre-D-147 line read.
+    # THE D-148 ASSERTION: the market curve, re-derived from the pricing
+    # function, and NOT the stored column the pre-D-148 line read.
     expected = market_pick_pool_value(2028, 1, "1qb_ppr")
     assert expected == 1263.0
     assert pick_row["value"] == pytest.approx(expected, rel=1e-3)

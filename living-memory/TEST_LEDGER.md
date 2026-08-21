@@ -10,11 +10,103 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-22b — negmem SHIPPED to `main` (PR #168) — deployed dark to Render
+
+**Merged:** squash PR [#168](https://github.com/mattmurf77/fantasy-trade-finder/pull/168) → `main` `7b7c314`; branch tip `71f63da` ledgered ([recovery](../docs/recovery/2026-08-22-negmem-ship.md)) before the remote delete.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` (local, merged tree) | **4097 passed, 1 skipped, 0 failed** |
+| CI `backend-tests` (Python 3.12.3) | **pass** (9m27s) |
+| CI `mobile-typecheck` | **pass** |
+| CI `maestro-testid-lint` | **pass** |
+| Mobile diff vs main | **empty** — zero mobile files; no EAS/TestFlight build cut or needed |
+| Simulator gate | **`FTF_SKIP_SIM_GATE=1`** — the standing D-056 posture. Evidence run instead: the full suite above + 30+ named sabotages RED-then-restored + CI. No simulator exists to run; this is the documented replacement, not a waiver of evidence. |
+
+**Post-deploy verification:** polled `GET /api/feature-flags` on Render — `trade.negmem` moved **ABSENT → false**, which is itself the proof the new build is live (the old build did not know the key). Deployed state: flag **false**, `config/negmem_leagues.json` **empty**, `MODEL_A_PROFILE` pins `negmem_strength = 0.0`. **The ON-condition is BOTH the flag and the allowlist, so nothing generates differently for anyone.**
+
+**Owed, unchanged by the ship:** the [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is **UNRUN** — the feature has structural evidence only and must not be described as validated.
+
+## 2026-08-22 — Negative-results memory v1 (leaf · registration · four seams · runner forwarding · readout pack) — full gates, FLAG DARK + ALLOWLIST EMPTY, NOT MERGED, on `claude/vigilant-spence-8583f5`
+
+**Branch:** `claude/vigilant-spence-8583f5`, cut from `origin/main`. Not pushed, not merged.
+Full gates — the operator did **not** declare express, and the change is outside the express
+lane by the bright-line rule anyway (new flag surface, six `model_config` keys, a new
+`features_json` key).
+Spec: [LLD](../docs/plans/negative-results-memory/LLD.md) §10 (the 27-test N-plan) ·
+scope [§6-RULINGS](../docs/plans/negative-results-memory/scope.md) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-147](DECISIONS.md).
+
+**Flag `trade.negmem` = false AND `config/negmem_leagues.json` = `[]`.** The ON-condition is
+both, so nothing in this entry is runtime evidence of the feature working — it is evidence that
+the feature is correctly inert and internally correct.
+
+| Gate | Result |
+|---|---|
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest backend/tests -q` | **4025 passed, 1 skipped, 0 failed** (345 s). Wave-2 tip baseline on this tree: **4016 passed, 1 skipped**. The +9 are this wave's additions (5 through-the-runner + 4 pack-SQL); nothing removed, nothing newly skipped. Local interpreter is **3.14.4**; CI is 3.12.3 — check CI before attributing any red to this branch (the standing version-skew caveat) |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK**. `git diff --stat -- mobile/` is **empty** — zero mobile files touched on the whole branch, so the mobile CI jobs are byte-identical to `origin/main`'s |
+| `cd mobile && tsc --noEmit` · `check-*.js` | not run in this worktree (no `node_modules`); moot per the line above |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) + `test_model_a_profile_only_names_real_knobs` | green with all six `negmem_*` keys in `_PINNED_KNOBS` + disposition sentences, and `MODEL_A_PROFILE`'s `negmem_strength = 0.0` naming a real knob |
+| Arm-A golden | **UNMOVED on first run, no recapture** (wave 2). The profile pin changes `snapshot_config` output and not deck bytes — which is the claim, asserted directly in `test_n7_serving_golden_strength0_is_stamp_inclusive_identity` |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence is this entry |
+
+**Negmem test totals: 128** — `test_negmem.py` **87** (the leaf: admission closed list, undo
+replay, decay/shrinkage worked examples incl. the five OQ-4b threshold assertions, MIN combine,
+`effective_mult` invariants, netting/retraction/revive, determinism + immutability, M2 E-B
+parity + feed guard, degraded taxonomy, identity hygiene, horizon/epoch boundaries, SQL
+dialect, leaf-import contract, readout format) and `test_negmem_seams.py` **41** (the four
+seams, the stamp trichotomy, the two goldens, T1, the relaxed pass, arm A, and this wave's
+runner half).
+
+**Sabotage discipline, by wave.** `PYTHONDONTWRITEBYTECODE=1` plus a `backend/__pycache__`
+clear between every cycle — stale `.pyc` gave wave 1 a false GREEN, and that is the reason the
+discipline is written down rather than assumed.
+
+- **B1 (leaf):** 26/26 named sabotages RED-then-restored; LLD worked examples reproduced exact.
+  One substitution recorded in-code: N-5's named sabotage is unreachable because the
+  strength-0 short-circuit precedes the upper clamp, so an equivalent was used.
+- **B2 (registration):** no behavioural sabotage — the inventory tests ARE the alarm, and they
+  fail by name. Values in `_DEFAULT_CFG` and `_MODEL_CONFIG_DEFAULTS` verified identical.
+- **B3 (seams):** 6 sabotage families RED-then-restored across the four seams and the stamp.
+- **This wave (runner + pack):** 4 cycles, each RED then restored:
+  1. delete `negmem_map = _nm` from `gen_v2_cards` → `test_runner_gen_v2_cards_forwards_the_map_and_the_m2_feed`,
+     `..._carry_negmem_influence_to_arm_c` and `test_runner_bakeoff_job_carries_negmem_into_arm_c_and_arm_fit` RED;
+  2. delete the `acceptance_stats` splat alone → the forwarding test RED, the rest green (the
+     asymmetry is separable, which is the point of testing both);
+  3. delete `negmem_map = kwargs.get("negmem")` from `gen_fit_cards` → the two fit runner tests
+     + the bake-off test RED;
+  4. paste `json_extract(...)` into `negmem-gr4-joint.sql`'s executable SQL → the pack
+     banned-token scan RED.
+
+**What the through-the-runner tests exist for.** `bakeoff_runner.gen_v2_cards` / `gen_fit_cards`
+are the ONLY callers of their generators inside a bake-off job. Every pre-existing seam test
+calls those generators directly, so a runner that dropped the forwarding would have left all 33
+of them green while arms C and fit ran negmem-blind. Sabotage 1 and 3 above are the proof that
+gap was real. The end-to-end test assembles the fan-out exactly as `server._run_trade_job` does
+(one map, splatted into every arm's lambda) over the direct-engine world rather than the
+bake-off harness world — the harness's opponents are unranked, so arms C and fit legitimately
+emit zero cards there and the assertion would have been vacuous.
+
+**Pack SQL is executed, not just scanned.** Both shipped files run against the seeded in-memory
+SQLite engine with real binds, so a renamed column fails here rather than in the operator's
+hands; the banned-token scan runs over the **executable** half (comments stripped) because both
+files document their Postgres-only variant in a comment, per the `bakeoff_readout.sql`
+convention. Comments are stripped before binding too — SQLAlchemy's `text()` harvests `:name`
+binds out of comment prose, and both files name their binds there.
+
+**Runtime evidence: NONE, and that is the honest state.** The
+[TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is written
+and **UNRUN**; no deck has ever been generated with this flag on for a real league. Its step 0
+(the before-readout) must run before the flip or the baseline is unrecoverable.
+
+---
+
 ## 2026-08-21c — League-surface pick-value alignment (Q-026 closed) — full gates, NOT PUSHED, on `feat/league-pick-value-alignment`
 
 **Branch:** `feat/league-pick-value-alignment`, cut from `origin/main` @ `f01ac9f` (which contains PR #167 `3192d13`, the per-slot pricing ship this follows). Not pushed, not merged.
+**`origin/main` advanced mid-build to `5472e70` (PR #168, negmem) and was MERGED IN**; every gate below was then re-run on the merged tree. That merge also forced a **D-id renumber: this ship's decision is D-148, not D-147** — PR #168 took D-147 while this branch was building. G-048, again, in the same week it was last logged.
 Full gates — the operator did **not** declare express. Operator ruling: *"I want the league values to reflect the same pick values."*
-Scope + code-walk + operator checklist: [docs/plans/league-pick-value-alignment/scope.md](../docs/plans/league-pick-value-alignment/scope.md) · ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/league-pick-value-alignment/decisions-draft.md) (D-147, Q-026 closure, new Q-027).
+Scope + code-walk + operator checklist: [docs/plans/league-pick-value-alignment/scope.md](../docs/plans/league-pick-value-alignment/scope.md) · ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/league-pick-value-alignment/decisions-draft.md) (D-148, Q-026 closure, new Q-027).
 
 **No schema change, no flag change, no client change.** `git diff --name-only origin/main -- mobile web extension` = **zero files**.
 
@@ -24,6 +116,7 @@ Scope + code-walk + operator checklist: [docs/plans/league-pick-value-alignment/
 |---|---|---|
 | before any source edit | `test_bakeoff_arm_a_golden` · `test_engine_quality_golden` · `test_fairness_gate_golden` · `test_rnk_elo_golden` | **29 passed** |
 | after the source change, before any fixture was touched | same four | **29 passed, ZERO edits** |
+| again after merging `origin/main` `5472e70` (which itself edited `test_bakeoff_arm_a_golden.py`) | same four | **29 passed, ZERO edits** |
 
 Arm A's structural immunity (it never constructs a `draft_picks` row, so it never reaches `priced_pool_value`) was **verified, not assumed** — that is what the second isolated run is for. No tolerance widened, no golden fixture touched.
 
@@ -31,7 +124,8 @@ Arm A's structural immunity (it never constructs a `draft_picks` row, so it neve
 
 | Gate | Result |
 |---|---|
-| `python3 -m pytest backend/tests -q` | **3986 passed, 1 skipped, 0 failed** (331 s). Baseline measured on this same tree at `origin/main` `f01ac9f`: **3969 passed, 1 skipped** (305 s). Delta reconciles exactly: **+5** from `test_league_picks_tier.py` (7 → 12) and **+12** from the new `test_league_pick_value_alignment.py`. Nothing removed, nothing newly skipped |
+| `python3 -m pytest backend/tests -q` (pre-merge, base `f01ac9f`) | **3986 passed, 1 skipped, 0 failed** (331 s) against a measured baseline of **3969 passed, 1 skipped** (305 s) on the same tree at `f01ac9f` |
+| `python3 -m pytest backend/tests -q` (**post-merge, base `5472e70` — the number that counts**) | **4114 passed, 1 skipped, 0 failed** (287 s). `origin/main` @ `5472e70` records **4097 passed, 1 skipped** in PR #168's own entry above. Delta **+17**, reconciling exactly on both baselines: **+5** from `test_league_picks_tier.py` (7 → 12) and **+12** from the new `test_league_pick_value_alignment.py`. Nothing removed, nothing newly skipped |
 | `bash mobile/scripts/testid-lint.sh` | **green** (`testid-lint OK`) |
 | `cd mobile && npx tsc --noEmit` · `check-*.js` | **NOT RUN in this worktree** — no `mobile/node_modules`, and `npm ci` needs network which is unavailable here. Evidence in its place: **zero mobile/web/extension diffs** against an `origin/main` whose CI is green. Asserted unaffected, **not observed — CI on the pushed sha must confirm** |
 | Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
@@ -62,7 +156,7 @@ Per-pick, 2026 round 1 — before → after (badge):
 
 | # | sabotage | caught by |
 |---|---|---|
-| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-147 line | 4 tests, incl. both AST guards |
+| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-148 line | 4 tests, incl. both AST guards |
 | 2 | a surface calls `priced_pool_value` directly with the **identical expression** (behaviourally a no-op) | 3 tests — proving the guard is structural, not behavioural |
 | 3 | `_league_slot_order` resolved once per PICK instead of once per league | `test_power_rankings_resolves_the_draft_order_once_per_league` (48 picks, 12 rosters, asserts exactly 1 lookup) |
 

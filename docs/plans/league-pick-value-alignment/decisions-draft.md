@@ -1,17 +1,32 @@
-# DECISIONS.md draft — D-147
+# DECISIONS.md draft — D-148
 
 > Paste into `living-memory/DECISIONS.md` at merge, and apply the Q-026 closure +
 > new Q-027 below into `living-memory/OPEN_QUESTIONS.md`.
 >
-> **ID ritual (G-048):** `grep "^## D-1" living-memory/DECISIONS.md | tail` → max is **D-146**.
-> Second grep across `living-memory/` + `docs/` (tracked and untracked) for `D-14[5-9]`
-> → the only hits outside DECISIONS.md are this branch's own docs and
-> `docs/plans/package-benchmark-sweetener/decisions-draft-arm-c.md`, whose D-145/D-146
-> are already landed. **D-147 is free.**
+> **ID ritual (G-048) — and it bit, exactly as G-048 says it does.**
+> At branch time (`origin/main` @ `f01ac9f`) the double grep said max = **D-146**, no
+> sibling draft in `living-memory/` or `docs/` claimed D-147, so this was drafted as
+> **D-147**. While the build ran, `origin/main` advanced to `5472e70` and **PR #168
+> landed its own D-147** ("Negative-Results Memory Is BUILT and Dark"). `origin/main`
+> was merged into this branch and every reference here renumbered to **D-148**.
+>
+> Re-verified after the merge: `grep "^## D-1" living-memory/DECISIONS.md | tail` → max
+> is **D-147** (negmem). Second grep for `D-14[8-9]` across `living-memory/` + `docs/`,
+> tracked and untracked → this branch's own files only. **D-148 is free as of `5472e70`
+> — re-check at merge if `origin/main` has moved again.**
+>
+> **Unrelated defect spotted on `origin/main` while doing this, NOT fixed here:** PR #168
+> appears to have run a blanket `D-144` → `D-147` replace over `living-memory/LLD.md`,
+> which relabelled the heading *"Retiring a per-user setting: 410 the write, fix the
+> read (2026-08-21, D-144)"* to D-147. That section documents **D-146** (the per-user
+> pick-pricing mode retirement) — it was already mislabelled D-144 by the slot-pricing
+> session's own renumber, and is now mislabelled D-147. Its TOC anchor still points at
+> `#...-d-144`, which is the tell. Left alone deliberately: it is another session's
+> shipped record, not this branch's to rewrite.
 
 ---
 
-## D-147 — One Pick, One Price: Every League Surface Reads the Engine's Waterfall
+## D-148 — One Pick, One Price: Every League Surface Reads the Engine's Waterfall
 
 **Date:** 2026-08-21 ([scope](../../plans/league-pick-value-alignment/scope.md)); **closes [Q-026](OPEN_QUESTIONS.md) in full**; opens [Q-027](OPEN_QUESTIONS.md)
 
@@ -63,14 +78,14 @@ Five call sites, no sixth — `_roster_eveners`, `_trade_evaluate_impl`, `get_le
 
 ### Q-026 — replace the RULED-DEFERRED block with:
 
-**CLOSED 2026-08-21 by [D-147](DECISIONS.md)** (PR pending). `_power_picks_by_owner`, `GET /api/league/picks` and `_roster_eveners` now price through `server._priced_pick_value` — the same `priced_pool_value` waterfall and the same D-090 resolution the engine uses — guarded bidirectionally by an AST walk over the five known call sites. The 1.01's 2117.0-vs-4867.1 split is gone. `test_league_picks_tier.py` re-derived (7 → 12 tests, badges moved as designed); Power Rankings pick totals move +12.4 % to −40.3 % by draft slot, −22.1 % league-wide, and `roster_history` steps at the merge (an ADR-011 boundary, append-only, nothing recomputed). Two residues, both raised rather than buried: pick-SHARE ratios stay on the legacy scale (scope §6 waiver 3) and the non-12-team board/engine mismatch became **Q-027**.
+**CLOSED 2026-08-21 by [D-148](DECISIONS.md)** (PR pending). `_power_picks_by_owner`, `GET /api/league/picks` and `_roster_eveners` now price through `server._priced_pick_value` — the same `priced_pool_value` waterfall and the same D-090 resolution the engine uses — guarded bidirectionally by an AST walk over the five known call sites. The 1.01's 2117.0-vs-4867.1 split is gone. `test_league_picks_tier.py` re-derived (7 → 12 tests, badges moved as designed); Power Rankings pick totals move +12.4 % to −40.3 % by draft slot, −22.1 % league-wide, and `roster_history` steps at the merge (an ADR-011 boundary, append-only, nothing recomputed). Two residues, both raised rather than buried: pick-SHARE ratios stay on the legacy scale (scope §6 waiver 3) and the non-12-team board/engine mismatch became **Q-027**.
 
 ### Q-027 — new entry:
 
 **Q-027 — The Draft Room board and the engine map non-12-team leagues onto DP's curve differently**
 
-**Raised:** 2026-08-21 (D-147 / league-pick-value-alignment scope §6 waiver 2). DynastyProcess publishes exactly one 12-team slot curve. `draft_board_service._basis_slot` maps a smaller league onto it by percentile within the round (plan O3, ends anchored), so a 10-team league's last first displays as the **1.12 → 820.8**. `pick_values.market_pick_slot_value` has no league size and looks the slot number up literally, so the same pick prices as the **1.10 → 1069.8** — a 30 % disagreement between a league's own board and its own trade cards. The mirror case: a 14-team league's 1.13/1.14 have no DP row, fall to the round curve (1859.5), and therefore price *above* that league's 1.12.
+**Raised:** 2026-08-21 (D-148 / league-pick-value-alignment scope §6 waiver 2). DynastyProcess publishes exactly one 12-team slot curve. `draft_board_service._basis_slot` maps a smaller league onto it by percentile within the round (plan O3, ends anchored), so a 10-team league's last first displays as the **1.12 → 820.8**. `pick_values.market_pick_slot_value` has no league size and looks the slot number up literally, so the same pick prices as the **1.10 → 1069.8** — a 30 % disagreement between a league's own board and its own trade cards. The mirror case: a 14-team league's 1.13/1.14 have no DP row, fall to the round curve (1859.5), and therefore price *above* that league's 1.12.
 
-Pre-D-147 this lived only in the engine; D-147 spread it to Power Rankings, `/api/league/picks` and the eveners, which is why it is now worth a decision. Pinned by `test_league_pick_value_alignment.py::test_non_twelve_team_boards_disagree_and_that_is_pinned_not_fixed` so neither mapping can drift silently.
+Pre-D-148 this lived only in the engine; D-148 spread it to Power Rankings, `/api/league/picks` and the eveners, which is why it is now worth a decision. Pinned by `test_league_pick_value_alignment.py::test_non_twelve_team_boards_disagree_and_that_is_pinned_not_fixed` so neither mapping can drift silently.
 
 **Options:** (a) route `market_pick_slot_value` through `_basis_slot` — needs league size threaded into `priced_pool_value`, and reprices the engine in every non-12-team league; (b) drop `_basis_slot` and map the board literally — cheaper, but prices a 10-team league's last first as if four more teams existed; (c) accept — a 12-team curve on a 10-team league is an approximation either way, and the board already flags itself `slot_value_approx`. **Needs an operator call.** 12-team leagues are exact under all three.

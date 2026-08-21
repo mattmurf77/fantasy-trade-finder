@@ -6,7 +6,7 @@ rows on calculator surfaces carry the pick-value ladder rung their
 TierBadge/TIER_LABEL machinery it uses for players — never a client-side
 derivation from the display value.
 
-⚠️  **D-147 (2026-08-21) MOVED THE VALUE THIS FILE BADGES.** Closing Q-026,
+⚠️  **D-148 (2026-08-21) MOVED THE VALUE THIS FILE BADGES.** Closing Q-026,
 the route now serves `_priced_pick_value` — the engine's own three-step
 waterfall (own slot → round curve → stored ladder) under the same D-090
 resolution a trade card charges — instead of the stored `draft_picks.
@@ -27,7 +27,7 @@ the badge. The headline the operator asked for is
 Every tier assertion pins a LITERAL rung, because the three named sabotages
 all produce a "tier" that a tautological tier-equals-whatever-the-helper-
 returns test would wave through. All three were re-verified against the
-PRICED values at the D-147 rewrite:
+PRICED values at the D-148 rewrite:
 
   S1 "wrong scale": passing the value straight to `tier_for_elo` without any
      inversion (the #263 bug) reads the 1859.5 round-curve 1st as Elo 1859.5
@@ -39,8 +39,8 @@ PRICED values at the D-147 rewrite:
      instead of 'fourth', the 4th 'third' instead of 'waivers'.
   S2 "platform-only tiers": skipping tier for `source: 'user'` rows fails the
      asserted-pick case.
-  S3 (new, D-147) "left on the ladder": serving `p["pool_value"]` verbatim —
-     the pre-D-147 code — puts every 2026 first back at 2117.0/'first_1',
+  S3 (new, D-148) "left on the ladder": serving `p["pool_value"]` verbatim —
+     the pre-D-148 code — puts every 2026 first back at 2117.0/'first_1',
      which `test_slotted_first_badges_above_a_slotted_twelfth` and every
      round-curve literal reject.
 
@@ -125,7 +125,7 @@ PICK_ROWS = [
      "round": 4, "owner_user_id": "u_b", "owner_username": "bob",
      "is_traded": 0, "original_username": "bob", "original_roster_id": "r2",
      "pool_value": pick_pool_value(4, 0)},
-    # NULL pool_value (pre-pool_value-column row). D-147: this no longer
+    # NULL pool_value (pre-pool_value-column row). D-148: this no longer
     # implies "no price" — the market can price a row the sync never did,
     # and the engine already does. See its own test.
     {"pick_id": f"{LEAGUE}_2026_4_1", "league_id": LEAGUE, "season": 2026,
@@ -221,14 +221,14 @@ def _fetch(c):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# D-147 — the route serves the ENGINE's price, and badges follow it
+# D-148 — the route serves the ENGINE's price, and badges follow it
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_served_value_is_the_engine_price_not_the_stored_ladder(client):
     """Q-026's closure, asserted as a NUMBER before any badge is read.
 
     Sabotage S3 (`{**p}` leaving the stored column on the wire — literally
-    the pre-D-147 line) fails every assertion here."""
+    the pre-D-148 line) fails every assertion here."""
     rows = _fetch(client)
     served = {pid: r["pool_value"] for pid, r in rows.items()}
     assert served[f"{LEAGUE}_2026_1_1"] == _CURVE_2026_1
@@ -260,11 +260,11 @@ def test_the_route_agrees_with_priced_pool_value_row_for_row(client):
 
 
 def test_slotted_first_badges_above_a_slotted_twelfth(slotted_client):
-    """THE OPERATOR'S HEADLINE (Q-026 ruling, D-147 §2).
+    """THE OPERATOR'S HEADLINE (Q-026 ruling, D-148 §2).
 
     Same round, same season, same stored rung (2117.0) — and now a 5.9x
     price spread and two different badges, on the list screen, matching what
-    a trade card charges. Under the pre-D-147 code both rows read 2117.0 and
+    a trade card charges. Under the pre-D-148 code both rows read 2117.0 and
     both badged 'first_1'."""
     _install_sess(_mk_sess())
     code, body = _get(slotted_client, f"/api/league/picks?league_id={LEAGUE}")
@@ -315,7 +315,7 @@ def test_far_out_pick_tier_is_the_discounted_band(client):
     """D-320-2's RULE is unchanged — the badge reflects TODAY's value, not
     the pick's name.
 
-    D-147 changed the VALUE it reflects, and reversed D-079's most visible
+    D-148 changed the VALUE it reflects, and reversed D-079's most visible
     consequence at this surface: a 2029 1st is no longer FLAT with a
     current-year 1st. Flat firsts are a property of the stored LADDER, which
     is now only step 3 of the waterfall; DP's curve decays a first across
@@ -351,7 +351,7 @@ def test_asserted_user_source_pick_carries_tier_too(client):
 
 
 def test_stored_null_now_prices_from_the_market_like_the_engine_does(client):
-    """D-147 re-anchored the null contract, deliberately.
+    """D-148 re-anchored the null contract, deliberately.
 
     A NULL `pool_value` used to mean "no price, no badge". It never meant
     that to anyone else: `_power_picks_by_owner` re-derives a price from a
@@ -401,17 +401,17 @@ def test_my_picks_rows_carry_tier_and_demo_league_unchanged(client):
 
 
 def test_the_d088_inverse_identity_is_still_the_one_this_route_uses(client):
-    """D-088 — THE INVARIANT, restated where D-147 left it.
+    """D-088 — THE INVARIANT, restated where D-148 left it.
 
     `tier_config.json`'s `_calibration` defines each band's floor AS a rung of
     `GENERIC_PICK_SEEDS` ("third floor = Late 3rd seed 1280"), which is only
     coherent if the seeds live on the tier-band Elo scale. The identity that
     pins it — `value_to_elo(pick_pool_value(R, 0)) == GENERIC_PICK_SEEDS[(R,
-    'Mid')]` — is a property of the LADDER, and D-147 did not touch it: the
+    'Mid')]` — is a property of the LADDER, and D-148 did not touch it: the
     ladder is still step 3, and `value_to_elo` is still the exact inverse of
     the units every step of the waterfall returns.
 
-    What D-147 changed is which number goes IN. So this asserts both halves,
+    What D-148 changed is which number goes IN. So this asserts both halves,
     separately, because only the pair excludes both defects:
 
       1. the ladder identity itself, for all four rounds; and
@@ -423,7 +423,7 @@ def test_the_d088_inverse_identity_is_still_the_one_this_route_uses(client):
       * no inversion at all (the #263 defect) → the 2026 1st reads 'firsts_2'
         and everything cheaper reads None
     """
-    # (1) the ladder identity — unchanged by D-147.
+    # (1) the ladder identity — unchanged by D-148.
     for rnd in (1, 2, 3, 4):
         assert abs(value_to_elo(pick_pool_value(rnd, 0))
                    - GENERIC_PICK_SEEDS[(rnd, "Mid")]) < 0.05
@@ -445,7 +445,7 @@ def test_deep_far_out_pick_tiers_null_rather_than_flattering_it(client):
     """A pick priced BELOW the `waivers` floor (Elo 1150) gets no badge at
     all — the documented null-tier contract — never a fabricated `fourth`.
 
-    Re-derived for D-147: the 2029 4th that used to sit below the floor now
+    Re-derived for D-148: the 2029 4th that used to sit below the floor now
     prices at 195.2 (Elo 1173.3) and honestly badges 'waivers', so the case
     is pinned one year deeper, at a 2030 4th (166.0 → Elo 1140.8). The
     PRICE is still served — only the badge is withheld."""

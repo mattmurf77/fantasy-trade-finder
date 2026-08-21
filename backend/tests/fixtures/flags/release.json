@@ -213,5 +213,6 @@
   "receipts.grading": true,
   "receipts.screen": false,
   "trade.breaker": false,
-  "trade.breaker_narrative": false
+  "trade.breaker_narrative": false,
+  "trade.negmem": false
 }

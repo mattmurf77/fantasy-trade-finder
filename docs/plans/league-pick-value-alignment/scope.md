@@ -60,7 +60,7 @@ One consequence worth naming for the analytics owner rather than the taxonomy: *
 | `docs/data-dictionary.md` | **updated** | `draft_picks.pool_value` — what it is vs what is served; `roster_history.team_value_picks` — the ADR-011 boundary; the `users.pick_pricing_mode` row's Q-026 parenthetical. |
 | `docs/config-reference.md` | **updated** | `picks.slot_labels` — the flag now moves LEAGUE-surface prices too, not only engine prices. |
 | `docs/glossary.md` | **n/a** | no new domain term. |
-| ADR or `DECISIONS.md` entry | **drafted** | D-147, in `decisions-draft.md` beside this file, with the Q-026 closure text. |
+| ADR or `DECISIONS.md` entry | **drafted** | D-148, in `decisions-draft.md` beside this file, with the Q-026 closure text. |
 
 ## 5. Ship gate declaration
 
@@ -163,7 +163,7 @@ Each applied to `backend/server.py`, the suite run, then reverted:
 
 | sabotage | what it does | caught by |
 |---|---|---|
-| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-147 line | 4 tests, incl. both AST guards |
+| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-148 line | 4 tests, incl. both AST guards |
 | 2 | a surface calls `priced_pool_value` directly with the *identical* expression (behaviourally a no-op) | 3 tests — proving the guard is structural, not behavioural |
 | 3 | `_league_slot_order` resolved once per PICK instead of once per league | `test_power_rankings_resolves_the_draft_order_once_per_league` |
 
