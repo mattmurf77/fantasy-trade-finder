@@ -115,6 +115,7 @@ exclusion be justified):
 | `bakeoff_serve_fit` | fit challenger PR-F3, 2026-08-20 | Arm roster / serving bit, not generation — read only by `bakeoff_runner` before or after any arm runs; an arm cannot observe it. |
 | `package_bench_trade_wide` | benchmark fix, 2026-08-21 | **Generation logic post-dating the reference SHA → INCLUDED in `MODEL_A_PROFILE` at its kill value 0.0.** The pre-wave engine benchmarked package depth against each side's own best asset; at ≤ 0 that math is byte-identical (proven by `test_package_benchmark.py::test_kill_value_is_byte_identical_to_pre_fix_math`), so the golden did NOT need re-capturing — verified 10/10 green with the pin. |
 | `package_floor_cross` | benchmark fix, 2026-08-21 | **Inert companion.** `_package_value_market` never reads it while `package_bench_trade_wide` ≤ 0 (arm A's pin) — same rule as `max_overpay_min_value`. Pinning it would imply it matters to arm A. |
+| `sweetener_gap_threshold` | gap auto-sweetener, 2026-08-21 | **Generation logic post-dating the reference SHA → INCLUDED in `MODEL_A_PROFILE` at its kill value 0.0.** At ≤ 0 the gap-sweetener pass is skipped entirely and every generator is byte-identical to its pre-sweetener self; the pre-wave engine had no sweetener. |
 
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag

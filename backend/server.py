@@ -4153,6 +4153,12 @@ def _log_deck_signal_impressions(
             "fit_premium":        bool(getattr(card, "fit_premium", None)),
             "aggression_variant": getattr(card, "aggression_variant", None),
             "relaxed":            bool(getattr(card, "relaxed", False)),
+            # 2026-08-21 gap auto-sweetener — stamped on EVERY row (null
+            # when the card was not sweetened) so measurement can split
+            # sweetened cards without an absent-key ambiguity. Rides
+            # INSIDE features_json (one column), so the executemany
+            # first-row-keys trap cannot drop it.
+            "gap_sweetener":      getattr(card, "gap_sweetener", None),
             # Board-state-at-serve (frozen: F6/F8 need serve-time recency)
             "ranked_player_count":  ranked_count,
             "last_board_update_at": last_board_update,
@@ -11023,6 +11029,12 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # 2026-08-21 gap auto-sweetener — same convention as `sweetener` above:
+    # serialized only when present, the equalizer player is already inside
+    # the side's id array; this identifies it and records the gap it closed.
+    gap_sweetener = getattr(card, "gap_sweetener", None)
+    if gap_sweetener:
+        out["gap_sweetener"] = gap_sweetener
     # F3 (deck.fatigue) — the ONE post-decline-window retest card, labeled
     # honestly. The attribute is only ever set while the flag is on, so
     # flag-off payloads stay byte-identical.

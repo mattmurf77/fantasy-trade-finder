@@ -68,7 +68,8 @@ from .trade_service import (
     replacement_levels,
 )
 
-__all__ = ["generate_pair_trades_v3", "find_three_team_cycles"]
+__all__ = ["generate_pair_trades_v3", "find_three_team_cycles",
+           "close_value_gap"]
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +672,68 @@ def generate_pair_trades_v3(
             organic_keys.add(key)
             budget -= 1
 
+    # --- 2026-08-21 gap auto-sweetener (sweetener_gap_threshold) ----------
+    # Runs at generation time on this pair's finished cards (never
+    # post-draft): a card whose absolute consensus gap exceeds the
+    # threshold is re-balanced in place by adding the smallest sufficient
+    # equalizer from the richer side's roster, re-earning every gate. A
+    # card the pass cannot close is kept unsweetened — the pass narrows
+    # gaps, it does not shrink the deck. ≤ 0 disables (arm A's pin).
+    GAP_THR = _c("sweetener_gap_threshold")
+    if GAP_THR > 0 and cards:
+        card_keys = {(frozenset(c.give_player_ids),
+                      frozenset(c.receive_player_ids)) for c in cards}
+
+        def _gap_extra_ok(g, r):
+            if not filler_ok(g, r, _uv, _vo):
+                return False
+            if not pick_swap_ok(g, r, players, _sv):
+                return False
+            if presentment_ok_fn is not None and not presentment_ok_fn(g, r):
+                return False
+            if not _gap_ok(g, r):
+                return False
+            u_s, o_s = _surpluses(g, r)
+            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+
+        for card in cards:
+            closed = close_value_gap(
+                card.give_player_ids, card.receive_player_ids,
+                seed_value=_sv, gap_threshold=GAP_THR,
+                fairness_threshold=fairness_threshold,
+                user_roster=user_roster, opp_roster=opponent.roster,
+                players=players, scoring_format=scoring_format,
+                untouchable_ids=untouchable_ids,
+                not_interested_ids=not_interested_ids,
+                extra_ok_fn=_gap_extra_ok)
+            if closed is None:
+                continue
+            s_pid, side, new_give, new_recv, n_gv, n_rv, ratio = closed
+            new_key = (frozenset(new_give), frozenset(new_recv))
+            if new_key in card_keys:      # would collide with a sibling card
+                continue
+            gap_before = abs((card.give_value or 0.0)
+                             - (card.receive_value or 0.0))
+            user_s, opp_s = _surpluses(new_give, new_recv)
+            hm = _harmonic_mean(user_s, opp_s)
+            card_keys.discard((frozenset(card.give_player_ids),
+                               frozenset(card.receive_player_ids)))
+            card.give_player_ids = new_give
+            card.receive_player_ids = new_recv
+            card.mismatch_score = round(hm, 1)
+            card.fairness_score = ratio
+            card.composite_score = round(
+                _composite(hm, ratio, new_give + new_recv, new_recv,
+                           new_give), 3)
+            card.give_value = round(n_gv, 1)
+            card.receive_value = round(n_rv, 1)
+            card.gap_sweetener = {
+                "player_id": s_pid, "side": side,
+                "gap_before": round(gap_before, 1),
+                "gap_after": round(abs(n_gv - n_rv), 1),
+            }
+            card_keys.add(new_key)
+
     return cards
 
 
@@ -734,6 +797,81 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
         if user_s < min_side or opp_s < min_side:
             continue
         return s_pid, side, new_give, new_recv, user_s, opp_s, round(ratio, 3)
+    return None
+
+
+def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
+                    fairness_threshold, user_roster, opp_roster, players,
+                    scoring_format="1qb_ppr", untouchable_ids=None,
+                    not_interested_ids=None, extra_ok_fn=None):
+    """2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`) — close an
+    ABSOLUTE consensus gap on a card that already passed its path's gates.
+
+    The ratio gate is scale-blind: fairness 0.85 on a five-figure package
+    still leaves more than a late 1st of consensus value on the table
+    (CHANGELOG 2026-08-21 — 15% of served cards carried gap > a late 1st).
+    This pass generalizes `_try_sweeten` (the 3.4 fairness-band rescue)
+    from "lift the ratio into the band" to "bring |gv − rv| under
+    ``gap_threshold``": the RICHER side — the one receiving more consensus
+    value — adds the smallest asset from its roster that
+
+      (a) brings the recomputed gap ≤ ``gap_threshold``,
+      (b) keeps the consensus point ratio ≥ ``fairness_threshold``,
+      (c) keeps BOTH post-trade lineups feasible (3.2 rule), and
+      (d) clears ``extra_ok_fn`` — the calling path's own gate stack
+          (junk-filler, presentment, pick-swap, surplus gates, …), so a
+          sweetened combo re-earns every gate the organic combo passed.
+
+    Candidates are tried cheapest-consensus-value first, so the first hit
+    is the smallest sufficient equalizer. Sweeteners are players only
+    (picks are not roster assets on this path), never untouchables (give
+    side) and never not-interested players (receive side).
+
+    Returns (sweetener_pid, side, new_give, new_recv, gv, rv, point_ratio)
+    or None. ``side`` is the side the asset was ADDED to: "give" when the
+    USER was the richer party (they pay the equalizer), "receive" when the
+    opponent was.
+    """
+    gv, rv = _consensus_packages(give_ids, recv_ids, seed_value)
+    if abs(gv - rv) <= gap_threshold:
+        return None
+    in_trade = set(give_ids) | set(recv_ids)
+    if rv > gv:            # user receives more — user adds to the give side
+        side, roster = "give", user_roster
+    else:                  # opponent receives more — they add (user receives)
+        side, roster = "receive", opp_roster
+
+    user_counts = _pos_counts(user_roster, players)
+    opp_counts = _pos_counts(opp_roster, players)
+
+    candidates = sorted((p for p in roster if p not in in_trade
+                         and not (side == "give" and untouchable_ids
+                                  and p in untouchable_ids)
+                         and not (side == "receive" and not_interested_ids
+                                  and p in not_interested_ids)),
+                        key=seed_value)
+    for s_pid in candidates:
+        if side == "give":
+            new_give, new_recv = list(give_ids) + [s_pid], list(recv_ids)
+        else:
+            new_give, new_recv = list(give_ids), list(recv_ids) + [s_pid]
+        n_gv, n_rv = _consensus_packages(new_give, new_recv, seed_value)
+        if n_gv <= 0 or n_rv <= 0:
+            continue
+        if abs(n_gv - n_rv) > gap_threshold:      # too small to close it
+            continue
+        ratio = min(n_gv, n_rv) / max(n_gv, n_rv)
+        if ratio < fairness_threshold:            # fell out of the band
+            continue
+        g_delta = _subset_pos_delta(new_give, players)
+        r_delta = _subset_pos_delta(new_recv, players)
+        if not (_feasible_after(user_counts, g_delta, r_delta, scoring_format)
+                and _feasible_after(opp_counts, r_delta, g_delta,
+                                    scoring_format)):
+            continue
+        if extra_ok_fn is not None and not extra_ok_fn(new_give, new_recv):
+            continue
+        return s_pid, side, new_give, new_recv, n_gv, n_rv, round(ratio, 3)
     return None
 
 

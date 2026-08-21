@@ -81,7 +81,7 @@
       "card_index": 0,
       "centerpiece_id": null,
       "deck_job_id": "job-bakeoff-golden",
-      "features_json": "{\"shape\": \"1x1\", \"basis\": \"consensus\", \"likes_you\": false, \"lane\": \"value\", \"give_positions\": [\"TE\"], \"receive_positions\": [\"RB\"], \"give_value\": 1349.9, \"receive_value\": 1648.7, \"give_value_band\": \"1000-1500\", \"receive_value_band\": \"1500-2000\", \"involves_pick\": false, \"partner_user_id\": \"user_opp2\", \"surplus_margin\": 0.0, \"fairness_score\": 0.819, \"need_fit\": 0.5, \"partner_fit\": null, \"fit_premium\": false, \"aggression_variant\": \"fair\", \"relaxed\": false, \"ranked_player_count\": 0, \"last_board_update_at\": null, \"user_value_basis\": \"consensus\"}",
+      "features_json": "{\"shape\": \"1x1\", \"basis\": \"consensus\", \"likes_you\": false, \"lane\": \"value\", \"give_positions\": [\"TE\"], \"receive_positions\": [\"RB\"], \"give_value\": 1349.9, \"receive_value\": 1648.7, \"give_value_band\": \"1000-1500\", \"receive_value_band\": \"1500-2000\", \"involves_pick\": false, \"partner_user_id\": \"user_opp2\", \"surplus_margin\": 0.0, \"fairness_score\": 0.819, \"need_fit\": 0.5, \"partner_fit\": null, \"fit_premium\": false, \"aggression_variant\": \"fair\", \"relaxed\": false, \"gap_sweetener\": null, \"ranked_player_count\": 0, \"last_board_update_at\": null, \"user_value_basis\": \"consensus\"}",
       "final_score": 0.36790912239864854,
       "is_ghost": null,
       "league_id": "league_bakeoff_golden",

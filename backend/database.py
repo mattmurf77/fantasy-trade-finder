@@ -2298,6 +2298,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Trade engine Tier 3 (flags trade_engine.v3, trade.three_team) ────
     ("v3_pool_size",            12.0,   "v3: per-side candidate pool size for exact enumeration"),
     ("sweetener_band",           0.15,  "v3: fairness shortfall band eligible for a sweetener rescue"),
+    ("sweetener_gap_threshold",  1539.0, "2026-08-21 gap auto-sweetener: close absolute consensus gaps above this (value units; 1539 = one late 1st) by adding the smallest sufficient asset from the richer side's roster; <=0 disables"),
     ("sweetener_max_cards",      2.0,   "v3: max sweetened cards per opponent pair"),
     ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
     ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),

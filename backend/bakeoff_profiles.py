@@ -93,6 +93,10 @@ MODEL_A_PROFILE: dict[str, float] = {
     # is deliberately absent — _package_value_market never reads it while
     # the benchmark knob is ≤ 0 (same rule as `max_overpay_min_value`).
     "package_bench_trade_wide":  0.0,   # own-max benchmark (pre-fix math)
+    # Same wave: the gap auto-sweetener post-dates the reference SHA; at
+    # ≤ 0 every generator skips the pass entirely (byte-identical), and
+    # the pre-wave engine had no sweetener.
+    "sweetener_gap_threshold":   0.0,   # gap auto-sweetener off
 }
 
 
