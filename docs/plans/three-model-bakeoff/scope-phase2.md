@@ -114,6 +114,45 @@ exclusion be justified):
 | `bakeoff_include_fit` | fit challenger PR-F3, 2026-08-20 | Arm roster / serving bit, not generation — read only by `bakeoff_runner` before or after any arm runs; an arm cannot observe it. |
 | `bakeoff_serve_fit` | fit challenger PR-F3, 2026-08-20 | Arm roster / serving bit, not generation — read only by `bakeoff_runner` before or after any arm runs; an arm cannot observe it. |
 
+> **2026-08-21 — the 25 `breaker_*` keys.** The counterparty breaker
+> ([LLD](../counterparty-breaker/LLD.md) §4) adds an **evaluation layer**, not a
+> generator: `backend/trade_breaker.py` is imported by no generator and no ranker, runs
+> after the deck-mutation stack has completed, and mutates only a new card attribute. No
+> arm can observe one of these knobs at any value, so pinning a kill value in
+> `MODEL_A_PROFILE` would imply they matter to a deck; they provably do not. This is the
+> same shape of exclusion as the `fit_*` rows above, one layer later in the pipeline. The
+> one knob the breaker also reads, `waiver_slot_cost`, is an **existing engine
+> registration** reused as-is (`_SHARED_ENGINE_KNOB_KEYS`, LLD §1.1) — it is not one of
+> the 25 and its disposition is unchanged by this feature.
+
+| Key | Added | Why arm A does not set it |
+|---|---|---|
+| `breaker_ms_budget` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_budget_checkpoint_frac` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_degraded_share_max` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_min_severity` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_max_repeat_frac` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_shadow_run` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_outlook_haircut_legacy` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_outlook_narrate_margin` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_board_div_min` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_board_min_divergent` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_value_scale` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_crunch_scale` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_fit_outlook` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_fit_new_weakness` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_fit_duplicate` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_value_giving` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_value_giving_consensus` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_other_player_keep` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_floor_roster_crunch` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_fit_outlook` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_fit_new_weakness` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_fit_duplicate` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_value_giving` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_other_player_keep` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+| `breaker_narrate_roster_crunch` | counterparty breaker, 2026-08-21 | Evaluation-layer knob for `backend/trade_breaker.py`, a module no generator or ranker imports; it runs after the deck-mutation stack completes and mutates only a new card attribute; no effect on MODEL_A_PROFILE output. |
+
 **R4 (#336 windowless awaiting/matched exclusion) has no knob** — the
 `trade.presentment_rules` flag is its only switch, and flipping that flag
 would disable R4 for arms B and C and for every other user of the process.

@@ -208,5 +208,7 @@
   "trade.bakeoff": true,
   "trades.presentation_v2": false,
   "trade.position_tiers": true,
-  "trade.rb_handcuff": true
+  "trade.rb_handcuff": true,
+  "trade.breaker": false,
+  "trade.breaker_narrative": false
 }

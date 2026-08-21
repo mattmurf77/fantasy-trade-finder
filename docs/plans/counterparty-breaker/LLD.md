@@ -544,7 +544,8 @@ Template table (exact v1 wording — PRD may polish, `tmpl_ver` bumps if it does
 | `fit_new_weakness` | `"Their likely hesitation: giving up {name} may leave them thin at {pos}."` |
 | `fit_duplicate` | `"Their likely hesitation: they're already deep at {pos}, so {name} may not move their lineup."` |
 | `value_giving` (consensus basis only) | `"Their likely hesitation: by consensus value they'd likely see this as giving up more than they get."` |
-| `roster_crunch` | `"Their likely hesitation: taking back {extra} more players than they send is a roster squeeze."` |
+| `roster_crunch` (extra ≥ 2) | `"Their likely hesitation: taking back {extra} more players than they send is a roster squeeze."` |
+| `roster_crunch.one` (extra == 1) | `"Their likely hesitation: taking back 1 more player than they send is a roster squeeze."` *(build-time wording fix — the single-template form rendered "1 more players"; added pre-first-ship, `tmpl_ver` unchanged at `brt-1` since no stamp was ever written)* |
 | `other_player_keep` | — none. Permanently dark in v1 (D-6); `hesitation_line` returns None for it unconditionally |
 
 Copy rules (HLD §5.2) audited per template: roster/observable claims only, hedged modality

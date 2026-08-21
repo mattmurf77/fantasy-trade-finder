@@ -35,6 +35,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Three-model bake-off (2026-08-18, ships **OFF**)](#flags-three-model-bake-off-2026-08-18-ships-off)
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
+- [Flags — Counterparty breaker (2026-08-21, ships **OFF**)](#flags-counterparty-breaker-2026-08-21-ships-off)
 - [Analytics events — Guided Onboarding v2 addendum (2026-08-15)](#analytics-events-guided-onboarding-v2-addendum-2026-08-15)
 - [`model_config` keys](#model_config-keys)
   - [Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))](#analytics-platform-p0-adr-007)
@@ -63,6 +64,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
   - [Draft-pick year decay (D-079) — `pick_values.py`, DB-seeded](#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
+  - [Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
 ---
@@ -505,6 +507,21 @@ Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md
 | `growth.invite_join_link` | **false** | **Emitter only.** ON: `mobile/src/utils/deepLinks.ts` `buildInviteUrl` emits `/app/league/join/<league_id>?ref=<username>`. OFF (default): today's `/?league=<id>&ref=<username>`. **It never gates the reader, the route, or the claim** — the `?league=` parser, the `LeagueJoin` mobile route, the server 302 at `GET /app/league/join/<id>` and the AASA `/app/league/join/*` claim are all **unflagged** and ship ahead of it. **Why the ordering is inverted from the usual pattern:** Apple caches `/.well-known/apple-app-site-association` on its own CDN for up to ~24 h, so a build that emitted the new URL before the claim propagated would open every invite in Safari — strictly worse than the legacy URL. Parsers-first also means links shared *before* this build keep working forever. **Graduation criteria (all three):** (1) the live AASA validates externally and lists `/app/league/join/*`, (2) ≥24 h of CDN propagation has elapsed since that deploy, (3) a TestFlight build installed *after* that deploy demonstrably opens the app on a tapped `/app/league/join/…` link. Procedure: [runbook § Universal Links AASA](runbook.md#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02). **Rollback = flip back to false**; the legacy URL is parsed forever by both clients, so nothing already in the wild breaks. `buildInviteUrl` reads the flag **imperatively** (`useFeatureFlags.getState()`) so multiple call sites cannot drift. |
 
 **No other P0 finding added a flag.** P0-1, P0-2, P0-5, P0-6, P0-7 and P0-8/9 ship unflagged by design — for P0-1 and P0-2 a flag's OFF position would be the known bug, which is not a rollback lever worth shipping. Rollback for those is `git revert` of the named commit; the levers are enumerated per finding in each PRD's *Rollback* section.
+
+---
+
+## Flags — Counterparty breaker (2026-08-21, ships **OFF**)
+
+Plan + doc suite: [docs/plans/counterparty-breaker/](plans/counterparty-breaker/) (PLAN · PRD · HLD · LLD · [scope](plans/counterparty-breaker/scope.md)). Two flags, both default **false**; the second **requires** the first. The 25 `breaker_*` `model_config` knobs are [below](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.breaker` | **false** | **Compute + stamp only.** ON ⇒ `backend/trade_breaker.py` scores the counterparty's likely objection across six classes (`fit_outlook`, `fit_new_weakness`, `fit_duplicate`, `value_giving`, `other_player_keep`, `roster_crunch`) and stamps a `breaker` attribute on every card, copied into `deck_impressions.features_json` at impression-log time. The key is present — null-valued when unscored — on **every** row of a deck, because `save_deck_impressions` takes its column set from the first row of the executemany (precedent guard `test_impressions_uniform_columns`). This is an **evaluation layer, not generation**: it runs after the whole deck-mutation stack completes, no generator or ranker imports it, and it cannot change deck order or composition — which is why the 25 knobs are excluded from `MODEL_A_PROFILE` ([scope-phase2.md](plans/three-model-bakeoff/scope-phase2.md)). Objection codes reuse the shipped `trade_pass_reasons` vocabulary, so "predicted objection" vs "actual pass reason filed" is a direct join with no new instrumentation. OFF (default) ⇒ the module is never imported (`sys.modules` check), no card attribute, no `features_json` key, no payload key, no publish-count change — rows and payloads byte-identical to today (NFR-3, pinned by `test_flag_off_features_json_byte_identical` + `test_flag_off_payload_byte_identical`). **Graduation criterion:** stamp coverage ≥99% of served cards with no p95 job-time regression, and the calibration readout ([PLAN](plans/counterparty-breaker/PLAN.md) §6) runs once. |
+| `trade.breaker_narrative` | **false** | The on-card **"their likely hesitation"** line (`mobile/src/components/TradeCard.tsx`; web and extension ignore the key in v1). ON ⇒ the server composes the sentence and `trade_card_to_dict` serializes `breaker` **only for narrated cards**, so payload presence IS the client gate — the client never re-checks a flag and never switches on the objection code. **Requires `trade.breaker`:** the narration call sits inside the `FLAGS.trade_breaker` block, so lighting this one alone does nothing; the requires-relationship is structural, not checked twice. Narration is additionally gated per class by the `breaker_narrate_*` switches (all default 0) and globally by `breaker_min_severity`. **Graduation criterion:** operator TestFlight pass + the A/B readout in [PLAN](plans/counterparty-breaker/PLAN.md) §6. |
+
+**Rollback ladder** (LLD §6), bluntest last: `trade.breaker_narrative` → false (hot reload) → `breaker_min_severity` = 1.1 or a per-class `breaker_narrate_*` switch to 0 (`scripts/set_knob.py`, logged in `model_config_changes`) → `trade.breaker` → false (compute gone, key gone) → revert commit. Nothing persisted needs cleanup: old `features_json.breaker` blobs are version-stamped inert serve-time facts — never re-stamped, never backfilled.
+
+**Product outcome 1 (filter/demote) is v2 and is NOT flagged here.** It changes deck composition and gets its own scope block if the operator elects it.
 
 ---
 
@@ -1124,6 +1141,42 @@ Semantics, as implemented:
 The CPU **candidate window** `K` (`mock_draft_service.MOCK_CANDIDATE_WINDOW`) is *not* a `model_config` key either, and since W2e it is a **performance bound only** — the width of the pool head a CPU scans, so the scan is `O(K)` rather than `O(pool)`. W2d found that at `K = 12` it was doubling as the *binding* support bound ([08d §6](plans/draft-extensions/mock-calibration-2026-08d.md)); W2e replaced it in that role with the round tier above and widened it **12 → 24**, comfortably clear of the deepest round cap (15, needing 16 candidates), so it never binds the distribution at any round. Pinned by `test_w2_04b_the_candidate_window_is_never_the_binding_constraint`.
 
 The persona weight itself is **not** a new key — it is `outlook_alpha(persona_outlook)`, the existing `outlook_alpha_*` map above, reused verbatim.
+
+### Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded
+
+Twenty-five keys, consumed **only** by `backend/trade_breaker.py` — an **evaluation-layer** module that no generator and no ranker imports, running after the deck-mutation stack completes and mutating only a new card attribute. All read through `trade_service._c` into the per-job config snapshot ([LLD](plans/counterparty-breaker/LLD.md) §3.0), so thread-local overrides, `reload_config()` and the run snapshot all work; all inert while `trade.breaker` is off. Every operator change goes through `scripts/set_knob.py` so it lands in `model_config_changes`. Full table + count derivation: [LLD](plans/counterparty-breaker/LLD.md) §4; arm-A dispositions: [scope-phase2.md](plans/three-model-bakeoff/scope-phase2.md).
+
+**`waiver_slot_cost` is reused, not re-registered.** The breaker prices roster slots with the existing engine knob (`_SHARED_ENGINE_KNOB_KEYS`, LLD §1.1); it is documented under the trade-engine v2 section above and is not one of the 25.
+
+**Severity-curve constants are deliberately NOT knobs** — the lean window, the slack table, the duplicate weights, the keep severities and `TIEBREAK_PRIORITY` are `BREAKER_VERSION`-pinned semantics (LLD §4, ruled M-6). Re-levelling across classes is what the floor knobs are for.
+
+| Key | Default | Disable | Role |
+|---|---|---:|---|
+| `breaker_ms_budget` | 250.0 | `0` | Per-deck evaluation budget, ms. `0` ⇒ evaluation off and every card stamps the minimal marker (LLD §3.9) |
+| `breaker_budget_checkpoint_frac` | 0.6 | `1.0` | Fraction of the budget at which pass 2 is dropped **whole** — the deck-uniform checkpoint (§3.9), never a half-run pass |
+| `breaker_degraded_share_max` | 0.05 | `1.0` | Graduation criterion, not a runtime gate: max share of rung-1..3 degraded rows the readout tolerates (NFR-6) |
+| `breaker_min_severity` | 0.60 | `1.1` | Global narration bar, applied **over** the per-class floors. `1.1` silences every class at once — the first knob-level rollback rung |
+| `breaker_max_repeat_frac` | 0.34 | `1.0` | Per-`(partner, code)` narration share above which repetition suppression keeps only the top card (§3.8) |
+| `breaker_shadow_run` | 1.0 | `0` | Viewer-seat shadow evaluation (operator decision 5). `0` ⇒ `breaker_shadow` is null everywhere |
+| `breaker_outlook_haircut_legacy` | 0.70 | `1.0` | Severity multiplier on `fit_outlook` when `outlook_src = "legacy"` (D-8) — a legacy window is a weaker claim about the partner |
+| `breaker_outlook_narrate_margin` | 0.06 | `99` | Inferred-window score margin over the crossed cut required to **narrate** `fit_outlook`. The stamp bar is unchanged: this raises only the bar for saying it out loud |
+| `breaker_board_div_min` | 25.0 | — | Elo divergence from seed for a board row to count as "divergent" (F-3). **The board-authenticity thresholds ARE knobs (above) but their *semantics* are version-pinned: calibration must not chase a moving authenticity definition, so a threshold change worth making is a `ver`-bump conversation first.** |
+| `breaker_board_min_divergent` | 10.0 | `0` | Divergent rows required for `board_auth = "board"`; below it the board is `board_suspect` and `value_giving` falls to the consensus basis. **The board-authenticity thresholds ARE knobs (above) but their *semantics* are version-pinned: calibration must not chase a moving authenticity definition, so a threshold change worth making is a `ver`-bump conversation first.** |
+| `breaker_value_scale` | 400.0 | `1e9` | Their-seat negative margin that maps `value_giving` severity to 1.0 |
+| `breaker_crunch_scale` | 850.0 | `1e9` | Slot-cost total that maps `roster_crunch` severity to 1.0 |
+| `breaker_floor_fit_outlook` | 0.35 | `1.1` | Top-selection floor. **Floors shape the stamp distribution, never narration policy** (D-6) — narration is the `breaker_narrate_*` switches plus `breaker_min_severity` |
+| `breaker_floor_fit_new_weakness` | 0.30 | `1.1` | 〃 |
+| `breaker_floor_fit_duplicate` | 0.30 | `1.1` | 〃 |
+| `breaker_floor_value_giving` | 0.30 | `1.1` | `value_giving` floor on the **board** basis |
+| `breaker_floor_value_giving_consensus` | 0.75 | `1.1` | `value_giving` floor on the **consensus** basis — materially higher on purpose (D-7: at the board floor the consensus basis fires on 86.3% of cards, a near-tautology) |
+| `breaker_floor_other_player_keep` | 0.50 | `1.1` | 〃 |
+| `breaker_floor_roster_crunch` | 0.40 | `1.1` | 〃 |
+| `breaker_narrate_fit_outlook` | 0.0 | `0` | Per-class narration switch. **All six default 0** (D-6 maturity ladder): graduation is an operator `set_knob` flip, logged in `model_config_changes`, never a build-time default |
+| `breaker_narrate_fit_new_weakness` | 0.0 | `0` | 〃 |
+| `breaker_narrate_fit_duplicate` | 0.0 | `0` | 〃 |
+| `breaker_narrate_value_giving` | 0.0 | `0` | 〃 — governs the **consensus** basis only; the board basis is ineligible for narration outright (D-7) |
+| `breaker_narrate_other_player_keep` | 0.0 | `0` | Registered for symmetry only. **The D-6 whitelist blocks this class even at 1 — flipping it alone renders nothing.** Graduating it needs a whitelist change, which is a `ver` bump |
+| `breaker_narrate_roster_crunch` | 0.0 | `0` | 〃 — the new-logic class, last to graduate (HLD §2.7) |
 
 ---
 

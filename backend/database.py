@@ -2436,6 +2436,37 @@ _MODEL_CONFIG_DEFAULTS = [
     ("ghost_holdout_one_in",       10.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
+    # ── Counterparty-breaker knobs (docs/plans/counterparty-breaker/LLD.md §4) ─
+    # All 25 seeded here so `set_config` / PUT /api/admin/config never KeyError
+    # on them and the LLD §6 rollback ladder is real rather than theater.
+    # Consumed by backend/trade_breaker.py, which runs AFTER generation and
+    # ranking; no generator or ranker imports it. `waiver_slot_cost` above is
+    # reused by the breaker and is NOT part of the 25.
+    ("breaker_ms_budget",                   250.0, "breaker: per-deck eval budget ms; 0 disables (minimal markers)"),
+    ("breaker_budget_checkpoint_frac",        0.6, "breaker: budget fraction at which pass 2 is dropped whole; 1.0 disables"),
+    ("breaker_degraded_share_max",           0.05, "breaker: graduation bar — max share of degraded (rung 1-3) rows; 1.0 off"),
+    ("breaker_min_severity",                 0.60, "breaker: global narration bar over the per-class floors; 1.1 silences all"),
+    ("breaker_max_repeat_frac",              0.34, "breaker: per-(partner,code) narration share cap before suppression; 1.0 off"),
+    ("breaker_shadow_run",                    1.0, "breaker: 1 = viewer-seat shadow eval; 0 = breaker_shadow null everywhere"),
+    ("breaker_outlook_haircut_legacy",       0.70, "breaker: fit_outlook severity multiplier when outlook_src='legacy'; 1.0 none"),
+    ("breaker_outlook_narrate_margin",       0.06, "breaker: inferred-window margin over the cut required to NARRATE fit_outlook"),
+    ("breaker_board_div_min",                25.0, "breaker: Elo divergence from seed for a board row to count as divergent"),
+    ("breaker_board_min_divergent",          10.0, "breaker: divergent rows needed for board_auth='board'; below ⇒ board_suspect"),
+    ("breaker_value_scale",                 400.0, "breaker: their-seat negative margin mapping value_giving severity to 1.0"),
+    ("breaker_crunch_scale",                850.0, "breaker: slot-cost total mapping roster_crunch severity to 1.0"),
+    ("breaker_floor_fit_outlook",            0.35, "breaker: top-selection floor for fit_outlook; 1.1 removes it from selection"),
+    ("breaker_floor_fit_new_weakness",       0.30, "breaker: top-selection floor for fit_new_weakness; 1.1 removes it"),
+    ("breaker_floor_fit_duplicate",          0.30, "breaker: top-selection floor for fit_duplicate; 1.1 removes it"),
+    ("breaker_floor_value_giving",           0.30, "breaker: value_giving floor on the BOARD basis; 1.1 removes it"),
+    ("breaker_floor_value_giving_consensus", 0.75, "breaker: value_giving floor on the CONSENSUS basis (higher — D-7); 1.1 off"),
+    ("breaker_floor_other_player_keep",      0.50, "breaker: top-selection floor for other_player_keep; 1.1 removes it"),
+    ("breaker_floor_roster_crunch",          0.40, "breaker: top-selection floor for roster_crunch; 1.1 removes it"),
+    ("breaker_narrate_fit_outlook",           0.0, "breaker: 1 = fit_outlook may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_fit_new_weakness",      0.0, "breaker: 1 = fit_new_weakness may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_fit_duplicate",         0.0, "breaker: 1 = fit_duplicate may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_value_giving",          0.0, "breaker: 1 = value_giving may narrate (CONSENSUS basis only — D-7); 0 = off"),
+    ("breaker_narrate_other_player_keep",     0.0, "breaker: symmetry only — the D-6 whitelist blocks this class even at 1"),
+    ("breaker_narrate_roster_crunch",         0.0, "breaker: 1 = roster_crunch may narrate; 0 (default) = stamp only"),
 ]
 
 
