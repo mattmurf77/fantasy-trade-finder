@@ -33,6 +33,7 @@
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
+- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
 
 ---
 
@@ -464,3 +465,33 @@ conventions for any future layer that **predicts something a user will later tel
   the T1 discipline, sabotage-proven. And any layer that values assets outside the generator pins the
   ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
   a silent dependency on whoever ran before you.
+
+## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)
+
+The operator deleted a setting — pick pricing — rather than changing its default. This repo had **no
+precedent for retiring a route**: `git grep "410" backend/server.py` returned nothing before this change.
+The shape chosen, and the reasoning, so the next one does not have to re-derive it:
+
+- **The write verb answers 410 Gone, not 404.** A 404 is what the route already meant last week (it 404d
+  while its flag was dark), so reusing it says "wrong URL / not deployed yet" to a client that is actually
+  looking at a resource that existed and was deliberately withdrawn. The body names the replacement state
+  (`{error: "gone", message, mode}`), so a human reading a log learns the answer without opening the code.
+  Body validation is **removed, not kept**: a once-valid mode and a garbage mode get the same 410, because
+  there is nothing left to validate against and a 400 would imply some body would work.
+- **The read verb keeps answering, with the FIXED state — never the stored column.** Builds in the field
+  still call GET on screen open. Serving `{mode: "market_slots", retired: true}` makes an old build render
+  the honest answer; serving the dead `users.pick_pricing_mode` would tell it the setting still means
+  something, and 404ing would make the shipped client hide the control as though the feature were dark.
+  The extra `retired: true` key is additive and costs an old client nothing.
+- **Auth posture does not change.** Retirement is not a reason to make a route public; `_require_session()`
+  still runs first on both verbs, so a caller without a session still gets 401 before it gets 410.
+- **The column is not dropped, and the flag is not deleted.** Additive-schema rule for the column
+  (`users.pick_pricing_mode` becomes dead data); for the flag, `trade.slot_pricing` stays in `FLAG_KEYS` at
+  `true` and is simply never read — deleting it would force a six-file change to satisfy
+  `test_release_flags_mirror_features_json`, make the key vanish from `/api/feature-flags` for shipped
+  builds, and reinterpret any stored override row as an unknown key.
+- **The client is deleted, not flag-hidden.** The Settings row, its state, its fetch, its optimistic PUT and
+  its analytics emitter all go. What stays behind is an **absence assertion** in the structural suite
+  (`check-settings-testids.js` `DELETED_PREFIXES`), so a well-meaning revert that re-adds the control fails
+  loudly instead of quietly restoring a setting the operator removed. The analytics EVENT stays registered
+  in the taxonomy so historical rows remain queryable — retire the emitter, never the name.

@@ -288,42 +288,55 @@ def pick_pool_value(round_: int, years_out: int,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# M6b — market slot pricing (`trade.slot_pricing`, plan operator decision O2)
+# Market pick pricing — THE SHIPPED PRICE since 2026-08-21 (D-144)
 # ═══════════════════════════════════════════════════════════════════════════
+#
+# Built as M6b behind the per-user toggle `pick_pricing_mode` and the flag
+# `trade.slot_pricing` (plan operator decision O2). The **2026-08-21 operator
+# ruling** removed both — *"Market slots should be default and not an opt-in or
+# even an option to flip. Aligned that future picks stay default for now."* —
+# so this is now the ONLY price an owned pick can get. See
+# `trade_service.pick_pricing_mode_for_user`, which is where the ruling lives.
 #
 # ⚠️  LLD/HLD-vs-OPERATOR CONFLICT, stated where the code lives.
 # `hld.md` KD-9 and `lld.md` §4.7 record engine adoption of DynastyProcess
 # slot values as **rejected** ("display-only"). Both predate the
 # **Operator decisions — 2026-08-06** block at the bottom of
-# `docs/plans/rookie-draft/plan.md`. Decision **O2 REVERSES them**: market
-# slot values DO go into the trade engine, behind a #214-style per-user
-# toggle, in this wave (M6b). Where those documents and the operator block
-# disagree, the operator block wins. The same conflict is called out in
-# `backend/data_loader.py`'s M6 section header and in
-# `docs/plans/rookie-draft/build-m6b.md` §"LLD/HLD vs O2".
+# `docs/plans/rookie-draft/plan.md`. Decision **O2 REVERSED them** (engine
+# adoption, behind a toggle); the 2026-08-21 ruling went further and made it
+# unconditional. Where those documents and the operator rulings disagree, the
+# rulings win. The same conflict is called out in `backend/data_loader.py`'s
+# M6 section header and in `docs/plans/rookie-draft/build-m6b.md`.
 #
 # WHAT THIS DOES NOT TOUCH — deliberately, and this is load-bearing:
 #
-#   * `GENERIC_PICK_SEEDS` is byte-unchanged in EVERY mode. The 12 generic
-#     rungs are RANKABLE POOL ASSETS (users swipe them in matchups; their
-#     seed Elo anchors tier colours) and tier bands are ABSOLUTE Elo mirrored
-#     across five clients (docs/cross-client-invariants.md). Repricing the
-#     rungs would repaint tier colours everywhere and move a shared,
-#     process-global pool for a PER-USER setting. Generic rungs also never
-#     appear on a roster, so they are not tradeable assets — they reach a
-#     trade only through the manual calculator, where the user's own board
-#     Elo already prices them.
+#   * `GENERIC_PICK_SEEDS` is byte-unchanged. The 12 generic rungs are
+#     RANKABLE POOL ASSETS (users swipe them in matchups; their seed Elo
+#     anchors tier colours) and tier bands are ABSOLUTE Elo mirrored across
+#     five clients (docs/cross-client-invariants.md). Repricing the rungs
+#     would repaint tier colours everywhere from a shared, process-global
+#     pool. Generic rungs also never appear on a roster, so they are not
+#     tradeable assets — they reach a trade only through the manual
+#     calculator, where the user's own board Elo already prices them.
+#     (Owned-pick BADGES do move: a badge reflects the SERVED value, D-320-2,
+#     and the served value moved. The BANDS themselves did not.)
 #
 #   * `draft_picks.pool_value` rows are never rewritten. That column is
 #     persisted by a league-wide sync path and SHARED by every user of the
-#     league; a per-user pricing mode that rewrote it would silently reprice
-#     everyone else. The mode is resolved and applied at READ time, in the
-#     request/job that prices the pick — see `priced_pool_value`.
+#     league. Pricing is applied at READ time, in the request/job that prices
+#     the pick — see `priced_pool_value`. Keeping it read-time is also what
+#     leaves the ladder recoverable as a harness axis.
 #
-# WHAT IT DOES: under `market_slots`, an owned pick's engine value comes from
-# DynastyProcess's published market curve for that pick's ABSOLUTE season and
-# round, instead of from `pick_pool_value`'s "Mid rung of the round, discounted
+# WHAT IT DOES: an owned pick's engine value comes from DynastyProcess's
+# published market curve for that pick's ABSOLUTE season and round, instead of
+# from `pick_pool_value`'s "Mid rung of the round, discounted
 # YEAR_DISCOUNT ** years_out".
+#
+# ROUND-LEVEL, NOT PER-SLOT. Read `UNKNOWN_SLOT_BASIS` below before assuming
+# otherwise: a 2026 1st prices at the value-space mean of slots 1.05–1.08, the
+# same number whether it is the 1.01 or the 1.12. D-090 resolves the real slot
+# and it drives the LABEL only. True-slot pricing is the remaining, unbuilt
+# half of Q-023.
 #
 # Keying off the absolute season (not years_out) is intentional: DP publishes
 # a distinct price per season, which already embeds the market's own time
@@ -332,7 +345,7 @@ def pick_pool_value(round_: int, years_out: int,
 # would silently shift every pick a year closer.
 
 PICK_PRICING_MODES = ("tier_ladder", "market_slots")
-PICK_PRICING_DEFAULT = "tier_ladder"        # today's behaviour, exactly
+PICK_PRICING_DEFAULT = "market_slots"       # the shipped, only-reachable price
 
 # DP publishes rounds 1–5. Our ladder stops at 4; deeper rounds clamp.
 _MARKET_MAX_ROUND = 5
@@ -459,18 +472,23 @@ def market_pick_pool_value(season: int, round_: int,
 
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
                       mode: str | None = None) -> float:
-    """The engine value of ONE owned-pick row under the caller's pricing mode.
+    """The engine value of ONE owned-pick row.
 
     THE read-time seam. `row` is a `draft_picks` row as `load_draft_picks`
     returns it; it is never mutated and never written back.
 
-    * `tier_ladder` (default) → `float(row["pool_value"] or 0.0)`, i.e. the
-      stored value, byte-identical to today. No DP read is attempted at all.
-    * `market_slots` → `market_pick_pool_value(season, round)`, falling back to
-      the stored value when DP has no price.
+    * `market_slots` (**the default and the only mode production reaches**
+      since the 2026-08-21 ruling) → `market_pick_pool_value(season, round)`,
+      **falling back to the stored ladder value when DP has no price**. That
+      fallback is now the whole safety net: DP unreachable, or a season DP
+      does not publish and cannot extrapolate to, silently yields today's
+      ladder price rather than a wrong number or an error.
+    * `tier_ladder` (harness/test axis only) → `float(row["pool_value"] or
+      0.0)`, the stored value verbatim. No DP read is attempted at all.
 
     `mode=None` resolves the thread-local pin (`trade_service`), so a caller
-    that has already entered `pick_pricing_override(...)` need not thread it.
+    that has already entered `pick_pricing_override(...)` need not thread it;
+    an unpinned thread resolves to `market_slots`.
     """
     if mode is None:
         from .trade_service import current_pick_pricing_mode

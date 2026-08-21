@@ -827,7 +827,7 @@ g_universal_seed: dict[str, float] = {}
 from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
-    priced_pool_value,          # M6b read-time pricing seam (flag trade.slot_pricing)
+    priced_pool_value,          # read-time market pricing seam (D-144)
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -7630,53 +7630,52 @@ def stud_tax_setting_route():
 
 @app.route("/api/settings/pick-pricing", methods=["GET", "PUT"])
 def pick_pricing_setting_route():
-    """GET/PUT /api/settings/pick-pricing — M6b per-user pick-pricing mode.
+    """GET/PUT /api/settings/pick-pricing — **RETIRED 2026-08-21** (D-144).
 
-    GET → {"mode": "tier_ladder"|"market_slots"} (stored setting;
-    'tier_ladder' — TODAY'S BEHAVIOUR — is the default). PUT persists it.
-    Sibling of /api/settings/stud-tax in every respect except one: this route
-    is FLAG-GATED. `trade.slot_pricing` off ⇒ 404 on both verbs, so the mode
-    cannot even be stored while the repricing is dark.
+    The operator ruling — *"Market slots should be default and not an opt-in or
+    even an option to flip"* — deleted the setting this route managed. Pick
+    pricing is now `market_slots` for everybody, resolved in
+    `trade_service.pick_pricing_mode_for_user` with no DB read.
 
-    Unlike #214/#215 — which shipped its retuned mode as the DEFAULT — the
-    market mode here is opt-in. Operator decision O2 authorises the toggle and
-    the calibration, not a change to what today's users are charged for picks.
+    WHY THE ROUTE SURVIVES AT ALL, in two different shapes:
+
+    * **GET → 200 `{"mode": "market_slots", "retired": true}`.** Build 12x
+      clients in the field still call this on Settings open. They 404'd
+      gracefully while the flag was dark, but the shipped mobile build that
+      DOES render the control reads `{mode}` and selects the matching pill —
+      so serving the true fixed state makes an old build show the honest
+      answer ("Market", selected) instead of a stale default. The stored
+      `users.pick_pricing_mode` column is deliberately NOT read: it is dead
+      data, and echoing it back would tell an old client the setting still
+      means something.
+    * **PUT → 410 Gone.** The correct code for a resource that existed and was
+      deliberately withdrawn — a 404 would read as "wrong URL / not deployed
+      yet", which is what it meant last week. There is no precedent for a
+      retired route in this codebase (grep: zero 410s before this one), so
+      this is the precedent: retire a write verb with 410 and a body naming
+      the replacement, keep the read verb serving the fixed state for old
+      clients. The shipped mobile catch-block turns this into a non-fatal
+      "Could not save the pick pricing setting" warn toast and reverts the
+      pill — no crash, no data loss (there is no data left to lose).
+
+    The PUT no longer runs `_verified_write_denial`. That is deliberate, not
+    an oversight: the denial existed to stop an unverified account writing a
+    setting, and nothing is written any more. An unverified caller now gets
+    the same 410 as everyone else, which is the more honest answer than "you
+    are not allowed to do this" about a thing nobody is allowed to do.
+
+    `pick_pricing_mode_changed` is no longer emitted; the event stays
+    registered in `analytics_taxonomy` so historical rows remain queryable.
     """
-    if not is_enabled("trade.slot_pricing"):
-        return jsonify({"error": "not_found"}), 404
-    from .database import (get_pick_pricing_mode, set_pick_pricing_mode,
-                           PICK_PRICING_MODES)
-    sess = _require_session()
-    g_user_id = sess["user_id"]
+    _require_session()          # unchanged auth posture: 401 before anything
     if request.method == "GET":
-        try:
-            return jsonify({"mode": get_pick_pricing_mode(g_user_id)})
-        except Exception as e:
-            log.error("pick-pricing read failed for %s: %s", g_user_id, e)
-            return jsonify({"error": "internal_error"}), 500
-    denial = _verified_write_denial(sess)
-    if denial is not None:
-        return denial
-    body = request.get_json(silent=True) or {}
-    mode = body.get("mode", "")
-    if mode not in PICK_PRICING_MODES:
-        return jsonify({"error": f"Invalid mode: {mode!r}"}), 400
-    try:
-        set_pick_pricing_mode(g_user_id, mode)
-        log.info("pick-pricing mode set for %s: %s", g_user_id, mode)
-        try:
-            record_event(
-                g_user_id, "pick_pricing_mode_changed",
-                league_id=getattr(sess.get("league"), "league_id", None),
-                source="api", props={"mode": mode},
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(pick_pricing_mode_changed) failed: %s", ev_err)
-        return jsonify({"ok": True, "mode": mode})
-    except Exception as e:
-        log.error("pick-pricing write failed for %s: %s", g_user_id, e)
-        return jsonify({"error": "internal_error"}), 500
+        return jsonify({"mode": "market_slots", "retired": True})
+    return jsonify({
+        "error": "gone",
+        "message": ("Pick pricing is no longer configurable — every pick "
+                    "prices off the dynasty market curve."),
+        "mode": "market_slots",
+    }), 410
 
 
 @app.route("/api/scoring/switch", methods=["POST"])
@@ -9697,15 +9696,12 @@ def trade_evaluate_route():
         _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
         _mode = (_trade_service_mod.stud_tax_mode_for_user(_sess_for_mode.get("user_id"))
                  if _sess_for_mode else _trade_service_mod.STUD_TAX_DEFAULT)
-    # M6b — the pick-pricing mode rides the same request-scoped pin. Resolved
-    # from the same (optional) session: Mode A stays public, and an anonymous
-    # caller gets the 'tier_ladder' default. An outer pin wins, as above.
-    _pp_mode = _trade_service_mod.pinned_pick_pricing_mode()
-    if _pp_mode is None:
-        if _sess_for_mode is None:
-            _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
-        _pp_mode = _trade_service_mod.pick_pricing_mode_for_user(
-            _sess_for_mode.get("user_id") if _sess_for_mode else None)
+    # Pick pricing rides the same request-scoped pin, but since the 2026-08-21
+    # ruling (D-144) it has nothing to resolve: `market_slots` for everybody,
+    # signed-in or anonymous, so no session lookup happens on its account. An
+    # outer pin still wins — that is the bake-off/test seam, never a user.
+    _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
+                or _trade_service_mod.pick_pricing_mode_for_user(None))
     with _trade_service_mod.stud_tax_override(_mode), \
             _trade_service_mod.pick_pricing_override(_pp_mode):
         return _trade_evaluate_impl(_mode)
@@ -9760,11 +9756,12 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # (already in elo_to_value units, so it composes directly with player
         # values). Generic picks (generic_pick_*) still resolve via `seed`.
         #
-        # M6b — the price is resolved at READ time under the caller's
-        # pick-pricing mode (pinned for this request by trade_evaluate_route,
-        # alongside the #215 stud-tax pin). `tier_ladder` (default, and the
-        # only reachable mode while `trade.slot_pricing` is off) returns the
-        # stored pool_value unchanged. The stored column is never written.
+        # The price is resolved at READ time under the pricing mode pinned for
+        # this request by trade_evaluate_route, alongside the #215 stud-tax
+        # pin. Since D-144 that is always `market_slots`: the DP market curve
+        # for the pick's absolute season+round, fail-softing to the stored
+        # ladder value when DP publishes no price. The stored column is never
+        # written — pricing is read-time in every mode.
         #
         # W3 M-C (S1) — the read opts into asserted rows behind
         # `picks.assign_tradeable`, and each priced pick entry carries its
@@ -10730,19 +10727,19 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     primed with these picks via _pick_asset_elos (see _inject_owned_picks) or
     every pick silently defaults to Elo 1500.
 
-    **M6b (flag `trade.slot_pricing`, operator decision O2)** — the price is
-    resolved HERE, at read time, through `pick_values.priced_pool_value` under
-    the thread-local pricing mode. The stored `draft_picks.pool_value` column
-    is NEVER rewritten: it is written by a league-wide sync path and shared by
-    every user of the league, so a per-user mode that rewrote it would
-    silently reprice the user's leaguemates. Under the default `tier_ladder`
-    mode `priced_pool_value` returns the stored value unchanged and no
-    DynastyProcess read is attempted, so this call is a no-op.
+    **Pricing (D-144, 2026-08-21)** — the price is resolved HERE, at read
+    time, through `pick_values.priced_pool_value` under the thread-local
+    pricing mode, which is now always `market_slots`. The stored
+    `draft_picks.pool_value` column is NEVER rewritten: it is written by a
+    league-wide sync path and shared by every user of the league, and keeping
+    pricing read-time is what leaves the legacy ladder available as a harness
+    axis. This call is no longer a no-op — it reaches DynastyProcess's cached
+    pick curve (24 h TTL, fail-soft to `{}`) on the first pick of a request.
 
     The cap is applied AFTER pricing (sort key is the priced value), because
-    `market_slots` re-shapes the curve — a 2029 3rd and a 2026 1st do not keep
-    their relative order across the two modes, and capping on the stale order
-    would inject a different top-N than the one the engine then prices.
+    the market curve re-shapes the ladder — a 2029 3rd and a 2026 1st do not
+    keep their relative order across the two curves, and capping on the stale
+    order would inject a different top-N than the one the engine then prices.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
@@ -10828,13 +10825,15 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     job-local COPY when picks were injected, so the session's shared
     service._seed is never polluted with pick ids.
 
-    **M6b** — this is the pricing-mode entry point for BOTH pick-bearing
-    engine lanes (the /api/trades/generate job and /api/trades/asset-ideas):
-    the deck owner's `pick_pricing_mode` is resolved once and pinned for the
-    whole injection, exactly as #215 pins the stud-tax mode. An already-active
-    outer pin wins (tests and the M6b matrix/deck harnesses pin around a whole
-    job). Flag off ⇒ `pick_pricing_mode_for_user` returns 'tier_ladder'
-    without a DB read and every price below is today's stored value.
+    **Pricing pin (D-144)** — this is the pricing entry point for BOTH
+    pick-bearing engine lanes (the /api/trades/generate job and
+    /api/trades/asset-ideas). The mode is pinned once for the whole injection,
+    exactly as #215 pins the stud-tax mode, so every pick in one deck is
+    priced off one curve. Since the 2026-08-21 ruling there is nothing
+    per-user to resolve — `market_slots` for everybody, `user_id` unread on
+    this account — but the pin stays, because an already-active outer pin
+    (the bake-off/deck harnesses, and the M6b regression tests) must still be
+    able to price a whole job on the legacy ladder.
     """
     _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
                 or _trade_service_mod.pick_pricing_mode_for_user(user_id))

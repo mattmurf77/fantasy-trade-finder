@@ -3,16 +3,21 @@
 // Implements plan §3 (`SettingsTradeValues` row of the page table). Composes
 // one Phase-0 section module:
 //
-//   • TradeValuesSection — the stud-tax segmented control (#214/#215) and the
-//     pick-pricing segmented control (flag `trade.slot_pricing`), each with the
-//     sub copy describing the active choice.
+//   • TradeValuesSection — the stud-tax segmented control (#214/#215), with
+//     the sub copy describing the active choice.
+//
+// The pick-pricing segmented control was the second control on this page until
+// 2026-08-21 (D-144), when the operator made market pick pricing
+// unconditional: *"Market slots should be default and not an opt-in or even an
+// option to flip."* It is deleted, not flag-hidden, so this page now hosts a
+// single control. Leaving the page in place is deliberate — it is a
+// second-level destination the hub links to, and the stud tax still earns it.
 //
 // BANNER: owned by TradeValuesSection itself (it renders
-// <TickLabel>Trade values</TickLabel>; pick pricing deliberately has no second
-// banner), so this page adds none.
+// <TickLabel>Trade values</TickLabel>), so this page adds none.
 //
-// Data (plan §6): this page owns getStudTaxMode() / getPickPricingMode(), both
-// fired from inside TradeValuesSection. They no longer run when Settings opens.
+// Data (plan §6): this page owns getStudTaxMode(), fired from inside
+// TradeValuesSection. It no longer runs when Settings opens.
 //
 // Finding F8 — this setting changes how every trade in the app is priced and
 // today gets one unlabelled segmented row inline. The page gives it room; the
