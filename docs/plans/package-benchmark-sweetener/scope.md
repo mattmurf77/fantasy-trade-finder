@@ -318,3 +318,14 @@ fit-premium 1-for-1 carrying a 1600 gap).
    directional; the main-vs-branch deltas are the result. The prod replay half
    (real league boards) needs prod read access and is an operator item, as it
    was for the fit W0 run.
+
+### Operator ratifications — 2026-08-22 (recorded by the coordinating session)
+
+| Item | Ruling |
+|---|---|
+| 1. Arm-A golden pinned, not re-captured | **RATIFIED "for now"** (operator: "Let's go with Y for now"). The pin stands; the deferred re-capture becomes MANDATORY if the legacy pricing path (`package_bench_trade_wide <= 0`) is ever removed — that removal must carry the re-capture in the same change. |
+| 2. Flag-off serving golden = drift-detector posture (historical parity claim retired) | **RATIFIED** ("Aligned") |
+| 3. Kill-value identity proven to 0.05 abs (not bit-for-bit) | Ratified as part of item 1 — arm-A deck-level byte-identity is the operative proof |
+| 4. Pricing discontinuity at the benchmark boundary (≤2.3%) | **ACCEPTED as-is** ("Leave it") |
+| 5. Arm C over-line regression | Ship rule recorded: the arm-C sweetener extension (separate session, in flight) rides the ship if green by merge time; otherwise `bakeoff_include_gen_v2 = 0` at ship until it lands |
+| 6. Fixture-only measurement | Prod-replay measurement running (operator approved read access) |
