@@ -106,7 +106,7 @@ There is no code coupling; the coupling is in the numbers.
 - **Surfaced, not fixed:** Power Rankings and `/api/league/picks` still show ladder prices — Q-026.
 - **No deploy-free rollback lever exists** — the ruling forbids the flag that would have been one.
   Rollback is revert + redeploy.
-- Tests: 3899 passed, 1 skipped (baseline 3897/1). All 114 golden assertions pass unedited. First
+- Tests: 3900 passed, 1 skipped (baseline 3897/1). All 114 golden assertions pass unedited. First
   `backend/tests/conftest.py` added — unconditional pricing made the suite non-hermetic against DP.
 ```
 
@@ -117,14 +117,15 @@ There is no code coupling; the coupling is in the numbers.
 
 | Gate | Result |
 |---|---|
-| `pytest backend/tests` | **3899 passed, 1 skipped** (baseline on `origin/main` bb56c59: 3897 passed, 1 skipped) |
+| `pytest backend/tests` | **3900 passed, 1 skipped** (baseline on `origin/main` bb56c59: 3897 passed, 1 skipped) |
 | `npx tsc --noEmit` (mobile) | clean |
 | `mobile/tests/check-*.js` (69 suites) | 69/69 pass |
 | `mobile/scripts/testid-lint.sh` | OK |
 | Goldens | `test_bakeoff_arm_a_golden`, `_serving`, `_challenger`, `_composition`, `test_engine_quality_golden`, `test_fairness_gate_golden`, `test_fit_congruence` — **114 assertions, zero edits, zero re-captures.** Arm A pins every input as a literal and its picks are Elo-map pseudo-assets, so it never reaches `priced_pool_value`. Verified by running the six files in isolation before any fixture was touched. |
 | Gate interactions | overpay/R1, `sweetener_gap_threshold` (1539.0), `pick_gap_ok` — all pass; no tolerance widened anywhere |
 | Fixtures moved (honestly) | `test_owned_picks.py` ×2 and `test_pick_values_in_suggestions.py` ×4 re-derived from `market_pick_pool_value` with inputs pinned as literals. One bound restated against the curve rather than a literal: a 2029 2nd/3rd gap is 93.2 on the market vs 122.8 on the ladder — a **finding**, recorded as such. |
-| Net test delta | +2 (M6b file rewritten around the inverted contract, 26 → 28; new premise test in `test_pick_values_in_suggestions`) |
+| Net test delta | **+3** (M6b file rewritten around the inverted contract, 26 → 28: T-M6B-05 pair added, two flag/column tests split from one; plus a new premise test in `test_pick_values_in_suggestions`) |
+| Known non-failure to ignore | An intermediate run showed 3 `test_trade_decision_idempotency` failures. Artifact, not a defect: those tests read `server.py` through `inspect.getsource`, and `server.py` was edited **while that run was in flight**, so `linecache` served a stale line map. They pass in isolation and in the final clean run. If you see them, check whether something rewrote a source file mid-run before investigating further. |
 | New | `backend/tests/conftest.py` — pins `FTF_DP_PICK_VALUES_FILE`. Required, not cosmetic: unconditional pricing put a live DP fetch on the suite's hot path (measured: a 2029 1st priced at 1459.4 from real network data before the pin). |
 | TestFlight | checklist in `docs/plans/slot-pricing-unconditional/scope.md` §8 — **NOT YET RUN**; operator to run and log the outcome here. |
 ```
