@@ -89,21 +89,31 @@ knee stays 1200). QB **value optics are not comparable across either seam.** Any
 at both timestamps. Both are logged in `model_config_changes`, so the M1 rail catches them
 automatically — which is exactly what makes §2.4 dangerous.
 
-### 2.4 The Monday code-ship boundary — **invisible to `model_config_changes`**
+### 2.4 The code-ship boundary — **invisible to `model_config_changes`** — LANDED 2026-08-22
 
-The `fix/package-benchmark-sweetener` merge (operator-approved, held for the Monday window boundary)
-re-benchmarks the package depth discount to **the trade's best asset** (the "4 mids for a stud scored
-fair" defect, analysed in `docs/reviews/2026-08-21-market-curve-comparison.md` — a sibling session's
-artifact, **not present in this checkout**; re-verify the path once that branch lands). The breaker's `value_giving` math
-reads package-adjusted values, so **its severities inherit the semantics change**.
+**BOUNDARY PINNED (2026-08-22, supersedes the "Monday" forecast):** the
+`fix/package-benchmark-sweetener` ship merged EARLY by operator election —
+**[PR #162](https://github.com/mattmurf77/fantasy-trade-finder/pull/162), `main` = `d42872f`**,
+Render deploy following immediately. The merge SHA is the boundary marker; the bracketing
+`model_config_changes` rows date it. It re-benchmarks the package depth discount to **the
+trade's best asset** (the "4 mids for a stud scored fair" defect, analysed in
+`docs/reviews/2026-08-21-market-curve-comparison.md`, now on `main`). The breaker's
+`value_giving` math reads package-adjusted values, so **its severities inherit the semantics
+change**. Rollback note: **D-143** records the pair-rollback rule — the benchmark fix and the
+sweetener revert TOGETHER, never separately.
 
-**This is a code deploy. The M1 `model_config_changes` rail will NOT censor it.** The readout censors
-at its deploy timestamp **explicitly**, as a hand-entered boundary, and per the LLD §3.4 sequencing
-sentence the **calibration cohort starts at or after that merge**: pre-merge severities are never
-pooled with post-merge ones. Every severity formula in the LLD is to be read as *post-fix* semantics.
+**This is a code deploy. The M1 `model_config_changes` rail will NOT censor it.** The readout
+censors at the `d42872f` deploy explicitly, and per the LLD §3.4 sequencing sentence the
+**calibration cohort starts at or after that deploy — a condition now SATISFIED**: any
+`trade.breaker` flag-on from here starts a clean post-fix cohort. Every severity formula in the
+LLD reads as *post-fix* semantics. ~~TBD-operator deploy timestamp~~ — resolved by the pinned
+SHA; `value_giving` rows are readable for stamps at/after it.
 
-> **Operator input required:** the merge's actual deploy timestamp (UTC) — **TBD-operator**, filled
-> before flag-on. Until it is filled, no `value_giving` row may be read.
+**Two cohort facts from the same ship:** (1) sweetened cards (`features_json.gap_sweetener`
+non-null) exist in served decks from this deploy forward — the §2.5 cut is live-relevant from
+day one; (2) **arm C is benched** (`bakeoff_include_gen_v2` = 0 @ 2026-08-22T16:37Z, logged)
+until its sweetener extension lands — per-arm cuts should expect **no fresh `gen_v2`
+impressions** during the opening cohort window and must not read the empty cell as signal.
 
 ### 2.5 `gap_sweetener` — an optional cut, never a silent state
 
