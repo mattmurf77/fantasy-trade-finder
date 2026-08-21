@@ -23330,7 +23330,10 @@ def league_team_review_route():
 
     try:
         from .power_rankings import compute_power_rankings, optimal_starter_slots
-        from .team_review import build_team_review, resolve_window_from_odds
+        from .team_review import (
+            build_team_review, resolve_window_from_odds,
+            resolve_window_precedence,
+        )
 
         members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
         if members is None:
@@ -23394,28 +23397,31 @@ def league_team_review_route():
         if is_enabled("trade.outlook_net_firsts"):
             firsts_ledgers = _first_round_ledgers(league_id)
 
-        for m in members:
-            uid = str(m.get("user_id"))
-            pids = [str(x) for x in (m.get("player_ids") or [])]
-            try:
-                # League-mates get the ledger too, deliberately: the `partners`
-                # beat pits your window against theirs, and two different
-                # definitions of "contender" inside one payload is exactly the
-                # failure this whole build is arranged to avoid.
-                w, _score, _sig = _trade_service_mod.infer_team_outlook(
-                    pids, players_meta, pick_share.get(uid, 0.0), len(members),
-                    firsts_ledgers.get(uid))
-                member_windows[uid] = w
-            except Exception:
-                member_windows[uid] = "not_sure"
+        # #372 — STARTER DYNASTY VALUE, summed straight off the
+        # `compute_power_rankings` call above: `starters` is that function's
+        # value-optimal lineup fill and `roster[].value` is the same per-player
+        # number the standing beat ranks with, so this route computes no new
+        # value and there is no second definition to drift. `starters` is None
+        # for EVERY team at once (it is a function of the league's lineup
+        # template), so `starters_known` is a league-level fact, not a
+        # per-team one — which is why a non-Sleeper league degrades the whole
+        # composite rather than half of it.
+        starter_value_by_uid: dict[str, float] = {}
+        league_starter_value = 0.0
+        starters_known = any(t.get("starters") is not None for t in teams)
+        for t in teams:
+            ids = set(t.get("starters") or [])
+            v = sum(float(r.get("value") or 0.0) for r in (t.get("roster") or [])
+                    if str(r.get("player_id")) in ids)
+            starter_value_by_uid[str(t["user_id"])] = v
+            league_starter_value += v
 
-        # The caller's own window + roster profile.
+        # #372 — the caller's roster profile, hoisted above the inference block
+        # below (which now runs after the odds are known) because the
+        # divergence and depth beats read it and neither waits on a window.
         my_roster = [str(x) for x in (sess.get("user_roster") or [])]
         my_profile = _trade_service_mod.analyze_roster_strengths(
             my_roster, players_meta, fmt) if my_roster else {}
-        my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
-            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
-            firsts_ledgers.get(me_league_id))
 
         # Weakest starting slot — lowest-valued filled slot in the caller's
         # value-optimal lineup. None when the template is unknown.
@@ -23506,6 +23512,12 @@ def league_team_review_route():
         # `payload["standing"]["outlook"]` below. It moved because the band may
         # now DRIVE the window, and the window is built inside the composer.
         outlook_band = None
+        # #372 — EVERY member's band, not just the caller's. The composite
+        # scores playoff likelihood as a term, and the `partners` beat pits
+        # your window against your league-mates': scoring the odds for you and
+        # not for them would put two different definitions of "contender" in
+        # one payload, which is the exact failure #365 was arranged to avoid.
+        band_by_uid: dict[str, dict] = {}
         try:
             if is_enabled("outlook.odds") and platform == "sleeper":
                 bundle = _outlook_impact_baseline(league_id, basis, sess)
@@ -23513,6 +23525,16 @@ def league_team_review_route():
                     from .outlook.trade_delta import playoff_band
                     _st, base_payload, _pv, _pp, _stype, _fmt = bundle
                     rid_of = {str(t.user_id): t.roster_id for t in _st.teams}
+                    uid_of = {rid: uid for uid, rid in rid_of.items()}
+                    for _row in (base_payload.get("teams") or []):
+                        _uid = uid_of.get(_row.get("roster_id"))
+                        _pct = ((_row.get("odds") or {}).get("playoff_pct"))
+                        if _uid is None or _pct is None:
+                            continue
+                        band_by_uid[str(_uid)] = {
+                            "band": playoff_band(float(_pct)),
+                            "playoff_pct": round(float(_pct), 4),
+                        }
                     mine = rid_of.get(str(me_league_id))
                     row = next((t for t in (base_payload.get("teams") or [])
                                 if t.get("roster_id") == mine), None)
@@ -23545,12 +23567,77 @@ def league_team_review_route():
         window_source = None
         window_odds = None
         window_odds_reason = None
-        roster_window = my_window
+        # `odds_refusal` is what the COMPOSITE's playoff term is told. When
+        # `trades.window_from_odds` is off we never asked the simulator's
+        # opinion at all, and "we did not ask" is a different claim from "we
+        # asked and it had nothing" — hence a fourth provenance value that
+        # deliberately does NOT leak into #371's `window.odds_reason`
+        # vocabulary (odds_unavailable | preseason). That field keeps its
+        # contract; `signals.playoff.provenance` carries this one.
+        odds_refusal: str | None = "odds_disabled"
         if is_enabled("trades.window_from_odds"):
             window_source, window_odds, window_odds_reason = \
                 resolve_window_from_odds(outlook_band, completed_weeks)
-            if window_source == "odds":
-                my_window = window_odds["implied"]
+            odds_refusal = window_odds_reason
+
+        # #372 — the inference itself, MOVED DOWN TO HERE from above the
+        # scoring block. It has to run after `outlook_band`, because the
+        # playoff band is now an INPUT to the score rather than an override
+        # applied to its output. Nothing between the old site and this one
+        # read a window.
+        composite_on = is_enabled("trade.outlook_composite")
+
+        def _starter_sig(uid: str):
+            """None while the flag is off — that is what makes
+            `infer_team_outlook` byte-identical (INV-372). With the flag on it
+            is always a dict, even when unreadable, so the card can name the
+            reason instead of showing an unexplained absence."""
+            if not composite_on:
+                return None
+            return _trade_service_mod.starter_value_signal(
+                starter_value_by_uid.get(uid) if starters_known else None,
+                league_starter_value if starters_known else None,
+                len(members))
+
+        def _odds_sig(uid: str):
+            if not composite_on:
+                return None
+            return _trade_service_mod.playoff_odds_signal(
+                band_by_uid.get(uid), odds_refusal)
+
+        for m in members:
+            uid = str(m.get("user_id"))
+            pids = [str(x) for x in (m.get("player_ids") or [])]
+            try:
+                # League-mates get the ledger too, deliberately: the `partners`
+                # beat pits your window against theirs, and two different
+                # definitions of "contender" inside one payload is exactly the
+                # failure this whole build is arranged to avoid. #372 extends
+                # that to the composite — same model for every team or none.
+                w, _score, _sig = _trade_service_mod.infer_team_outlook(
+                    pids, players_meta, pick_share.get(uid, 0.0), len(members),
+                    firsts_ledgers.get(uid), _starter_sig(uid), _odds_sig(uid))
+                member_windows[uid] = w
+            except Exception:
+                member_windows[uid] = "not_sure"
+
+        my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
+            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
+            firsts_ledgers.get(me_league_id),
+            _starter_sig(me_league_id), _odds_sig(me_league_id))
+        roster_window = my_window
+
+        # #372 PRECEDENCE. When the composite actually APPLIED, the band was
+        # already scored as a weighted term, so letting it ALSO overwrite the
+        # verdict would count the same signal twice — the band drives once or
+        # not at all. `source` reads "composite" and `inferred ==
+        # roster_inferred` by construction, because nothing replaced anything.
+        # When the composite did not apply (flag off, or no lineup template to
+        # read starters from) #371's behaviour is untouched.
+        composite_applied = bool((my_signals.get("starters") or {}).get("applied"))
+        window_source, my_window = resolve_window_precedence(
+            composite_applied, window_source,
+            (window_odds or {}).get("implied"), roster_window)
 
         payload = build_team_review(
             teams=teams,

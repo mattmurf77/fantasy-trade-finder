@@ -279,6 +279,44 @@ _DEFAULT_CFG: dict[str, float] = {
     # originally owned in the horizon.
     "infer_w_net_firsts":         0.10,
     "infer_net_firsts_cap":       1.00,
+    # #372 — the COMPOSITE weight vector (flag: trade.outlook_composite).
+    # Operator, 2026-08-20: "age distribution alone is not a strong enough of
+    # a signal. We calculate starter dynasty value. Let's incorporate that and
+    # playoff likelihood. The age distribution can stay but make it a lighter
+    # driver."
+    #
+    # These are a SEPARATE NAMESPACE from the five `infer_w_*` keys above on
+    # purpose: the legacy vector is what every engine caller still scores
+    # with, and reusing its keys would mean the composite could not be tuned
+    # without moving the engine. Set `infer_composite_w_starter` and
+    # `infer_composite_w_playoff` to 0 and the composite degenerates to a
+    # down-weighted age model — a knob-only rollback below the flag.
+    #
+    # Calibration, on 12 real prod leagues / 156 teams
+    # (docs/feedback/items/372-window-composite/scope.md §7):
+    #   legacy    101 rebuilder / 26 not_sure /  29 contender  (65 % rebuilder)
+    #   composite  62 rebuilder / 40 not_sure /  54 contender
+    # The legacy vector's rebuilder skew is the whole of what #365/#371/#372
+    # keep reporting. The cuts (±0.08) are UNMOVED — see D-140.
+    "infer_composite_w_vet":      0.40,   # was 1.00 — "lighter driver"
+    "infer_composite_w_youth":    0.40,   # was 1.00
+    "infer_composite_w_pick":     2.00,   # unchanged; pick capital is not age
+    # Starter-value index = (your starters' value / the league's mean) − 1, so
+    # 0 is an average starting lineup and +0.50 is 50 % above it. Capped
+    # because one absurd roster must not swamp every other term: at 0.60 the
+    # capped contribution is ±0.30, roughly four times the not_sure band.
+    "infer_composite_w_starter":  0.60,
+    "infer_composite_starter_cap": 0.50,
+    # Playoff index = (playoff_pct − centre) / centre-half-width, i.e.
+    # 2·(pct − 0.50). 0.50 is NOT invented here: it is the midpoint of the
+    # `tossup` band (`outlook.trade_delta.playoff_band`: likely >= 0.65,
+    # unlikely < 0.35), so the neutral point of this term is the neutral point
+    # of the band map every client already renders. At the `likely` edge the
+    # contribution is 0.40·0.30 = 0.12, which on its own clears the 0.08
+    # contender cut — a genuinely likely playoff team should be called one.
+    "infer_composite_w_playoff":  0.40,
+    "infer_composite_playoff_center": 0.50,
+    "infer_composite_playoff_cap": 1.00,
     # ------------------------------------------------------------------
     # Tier 2 amendment A6 — league-wide deck diversification
     # (flag: trade.deck_diversity — consumed by server._order_deck)
@@ -2916,12 +2954,141 @@ def first_round_signal(ledger: dict | None) -> dict:
     return out
 
 
+def starter_value_signal(
+    starter_value: float | None,
+    league_starter_value: float | None,
+    num_teams: int,
+) -> dict:
+    """#372 — "we calculate starter dynasty value. Let's incorporate that."
+
+    Turns the caller's value-optimal STARTING lineup into a league-relative
+    index. Pure: the caller sums the values (they come straight off
+    `power_rankings.compute_power_rankings`, whose `starters` list is the
+    value-optimal fill and whose `roster` rows carry the per-player value),
+    this function only relates them and reports its own confidence.
+
+        share = your starters' value / the league's starters' value
+        index = share · num_teams − 1
+
+    `index` is `share − 1/num_teams` rescaled by `num_teams`, which is the
+    same centring convention `pick_share` uses — but expressed so that the
+    number does NOT depend on league size. 0.0 is an exactly average starting
+    lineup; +0.30 is 30 % above the league mean. That independence is why the
+    weight can be one constant instead of one per league shape.
+
+    WHY STARTERS AND NOT ROSTER VALUE. Total roster value is already the
+    standing beat's number and it rewards hoarding: a rebuilder sitting on
+    nine young WR4s can out-total a contender. A team is strong WHERE IT
+    STARTS, which is precisely the axis the age model cannot see — and #372 is
+    a report that the age model called an all-in roster a rebuild.
+
+    DEGRADES BY NAMING THE REASON (same rule as `first_round_signal`, D-110):
+
+      observed        a lineup template was known and the league has priced
+                      starter value — the term counts
+      lineup_unknown  `starters` is None: the platform exposes no
+                      roster_positions equivalent and the meta fetch found no
+                      template (`server._league_lineup_slots` returns None
+                      rather than guess one). We did not look
+      absent          a template existed but the league's total starter value
+                      is zero — an unsynced or demo league. Nothing to relate
+
+    `applied` is the ONLY correct test of whether the term entered the score.
+    Never derive it from `index == 0`: a perfectly average team and a team we
+    could not read both index at 0 and they are different claims.
+    """
+    out = {
+        "starter_value": 0.0, "league_starter_value": 0.0,
+        "share": 0.0, "index": 0.0, "index_raw": 0.0,
+        "provenance": "lineup_unknown", "applied": False,
+    }
+    if starter_value is None or league_starter_value is None:
+        return out
+    lg = float(league_starter_value)
+    out["starter_value"] = round(float(starter_value), 1)
+    out["league_starter_value"] = round(lg, 1)
+    if lg <= 0:
+        out["provenance"] = "absent"
+        return out
+    out["provenance"] = "observed"
+    share = float(starter_value) / lg
+    cap = abs(_c("infer_composite_starter_cap"))
+    raw = share * max(int(num_teams), 1) - 1.0
+    out["share"] = round(share, 4)
+    # BOTH the scored value and the measured one. The cap binds on real
+    # rosters — the FFV3 caller in the report measures +0.82 and is scored at
+    # +0.50 — and a card that printed only `index` would tell him his starters
+    # are 50 % above average when they are 82 % above. `index` is what entered
+    # the score and `index_raw` is what was observed; the card shows the
+    # measurement and names the cap when the two differ.
+    out["index_raw"] = round(raw, 4)
+    out["index"] = round(max(-cap, min(cap, raw)), 4)
+    out["applied"] = bool(FLAGS.trade_outlook_composite)
+    return out
+
+
+def playoff_odds_signal(odds: dict | None, refusal: str | None) -> dict:
+    """#372 — "incorporate … playoff likelihood", as a TERM rather than as the
+    replacement `trades.window_from_odds` (#371/D-111) makes it.
+
+    `odds` is the band block `team_review.resolve_window_from_odds` returns —
+    `{band, playoff_pct, implied}` — and `refusal` is that function's own
+    reason string, or None when it admitted the odds. This function does not
+    re-derive the admission rule, it INHERITS it: the odds engine is
+    Sleeper-only (`backend/outlook/league_state.py` stubs every other
+    platform) and is refused in preseason (D-094: `completed_weeks == 0` is
+    its weakest window), and those two rulings must not exist twice.
+
+        index = clamp(2 · (playoff_pct − centre), ± cap)
+
+    with `centre` the midpoint of the `tossup` band. +0.30 at the `likely`
+    boundary, −0.30 at the `unlikely` boundary, ±1.00 at certainty.
+
+    Provenance is the refusal string when there is one, so the card can say
+    "your odds read likely, but nobody has played a game" rather than showing
+    a term worth nothing:
+
+      observed          the band was admitted — the term counts
+      preseason         a band exists and was deliberately not used
+      odds_unavailable  no band: non-Sleeper, `outlook.odds` off, or the
+                        simulator failed
+      odds_disabled     `trades.window_from_odds` is off, so we never asked
+
+    A refused term is ABSENT FROM THE SCORE, never a zero standing in for
+    "neutral" — the operator's degrade-honestly ruling (D-110).
+    """
+    out = {
+        "playoff_pct": None, "band": None, "index": 0.0,
+        "center": _c("infer_composite_playoff_center"),
+        "provenance": refusal or "odds_unavailable", "applied": False,
+    }
+    if not odds:
+        return out
+    out["band"] = odds.get("band")
+    pct = odds.get("playoff_pct")
+    if pct is not None:
+        out["playoff_pct"] = round(float(pct), 4)
+    if refusal is not None or pct is None:
+        return out
+    centre = float(out["center"])
+    cap = abs(_c("infer_composite_playoff_cap"))
+    # ×2 so the index reaches ±1.00 at 0 % / 100 %, which makes `cap` a
+    # meaningful knob rather than a bound the data can never approach.
+    raw = 2.0 * (float(pct) - centre)
+    out["index"] = round(max(-cap, min(cap, raw)), 4)
+    out["provenance"] = "observed"
+    out["applied"] = bool(FLAGS.trade_outlook_composite)
+    return out
+
+
 def infer_team_outlook(
     roster_ids: list[str],
     players: dict,
     pick_share: float = 0.0,
     num_teams: int = 12,
     first_round_ledger: dict | None = None,
+    starter_signal: dict | None = None,
+    odds_signal: dict | None = None,
 ) -> tuple[str, float, dict]:
     """Infer a team's contend↔rebuild window from observable roster shape
     (backlog #1). Pure function: no DB, no I/O — feeds the same
@@ -2936,6 +3103,9 @@ def infer_team_outlook(
       • net first-round capital (#365, flag `trade.outlook_net_firsts`) —
         firsts acquired minus firsts traded away, over the firsts originally
         yours. Only present when a caller supplies `first_round_ledger`.
+      • starter-value index + playoff index (#372, flag
+        `trade.outlook_composite`) — see below. Only present when a caller
+        supplies `starter_signal`.
 
     Score (higher = more contending)
         = w_vet·vet − w_youth·youth − w_pick·(pick − equal) − w_firsts·net_share.
@@ -2960,6 +3130,48 @@ def infer_team_outlook(
                 Team Review route builds a ledger today, so lighting the flag
                 moves the window beat and not one deck. Wiring the other three
                 callers is a separate change with its own evidence.
+
+    #372 — THE COMPOSITE (flag `trade.outlook_composite`). Operator, third
+    report on this surface: "The logic is still too simple… age distribution
+    alone is not a strong enough of a signal. We calculate starter dynasty
+    value. Let's incorporate that and playoff likelihood. The age distribution
+    can stay but make it a lighter driver."
+
+    This is ONE RE-WEIGHTED SCORE, not a fourth bolt-on term. When the
+    composite is live the whole vector changes at once:
+
+        vet      1.00 → 0.40      the "lighter driver"
+        youth    1.00 → 0.40
+        pick     2.00 → 2.00      unchanged; pick capital is not age
+        starter    —  → 0.60      NEW, capped ±0.50
+        playoff    —  → 0.40      NEW, capped ±1.00, absent in preseason
+        firsts   0.10 → 0.10      unchanged, still its own flag
+
+    The two age terms stay ADJACENT-THRESHOLD siblings (vet_age 27,
+    youth_age 26 — every aged player is one or the other), which is exactly
+    why halving both rather than dropping one is the honest edit: they are
+    close to one rescaled quantity, so the pair's total influence is what
+    #372 asked to reduce, and it drops by 60 %.
+
+    THE SAME TWO INVARIANTS, EXTENDED — and they are what keep every deck
+    where it is:
+
+      INV-372   flag OFF ⇒ `starter_signal` / `odds_signal` are accepted and
+                IGNORED, and neither the score nor any key of `signals`
+                moves. Byte-identical to origin/main for every caller.
+      INV-372b  flag ON but no APPLIED starter signal ⇒ the LEGACY vector
+                still scores. The composite's anchor is starter value, and a
+                re-weighting that halves age without putting anything in its
+                place is not a model, it is a quieter model. So the engine,
+                the mock draft and the outlook seed — none of which pass a
+                starter signal — are untouched even with the flag lit. Only
+                GET /api/league/team-review supplies one.
+
+    DEGRADES PER SIGNAL, NOT ALL-OR-NOTHING. `odds_signal` may be refused
+    (preseason, non-Sleeper, `trades.window_from_odds` off) while the starter
+    term still scores; both signal blocks ride `signals` with their
+    provenance either way, so the card names what is missing instead of
+    scoring an absent term as a neutral zero.
 
     Returns (outlook, score, signals).
     """
@@ -3013,24 +3225,80 @@ def infer_team_outlook(
         model["w_net_firsts"]   = _c("infer_w_net_firsts")
         model["net_firsts_cap"] = _c("infer_net_firsts_cap")
 
+    # #372 — the composite's two signal blocks. Gated on the flag AND on the
+    # caller supplying a starter signal, exactly as #365 gated on a ledger
+    # (INV-372 / INV-372b above). `composite` decides which WEIGHT VECTOR the
+    # score below uses, so it is resolved before the score and not after.
+    starters_sig = None
+    playoff_sig = None
+    composite = False
+    if FLAGS.trade_outlook_composite and starter_signal is not None:
+        starters_sig = dict(starter_signal)
+        signals["starters"] = starters_sig
+        composite = bool(starters_sig.get("applied"))
+        if odds_signal is not None:
+            playoff_sig = dict(odds_signal)
+            signals["playoff"] = playoff_sig
+        if composite:
+            # D-101 — SHIP THE MODEL YOU ACTUALLY RAN. These two keys already
+            # exist and are RE-STATED at their composite values, because the
+            # card renders `w_vet_share × vet_share` as an arithmetic row: a
+            # model block still reading 1.00 while the score used 0.40 is the
+            # same defect as "age 23 and under" against a youth_age of 26.
+            model["w_vet_share"]   = _c("infer_composite_w_vet")
+            model["w_youth_share"] = _c("infer_composite_w_youth")
+            model["w_pick_share"]  = _c("infer_composite_w_pick")
+            model["w_starter_index"]  = _c("infer_composite_w_starter")
+            model["starter_index_cap"] = _c("infer_composite_starter_cap")
+            model["composite"] = True
+            # The playoff weight rides ONLY when the term actually scores, so
+            # the card can never print a weight beside a refused signal.
+            if playoff_sig is not None and playoff_sig.get("applied"):
+                model["w_playoff_index"]   = _c("infer_composite_w_playoff")
+                model["playoff_center"]    = _c("infer_composite_playoff_center")
+                model["playoff_index_cap"] = _c("infer_composite_playoff_cap")
+
     # No roster value to read ⇒ no opinion. Guard before the pick-centering
     # term, which would otherwise read "owns zero picks" as a contend signal.
     # The firsts term is suppressed here too: a team with no readable roster
-    # has no window, and half a model is not an opinion.
+    # has no window, and half a model is not an opinion. Same for the two
+    # composite terms — a team whose roster we cannot price has no starting
+    # lineup worth relating to the league's either.
     if total <= 0:
         if firsts is not None:
             firsts["applied"] = False
+        if starters_sig is not None:
+            starters_sig["applied"] = False
+        if playoff_sig is not None:
+            playoff_sig["applied"] = False
         signals["score"] = 0.0
         return "not_sure", 0.0, signals
     signals["vet_share"]   = vet_val / total
     signals["youth_share"] = youth_val / total
 
     equal_share = 1.0 / max(num_teams, 1)
-    score = (
-        _c("infer_w_vet_share")   * signals["vet_share"]
-        - _c("infer_w_youth_share") * signals["youth_share"]
-        - _c("infer_w_pick_share")  * (pick_share - equal_share)
-    )
+    if composite:
+        # #372 — ONE re-weighted score. Age keeps both signals at 40 % of the
+        # weight it had; starter value and (when the season has started and
+        # the league is Sleeper) playoff likelihood carry the difference.
+        score = (
+            _c("infer_composite_w_vet")     * signals["vet_share"]
+            - _c("infer_composite_w_youth") * signals["youth_share"]
+            - _c("infer_composite_w_pick")  * (pick_share - equal_share)
+            + _c("infer_composite_w_starter") * float(starters_sig["index"])
+        )
+        # Sign convention differs from the pick terms deliberately: a BETTER
+        # starting lineup and BETTER playoff odds both read as contending, so
+        # both ADD, while accumulating pick capital reads as rebuilding and
+        # subtracts.
+        if playoff_sig is not None and playoff_sig.get("applied"):
+            score += _c("infer_composite_w_playoff") * float(playoff_sig["index"])
+    else:
+        score = (
+            _c("infer_w_vet_share")   * signals["vet_share"]
+            - _c("infer_w_youth_share") * signals["youth_share"]
+            - _c("infer_w_pick_share")  * (pick_share - equal_share)
+        )
     # Same sign convention as the pick-capital term above: ACCUMULATING pick
     # capital reads as rebuilding, so a positive net (more firsts acquired
     # than shipped) subtracts, and a manager who has sold his firsts gains.

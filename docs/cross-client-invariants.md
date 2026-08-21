@@ -370,6 +370,35 @@ Three rules travel with the map and are part of the invariant:
 
 ---
 
+## Composite window signals — `provenance`, `applied`, and the fourth refusal (#372, flag `trade.outlook_composite`, D-140)
+
+`window.signals.starters` and `window.signals.playoff` carry the two signals #372 added. They follow the same contract as `signals.firsts` above and for the same reason: both encode *absence of knowledge*, and absence of knowledge is what a client is most likely to render as a confident zero.
+
+| `starters.provenance` | Meaning | May the client show the index as a signal? |
+|---|---|---|
+| `observed` | a lineup template was known and the league has priced starter value | yes |
+| `lineup_unknown` | `starters` is `None` — the platform exposes no `roster_positions` equivalent and no template was found, so there is no "starting lineup" to value | no — say we could not read it |
+| `absent` | a template existed but the league's total starter value is zero (unsynced, demo) | no — say there is nothing to compare against |
+
+| `playoff.provenance` | Meaning | May the client show the term as a signal? |
+|---|---|---|
+| `observed` | the band was admitted and scored | yes |
+| `preseason` | a band exists and was **deliberately not used** — `completed_weeks == 0` is the simulator's weakest window (D-094) | no — show the band, state the refusal |
+| `odds_unavailable` | no band at all: non-Sleeper, `outlook.odds` off, or the sim failed | no |
+| `odds_disabled` | `trades.window_from_odds` is off, so we never asked | no |
+
+- **`odds_disabled` is a fourth value and is NOT `odds_unavailable`.** "We did not ask" and "we asked and got nothing" are different claims and the card says which. It deliberately does **not** enter `window.odds_reason`'s vocabulary (`preseason` \| `odds_unavailable`), which keeps #371's field contract intact — `signals.playoff.provenance` carries this one.
+- **`applied` is read, never derived**, exactly as for `firsts` — and here the trap is sharper: an exactly average starting lineup and a lineup we could not read **both index at 0**, and a genuinely even playoff team and a refused band both index at 0. Only `applied` separates them. Pinned by `test_an_unapplied_starter_signal_with_a_LOUD_index_still_scores_nothing` and `test_a_refused_playoff_term_is_absent_from_the_score_not_a_zero`, both of which hand the function a refused block with a **loud** index precisely because a test built on the helper's own (zeroed) output cannot tell a working guard from a lucky number.
+- **Render `starters.index_raw`, score `starters.index`.** `index` is `index_raw` clamped to `model.starter_index_cap`, and **the cap binds on real rosters** — the FFV3 caller measures +0.82 and is scored at +0.50. A card printing `index` would tell him his starters are 50 % above the league mean when they are 82 % above: the model's number stated as the team's. Show the measurement, and name the cap only when the two differ.
+- **`starters.index` is `share × num_teams − 1`, not `share − 1/num_teams`.** Same centring, rescaled so the number does not depend on league size: 0.0 is an exactly average starting lineup and +0.30 is 30 % above the league mean in a 10-team league and in a 14-team league alike. That independence is what lets one weight be correct everywhere. A client renders it; it never re-derives it from `share`.
+- **`playoff.center` is shipped, not restated.** It is the midpoint of the `tossup` band (see § Playoff band above), and a client that hardcodes 0.5 drifts the day the band cuts move — the D-101 defect exactly.
+- **`window.model`'s three existing weights are RE-STATED at their composite values** when `model.composite` is `true`. Under the composite `w_vet_share` is `0.40`, not `1.00`. A client that reads them is always right; one that hardcodes either value prints arithmetic that does not add up to the total beside it.
+- **`window.source: "composite"` means the band was scored, not obeyed**, so `inferred == roster_inferred`. When `trade.outlook_composite` and `trades.window_from_odds` are both on, the composite **suppresses** the band→window replacement (`team_review.resolve_window_precedence`): a signal drives once or not at all.
+
+**Locations to update together:** `backend/trade_service.py` (`starter_value_signal`, `playoff_odds_signal`, `infer_team_outlook`), `backend/team_review.py` (`resolve_window_precedence`, `_window`), `backend/server.py` (the team-review route's window wiring), `mobile/src/api/teamReview.ts` (`StarterProvenance`, `PlayoffProvenance`, `TeamReviewWindow`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat).
+
+---
+
 ## Consensus-gap direction — which list is the sell list (#367, D-100, 2026-08-20)
 
 `GET /api/trends/consensus-gap` has **three consumers** — mobile Trends

@@ -55,6 +55,7 @@
     "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js",
     "test:team-review": "node tests/check-team-review.js",
     "test:window-signals": "node tests/check-window-signals.js",
+    "test:window-composite": "node tests/check-window-composite.js",
     "test:team-review-depth": "node tests/check-team-review-depth.js",
     "test:finder-conditions": "node tests/check-finder-conditions-reachable.js"
   },

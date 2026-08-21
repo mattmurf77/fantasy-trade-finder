@@ -535,6 +535,24 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ `window` carries none of the source/odds keys and the
     # payload is byte-identical.
     "trades.window_from_odds",
+    # #372 — the COMPOSITE window model. Third operator report on this
+    # surface: age alone is too simple, incorporate starter dynasty value and
+    # playoff likelihood, and make age a lighter driver. `trade.*` for the
+    # same reason as `trade.outlook_net_firsts`: it re-weights the ENGINE's
+    # classifier, whose verdict feeds outlook_alpha.
+    # OFF (default) ⇒ the two new kwargs are accepted and IGNORED, so
+    # `infer_team_outlook` is byte-identical for every caller (INV-372) and
+    # the route builds no starter signal at all. ON ⇒ the re-weighting applies
+    # ONLY where an APPLIED starter signal is supplied, and today only the
+    # Team Review route supplies one — so lighting this moves the WINDOW BEAT
+    # and no deck (INV-372b). It also SUPERSEDES `trades.window_from_odds`'s
+    # replacement behaviour when both are on: the playoff band becomes a
+    # weighted term inside the score instead of overwriting the verdict, and
+    # counting the same signal twice is what that precedence exists to stop.
+    # Knobs: `infer_composite_w_*` (vet 0.40 / youth 0.40 / pick 2.00 /
+    # starter 0.60 / playoff 0.40); starter and playoff at 0 neutralise the
+    # new terms without changing the payload shape.
+    "trade.outlook_composite",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
