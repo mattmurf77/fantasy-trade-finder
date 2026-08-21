@@ -33,7 +33,9 @@
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
-- [Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-144)](#consulting-a-leaf-from-inside-an-engine-live-module-bindings-one-kwarg-copy-at-log-2026-08-22-d-144)
+- [Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)](#consulting-a-leaf-from-inside-an-engine-live-module-bindings-one-kwarg-copy-at-log-2026-08-22-d-144)
+- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
+- [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-144)
 
 ---
 
@@ -225,10 +227,12 @@ New beats use `n`-prefixed ids (engine's `isV2NewStepId` drives the v1-upgrader 
 
 ## Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)
 
-`backend/trade_gen_v2.py` (flag `trade_gen.v2`, dark) sets three conventions:
+`backend/trade_gen_v2.py` (flag `trade_gen.v2`, dark) sets five conventions:
 - **`gen2_*` config namespace** — every tunable of the staged pipeline lives in `trade_service._DEFAULT_CFG` under a `gen2_` prefix (read through the same `_c()` accessor / model_config overlay as every other engine knob). New pipeline knobs go there, never as module constants.
 - **Dual-board ε extends #108 to both sides.** `gen2_epsilon` gates BOTH sides' own-board gain on every generated package (consolidation-discounted, `trade_gen_v2.side_gain`) — the two-sided generalization of `user_gain_epsilon`. The directed `side_gain(in, out, value_of)` decomposition is the unit a future 3-team-cycle layer reuses; don't collapse it into a pairwise-only formula.
 - **`GenerationReport` is the generation→telemetry interface.** The pipeline owns NO tables: per-suggestion health metrics ride `card.health` (never serialized) and batch health + per-team exposure counts ride the returned `GenerationReport` (also logged as one JSON line, logger `backend.trade_gen_v2`). The suggestion-telemetry layer (own branch) persists from that object — schema decisions belong to that thread.
+- **A pass that rewrites a card's assets belongs in `_pair_survivors`, and must rebuild the whole `_Candidate`.** (2026-08-21, [D-145](DECISIONS.md).) The gap sweetener is the worked example: the absolute gap it acts on is only computable from `_consensus_packages`, which `generate_league_suggestions` calls at card-build time — but TEN downstream values are derived from the `_Candidate` before that point (`_dedup_batch`'s exact/bucket/jaccard keys, `_meso_variants`, `_rationale`, `classify_package_shape` — whose `"consolidation"` label is literally `len(ids) == 1` — `card.health`'s seven entries, `mismatch_score`, `fairness_score`, `composite_score`, and the Stage 6/7 exposure + tier ranking). Mutating ids at the card-build site leaves every one of them describing a trade that is no longer being offered. This is the general shape of the v3 stale-`fit_premium` defect, and arm C's surface for it is the largest in the codebase. Two corollaries: **(a)** re-earn the gate stack via an `extra_ok_fn` that touches no `report` counter — a sweetened combo that fails a gate is not a rejected candidate, it is a candidate that ships unsweetened — and re-test `past_decision_keys`, since the rewritten combo is a different trade with a different key that the enumeration never saw; **(b)** arm C is the only generator with `_dedup_batch` downstream, and its bucket key contains the give×receive SHAPE, so a pass that changes a card's shape CAN shrink the deck by evicting a bucket occupant. Invariants asserted by the other generators ("never shrinks the deck") do not transfer here — re-verify them rather than inheriting them.
+- **Pruned pools have two layers, and only one of them binds a rewriting pass.** (2026-08-21, [D-146](DECISIONS.md).) When handing a candidate universe to a helper like `trade_optimizer.close_value_gap`, separate the **semantic** pools (`user_assets` = ranked on both boards and not untouchable; `extras_all` = divergence-positive and not not-interested — these encode real rules, and crossing one produces an asset the engine could never legitimately trade) from the **enumeration-budget** slices (`[:gen2_give_pool]`, `[:gen2_recv_extra_pool]`, `gen2_centerpiece_top_k` — documented as bounding search breadth, never output length). Pass the semantic universe; reaching past a budget slice is not the pool-containment defect that `49c1d76` fixed, which crossed a *user instruction* (a #174 pinned give job smuggling in an unpinned player). Confusing the two layers makes the pass a measured no-op: wired to arm C's budget slices, 78 of 112 rejected equalizers were undershoot rather than gate kills.
 
 Additive `TradeCard` fields `rationale` / `meso_variants` / `health` are stamped ONLY by this pipeline; every other path leaves them `None` and `trade_card_to_dict` omits them (flag-off payloads byte-identical). `health` is deliberately never serialized.
 
@@ -466,10 +470,10 @@ conventions for any future layer that **predicts something a user will later tel
   ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
   a silent dependency on whoever ran before you.
 
-## Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-144)
+## Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)
 
 `backend/negmem.py` ([plan suite](../docs/plans/negative-results-memory/),
-[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), [D-144](DECISIONS.md)) sets four
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), [D-147](DECISIONS.md)) sets four
 conventions for any future **leaf that the generators consult**, as opposed to `trade_breaker.py`'s leaf that
 reads the finished deck. The difference matters: a consulted leaf runs *inside* the thing under test, so its
 plumbing has to be provably inert when off.
@@ -506,3 +510,96 @@ plumbing has to be provably inert when off.
   changes only order. Where the effect is meant to be ordering-only, the multiplication also has to land on the
   correct side of any quantization — inside the rounding that collapses float noise, not after it — or the
   deterministic tie-break loses to the noise the rounding exists to erase.
+## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)
+
+The operator deleted a setting — pick pricing — rather than changing its default. This repo had **no
+precedent for retiring a route**: `git grep "410" backend/server.py` returned nothing before this change.
+The shape chosen, and the reasoning, so the next one does not have to re-derive it:
+
+- **The write verb answers 410 Gone, not 404.** A 404 is what the route already meant last week (it 404d
+  while its flag was dark), so reusing it says "wrong URL / not deployed yet" to a client that is actually
+  looking at a resource that existed and was deliberately withdrawn. The body names the replacement state
+  (`{error: "gone", message, mode}`), so a human reading a log learns the answer without opening the code.
+  Body validation is **removed, not kept**: a once-valid mode and a garbage mode get the same 410, because
+  there is nothing left to validate against and a 400 would imply some body would work.
+- **The read verb keeps answering, with the FIXED state — never the stored column.** Builds in the field
+  still call GET on screen open. Serving `{mode: "market_slots", retired: true}` makes an old build render
+  the honest answer; serving the dead `users.pick_pricing_mode` would tell it the setting still means
+  something, and 404ing would make the shipped client hide the control as though the feature were dark.
+  The extra `retired: true` key is additive and costs an old client nothing.
+- **Auth posture does not change.** Retirement is not a reason to make a route public; `_require_session()`
+  still runs first on both verbs, so a caller without a session still gets 401 before it gets 410.
+- **The column is not dropped, and the flag is not deleted.** Additive-schema rule for the column
+  (`users.pick_pricing_mode` becomes dead data); for the flag, `trade.slot_pricing` stays in `FLAG_KEYS` at
+  `true` and is simply never read — deleting it would force a six-file change to satisfy
+  `test_release_flags_mirror_features_json`, make the key vanish from `/api/feature-flags` for shipped
+  builds, and reinterpret any stored override row as an unknown key.
+- **The client is deleted, not flag-hidden.** The Settings row, its state, its fetch, its optimistic PUT and
+  its analytics emitter all go. What stays behind is an **absence assertion** in the structural suite
+  (`check-settings-testids.js` `DELETED_PREFIXES`), so a well-meaning revert that re-adds the control fails
+  loudly instead of quietly restoring a setting the operator removed. The analytics EVENT stays registered
+  in the taxonomy so historical rows remain queryable — retire the emitter, never the name.
+
+## Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)
+
+Per-slot pick pricing needed a per-league fact (the resolved draft order) inside a per-pick function.
+The shape that worked, and generalises to any read-time enrichment:
+
+- **Resolve at the widest scope that owns the fact, pass the narrow value down.** The order is looked
+  up once per league (`server._league_slot_order`, DB-backed with a 60s cache); `pick_slots.slot_for`
+  turns it into one integer per pick; `pick_values.priced_pool_value` takes that integer and resolves
+  NOTHING itself. A pricing function that reached for a DB-backed lookup per pick would be correct and
+  unshippable.
+- **Reuse the existing resolver rather than re-deriving the rule.** `slot_for` already refuses future
+  seasons, unknown rosters, malformed blobs and unverifiable snake reversals. Every one of those
+  refusals is a pricing safety property now, obtained for free. A second implementation would have had
+  to re-earn all four, and would drift.
+- **Derive the price and the label from the same resolution.** A card that says "2026 1.03" while
+  charging for a generic first is worse than one that says neither. Where a shared helper cannot yet
+  take the precomputed value, say so at the call site and explain why the two agree anyway (purity +
+  identical arguments) rather than leaving the reader to assume it.
+- **Fall soft in named steps, and clamp in exactly one of them.** Slot price -> round curve -> stored
+  value, each step returning None to mean "I have nothing honest to say". Round clamping lives only in
+  the round-curve step; the per-slot step deliberately does not clamp, because a round-9 slot has no
+  published row and no honest analogue. Two clamps would drift apart.
+- **Prefer a fallback that falls out of the DATA over one that falls out of a BRANCH.** "Future picks
+  stay default" needed no `if season > current` anywhere: DP publishes per-slot rows only for the
+  current class, so the lookup misses and the waterfall does the rest. A branch encoding the same rule
+  would be a second source of truth about what DP publishes.
+- **When a structural guard has to widen, make it stricter in the same edit.** The guard pinning which
+  functions may read DP grew a second permitted reader; it was rewritten from a source-line comparison
+  to an AST reader-set equality check with a module-level-import refusal, and sabotage-verified. A
+  widened guard that is not also tightened is how a bound quietly becomes decorative.
+## Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)
+
+A table-family convention introduced by Receipts, worth reusing for anything that grades our
+own past output.
+
+- **The prefix owns the writer.** `receipts_*` tables are written by exactly one module
+  (`backend/receipts_service.py`) and read by that module's two read surfaces. Sibling efforts
+  take their own prefixes (`negmem_`, `breaker_`), so "who wrote this row" is answerable from
+  the table name.
+- **INSERT + SELECT helpers only.** `database.py` deliberately exposes no UPDATE or DELETE
+  path for these tables, and a test greps for one. That is what makes "we can't move the
+  goalposts" a mechanism rather than a promise — a correction is a `grader_version` bump plus
+  a regrade, with the superseded rows retained.
+- **Version suffixes are NUMERIC, and reads must sort them that way.** `receipts-10` beats
+  `receipts-2`; lexicographic ordering silently pins reads to a stale version the moment a
+  tenth correction ships. `receipts_service.parse_grader_version` is the one comparator.
+- **The work queue is defined by ABSENCE, never by a progress marker.** "Rows with no grade at
+  this `(window, grader_version)`" makes the job idempotent by construction: a crash loses at
+  most one batch, a double-fire no-ops, and there is no cursor to corrupt. The corollary bites —
+  *pending* states must not be persisted, because a row written for "not ready yet" would
+  permanently hide that work from its own queue.
+- **Denormalize the slice keys at write time.** Grade rows copy `shape_bucket` / `basis` /
+  `model_arm` / `policy_version` from the impression rather than re-deriving them, so a per-cell
+  read is one GROUP BY and no read-time recomputation can drift from what was frozen at serve.
+- **Constants that encode honesty rules stay constants, not knobs.** The junk-for-junk midpoint
+  floor, the window set, the headline window and the frozen pick weights are pinned under
+  `grader_version` — a tunable pick weight would let a config write flip existing rows between
+  `graded` and `pick_majority` with no regrade and no audit trail.
+- **Cross-format work queues take the UNION and skip in-loop.** Where a predicate depends on
+  per-format data (here, snapshot coverage), build the queue from the union across formats and
+  skip rows whose own format has not resolved — *without* consuming the batch cap. Folding
+  resolvability into the WHERE is what stops a head-of-queue block of unresolvable rows
+  starving every run.

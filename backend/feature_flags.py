@@ -605,16 +605,27 @@ FLAG_KEYS: tuple[str, ...] = (
     # order entry (never null), no `slot_value_approx` key, and values.csv is
     # never fetched. A fetch failure with the flag ON degrades the same way.
     "picks.slot_values",
-    # M6b — DynastyProcess market slot values IN THE TRADE ENGINE (plan
-    # operator decision O2, which reverses hld KD-9 / lld §4.7). Gates the
-    # per-user `pick_pricing_mode` setting ('tier_ladder' default |
-    # 'market_slots'): the /api/settings/pick-pricing route and the mode
-    # resolution in trade_service.pick_pricing_mode_for_user.
-    # OFF (default) ⇒ pick_pricing_mode_for_user returns 'tier_ladder' for
-    # EVERY user without reading the DB, /api/settings/pick-pricing 404s, and
-    # every owned pick prices at its stored `draft_picks.pool_value` exactly
-    # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
-    # byte-unchanged in BOTH modes — this flag reprices owned picks only.
+    # ⚠️ RETIRED 2026-08-21 (D-144) — REGISTERED BUT NEVER READ. Zero call
+    # sites: `git grep 'trade.slot_pricing' backend mobile web extension`
+    # returns this line, config/features.json, the fixture mirrors and docs,
+    # and nothing else. Setting it either way changes nothing.
+    #
+    # It gated M6b: the per-user `pick_pricing_mode` setting ('tier_ladder' |
+    # 'market_slots'), the /api/settings/pick-pricing route, and the mode
+    # resolution in trade_service.pick_pricing_mode_for_user. The operator
+    # ruling of 2026-08-21 — "Market slots should be default and not an opt-in
+    # or even an option to flip" — made market pricing unconditional, so there
+    # is no longer anything to gate.
+    #
+    # THE KEY IS KEPT ON PURPOSE, at `true`, and this is the disposition to
+    # copy for the next retired flag. Deleting it from FLAG_KEYS would force a
+    # matching delete in config/features.json and all five flag fixtures (the
+    # test_release_flags_mirror_features_json exact-equality test), would make
+    # every client build in the field that reads the key see it vanish from
+    # /api/feature-flags, and would silently reinterpret any stored override
+    # row as an unknown key. Keeping it is additive, free, and honest: the
+    # flag reads `true` because market pricing IS on. Removal, if ever, is its
+    # own change once no shipped build reads the key.
     "trade.slot_pricing",
     # draft-extensions W1 — per-player ACTIONS on the Draft Room's undrafted
     # rows (docs/plans/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a
@@ -934,6 +945,28 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ the key is ABSENT from the profile (never 0, never null)
     # and no depth_chart_* attribute is read at all.
     "trade.rb_handcuff",
+    # ── Receipts — graded suggestion track record (docs/plans/receipts/) ──
+    # TWO INDEPENDENT KILL SWITCHES, both default false, sequenced
+    # grading-then-screen (PRD DR-11) so the numbers exist before any screen
+    # can show them.
+    #
+    # `receipts.grading` ON ⇒ POST /api/cron/receipts-grade does work, the
+    # daily-tick guard calls the same function, and GET
+    # /api/admin/receipts/metrics answers. OFF (default) ⇒ the cron endpoint
+    # returns {"ok": true, "skipped": "flag"} and writes NOTHING, the guard
+    # is a no-op, and the admin route 404s. Nothing else in the app reads
+    # `receipts_*` tables, so OFF is byte-identical serving by construction —
+    # the grader is an offline consumer of frozen impressions and frozen
+    # consensus snapshots, and adds no line to any generation module
+    # (PLAN §7.3, pinned by test_receipts_grading.py's isolation test).
+    "receipts.grading",
+    # `receipts.screen` ON ⇒ GET /api/league/<id>/receipts answers and the
+    # mobile "Track record" entry point renders. OFF (default) ⇒ that route
+    # 404s `feature_disabled` and the entry point is ABSENT (never an error
+    # dialog — PRD FR-5). Deliberately separate from `receipts.grading`: the
+    # grading half must run dark for ≥2 weeks before any screen ships, and a
+    # bad screen must be revertible without stopping data collection.
+    "receipts.screen",
     # ── Counterparty breaker (docs/plans/counterparty-breaker/LLD.md §1.7) ────
     # ON ⇒ `backend/trade_breaker.py` is imported and every served card is
     # stamped with a `breaker` attribute: the counterparty's likely objection,

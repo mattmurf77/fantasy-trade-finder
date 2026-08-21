@@ -250,6 +250,28 @@ NON_INTENT_EVENTS = frozenset({
     # (and the apply behind it) does not already account for.
     "rankings_preset_detected",
     "rankings_preset_fallback",
+    # ── Receipts, 2026-08-21 (docs/plans/receipts/, PRD DR-9) — added in the
+    # SAME commit that registered it in analytics_taxonomy, for the reason
+    # stated at the top of this block.
+    #
+    #   receipts_grade_run — SERVER-fired, one row per grading run, carrying
+    #     user_id="system:receipts". It fires on a daily cron tick whether or
+    #     not a human opened the app, so admitting it to INTENT would mint a
+    #     user-day out of a background job and step-change DAU/WAU at the
+    #     seam. The `api_call` / `api_request` class exactly.
+    #
+    # `receipts_opened` is deliberately ABSENT from this deny-list and stays
+    # INTENT: opening your own track record is a deliberate feature
+    # engagement, the peer of `find_trades_tapped`. Its NON_INTENT sibling
+    # `receipts_window_changed` (navigation, the `tab_selected` class) lands
+    # here with the screen that emits it.
+    "receipts_grade_run",
+    # `receipts_window_changed` — navigation, the `tab_selected` class, added
+    # in the SAME commit as its emitter. Every emission is preceded on the
+    # same screen by `receipts_opened`, which IS intent and already counts the
+    # user, so no user-day exists for this to add. `receipts_opened` itself
+    # stays deliberately ABSENT from this deny-list.
+    "receipts_window_changed",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

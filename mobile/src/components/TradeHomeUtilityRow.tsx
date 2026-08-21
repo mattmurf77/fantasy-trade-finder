@@ -47,6 +47,13 @@ interface Props {
    *  entry point the mode bar carried has to exist here too. Omitting it keeps
    *  a flag-off build byte-identical. */
   onConditions?: () => void;
+  /** Receipts (docs/plans/receipts/, flag `receipts.screen`) — opens the
+   *  viewer's graded suggestion track record. Same optional-prop convention as
+   *  `onTodaysTrade` and `onConditions` above: passing the handler is what
+   *  creates the control, so a flag-off build renders this row byte-identical
+   *  to today. The FLAG gates this entry point; the route itself is
+   *  registered unconditionally in RootNav. */
+  onTrackRecord?: () => void;
 }
 
 export default function TradeHomeUtilityRow({
@@ -55,6 +62,7 @@ export default function TradeHomeUtilityRow({
   onManualCalc,
   onTodaysTrade,
   onConditions,
+  onTrackRecord,
 }: Props) {
   return (
     <View style={styles.row} testID="trades.home-utility-row">
@@ -134,6 +142,24 @@ export default function TradeHomeUtilityRow({
         <Icon name="swap" size={24} color={chalk.dim} />
         <Text style={styles.lbl}>Manual calc</Text>
       </Pressable>
+      {/* Receipts — how past suggestions actually tracked the market. Uses the
+          shared `trends` glyph (nearest semantic fit: a record over time); no
+          dedicated glyph exists in the shared Icon set. */}
+      {onTrackRecord ? (
+        <Pressable
+          testID="trades.home-utility.track-record"
+          accessibilityRole="button"
+          accessibilityLabel="Track record"
+          onPress={() => {
+            haptics.selection();
+            onTrackRecord();
+          }}
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+        >
+          <Icon name="trends" size={28} color={chalk.dim} />
+          <Text style={styles.lbl}>Track record</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

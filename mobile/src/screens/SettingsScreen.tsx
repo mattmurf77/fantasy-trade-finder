@@ -39,12 +39,9 @@ import { getMflLinkStatus, unlinkMfl } from '../api/sendInMfl';
 import {
   exportAccountData,
   getProfileVisibility,
-  getPickPricingMode,
   getStudTaxMode,
-  setPickPricingMode,
   setProfileVisibility,
   setStudTaxMode,
-  type PickPricingMode,
 } from '../api/accountPrefs';
 import type { StudTaxMode } from '../api/calc';
 import { track } from '../api/events';
@@ -103,10 +100,9 @@ export default function SettingsScreen({ navigation }: any) {
   const profileToggleEnabled    = useFlag('profiles.user_toggle');
   const denialRecoveryEnabled   = useFlag('notif.denial_recovery');
   const helpSurfaceEnabled      = useFlag('ux.help_surface');
-  // M6b — gates the pick-pricing segmented control. Off (shipped) ⇒ the
-  // section is not rendered AND /api/settings/pick-pricing is never called
-  // (it 404s server-side while dark).
-  const slotPricingOn           = useFlag('trade.slot_pricing');
+  // (The pick-pricing segmented control and its `trade.slot_pricing` flag
+  // read were REMOVED 2026-08-21, D-144 — pick pricing is no longer a
+  // setting. See TradeValuesSection.tsx, which owns this block in v2.)
   // Rank-home preference — which ranking flow the Rank tab opens at launch.
   // Local persist is what routes; the backend POST is analytics-only, so a
   // failure there never blocks or reverts the slider. With settings v2 on,
@@ -156,45 +152,11 @@ export default function SettingsScreen({ navigation }: any) {
     }
   }
 
-  // ── M6b — draft-pick pricing mode (flag `trade.slot_pricing`) ─────────
-  // 'tier_ladder' (DEFAULT — today's pick ladder) | 'market_slots'
-  // (DynastyProcess per-slot market curve). Same optimistic pattern as the
-  // stud-tax control. NOTE the default differs from #215's: the market mode
-  // is opt-in here, so a read failure must land on 'tier_ladder'.
-  const [pickPricing, setPickPricing] = useState<PickPricingMode>('tier_ladder');
-  const [pickPricingBusy, setPickPricingBusy] = useState(false);
-  useEffect(() => {
-    if (!slotPricingOn) return;
-    let alive = true;
-    getPickPricingMode()
-      .then((r) => {
-        if (alive && (r.mode === 'tier_ladder' || r.mode === 'market_slots')) {
-          setPickPricing(r.mode);
-        }
-      })
-      .catch(() => {
-        /* stay on the tier_ladder default — read failure is non-fatal */
-      });
-    return () => {
-      alive = false;
-    };
-  }, [slotPricingOn]);
-
-  async function onPickPricingChange(mode: PickPricingMode) {
-    if (mode === pickPricing || pickPricingBusy) return;
-    const prev = pickPricing;
-    setPickPricing(mode);
-    setPickPricingBusy(true);
-    try {
-      await setPickPricingMode(mode);
-      track('pick_pricing_mode_changed', { mode }, 'Settings');
-    } catch {
-      setPickPricing(prev);
-      setToast({ msg: 'Could not save the pick pricing setting', tone: 'warn' });
-    } finally {
-      setPickPricingBusy(false);
-    }
-  }
+  // ── Draft-pick pricing mode — REMOVED 2026-08-21 (D-144) ──────────────
+  // Operator ruling: "Market slots should be default and not an opt-in or
+  // even an option to flip." The state, the fetch, the optimistic PUT and the
+  // `pick_pricing_mode_changed` emitter all died with the control; the
+  // backend serves the fixed state on GET and 410s the PUT.
 
   function rerouteRankStack(m: RankMethodPref) {
     // Reset the nested Rank stack to the chosen flow WITHOUT changing tab
@@ -939,49 +901,11 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
-  // M6b — how the trade engine prices DRAFT PICKS. Same segmented control as
-  // the stud tax, one row below it, behind `trade.slot_pricing`.
-  // `tier_ladder` is the DEFAULT and is today's behaviour exactly; the market
-  // curve is opt-in (operator decision O2 authorised the toggle, not a
-  // default change — contrast #214/#215, where the retuned mode shipped ON).
-  const PICK_PRICING_OPTIONS: Array<{
-    key: PickPricingMode; label: string; desc: string;
-  }> = [
-    { key: 'tier_ladder', label: 'Tier ladder',
-      desc: 'Tier ladder — every pick prices at its round\u2019s tier value (current behaviour).' },
-    { key: 'market_slots', label: 'Market',
-      desc: 'Market — picks price off the live dynasty market curve, which is steeper: a 1.01 costs more, and 2nds and 3rds cost less.' },
-  ];
-  const pickPricingSection = slotPricingOn ? (
-    <>
-      <View style={styles.studTaxBlock}>
-        <Text style={styles.rowKey}>Pick pricing</Text>
-        <View style={styles.segRow}>
-          {PICK_PRICING_OPTIONS.map((o) => {
-            const on = o.key === pickPricing;
-            return (
-              <Pressable
-                key={o.key}
-                testID={`settings.pick-pricing.${o.key}`}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on, disabled: pickPricingBusy }}
-                accessibilityLabel={o.desc}
-                disabled={pickPricingBusy}
-                onPress={() => onPickPricingChange(o.key)}
-                style={[styles.seg, on && styles.segOn, pickPricingBusy && styles.segBusy]}
-              >
-                <Text style={[styles.segText, on && styles.segTextOn]}>{o.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={styles.rowSub}>
-          {PICK_PRICING_OPTIONS.find((o) => o.key === pickPricing)?.desc} Applies
-          to the calculator and trade suggestions.
-        </Text>
-      </View>
-    </>
-  ) : null;
+  // The "Pick pricing" segmented control lived here until 2026-08-21 (D-144).
+  // It is gone, not hidden: the operator ruled market pricing is "not an
+  // opt-in or even an option to flip", so there is no state left to render
+  // and no flag left to read. Both former render sites below keep the
+  // stud-tax block alone.
 
   // #187 — dismiss/disable The Analyst from Settings, both directions.
   // Off: same path as the bubble's "Skip the tour" (dismissTour — clears any
@@ -1486,7 +1410,6 @@ export default function SettingsScreen({ navigation }: any) {
 
             {rankingSection}
             {studTaxSection}
-            {pickPricingSection}
             {guideSection}
 
             <View style={styles.section}>
@@ -1523,7 +1446,6 @@ export default function SettingsScreen({ navigation }: any) {
 
             {rankingSection}
             {studTaxSection}
-            {pickPricingSection}
             {guideSection}
 
             <View style={styles.section}>

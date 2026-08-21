@@ -5,10 +5,17 @@ Committed for REPRODUCIBILITY, not as a test — nothing runs it in CI. It is
 the harness behind the numbers in living-memory/TEST_LEDGER.md 2026-08-21a.
 
     # branch tip
-    cd <repo>            && python3 docs/plans/package-benchmark-sweetener/measure_gap_distribution.py
+    cd <repo>            && PYTHONHASHSEED=0 python3 docs/plans/package-benchmark-sweetener/measure_gap_distribution.py
     # the before side
     git archive origin/main | tar -x -C /tmp/main_tree
-    cd /tmp/main_tree    && python3 <abs path to this file>
+    cd /tmp/main_tree    && PYTHONHASHSEED=0 python3 <abs path to this file>
+
+PIN `PYTHONHASHSEED` ON BOTH SIDES (G-053). Unseeded, this harness is not
+deterministic: two consecutive runs on the IDENTICAL tree can disagree by one
+card in one arm (observed on 12t_1qb / v2_only / D_challenger, sweetened 1 vs
+2), because set/dict iteration order breaks ties between equally-ranked
+candidates. That is small enough to look like a real single-card regression
+and it will send you hunting a leak that is not there.
 
 It builds the two constructed fixture leagues the fit-challenger W0 dry run
 used (TEST_LEDGER 2026-08-20b) — 12-team 1QB 26-man and 16-team SF 21-man,

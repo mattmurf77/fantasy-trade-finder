@@ -1,29 +1,38 @@
-"""rookie-draft M6b — DynastyProcess market slot values IN THE TRADE ENGINE.
+"""Market pick pricing — built as rookie-draft M6b, made UNCONDITIONAL by the
+operator ruling of 2026-08-21 (D-144).
 
-Operator decision O2 (plan.md, *Operator decisions — 2026-08-06*) reverses
-hld KD-9 / lld §4.7's "display-only" position. This wave adds a #214-style
-per-user toggle, `pick_pricing_mode`:
+Operator decision O2 (plan.md, *Operator decisions — 2026-08-06*) reversed
+hld KD-9 / lld §4.7's "display-only" position and put DynastyProcess's market
+curve into the trade engine behind a #214-style per-user toggle
+(`pick_pricing_mode`) and a default-OFF flag (`trade.slot_pricing`).
 
-    'tier_ladder'  DEFAULT — today's behaviour, EXACTLY
-    'market_slots' the DP per-slot market curve
+**The 2026-08-21 ruling removed both**, verbatim: *"Market slots should be
+default and not an opt-in or even an option to flip. Aligned that future picks
+stay default for now."* So every assertion below that used to read "the flag
+is the gate" now reads "there is no gate".
 
-behind the default-OFF flag `trade.slot_pricing`.
+    'market_slots'  THE PRICE. Every owned pick, every user, no exceptions.
+    'tier_ladder'   the legacy ladder, reachable ONLY by an explicit
+                    `pick_pricing_override` from a harness or a test.
 
-The load-bearing tests here, in priority order:
+WHAT THIS FILE PINS, in priority order:
 
-  T-M6B-01  BYTE-IDENTITY with the flag off — GENERIC_PICK_SEEDS unchanged,
-            every stored pool_value returned verbatim, and the DP source is
-            NEVER read (the fetcher is patched to explode if touched).
-  T-M6B-02  the flag is the ONE gate: a user with 'market_slots' STORED still
-            prices at the ladder while the flag is off, and the settings
-            route 404s.
+  T-M6B-01  the ladder axis still works and still reads NO DP data — the
+            fetcher is patched to explode if `tier_ladder` touches it.
+  T-M6B-02  THE INVERTED GATE TEST: no flag is read, no session is read, and
+            `users.pick_pricing_mode` is never queried, whatever it stores.
   T-M6B-03  the stored `draft_picks.pool_value` column is never written —
-            the mode is applied at READ time only (it is league-shared).
+            pricing is applied at READ time only (it is league-shared).
   T-M6B-04  GENERIC_PICK_SEEDS / the tier ladder are unchanged in BOTH modes
             (tier bands are absolute Elo mirrored across five clients).
+  T-M6B-05  **PER-SLOT: a resolved 1.01 outprices a 1.05 outprices a 1.12.**
+            The operator's ruling in one assertion — each pick holds real
+            value rather than generic. Its sibling pins the FALLBACK: a pick
+            whose order is UNRESOLVED still prices at the round curve, which
+            is what every future-year pick and every order-less league gets.
   plus      the slot-mapping basis, format awareness, the DP-horizon
             extrapolation, fail-soft to the ladder, the thread-local
-            contextmanager, the cap-after-pricing rule, and the route.
+            contextmanager, the cap-after-pricing rule, and the retired route.
 """
 
 from __future__ import annotations
@@ -55,6 +64,14 @@ def _isolate(monkeypatch):
 
 
 def _flag_on():
+    """RETIRED helper, deliberately kept as a NO-OP marker.
+
+    Every call site below used to need `trade.slot_pricing` on. D-144 removed
+    the gate, so this sets the flag purely to prove the tests do not depend on
+    it: each assertion holds with the flag in the state this leaves it in AND
+    with the all-off default the autouse fixture installs. The pairing is
+    checked directly by `test_m6b_02_the_flag_is_no_longer_read`.
+    """
     ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.slot_pricing": True}
 
 
@@ -86,8 +103,12 @@ def test_m6b_04_generic_ladder_byte_unchanged_in_every_mode(mode):
     """Tier bands are ABSOLUTE Elo mirrored across five clients
     (docs/cross-client-invariants.md). The 12 generic rungs are RANKABLE POOL
     assets whose seeds anchor those bands — repricing them would repaint tier
-    colours everywhere for a PER-USER setting. They must not move in either
-    mode."""
+    colours on every client. They must not move in either mode.
+
+    D-144 raised the stakes rather than lowering them: `market_slots` is no
+    longer an opt-in cohort, so a rung that moved with the mode would now move
+    for everybody. Owned-pick BADGES move (they reflect the served value,
+    D-320-2); these rungs, and the BANDS they anchor, do not."""
     _flag_on()
     with ts.pick_pricing_override(mode):
         assert pv.GENERIC_PICK_SEEDS == SHIPPED_SEEDS
@@ -95,55 +116,77 @@ def test_m6b_04_generic_ladder_byte_unchanged_in_every_mode(mode):
         assert srv.GENERIC_PICK_SEEDS is pv.GENERIC_PICK_SEEDS
 
 
-def test_m6b_01_flag_off_prices_at_the_stored_value_and_never_reads_dp(monkeypatch):
-    """Flag off ⇒ every price is the stored pool_value, and DynastyProcess's
-    values.csv is not fetched, parsed or cached."""
+def test_m6b_01_the_ladder_axis_prices_at_the_stored_value_and_never_reads_dp(monkeypatch):
+    """The `tier_ladder` pin returns the stored pool_value and does not fetch,
+    parse or cache DynastyProcess's values.csv.
+
+    Production cannot reach this pin any more — it is the harness/test axis —
+    but it stays load-bearing twice over: the bake-off arms price both curves
+    in one process, and "no DP read" is what proves the market path really is
+    the thing doing the repricing rather than something upstream."""
     def _explode(*a, **k):
-        raise AssertionError("DP pick values read while trade.slot_pricing is OFF")
+        raise AssertionError("DP pick values read under the tier_ladder pin")
     monkeypatch.setattr(data_loader, "_fetch_pick_values_csv", _explode)
-    monkeypatch.setattr(db, "get_pick_pricing_mode", lambda uid: "market_slots")
+    data_loader.reset_pick_values_cache()
 
     for season, rnd, stored in ((2026, 1, 2117.0), (2027, 2, 695.9),
                                 (2029, 4, 167.4)):
         row = _row(season, rnd, stored)
-        mode = ts.pick_pricing_mode_for_user(USER)
-        assert mode == "tier_ladder"
-        with ts.pick_pricing_override(mode):
+        with ts.pick_pricing_override("tier_ladder"):
             assert pv.priced_pool_value(row, scoring_format="1qb_ppr") == stored
 
 
 def test_m6b_01b_tier_ladder_mode_is_the_stored_value_verbatim():
-    """Even with the flag ON, `tier_ladder` returns the stored float itself —
-    no round-trip, no recompute, no DP read."""
-    _flag_on()
+    """`tier_ladder` returns the stored float itself — no round-trip, no
+    recompute, no DP read."""
     for stored in (2117.0, 0.0, 1.234567, 999.9):
         row = _row(2027, 1, stored)
         assert pv.priced_pool_value(row, scoring_format="1qb_ppr",
                                     mode="tier_ladder") == stored
 
 
-def test_m6b_02_stored_market_mode_cannot_escape_the_flag(monkeypatch):
-    """THE gate test. A user row that says 'market_slots' prices at the ladder
-    while the flag is off, without the DB even being read."""
+def test_m6b_02_the_flag_is_no_longer_read(monkeypatch):
+    """THE INVERTED GATE TEST (D-144).
+
+    Before: `trade.slot_pricing` off ⇒ ladder for everyone, DB unread.
+    Now: there is no gate. The resolver returns `market_slots` with the flag
+    off, with the flag on, and with `is_enabled` rigged to explode — which is
+    the strongest available proof that the flag is not consulted at all."""
+    def _explode(key):
+        raise AssertionError(f"feature flag {key!r} read by pick pricing")
+    monkeypatch.setattr(ff, "is_enabled", _explode)
+
+    ff._flags_cache = {**ff.DEFAULT_FLAGS}                      # flag off
+    assert ts.pick_pricing_mode_for_user(USER) == "market_slots"
+    _flag_on()                                                  # flag on
+    assert ts.pick_pricing_mode_for_user(USER) == "market_slots"
+
+
+def test_m6b_02_the_stored_column_is_no_longer_read(monkeypatch):
+    """`users.pick_pricing_mode` is DEAD DATA. A row that still says
+    'tier_ladder' — every row does, it was the old default — must not drag its
+    owner back onto the ladder, and the column must not even be queried."""
     called = []
     monkeypatch.setattr(db, "get_pick_pricing_mode",
-                        lambda uid: called.append(uid) or "market_slots")
-    assert ts.pick_pricing_mode_for_user(USER) == "tier_ladder"
-    assert called == []                       # no DB read at all
-    _flag_on()
+                        lambda uid: called.append(uid) or "tier_ladder")
     assert ts.pick_pricing_mode_for_user(USER) == "market_slots"
-    assert called == [USER]
+    assert ts.pick_pricing_mode_for_user(None) == "market_slots"
+    assert ts.pick_pricing_mode_for_user("") == "market_slots"
+    assert called == []                       # not one DB read
 
 
-def test_m6b_02b_defaults_are_todays_behaviour():
-    """Unlike #214 — which shipped its retuned mode as the DEFAULT — the
-    market mode here is opt-in."""
-    assert pv.PICK_PRICING_DEFAULT == "tier_ladder"
-    assert ts.PICK_PRICING_DEFAULT == "tier_ladder"
+def test_m6b_02b_the_default_is_the_market():
+    """The ruling, as constants. `market_slots` is the default in every module
+    that names one, so an unpinned thread — a cron job, a background deck
+    worker, a direct `priced_pool_value` call — prices at the market."""
+    assert pv.PICK_PRICING_DEFAULT == "market_slots"
+    assert ts.PICK_PRICING_DEFAULT == "market_slots"
     assert db.PICK_PRICING_MODES == pv.PICK_PRICING_MODES == ts.PICK_PRICING_MODES
-    assert ts.current_pick_pricing_mode() == "tier_ladder"
+    assert ts.current_pick_pricing_mode() == "market_slots"
     assert ts.pinned_pick_pricing_mode() is None
-    assert ff.DEFAULT_FLAGS["trade.slot_pricing"] is False
+    # The flag key is KEPT (clients in the field still receive it) but is
+    # never read. Its value is documentation, not behaviour.
+    assert "trade.slot_pricing" in ff.FLAG_KEYS
 
 
 def test_m6b_03_read_time_only_never_writes_the_shared_column():
@@ -298,11 +341,190 @@ def test_the_measured_reshaping_direction_is_deflation_not_inflation():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# T-M6B-05 — the per-slot price, and the round-curve fallback under it
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Pinned against the snapshot `conftest.py` installs
+# (fixtures/dp_values_picks_2026-08-06.csv), 1QB, 2026 round 1:
+#
+#     ladder rung (every first alike) 2117.0
+#     round curve (mid tercile)       1859.5
+#     slot 1.01                       4867.1     2.62x the round price
+#     slot 1.05                       2343.2     1.26x
+#     slot 1.12                        820.8     0.44x
+#
+# The literals are spelled out rather than recomputed from the function under
+# test, so a change to the pricing path has to change this block on purpose.
+
+_R1_2026 = {1: 4867.1, 5: 2343.2, 12: 820.8}
+_R1_ROUND_PRICE = 1859.5
+_R1_LADDER_RUNG = 2117.0
+
+
+def test_m6b_05_a_resolved_101_outprices_a_105_outprices_a_112():
+    """**THE RULING, AS ONE ASSERTION.** Operator: each pick should hold "real
+    value rather than generic".
+
+    Before D-144's per-slot extension all three of these priced identically at
+    the round curve; before M6b they priced identically at the ladder rung.
+    Now they are ordered, and the spread is enormous — a 1.01 is 5.9x a 1.12.
+
+    The row is IDENTICAL in all three calls. Only `slot` differs, which is the
+    point: the price comes from the resolved slot, not from anything stored on
+    the pick."""
+    row = _row(2026, 1, _R1_LADDER_RUNG)
+    priced = {s: pv.priced_pool_value(row, scoring_format="1qb_ppr", slot=s)
+              for s in (1, 5, 12)}
+
+    assert priced[1] > priced[5] > priced[12]
+    for s, expected in _R1_2026.items():
+        assert priced[s] == pytest.approx(expected, abs=0.05), s
+    assert priced[1] / priced[12] > 5.0
+
+    # The round curve is not a floor or a ceiling — real slots straddle it.
+    assert priced[1] > _R1_ROUND_PRICE > priced[12]
+    # ...and so does the ladder rung the whole app used to charge.
+    assert priced[1] > _R1_LADDER_RUNG > priced[12]
+
+
+def test_m6b_05b_an_unresolved_slot_still_prices_at_the_round_curve():
+    """**THE FALLBACK CONTRACT — the sibling that keeps the ruling honest.**
+
+    Per-slot pricing applies only where D-090 resolved an order. Everything
+    else — every future-year pick (DP publishes no per-slot rows for them at
+    all), every league on an unsupported platform, every league whose order is
+    unpublished or unresolvable, and every call while `picks.slot_labels` is
+    off — must still price at the round curve, exactly as it did before the
+    extension.
+
+    Two 2026 firsts with NO slot are therefore identical, which is the
+    property `test_m6b_05_a_...` deliberately breaks when a slot IS known."""
+    row = _row(2026, 1, _R1_LADDER_RUNG)
+    for unresolved in (None, 0):
+        assert pv.priced_pool_value(row, scoring_format="1qb_ppr",
+                                    slot=unresolved) == _R1_ROUND_PRICE
+
+    # Two different picks, same round, neither resolved → same price.
+    a = pv.priced_pool_value(_row(2026, 1, _R1_LADDER_RUNG, "a"),
+                             scoring_format="1qb_ppr")
+    b = pv.priced_pool_value(_row(2026, 1, _R1_LADDER_RUNG, "b"),
+                             scoring_format="1qb_ppr")
+    assert a == b == _R1_ROUND_PRICE
+
+
+def test_m6b_05c_future_years_ignore_a_slot_because_dp_publishes_none():
+    """"Future picks stay default for now" — the operator's second clause.
+
+    It needs no branch in our code: DP prices individual slots only for the
+    current class, so `market_pick_slot_value` returns None for a future
+    season and the waterfall falls to the round curve by itself. Asserted at
+    BOTH levels so a future snapshot that starts publishing 2027 slots fails
+    here loudly rather than silently repricing next year's picks."""
+    for season in (2027, 2028, 2029):
+        assert pv.market_pick_slot_value(season, 1, 1, "1qb_ppr") is None, season
+        with_slot = pv.priced_pool_value(_row(season, 1, 999.0),
+                                         scoring_format="1qb_ppr", slot=1)
+        without = pv.priced_pool_value(_row(season, 1, 999.0),
+                                       scoring_format="1qb_ppr")
+        assert with_slot == without
+        assert with_slot == pv.market_pick_pool_value(season, 1, "1qb_ppr")
+
+
+def test_m6b_05d_per_slot_is_format_aware():
+    """A superflex 1.01 is dearer than a 1QB one, like every other DP price."""
+    for s in (1, 5, 12):
+        sf = pv.market_pick_slot_value(2026, 1, s, "sf_tep")
+        one = pv.market_pick_slot_value(2026, 1, s, "1qb_ppr")
+        assert sf > one, (s, sf, one)
+    assert pv.market_pick_slot_value(2026, 1, 1, "sf_tep") == pytest.approx(
+        6181.1, abs=0.05)
+
+
+def test_m6b_05e_slot_pricing_falls_soft_at_every_step(monkeypatch):
+    """The waterfall's three steps, each proven by removing the one above it.
+
+    Step 3 (the stored ladder) is the only safety net left, so its trigger —
+    DP unreachable — is exercised explicitly rather than assumed."""
+    # (a) a round DP does not publish per-slot: no row, so round curve.
+    assert pv.market_pick_slot_value(2026, 9, 1, "1qb_ppr") is None
+    # (b) junk slots never raise and never invent a price.
+    for junk in (None, 0, -3, "nope"):
+        assert pv.market_pick_slot_value(2026, 1, junk, "1qb_ppr") is None
+    # (c) DP unreachable ⇒ even a perfectly good slot yields the stored value.
+    monkeypatch.setattr(data_loader, "load_pick_slot_values", lambda *a, **k: {})
+    assert pv.market_pick_slot_value(2026, 1, 1, "1qb_ppr") is None
+    assert pv.priced_pool_value(_row(2026, 1, 1234.5), scoring_format="1qb_ppr",
+                                slot=1) == 1234.5
+
+
+def test_m6b_05f_the_badge_follows_the_served_value():
+    """D-320-2: a pick's tier badge reflects the value it is SERVED at, not its
+    name. Per-slot pricing is where that finally bites — a 1.01 and a 1.12 are
+    both "a 2026 1st" and now badge in genuinely different bands.
+
+    Walked over the same inverse the clients use, so a badge computed here
+    matches what a client would compute from the same number."""
+    tier_for = srv.RankingService.tier_for_elo
+    v2e = ts.value_to_elo
+    band = lambda v: tier_for(v2e(v), None, "1qb_ppr")
+
+    b101, b112 = band(_R1_2026[1]), band(_R1_2026[12])
+    assert b101 != b112, "the ruling's whole point: they no longer badge alike"
+    # The old world: one rung, therefore one badge for every 2026 first.
+    assert band(_R1_LADDER_RUNG) == band(_R1_LADDER_RUNG)
+    # Every band is a real band — no pick falls off the ladder into None.
+    for v in (*_R1_2026.values(), _R1_ROUND_PRICE, _R1_LADDER_RUNG):
+        assert band(v) is not None, v
+
+
+def test_m6b_05g_the_engine_read_site_applies_the_slot(monkeypatch):
+    """End to end through `_owned_pick_assets`, because a seam nothing calls
+    with a slot would pass every test above and still ship generic prices.
+
+    Pins the ORDERING too: the cap sorts on the priced value, so a 1.01 must
+    outrank a 1.12 of the same round — which the ladder could never express."""
+    rows = [_row(2026, 1, _R1_LADDER_RUNG, "P_101"),
+            _row(2026, 1, _R1_LADDER_RUNG, "P_112")]
+    rows[0]["original_roster_id"] = "r1"
+    rows[1]["original_roster_id"] = "r12"
+    order = {"schema": 1, "season": 2026, "teams": 12, "type": "linear",
+             "slots": {"r1": 1, "r12": 12}}
+    monkeypatch.setattr(srv, "load_draft_picks", lambda **k: [dict(r) for r in rows])
+    monkeypatch.setattr(srv, "_picks_pool_cap", lambda: 6)
+    monkeypatch.setattr(srv, "_league_slot_order", lambda lid: order)
+
+    out = srv._owned_pick_assets("L", "1qb_ppr")["o1"]
+    priced = {a.id: ts.elo_to_value(1200.0 + 6.0 * a.pick_value) for a in out}
+    assert priced["P_101"] == pytest.approx(_R1_2026[1], rel=1e-3)
+    assert priced["P_112"] == pytest.approx(_R1_2026[12], rel=1e-3)
+    assert [a.id for a in out] == ["P_101", "P_112"], "cap must sort on price"
+    # The label agrees with the price — the same slot drove both.
+    assert out[0].name.startswith("2026 1.01")
+    assert out[1].name.startswith("2026 1.12")
+
+
+def test_m6b_05h_no_resolved_order_reproduces_the_round_curve_at_the_read_site(monkeypatch):
+    """The same read site with `_league_slot_order` returning None — the
+    answer for every league we cannot resolve. Both picks price at the round
+    curve and the labels stay generic, byte-identical to pre-extension."""
+    rows = [_row(2026, 1, _R1_LADDER_RUNG, "P_a"),
+            _row(2026, 1, _R1_LADDER_RUNG, "P_b")]
+    monkeypatch.setattr(srv, "load_draft_picks", lambda **k: [dict(r) for r in rows])
+    monkeypatch.setattr(srv, "_picks_pool_cap", lambda: 6)
+    monkeypatch.setattr(srv, "_league_slot_order", lambda lid: None)
+
+    out = srv._owned_pick_assets("L", "1qb_ppr")["o1"]
+    priced = {a.id: ts.elo_to_value(1200.0 + 6.0 * a.pick_value) for a in out}
+    assert priced["P_a"] == pytest.approx(_R1_ROUND_PRICE, rel=1e-3)
+    assert priced["P_b"] == pytest.approx(_R1_ROUND_PRICE, rel=1e-3)
+    assert all(a.name == "2026 1st" for a in out)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Thread-local plumbing (the matrix/deck harnesses depend on it)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_override_pins_nests_and_restores():
-    _flag_on()
     assert ts.pinned_pick_pricing_mode() is None
     with ts.pick_pricing_override("market_slots"):
         assert ts.current_pick_pricing_mode() == "market_slots"
@@ -311,23 +533,29 @@ def test_override_pins_nests_and_restores():
             assert ts.current_pick_pricing_mode() == "tier_ladder"
         assert ts.current_pick_pricing_mode() == "market_slots"
     assert ts.pinned_pick_pricing_mode() is None
-    assert ts.current_pick_pricing_mode() == "tier_ladder"
+    # UNPINNED now lands on the market, not the ladder — the D-144 flip.
+    assert ts.current_pick_pricing_mode() == "market_slots"
 
 
 def test_override_rejects_garbage_and_none():
+    """An unrecognised pin falls back to the DEFAULT, which is now the market.
+    Note what this means: a typo'd mode string can no longer silently restore
+    the old ladder — it fails safe toward the shipped price instead."""
     with ts.pick_pricing_override("nonsense"):
-        assert ts.current_pick_pricing_mode() == "tier_ladder"
+        assert ts.current_pick_pricing_mode() == "market_slots"
     with ts.pick_pricing_override(None):
-        assert ts.current_pick_pricing_mode() == "tier_ladder"
+        assert ts.current_pick_pricing_mode() == "market_slots"
 
 
-def test_mode_for_user_is_db_failure_safe(monkeypatch):
-    _flag_on()
+def test_mode_for_user_cannot_fail(monkeypatch):
+    """It used to be DB-failure-safe by catching. Now it is safe by not
+    touching the DB at all: a `get_pick_pricing_mode` that raises on sight
+    proves the call never happens."""
     def _boom(uid):
-        raise RuntimeError("db down")
+        raise AssertionError("users.pick_pricing_mode read after D-144")
     monkeypatch.setattr(db, "get_pick_pricing_mode", _boom)
-    assert ts.pick_pricing_mode_for_user(USER) == "tier_ladder"
-    assert ts.pick_pricing_mode_for_user(None) == "tier_ladder"
+    assert ts.pick_pricing_mode_for_user(USER) == "market_slots"
+    assert ts.pick_pricing_mode_for_user(None) == "market_slots"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -392,11 +620,13 @@ def test_owned_pick_assets_never_injects_a_zero_or_negative_price(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _settings_call(monkeypatch, method, body=None, token="m6b-set"):
-    store = {}
-    monkeypatch.setattr(db, "get_pick_pricing_mode",
-                        lambda uid: store.get(uid, "tier_ladder"))
-    monkeypatch.setattr(db, "set_pick_pricing_mode",
-                        lambda uid, mode: store.__setitem__(uid, mode))
+    # Both accessors raise: the retired route must touch NEITHER, on either
+    # verb. (They still exist, and still round-trip — see the db test below —
+    # because the column is kept as dead data, not dropped.)
+    def _boom(*a, **k):
+        raise AssertionError("retired route touched users.pick_pricing_mode")
+    monkeypatch.setattr(db, "get_pick_pricing_mode", _boom)
+    monkeypatch.setattr(db, "set_pick_pricing_mode", _boom)
     with srv._sessions_lock:
         srv._sessions[token] = {"user_id": USER, "active_format": "1qb_ppr",
                                 "last_active": 0.0}
@@ -412,33 +642,45 @@ def _settings_call(monkeypatch, method, body=None, token="m6b-set"):
             srv._sessions.pop(token, None)
 
 
-def test_m6b_02c_route_404s_while_the_flag_is_dark(monkeypatch):
-    assert _settings_call(monkeypatch, "GET").status_code == 404
-    assert _settings_call(monkeypatch, "PUT",
-                          {"mode": "market_slots"}).status_code == 404
+def test_route_get_serves_the_fixed_state_for_old_clients(monkeypatch):
+    """Build 12x clients still GET this on Settings open. They must receive the
+    TRUE fixed state — not the dead stored column, and not a 404 (which the
+    shipped client reads as "flag dark, hide the control", i.e. a lie now)."""
+    for flags in ({**ff.DEFAULT_FLAGS},
+                  {**ff.DEFAULT_FLAGS, "trade.slot_pricing": True}):
+        ff._flags_cache = flags
+        r = _settings_call(monkeypatch, "GET")
+        assert r.status_code == 200
+        assert r.get_json() == {"mode": "market_slots", "retired": True}
 
 
-def test_route_get_defaults_to_tier_ladder(monkeypatch):
-    _flag_on()
-    r = _settings_call(monkeypatch, "GET")
-    assert r.status_code == 200 and r.get_json() == {"mode": "tier_ladder"}
+def test_route_put_is_410_gone_whatever_the_body(monkeypatch):
+    """410, not 404 and not 400: the resource existed and was withdrawn. A
+    once-valid mode, a once-invalid mode and no body at all all get the same
+    answer — there is nothing left to validate against."""
+    for body in ({"mode": "market_slots"}, {"mode": "tier_ladder"},
+                 {"mode": "market"}, {}, None):
+        r = _settings_call(monkeypatch, "PUT", body)
+        assert r.status_code == 410, body
+        payload = r.get_json()
+        assert payload["error"] == "gone"
+        assert payload["mode"] == "market_slots"
+        assert "no longer configurable" in payload["message"]
 
 
-def test_route_put_validates_and_persists(monkeypatch):
-    _flag_on()
-    assert _settings_call(monkeypatch, "PUT", {"mode": "market"}).status_code == 400
-    ok = _settings_call(monkeypatch, "PUT", {"mode": "market_slots"})
-    assert ok.status_code == 200
-    assert ok.get_json() == {"ok": True, "mode": "market_slots"}
-
-
-def test_route_requires_a_session():
-    _flag_on()
+def test_route_still_requires_a_session_on_both_verbs():
+    """Unchanged auth posture — the retirement did not make the route public."""
     with srv.app.test_client() as c:
         assert c.get("/api/settings/pick-pricing").status_code == 401
+        assert c.put("/api/settings/pick-pricing",
+                     json={"mode": "market_slots"}).status_code == 401
 
 
-def test_db_accessors_round_trip_and_reject_bad_modes():
+def test_db_accessors_survive_as_dead_data():
+    """`users.pick_pricing_mode` is never dropped (additive-schema rule) and
+    its accessors still work. Nothing in production calls them; this pins that
+    the column's removal was NOT part of the retirement, so a restore of the
+    per-user axis would not need a migration."""
     db.init_db()
     uid = "m6b_db_user"
     assert db.get_pick_pricing_mode(uid) == "tier_ladder"
@@ -448,3 +690,5 @@ def test_db_accessors_round_trip_and_reject_bad_modes():
     assert db.get_pick_pricing_mode(uid) == "tier_ladder"
     with pytest.raises(ValueError):
         db.set_pick_pricing_mode(uid, "market")
+    # ...and none of it reaches pricing.
+    assert ts.pick_pricing_mode_for_user(uid) == "market_slots"

@@ -234,7 +234,7 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
-from . import pick_slots                          # D-090 — real-slot pick labels
+from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
@@ -829,7 +829,7 @@ g_universal_seed: dict[str, float] = {}
 from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
-    priced_pool_value,          # M6b read-time pricing seam (flag trade.slot_pricing)
+    priced_pool_value,          # read-time market pricing seam (D-144)
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -7719,53 +7719,52 @@ def stud_tax_setting_route():
 
 @app.route("/api/settings/pick-pricing", methods=["GET", "PUT"])
 def pick_pricing_setting_route():
-    """GET/PUT /api/settings/pick-pricing — M6b per-user pick-pricing mode.
+    """GET/PUT /api/settings/pick-pricing — **RETIRED 2026-08-21** (D-144).
 
-    GET → {"mode": "tier_ladder"|"market_slots"} (stored setting;
-    'tier_ladder' — TODAY'S BEHAVIOUR — is the default). PUT persists it.
-    Sibling of /api/settings/stud-tax in every respect except one: this route
-    is FLAG-GATED. `trade.slot_pricing` off ⇒ 404 on both verbs, so the mode
-    cannot even be stored while the repricing is dark.
+    The operator ruling — *"Market slots should be default and not an opt-in or
+    even an option to flip"* — deleted the setting this route managed. Pick
+    pricing is now `market_slots` for everybody, resolved in
+    `trade_service.pick_pricing_mode_for_user` with no DB read.
 
-    Unlike #214/#215 — which shipped its retuned mode as the DEFAULT — the
-    market mode here is opt-in. Operator decision O2 authorises the toggle and
-    the calibration, not a change to what today's users are charged for picks.
+    WHY THE ROUTE SURVIVES AT ALL, in two different shapes:
+
+    * **GET → 200 `{"mode": "market_slots", "retired": true}`.** Build 12x
+      clients in the field still call this on Settings open. They 404'd
+      gracefully while the flag was dark, but the shipped mobile build that
+      DOES render the control reads `{mode}` and selects the matching pill —
+      so serving the true fixed state makes an old build show the honest
+      answer ("Market", selected) instead of a stale default. The stored
+      `users.pick_pricing_mode` column is deliberately NOT read: it is dead
+      data, and echoing it back would tell an old client the setting still
+      means something.
+    * **PUT → 410 Gone.** The correct code for a resource that existed and was
+      deliberately withdrawn — a 404 would read as "wrong URL / not deployed
+      yet", which is what it meant last week. There is no precedent for a
+      retired route in this codebase (grep: zero 410s before this one), so
+      this is the precedent: retire a write verb with 410 and a body naming
+      the replacement, keep the read verb serving the fixed state for old
+      clients. The shipped mobile catch-block turns this into a non-fatal
+      "Could not save the pick pricing setting" warn toast and reverts the
+      pill — no crash, no data loss (there is no data left to lose).
+
+    The PUT no longer runs `_verified_write_denial`. That is deliberate, not
+    an oversight: the denial existed to stop an unverified account writing a
+    setting, and nothing is written any more. An unverified caller now gets
+    the same 410 as everyone else, which is the more honest answer than "you
+    are not allowed to do this" about a thing nobody is allowed to do.
+
+    `pick_pricing_mode_changed` is no longer emitted; the event stays
+    registered in `analytics_taxonomy` so historical rows remain queryable.
     """
-    if not is_enabled("trade.slot_pricing"):
-        return jsonify({"error": "not_found"}), 404
-    from .database import (get_pick_pricing_mode, set_pick_pricing_mode,
-                           PICK_PRICING_MODES)
-    sess = _require_session()
-    g_user_id = sess["user_id"]
+    _require_session()          # unchanged auth posture: 401 before anything
     if request.method == "GET":
-        try:
-            return jsonify({"mode": get_pick_pricing_mode(g_user_id)})
-        except Exception as e:
-            log.error("pick-pricing read failed for %s: %s", g_user_id, e)
-            return jsonify({"error": "internal_error"}), 500
-    denial = _verified_write_denial(sess)
-    if denial is not None:
-        return denial
-    body = request.get_json(silent=True) or {}
-    mode = body.get("mode", "")
-    if mode not in PICK_PRICING_MODES:
-        return jsonify({"error": f"Invalid mode: {mode!r}"}), 400
-    try:
-        set_pick_pricing_mode(g_user_id, mode)
-        log.info("pick-pricing mode set for %s: %s", g_user_id, mode)
-        try:
-            record_event(
-                g_user_id, "pick_pricing_mode_changed",
-                league_id=getattr(sess.get("league"), "league_id", None),
-                source="api", props={"mode": mode},
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(pick_pricing_mode_changed) failed: %s", ev_err)
-        return jsonify({"ok": True, "mode": mode})
-    except Exception as e:
-        log.error("pick-pricing write failed for %s: %s", g_user_id, e)
-        return jsonify({"error": "internal_error"}), 500
+        return jsonify({"mode": "market_slots", "retired": True})
+    return jsonify({
+        "error": "gone",
+        "message": ("Pick pricing is no longer configurable — every pick "
+                    "prices off the dynasty market curve."),
+        "mode": "market_slots",
+    }), 410
 
 
 @app.route("/api/scoring/switch", methods=["POST"])
@@ -8376,6 +8375,54 @@ def suggestion_telemetry_ratio_route():
             "ghost_matches": sum(l["ghost_matches"] for l in leagues),
         },
     })
+
+
+@app.route("/api/admin/receipts/metrics", methods=["GET"])
+def receipts_admin_metrics_route():
+    """GET /api/admin/receipts/metrics — per-taxonomy-cell grading accuracy.
+
+    Receipts' internal readout (docs/plans/receipts/LLD.md §2.3). Operator-only
+    (X-Cron-Secret, the `suggestion-telemetry/ratio` pattern above). Cells are
+    (window × shape_bucket × basis × model_arm); each carries `n`, win share, a
+    **Wilson 95% interval** in its centre-shifted form, median `edge_pct`, and
+    `gradeable_share` with a `flag_low_share` marker below 70%.
+
+    No bare percentages: at the single-digit per-cell n this feature will live
+    at for months, a point estimate without its interval is a claim the data
+    cannot support. Cells here deliberately SKIP the user surface's coverage
+    filter — the admin read wants every graded row plus the disclosure, not a
+    tidier subset — and the `n == rows used` invariant holds per surface.
+
+    `effective_window` reports the real span of `window_snap_date −
+    serve_snap_date`: a nominal 14-day window lands at roughly 11–20 days once
+    both anchors resolve, and the operator should read the number knowing it.
+
+    Optional filters: `window`, `shape_bucket`, `basis`, `model_arm`,
+    `league_id`, `dedup` (default 1 — the same earliest-serve rule as the user
+    surface; `dedup=0` includes re-serves and the response says so).
+
+    Available regardless of `receipts.screen`; 404 `feature_disabled` while
+    `receipts.grading` is off.
+    """
+    _require_cron_auth()
+    from .receipts_service import admin_metrics, grading_enabled
+    if not grading_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    window = request.args.get("window")
+    try:
+        window_days = int(window) if window else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "window must be an integer"}), 400
+
+    return jsonify(admin_metrics(
+        window=window_days,
+        shape_bucket=request.args.get("shape_bucket") or None,
+        basis=request.args.get("basis") or None,
+        model_arm=request.args.get("model_arm") or None,
+        league_id=request.args.get("league_id") or None,
+        dedup=request.args.get("dedup", "1") != "0",
+    ))
 
 
 @app.route("/api/admin/analytics/<report>", methods=["GET"])
@@ -9786,15 +9833,12 @@ def trade_evaluate_route():
         _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
         _mode = (_trade_service_mod.stud_tax_mode_for_user(_sess_for_mode.get("user_id"))
                  if _sess_for_mode else _trade_service_mod.STUD_TAX_DEFAULT)
-    # M6b — the pick-pricing mode rides the same request-scoped pin. Resolved
-    # from the same (optional) session: Mode A stays public, and an anonymous
-    # caller gets the 'tier_ladder' default. An outer pin wins, as above.
-    _pp_mode = _trade_service_mod.pinned_pick_pricing_mode()
-    if _pp_mode is None:
-        if _sess_for_mode is None:
-            _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
-        _pp_mode = _trade_service_mod.pick_pricing_mode_for_user(
-            _sess_for_mode.get("user_id") if _sess_for_mode else None)
+    # Pick pricing rides the same request-scoped pin, but since the 2026-08-21
+    # ruling (D-144) it has nothing to resolve: `market_slots` for everybody,
+    # signed-in or anonymous, so no session lookup happens on its account. An
+    # outer pin still wins — that is the bake-off/test seam, never a user.
+    _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
+                or _trade_service_mod.pick_pricing_mode_for_user(None))
     with _trade_service_mod.stud_tax_override(_mode), \
             _trade_service_mod.pick_pricing_override(_pp_mode):
         return _trade_evaluate_impl(_mode)
@@ -9849,11 +9893,12 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # (already in elo_to_value units, so it composes directly with player
         # values). Generic picks (generic_pick_*) still resolve via `seed`.
         #
-        # M6b — the price is resolved at READ time under the caller's
-        # pick-pricing mode (pinned for this request by trade_evaluate_route,
-        # alongside the #215 stud-tax pin). `tier_ladder` (default, and the
-        # only reachable mode while `trade.slot_pricing` is off) returns the
-        # stored pool_value unchanged. The stored column is never written.
+        # The price is resolved at READ time under the pricing mode pinned for
+        # this request by trade_evaluate_route, alongside the #215 stud-tax
+        # pin. Since D-144 that is always `market_slots`, and the waterfall is
+        # the pick's OWN slot price when D-090 resolves one → the round curve
+        # → the stored ladder value. The stored column is never written —
+        # pricing is read-time in every mode.
         #
         # W3 M-C (S1) — the read opts into asserted rows behind
         # `picks.assign_tradeable`, and each priced pick entry carries its
@@ -9864,10 +9909,18 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _tradeable = _asserted_picks_tradeable()
         if league_id and league_id != "league_demo":
             try:
+                # D-144 per-slot pricing needs the league's resolved draft
+                # order. Looked up ONCE per request (it is DB-backed with a
+                # 60s cache), never per pick — same discipline as the deck
+                # lane's lookup in `_owned_pick_assets`.
+                _slot_order = _league_slot_order(league_id)
                 for _p in load_draft_picks(league_id=league_id,
                                            source=_pick_read_source()):
                     league_pick_vals[_p["pick_id"]] = priced_pool_value(
-                        _p, scoring_format=fmt)
+                        _p, scoring_format=fmt,
+                        slot=pick_slots.slot_for(
+                            _slot_order, _p.get("season"), _p.get("round"),
+                            _p.get("original_roster_id")))
                     league_pick_meta[_p["pick_id"]] = _pick_wire_source(
                         _p, _tradeable, with_season=True)
             except Exception as _lp_err:
@@ -10819,19 +10872,26 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     primed with these picks via _pick_asset_elos (see _inject_owned_picks) or
     every pick silently defaults to Elo 1500.
 
-    **M6b (flag `trade.slot_pricing`, operator decision O2)** — the price is
-    resolved HERE, at read time, through `pick_values.priced_pool_value` under
-    the thread-local pricing mode. The stored `draft_picks.pool_value` column
-    is NEVER rewritten: it is written by a league-wide sync path and shared by
-    every user of the league, so a per-user mode that rewrote it would
-    silently reprice the user's leaguemates. Under the default `tier_ladder`
-    mode `priced_pool_value` returns the stored value unchanged and no
-    DynastyProcess read is attempted, so this call is a no-op.
+    **Pricing (D-144, 2026-08-21)** — the price is resolved HERE, at read
+    time, through `pick_values.priced_pool_value` under the thread-local
+    pricing mode, which is now always `market_slots`. A pick whose slot D-090
+    resolves is priced at THAT slot's market value; everything else rides the
+    round curve. The stored
+    `draft_picks.pool_value` column is NEVER rewritten: it is written by a
+    league-wide sync path and shared by every user of the league, and keeping
+    pricing read-time is what leaves the legacy ladder available as a harness
+    axis. This call is no longer a no-op — it reaches DynastyProcess's cached
+    pick curve (24 h TTL, fail-soft to `{}`) on the first pick of a request.
 
     The cap is applied AFTER pricing (sort key is the priced value), because
-    `market_slots` re-shapes the curve — a 2029 3rd and a 2026 1st do not keep
-    their relative order across the two modes, and capping on the stale order
-    would inject a different top-N than the one the engine then prices.
+    the market curve re-shapes the ladder — a 2029 3rd and a 2026 1st do not
+    keep their relative order across the two curves, and capping on the stale
+    order would inject a different top-N than the one the engine then prices.
+    **Per-slot pricing makes this load-bearing rather than merely tidy**: the
+    ladder prices every 2026 first identically, so it cannot rank a 1.01 above
+    a 1.12, and a cap applied on stored values would routinely inject the
+    wrong first. It now sorts 1.01 (4867.1) above 2026 2.01 above 1.12
+    (820.8), which is the whole point of the ruling.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
@@ -10845,12 +10905,26 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    _slots: dict[str, int | None] = {}
     for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
+            # D-144 — the slot that sets the PRICE. `_owned_pick_label`
+            # below re-derives the same slot for the LABEL from the same
+            # `slot_order` and the same row, so the two agree by
+            # construction: `pick_slots.slot_for` is pure, and both calls
+            # pass identical arguments. That redundancy is deliberate —
+            # threading a precomputed slot through `_owned_pick_label` would
+            # mean changing all five of its call sites, four of which have no
+            # price to keep in step. If it ever grows a slot parameter, pass
+            # `_slots[pick_id]` here and the guarantee becomes structural
+            # instead of argued.
+            _slots[p["pick_id"]] = pick_slots.slot_for(
+                slot_order, p.get("season"), p.get("round"),
+                p.get("original_roster_id"))
             _priced[p["pick_id"]] = priced_pool_value(
-                p, scoring_format=scoring_format)
+                p, scoring_format=scoring_format, slot=_slots[p["pick_id"]])
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -10917,13 +10991,15 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     job-local COPY when picks were injected, so the session's shared
     service._seed is never polluted with pick ids.
 
-    **M6b** — this is the pricing-mode entry point for BOTH pick-bearing
-    engine lanes (the /api/trades/generate job and /api/trades/asset-ideas):
-    the deck owner's `pick_pricing_mode` is resolved once and pinned for the
-    whole injection, exactly as #215 pins the stud-tax mode. An already-active
-    outer pin wins (tests and the M6b matrix/deck harnesses pin around a whole
-    job). Flag off ⇒ `pick_pricing_mode_for_user` returns 'tier_ladder'
-    without a DB read and every price below is today's stored value.
+    **Pricing pin (D-144)** — this is the pricing entry point for BOTH
+    pick-bearing engine lanes (the /api/trades/generate job and
+    /api/trades/asset-ideas). The mode is pinned once for the whole injection,
+    exactly as #215 pins the stud-tax mode, so every pick in one deck is
+    priced off one curve. Since the 2026-08-21 ruling there is nothing
+    per-user to resolve — `market_slots` for everybody, `user_id` unread on
+    this account — but the pin stays, because an already-active outer pin
+    (the bake-off/deck harnesses, and the M6b regression tests) must still be
+    able to price a whole job on the legacy ladder.
     """
     _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
                 or _trade_service_mod.pick_pricing_mode_for_user(user_id))
@@ -16163,6 +16239,65 @@ def set_asset_prefs():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/league/<league_id>/receipts")
+@_gate_unverified_read
+def league_receipts_route(league_id):
+    """GET /api/league/<league_id>/receipts — the viewer's graded track record.
+
+    Receipts (docs/plans/receipts/LLD.md §2.2). One payload carries ALL THREE
+    windows (14/28/56d) plus the fixed 28d headline: making every window
+    present is what stops any surface — this one or a later one — from
+    selecting the best-looking number. There is no per-window endpoint on
+    purpose.
+
+    A path segment rather than `?league_id=` (the older league routes' shape),
+    because the LLD specifies this path and the mobile client is built to it.
+
+    Scoping is a WHERE, not a post-filter: rows are `user_id = the session's
+    ACCOUNT id` (what `_log_deck_signal_impressions` stamps, `server.py:6102`)
+    AND this league. A non-member therefore sees an empty payload rather than
+    a permission error, and cross-user receipts are unreachable by
+    construction (PLAN NG-3). Ghost rows are filtered again here as defense in
+    depth — the queue predicate means none can exist (operator ruling
+    2026-08-21) — and re-serves of one card collapse to their earliest serve
+    so a deck regeneration cannot give one call two votes.
+
+    Names are resolved server-side for DISPLAY ONLY and never enter the math.
+
+    404 `feature_disabled` while `receipts.screen` is off — the client hides
+    the entry point on that response rather than showing an error.
+    """
+    from .receipts_service import league_receipts, screen_enabled
+    if not screen_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    viewer = sess.get("user_id")
+    if not viewer:
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = league_receipts(str(viewer), str(league_id))
+
+    # Display enrichment, after the fact: collect the player ids the payload
+    # actually renders and name them in one batched query. A lookup failure
+    # costs names, never the route.
+    try:
+        ids = {a["id"] for row in payload.get("rows", [])
+               for side in ("give", "receive")
+               for a in row[side]["assets"] if not a["is_pick"]}
+        names = _player_names_by_id(ids) if ids else {}
+        for row in payload.get("rows", []):
+            for side in ("give", "receive"):
+                for a in row[side]["assets"]:
+                    if not a["is_pick"]:
+                        a["name"] = names.get(a["id"]) or a["name"]
+    except Exception as e:
+        log.warning("receipts: name resolution failed (continuing): %s", e)
+
+    return jsonify(payload)
+
+
 @app.route("/api/league/summary")
 def league_summary_route():
     """GET /api/league/summary?league_id=XXX
@@ -19706,6 +19841,32 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
 
+    # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
+    # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
+    # service is provisioned for it (operator ruling Q-4) — and the one
+    # value-snapshot "provisioned cron" this repo believed in turned out to be
+    # fictional (reverted in commit 1e50d3e). So grading rides the same
+    # three-trigger pattern roster_history uses (database.py:1320-1336): the
+    # dedicated endpoint, this guard, and the backfill script all call ONE
+    # idempotent writer. The guard is what actually fires day to day.
+    #
+    # Fire-and-forget on a daemon thread: a grading run must never lengthen
+    # the tick or be able to fail the push work above (and vice versa). Single-
+    # flight inside the service means an overlap with the dedicated endpoint
+    # no-ops rather than duplicating. No-op while `receipts.grading` is off.
+    #
+    # The counter is serialized ONLY when `receipts.grading` is on, so a
+    # flag-off tick payload stays byte-identical to today — the
+    # `_run_weekly_replenishment` convention, pinned by
+    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
+    receipts_grade_started: bool | None = None
+    try:
+        from .receipts_service import grading_enabled as _receipts_on
+        if _receipts_on():
+            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
+    except Exception as e:
+        log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
+
     log.info("daily-tick: %s", counters)
     extra: dict = {}
     # Serialized only when the flag is on — flag-off tick payloads stay
@@ -19715,6 +19876,8 @@ def cron_daily_tick():
         extra["roster_snapshot"] = roster_snapshot_stats
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
+    if receipts_grade_started is not None:
+        extra["receipts_grade_started"] = receipts_grade_started
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
         return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
@@ -19738,6 +19901,75 @@ def cron_value_snapshot():
     _require_cron_auth()
     today, counters = _write_daily_value_snapshots()
     return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
+def _kickoff_receipts_grading(trigger: str, batch: int | None = None) -> bool:
+    """Start a Receipts grading run on a daemon thread. Returns whether a run
+    was actually started.
+
+    Render "cron" is an HTTP POST into the single-worker web service, so the
+    grading loop must NEVER run inline — same constraint, same answer, as
+    `_refresh_players_cache_async` (`cron_players_refresh` below). Single-
+    flight lives inside `receipts_service`, so a double-fire (dedicated
+    endpoint + daily-tick guard on the same day) is a no-op, not a duplicate.
+    """
+    from .receipts_service import grading_enabled, is_running, run_grading
+    if not grading_enabled() or is_running():
+        return False
+    t = threading.Thread(
+        target=lambda: run_grading(trigger=trigger, batch=batch),
+        name=f"receipts-grade-{trigger}", daemon=True)
+    t.start()
+    return True
+
+
+@app.route("/api/cron/receipts-grade", methods=["POST"])
+def cron_receipts_grade():
+    """Grade elapsed suggestion windows against consensus movement.
+
+    Receipts (docs/plans/receipts/). The serve-time `deck_impressions` row is
+    the preregistered prediction; this job marks it to market at 14/28/56 days
+    and appends immutable `receipts_grades` rows. It reads only frozen data
+    (`deck_impressions`, `player_value_history`) and writes only
+    `receipts_*` tables, so it cannot affect serving in any flag state.
+
+    Returns **202 immediately** and grades on a daemon thread — never inline,
+    because one gunicorn worker serves every request (`render.yaml:16`).
+    `started=false` means a run was already in flight (single-flight, not a
+    queue). `remaining_resolvable` is a cheap COUNT of work that can reach a
+    TERMINAL row today — impressions still waiting on a future snapshot are
+    excluded, so the number never looks like a stuck backlog.
+
+    `?batch=N` (1..5000) overrides `receipts_grade_batch` for one run — what
+    `scripts/receipts_backfill.py` drives the launch-day drain with.
+
+    Flag `receipts.grading` off → `200 {"ok": true, "skipped": "flag"}` and
+    NO writes. Env kill switch `FTF_RECEIPTS_GRADE=0` → the same, without a
+    flag write. Auth: X-Cron-Secret, same as every other /api/cron/*.
+    """
+    _require_cron_auth()
+    from .receipts_service import grading_enabled, remaining_resolvable
+    if not grading_enabled():
+        return jsonify({"ok": True, "skipped": "flag"})
+
+    batch = None
+    raw = request.args.get("batch")
+    if raw:
+        try:
+            batch = max(1, min(5000, int(raw)))
+        except (TypeError, ValueError):
+            return jsonify({"error": "batch must be an integer 1..5000"}), 400
+
+    # Computed BEFORE the thread starts, so the number in the 202 describes
+    # the backlog the caller is about to work on rather than a race.
+    try:
+        left = remaining_resolvable()
+    except Exception as e:
+        log.warning("receipts-grade: backlog count failed (continuing): %s", e)
+        left = None
+    started = _kickoff_receipts_grading("cron", batch)
+    return jsonify({"ok": True, "started": started,
+                    "remaining_resolvable": left}), 202
 
 
 @app.route("/api/cron/players-refresh", methods=["POST"])

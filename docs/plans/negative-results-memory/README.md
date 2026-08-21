@@ -9,7 +9,7 @@ a log row and staying there; the next generation run starts from a different pla
 merged, and lit nowhere.** The planning suite went through full gates first; the operator's
 three §6 rulings (2026-08-22) opened the build gate, and the build ran in four waves.
 Decision records: [ADR-015](../../adr/adr-015-negmem-soft-prior-not-fourth-filter.md),
-[D-144](../../../living-memory/DECISIONS.md).
+[D-147](../../../living-memory/DECISIONS.md).
 
 **Nothing is on.** The ON-condition is `trade.negmem` (**false**) **∧** the league appearing in
 `config/negmem_leagues.json` (**empty**) — so no deck has ever been generated with this active

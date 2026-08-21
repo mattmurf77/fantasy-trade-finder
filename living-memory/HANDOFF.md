@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)
+- [2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed](#2026-08-21--receipts-built-dark-on-featreceipts-not-pushed-p0-prod-read-owed)
 - [2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge](#2026-08-21--counterparty-breaker-complete-suite-converged-v1-built-dark-pr-161-awaits-operator-merge)
 - [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
@@ -57,7 +58,7 @@ adapters) · the features-assembly stamp trichotomy · the M2 feed at both gen_v
 + 6 knobs + the M2 global-kill note) · data-dictionary (all four stamp variants + the job-dict
 `negmem_note`) · glossary (negmem / reason family / evidence cell) · architecture +
 living-memory/HLD + living-memory/LLD · runbook § negmem (8 lines) ·
-[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-144](DECISIONS.md) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-147](DECISIONS.md) ·
 TEST_LEDGER 2026-08-22.
 
 **What is OWED, in order:**
@@ -78,6 +79,43 @@ empty allowlist, not failing builds. Both are runbook lines 4 and 7.
 
 **Do not claim this is validated.** Evidence is structural only: green suite with named
 sabotages. No deck has ever been generated with the flag on for a real league.
+## 2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed
+
+**Where it is.** Complete and green on `feat/receipts` (worktree `agent-a60b48a57928d5895`),
+cut from `origin/main` at `eb9c1de`, with `plan/receipts` merged in (that merge IS the shared
+taxonomy's repo landing — the file is byte-identical to `main`'s copy, same blob SHA) and
+`origin/main` re-merged at `d42872f` after PRs #161/#162 landed mid-build. **Nothing is
+pushed and nothing is merged**, per the brief.
+
+Four commits: P1 (schema/flags/knobs/grader/cron/backfill) · the merge · the 54-test matrix ·
+P3 (user route/screen/analytics/structural guard) · docs+evidence.
+
+**Gates: all green.** `pytest backend/tests` 3951 passed / 1 skipped (54 of them new);
+`tsc --noEmit` green; `npm run test:receipts` 12/12; `testid-lint OK`. 21 named sabotages all
+confirmed RED. Details + the six blind-guard fixes are in TEST_LEDGER 2026-08-21b.
+
+**What is NOT done, and blocks everything downstream:**
+1. The **P0 prod cohort read** has never run. `data/trade_finder.db` holds zero
+   `deck_impressions` rows, so the backfill dry-run correctly reports 0 and **nothing is known
+   about real cohort size** — the A-1 gate is unevaluated. Run LLD §8's five read-only queries
+   via `backend/tools/prod_analytics.py` first.
+2. Both flags are off, so the grader is inert. Grading must run dark ≥2 weeks before the
+   screen ships (PRD DR-11), and the 56d window cannot mature before ~Oct 11.
+3. No device has ever rendered `ReceiptsScreen`. The 12-step checklist at
+   `docs/plans/receipts/testflight-checklist.md` is the only runtime evidence it will get.
+
+**Two things a future session should not have to rediscover.** A same-length source edit
+inside one mtime-second leaves Python running a **stale `.pyc`** — that masked a real dedup
+bug during sabotage runs and made `inspect.getsource` disagree with what was executing; clear
+`__pycache__` between sabotage steps. And the daily-tick response payload is a contract other
+tests pin: a guard that serializes a key while its flag is off is a payload change shipped by
+a dark feature.
+
+**One convention divergence, deliberate:** `GET /api/league/<league_id>/receipts` uses a path
+segment where every older league route takes `?league_id=`. The LLD specifies the path form
+in three places and the mobile client is built to it; flagged here so it is not mistaken for
+drift.
+
 ## 2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge
 
 **Where:** branch `claude/counterparty-breaker-plan`, tip `da23921`, **pushed** —

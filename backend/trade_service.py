@@ -1245,28 +1245,50 @@ def stud_tax_mode_for_user(user_id: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# M6b — draft-pick pricing mode (per-user setting `pick_pricing_mode`)
+# Draft-pick pricing — MARKET SLOTS, UNCONDITIONALLY (2026-08-21, D-144)
 # ---------------------------------------------------------------------------
-# 'tier_ladder' (DEFAULT — today's behaviour, EXACTLY) — an owned pick prices
-#     at its stored `draft_picks.pool_value`, written by
-#     `pick_values.pick_pool_value` (the shipped ladder's Mid rung of the
-#     round, year-discounted).
-# 'market_slots' — the pick prices off DynastyProcess's published market curve
-#     for its absolute season+round (`pick_values.market_pick_pool_value`).
+# OPERATOR RULING, 2026-08-21, verbatim:
+#     "Market slots should be default and not an opt-in or even an option to
+#      flip. Aligned that future picks stay default for now."
 #
-# NOTE THE DEFAULT. #214 shipped its retuned mode ('market') as the default;
-# **this wave does NOT**. Operator decision O2 authorises the toggle and the
-# calibration, not a change to what today's users see. `tier_ladder` is the
-# default and the flag `trade.slot_pricing` is OFF, so nothing reprices until
-# somebody deliberately flips both.
+# That retires the M6b opt-in wholesale and closes the implementation half of
+# Q-023. There is no per-user pricing mode any more, no flag read and no DB
+# read: EVERY owned pick, for EVERY user, prices off DynastyProcess's
+# published market curve for its absolute season+round
+# (`pick_values.market_pick_pool_value`).
 #
-# Same thread-local shape as the #215 stud-tax mode above, for the same
-# reason: entry points that know the user pin it once for the whole job, and
-# every pick priced inside inherits it — including `pick_values`'
-# `priced_pool_value`, which resolves `mode=None` through this pin.
+# READ THE SCOPE OF "market slots" CAREFULLY — it is a ROUND-level curve, not
+# a per-slot one. An owned 2026 1st prices at the value-space mean of slots
+# 1.05–1.08 (`pick_values.UNKNOWN_SLOT_BASIS`, the market analogue of the
+# ladder's Mid rung), NOT at its own resolved slot. D-090 resolves the real
+# slot and it drives the LABEL only. True-slot pricing — a 1.01 above a 1.12 —
+# is the remaining, unbuilt half of Q-023; see docs/plans/
+# slot-pricing-unconditional/scope.md §"What this does NOT do".
+#
+# WHAT DID NOT CHANGE, and is load-bearing:
+#   * FUTURE-YEAR picks price off DP's generic/Mid rung for that season — the
+#     operator's "future picks stay default for now". `market_slots` always
+#     keyed off the ABSOLUTE season, so this is the shipped path unmodified.
+#   * UNKNOWN DRAFT ORDER is not a special case and never was: the round-level
+#     basis applies to every pick regardless of whether an order exists.
+#   * DP unreachable / no published price ⇒ `priced_pool_value` still
+#     fail-softs to the stored ladder `pool_value`. Unconditional pricing
+#     makes that the ONLY safety net, so it stays and is now load-bearing.
+#   * `GENERIC_PICK_SEEDS`, the tier ladder and the ABSOLUTE tier bands are
+#     byte-unchanged, exactly as they were in both M6b modes. Pick tier
+#     BADGES do move, because a badge reflects the SERVED value (D-320-2) and
+#     the served value moved. That is a consequence, not a second decision.
+#   * `draft_picks.pool_value` is still never rewritten; pricing is read-time.
+#
+# The two-mode vocabulary survives ONLY as an internal harness/test axis:
+# `pick_pricing_override('tier_ladder')` still pins the legacy ladder so the
+# bake-off harnesses and the M6b regression tests can price both curves side
+# by side in one process. Nothing user-facing can reach it — no route, no
+# setting, no flag. `users.pick_pricing_mode` is dead data, kept under the
+# additive-schema rule (never drop a column).
 
 PICK_PRICING_MODES = ("tier_ladder", "market_slots")
-PICK_PRICING_DEFAULT = "tier_ladder"
+PICK_PRICING_DEFAULT = "market_slots"       # the shipped, only-reachable price
 
 _pick_pricing_local = threading.local()
 
@@ -1279,15 +1301,19 @@ def current_pick_pricing_mode() -> str:
 def pinned_pick_pricing_mode() -> str | None:
     """The explicitly pinned thread-local mode, or None. Mirrors
     `pinned_stud_tax_mode` — entry points keep an active outer pin instead of
-    re-resolving the stored setting, which is also what lets a test (or the
-    M6b matrix/deck harnesses) pin a mode around a whole job."""
+    re-resolving, which is also what lets a test (or the bake-off/deck
+    harnesses) pin the legacy ladder around a whole job."""
     m = getattr(_pick_pricing_local, "mode", None)
     return m if m in PICK_PRICING_MODES else None
 
 
 @contextmanager
 def pick_pricing_override(mode: str | None):
-    """Pin the pick-pricing mode for `priced_pool_value` calls on this thread."""
+    """Pin the pick-pricing mode for `priced_pool_value` calls on this thread.
+
+    HARNESS/TEST SEAM since the 2026-08-21 ruling — production entry points
+    pin `PICK_PRICING_DEFAULT`, which is also what an unpinned thread
+    resolves to, so an outer pin can only ever narrow to the legacy ladder."""
     prev = getattr(_pick_pricing_local, "mode", None)
     _pick_pricing_local.mode = (mode if mode in PICK_PRICING_MODES
                                 else PICK_PRICING_DEFAULT)
@@ -1298,22 +1324,15 @@ def pick_pricing_override(mode: str | None):
 
 
 def pick_pricing_mode_for_user(user_id: str | None) -> str:
-    """The stored per-user mode — **the single flag gate**.
+    """`market_slots`. Always, for everybody. (Operator ruling 2026-08-21.)
 
-    `trade.slot_pricing` OFF (the shipped state) ⇒ always `tier_ladder`, no DB
-    read, so a stored `market_slots` set while the flag was briefly on cannot
-    reprice anybody. DB-unavailable is likewise safe: default.
+    Kept as a named function rather than inlined at the call sites so the
+    ruling has exactly one home, and so a future per-user axis — if one is
+    ever authorised again — has one place to come back to. It reads no flag,
+    no session and no DB row: `user_id` is accepted and ignored, and
+    `users.pick_pricing_mode` is dead data.
     """
-    from .feature_flags import is_enabled
-    if not is_enabled("trade.slot_pricing"):
-        return PICK_PRICING_DEFAULT
-    if not user_id:
-        return PICK_PRICING_DEFAULT
-    try:
-        from .database import get_pick_pricing_mode
-        return get_pick_pricing_mode(user_id)
-    except Exception:
-        return PICK_PRICING_DEFAULT
+    return PICK_PRICING_DEFAULT
 
 
 # ---------------------------------------------------------------------------

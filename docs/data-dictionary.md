@@ -132,7 +132,7 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — the proof source; NULL = never verified (username-only) |
 | `profile_public` | int | Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`): 1 = user opted into `/u/<username>` exposure; NULL/0 = private. Checked by the public profile routes IN ADDITION to the global `profiles.public_pages` flag; managed via GET/PUT `/api/profile/visibility` |
 | `stud_tax_mode` | str | #214/#215 — per-user stud-tax mode: `'market'` (retuned default; NULL/unknown reads as market) / `'heavy'` (pre-#214 legacy adjustment math) / `'off'` (no crown premium or package-depth discount). Managed via GET/PUT `/api/settings/stud-tax`; read by `trade_service.stud_tax_mode_for_user` for `/api/trade/evaluate` + deck generation |
-| `pick_pricing_mode` | str | **M6b** (flag `trade.slot_pricing`) — per-user draft-pick pricing mode: `'tier_ladder'` (**default**; NULL/unknown reads as tier_ladder — today's shipped ladder, `pick_values.pick_pool_value`) / `'market_slots'` (DynastyProcess's published per-slot market curve, `pick_values.market_pick_pool_value`). Managed via GET/PUT `/api/settings/pick-pricing` (404 while the flag is off); read by `trade_service.pick_pricing_mode_for_user` and applied at READ time by `pick_values.priced_pool_value` in `_owned_pick_assets` + `/api/trade/evaluate`. **It never rewrites `draft_picks.pool_value`** — that column is league-shared, so a per-user mode that wrote it would reprice leaguemates |
+| `pick_pricing_mode` | str | ⚠️ **DEAD DATA since 2026-08-21 (D-144) — written by nothing, read by nothing.** (Unrelated but adjacent: `draft_picks.pool_value` is still written and still holds the LADDER price; the engine reprices it at read time and the league surfaces do not — Q-026.) Every row still says `'tier_ladder'` (or NULL); ignore it. It was **M6b**'s per-user draft-pick pricing mode, managed via GET/PUT `/api/settings/pick-pricing` and read by `trade_service.pick_pricing_mode_for_user`. The operator ruled market pricing *"not an opt-in or even an option to flip"*, so the resolver now returns `'market_slots'` unconditionally without touching this column, the PUT is 410 Gone, and the GET serves the fixed state rather than echoing this value back. **The column is deliberately NOT dropped** (additive-schema rule — never drop a column): keeping it means a restore of the per-user axis, if one is ever authorised, needs no migration, and it costs one unread VARCHAR. `db.get_pick_pricing_mode` / `set_pick_pricing_mode` still exist and still round-trip; nothing in production calls them. Pinned by `test_db_accessors_survive_as_dead_data` and `test_m6b_02_the_stored_column_is_no_longer_read` |
 
 ---
 
@@ -1393,6 +1393,65 @@ FTF-native mock-draft state (draft-extensions W2, [plan](plans/draft-extensions/
 **No unique constraint, deliberately.** "One active mock per user per league" is enforced in application code inside `create_mock_draft`'s transaction (abandon-then-insert). `UniqueConstraint(user_id, league_id, status)` would also block a second *abandoned* row, and the partial unique index that fixes that is dialect-divergent across SQLite/Postgres.
 
 **`server_default`, not Python `default`** (the `referrals` precedent), so a raw-SQL insert cannot produce NULL.
+
+---
+
+## Receipts tables (graded suggestion track record)
+
+[docs/plans/receipts/LLD.md](plans/receipts/LLD.md) §3. Written **only** by `backend/receipts_service.py` (flag `receipts.grading`, default off); read by that module's two read surfaces and by nothing else. No engine module imports it, and nothing in generation or ordering reads a `receipts_*` table — that boundary is the feature's Goodhart line and is test-enforced.
+
+**Both tables are APPEND-ONLY, and that is the whole design.** The serve-time `deck_impressions` row is a *preregistered* prediction: it names the asset set and direction and was frozen before any outcome existed. These tables record only how consensus moved afterwards. A wrong grade is corrected by bumping `grader_version` and regrading — the superseded rows stay — never by editing a row. `backend/database.py` exposes INSERT and SELECT helpers only; there is no UPDATE or DELETE path for either table anywhere in the codebase, and a test fails if one appears.
+
+### `receipts_grades`
+
+One row per `(impression_id, window_days, grader_version)` that reaches a TERMINAL status. An impression×window still waiting on its window snapshot has **no row at all** — retry-pending is queue-implicit and never persisted, which is exactly what lets the work queue be defined as "no grade row exists yet" and makes the job idempotent by construction.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `impression_id` | str, not null | Soft ref to `deck_impressions` (house style: no FKs) |
+| `window_days` | int, not null | `14` \| `28` \| `56`. All three are always graded and always shipped together |
+| `grader_version` | str, not null | `'receipts-1'`. Reads pin the MAX by **numeric suffix** — `receipts-10` beats `receipts-2`; lexicographic ordering would silently pin reads to a stale version at the tenth correction |
+| `taxonomy_version` | str | Mirrors `docs/plans/shared/trade-shape-taxonomy.md` (`1.1.1`) |
+| `status` | str, not null | `graded` \| `ungradeable` |
+| `reason` | str | NULL when graded; else `pick_majority` \| `no_serve_snapshot` \| `missing_snapshot` \| `malformed_assets` \| `format_missing` |
+| `serve_snap_date` / `window_snap_date` | str | The snapshot dates ACTUALLY used, so the ±tolerance match is auditable and the admin `effective_window` block can report the real span (a nominal 14d window runs ~11–20d once both anchors resolve) |
+| `give_serve_value` / `receive_serve_value` | float | Players-only consensus sums at the serve anchor, VALUE units. Never from the card's own frozen values — those may be the user's personal board |
+| `give_delta` / `receive_delta` | float | Window sum minus serve sum, per side |
+| `edge` | float | **The metric.** `receive_delta − give_delta`. The give side is the market control |
+| `edge_pct` | float | `edge ÷ serve-time package midpoint`. **NULL** below a 100.0 midpoint (junk-for-junk guard) — the edge is still recorded and the row still counted, but a ±40 swing on a 60-value package is not a 67% call. NULL rows are excluded from the median and disclosed |
+| `baseline_edge` | float | **RESERVED, always NULL in v1** — the shuffle-baseline follow-on |
+| `coverage_give` / `coverage_receive` | float | Share of each side's serve-time weight that actually resolved. Read surfaces filter on `min(give, receive)` — a package measured well on one side and barely on the other is not a swap measurement |
+| `has_picks` | int | 1 when either side contains a draft pick. Picks contribute delta 0: their prices are static code seeds repriced by commits, so grading them would grade our own deploys |
+| `imputed_count` | int | Assets present at serve and GONE at the window date, imputed to the consensus pool floor. Dropping them instead would delete our worst outcomes — survivorship bias that flatters the engine exactly where it was most wrong |
+| `assets_detail_json` | text (JSON) | `[{id, side, is_pick, cv0, cv1, imputed_floor}]` — the per-asset audit trail |
+| `league_id` / `user_id` | str, not null | Denormalized from the impression. `user_id` is the ACCOUNT id; the user route scopes on it |
+| `scoring_format` | str | Pinned at grade time, so a league that flips format later does not rewrite old grades |
+| `served_at` | str, not null | ISO UTC, copied from the impression |
+| `trade_hash` | str | Read-time dedup key ONLY. The hash is not invertible and nothing reconstructs assets from it — that would mint a new prediction after the outcome was known |
+| `is_ghost` | int | Always NULL/0 on a graded row: the queue excludes ghosts entirely (operator ruling 2026-08-21). Kept as a column so a ruling change is a one-line predicate flip rather than a migration |
+| `shape_bucket` / `archetype` / `basis` / `model_arm` / `policy_version` | str | Taxonomy slice keys **copied** from the impression (`basis` from `features_json`, which is read for slicing only and never for valuation). Denormalized so a per-cell read is one GROUP BY with no read-time recomputation to drift |
+| `graded_at` | str, not null | ISO UTC |
+
+`UniqueConstraint(impression_id, window_days, grader_version)` = `uq_receipts_grade` — with insert-or-ignore, this is the entire idempotency mechanism: a crashed run's completed inserts stand and the rest simply re-queue. Indexes: `ix_receipts_grades_league` (league, window), `ix_receipts_grades_user` (user, league), `ix_receipts_grades_shape` (shape, window).
+
+### `receipts_grade_runs`
+
+Run ledger — the observability surface for a job with no UI. **TWO rows per invocation sharing a `run_id`**: `kind='start'` at begin, `kind='end'` at completion. A killed run (crash, Render free-instance spin-down mid-run) is therefore visible as an **unmatched start row**, which is the point of splitting them; counts live on the `end` row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `run_id` | str, not null | uuid4 hex, shared by the pair. Indexed (`ix_receipts_grade_runs_run`) |
+| `kind` | str, not null | `start` \| `end` |
+| `run_at` | str, not null | ISO UTC of THIS row |
+| `trigger` | str | `cron` \| `daily_tick` \| `backfill` — three triggers, one idempotent writer |
+| `duration_ms` | int | `end` rows only |
+| `graded` / `ungradeable` | int | Terminal rows written this run |
+| `reason_counts_json` | text (JSON) | `{reason: count}` — the supply-health read |
+| `batch_cap` / `cap_hit` | int | The cap in force and whether it bound |
+| `remaining_resolvable` | int | Backlog that can reach a terminal row today (retry-pending excluded) |
+| `grader_version` | str | |
 
 ---
 

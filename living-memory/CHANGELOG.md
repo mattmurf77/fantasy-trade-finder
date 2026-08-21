@@ -20,7 +20,7 @@ arm-A golden UNMOVED, no recapture) → B3 the four consultation seams + threadi
 trichotomy (33 seam tests, 6 sabotage families) → this wave: the `bakeoff_runner` forwarding
 that B3 left, 5 through-the-runner tests, the two readout SQL files, the TestFlight checklist,
 and every docs row. Suite **4025 passed / 1 skipped / 0 failed** (wave-2 baseline 4016; +9 this wave); testid-lint OK; zero mobile files touched.
-[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) + [D-144](DECISIONS.md)
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) + [D-147](DECISIONS.md)
 record the soft-prior-not-a-filter shape and the build-complete state.
 
 **Known gap, deliberate:** nothing is lit. `trade.negmem` is false and
@@ -56,6 +56,49 @@ M2×strength decision: `negmem_strength` M1-only, M2 kill = `gen2_accept_prior_s
 Three-way reconciliation with Receipts CONFIRMED (their contract §7; two data boundaries
 inherited); breaker boundary agreed (shape_aversion producer=negmem); operator ghost
 ruling absorbed (checked NOT load-bearing). **LLD pending — session limit** (see HANDOFF).
+## 2026-08-21b — Triple ship: Receipts LIVE (grading lit) · arm C unbenched with its sweetener · TRUE PER-SLOT pick pricing
+
+Three merges, all operator-driven same-day, each a value/measurement boundary:
+
+- **#165 `93f1fd0` Receipts** — nightly suggestion grading over the 4,051-card cohort
+  (P0 prod checks passed: cohort from 2026-08-16, zero snapshot gaps, top testers 750–840
+  gradeable each). `receipts.grading` LIT at ship (Q-1..Q-4 rulings); screen dark until the
+  operator's TestFlight pass. First mature grades ≈ 2026-08-30.
+- **#166 `3df71c0` arm-C gap sweetener** (cherry-picked from the operator's side session)
+  — closes the regression that benched gen_v2 at #162; `bakeoff_include_gen_v2` 0→1 @18:49Z.
+  **All three serving arms now run honest pricing + the sweetener.**
+- **#167 `3192d13` per-slot pick pricing, unconditional** ([D-146](DECISIONS.md), closes
+  Q-023 fully; Q-026 ruled-deferred). 1QB 2026: 1.01 **4867** … 1.12 **821** (5.9× spread)
+  where the ladder charged 2117 flat. The operator's Maye+Adams ↔ 1.05+2027-1st proof case:
+  +372 picks-favored → **−15 near-even**. Opt-in mode/route/Settings row retired (repo's
+  first 410). Goldens: 156 assertions, zero edits, twice. Repo's first conftest.py pins the
+  DP pick snapshot (suite was one network fetch from flaky).
+
+Origin story for the day: operator feedback on ONE trade (Maye+Adams for 1.03+1.05) →
+market-curve analysis → benchmark+sweetener ship → per-slot ship. Suite 3969p/1s at day end.
+## 2026-08-21 — Receipts built dark on `feat/receipts` (NOT pushed, NOT merged)
+
+Grades our own past suggestions against subsequent consensus movement. No competitor grades
+its own advice. Everything is behind two default-false flags.
+
+- **Metric is swap edge** (`receive-delta − give-delta` on `player_value_history`), not an
+  acquire-side % — the give side is the market control (D-145). Valuation never comes from
+  the frozen card, whose values may be the user's personal board.
+- **Grades are append-only + `grader_version`-stamped** (D-144): no UPDATE/DELETE path exists
+  for `receipts_*`, test-enforced. A correction is a regrade; old rows stay.
+- Ships: `backend/receipts_service.py` (leaf — no engine import, both directions guarded), 2
+  tables, 3 routes (cron 202+daemon, viewer-scoped league read, admin per-cell readout with
+  Wilson intervals), daily-tick guard, `scripts/receipts_backfill.py`, `ReceiptsScreen` +
+  entry point, 3 analytics events.
+- **Both screen states built** per operator ruling Q-1 — the maturity/ledger state is the
+  launch hero, not an empty state.
+- Evidence: 54 pytest + 12 structural checks, **21 named sabotages all RED**; six guards were
+  blind on the first pass and were strengthened. Two real defects caught: a dedup keeping the
+  latest serve (masked by a stale `.pyc`) and a flag-off daily-tick payload change.
+- Backfill exercised on a synthetic fixture DB: 565 resolvable → 542 graded + 23 ungradeable,
+  terminating on two zero-work runs, 0 ghosts graded. The real dev DB has no impressions, so
+  its dry-run correctly reports 0; the prod P0 cohort read is still outstanding.
+
 ## 2026-08-22 — SHIPPED early by operator call: package pricing honesty + gap auto-sweetener (PR #162, `d42872f`)
 
 Operator: *"I would rather the more accurate trade suggestions now."* Merged ahead of the
