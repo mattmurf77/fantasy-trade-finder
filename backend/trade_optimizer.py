@@ -727,6 +727,13 @@ def generate_pair_trades_v3(
                            new_give), 3)
             card.give_value = round(n_gv, 1)
             card.receive_value = round(n_rv, 1)
+            # Round-2 review 2026-08-21: `fit_premium` is a 1-for-1-only
+            # annotation (fit_premium_1for1 returns a price only when the
+            # #108 raw-board gate fails, which it can only do on a 1x1).
+            # A sweetened card is no longer that shape, so the stale price
+            # must not ride along on the payload — the v2 divergence path
+            # already nulls its `fit_paid` for the same reason.
+            card.fit_premium = None
             card.gap_sweetener = {
                 "player_id": s_pid, "side": side,
                 "gap_before": round(gap_before, 1),
@@ -803,7 +810,8 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
 def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
                     fairness_threshold, user_roster, opp_roster, players,
                     scoring_format="1qb_ppr", untouchable_ids=None,
-                    not_interested_ids=None, extra_ok_fn=None):
+                    not_interested_ids=None, extra_ok_fn=None,
+                    give_candidates=None, recv_candidates=None):
     """2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`) — close an
     ABSOLUTE consensus gap on a card that already passed its path's gates.
 
@@ -823,9 +831,26 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
           sweetened combo re-earns every gate the organic combo passed.
 
     Candidates are tried cheapest-consensus-value first, so the first hit
-    is the smallest sufficient equalizer. Sweeteners are players only
-    (picks are not roster assets on this path), never untouchables (give
-    side) and never not-interested players (receive side).
+    is the smallest sufficient equalizer. They are drawn from the richer
+    side's ROSTER by default, never untouchables (give side) and never
+    not-interested players (receive side).
+
+    ``give_candidates`` / ``recv_candidates`` (2026-08-21 round-2 review)
+    narrow that universe when the CALLING path restricted its own pools
+    rather than gating per-combo: the consensus generator prunes
+    `give_pool` to the #174 pinned give players and `recv_pool` to the
+    FB-47 pinned acquire targets / needed positions, so an equalizer
+    drawn from the raw roster would put an asset in the card that the
+    path itself would never have enumerated. Paths whose pinned/position
+    rules are per-combo and monotone under addition (v2 divergence, v3)
+    pass nothing and keep the full-roster universe, matching
+    `_try_sweeten`. ``user_roster``/``opp_roster`` are still the FULL
+    rosters — the 3.2 lineup-feasibility counts are computed from them.
+
+    Picks: when `trade.picks_in_pool` is on, owned picks are injected as
+    PICK pseudo-assets INTO the rosters, so a pick can be the equalizer.
+    `pick_swap_ok` re-runs inside every caller's `extra_ok_fn` (#227/C3),
+    which is the guard that keeps a pick-for-pick churn shape out.
 
     Returns (sweetener_pid, side, new_give, new_recv, gv, rv, point_ratio)
     or None. ``side`` is the side the asset was ADDED to: "give" when the
@@ -837,9 +862,11 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
         return None
     in_trade = set(give_ids) | set(recv_ids)
     if rv > gv:            # user receives more — user adds to the give side
-        side, roster = "give", user_roster
+        side = "give"
+        roster = user_roster if give_candidates is None else give_candidates
     else:                  # opponent receives more — they add (user receives)
-        side, roster = "receive", opp_roster
+        side = "receive"
+        roster = opp_roster if recv_candidates is None else recv_candidates
 
     user_counts = _pos_counts(user_roster, players)
     opp_counts = _pos_counts(opp_roster, players)

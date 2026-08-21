@@ -580,7 +580,14 @@ _DEFAULT_CFG: dict[str, float] = {
     # Ghost holdout: withhold ~1-in-N organic deck cards from display
     # (logged with is_ghost=1). ≤0 disables ghosting without touching the
     # flag — the deploy-free rollback lever.
-    "ghost_holdout_one_in":       10,
+    # OPERATOR RULING 2026-08-21 (batch-wide, living-memory/CHANGELOG.md
+    # 2026-08-21): "I still am against the ghost cards" — ghosts are ruled
+    # out entirely, not merely paused. Ghost accumulation was also the
+    # amplifier behind the 6-card-repeat deck (a ghost can never be
+    # decided, so it never leaves the FFV3 pool; one hash ghost-served
+    # 35x). The prod model_config row is already 0; this default makes the
+    # code agree with the ruling instead of relying on a live DB row.
+    "ghost_holdout_one_in":        0,
     # Executed-trade matcher: only suggestions served within this many days
     # BEFORE the trade executed are match candidates.
     "suggestion_match_lookback_days": 14,
@@ -6027,6 +6034,17 @@ class TradeService:
                     players=players, scoring_format=scoring_format,
                     untouchable_ids=untouchable_ids,
                     not_interested_ids=not_interested_ids,
+                    # Round-2 review 2026-08-21: this path PRUNES its pools
+                    # (#174 pinned give players, FB-47 pinned acquire
+                    # targets, need-position receive filter) instead of
+                    # gating per combo, so the equalizer must come from the
+                    # SAME pools — otherwise a pinned "trade away G" job
+                    # could hand the user a card that also ships an
+                    # unpinned player, and an "acquire RB" job could hand
+                    # back an off-need receive asset. The full rosters
+                    # above still drive the 3.2 feasibility counts.
+                    give_candidates=give_pool,
+                    recv_candidates=recv_pool,
                     extra_ok_fn=_gap_gates_ok)
                 if closed is not None:
                     s_pid, side, n_give, n_recv, n_gv, n_rv, n_ratio = closed

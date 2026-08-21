@@ -381,3 +381,156 @@ def test_v2_divergence_sabotage_disable_brings_gap_cards_back():
     assert cards
     assert all(c.gap_sweetener is None for c in cards)
     assert any(abs(c.give_value - c.receive_value) > 1539.0 for c in cards)
+
+
+# ── round-2 adversarial review, 2026-08-21 ────────────────────────────────
+# Two defects the first build shipped; each test below FAILS on the
+# pre-review code (verified by reverting the fix, not by assertion).
+
+
+def test_helper_candidate_pools_narrow_the_equalizer_universe():
+    """`give_candidates`/`recv_candidates` restrict WHICH assets may be the
+    equalizer without touching the rosters the 3.2 feasibility counts are
+    built from. Omitted ⇒ the full roster, exactly as before."""
+    players, user_roster, opp_roster, sv, _values = _mini_league()
+    kw = dict(seed_value=sv, gap_threshold=1539.0, fairness_threshold=0.75,
+              user_roster=user_roster, opp_roster=opp_roster,
+              players=players)
+    # Full roster: X1 is reachable.
+    assert close_value_gap(["G"], ["R"], **kw)[0] == "X1"
+    # Pool without X1: unclosable, even though X1 is still on the roster
+    # (so feasibility still sees the real team).
+    assert close_value_gap(["G"], ["R"], give_candidates=["X2"], **kw) is None
+
+
+def _pinned_consensus_cards(svc, elos, user_roster, **kw):
+    _set_flags(**{"trade_engine.v2": True})
+    return svc.generate_trades(
+        user_id="user", user_elo=dict(elos), user_roster=user_roster,
+        league_id="L1", seed_elo=dict(elos), fairness_threshold=0.75,
+        max_per_opponent=10, **kw)
+
+
+def test_consensus_sweetener_never_adds_an_unpinned_give_player():
+    """#174 package mode: the consensus generator PRUNES its give pool to
+    the pinned players instead of gating per combo, so a sweetener drawn
+    from the raw roster smuggles an asset the user never offered into a
+    'trade away exactly G' job. Pre-review this emitted [G, X1] → [R]."""
+    svc, elos, user_roster = _consensus_league()
+    cards = _card_for(
+        _pinned_consensus_cards(svc, elos, user_roster,
+                                pinned_give_players=["G"]), "R")
+    assert cards, "fixture no longer yields the pinned G→R card"
+    for c in cards:
+        assert set(c.give_player_ids) == {"G"}, (
+            f"pinned job shipped unpinned give assets: {c.give_player_ids}")
+        assert c.gap_sweetener is None
+    # Non-vacuity: the same fixture WITHOUT the pin is still sweetened, so
+    # this test pins the pool restriction, not a dead sweetener.
+    free = _card_for(_pinned_consensus_cards(svc, elos, user_roster), "R")
+    assert any(c.gap_sweetener for c in free)
+
+
+def _acquire_league():
+    """User gives G (consensus 7000, WR) for R (5400, RB) — their OWN board
+    loves R, so the #108 gate passes while consensus says the OPPONENT is
+    the richer side, which puts the equalizer on the RECEIVE side. The
+    opponent also rosters Z (2400, RB). `consensus_both_ways` is arm D's
+    overlay and is what lets a give-heavy consensus card exist at all."""
+    ts._cfg["consensus_both_ways"] = 1.0
+    elos = {"G": _elo_for_value(7000.0), "R": _elo_for_value(5400.0),
+            "Z": _elo_for_value(2400.0)}
+    spec = {"G": "WR", "R": "WR", "Z": "RB"}
+    for pid, pos in {**_bodies("u"), **_bodies("o")}.items():
+        spec[pid] = pos
+        elos[pid] = _elo_for_value(200.0)
+    players = {pid: _Player(id=pid, name=pid, position=pos)
+               for pid, pos in spec.items()}
+    user_roster = ["G"] + list(_bodies("u"))
+    opp_roster = ["R", "Z"] + list(_bodies("o"))
+    opp = LeagueMember(user_id="opp", username="opp", roster=opp_roster,
+                       elo_ratings={}, has_rankings=False)
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    user_elo = dict(elos, R=_elo_for_value(7600.0))
+    return svc, elos, user_elo, user_roster
+
+
+def test_consensus_sweetener_respects_the_acquire_position_filter():
+    """FB-47 / need-positions: the consensus receive pool is pruned to the
+    positions the user asked for, so an off-need equalizer would hand back
+    an asset the job excluded. WR-only ⇒ the RB equalizer is unreachable;
+    allowing RB ⇒ the same card IS sweetened (non-vacuity in one pair)."""
+    svc, elos, user_elo, user_roster = _acquire_league()
+    _set_flags(**{"trade_engine.v2": True})
+
+    def _run(acq):
+        cards = svc.generate_trades(
+            user_id="user", user_elo=dict(user_elo), user_roster=user_roster,
+            league_id="L1", seed_elo=dict(elos), fairness_threshold=0.75,
+            max_per_opponent=10, acquire_positions=acq)
+        return [c for c in cards if c.give_player_ids == ["G"]]
+
+    wr_only = _run(["WR"])
+    assert wr_only, "fixture no longer yields the G→R card"
+    for c in wr_only:
+        assert "Z" not in c.receive_player_ids, (
+            "an off-need RB was swept into a WR-only acquire job")
+        assert c.gap_sweetener is None
+    both = _run(["WR", "RB"])
+    assert any(c.gap_sweetener and "Z" in c.receive_player_ids
+               for c in both), "fixture no longer sweetens when RB is allowed"
+
+
+def _fit_premium_v3_cards(gap_threshold):
+    """A v3 pair whose organic winner is a fit-premium 1-for-1 (the user
+    pays 200 of raw-board value for a need fill) that ALSO carries a
+    consensus gap of 1600. Z is deliberately absent from the opponent's
+    Elo map, so v3 never enumerates [G] → [R, Z] organically — only the
+    gap pass can build it."""
+    ts._cfg["trade_elo_gap_max"] = 0.0
+    ts._cfg["sweetener_gap_threshold"] = gap_threshold
+    seed = {"G": _elo_for_value(7000.0), "R": _elo_for_value(5400.0),
+            "Z": _elo_for_value(2400.0)}
+    spec = {"G": "WR", "R": "RB", "Z": "RB"}
+    for pid, pos in {**_bodies("u"), **_bodies("o")}.items():
+        spec[pid] = pos
+        seed[pid] = _elo_for_value(200.0)
+    players = {pid: _Player(id=pid, name=pid, position=pos)
+               for pid, pos in spec.items()}
+    shrunk = dict(seed, R=_elo_for_value(7300.0))
+    raw = dict(seed, R=_elo_for_value(6800.0))       # loss 200 ≤ 300 cap
+    opp_elo = dict(seed, G=_elo_for_value(7400.0), R=_elo_for_value(5000.0))
+    del opp_elo["Z"]
+    opp = LeagueMember(user_id="opp", username="opp",
+                       roster=["R", "Z"] + list(_bodies("o")),
+                       elo_ratings=opp_elo, has_rankings=True)
+    return generate_pair_trades_v3(
+        user_id="user", shrunk_user_elo=shrunk,
+        user_value={pid: elo_to_value(e) for pid, e in shrunk.items()},
+        user_roster=["G"] + list(_bodies("u")), opponent=opp,
+        league_id="L1", seed_elo=seed, confidence=None, max_cards=1,
+        fairness_threshold=0.75, players=players, raw_user_elo=raw,
+        user_needs={"RB"})
+
+
+def test_v3_gap_sweetener_clears_the_stale_fit_premium():
+    """`fit_premium` prices a 1-for-1 the user knowingly loses a little on
+    (`fit_premium_1for1` can only fire on a 1x1). A gap-sweetened card is
+    no longer that shape, so the price must not ride along — the v2
+    divergence path already nulls its `fit_paid`. Pre-review, v3 shipped
+    the stale badge on the 1-for-2."""
+    _set_flags(**{"trade_engine.v2": True, "trade.fit_premium": True})
+    # Non-vacuity first: at the kill value the organic winner IS the
+    # fit-premium 1-for-1 this test needs the sweetener to consume.
+    off = _fit_premium_v3_cards(0.0)
+    assert off and off[0].receive_player_ids == ["R"]
+    assert off[0].fit_premium and off[0].fit_premium["value_paid"] == 200.0
+    assert abs(off[0].give_value - off[0].receive_value) > 1539.0
+
+    on = _fit_premium_v3_cards(1539.0)
+    assert on and sorted(on[0].receive_player_ids) == ["R", "Z"]
+    assert on[0].gap_sweetener and on[0].gap_sweetener["side"] == "receive"
+    assert on[0].fit_premium is None, (
+        "sweetened card kept a 1-for-1 fit-premium price")
