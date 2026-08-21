@@ -252,9 +252,23 @@ design or measurement may create or consume ghost impressions.
   `bakeoff_group_size` 10→0 @00:43:33Z, `bakeoff_deck_limit` 30→60 @00:43:33Z,
   `bakeoff_serve_interleaved` 0→1 @00:43:34Z. Ghost rows END at that boundary; interleaved
   decks (arm mix challenger/current/gen_v2, zero ghosts) are live. Also logged same table:
-  `qb_1qb_cap_elo` 1785→1644 and `qb_1qb_cap_knee_elo` 1580→1200 @04:46Z — 1QB QB prices drop
-  sharply at the next value refresh; value-optics objections must not treat pre-boundary QB
-  values as comparable. Retrospective studies additionally inherit Receipts' verified
+  `qb_1qb_cap_elo` 1785→1644 @04:46Z, then **1644→1717 @11:48Z** (operator moved from
+  "Allen = late 1st" to "Allen = mid 1st"; knee stays 1200) — 1QB QB prices shift at the next
+  value refresh; value-optics objections must not treat cross-boundary QB values as comparable.
+  The general rule stands: every measurement window censors at logged
+  `model_config_changes` timestamps.
+  **Pending ship the breaker build must absorb (2026-08-21, operator-approved, branch
+  `fix/package-benchmark-sweetener`, merge held for the Monday window boundary):** (a) the
+  package depth discount re-benchmarks to the TRADE'S best asset (the "4-mids-for-a-stud
+  scored fair" defect — `docs/reviews/2026-08-21-market-curve-comparison.md`) — the breaker's
+  `value_giving` math reads package-adjusted values, so its severities inherit this semantics
+  change; calibration windows censor at that ship, and the LLD's severity formulas must be
+  read as post-fix semantics; (b) a generation-time **auto-sweetener** adds an equalizer asset
+  at consensus gap > 1539 and stamps a `features_json` key — sweetened cards are ordinary
+  cards to the breaker (evaluated as-is), and the calibration readout gains an optional cut on
+  the sweetened key rather than ignoring the state silently; (c) the **arm-A golden is
+  re-captured** at that ship — nothing here cites the old golden SHA; the knob-inventory
+  mechanism (fails by name) is unaffected. Retrospective studies additionally inherit Receipts' verified
   boundaries: the gradeable cohort starts 2026-08-16 (`assets_json` landed with telemetry, no
   backfill — ~7.7k earlier impressions permanently ungradeable) and picks carry NO value
   history (static code seeds). Prospective breaker calibration (post-ship stamps ⨝ pass
