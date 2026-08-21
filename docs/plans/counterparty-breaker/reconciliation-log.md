@@ -130,7 +130,37 @@ None — both lenses signed off (A round 4; B round 4 + diff re-verify).
 
 ## LLD loop
 
-*(appended after the LLD rounds)*
+### Round 1 — independent drafts
+- **A (implementer)** delivered the full implementable surface: verbatim seam block, payload/
+  marker schemas, per-class predicate math with severity formulas from existing helpers,
+  25-knob table with the five-registration checklist, mobile element + testIDs, complete test
+  plan, calibration-readout skeleton. Contestable calls it flagged: `fit_outlook` on the
+  unweighted shared lean scalar (provable coherence over value-weighting); co-owner union
+  unimplementable at the seam (owner-id-only + `identity_src` marker); seam-owned republish;
+  split `value_giving` floors by basis; atomic pass-2 discard; pinned (not knobbed) severity
+  curve constants.
+- **B (reviewer)** verified the hazards: **all eight snapshot publish sites are conditional —
+  with `deck.signal_v2` off there is NO post-mutation publish**, so narrated sentences would
+  ship dark without a breaker-owned republish (the HLD's deferred republish question, answered
+  with a contract + flag-matrix test); the HLD §3.3 no-default impression copy **crashes a
+  whole deck's impressions on a mid-job flag flip** (no per-row try/except in
+  `_log_deck_signal_impressions`); cost basis is **60 cards** (`bakeoff_deck_limit` 30→60 at
+  the A-1 boundary), not 30; partner `asset_preferences`/declared outlooks are NOT loaded by
+  the job (two bulk readers needed); stud-tax thread-local unpinned at the seam; hot
+  `reload_config` mid-job breaks intra-deck determinism (per-job knob snapshot); argmax
+  tie-break unspecified; small fixtures test the wrong tier mode (`_POS_TIER_MIN_POOL=40`,
+  the #366 lesson).
+
+### Round 2 — orchestrator merge (rulings M-1…M-12)
+B's safety findings win where they conflict with A and with the HLD's literal text: attribute-
+gated impression copy with a synthetic `flag_flip_or_unstamped` marker (never bare null, never
+a crash — invariant lives in tests); 60-card cost basis; bulk readers; per-job knob snapshot;
+`stud_tax_override("market")` pinned with rationale. A's surface stands elsewhere (25 knobs,
+co-owner degrade-and-mark, atomic pass-2 discard, pinned curve constants). Three **HLD errata**
+recorded for post-convergence amendment (impression-copy sketch, cost claim, "already loaded"
+data claim). `fit_outlook` scalar choice left flagged for cross-review adjudication.
+
+*(cross-review and sign-off rounds appended below)*
 
 ---
 
