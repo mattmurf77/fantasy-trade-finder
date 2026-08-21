@@ -99,6 +99,78 @@ binds out of comment prose, and both files name their binds there.
 and **UNRUN**; no deck has ever been generated with this flag on for a real league. Its step 0
 (the before-readout) must run before the flip or the baseline is unrecoverable.
 
+---
+
+## 2026-08-21c — League-surface pick-value alignment (Q-026 closed) — full gates, NOT PUSHED, on `feat/league-pick-value-alignment`
+
+**Branch:** `feat/league-pick-value-alignment`, cut from `origin/main` @ `f01ac9f` (which contains PR #167 `3192d13`, the per-slot pricing ship this follows). Not pushed, not merged.
+**`origin/main` advanced mid-build to `5472e70` (PR #168, negmem) and was MERGED IN**; every gate below was then re-run on the merged tree. That merge also forced a **D-id renumber: this ship's decision is D-148, not D-147** — PR #168 took D-147 while this branch was building. G-048, again, in the same week it was last logged.
+Full gates — the operator did **not** declare express. Operator ruling: *"I want the league values to reflect the same pick values."*
+Scope + code-walk + operator checklist: [docs/plans/league-pick-value-alignment/scope.md](../docs/plans/league-pick-value-alignment/scope.md) · ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/league-pick-value-alignment/decisions-draft.md) (D-148, Q-026 closure, new Q-027).
+
+**No schema change, no flag change, no client change.** `git diff --name-only origin/main -- mobile web extension` = **zero files**.
+
+**GOLDEN SET FIRST, IN ISOLATION, TWICE — the standing discipline, honoured.**
+
+| when | files | result |
+|---|---|---|
+| before any source edit | `test_bakeoff_arm_a_golden` · `test_engine_quality_golden` · `test_fairness_gate_golden` · `test_rnk_elo_golden` | **29 passed** |
+| after the source change, before any fixture was touched | same four | **29 passed, ZERO edits** |
+| again after merging `origin/main` `5472e70` (which itself edited `test_bakeoff_arm_a_golden.py`) | same four | **29 passed, ZERO edits** |
+
+Arm A's structural immunity (it never constructs a `draft_picks` row, so it never reaches `priced_pool_value`) was **verified, not assumed** — that is what the second isolated run is for. No tolerance widened, no golden fixture touched.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` (pre-merge, base `f01ac9f`) | **3986 passed, 1 skipped, 0 failed** (331 s) against a measured baseline of **3969 passed, 1 skipped** (305 s) on the same tree at `f01ac9f` |
+| `python3 -m pytest backend/tests -q` (**post-merge, base `5472e70` — the number that counts**) | **4114 passed, 1 skipped, 0 failed** (287 s). `origin/main` @ `5472e70` records **4097 passed, 1 skipped** in PR #168's own entry above. Delta **+17**, reconciling exactly on both baselines: **+5** from `test_league_picks_tier.py` (7 → 12) and **+12** from the new `test_league_pick_value_alignment.py`. Nothing removed, nothing newly skipped |
+| `bash mobile/scripts/testid-lint.sh` | **green** (`testid-lint OK`) |
+| `cd mobile && npx tsc --noEmit` · `check-*.js` | **NOT RUN in this worktree** — no `mobile/node_modules`, and `npm ci` needs network which is unavailable here. Evidence in its place: **zero mobile/web/extension diffs** against an `origin/main` whose CI is green. Asserted unaffected, **not observed — CI on the pushed sha must confirm** |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**MEASURED BEFORE/AFTER — FFV3-shaped fixture** (12-team linear board, 2026 rounds 1–4 × 12 slots + 2027/2028 firsts and seconds = 96 picks, 1QB, pinned DP snapshot `dp_values_picks_2026-08-06.csv`).
+
+Per-pick, 2026 round 1 — before → after (badge):
+
+| 1.01 | 1.05 | 1.08 | 1.12 |
+|---|---|---|---|
+| 2117.0 → **4867.1** (`first_1`→`firsts_2`) | 2117.0 → 2343.2 (unmoved) | 2117.0 → 1435.5 (`first_1`→`second`) | 2117.0 → **820.8** (`first_1`→`second`) |
+
+**Per-roster team-value pick totals** — monotonic by draft slot, which is the shape that proves the slot is reaching the price:
+
+| roster | 1 | 2 | 3 | 6 | 9 | 12 | league |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 103084.8 |
+| after | 9653.9 | 8722.1 | 7965.4 | 6439.9 | 5598.8 | 5124.6 | 80298.3 |
+| Δ | **+12.4 %** | +1.5 % | −7.3 % | −25.0 % | −34.8 % | **−40.3 %** | **−22.1 %** |
+
+**Badge movement: 50 of 96 picks (52 %).** 6 of the twelve 2026 firsts, 8 of the seconds, all 12 thirds, all 12 fourths, and all 12 **2028 firsts** (`first_1` → `second`). 2027 picks and the 2026 1.02–1.07 keep their badge. Bands untouched (`tier_config.json` + five client mirrors byte-identical); the inverse is still `value_to_elo` (D-088).
+
+**Read the league row honestly: aggregate DEFLATION, not just dispersion.** The dispersion story holds within 2026 round 1; across a roster the round curve dominates because DP decays future firsts hard (2028 1st 2117.0 → 1263.0) where D-079's ladder held them flat. Those are the engine's prices as of `3192d13` — this ship stops one screen disagreeing with them, it does not create them.
+
+**ADR-011 TIME-SERIES BOUNDARY AT THIS MERGE — named, and proven to be a boundary rather than a rewrite.** `roster_history.team_value` / `team_value_picks` are fed by `_power_picks_by_owner`, so the series steps here and is **not comparable across 2026-08-21** for any pick-holding team; the Wrapped/recap and trends consumers read across it. Nothing historical is recomputed, verified by `test_history_snapshot_reads_the_same_priced_picks_as_power_rankings`, which asserts `roster_history.py` contains no `priced_pool_value`, no `_priced_pick_value` and no `pick_pool_value` call at all — the writer is HANDED its prices and has no pricing path to re-run.
+
+**Structural guard, sabotage-verified three ways** (`test_league_pick_value_alignment.py`, bidirectional AST walk over `server.py`). Each sabotage applied, suite run, reverted:
+
+| # | sabotage | caught by |
+|---|---|---|
+| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-148 line | 4 tests, incl. both AST guards |
+| 2 | a surface calls `priced_pool_value` directly with the **identical expression** (behaviourally a no-op) | 3 tests — proving the guard is structural, not behavioural |
+| 3 | `_league_slot_order` resolved once per PICK instead of once per league | `test_power_rankings_resolves_the_draft_order_once_per_league` (48 picks, 12 rosters, asserts exactly 1 lookup) |
+
+**Three fixture files re-derived from the pricing functions with literal inputs; no tolerance widened.**
+
+- `test_league_picks_tier.py` (7 → 12): every badge literal re-derived. **All three original sabotages re-verified against the PRICED values** (S1 raw scale, S1b `seed_elo_for_value` inverse, S2 platform-only) — each still produces a different tier on ≥2 rows — and a fourth added (S3: leaving the stored column on the wire). The null-tier contract was re-anchored: a stored NULL now prices from the market like the engine already did, and null is reserved for "every step of the waterfall is empty".
+- `test_power_rankings.py` (3 tests): **one trap had to be reshaped, not renumbered.** D-084's "u_a's one 3rd separates the literal from the dollar label scale" collapsed under the new prices — 2 seconds + 1 third is 1130.3 dollars, which rounds to ≈0.5 firsts, the same answer the literal count gives. Re-derived to **three** thirds (1654.9 ⇒ "≈1 firsts" vs literal "≈0.5 firsts"). Two thirds would not have worked (1392.6 still rounds to ≈0.5); the fixture note says so.
+- `test_trade_evaluate.py` (1 test): the evener pick moved 2027 → 2028 so its priced value (1263.0) lands where the ordering assertion needs it, and the row now STORES 1005.3 so "priced, not stored" is provable rather than incidental.
+
+**A real defect fixed in passing.** `_roster_eveners` (S4) priced sweetener candidates off the stored ladder while the `gap` they were sized against came from priced picks — both call sites are inside `_trade_evaluate_impl`. A one-tap "add their 2026 1.01" was offered as closing a 2117.0 hole the same response charged 4867.1 for.
+
+**Two residues raised rather than buried, both needing an operator call:** pick-SHARE ratios (`_user_pick_share` + the trade job's opponent shares) stay on the legacy `pick_value` column, so the contend/rebuild classifier still weights every first alike (scope §6 waiver 3); and the Draft Room board vs engine mismatch in non-12-team leagues — a 10-team league's last first displays as 820.8 and prices as 1069.8 — pinned by a test and raised as **Q-027** (scope §6 waiver 2). 12-team leagues agree exactly, asserted slot by slot.
+
+---
 ## 2026-08-21b — Gap auto-sweetener extended to bake-off arm C (`trade_gen_v2`) — full gates, NOT PUSHED, NOT MERGED, on `feat/gap-sweetener-arm-c`
 
 **Branch:** `feat/gap-sweetener-arm-c`, **stacked on `fix/package-benchmark-sweetener` @ `480cce0`** — NOT cut from `origin/main`. `close_value_gap` does not exist on `origin/main` at all, so this work is unbuildable there; the operator chose the stacked branch over waiting for the Monday window (2026-08-21). **Merge order is load-bearing: the parent lands first, then this.**
