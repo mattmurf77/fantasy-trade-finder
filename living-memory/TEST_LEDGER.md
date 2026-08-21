@@ -72,6 +72,123 @@ ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/p
 
 **Six operator ratification items** are listed in [scope.md §6](../docs/plans/package-benchmark-sweetener/scope.md) — headline ones: the arm-A golden was pinned rather than re-captured, and the flag-off serving golden's parity-with-the-pre-bake-off-SHA claim died with its re-capture and is now a drift detector.
 
+### Addendum 2026-08-21b — the PROD-REPLAY half, on real boards. Owed item (b) above is now CLOSED.
+
+Read-only prod replay of league `1312140920132497408` ("Fantasy Football Version 3", `1qb_ppr`) — the
+only league with 3+ boards — against **`origin/main` `eb9c1de`** (pinned by SHA and materialized with
+`git archive`, because main moves) **vs this branch tip `480cce0`**. Nothing was pushed, merged,
+flagged or written; no engine file was touched by this measurement.
+
+**Method** — the arm-B audit's recipe ([docs/reviews/2026-08-19-armb-audit-claims-3-4.md](../docs/reviews/2026-08-19-armb-audit-claims-3-4.md) §7),
+extended to the full serving inputs. Prod was read **once** into a local JSON fixture and both trees
+then ran against those FROZEN inputs — no per-generation prod access. Connection posture copied from
+`backend/tools/prod_analytics.py`: `DATABASE_URL_PROD` from the gitignored root `secrets.local.env`,
+session-level `default_transaction_read_only=on` + `statement_timeout`, SELECT only, DSN never printed.
+
+- Pool + consensus seed: `player_value_history` @ `2026-08-21` / `1qb_ppr` (644 rows) joined to `players`.
+- Each member's board: their **real** `swipe_decisions` replayed through the **real**
+  `RankingService.replay_from_db` (1808 / 1080 / 956 / 175 / 120 / 42 rows), `users.tier_overrides`
+  restored into `_elo_overrides` (with `__OVERRIDE_AT__` stamps), then `get_rankings()`,
+  `comparison_counts()` → `confidence`, `placement_bands()` → `placements`.
+- Rosters from `league_members.roster_data`; outlooks + acquire/trade-away positions from
+  `league_preferences`; `asset_preferences` as untouchable/target/not-interested sets; opponent
+  outlooks and pick shares assembled as `_run_trade_job` does.
+- Owned picks injected exactly as `server._inject_owned_picks` does (144 rows, `picks_pool_cap`, and
+  `trade.slot_pricing`'s default `tier_ladder` mode ⇒ the stored `pool_value`), with `_pick_asset_elos`
+  priming every Elo map — so a pick can be an equalizer, as it is in prod.
+- Prod `model_config` (185 rows) into both modules' `_cfg`; each viewer's real `stud_tax_mode` pinned;
+  flags from `config/features.json`; cards from the real `TradeService.generate_trades` at the **organic
+  serving parameters** (`fairness_threshold` 0.75, `max_per_opponent` 5).
+- **Both trees ran against ONE shared throwaway SQLite `DATABASE_URL`** so neither could read a
+  different local `experiments` / `model_config` table (the branch worktree has a populated
+  `data/trade_finder.db`; the archived main tree does not — that asymmetry was found and removed).
+- 6 boarded viewers × 2 paths (v3 = the live posture, and v2-only) × arms A/B/C/D, plus a branch-only
+  `sweetener_gap_threshold = 0` control that isolates the sweetener from the benchmark fix.
+- **Determinism proved, not assumed:** the whole branch run was repeated and the two result files are
+  byte-identical.
+
+Harness committed (DB-free half): [`replay_prod_boards.py`](../docs/plans/package-benchmark-sweetener/replay_prod_boards.py).
+The prod extractor is deliberately **not** committed — it holds a prod connection helper, the same
+posture the arm-B audit took with its probe scripts.
+
+| Slice | main cards | branch cards | Δ | main >1539 | branch >1539 | sweetened | main mean gap | branch mean gap |
+|---|---|---|---|---|---|---|---|---|
+| **Served arm roster (B+C+D, both paths)** | 434 | 427 | **−7 (−1.6%)** | 45 (10.4%) | 33 (7.7%) | 28 | 614.0 | 568.6 |
+| arm B `current`, both paths | 186 | 185 | −1 (−0.5%) | 15 (8.1%) | 7 (3.8%) | 17 | 552.6 | 486.2 |
+| **arm B, v3 path — the live posture** | 105 | 106 | **+1 (+1.0%)** | 7 (6.7%) | **3 (2.8%)** | 9 | 538.1 | 501.3 |
+| arm B, v2-only path | 81 | 79 | −2 (−2.5%) | 8 (9.9%) | 4 (5.1%) | 8 | 571.3 | 466.1 |
+| **arm A `baseline` (pin check)** | 376 | 376 | **+0** | 71 (18.9%) | 71 (18.9%) | 0 | **835.6** | **835.6** |
+| arm C `gen_v2` (inherits the fix, no sweetener) | 51 | 51 | +0 | 15 (29.4%) | **19 (37.2%)** | 0 | 1173.7 | 1253.0 |
+| arm D `challenger` | 197 | 191 | −6 (−3.0%) | 15 (7.6%) | 7 (3.7%) | 11 | 527.2 | 465.7 |
+
+By basis, arm B, both paths: **divergence** 96 → 94 cards, over-line 13 (13.5%) → 7 (7.4%), 15 sweetened;
+**consensus** 90 → 91 cards, over-line 2 (2.2%) → **0 (0.0%)**, 2 sweetened. Sweetener fire rate splits
+almost entirely by basis, not by path: divergence **15.9%** (v2) / **16.0%** (v3), consensus 2.9% / 1.8%.
+
+**Fixture prediction vs real boards — four corrections and one confirmation.**
+
+1. **Deck shrink is less than half what the fixture predicted.** Fixture: **−3.9%** served roster,
+   −4.4% arm B, worst cell −20%. Real boards: **−1.6%** served roster, **−0.5%** arm B, and the live
+   v3 path actually gains a card (**+1.0%**). Worst single cell is `v2_only` / arm D / MangoPatti,
+   15 → 11 (−26.7%); worst arm-B cell is `v2_only` / johnstanfield, 17 → 15 (−11.8%). The operator
+   accepted −3.9% in advance; the real cost is smaller than the number they accepted.
+2. **The over-the-line LEVEL the fixture could not reach is confirmed, and the CHANGELOG's ~15% is
+   located.** At `origin/main` on real boards: arm A **18.9%**, arm C **29.4%**, arm B **8.1%** — and
+   arm B's **divergence** slice is **13.5%**. The fixture read 0–5% on arm B. So the ~15% figure is a
+   divergence/mixed-arm number, not an arm-B-overall one, and the fixture was indeed measuring an
+   arithmetically compressed board.
+3. **The sweetener fires about twice as often as the fixture implied — confirmed as predicted.**
+   Fixture: 3 sweetened cards across 65 arm-B cards (~4.6%), "roughly one card per deck". Real boards:
+   **17 / 185 = 9.2%**, **1.42 cards per deck** on a mean deck of 15.4. Owed item (d) called this and
+   was right.
+4. **The sweetener's economics on real assets.** Mean gap **2173 → 850** (median 2010 → 814), mean
+   1324 units closed. **17 of 17 sweetened cards land under the 1539 line** — when the pass fires it
+   always succeeds. Equalizer came off the **give** side 14 times, the **receive** side 3, and was an
+   owned **PICK** 5 of 17 (Bcork's 2027 1sts, johnstanfield's 2026 1sts) — the `close_value_gap`
+   docstring correction in §6 is load-bearing in production, not theoretical. The 7 cards still over
+   the line on the branch are **all unsweetened** (gaps 1648, 1648, 1812, 1876, 2171, 2547, 4105) —
+   unclosable and kept, exactly as specced.
+5. **NEW — the branch's two halves pull in opposite directions, and only the sweetener makes it a
+   win.** The branch-only `sweetener_gap_threshold=0` control isolates them on identical decks
+   (deck size is unchanged by the sweetener on real boards — every viewer's card count matches
+   card-for-card between sweetener-on and sweetener-off, so the whole −1.6% deck delta is the
+   BENCHMARK FIX, not the sweetener):
+
+   | Path | main | branch, sweetener OFF | branch, sweetener ON |
+   |---|---|---|---|
+   | v3 | 7/105 = 6.7% | **12/106 = 11.3%** | 3/106 = **2.8%** |
+   | v2-only | 8/81 = 9.9% | **12/79 = 15.2%** | 4/79 = **5.1%** |
+
+   The benchmark fix ALONE would raise arm B's over-the-line share (6.7 → 11.3, 9.9 → 15.2) — the same
+   mechanism that makes arm C worse. The sweetener then removes 9 of 12 and 8 of 12. **Shipping the
+   benchmark fix without the sweetener would be a net regression on this metric**; they must ship
+   together, and `sweetener_gap_threshold` is not an independent rollback lever for the benchmark fix.
+
+**Arm A is byte-identical on REAL boards too** — 376 cards, 71 over the line, mean gap 835.6 to 0.1, on
+both trees, across all six viewers and both paths. Ratification item 1 (the arm-A golden pinned rather
+than re-captured) now has live-data evidence on top of the fixture and the unit test.
+
+**Arm C is worse than the fixture said, and it is a pre-existing problem the branch deepens.** Real
+boards: **29.4% → 37.2%** over the line on an identical 51-card deck (fixture: 0 → 13.6% and
+5.3 → 10.5%). Most of that level is NOT this branch — jonbonjourvi's arm C is 11 of 13 over the line on
+BOTH trees. Ratification item 5 stands, and the arm-C follow-up is confirmed as a priority.
+
+**One caveat the headline numbers hide: net deck size barely moves, but deck CONTENT churns hard.**
+Arm B across all 12 viewer-path decks: 107 cards common, 51 main-only, 50 branch-only — roughly a
+third of the deck is different. Per-viewer worst case is Bcork on `v2_only`, 4 of 12 cards common. A
+tester comparing decks before/after the merge will see much more change than "−1 card" suggests.
+
+**Not measured here, still owed:** the manual TestFlight checklist (item (a)) — unchanged, it needs a
+build. This replay covers generation only; the post-generation presentation stack (thompson, diversity,
+fatigue, session rerank, first-session shaping, bake-off interleave) was not replayed, so these are
+served-CANDIDATE decks, not final served decks.
+
+**Ship recommendation: unchanged — ship.** Every headline moved in the branch's favour relative to the
+fixture: less deck loss than the operator pre-accepted, a bigger over-the-line reduction on a higher
+real baseline, and a sweetener that closes every gap it touches. The two findings that change anything
+are (5) — the halves are not independently shippable — and the arm-C deepening, which is a follow-up,
+not a blocker.
+
 ---
 ## 2026-08-20f — Composite window model #372 (starter value + playoff likelihood + age at 40 %) — full gates, FLAG DARK, NOT MERGED, on `claude/372-window-composite`
 

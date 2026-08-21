@@ -315,9 +315,19 @@ fit-premium 1-for-1 carrying a 1600 gap).
    cost of the "arm C is a v1 follow-up" decision, quantified. The follow-up
    is now a priority item, not a nicety.
 6. **The measurement is fixture-based, with synthetic boards.** Levels are
-   directional; the main-vs-branch deltas are the result. The prod replay half
+   directional; the main-vs-branch deltas are the result. ~~The prod replay half
    (real league boards) needs prod read access and is an operator item, as it
-   was for the fit W0 run.
+   was for the fit W0 run.~~ **DONE 2026-08-21** — the prod replay ran read-only
+   against league `1312140920132497408`; numbers and method in
+   `living-memory/TEST_LEDGER.md` addendum 2026-08-21b, harness
+   [replay_prod_boards.py](replay_prod_boards.py). It CONFIRMS the direction and
+   softens the cost (deck −1.6% served roster, not the fixture's −3.9%;
+   over-the-line share 8.1% → 3.8% on arm B from a real 8.1% baseline, not the
+   fixture's 0–5%; sweetener fires on 9.2% of arm-B cards, ~2x the fixture rate,
+   as owed-item (d) predicted). Two things it adds: arm C is worse on real
+   boards than on the fixture (29.4% → 37.2%), and **the benchmark fix alone
+   RAISES the over-the-line share** (6.7 → 11.3 on v3) — only the sweetener makes
+   the pair a net win, so the two are not independently shippable.
 
 ### Operator ratifications — 2026-08-22 (recorded by the coordinating session)
 
