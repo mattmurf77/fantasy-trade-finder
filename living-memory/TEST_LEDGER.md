@@ -77,7 +77,7 @@ ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/p
 Read-only prod replay of league `1312140920132497408` ("Fantasy Football Version 3", `1qb_ppr`) — the
 only league with 3+ boards — against **`origin/main` `eb9c1de`** (pinned by SHA and materialized with
 `git archive`, because main moves) **vs this branch tip `480cce0`**. Nothing was pushed, merged,
-flagged or written; no engine file was touched by this measurement.
+flagged or written; no engine file was touched by this measurement. (A concurrent session committed `e59650c` to this branch mid-run; it is docs-only — `git diff 480cce0 e59650c -- backend/ config/` is empty — so these numbers still describe the current tip.)
 
 **Method** — the arm-B audit's recipe ([docs/reviews/2026-08-19-armb-audit-claims-3-4.md](../docs/reviews/2026-08-19-armb-audit-claims-3-4.md) §7),
 extended to the full serving inputs. Prod was read **once** into a local JSON fixture and both trees
