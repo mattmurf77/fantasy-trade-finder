@@ -17,7 +17,8 @@
       "Bash(python3 -c ' *)",
       "Bash(git add *)",
       "Bash(git commit --quiet -m 'feedback: hide closed notes from the user inbox; verify per-user scoping *)",
-      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)"
+      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)",
+      "Bash(python3 scripts/set_knob.py *)"
     ]
   }
 }
