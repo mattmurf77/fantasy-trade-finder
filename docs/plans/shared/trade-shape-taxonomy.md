@@ -1,6 +1,6 @@
 # Trade-shape taxonomy — shared vocabulary (co-owned)
 
-**Version:** 1.1.0 — additive: §5 objection vocabulary (authored by the counterparty-breaker session, incorporated verbatim 2026-08-21). Sign-off: breaker yes · Receipts yes · coordinator yes · **negmem sign-off PENDING** (pre-agreed the producer split; explicit 1.1.0 confirmation owed per the change rule). 1.0.0 seed content (§1–§4) unchanged.
+**Version:** 1.1.1 — 1.1.0 (additive §5 objection vocabulary, breaker-authored) is **fully agreed three ways**: breaker yes · negmem yes (confirmed 2026-08-21, point-by-point) · Receipts yes. 1.1.1 is a patch-level footnote requested by negmem (wording only, non-normative; no-impact for breaker/Receipts). 1.0.0 seed content (§1–§4) unchanged.
 **Date:** 2026-08-21
 **Status:** draft — pending three-way reconciliation sign-off
 **Co-owners:** Receipts (post-hoc suggestion scoring) · Negative-results memory (per-league priors feeding generation) · Counterparty breaker (partner-side objection scoring)
@@ -132,3 +132,9 @@ breaker output is a reviewable defect, and vice versa where marked.
 
 Severity (breaker-only): per-class 0–1 from present-state margins (LLD §3), NOT a
 partner-liking magnitude — that remains the fit arm's them-score (§2.8 rule upheld).
+
+> **Footnote (1.1.1, negmem):** the producer column marks which side of the
+> predicted/observed boundary a code lives on — it is **not** negmem's M1 evidence-admission
+> list. Per negmem PRD R2, only the {value, fit} layer-1 families accrue M1 evidence;
+> `other_player_avoid` / `value_other` / `fit_other` are negmem-domain codes that do NOT
+> accrue. Do not read this table as the admission spec.
