@@ -97,6 +97,17 @@ MODEL_A_PROFILE: dict[str, float] = {
     # ≤ 0 every generator skips the pass entirely (byte-identical), and
     # the pre-wave engine had no sweetener.
     "sweetener_gap_threshold":   0.0,   # gap auto-sweetener off
+    # Negative-results memory — 2026-08-22 (docs/plans/negative-results-
+    # memory/LLD.md §3.4, HLD D-6). negmem post-dates the reference SHA and
+    # its seam multiplies `composite_score` inside generation, so arm A pins
+    # it at 0.0 — the documented byte-identical M1 disable. The other five
+    # `negmem_*` knobs are deliberately absent: at strength 0.0
+    # `negmem.effective_mult` returns exactly 1.0 before any of them is read
+    # (they shape the map, not the gate), same rule as `package_floor_cross`.
+    # M2 is NOT killed here: its strength is the global
+    # `gen2_accept_prior_strength`, and an arm overlay pin is expressly not
+    # the sanctioned M2 kill (HLD §5.3).
+    "negmem_strength":           0.0,   # M1 seam off (pre-negmem engine)
 }
 
 

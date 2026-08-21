@@ -1052,6 +1052,46 @@ _DEFAULT_CFG: dict[str, float] = {
     "breaker_narrate_value_giving":           0.0,
     "breaker_narrate_other_player_keep":      0.0,
     "breaker_narrate_roster_crunch":          0.0,
+
+    # ------------------------------------------------------------------
+    # Negative-results memory — 6 knobs (flag `trade.negmem`, default OFF;
+    # docs/plans/negative-results-memory/LLD.md §3.4). Consumed ONLY by
+    # backend/negmem.py, a leaf module that imports no engine module: it
+    # derives a per-(partner × reason-family) soft prior on read, once per
+    # job, and the engines consult it through a pure multiplier. They live
+    # here because `_c()` is the accessor for BOTH read paths — the seam
+    # reads `negmem_strength` / `negmem_floor` inside the arm's overlay
+    # (D-6/D-10), and `server._run_trade_job` reads the four build knobs
+    # off the job thread before the arm fan-out and passes plain floats
+    # into `build_map` (DE-3), which is what keeps negmem literal-free.
+    # Thread-local overrides and reload_config() both work, and
+    # snapshot_config() captures all six per run (D-8). Five registrations
+    # per key, same logical change as the consumer (see the fit block
+    # above): this dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row. M2's strength is NOT here —
+    # it is governed by the existing `gen2_accept_prior_strength` /
+    # `gen2_accept_global_prior` above, whose 0 is M2's kill.
+    # ------------------------------------------------------------------
+    # M1 lever, read at the seam. 0.0 = byte-identical M1 disable (deck
+    # content, scores and order); M1-ONLY, it does not govern M2.
+    "negmem_strength":            1.0,
+    # Double role (LLD §4.4): the clamp floor for the effective multiplier
+    # AND the build-time evidence-curve asymptote `floor_b`.
+    "negmem_floor":               0.6,
+    # Shrinkage threshold — cells with decayed evidence below this are
+    # identity (multiplier exactly 1.0).
+    "negmem_min_evidence":        3.0,
+    # Exponential-decay half-life in days; also sets the read horizon (x4).
+    "negmem_halflife_days":      45.0,
+    # Saturation pseudo-count of the evidence curve
+    # (mult = 1 - (1 - floor) * n_eff / (n_eff + k)) — the deploy-free
+    # flap lever for the shrinkage-gate discontinuity (OQ-4b).
+    "negmem_sat_k":               3.0,
+    # Evidence mass one admitted viewed like nets against every
+    # (partner, *) cell, folded chronologically with a clamp at zero
+    # after every step (DE-2).
+    "negmem_like_net":            1.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

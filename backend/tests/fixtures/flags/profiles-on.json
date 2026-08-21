@@ -207,5 +207,6 @@
   "trade.position_tiers": true,
   "trade.rb_handcuff": true,
   "trade.breaker": false,
-  "trade.breaker_narrative": false
+  "trade.breaker_narrative": false,
+  "trade.negmem": false
 }
