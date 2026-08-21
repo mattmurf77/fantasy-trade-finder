@@ -3,7 +3,7 @@
 **Date:** 2026-08-21
 **Entry point:** direct ask (operator product-gap review, item 2; dispatched cross-session 2026-08-21)
 **Builder:** planning session `vigilant-spence-8583f5` (branch `claude/vigilant-spence-8583f5`); build unassigned — planning stops at the doc suite
-**Operator sign-off on waivers:** PENDING — this scope names three operator decisions (§6) that must be answered before build
+**Operator sign-off on waivers:** ANSWERED 2026-08-22 — all three §6 decisions ruled (see §6 rulings); the build gate is open
 
 Parent docs: [README.md](README.md) · [research-verification.md](research-verification.md) (code-truth memo — every claim below cites it) · PRD/HLD/LLD via dual-agent review (in flight)
 
@@ -104,3 +104,30 @@ byte-identical-disable knobs (memo §Design-constraints 3, 4, 9).
    app-users only, (c) aggregate-only (no per-person records shown to anyone, engine
    internal), or (d) defer layer 2 entirely? The PRD presents the options with the
    memo's factual basis; nothing is built until ruled.
+
+
+---
+
+## §6 RULINGS (operator, 2026-08-22, direct)
+
+1. **D-067 family-level soft prior: YES** — "Aligned." Soft family down-weighting ships
+   as specced: coarse (partner × {value, fit}) key, floor 0.6, min-evidence 3, 45d
+   half-life decay, like-netting. The coarse-key definition of "cousin" (same partner +
+   same reason family, NOT package-similarity) was explained and explicitly aligned on.
+2. **Layer-2 boundary: SEED ONLY** — confirmed as recommended. v1 = the M2 feed
+   (aggregate per-manager acceptance counts into the existing `acceptance_prior`);
+   per-trade-type tendency modeling stays deferred behind the data-volume gate.
+3. **Privacy posture: (a) — FULL layer 2** — the operator ruled AGAINST the
+   aggregate-only recommendation, knowingly (options and consequences were laid out in
+   layman's terms, incl. non-app-user modeling). Consequences recorded:
+   - **v1 is byte-identical under (a) vs (c):** v1 ships derive-on-read with zero
+     tables per NG6 regardless — that is an engineering choice, no longer a privacy
+     ceiling. Nothing in the v1 build changes.
+   - **What (a) unlocks, later:** the P2 layer-2 expansion MAY persist per-person
+     tendency profiles (incl. non-app-user league-mates) and MAY surface per-person
+     insights as product features — both were foreclosed under (c).
+   - **The obligation (a) creates, later:** the moment any per-person profile is
+     PERSISTED, `delete_user_data` gains a partner-keyed surface it does not have today
+     (the gap (c) sidestepped) — that persistence change carries its own scope block
+     with the deletion path as a named requirement, and the PRD §5.1 "no per-person
+     dossier" user story must be re-scoped in that PRD, not silently.

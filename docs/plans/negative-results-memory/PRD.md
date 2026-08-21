@@ -355,7 +355,15 @@ on breaker.
 
 ## 8. Rollout & Measurement
 
-### 8.1 The three operator decisions (present before build — scope §6)
+### 8.1 The three operator decisions — ANSWERED (operator, 2026-08-22; rulings recorded in scope.md §6-RULINGS)
+
+**D1 = YES** (soft family down-weighting as specced) · **D2 = seed only** (M2 feed;
+tendency modeling deferred) · **D3 = (a) full layer 2** — AGAINST the recommendation,
+knowingly ruled: v1 is unchanged (derive-on-read per NG6 is engineering, not a privacy
+ceiling), but the P2 expansion may persist and surface per-person profiles, and any
+future persistence carries the `delete_user_data` partner-key obligation as a named
+requirement in its own scope block. The build gate is OPEN. Original decision text
+follows for the record:
 1. **D1 — D-067 family-level ruling.** Recommendation: **YES to soft family
    down-weighting** — floor-clamped (0.6 default), min-evidence 3, decaying, stamped,
    deploy-free-revertible. D-067's line targeted hard exclusion and unacted
