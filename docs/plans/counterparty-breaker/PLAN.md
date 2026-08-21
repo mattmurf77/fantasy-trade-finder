@@ -250,9 +250,19 @@ below visibility.
   decks (arm mix challenger/current/gen_v2, zero ghosts) are live. Also logged same table:
   `qb_1qb_cap_elo` 1785→1644 and `qb_1qb_cap_knee_elo` 1580→1200 @04:46Z — 1QB QB prices drop
   sharply at the next value refresh; value-optics objections must not treat pre-boundary QB
-  values as comparable.
-- **A-2:** Receipts Reconciliation-contract text (RESERVED seams) — pending; reconcile before
-  operator delivery.
+  values as comparable. Retrospective studies additionally inherit Receipts' verified
+  boundaries: the gradeable cohort starts 2026-08-16 (`assets_json` landed with telemetry, no
+  backfill — ~7.7k earlier impressions permanently ungradeable) and picks carry NO value
+  history (static code seeds). Prospective breaker calibration (post-ship stamps ⨝ pass
+  reasons) is unaffected by either.
+- **A-2: CLOSED 2026-08-21** — Receipts' Reconciliation contract landed
+  (`docs/plans/receipts/PLAN.md` §7, dual-signed): Receipts touches zero generation code
+  (writes only `receipts_grades`/`receipts_grade_runs`; explicit reads-never-writes list); its
+  RESERVED feedback-into-scoring seam is the ordering/presentation multiplier stack
+  (propensity/Thompson layer), never the generation path — disjoint from both my post-ranking
+  stamp seam and negmem's generation-time prior; my fit-them-lens adjacency is cross-referenced
+  as agreed; taxonomy §5 is reserved for the 1.1.0 objection vocabulary with the producer
+  column exactly as reconciled (7a/7b).
 - **A-3:** exact current line numbers for the M3 stamp site / `_log_deck_signal_impressions`
   features block (drift expected; re-cite at LLD-build time).
 
