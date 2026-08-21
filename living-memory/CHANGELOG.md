@@ -35,6 +35,34 @@ scope · PLAN · HLD · LLD · PRD, each dual-agent converged (4 rounds each), f
   **[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open — merge is the
   operator's.** 20-item register in PRD §9 — defaults ship, register is post-build tuning.
 
+## 2026-08-21 — Serving RE-LIT (B/D/C interleaved), ghosts OFF by ruling, QB 1QB repriced, planning fleet
+
+**All prod changes via `scripts/set_knob.py`, logged in `model_config_changes` (the M1 rail's
+first live use).** Operator-driven session, all decisions theirs:
+
+- **Interleaved serving LIVE** 00:43Z: `bakeoff_serve_interleaved` 1, `bakeoff_group_size` 0
+  (plain draft), `bakeoff_deck_limit` 60. First decks: 26–29 cards, arm mix challenger 38 /
+  current 26 / gen_v2 17. Root cause of the operator's 6-card-repeat deck: FFV3 pool exhaustion
+  (287 decided + 812 standing decisions) **amplified by ghost accumulation** — ghosts can never
+  be decided so never leave the pool (one hash ghost-served 35×; two decks were 100% ghost).
+- **Ghost holdout OFF** (`ghost_holdout_one_in` 0) and then **ghosts ruled out entirely**
+  (operator: "I still am against the ghost cards") — Receipts amended post-sign-off (`325896e`),
+  all three planning suites carry the ruling; code/seed defaults flip to 0 next ship.
+- **QB 1QB repriced** 04:46Z: `qb_1qb_cap_elo` 1785→**1644**, knee 1580→**1200** — two-anchor
+  solve: Allen = exactly a late 1st (1539), sub-first QBs = mid-2nds. The old cap priced Allen
+  ABOVE an early 1st (3592 vs 3373). Also seeded 10 never-seeded serving/ghost knobs
+  (`024b030`) — the "deploy-free" flips had been code-default edits all along.
+- **Tier-anchor diagnostic** (operator's "too flat" thesis): within-band spread is HEALTHY
+  (p10/p50/p90 ≈ .07/.5/.9 in every band) — thesis not confirmed as stated; rung occupancy
+  lumpy; market-curve steepness comparison (D-084 method, vs KTC/FC) running as the follow-up.
+- **Post-flip card analysis:** 15% of cards carry gap > a late 1st, all from arms D/C at
+  fairness .73–.83 on big packages — the ratio-gate scale-blindness, live. Operator
+  commissioned an **auto-sweetener pass** (add the equalizer instead of serving the gap); queued.
+- **Planning fleet** (3 sessions + coordinator): Receipts suite COMPLETE (dual sign-off, round 3;
+  8 blockers fixed incl. a wrong Wilson formula and a sign error both reviewers independently
+  caught) on `plan/receipts`; negmem + breaker reconciled against its §7 contract; shared
+  trade-shape taxonomy v1.0.0 seeded (`docs/plans/shared/`). Batch → operator when sibling LLDs land.
+
 ## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
 
 Operator ran the flow end-to-end and filed **thirteen reports**. All closed in code across
