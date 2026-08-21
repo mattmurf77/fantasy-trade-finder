@@ -605,6 +605,7 @@ not a code: it is excluded from the breaker vocabulary, and calibration joins tr
 `other_text` rows as unmatched-by-construction, excluded from per-class precision denominators
 — extended only by `roster_crunch` (`producer=breaker`), registered in
 the shared taxonomy (§5.7; changes only by PR to that file, pending operator decision 7a).
+*[Errata 2026-08-21: superseded — taxonomy v1.1.1 landed (5572604); see reconciliation-log E-1.]*
 
 **Why.** (1) Calibration becomes a join against ~200+ existing coded rows — G-2 with zero new
 instrumentation. (2) One vocabulary, two tenses, with negmem (their hard constraint: extensions
@@ -926,6 +927,7 @@ Two exposures share one property — the harmed party can't see the harm:
   `docs/plans/shared/` does not exist here). Cited here by its eventual home path; adopted
   verbatim on merge; this plan contributes the objection-vocabulary section (anchor codes +
   `roster_crunch` + producer column) via PR to that file (taxonomy v1.1.0, three-way signed).
+  *[Errata 2026-08-21: superseded — taxonomy v1.1.1 landed (5572604); see reconciliation-log E-1.]*
 - **Fit-challenger precedents:** LLD §3.2 (the M3 stamp site this rail extends), §3.3
   (`_log_deck_signal_impressions` features keys), §3.4 (`trade_card_to_dict` additive
   serialization), §4 (five-registration knob rule) —

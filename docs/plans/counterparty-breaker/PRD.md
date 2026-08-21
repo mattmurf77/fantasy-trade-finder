@@ -173,7 +173,15 @@ register — never a readout footnote** (ruling M-1).
   genuinely flawed cards — a per-card like-rate guardrail would punish the feature for
   working. Expected-n honesty applies here too (M4's row): narrated-cell n is small; the
   guardrail is read at deck level with its cell n printed, and no degradation *claim* is made
-  below the same n=130/side bar that binds M4's lift claims.
+  below the same n=130/side bar that binds M4's lift claims. **Enforcement definition
+  (binding):** below cell n=130/side M-G5 is REPORT-ONLY — printed with cell n; it can neither
+  confirm nor clear degradation; it never blocks — blocking would deadlock, since n only
+  accrues by widening. One non-statistical tripwire applies from n≥30/side: narrated-deck
+  like-on-viewed < ½ the concurrent non-narrated rate triggers an operator review + a logged
+  HOLD on allowlist widening (not an auto-rollback, not a "degradation" finding), resolved at
+  the n=130 read. M-G5 becomes a blocking gate on FURTHER WIDENING only after either side
+  reaches 130. Below that, the blocking protections remain M-G4's entropy red line and M1
+  coverage/perf. Tripwire numbers registered as §9 item 20.
 - **M-G6 — Cross-seat divergence** (R-6 monitor): mirrored-serve narration-divergence count
   rides per-job diagnostics; re-read at the A-5 cadence.
 
@@ -205,6 +213,16 @@ acceptance criteria.
 - **R-2** Deck order and composition MUST be byte-identical with `trade.breaker` on vs off,
   on organic and interleaved decks alike; nothing in generation may read breaker stamps.
   (HLD NFR-1, D-11; `test_breaker_zero_ordering_effect`, `test_breaker_inert_seam_creep_guard`.)
+- **R-2b — Flag-off is byte-identical, MUST.** With `trade.breaker` off, the system MUST be
+  indistinguishable from today at every observable layer: the breaker module is never imported
+  (`backend.trade_breaker` absent from `sys.modules` across a full job), `features_json` carries
+  no breaker key and impression rows are byte-identical, the client payload carries no breaker
+  key and `trade_card_to_dict` output is byte-identical, and the publish stream adds zero
+  publishes with snapshots byte-identical to flag-off. Acceptance: LLD §7's
+  `test_flag_off_features_json_byte_identical`, `test_flag_off_payload_byte_identical`,
+  `test_flag_off_never_imports_breaker`, plus the publish-count assertion in
+  `test_narrated_payload_reaches_snapshot_all_flag_combos` (dark/zero-narrated decks add zero
+  publishes).
 - **R-3** Objection codes MUST be the closed set: the 9 coded `PASS_REASON_LAYER2` codes +
   `roster_crunch` (`producer=breaker`); `shape_aversion` never appears in any field; evidence
   keys are exactly the LLD §2.4 enums — ids, numbers, enum strings, no free text, no names.
@@ -351,6 +369,7 @@ table merged in, deduped).
 | No objection clears the bar | Nothing — and **no affirmative variant** | R-17 below |
 | Objection exists but suppressed (below floor / class not graduated / repetition / format gap / template error) | Nothing on that card — deliberately indistinguishable from "no objection" to the user; the *stamp* records the reason | R-9; an "objection withheld" hint would be a dark-pattern tease — the data still sees it |
 | Repetition case: several same-partner cards, same objection | The single highest-severity card carries the line; the rest are silent | R-18 below; anti-wallpaper (D-7); register item 10 |
+| Cross-deck repetition: the same card narrated yesterday, silent today | Suppression is per-deck, so the same (partner, objection) may narrate on one deck and not the next — intent, not a bug; QA judges it as such | register item 10 (per-deck suppression accepted, `suppressed` stamped); R-18 |
 | 14-team / IDP / non-Sleeper league | Fewer named hesitations, never wrong ones — depth-based classes are envelope-gapped | HLD §3.5 |
 | Unboarded counterparty (84.5% case) | Only consensus-basis or roster-structure hesitations, behind a deliberately high floor | D-7 near-tautology guard |
 | Counterparty's own app | **Never any output caused by the breaker** — no notification, no surface, nothing | HLD §1.4, §5.6 |
@@ -521,9 +540,11 @@ boundary) precedes the breaker build (PLAN A-1 pending-ship block):
 
 - **Shared taxonomy: CLOSED.** The objection-vocabulary contribution (anchor codes +
   `roster_crunch` `producer=breaker` + the producer column, `shape_aversion` ceded to negmem)
-  landed as **taxonomy v1.1.1**; the breaker build **cherry-picks the taxonomy through
-  `5572604` at landing**. This supersedes the "v1.1.0 PR pending" language in
-  PLAN §8/HLD §5.7 (drift-risk R-12 is thereby retired); register items 7a/7b are ruled.
+  landed as **taxonomy v1.1.1** (commit `5572604` on `plan/receipts`, three-way signed); the
+  breaker build **cherry-picks the seed + taxonomy through `5572604` at landing**. See
+  **reconciliation-log Errata E-1 (2026-08-21)**, which supersedes the pending-v1.1.0-PR
+  language in PLAN §8/HLD §5.7 (drift-risk R-12 is thereby retired). Register items 7a/7b:
+  landed, three-way signed; operator ratifies with PRD approval.
 - **Bulk readers** (LLD §2.2): negmem may want equivalents; whichever plan builds first owns
   them, the other reuses (Q-11).
 - **Receipts contract** (A-2): CLOSED — disjoint seams dual-signed; Receipts touches zero
@@ -532,6 +553,12 @@ boundary) precedes the breaker build (PLAN A-1 pending-ship block):
   (R-16; §8.3 preconditions).
 - **Change control:** serving-affecting flips share the one-engine-change-per-tester-week
   calendar across all three siblings — one operator, three eager plans (HLD §5.1).
+  **Worst-case calendar arithmetic:** narration first light lands ≈ **4–5 weeks after P1
+  flag-on** in the worst case — a class clears its bar just after a serving round starts
+  (≤1-week round wait) and both siblings hold the next two one-change-per-week slots. Sibling
+  contention is the only unbounded term, and it is operator-arbitrated. Two escape valves:
+  the mobile element ships dark on the regular release train (no calendar slot consumed), and
+  the annotated-readout option (register item 9) buys back the ≤1-week round wait.
 - **Re-derivations at build:** A-4 (legacy-outlook skew ~65%) and A-5 (mirrored-serve rate
   ~3.7%) re-checked before P2 — the `fit_outlook` haircut and the M3 demotion numbers depend
   on them.
@@ -574,7 +601,7 @@ when the narrative flag lights, nothing renders — by design.
 Rollback, deploy-free, outermost first: narrative flag off (hot) → `breaker_min_severity`
 1.1 or per-class switch to 0 → `trade.breaker` off (module unimported, key gone, rows
 byte-identical) → revert commit; nothing persisted needs migration. Rungs 1–2 are rehearsed
-in §8.3 (steps 15–17), not just documented.
+in §8.3 (steps 16–17; step 15 feeds 16), not just documented.
 
 ### 8.2 First exposure & readout predicates
 
@@ -606,7 +633,7 @@ element.
 
 | # | Step | Expected result |
 |---|---|---|
-| 1 | Confirm flag/knob state before starting: `trade.breaker` on, `trade.breaker_narrative` off, the intended class's `breaker_narrate_<class>` flip staged | `GET /api/feature-flags` + config show exactly this state; `model_config_changes` has the logged flips |
+| 1 | Confirm flag/knob state before starting: `trade.breaker` on, `trade.breaker_narrative` off, the intended class's `breaker_narrate_<class>` flip staged. Note: the class switch MAY already be 1 during steps 1–4 — the narrative flag alone holds the dark window (R-7, R-11) | `GET /api/feature-flags` + config show exactly this state; `model_config_changes` has the logged flips |
 | 2 | **Dark-window UI check**: generate a fresh deck; swipe through every card | NO hesitation element on any card (`trade-card.breaker-hesitation` absent everywhere); cards identical in layout to the previous build |
 | 3 | Dark-window payload check (optional): fetch the deck payload; search for `"breaker"` | Key absent from every card object — the dark window serves nothing (R-7) |
 | 4 | Dark-window regression: like one card; pass one card and file a layer-2 decline reason | Both flows unchanged; DeclineReasonPanel files normally |
@@ -615,7 +642,7 @@ element.
 | 7 | Class restriction: inspect every narrated card's sentence on the deck; cross-check a card whose top objection is a non-graduated or dark class (diagnostics identify one) | Every sentence is from the graduated class's template family only; the non-graduated/dark-class card shows no hesitation row — and nothing else on the card hints at the withheld objection; NO sentence ever mentions untouchables, "their board", or their rankings |
 | 8 | Check every OTHER card in the deck (no-objection and below-floor cards) | Cards without a narrated objection show no hesitation row at all — no empty row, no placeholder, no "no red flags" variant, no layout shift vs a pre-feature build (R-17) |
 | 9 | **Suppression state**: find (or induce, by re-rolling decks) a deck with 3+ cards against the same partner where the same hesitation would apply | At most the top-severity card for that (partner, objection) narrates; the rest show NO element and no blank-space artifact; nothing in the UI references the hidden repeats (R-18) |
-| 10 | **Null-evidence template** (runs iff `fit_outlook` is the graduated class — the evidence-free branch is only reachable there; otherwise mark n/a): find a card sending picks/future capital to a win-now partner | Sentence reads "…they look win-now, and this asks them to take back future capital." — no player name, no age, no position interpolated (never "None") |
+| 10 | **Lowest-evidence template branch**: exercise the graduated class's lowest-evidence template branch (its LLD §1.6 row) — find/induce a card on that branch (e.g. for `fit_outlook`, a card sending picks/future capital to a win-now partner) | No null interpolation, never "None"; the sentence matches the template. If the graduated class's row has no reduced-evidence branch, record n/a naming the class and row IN THE TEST_LEDGER ENTRY, and step 10 becomes a standing obligation re-run when `fit_outlook` graduates |
 | 11 | Layout: view a narrated card with the longest player name available; include a card that also shows fitLine + consensus note + strength bar | Sentence wraps ≤2 lines, no truncation/ellipsis, no clipping of TradeValueBar or the disposition row; element sits between the partner-fit line and the consensus note |
 | 12 | Visual pass against the Chalkline reference (`web/style-guide.html` + design-system tokens) | Dot is flare (informational), not ice; typography matches the fit-line row; no new colors, no emoji, radius within spec; dark/light both correct |
 | 13 | Pass a NARRATED card and file a decline reason | The pass-reason sheet flows exactly as before — same codes, no new step, no reference to the hesitation; the filed reason lands (this is the calibration join's right-hand side — verify a row exists if DB access is handy) |
@@ -624,7 +651,7 @@ element.
 | 16 | **Rollback rehearsal, rung 1** (confirmed from step 15): narrative flag alone removes the surface deck-over-deck, with `trade.breaker` still ON | User-visible surface gone on the next deck; stamps continue (backend diagnostics still count stamped cards) |
 | 17 | **Rollback rehearsal, rung 2**: flip `trade.breaker_narrative` back ON; set `breaker_min_severity = 1.1` via `set_knob`; regenerate | No sentence on any card while both flags are ON — the knob alone silences the line (HLD §5.3 rung 2); restore the knob's prior value and confirm sentences return on a fresh deck |
 | 18 | Regression sweep: like, pass, undo, propose-flow entry on narrated and non-narrated cards | All actions behave identically to the pre-feature build |
-| 19 | Record: build number, flag/knob states per step, screenshots of steps 5, 9, 10, 11 | TEST_LEDGER entry naming every step's pass/fail |
+| 19 | Record: build number, the (`ver`, `tmpl_ver`) pair (the A/B join key), flag/knob states per step, screenshots of steps 5, 9, 10, 11 | TEST_LEDGER entry naming every step's pass/fail |
 
 A failure on any step blocks general lighting (launch step 7) until fixed and re-run.
 
@@ -645,7 +672,7 @@ is the post-build tuning worklist: each row is a call the operator can revisit w
 hand, and the "where flagged" column says where the full argument lives. Anything whose
 non-default answer requires new code is marked **[v1.1+]**. Sources merged and renumbered
 transparently: items 1–15 keep the PLAN §9 / HLD §6.3 numbering both drafts used (the `src`
-column maps to draft A / draft B item numbers); 16–19 are PRD additions.
+column maps to draft A / draft B item numbers); 16–20 are PRD additions.
 
 | # | Question | Default shipped | Status | Where flagged | src |
 |---|---|---|---|---|---|
@@ -655,20 +682,21 @@ column maps to draft A / draft B item numbers); 16–19 are PRD additions.
 | 4 | `breaker_min_severity` initial bar (with the per-class switches, the only user-visible-effect knobs in v1) | 0.60 ships; re-leveled from the calibration readout, never guessed | open — post-readout tuning | PLAN §9 #4; LLD §4 | A4/B4 |
 | 5 | Viewer-seat shadow run — acceptable compute for the PRIMARY calibration population? (~2×/card, same ms budget; turning it off starves M2) | on (`breaker_shadow_run` = 1.0) at `trade.breaker` first light | open (default ships; **confirm the compute posture at Phase-1 flag-on** — on the flag-on checklist) | PLAN §9 #5; LLD §2.5/§4 | A5+A16/B5 |
 | 6 | v2 seam election + evidence bar: (a) per-arm pre-draft · (b) bypassed-on-interleave demote · (c) user-side filter. PRD recommends **(a)**, advises against (b) (unmeasured by construction) and notes (c) is not a filter (§6.3); earn-in = the §6.4 counterfactual supports killing. Proposed unlock bar: M6 pooled cut at n ≥ 200 decided stamped cards per cohort, would-kill cohort like-on-viewed ≤ ½ the keep cohort's (CI-separated), M2 precision passed for every class contributing to the kill bar, per-arm cut directionally consistent. D-067 family-suppression binds any demotion below visibility | none built — decided after the §6.4 readout | open — operator ratifies bar + seam preference now or at the M6 readout | PLAN §9 #6; this PRD §6.3 | A6/B6+B18 |
-| 7a | `roster_crunch` extension code in the shared taxonomy (`producer=breaker`) | in taxonomy v1.1.1 | **ruled — closed** (taxonomy v1.1.1 landed; build cherry-picks through `5572604`) | PRD §7.2; PLAN §9 #7a; HLD D-1 | A7a/B7a |
-| 7b | `shape_aversion` as `producer=negmem` (breaker may cite it only via the future memory→breaker coupling); producer column | in taxonomy v1.1.1 | **ruled — closed** (same landing) | PRD §7.2; PLAN §9 #7b; HLD D-2 | A7b/B7b |
+| 7a | `roster_crunch` extension code in the shared taxonomy (`producer=breaker`) | in taxonomy v1.1.1 | **landed, three-way signed; operator ratifies with PRD approval** (taxonomy v1.1.1 at `5572604`; build cherry-picks through it — reconciliation-log E-1) | PRD §7.2; PLAN §9 #7a; HLD D-1 | A7a/B7a |
+| 7b | `shape_aversion` as `producer=negmem` (breaker may cite it only via the future memory→breaker coupling); producer column | in taxonomy v1.1.1 | **landed, three-way signed; operator ratifies with PRD approval** (same landing) | PRD §7.2; PLAN §9 #7b; HLD D-2 | A7b/B7b |
 | 8 | Evidence whitelist: private counterparty state stamps dark, never renders — accepted? And may even a generic form ("unlikely to move him") ever render? | dark-only; generic form does NOT render | open (default ships; PRD marks it non-negotiable in v1 — R-10) | HLD §6.3 #8, D-6, §5.6 | A8/B8 |
-| 9 | Narration-flip timing vs the live interleaved bake-off window | `trade.breaker_narrative` stays DARK until the current serving round's verdict; mid-window lighting requires accepting an annotated readout | open — operator calendar call | HLD §6.3 #9 | A9/B9 |
+| 9 | Narration-flip timing vs the live interleaved bake-off window. **Middle rung (adopted):** operator-only first light on ONE allowlisted device, with that device-unit EXCLUDED from arm readouts, does not count as "lighting mid-window" — one device cannot meaningfully contaminate the arm comparison, and the exclusion makes it exact. P4 (general narration) keeps default-dark-until-verdict with the annotated-readout escape | `trade.breaker_narrative` stays DARK until the current serving round's verdict (operator-only single-device first light excepted, readout-excluded); mid-window general lighting requires accepting an annotated readout | open — operator calendar call | HLD §6.3 #9 | A9/B9 |
 | 10 | Per-deck repetition suppression: same card, different decks, different narration — acceptable? | yes, with `suppressed` stamped | open (default ships; R-18 states the UX) | HLD §6.3 #10, D-7 | A10/B10 |
 | 11 | Inferred-window `fit_outlook` narration: wait for the composite's engine-wide graduation, or ship behind the high-margin bar? | high-margin bar (`breaker_outlook_narrate_margin`); declared outlook is confidence-only on agreement | open | HLD §6.3 #11, D-8 | A11/B11 |
 | 12 | `breaker_stamp_scope`: full-candidate-pool stamping | served-deck-only; not built | open — v2 study option [v1.1+] | HLD §6.3 #12, D-9 | A12/B12 |
 | 13 | Organic them-score coverage by promoting the fit stamp to organic decks — a fit-challenger scope question, registered here for visibility | `breaker.them` null on organic decks | open (belongs to fit-challenger) | HLD §6.3 #13, D-3 | A13/B13 |
 | 14 | Declared-outlook disclosure: is narrating from a privately declared `team_outlook` ever acceptable? | never in v1 — confidence-only on public-inferred agreement; disagreement mutes the class; stamp records both | open (default ships) | HLD §6.3 #14, D-8 | A14/B14 |
 | 15 | Demo-deck narration as demo material (T-1 lift option). Weighed (draft B, adopted): *for* — the demo deck is the first-run sales surface, a hesitation line there demos the scout persona at the moment the user forms their model of the app; *against* — (a) demo partners are synthetic: training users on fabricated hesitations about fake managers teaches that the line is decorative flavor, the opposite of the trust the feature must earn; (b) demo rows never join outcomes ⇒ zero calibration value at the cost of its own fixture set, honesty audit, and TestFlight steps; (c) the demo builder constructs `members` without the viewer (Q-1) — an input shape production never sees; (d) narration first light is weeks post-launch anyway, past the window where demo matters most | demo decks skipped, no narration | **RECOMMENDED-CLOSED pending operator veto**: keep the skip; revisit as a deliberate demo-material product lift only after ≥1 class has graduated on real-league copy [v1.1+] | LLD §9 Q-10 (T-1 ruling); PRD R-16 | A15/B15 |
-| 16 | Calibration TBD cells (LLD §8): proposed min n = 50 per class (primary stratum `consensus` basis × `legacy` outlook_src), required margin ≥ +10 points over BOTH baselines, per class; `roster_crunch` and `other_player_keep` rows reported-never-gated in v1 (M2 verdict, §4.1) | proposed numbers above | open — **operator confirms before `trade.breaker` lights** (P1 precondition) | LLD §8; PRD §4.3 | —/B16 |
+| 16 | Calibration TBD cells (LLD §8): proposed min n = 50 per class (primary stratum `consensus` basis × `legacy` outlook_src), required margin ≥ +10 points over BOTH baselines, per class; `roster_crunch` and `other_player_keep` rows reported-never-gated in v1 (M2 verdict, §4.1). **Consequence note:** at n=50 a +10-pt margin is ≈1–1.4 SE — graduation is PROVISIONAL, paired with a re-read at n≈100 (rung-2 reversible). Horizons scale ~linearly with min-n: n=100 ⇒ `fit_outlook`/`value_giving` in 2–4 wks, `fit_new_weakness` 10–16 wks = out of v1. Any min-n change lands BEFORE `trade.breaker` lights (P1 precondition); a later change keeps the accrued cohort, with the gate read only at the new n. Min-n does NOT move the n=130/side claim bar (different population, different question). The §4.1 realism column and register 17's throughput argument are FUNCTIONS OF this item — recompute both if it moves | proposed numbers above | open — **operator confirms before `trade.breaker` lights** (P1 precondition) | LLD §8; PRD §4.3 | —/B16 |
 | 17 | **First class to graduate** — which class gets the first `breaker_narrate_<class>` flip? **Default: the first class to clear its preregistered bar.** Realism at min-n 50 (§4.1 M2): only `fit_outlook` and consensus `value_giving` can graduate inside v1's 1–2-week horizon; `fit_new_weakness` needs 5–8 weeks; `roster_crunch` is reported-never-gated (no filed-reason anchor). Two positions, both recorded: **safety (draft A)** — graduate the low-risk class first: `fit_new_weakness` mirrors a live viewer-seat predicate, renders only public lineup math, and its failure mode is a checkable roster fact, where `fit_outlook` inherits the skewed legacy window (R-2); **throughput (draft B)** — the low-risk class can't reach n inside v1's horizon, so waiting for it idles narration for 5–8 weeks; `fit_outlook` carries the haircut + margin bar + graduation gate precisely so it can go first. The operator holds the flip either way — graduation is a logged per-class `set_knob` decision against the class's own readout row | first class to clear its preregistered bar | open — decided at P2 from the per-class readout rows | this PRD §4.1/§6.2; HLD D-6/D-8/§2.7 | A17/— |
 | 18 | Positive-signal variant ("no objection found" affirmative copy) — R-17 bans it in v1 as an over-claim in the opposite direction | absent | open — explicit product decision if ever wanted [v1.1+] | PRD R-17 | —/B17 |
 | 19 | Lead-in label: fixed "Their likely hesitation:" vs varied phrasing. Fixed label ships (§5.4 rule 1 — learn once, scan thereafter); the repeated-label wallpaper risk is owned by the D-7 entropy monitor + repetition suppression, not by label variation; label variation would fragment the element's scannability and the template-snapshot discipline for a risk another mechanism already owns | fixed label | open (default ships; any change is a `tmpl_ver` bump) [v1.1+] | PRD §5.4; HLD D-7 | — (M-6) |
+| 20 | M-G5 tripwire numbers (§4.2 enforcement definition): report-only below n=130/side; non-statistical tripwire from n≥30/side — narrated-deck like-on-viewed < ½ the concurrent non-narrated rate ⇒ operator review + logged HOLD on allowlist widening (no auto-rollback, no "degradation" finding), resolved at the n=130 read; M-G5 blocks FURTHER WIDENING only once either side reaches 130 | numbers above | open (defaults ship; re-leveled with data) | PRD §4.2 M-G5 | — (BF-3) |
 
 ---
 

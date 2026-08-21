@@ -1,6 +1,6 @@
 # PLAN — Counterparty breaker
 
-**Date:** 2026-08-21 · **Status:** DRAFT for three-way sibling reconciliation, then operator review.
+**Date:** 2026-08-21 · **Status:** RECONCILED (three-way, 2026-08-21) — suite complete; operator ratifies with PRD approval; build authorized post-PRD by operator instruction.
 **Branch:** `claude/counterparty-breaker-plan` (docs only — planning stops before any build).
 **Doc order (later binds tighter):** this PLAN → HLD → LLD → PRD. Scope block: [scope.md](scope.md).
 **Siblings (one operator batch, three plans):** Receipts (`plan/receipts`, retrospective suggestion
@@ -221,6 +221,7 @@ design or measurement may create or consume ghost impressions.
   `producer=negmem`) — per the negmem session's hard constraint, extensions extend the shipped
   taxonomy, never parallel it. Changes only by PR touching the shared file (targets v1.1.0
   minor bump, three-way signed).
+  *[Errata 2026-08-21: superseded — taxonomy v1.1.1 landed (5572604); see reconciliation-log E-1.]*
 - **Table ownership:** `receipts_` (Receipts) · `negmem_` (memory) · `breaker_` (this, reserved,
   UNUSED in v1).
 - **Seams, disjoint by construction:** negmem = generation-time prior (inside candidate
@@ -244,6 +245,8 @@ design or measurement may create or consume ghost impressions.
 | 6 | v2 seam election (per-arm pre-draft vs bypassed-on-interleave vs user-side filter) | none — decided after §6.4 readout |
 | 7a | Extension code `roster_crunch` (broadened: forced drop / lineup slot math / positional pile-up) accepted into the shared taxonomy as `producer=breaker` | sibling-agreed 2026-08-21, pending operator yes |
 | 7b | `shape_aversion` enters the taxonomy as `producer=negmem` (breaker may cite it only via future memory→breaker coupling); producer column added to the shared file | sibling-agreed 2026-08-21, pending operator yes |
+
+*[Errata 2026-08-21 (items 7a/7b): superseded — taxonomy v1.1.1 landed (5572604); see reconciliation-log E-1.]*
 
 ## 10. Assumptions to verify at build (not trusted from this session)
 

@@ -247,3 +247,17 @@ register item. Both drafts independently recommended v2 seam (a) and keeping the
 adopted. Registers consolidated into one table.
 
 *(cross-review and sign-off appended below)*
+
+---
+
+## Errata
+
+### Errata E-1 (2026-08-21) — shared taxonomy landed as v1.1.1
+
+Taxonomy **v1.1.1 landed at commit `5572604` on `plan/receipts` (three-way signed)**,
+superseding all pending-v1.1.0-PR language in this suite (PLAN §8 taxonomy bullet, PLAN §9
+items 7a/7b, HLD §5.7). The breaker build **cherry-picks the seed + taxonomy through
+`5572604` at landing**. The shared file (`docs/plans/shared/trade-shape-taxonomy.md`) is not
+present in this worktree — it lives on the sibling branch until the cherry-pick. Stale spots
+carry one-line bracketed pointers to this entry; no body rewrites, no renumbering. Register
+items 7a/7b status: landed, three-way signed; operator ratifies with PRD approval.
