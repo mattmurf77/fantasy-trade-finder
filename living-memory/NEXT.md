@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — Production-visibility gaps (four, from the operator's infra-checklist review)](#2026-08-21--production-visibility-gaps-four-from-the-operators-infra-checklist-review)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
@@ -29,6 +30,45 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-21 — Production-visibility gaps (four, from the operator's infra-checklist review)
+
+Operator-directed queue adds (2026-08-21), from auditing the codebase against a
+production-readiness checklist. Verdict on the record: most of that list is
+already handled or irrelevant at this scale — these four are the real gaps, and
+all share one trigger: **they become launch-blocking when distribution leaves
+TestFlight.** #1 pays off *now*.
+*Why now:* D-056 made manual TestFlight passes the only runtime evidence — and we
+are flying blind on the crashes those passes don't catch.
+
+1. **Arm crash reporting.** `@sentry/react-native` is already in
+   `mobile/package.json` but dark — `backend/analytics_queries.py:943` annotates
+   crash reporting as "JS-errors-only (Sentry not armed); dark until SDK". Arm
+   it (DSN, init, source maps in EAS build); add backend error tracking (Sentry
+   Python or equivalent) so exceptions stop living only in unread Render logs.
+   Highest leverage item — it improves TestFlight QA today, not just launch.
+2. **Rate limiting before open access.** No per-IP/per-route limiter exists;
+   only internal throttles + the analytics per-device budget.
+   `/api/session/init` mints sessions freely, so "session-gated" is not a cost
+   barrier (already noted in `docs/plans/web-parity/plan.md` P2-1). The
+   open-access gates doc covers deck quality only — add an infra gate row there
+   when this lands.
+3. **Uptime monitoring + alerting.** `/api/admin/analytics/health` is pull-based
+   and CRON-gated; a dead cron service or wedged worker is silent until a user
+   complains. Wanted: an external uptime ping on the web service + one alert
+   channel; a cron-liveness check can ride the existing health payload.
+4. **Prod Postgres backup/restore story.** `docs/runbook.md` documents SQLite
+   backup mechanics only; prod is Render Postgres (`basic-256mb`). Verify the
+   Render backup posture in the dashboard, write the restore procedure into the
+   runbook, and rehearse one restore against a scratch DB. Mostly a
+   verification + docs task.
+
+Honorable mention, not queued as its own item: `gunicorn --workers 1` (free
+plan) means one slow request stalls the service — acceptable today because deck
+generation is job-based; bump workers + plan as part of the launch checklist.
+
+*(Cap note: added while the 7-item cap is already blown, by operator direction;
+the 2026-08-08/08-11 sections remain first in line to drop.)*
 
 ## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
 
