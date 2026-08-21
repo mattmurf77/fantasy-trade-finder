@@ -322,11 +322,21 @@ two of the six (memo §2).
 
 Dependencies: shared taxonomy v1.0.0 must LAND ON MAIN (today it exists only on the
 Receipts session's unmerged branch — a builder starting from origin/main cannot read
-it; land or vendor before build) and v1.1.0 (three-way sign-off; authorship of the
-additive section to be reconciled — this PRD and the breaker's plan both propose
-overlapping text with converged content); serving rounds running (ADR-014) for
-arm-attributed measurement; Receipts' contract (namespace + seam registry); no code
-dependency on breaker.
+it; land or vendor before build) and v1.1.0 — **authorship resolved at reconciliation:
+the breaker session authors the objection-vocabulary section through the taxonomy's
+reserved §5 slot** (Receipts PLAN §7.1); this PRD's contribution is the
+`shape_aversion` producer=negmem entry and the pass-reason anchoring constraint, both
+carried. Serving rounds running (ADR-014) for arm-attributed measurement. **Receipts
+reconciliation contract (their PLAN §7): CONFIRMED compliant 2026-08-21** — prefixes
+(`negmem_` reserved/unspent v1), seams disjoint (negmem generation-time · breaker
+post-ranking · Receipts offline cron; their reserved future ordering-stack hook does
+not touch generation), and their schema choices (§7.4) verified non-foreclosing. Two
+data boundaries INHERITED from Receipts rather than rediscovered: (a) `assets_json`
+exists only from 2026-08-16, no backfill — subsumed by this PRD's stricter clean epoch
+(2026-08-20) for M1/RFPS, and irrelevant to M2's count-based aggregation; (b) picks
+have no value history — structurally irrelevant here (NG3/NG7: negmem never reads
+value history), recorded so no future refinement assumes otherwise. No code dependency
+on breaker.
 
 | Risk | Handling |
 |---|---|
