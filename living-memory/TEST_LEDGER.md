@@ -10,6 +10,67 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-21a — Package-benchmark fix + gap auto-sweetener + ghost default, round-2 reviewed — full gates, NOT PUSHED, NOT MERGED, on `fix/package-benchmark-sweetener`
+
+**Branch:** `fix/package-benchmark-sweetener` (worktree `agent-a8f35b1a442cb2147`), cut from `origin/main` at `eb9c1de`. **Not pushed, not merged** — the merge is the operator's Monday-boundary call (change-control rule, trade-engine-accuracy PLAN Phase 0.4).
+Full gates ran — operator did **not** declare express, and the change is outside the express lane by the bright-line rule anyway (it adds three `model_config` keys and changes a shipped default).
+Scope: [docs/plans/package-benchmark-sweetener/scope.md](../docs/plans/package-benchmark-sweetener/scope.md) (round-2 review in §6) ·
+code-walk: [code-walk.md](../docs/plans/package-benchmark-sweetener/code-walk.md) ·
+checklist: [testflight-checklist.md](../docs/plans/package-benchmark-sweetener/testflight-checklist.md) ·
+ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/package-benchmark-sweetener/decisions-draft.md).
+
+**No feature flag.** Knob-gated: `package_bench_trade_wide` 1.0, `package_floor_cross` 0.40, `sweetener_gap_threshold` 1539.0 — each ≤ 0 is a deploy-free rollback. Changed default: `ghost_holdout_one_in` 10 → 0.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3786 passed, 1 skipped, 0 failed** (271 s). Baseline on the inherited tip `0e04d30`, measured on this same tree: **3782 passed, 1 skipped**. The +4 are the round-2 regression tests in `test_gap_sweetener.py`; no other delta, nothing removed, nothing skipped that was not already skipped |
+| `cd mobile && tsc --noEmit` · `check-*.js` · `testid-lint.sh` | **not run in this worktree** (no `node_modules`); **zero mobile files touched** on the whole branch — `git diff --stat origin/main -- mobile/` is empty, so the mobile CI jobs are byte-identical to `origin/main`'s green |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) | green with all three new keys in `_PINNED_KNOBS` + disposition sentences in `docs/plans/three-model-bakeoff/scope-phase2.md` |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**Round-2 adversarial review of the inherited commits — two real defects, both reproduced before they were fixed.** The operator re-delegated the sweetener for a hostile re-read. `72ecd51` (benchmark fix) came back **clean**: `v_max` verified trade-wide at all 14 constructions in `backend/`, the carve-outs verified surgical, kill-value identity verified test-proved rather than asserted. `0e04d30` (sweetener) shipped two defects, fixed in `49c1d76`:
+
+1. **The consensus generator's pool pruning was bypassed.** `_generate_consensus_for_pair` prunes `give_pool` to the #174 pinned give players and `recv_pool` to the FB-47 pinned acquire targets / need positions, rather than gating per combo. `close_value_gap` drew from the raw rosters, so a `pinned_give_players=["G"]` job emitted `[G, X1] → [R]` with `X1` never offered up, and a WR-only acquire job could hand back an off-need RB. Fixed with optional `give_candidates`/`recv_candidates` (rosters still drive the 3.2 feasibility counts). v2 and v3 pass nothing — their pinned/position rules are per-combo and monotone under addition, verified callsite by callsite.
+2. **v3 shipped a stale `fit_premium`.** `fit_premium_1for1` can only price a 1×1; the gap pass rewrote the card to a 1-for-2 and left the badge on. The v2 divergence path already nulled its `fit_paid`; v3 now does too.
+
+**Verify-by-revert on all four new tests:** with `backend/trade_service.py` + `backend/trade_optimizer.py` stashed back to `0e04d30`, `test_helper_candidate_pools_narrow_the_equalizer_universe`, `test_consensus_sweetener_never_adds_an_unpinned_give_player`, `test_consensus_sweetener_respects_the_acquire_position_filter` and `test_v3_gap_sweetener_clears_the_stale_fit_premium` all go **red**; restored, all green. Each also carries its own non-vacuity half (the same fixture without the pin IS sweetened; the knob-off half proves the v3 organic winner really is a fit-premium 1-for-1 carrying a 1600 gap).
+
+**W0-style deck-size / gap-distribution measurement — `origin/main` `eb9c1de` vs this branch tip.** Fixture-only. Two constructed leagues (12-team 1QB 26-man, 16-team SF 21-man) drafted from `backend/tests/fixtures/player_pool_2026.json`, 3 owned-pick pseudo-assets per team, hash-offset synthetic boards, `fairness_threshold` 0.85, `max_per_opponent` 5, `_cfg` at code defaults, flags from `config/features.json`. Harness committed for reproducibility: [`measure_gap_distribution.py`](../docs/plans/package-benchmark-sweetener/measure_gap_distribution.py). The "before" side was produced by `git archive origin/main` into a scratch tree and running the same file there. **One deviation from the fit-challenger W0 recipe, and it is load-bearing:** W0's flat rank-ladder Elo seeds (1750 → 1250) compress the board into 286..3490 value units, where a 1539 gap is arithmetically almost unreachable — the measurement reads zero everywhere regardless of the engine. Seeds here come from the pool's own DynastyProcess values rescaled so the #1 asset lands on FTF's real top-asset price (~7737), reproducing the production value CURVE.
+
+| League | Path | Arm | main cards | branch cards | Δ | main >1539 | branch >1539 | sweetened | main mean gap | branch mean gap |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 12t 1QB | v2 only | B `current` | 14 | 13 | −1 (−7%) | 0 (0.0%) | 0 (0.0%) | 1 | 105.4 | 112.2 |
+| 12t 1QB | v2 only | B, sweetener OFF | — | 13 | — | — | 1 (7.7%) | 0 | — | 211.5 |
+| 12t 1QB | v2 only | D `challenger` | 14 | 13 | −1 (−7%) | 0 (0.0%) | 0 (0.0%) | 1 | 105.4 | 112.2 |
+| 12t 1QB | v2 only | C `gen_v2` | 22 | 22 | +0 | 0 (0.0%) | **3 (13.6%)** | 0 | 427.0 | 583.5 |
+| 12t 1QB | v2 only | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 312.4 | **312.4** |
+| 12t 1QB | v3 | B `current` | 19 | 16 | −3 (−16%) | 1 (5.3%) | 0 (0.0%) | 1 | 284.9 | 393.9 |
+| 12t 1QB | v3 | B, sweetener OFF | — | 16 | — | — | 1 (6.2%) | 0 | — | 492.0 |
+| 12t 1QB | v3 | D `challenger` | 20 | 16 | **−4 (−20%)** | 1 (5.0%) | 0 (0.0%) | 1 | 287.3 | 379.9 |
+| 12t 1QB | v3 | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 448.3 | **448.3** |
+| 16t SF | v2 only | B `current` | 16 | 17 | +1 (+6%) | 0 (0.0%) | 0 (0.0%) | 0 | 305.9 | 125.4 |
+| 16t SF | v2 only | D `challenger` | 16 | 17 | +1 (+6%) | 0 (0.0%) | 0 (0.0%) | 0 | 305.9 | 125.4 |
+| 16t SF | v2 only | C `gen_v2` | 19 | 19 | +0 | 1 (5.3%) | **2 (10.5%)** | 0 | 468.3 | 551.5 |
+| 16t SF | v2 only | A `baseline` | 30 | 30 | +0 | 0 (0.0%) | 0 (0.0%) | 0 | 178.5 | **178.5** |
+| 16t SF | v3 | B `current` | 19 | 19 | +0 | 0 (0.0%) | 1 (5.3%) | 1 | 291.4 | 470.2 |
+| 16t SF | v3 | B, sweetener OFF | — | 19 | — | — | 2 (10.5%) | 0 | — | 495.1 |
+| 16t SF | v3 | D `challenger` | 19 | 19 | +0 | 0 (0.0%) | 1 (5.3%) | 1 | 284.3 | 470.2 |
+| 16t SF | v3 | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 560.7 | **560.7** |
+
+**Four readings.**
+
+- **Deck shrink — the number the operator accepted in advance:** **−3.9%** across the served arm roster (B + C + D, 178 → 171 cards); **−4.4%** for arm `current` alone (68 → 65). Worst single cell **−20%** (12-team 1QB, v3, arm D: 20 → 16). No cell lost more than 4 cards.
+- **Arm A is byte-identical at `origin/main` and at this branch tip** — same 30 cards, same 9 over-the-line count, same p90 and mean gaps to 0.1, on every league × path. That is LIVE evidence for the pin-instead-of-recapture choice, on top of the unit test, and it is the strongest single result in this run.
+- **The sweetener works where it fires, and it fires narrowly.** The branch-only "sweetener OFF" rows isolate it from the benchmark fix: arm `current` would carry 1 / 1 / 2 over-the-line cards on the three cells where it matters, and the pass takes those to 0 / 0 / 1 — 3 of 4 closed. It sweetens roughly **one card per deck**, not a third of it.
+- **Arm C gets WORSE, and this is the finding to act on.** Arm C's deck is identical card-for-card (22 and 19 on both trees) — only the DISPLAYED values moved, because it inherits `package_value_v2` through `_consensus_packages` but does not run the sweetener. Its over-the-line share goes 0 → 13.6% and 5.3 → 10.5%. Across the served roster that alone lifts the combined over-the-line share from 1.7% to 4.1%. The arm-C follow-up named in scope.md is a **priority item**, not a nicety.
+
+**What is NOT proven, and is owed.** (a) The manual TestFlight checklist — it needs a build containing this branch, which does not exist; no runtime evidence exists for these cards yet. (b) A prod-replay half against real league boards — needs prod read access, operator item, same gap the fit W0 run had. (c) Fixture boards are synthetic (rank-drafted rosters, hash-offset personal Elo), so the LEVELS above are directional; the main-vs-branch DELTAS are the result. (d) The fixture decks carry a far lower over-the-line share (0–5% on arm B) than the 15% the CHANGELOG measured on real served cards, so the sweetener's real-world firing rate is likely HIGHER than one card per deck — read it from the checklist's readout SQL before trusting the fixture rate.
+
+**Six operator ratification items** are listed in [scope.md §6](../docs/plans/package-benchmark-sweetener/scope.md) — headline ones: the arm-A golden was pinned rather than re-captured, and the flag-off serving golden's parity-with-the-pre-bake-off-SHA claim died with its re-capture and is now a drift detector.
+
+---
 ## 2026-08-20f — Composite window model #372 (starter value + playoff likelihood + age at 40 %) — full gates, FLAG DARK, NOT MERGED, on `claude/372-window-composite`
 
 **Branch:** `claude/372-window-composite`, cut from `origin/main` at `c00a9a6`. **Not pushed, not merged** — parent agent integrates.
