@@ -216,6 +216,16 @@ export interface TradeCard {
   // when the flag is on AND the user expressed targets; drives the fit
   // line on cards (deck order is already fit-aware server-side).
   partner_fit?: number;
+  // Counterparty breaker (flags trade.breaker + trade.breaker_narrative).
+  // NARRATION-GATED: server.py trade_card_to_dict emits this key ONLY for a
+  // card whose top objection was actually narrated — during the dark-stamp
+  // window (breaker on, narrative off) the key is absent entirely, so
+  // payload presence IS the client's gate. The full objection vector and
+  // `breaker_shadow` NEVER serialize (features_json only). `code` and
+  // `severity` are carried for analytics/debug parity with the impression
+  // row; the UI reads `sentence` only and must never switch on `code`
+  // (docs/plans/counterparty-breaker/LLD.md §1.5, §1.8).
+  breaker?: { code: string; severity: number; sentence: string };
   // Structured "why this match" context stamped on every v2 card
   // (server.py trade_card_to_dict → match_context). Only the fields the
   // client reads are typed; extend as needed.

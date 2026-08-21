@@ -4004,6 +4004,12 @@ def _is_ghost_card(league_id: str, card) -> bool:
         league_id, _deck_trade_hash(give, recv, target))
 
 
+#: Counterparty breaker (LLD §1.4) — a fresh sentinel, never None, so
+#: "card carries no breaker attribute" stays distinguishable from any stamped
+#: value (including a legitimately null-ish one) at impression-log time.
+_BK_SENTINEL = object()
+
+
 def _served_cards(cards: list, league_id: str, ghost_active: bool) -> list:
     """The render gate: every published job snapshot (streaming AND final)
     filters ghosts through here, so a withheld card can never flash
@@ -4204,6 +4210,33 @@ def _log_deck_signal_impressions(
             # sit inside the `bakeoff_run is not None` guard.
             features["fit"]      = getattr(card, "fit", None)
             features["fit_diag"] = getattr(card, "fit_diag", None)
+        # Counterparty breaker (LLD §1.4, ruling M-2) — OUTSIDE the
+        # bakeoff_run guard: organic decks stamp too. ATTRIBUTE-gated, not
+        # flag-gated: a mid-job hot flag flip must not make this block see a
+        # flag state the stamp site never saw, and this loop has NO per-row
+        # try/except — one AttributeError here would lose the whole deck's
+        # impressions (fit keys included) to the outer catch in _run_trade_job.
+        # When the flag reads ON at log time but a card lacks the attribute
+        # (hot-reload flip mid-job, injected-card race), a SYNTHETIC
+        # degradation marker is written — never a bare null, never a crash,
+        # never a silent absence on a flag-on row (invariant lives in tests:
+        # test_impressions_breaker_uniform_keys, test_midjob_flag_flip_no_crash).
+        # Both keys ride INSIDE features_json (one column) — the
+        # save_deck_impressions executemany first-row-keys trap
+        # (database.py) cannot drop them. Ghost rows (inert under the
+        # no-ghost ruling) take the same copy; readouts filter is_ghost=0
+        # regardless. The synthetic marker's `ver` is null by construction:
+        # at log time the module may never have been imported, so no version
+        # literal can honestly be claimed.
+        _bk = getattr(card, "breaker", _BK_SENTINEL)
+        if _bk is not _BK_SENTINEL:
+            features["breaker"]        = _bk
+            features["breaker_shadow"] = getattr(card, "breaker_shadow", None)
+        elif FLAGS.trade_breaker:
+            features["breaker"] = {"ver": None,
+                                   "degraded": "flag_flip_or_unstamped",
+                                   "objections": None}
+            features["breaker_shadow"] = None
         if getattr(card, "wildcard", False):
             features["wildcard"] = True
             features["wildcard_pool_size"] = getattr(
@@ -6026,6 +6059,88 @@ def _run_trade_job(
                             j["board_refresh"] = _board_refresh
             except Exception as br_err:
                 log.warning("board-refresh header failed (non-fatal): %s", br_err)
+
+        # Counterparty breaker (v1) — evaluate + stamp + (flag 2) narrate.
+        # Post-mutation-stack, pre-ghost-split: `final_cards` here is the
+        # exact list _log_deck_signal_impressions receives (likes-you-
+        # injected cards included — they carry no fit_diag; their `them`
+        # passthrough is null, D-3). Attribute-only; zero ordering effect
+        # (test_breaker_zero_ordering_effect); fail-open with LABELED
+        # degradation (LLD §5) — never a bare null, never a missing key on
+        # a flag-on deck. Ghost split below is inert (no-ghost ruling):
+        # served_final == final_cards.
+        # Both flags read ONCE, up front (§5.5 E-8): the pair the whole
+        # block acts on is one coherent read.
+        # Skips (T-1 ruling, §9 Q-10): the demo league (consistent with
+        # every neighboring mutation layer and the demo-guarded impressions
+        # blocks below) and superseded jobs (pure wasted-compute avoidance —
+        # no correctness dependency either way, §5.5 E-13).
+        _bk_on   = FLAGS.trade_breaker
+        _bk_narr = FLAGS.trade_breaker_narrative
+        if (_bk_on and league_id != "league_demo"
+                and not _job_superseded(job_id)):
+            try:
+                from .trade_breaker import stamp_breaker, compose_narration
+                # lazy — flag-off never imports (NFR-3,
+                # test_flag_off_never_imports_breaker)
+                _bk_job = stamp_breaker(
+                    final_cards,
+                    league            = g_league,
+                    players           = players_dict,
+                    seed_elo          = seed_map,
+                    scoring_format    = active_format,
+                    league_id         = league_id,
+                    viewer_user_id    = g_user_id,
+                    viewer_roster     = _generate_kwargs["user_roster"],
+                    viewer_elo        = elo_map_rt,
+                    viewer_outlook    = outlook_value,
+                    declared_outlooks = opponent_outlooks,
+                    pick_shares       = opponent_pick_shares,
+                )
+                _n_narrated = 0
+                if _bk_narr:
+                    _n_narrated = compose_narration(final_cards,
+                                                    players=players_dict,
+                                                    job=_bk_job)
+                if _n_narrated:
+                    # M-1 republish contract: republish iff narrated_count
+                    # > 0, so the narrated payload reaches the snapshot the
+                    # client actually receives on EVERY flag combination
+                    # (§1.3) — the deck.signal_v2 republish below is
+                    # conditional and must not be relied on. Same idiom as
+                    # the F7/F9 republishes above (standard decoration,
+                    # _served_cards path, _job_live-guarded).
+                    snapshot = []
+                    for c in _served_cards(final_cards, league_id, ghost_on):
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if _job_live(j):
+                            j["cards"] = snapshot
+            except Exception as bk_err:
+                log.warning("breaker stamp failed (non-fatal): %s", bk_err)
+                # Rung 5 — minimal marker on EVERY card, constructed with no
+                # breaker state (the import itself may be what failed). The
+                # "brk-1" literal is version-pinned against
+                # trade_breaker.BREAKER_VERSION by
+                # test_rung5_marker_version_pinned.
+                _mark = {"ver": "brk-1", "degraded": "exception_outer",
+                         "objections": None}
+                # BOTH markers stamped with NO knob read and NO module
+                # reference: in _run_trade_job the local `trade_service` is
+                # the per-format TradeService INSTANCE, which has no `_c` —
+                # and a live knob read at failure time would violate the
+                # §3.0 one-job-one-knob-state rule anyway. A shadow marker
+                # on a shadow-off deck is harmless (readouts treat markers
+                # as degraded either way); an existing shadow stamp is
+                # preserved.
+                for _bc in final_cards:
+                    _bc.breaker = dict(_mark)
+                    if getattr(_bc, "breaker_shadow", None) is None:
+                        _bc.breaker_shadow = dict(_mark)
 
         # suggestion.telemetry — split the final deck into served cards and
         # ghost cards (ghosts keep their would-have-been position for the
@@ -11058,6 +11173,21 @@ def trade_card_to_dict(card, players: dict) -> dict:
     _fit = getattr(card, "fit", None)
     if _fit is not None:
         out["fit"] = _fit
+    # Counterparty breaker (LLD §1.5) — NARRATION-GATED: during the dark-
+    # stamp window (trade.breaker on, trade.breaker_narrative off) the
+    # payload carries NO breaker key at all — dark-class codes must never
+    # ship as inspectable structured data. The full objection vector never
+    # serializes (features_json only); card.breaker_shadow NEVER serializes
+    # (test_breaker_shadow_never_serialized). `top` is non-null whenever
+    # narrated is (compose_narration's invariant, pinned in tests) — the
+    # unguarded index is deliberate: a violation must fail loudly in tests.
+    _bk = getattr(card, "breaker", None)
+    if isinstance(_bk, dict) and _bk.get("narrated"):
+        out["breaker"] = {
+            "code":     _bk["top"]["code"],
+            "severity": _bk["top"]["severity"],
+            "sentence": _bk["narrated"],
+        }
     # Interview phase 2 — two-lane label ("window" | "value"), only when
     # trade.lanes stamped it (user has a resolved window).
     lane = getattr(card, "lane", None)

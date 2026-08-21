@@ -122,8 +122,9 @@ See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public)
 1. Client requests: `POST /api/trades/generate`.
 2. `trade_service.py` compares the user's ranking set against each leaguemate's roster.
 3. Mutual-gain trades discovered (each side improves by their own valuation).
-4. Trade cards persisted; surfaced via `GET /api/trades`.
-5. User swipes like/pass: `POST /api/trades/swipe`. Like recorded; Elo updated based on the swipe signal.
+4. **Evaluation layer** (2026-08-21, flags `trade.breaker` / `trade.breaker_narrative`, [D-142](DECISIONS.md)): the deck now passes through a distinct stage between generation and serving — **generator arms → breaker evaluation → presentment → serving**. `backend/trade_breaker.py` scores each finished card from the *counterparty's* seat, stamps the verdict on the card (and into `deck_impressions.features_json` for calibration), and optionally renders one "their likely hesitation" sentence. It is architecturally a peer of `suggestion_telemetry.py`, not of the generators: it reads the finished deck, writes only its own attributes, and is structurally forbidden (grep guard) from being imported by any generator — so it can never influence what was generated or in what order. Flags off ⇒ never imported. Detail: `../docs/architecture.md` (`trade_breaker.py` row + the trade-card lifecycle), plan suite `../docs/plans/counterparty-breaker/`.
+5. Trade cards persisted; surfaced via `GET /api/trades`.
+6. User swipes like/pass: `POST /api/trades/swipe`. Like recorded; Elo updated based on the swipe signal.
 
 ### Flow D — Real-league trade matching
 1. Both users like mirrored trade cards (A-likes-trade-X, B-likes-same-trade-X-from-other-side).

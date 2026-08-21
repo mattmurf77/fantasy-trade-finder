@@ -934,6 +934,32 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ the key is ABSENT from the profile (never 0, never null)
     # and no depth_chart_* attribute is read at all.
     "trade.rb_handcuff",
+    # ── Counterparty breaker (docs/plans/counterparty-breaker/LLD.md §1.7) ────
+    # ON ⇒ `backend/trade_breaker.py` is imported and every served card is
+    # stamped with a `breaker` attribute: the counterparty's likely objection,
+    # scored across six classes. COMPUTE + STAMP ONLY — zero user-visible
+    # effect, zero ordering effect. The evaluation runs after the whole
+    # deck-mutation stack, so no generator or ranker can observe it.
+    #
+    # OFF (default) ⇒ the module is never imported (`sys.modules` check), no
+    # card attribute, no `features_json` key, no payload key, no publish-count
+    # change — rows and payloads byte-identical to today (NFR-3).
+    #
+    # Graduation criterion (scope.md §2): stamp coverage ≥99% of served cards
+    # with no p95 job-time regression, and the calibration readout (PLAN §6)
+    # runs once.
+    "trade.breaker",
+    # ON ⇒ the on-card "their likely hesitation" line is composed and
+    # serialized (`trade_card_to_dict` emits `breaker` only for narrated
+    # cards, so payload presence IS the client gate).
+    #
+    # REQUIRES `trade.breaker`: the narration call sits inside the
+    # `FLAGS.trade_breaker` block, so this key alone does nothing. The
+    # requires-relationship is structural, not checked twice.
+    #
+    # Graduation criterion (scope.md §2): operator TestFlight pass + the A/B
+    # readout in PLAN §6.
+    "trade.breaker_narrative",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
