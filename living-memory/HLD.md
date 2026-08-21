@@ -86,6 +86,7 @@ A dynasty fantasy football trade-finding app. Users log in via their Sleeper use
 | **Trade generation** | `backend/trade_service.py` | Mutual-gain trade discovery; team-outlook modifiers; positional preference scoring; package diminishing-returns |
 | **Smart matchup generator** | `backend/smart_matchup_generator.py` | Claude-powered selection of ~10 candidate pairs; algorithmic fallback if no `ANTHROPIC_API_KEY` |
 | **Data loader** | `backend/data_loader.py` | DynastyProcess CSV → initial Elo (value 10000 ≈ Elo 1800; value 0 ≈ Elo 1200) |
+| **Receipts (offline grading)** | `backend/receipts_service.py` | Grades PAST served suggestions against subsequent consensus movement at 14/28/56d — the measurement loop, not a serving one. Reads frozen `deck_impressions` + `player_value_history`; writes only append-only `receipts_grades` / `receipts_grade_runs`. Runs off the request path (202 + daemon, daily-tick guard, backfill script). Flags `receipts.grading` / `receipts.screen`, both default off. **Isolation is the design**: no engine module imports it and nothing in generation or ordering reads a grade — that boundary is the Goodhart line and is guarded in both directions |
 | **Web client** | `web/*.html` | Vanilla HTML/CSS/JS single-page app |
 | **Mobile client** | `mobile/` | React Native / Expo; entry `mobile/App.tsx` |
 | **Browser extension** | `extension/` | MV3 Chrome/Edge extension; entry `extension/manifest.json` |

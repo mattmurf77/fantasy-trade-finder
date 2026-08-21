@@ -206,6 +206,8 @@
   "trades.presentation_v2": false,
   "trade.position_tiers": true,
   "trade.rb_handcuff": true,
+  "receipts.grading": true,
+  "receipts.screen": false,
   "trade.breaker": false,
   "trade.breaker_narrative": false
 }

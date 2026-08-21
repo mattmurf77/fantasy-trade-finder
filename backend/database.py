@@ -27,7 +27,7 @@ except ImportError:                # pragma: no cover
 
 from sqlalchemy import (
     Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
-    create_engine, delete, func, insert, or_, select, update, and_, text,
+    create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
 from datetime import timedelta
@@ -2183,6 +2183,97 @@ mock_drafts_table = Table("mock_drafts", metadata,
     Index("ix_mock_drafts_user_league", "user_id", "league_id"),
 )
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Receipts — graded suggestion track record (docs/plans/receipts/LLD.md §3)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The serve-time `deck_impressions` row IS the prediction (preregistration):
+# `assets_json` names the asset set and direction, and it was frozen before
+# any outcome existed. These two tables record only how CONSENSUS moved
+# afterwards — never a re-derivation of what the engine thought at serve.
+#
+# Written exclusively by `backend/receipts_service.py` (flag
+# `receipts.grading`, default off). Soft references, no FKs — house style,
+# cf. deck_outcomes above.
+#
+# receipts_grades — APPEND-ONLY. One row per
+# (impression_id, window_days, grader_version) that reaches a TERMINAL
+# status ('graded' or 'ungradeable'). Never UPDATEd, never DELETEd:
+# corrections are a new `grader_version` with the old rows retained
+# (HLD D-3), which is what makes "we can't move the goalposts" mechanical
+# rather than aspirational. Rows whose window endpoint is not yet resolvable
+# are simply absent — the queue is defined by that absence (LLD §4.1), so
+# idempotency is structural rather than bookkept.
+receipts_grades_table = Table("receipts_grades", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("impression_id",   String,  nullable=False),   # deck_impressions soft ref
+    Column("window_days",     Integer, nullable=False),   # 14 | 28 | 56
+    Column("grader_version",  String,  nullable=False),   # 'receipts-1'
+    Column("taxonomy_version", String),                   # '1.1.1' (doc mirror, HLD D-10)
+    Column("status",          String,  nullable=False),   # 'graded' | 'ungradeable'
+    Column("reason",          String),                    # NULL when graded; enum LLD §5.3
+    # The snapshot dates ACTUALLY used, so the ±tolerance match is auditable
+    # and the admin `effective_window` block can report the real spread.
+    Column("serve_snap_date",  String),
+    Column("window_snap_date", String),
+    # Players-only consensus sums, value units (HLD D-1/D-2). Picks are held
+    # at delta 0 and never enter these sums.
+    Column("give_serve_value",   Float), Column("receive_serve_value", Float),
+    Column("give_delta",         Float), Column("receive_delta",       Float),
+    Column("edge",               Float), Column("edge_pct",            Float),
+    Column("baseline_edge",      Float),  # RESERVED, always NULL in v1 (shuffle baseline)
+    # Coverage + pick accounting (HLD D-7)
+    Column("coverage_give",   Float), Column("coverage_receive", Float),
+    Column("has_picks",       Integer),
+    Column("imputed_count",   Integer),   # pool-floor-imputed assets (HLD D-8)
+    # Per-asset audit trail:
+    #   [{id, side, is_pick, cv0, cv1, imputed_floor}]
+    Column("assets_detail_json", Text),
+    # Denormalized slice keys, copied FROM the impression at grade time so a
+    # per-cell read is one GROUP BY with no features_json parsing.
+    Column("league_id",       String, nullable=False),
+    Column("user_id",         String, nullable=False),
+    Column("scoring_format",  String),
+    Column("served_at",       String, nullable=False),
+    Column("trade_hash",      String),                    # read-time dedup key
+    # Always NULL/0 on a graded row: the queue predicate excludes ghosts
+    # entirely (operator ruling 2026-08-21). Kept as a column so a future
+    # ruling change is a one-line predicate flip, not a migration.
+    Column("is_ghost",        Integer),
+    Column("shape_bucket",    String), Column("archetype", String),
+    Column("basis",           String), Column("model_arm", String),
+    Column("policy_version",  String),
+    Column("graded_at",       String, nullable=False),    # ISO UTC
+    UniqueConstraint("impression_id", "window_days", "grader_version",
+                     name="uq_receipts_grade"),
+)
+Index("ix_receipts_grades_league",
+      receipts_grades_table.c.league_id, receipts_grades_table.c.window_days)
+Index("ix_receipts_grades_user",
+      receipts_grades_table.c.user_id, receipts_grades_table.c.league_id)
+Index("ix_receipts_grades_shape",
+      receipts_grades_table.c.shape_bucket, receipts_grades_table.c.window_days)
+
+# receipts_grade_runs — run ledger, APPEND-ONLY, TWO rows per invocation
+# sharing a `run_id`: kind='start' at run begin and kind='end' at completion.
+# A killed run (crash, Render free-instance spin-down mid-run) is visible as
+# an unmatched start row — the observability surface for a job with no UI.
+# Counts live on the 'end' row.
+receipts_grade_runs_table = Table("receipts_grade_runs", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("run_id",         String,  nullable=False),    # uuid4 hex, shared by the pair
+    Column("kind",           String,  nullable=False),    # 'start' | 'end'
+    Column("run_at",         String,  nullable=False),    # ISO UTC of THIS row
+    Column("trigger",        String),                     # 'cron' | 'daily_tick' | 'backfill'
+    Column("duration_ms",    Integer),                    # end rows only
+    Column("graded",         Integer), Column("ungradeable", Integer),
+    Column("reason_counts_json", Text),
+    Column("batch_cap",      Integer), Column("cap_hit", Integer),
+    Column("remaining_resolvable", Integer),              # backlog estimate (end rows)
+    Column("grader_version", String),
+    Index("ix_receipts_grade_runs_run", "run_id"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -2442,6 +2533,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
+
+    # ── Receipts — OFFLINE grading knobs (docs/plans/receipts/LLD.md §1) ──
+    # Consumed ONLY by backend/receipts_service.py, which runs after the
+    # fact against frozen impressions and frozen consensus snapshots. NO
+    # generation path reads them and they are deliberately absent from
+    # trade_service._DEFAULT_CFG, so arm A (and every other arm) cannot
+    # observe them — the arm-A disposition sentence for each key is
+    # recorded in docs/plans/three-model-bakeoff/scope-phase2.md.
+    ("receipts_grade_batch",      500.0, "receipts: terminal grade rows written per run (fan-out cap)"),
+    ("receipts_min_n",             10.0, "receipts: min displayed n before the user-facing headline renders"),
+    ("receipts_coverage_min",       0.5, "receipts: min(coverage_give, coverage_receive) a graded row needs for user aggregates"),
+    ("receipts_pick_share_max",     0.5, "receipts: pick share of a side's serve value above which the row is ungradeable/pick_majority"),
+    ("receipts_snap_tolerance_days", 3.0, "receipts: +/- days tolerance when matching a value snapshot to an endpoint date"),
     # ── Counterparty-breaker knobs (docs/plans/counterparty-breaker/LLD.md §4) ─
     # All 25 seeded here so `set_config` / PUT /api/admin/config never KeyError
     # on them and the LLD §6 rollback ladder is real rather than theater.
@@ -13081,3 +13185,360 @@ def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = No
             .values(**values)
         )
     return bool(result.rowcount)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Receipts — graded suggestion track record (docs/plans/receipts/LLD.md)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# INSERT + SELECT ONLY, deliberately. `receipts_grades` and
+# `receipts_grade_runs` are append-only (HLD D-3): a wrong grade is corrected
+# by bumping `grader_version` and regrading, never by editing a row. There is
+# no UPDATE or DELETE helper for either table anywhere in the codebase, and
+# `backend/tests/test_receipts_grading.py` (T-10) fails if one appears.
+
+def _receipts_serve_date_expr():
+    """`substr(served_at, 1, 10)` — the UTC serve DATE of an impression.
+
+    `served_at` is an ISO-UTC timestamp string (deck_impressions.served_at),
+    so the first ten characters are the date and lexicographic ordering
+    matches chronological ordering. `substr` is spelled identically on
+    SQLite and Postgres, which is why the receipts queue never needs the
+    dialect-divergent `date()` / `::date` forms.
+    """
+    return func.substr(deck_impressions_table.c.served_at, 1, 10)
+
+
+def _receipts_candidate_where(window_days: int, grader_version: str,
+                              serve_dates: list[str]):
+    """Shared WHERE for the grading queue and its backlog COUNT (LLD §4.1).
+
+    Four predicates, each load-bearing:
+      * `assets_json IS NOT NULL` — telemetry-era rows only. Pre-telemetry
+        impressions are permanently ungradeable (PLAN NG-7): `trade_hash` is
+        not invertible and reconstructing the asset set at grade time would
+        mint a new prediction, which is exactly what preregistration forbids.
+      * `is_ghost IS NULL OR is_ghost = 0` — operator ruling 2026-08-21:
+        ghost rows never enter the grading queue.
+      * serve date ∈ `serve_dates` — the caller passes the dates whose window
+        endpoint is RESOLVABLE NOW (or past its retry deadline, and therefore
+        terminally `missing_snapshot`). Folding resolvability into the WHERE
+        is the LLD §4.1 alternative to skip-and-fill: every selected candidate
+        produces a terminal row, so the batch cap bounds terminal rows
+        directly and a head-of-queue block of unresolvable impressions cannot
+        starve a run.
+      * no grade row at this (window, grader_version) — the queue is defined
+        by ABSENCE, which is what makes the job idempotent by construction.
+    """
+    g = receipts_grades_table
+    already = (
+        select(literal(1))
+        .where(g.c.impression_id == deck_impressions_table.c.impression_id)
+        .where(g.c.window_days == int(window_days))
+        .where(g.c.grader_version == str(grader_version))
+        .exists()
+    )
+    return and_(
+        deck_impressions_table.c.assets_json.isnot(None),
+        or_(deck_impressions_table.c.is_ghost.is_(None),
+            deck_impressions_table.c.is_ghost == 0),
+        _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
+        ~already,
+    )
+
+
+def receipts_min_served_date() -> str | None:
+    """Earliest UTC serve date among gradeable (telemetry-era) impressions.
+
+    Bounds the serve-date enumeration the queue predicate needs; None when no
+    telemetry-era impression exists at all.
+    """
+    try:
+        with engine.connect() as conn:
+            return conn.execute(
+                select(func.min(_receipts_serve_date_expr()))
+                .where(deck_impressions_table.c.assets_json.isnot(None))
+            ).scalar()
+    except Exception as e:
+        print(f"[receipts_min_served_date] failed: {e}")
+        return None
+
+
+def load_receipts_queue(window_days: int, grader_version: str,
+                        serve_dates: list[str], limit: int) -> list[dict]:
+    """Impressions awaiting a grade at (window_days, grader_version)."""
+    if not serve_dates:
+        return []
+    i = deck_impressions_table
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(i.c.impression_id, i.c.user_id, i.c.league_id,
+                       i.c.trade_hash, i.c.features_json, i.c.served_at,
+                       i.c.is_ghost, i.c.assets_json, i.c.archetype,
+                       i.c.shape_bucket, i.c.model_arm, i.c.policy_version)
+                .where(_receipts_candidate_where(window_days, grader_version,
+                                                 serve_dates))
+                .order_by(i.c.served_at.asc())
+                .limit(int(limit))
+            ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_queue] failed: {e}")
+        return []
+
+
+def count_receipts_queue(window_days: int, grader_version: str,
+                         serve_dates: list[str]) -> int:
+    """COUNT of the same queue — the `remaining_resolvable` backlog figure
+    returned in every cron 202 (LLD §2.1). Retry-pending impressions are
+    excluded because their serve dates are simply absent from `serve_dates`.
+    """
+    if not serve_dates:
+        return 0
+    try:
+        with engine.connect() as conn:
+            return int(conn.execute(
+                select(func.count())
+                .select_from(deck_impressions_table)
+                .where(_receipts_candidate_where(window_days, grader_version,
+                                                 serve_dates))
+            ).scalar() or 0)
+    except Exception as e:
+        print(f"[count_receipts_queue] failed: {e}")
+        return 0
+
+
+def insert_receipts_grades(rows: list[dict]) -> int:
+    """Append terminal grade rows. INSERT-OR-IGNORE on `uq_receipts_grade`, so
+    a crashed run that already wrote part of a batch re-runs cleanly and a
+    cron/daily-tick double-fire cannot duplicate (LLD §5.1)."""
+    if not rows:
+        return 0
+    written = 0
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _dialect_insert
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _dialect_insert
+    try:
+        with engine.begin() as conn:
+            for row in rows:
+                try:
+                    stmt = _dialect_insert(receipts_grades_table).values(**row)
+                    stmt = stmt.on_conflict_do_nothing(
+                        index_elements=["impression_id", "window_days",
+                                        "grader_version"])
+                    result = conn.execute(stmt)
+                    written += int(result.rowcount or 0)
+                except Exception as e:
+                    print(f"[insert_receipts_grades] row failed: {e}")
+    except Exception as e:
+        print(f"[insert_receipts_grades] failed: {e}")
+    return written
+
+
+def insert_receipts_grade_run(row: dict) -> None:
+    """Append one run-ledger row. Runs write a `kind='start'` row at begin and
+    a `kind='end'` row at completion; an unmatched start is the kill marker
+    for a crashed or spun-down run (HLD §5)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(receipts_grade_runs_table.insert().values(**row))
+    except Exception as e:
+        print(f"[insert_receipts_grade_run] failed: {e}")
+
+
+def load_receipts_grade_runs(limit: int = 20) -> list[dict]:
+    """Most recent run-ledger rows (operator readout)."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(receipts_grade_runs_table)
+                .order_by(receipts_grade_runs_table.c.id.desc())
+                .limit(int(limit))
+            ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_grade_runs] failed: {e}")
+        return []
+
+
+def load_receipts_grades(*, user_id: str | None = None,
+                         league_id: str | None = None,
+                         grader_version: str | None = None,
+                         window_days: int | None = None,
+                         shape_bucket: str | None = None,
+                         basis: str | None = None,
+                         model_arm: str | None = None) -> list[dict]:
+    """Grade rows for a read surface. Every filter is optional; the user route
+    always passes `user_id` + `league_id` (viewer scoping is a WHERE, never a
+    post-filter)."""
+    g = receipts_grades_table
+    conds = []
+    if user_id is not None:
+        conds.append(g.c.user_id == str(user_id))
+    if league_id is not None:
+        conds.append(g.c.league_id == str(league_id))
+    if grader_version is not None:
+        conds.append(g.c.grader_version == str(grader_version))
+    if window_days is not None:
+        conds.append(g.c.window_days == int(window_days))
+    if shape_bucket is not None:
+        conds.append(g.c.shape_bucket == str(shape_bucket))
+    if basis is not None:
+        conds.append(g.c.basis == str(basis))
+    if model_arm is not None:
+        conds.append(g.c.model_arm == str(model_arm))
+    try:
+        with engine.connect() as conn:
+            stmt = select(g)
+            if conds:
+                stmt = stmt.where(and_(*conds))
+            rows = conn.execute(stmt.order_by(g.c.served_at.asc(),
+                                              g.c.id.asc())).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_grades] failed: {e}")
+        return []
+
+
+def load_receipts_grader_versions() -> list[str]:
+    """Distinct `grader_version` values present in `receipts_grades`. Reads
+    pin the MAX by NUMERIC SUFFIX (`receipts-10` > `receipts-2`), which the
+    caller does — ordering here would be lexicographic and wrong."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(receipts_grades_table.c.grader_version).distinct()
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+    except Exception as e:
+        print(f"[load_receipts_grader_versions] failed: {e}")
+        return []
+
+
+def receipts_impression_cohort(user_id: str, league_id: str) -> dict:
+    """Cohort sizing for the maturity state and the read-time disclosure: how
+    many of the viewer's impressions in this league are gradeable at all
+    (`tracked`), when tracking started, and how many are permanently
+    ungradeable pre-telemetry rows (`pre_telemetry`, disclosed not graded)."""
+    i = deck_impressions_table
+    base = and_(i.c.user_id == str(user_id), i.c.league_id == str(league_id),
+                or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0))
+    out: dict = {"tracked": 0, "first_tracked_at": None, "pre_telemetry": 0}
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(func.count(), func.min(_receipts_serve_date_expr()))
+                .select_from(i)
+                .where(and_(base, i.c.assets_json.isnot(None)))
+            ).fetchone()
+            if row:
+                out["tracked"] = int(row[0] or 0)
+                out["first_tracked_at"] = row[1]
+            out["pre_telemetry"] = int(conn.execute(
+                select(func.count()).select_from(i)
+                .where(and_(base, i.c.assets_json.is_(None)))
+            ).scalar() or 0)
+    except Exception as e:
+        print(f"[receipts_impression_cohort] failed: {e}")
+    return out
+
+
+def load_value_snapshot_dates(scoring_format: str) -> list[str]:
+    """Every `snapshot_date` present for a scoring format, ascending. The
+    grader turns this into the set of serve dates whose window endpoint is
+    resolvable, so the queue predicate can be a plain IN list."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(player_value_history_table.c.snapshot_date)
+                .where(player_value_history_table.c.scoring_format
+                       == scoring_format)
+                .distinct()
+                .order_by(player_value_history_table.c.snapshot_date.asc())
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+    except Exception as e:
+        print(f"[load_value_snapshot_dates] {scoring_format} failed: {e}")
+        return []
+
+
+def load_value_snapshots_for(scoring_format: str, player_ids: list[str],
+                             date_lo: str, date_hi: str) -> dict:
+    """Batched consensus prefetch: {(player_id, snapshot_date):
+    consensus_value} for one format over an inclusive date range (LLD §4.2).
+    One query per run rather than one per asset per endpoint."""
+    if not player_ids:
+        return {}
+    p = player_value_history_table
+    out: dict[tuple[str, str], float] = {}
+    ids = sorted({str(x) for x in player_ids})
+    try:
+        with engine.connect() as conn:
+            # Chunked so a large asset set cannot blow a parameter limit.
+            for start in range(0, len(ids), 500):
+                rows = conn.execute(
+                    select(p.c.player_id, p.c.snapshot_date, p.c.consensus_value)
+                    .where(p.c.scoring_format == scoring_format)
+                    .where(p.c.player_id.in_(ids[start:start + 500]))
+                    .where(p.c.snapshot_date >= date_lo)
+                    .where(p.c.snapshot_date <= date_hi)
+                ).fetchall()
+                for r in rows:
+                    if r.consensus_value is not None:
+                        out[(r.player_id, r.snapshot_date)] = float(r.consensus_value)
+    except Exception as e:
+        print(f"[load_value_snapshots_for] {scoring_format} failed: {e}")
+    return out
+
+
+def load_value_snapshot_floors(scoring_format: str,
+                               dates: list[str]) -> dict[str, float]:
+    """{snapshot_date: MIN(consensus_value)} — the consensus POOL FLOOR per
+    date. A player who cratered out of the pool between serve and window is
+    imputed to this floor rather than dropped (HLD D-8): dropping him would
+    delete our worst outcomes, which is survivorship bias that flatters the
+    engine."""
+    if not dates:
+        return {}
+    p = player_value_history_table
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(p.c.snapshot_date, func.min(p.c.consensus_value))
+                .where(p.c.scoring_format == scoring_format)
+                .where(p.c.snapshot_date.in_([str(d) for d in dates]))
+                .group_by(p.c.snapshot_date)
+            ).fetchall()
+        return {r[0]: float(r[1]) for r in rows if r[1] is not None}
+    except Exception as e:
+        print(f"[load_value_snapshot_floors] {scoring_format} failed: {e}")
+        return {}
+
+
+def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
+    """{league_id: scoring_format} for a batch of leagues, defaulting to
+    DEFAULT_SCORING exactly as `get_league_scoring` does for one. Leagues with
+    no row at all are OMITTED, so the grader can tell "unknown league"
+    (→ ungradeable/format_missing) from "league defaulting to 1qb_ppr"."""
+    if not league_ids:
+        return {}
+    ids = sorted({str(x) for x in league_ids})
+    out: dict[str, str] = {}
+    try:
+        with engine.connect() as conn:
+            for start in range(0, len(ids), 500):
+                rows = conn.execute(
+                    select(leagues_table.c.sleeper_league_id,
+                           leagues_table.c.default_scoring)
+                    .where(leagues_table.c.sleeper_league_id
+                           .in_(ids[start:start + 500]))
+                ).fetchall()
+                for r in rows:
+                    fmt = r.default_scoring
+                    out[r.sleeper_league_id] = (
+                        fmt if fmt in SCORING_FORMATS else DEFAULT_SCORING)
+    except Exception as e:
+        print(f"[load_league_scoring_map] failed: {e}")
+    return out
