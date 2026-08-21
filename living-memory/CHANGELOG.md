@@ -38,6 +38,80 @@ M2×strength decision: `negmem_strength` M1-only, M2 kill = `gen2_accept_prior_s
 Three-way reconciliation with Receipts CONFIRMED (their contract §7; two data boundaries
 inherited); breaker boundary agreed (shape_aversion producer=negmem); operator ghost
 ruling absorbed (checked NOT load-bearing). **LLD pending — session limit** (see HANDOFF).
+## 2026-08-22 — SHIPPED early by operator call: package pricing honesty + gap auto-sweetener (PR #162, `d42872f`)
+
+Operator: *"I would rather the more accurate trade suggestions now."* Merged ahead of the
+Monday boundary; this week's readout is two-window censored at the merge SHA (accepted).
+
+- **The mid-package-buys-stud defect is dead:** `_package_value_market` depth discount now
+  benchmarks against the TRADE's best asset. Nacua proof case 0.952 → 0.709 (blocked).
+- **Gap auto-sweetener:** consensus gap > 1539 (one late 1st) ⇒ generation adds the best
+  equalizer from the richer side. Real-boards replay: fires 1.42/deck, closed **17 of 17**
+  it touched (mean gap 2173 → 850); deck cost only **−1.6%**; arm-B over-line 8.1 → 3.8%.
+- **NOT independently revertable** (replay finding): the benchmark fix ALONE raises the
+  over-line share (v3 6.7→11.3%) — the sweetener nets it down. Rollback = BOTH
+  `package_bench_trade_wide ≤ 0` AND `sweetener_gap_threshold ≤ 0` together ([D-143](DECISIONS.md)).
+- **Arm A never moved:** knobs pinned 0.0 in `MODEL_A_PROFILE`, deck-level byte-identity
+  proven on fixtures AND real boards — golden un-recaptured, operator-ratified ("Y").
+- **Arm C benched at ship** (`bakeoff_include_gen_v2` 0, logged 16:37Z): it inherits honest
+  pricing without the sweetener (37.2% over-line on real boards). Unbench when the arm-C
+  sweetener extension (separate session, in flight) merges.
+- `ghost_holdout_one_in` code/seed defaults → 0 (the 08-21 ruling, now durable). Opus
+  review pre-ship fixed two inherited defects (sweetener targeting bypass; stale
+  fit_premium on v3 sweetened cards). Suite 3897p/1s post-#161-merge; CI green ×2.
+
+## 2026-08-21 — Counterparty-breaker suite CONVERGED (dual-agent, three-way reconciled); build started dark
+
+Full planning suite for the "Counterparty breaker" (evaluates every trade suggestion from the
+OTHER manager's seat; predicts their decline reason in `trade_pass_reasons` vocabulary; v1 =
+stamp + hesitation narrative, zero ordering effect) completed on `claude/counterparty-breaker-plan`
+(tip `c14680a`+): [docs/plans/counterparty-breaker/](../docs/plans/counterparty-breaker/) —
+scope · PLAN · HLD · LLD · PRD, each dual-agent converged (4 rounds each), full
+[reconciliation-log](../docs/plans/counterparty-breaker/reconciliation-log.md).
+
+- **Three-way reconciled** with Receipts + negative-results-memory; shared taxonomy **v1.1.1**
+  closed on `plan/receipts` (`5572604`, producer column enforces the breaker/negmem boundary);
+  Receipts batch check **PASS**.
+- **Review caught real defects pre-build:** false seam claim (likes-you cards injected after the
+  fit-stamp site), payload-layer privacy leak (dark window now serves NO breaker key), rung-5
+  handler crash, picks-in-lean contradiction, lost flag-off MUST — all fixed in-loop.
+- **Binding constraints recorded:** operator NO-ghost ruling; interleave discipline (v1 zero
+  ordering effect); Monday `fix/package-benchmark-sweetener` ship = named measurement boundary
+  (arm A byte-invariant — knobs pinned 0.0 in its profile; `gap_sweetener` key).
+- **Build COMPLETE same session** per operator instruction (Opus subagents, 3 waves: module+knobs+
+  templates+mobile → server seam → docs/evidence). Everything behind `trade.breaker` +
+  `trade.breaker_narrative`, both **false**; suite at tip **3872p/1s**; 25 knobs ×5; taxonomy
+  v1.1.1 landed; calibration spec committed pre-flag-on; [D-142](DECISIONS.md);
+  **[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open — merge is the
+  operator's.** 20-item register in PRD §9 — defaults ship, register is post-build tuning.
+
+## 2026-08-21 — Serving RE-LIT (B/D/C interleaved), ghosts OFF by ruling, QB 1QB repriced, planning fleet
+
+**All prod changes via `scripts/set_knob.py`, logged in `model_config_changes` (the M1 rail's
+first live use).** Operator-driven session, all decisions theirs:
+
+- **Interleaved serving LIVE** 00:43Z: `bakeoff_serve_interleaved` 1, `bakeoff_group_size` 0
+  (plain draft), `bakeoff_deck_limit` 60. First decks: 26–29 cards, arm mix challenger 38 /
+  current 26 / gen_v2 17. Root cause of the operator's 6-card-repeat deck: FFV3 pool exhaustion
+  (287 decided + 812 standing decisions) **amplified by ghost accumulation** — ghosts can never
+  be decided so never leave the pool (one hash ghost-served 35×; two decks were 100% ghost).
+- **Ghost holdout OFF** (`ghost_holdout_one_in` 0) and then **ghosts ruled out entirely**
+  (operator: "I still am against the ghost cards") — Receipts amended post-sign-off (`325896e`),
+  all three planning suites carry the ruling; code/seed defaults flip to 0 next ship.
+- **QB 1QB repriced** 04:46Z: `qb_1qb_cap_elo` 1785→**1644**, knee 1580→**1200** — two-anchor
+  solve: Allen = exactly a late 1st (1539), sub-first QBs = mid-2nds. The old cap priced Allen
+  ABOVE an early 1st (3592 vs 3373). Also seeded 10 never-seeded serving/ghost knobs
+  (`024b030`) — the "deploy-free" flips had been code-default edits all along.
+- **Tier-anchor diagnostic** (operator's "too flat" thesis): within-band spread is HEALTHY
+  (p10/p50/p90 ≈ .07/.5/.9 in every band) — thesis not confirmed as stated; rung occupancy
+  lumpy; market-curve steepness comparison (D-084 method, vs KTC/FC) running as the follow-up.
+- **Post-flip card analysis:** 15% of cards carry gap > a late 1st, all from arms D/C at
+  fairness .73–.83 on big packages — the ratio-gate scale-blindness, live. Operator
+  commissioned an **auto-sweetener pass** (add the equalizer instead of serving the gap); queued.
+- **Planning fleet** (3 sessions + coordinator): Receipts suite COMPLETE (dual sign-off, round 3;
+  8 blockers fixed incl. a wrong Wilson formula and a sign error both reviewers independently
+  caught) on `plan/receipts`; negmem + breaker reconciled against its §7 contract; shared
+  trade-shape taxonomy v1.0.0 seeded (`docs/plans/shared/`). Batch → operator when sibling LLDs land.
 
 ## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
 

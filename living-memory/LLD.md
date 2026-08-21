@@ -32,6 +32,7 @@
 - [Derived league state belongs to the writer, not the reader (2026-08-19, D-091)](#derived-league-state-belongs-to-the-writer-not-the-reader-2026-08-19-d-091)
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
+- [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
 
 ---
 
@@ -415,3 +416,51 @@ conventions that fall out generalise past picks.
   `_SANCTIONED_SOURCE_CALLERS` rather than its seven engine sites — because what "1.05" means must not
   change when a *pricing* flag moves, or a trade card and the assignment screen would disagree about the
   same slot.
+
+## Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)
+
+`backend/trade_breaker.py` ([plan suite](../docs/plans/counterparty-breaker/), [D-142](DECISIONS.md)) sets three
+conventions for any future layer that **predicts something a user will later tell us directly**, or that rides
+`features_json` and shows part of itself on a card.
+
+- **A prediction is expressed in the vocabulary the answer will arrive in, and every code names its producer.**
+  The breaker's objection codes ARE `database.PASS_REASON_LAYER2` — imported, never copied — so "predicted
+  objection" ⨝ "filed pass reason" is a join on `impression_id` and the feature needs **zero new
+  instrumentation**. Two rules keep the shared enum honest once more than one thing writes it: every code
+  carries a **producer column** (who may emit it), so a sibling plan's code appearing in a breaker payload is a
+  test failure rather than a curiosity (`test_breaker_vocabulary_closure`); and a code with **no filed-reason
+  anchor** — the one registered extension `roster_crunch` — is declared unmeasurable up front instead of being
+  hand-coded against free text later. `other_text` is unmatched by construction and leaves every precision
+  denominator. The same closure rule extends past the codes to the **evidence keys**: each code has a closed
+  key enum, because an unlisted key is how private partner state leaks past a copy whitelist.
+- **A `features_json` key obeys uniform-keys, and its "nothing here" value is a marker object, never a bare
+  null.** `save_deck_impressions` compiles its `executemany` from the **first row's keys**, so a key written
+  conditionally is dropped for the whole deck, silently. The breaker's copy therefore sits *outside* the
+  bake-off guard (organic decks stamp too) and is **attribute-gated, not flag-gated** — a hot flag flip
+  mid-job must not let the log site see a state the stamp site never saw, and the copy loop has no per-row
+  try/except, so one `AttributeError` would lose an entire deck's impressions including other features' keys.
+  Three shapes fall out and generalise: a fresh module-level **sentinel** (`_BK_SENTINEL`, never `None`)
+  distinguishes "no attribute" from "stamped null"; every degraded path stamps a labeled minimal marker
+  `{ver, degraded, objections: null}` so *why* a row is unscored survives into the corpus and readouts can
+  subtract it from coverage; and the synthetic marker written at log time carries `ver: null` **by
+  construction**, because at that point the module may never have been imported and no version literal can
+  honestly be claimed. Corollary: the failure ladder's outermost rung is constructed with **no module
+  reference and no knob read at all** — the import itself may be what failed, and a live knob read at failure
+  time would break the one-job-one-knob-state rule anyway.
+- **Payload presence is the client gate — narration-gated serialization.** `trade_card_to_dict` emits the
+  `breaker` object **only for a card that actually narrated**, and emits three fields of it. During the
+  dark-stamp window (compute flag on, narrative flag off) the payload carries no breaker key whatsoever, so:
+  the client re-checks no flag and cannot drift from the server's eligibility rules; a class that is scored
+  but permanently un-narratable (`other_player_keep` — it would advertise that we read the partner's private
+  keep-list) cannot reach a client even as inspectable structured data; and the viewer-seat shadow stamp never
+  serializes anywhere. The general rule: **when eligibility is a server-side policy, ship the eligible result
+  or ship nothing — never ship the data plus a flag and trust every client to re-implement the policy.** The
+  structural guard (`mobile/tests/check-breaker-card.js`) pins the client half — gated on
+  `data.breaker?.sentence`, renders the sentence verbatim, switches on no code.
+- **One job, one knob state; one call, one pin.** All 25 `breaker_*` knobs plus every engine knob the layer
+  reads (`waiver_slot_cost`) are resolved **once** into a frozen per-call snapshot, so a `PUT
+  /api/admin/config` landing mid-job cannot produce a deck scored under two configs. Knobs are read through
+  the **module** (`ts._c`), never rebound at import, so a monkeypatched knob moves the next call's verdicts —
+  the T1 discipline, sabotage-proven. And any layer that values assets outside the generator pins the
+  ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
+  a silent dependency on whoever ran before you.

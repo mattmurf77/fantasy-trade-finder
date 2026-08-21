@@ -10,6 +10,8 @@
 
 ## Table of Contents
 - [2026-08-21 — negmem planning COMPLETE; batch delivery staged; operator holds 3 decisions](#2026-08-21--negmem-planning-complete-batch-delivery-staged-operator-holds-3-decisions)
+- [2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge](#2026-08-21--counterparty-breaker-complete-suite-converged-v1-built-dark-pr-161-awaits-operator-merge)
+- [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
@@ -57,6 +59,59 @@ stub) · privacy posture (recommend aggregate-only derive-on-read). Nothing buil
 before they're answered.
 
 **Branch hygiene:** not merged, not pushed unless asked; ~20 commits, all planning docs.
+## 2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge
+
+**Where:** branch `claude/counterparty-breaker-plan`, tip `da23921`, **pushed** —
+**[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open, merge is the
+operator's call.** Suite complete AND v1 built dark in one session (operator authorized build
+post-PRD mid-session; Opus build agents, 3 waves).
+
+**What exists:** `docs/plans/counterparty-breaker/` — scope · PLAN · HLD · LLD · PRD (each
+dual-agent converged, 4 rounds) · reconciliation-log (the cold-start read) ·
+calibration-readout-spec.md (preregistered, committed pre-flag-on) · code-walk.md · drafts/.
+Code: `backend/trade_breaker.py` (+67 tests) · server seam post-F9/pre-ghost-split with
+narration-gated payload + seam republish (+35 integration tests incl. the T-13 flag matrix) ·
+`trade_narrative.hesitation_line` (brt-1, incl. `roster_crunch.one` pluralization) · 25 knobs
+×5 registrations · `trade.breaker` + `trade.breaker_narrative` both **false** · mobile
+hesitation element + `check-breaker-card.js` (12 sabotage-proven assertions) · shared taxonomy
+v1.1.1 landed. Suite at tip **3872 passed / 1 skipped**; testid-lint OK; `tsc` rides CI
+(no local node_modules — pre-existing). [D-142](DECISIONS.md), TEST_LEDGER 2026-08-21.
+
+**Operator-owed next (in order):** (1) merge PR #161 when CI is green; (2) the PRD §8.3 launch
+sequence — P1 `trade.breaker` on (dark stamp) → calibration readout per the preregistered spec
+→ per-class graduation (`breaker_narrate_<class>` via `set_knob`) → operator-only narrative
+first light (single allowlisted device, readout-excluded) → the **19-step TestFlight checklist
+(UNRUN — the only runtime evidence under D-056; needs a build cut)**; (3) the 20-item register
+in PRD §9 — defaults ship, all post-build tuning. **Sequencing:** dry run + calibration cohort
+start at/after the Monday `fix/package-benchmark-sweetener` merge (a code-ship boundary the M1
+rail cannot censor).
+
+**Binding constraints (do not re-derive):** NO ghost cards (operator, batch-wide) · v1 zero
+ordering effect (interleaved serving live) · narration derives from public state only; dark
+window serves no payload key · vocabulary anchors on `trade_pass_reasons` (+`roster_crunch`;
+`shape_aversion`=negmem via producer column) · fit-challenger rulings untouched.
+
+**Sibling batch:** Receipts suite final + batch check PASS; negmem HLD final (their LLD was
+resuming); three-way taxonomy closed at v1.1.1. The three suites go to the operator as one
+batch — mine is delivered via PR #161.
+
+## 2026-08-21 — Serving live; operator iterating; planning fleet converging
+
+**Live state:** interleaved serving ON (B/D/C), deck cap 60, ghosts off + ruled out, QB 1QB
+repriced (cap 1644/knee 1200 — operator owes the `players-refresh?force=1` click or waits for
+the daily cycle). All flips logged in `model_config_changes`.
+
+**In flight:** market-curve comparison (Opus agent → `docs/reviews/2026-08-21-market-curve-comparison.md`,
+uncommitted) · Receipts suite FINAL on `plan/receipts` in the planner worktree
+(`agent-af95ea98f982612d6`, 5 commits, not pushed) · negmem + breaker LLDs in their sessions ·
+three-way batch → operator review next.
+
+**Queued builds (operator-commissioned):** auto-sweetener pass (all arms; threshold in
+pick-equivalents, late 1st = 1539) · ghost knob code-default → 0 · fit W3 roster flip
+(`bakeoff_include_fit` 1, operator: yes at W3).
+
+**Watch:** daily deck-median tripwire (investigate < 22, revert < 18 ×2 days) — first Friday
+readout due; `scripts/bakeoff_readout.sql`.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 

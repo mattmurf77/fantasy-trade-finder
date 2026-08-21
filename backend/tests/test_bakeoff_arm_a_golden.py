@@ -409,12 +409,20 @@ def test_pick_pair_strip_kill_value_is_load_bearing():
 def test_r4_bypass_restores_a_card_the_flag_would_exclude():
     """R4 (#336 windowless awaiting/matched exclusion) has no kill knob, so
     arm A needs the thread-local bypass. Feed the engine an exclusion key for
-    a card the golden contains: arm B must drop it, arm A must keep it."""
+    a card the golden contains: arm A must keep it. Arm B's R4-respect half
+    uses a victim from arm B's OWN current deck — since the 2026-08-21
+    package-benchmark fix, arm B no longer emits GOLDEN[0]'s shape on this
+    fixture (the cross-benchmarked receive side prices out of band), so a
+    golden victim would never reach R4 there."""
     victim = GOLDEN[0]
     key = {(frozenset(victim[0]), frozenset(victim[1]))}
 
-    svc_b, arm_b = _deck(presentment=True, exclusion_keys=key)
-    assert [r[:2] for r in arm_b].count(victim[:2]) == 0
+    _, arm_b_full = _deck(presentment=True, exclusion_keys=set())
+    assert arm_b_full, "fixture yields no arm-B deck at live defaults"
+    b_victim = arm_b_full[0]
+    b_key = {(frozenset(b_victim[0]), frozenset(b_victim[1]))}
+    svc_b, arm_b = _deck(presentment=True, exclusion_keys=b_key)
+    assert [r[:2] for r in arm_b].count(b_victim[:2]) == 0
     assert svc_b.presentment_kill_counts()["R4"] == 1
 
     svc_a, arm_a = _deck(presentment=True, exclusion_keys=key, arm_a=True)
@@ -464,7 +472,14 @@ def test_r4_bypass_is_thread_local():
 #: makes. trade_gen_v2, the mock draft and the outlook seed still pass four
 #: positional arguments, so with the flag lit they score the LEGACY vector
 #: (INV-372b, pinned by test_window_composite.py). Excluded rather than
-#: pinned: a kill value would assert these reach a deck.) This is the
+#: pinned: a kill value would assert these reach a deck.)
+#: 2026-08-21 added the 25 `breaker_*` knobs (counterparty breaker,
+#: docs/plans/counterparty-breaker/LLD.md §4): excluded from MODEL_A_PROFILE
+#: because they are EVALUATION-layer, not generation. `backend/trade_breaker.py`
+#: is imported by no generator and no ranker; it runs after the deck-mutation
+#: stack completes and mutates only a new card attribute, so no arm can observe
+#: one. Dispositions in scope-phase2.md. `waiver_slot_cost`, which the breaker
+#: reuses, is an existing engine knob and was already pinned below.) This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -477,7 +492,20 @@ bakeoff_lane_reallocate bakeoff_serve_fit
 asset_ideas_lateral_band audition_like_rate_frac audition_min_views
 audition_retire_days bench_credit_qb bench_credit_qb_sf bench_credit_rate
 bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr
-block_boost_weight boost_moderate boost_strong consensus_both_ways
+block_boost_weight boost_moderate boost_strong
+breaker_board_div_min breaker_board_min_divergent
+breaker_budget_checkpoint_frac breaker_crunch_scale
+breaker_degraded_share_max breaker_floor_fit_duplicate
+breaker_floor_fit_new_weakness breaker_floor_fit_outlook
+breaker_floor_other_player_keep breaker_floor_roster_crunch
+breaker_floor_value_giving breaker_floor_value_giving_consensus
+breaker_max_repeat_frac breaker_min_severity breaker_ms_budget
+breaker_narrate_fit_duplicate breaker_narrate_fit_new_weakness
+breaker_narrate_fit_outlook breaker_narrate_other_player_keep
+breaker_narrate_roster_crunch breaker_narrate_value_giving
+breaker_outlook_haircut_legacy breaker_outlook_narrate_margin
+breaker_shadow_run breaker_value_scale
+consensus_both_ways
 consensus_fairness_floor consensus_score_scale
 consolidation_raw_loss_frac crown_elite_value crown_rate crown_rate_market
 crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net
@@ -518,7 +546,8 @@ neutral outlook_alpha_championship outlook_alpha_contender outlook_alpha_jets
 outlook_alpha_not_sure outlook_alpha_rebuilder outlook_dir_age_gap_mult
 outlook_dir_age_tolerance outlook_dir_boost outlook_dir_contend_weight
 outlook_dir_penalty outlook_dir_rescue_frac package_adj_gamma
-package_adj_gamma_market package_discount_cap package_floor_market
+package_adj_gamma_market package_bench_trade_wide package_discount_cap
+package_floor_cross package_floor_market
 package_weight_1 package_weight_2 package_weight_3 package_weight_4
 package_weight_5 pass_cooldown_days pass_cooldown_start_epoch penalty_heavy
 penalty_mod penalty_soft pick_gap_frac pick_gap_min_value pick_pair_strip_frac
@@ -530,7 +559,8 @@ relaxed_fairness_threshold relaxed_surplus_floor replenish_weekday
 roster_clogger_penalty roster_clogger_threshold roster_spot_penalty
 shrink_pseudocount skew_phaseout star_tax_elite_multiplier
 star_tax_per_tier_gap suggestion_match_lookback_days
-suggestion_match_min_overlap sweetener_band sweetener_max_cards
+suggestion_match_min_overlap sweetener_band sweetener_gap_threshold
+sweetener_max_cards
 target_acquire_bonus taste_clamp_hi taste_clamp_lo taste_dwell_bonus
 taste_dwell_ms taste_epsilon taste_eta_long taste_eta_short
 taste_prior_ref_delta taste_prior_scale taste_prior_shrink taste_tau_long_days

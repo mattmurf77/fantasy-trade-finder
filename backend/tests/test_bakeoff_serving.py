@@ -5,12 +5,29 @@ Scope block: docs/plans/three-model-bakeoff/scope-phase3.md.
 
 Contract under test, in `server._run_trade_job`:
 
-  • Flag OFF ⇒ the generation path is byte-identical to pre-bake-off
-    `origin/main`. Proven against a CAPTURED golden
-    (backend/tests/fixtures/bakeoff/flag_off_golden.json, produced by running
+  • Flag OFF ⇒ the generation path is the non-bake-off path, and the only
+    admitted difference from it is the additive NULL columns. Proven
+    against backend/tests/fixtures/bakeoff/flag_off_golden.json.
+    PROVENANCE, and what the golden does and does NOT prove today —
+    the original capture came from running
     backend/tests/support/bakeoff_harness.py inside a worktree at the
-    pre-bake-off SHA), not against an assertion about ourselves. The only
-    admitted difference is the two additive NULL columns.
+    pre-bake-off SHA, so it was EXTERNAL evidence: flag-off output equalled
+    real pre-bake-off `origin/main` output. It has since been RE-CAPTURED
+    from this repo's own code twice, both on 2026-08-21: (1) the
+    operator-approved package-benchmark fix (`package_bench_trade_wide`,
+    docs/reviews/2026-08-21-market-curve-comparison.md §3b) deliberately
+    moved generation for every arm, so the flag-off deck moved with it
+    (2 cards → 1 on this fixture — the receive side of the dropped
+    1-for-2 now prices out of band); (2) the gap auto-sweetener stamps a
+    `gap_sweetener` key (null when unsweetened) on every impression row's
+    features_json. So `test_flag_off_is_byte_identical_to_the_captured_golden`
+    is now a DRIFT DETECTOR against a self-capture, not independent
+    evidence of parity with the pre-bake-off SHA — that historical claim
+    died with the re-capture and is not re-provable without a worktree at
+    that SHA. What still holds independently is the live contract:
+    `test_dark_mode_serves_the_flag_off_deck` compares the flag-ON deck to
+    the SAME golden, so flag-off and bake-off-dark are still proven to
+    serve identical decks through two different code paths.
   • Phase 4 (dark, the default inside the flag): three arms generate and log,
     only arm `current` is served, and the served deck is still the flag-off
     deck.
@@ -1209,3 +1226,132 @@ def test_impressions_uniform_columns():
     fit_rows = [i for i, r in enumerate(rows) if r["model_arm"] == "fit"]
     assert fit_rows
     assert feats[fit_rows[0]]["fit"]["ver"] == "fit-1"
+
+
+# ---------------------------------------------------------------------------
+# Counterparty breaker — the uniform-keys extension (LLD §1.4 / §7.3, T-10)
+# ---------------------------------------------------------------------------
+
+#: A scored stamp, shaped like trade_breaker's real payload. Only the keys the
+#: features copy has to carry verbatim matter here.
+_BK_SCORED = {
+    "ver": "brk-1", "degraded": None, "them": None, "narrated": None,
+    "tmpl_ver": None,
+    "top": {"code": "fit_outlook", "severity": 0.82, "evidence": {}},
+    "objections": [{"code": "fit_outlook", "severity": 0.82, "evidence": {}}],
+}
+_BK_MARKER = {"ver": "brk-1", "degraded": "exception_card", "objections": None}
+
+
+def _breaker_flags(monkeypatch, on: bool):
+    import backend.feature_flags as ff
+    flags = dict(ff.flags_dict())
+    flags["trade.breaker"] = on
+    monkeypatch.setattr(ff, "_flags_cache", flags, raising=False)
+
+
+def _log_rows(cards, *, bakeoff_run):
+    seen = {}
+    with patch.object(server, "save_deck_impressions",
+                      lambda rows: seen.setdefault("rows", rows)), \
+            patch.object(server, "load_board_state",
+                         lambda *a, **kw: (0, None)), \
+            patch.object(server, "_deck_fatigue_enabled", lambda: False), \
+            patch.object(server, "_deck_taste_enabled", lambda: False):
+        server._log_deck_signal_impressions(
+            user_id=H.ME, league_id=H.LEAGUE, job_id="j-breaker",
+            cards=cards, players_dict={}, capture=None,
+            scoring_format="1qb_ppr", seed_map={}, bakeoff_run=bakeoff_run)
+    return seen["rows"]
+
+
+def _mixed_deck():
+    """Deck LED by an UNSTAMPED likes-you-style injection, then a scored card
+    and a rung-marker card — the three states a flag-on deck can hold."""
+    run, _cur, fit = _fit_run(serve_fit=1, group_size=0)
+    served = list(run.served_deck())
+    assert len(served) >= 2
+    served[0].breaker = dict(_BK_SCORED)
+    served[0].breaker_shadow = dict(_BK_MARKER)
+    served[1].breaker = dict(_BK_MARKER)          # no shadow attribute at all
+    injection = _card(["inj_g"], ["inj_r"])       # never stamped
+    return run, [injection] + served
+
+
+@pytest.mark.parametrize("bakeoff", [True, False])
+def test_impressions_breaker_uniform_keys(monkeypatch, bakeoff):
+    """LLD §1.4 / §7.3 (T-10) — extends `test_impressions_uniform_columns` to
+    the breaker keys. On a flag-on deck EVERY impression row's features_json
+    decodes with a non-null `breaker` (scored payload, rung marker, or the
+    synthetic `flag_flip_or_unstamped` marker for the injected card that the
+    stamp never reached) and a present `breaker_shadow`. Parametrized over
+    bake-off and ORGANIC logging: the block sits OUTSIDE the `bakeoff_run is
+    not None` guard, so organic rows stamp too."""
+    _breaker_flags(monkeypatch, True)
+    run, cards = _mixed_deck()
+    rows = _log_rows(cards, bakeoff_run=run if bakeoff else None)
+
+    assert len(rows) == len(cards)
+    assert len({tuple(sorted(r)) for r in rows}) == 1      # T2 key set
+    feats = [json.loads(r["features_json"]) for r in rows]
+    for f in feats:
+        assert f.get("breaker") is not None                # never a bare null
+        assert "breaker_shadow" in f
+    # The injected, never-stamped card: the SYNTHETIC marker, ver honestly
+    # null (at log time the module may never have been imported).
+    assert feats[0]["breaker"] == {"ver": None,
+                                   "degraded": "flag_flip_or_unstamped",
+                                   "objections": None}
+    assert feats[0]["breaker_shadow"] is None
+    # The scored card rides through whole, shadow included.
+    assert feats[1]["breaker"]["top"]["code"] == "fit_outlook"
+    assert feats[1]["breaker_shadow"] == _BK_MARKER
+    # A rung-marker card with no shadow attribute: key present, value null.
+    assert feats[2]["breaker"]["degraded"] == "exception_card"
+    assert feats[2]["breaker_shadow"] is None
+    if bakeoff:                                            # fit keys intact
+        for f in feats:
+            assert "fit" in f and "fit_diag" in f
+
+
+def test_midjob_flag_flip_no_crash(monkeypatch):
+    """LLD §7.3 / erratum E-A — the row the HLD's bare-attribute sketch would
+    have lost. This loop has no per-row try/except, so an AttributeError here
+    would drop the WHOLE deck's impressions.
+
+    off→on (flag flipped on between stamp and log): unstamped cards still
+    write rows, each carrying the synthetic marker. on→off: stamped payloads
+    ride through, because the copy is ATTRIBUTE-gated, not flag-gated."""
+    run, _cur, _fit = _fit_run(serve_fit=1, group_size=0)
+    unstamped = list(run.served_deck())
+    for c in unstamped:
+        assert not hasattr(c, "breaker")
+
+    _breaker_flags(monkeypatch, True)                      # off → on
+    rows = _log_rows(unstamped, bakeoff_run=run)
+    feats = [json.loads(r["features_json"]) for r in rows]
+    assert len(rows) == len(unstamped)
+    assert all(f["breaker"]["degraded"] == "flag_flip_or_unstamped"
+               for f in feats)
+    assert all("fit" in f and "fit_diag" in f for f in feats)
+
+    _breaker_flags(monkeypatch, False)                     # on → off
+    for c in unstamped:
+        c.breaker = dict(_BK_SCORED)
+    rows2 = _log_rows(unstamped, bakeoff_run=run)
+    feats2 = [json.loads(r["features_json"]) for r in rows2]
+    assert all(f["breaker"] == _BK_SCORED for f in feats2)
+    assert all(f["breaker_shadow"] is None for f in feats2)
+
+
+def test_flag_off_features_json_carries_no_breaker_key(monkeypatch):
+    """LLD §7.3 — flag off at BOTH sites ⇒ no key at all, so a flag-off row is
+    byte-identical to today's (NFR-3). The full-capture byte-identity proof is
+    `test_breaker_seam.test_flag_off_features_json_byte_identical`."""
+    _breaker_flags(monkeypatch, False)
+    run, _cur, _fit = _fit_run(serve_fit=1, group_size=0)
+    rows = _log_rows(list(run.served_deck()), bakeoff_run=run)
+    for r in rows:
+        assert "breaker" not in r["features_json"]
+        f = json.loads(r["features_json"])
+        assert "breaker" not in f and "breaker_shadow" not in f
