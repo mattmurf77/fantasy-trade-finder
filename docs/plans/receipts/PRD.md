@@ -31,9 +31,8 @@ move the goalposts. No competitor (KeepTradeCut, FantasyCalc) grades its own adv
   whether past suggestions were any good. Decline reasons show users argue with the
   card's values (40% `value_giving` — accuracy PLAN Part 1); a track record is the only
   durable answer.
-- **Program need:** the accuracy program is measurement-first; its Phase 1.2 ("read the
-  ghost holdout") and per-arm questions need exactly the grading substrate Receipts
-  builds. `propose` has fired zero times ever — every current quality metric is a proxy;
+- **Program need:** the accuracy program is measurement-first; its per-arm measurement
+  questions need exactly the grading substrate Receipts builds. `propose` has fired zero times ever — every current quality metric is a proxy;
   value-movement grading is a proxy with teeth.
 - **Why now:** preregistration data exists since 2026-08-16 (telemetry-era
   `assets_json`); consensus snapshots since 2026-07-26; every week without grading is
@@ -47,7 +46,7 @@ move the goalposts. No competitor (KeepTradeCut, FantasyCalc) grades its own adv
 **Goals (outcomes):**
 1. A user can see, per league, how suggestions served to them tracked the market — with
    losses shown as prominently as wins (trust through honesty, not through bragging).
-2. The operator can slice graded accuracy by taxonomy cell × arm × ghost × window with
+2. The operator can slice graded accuracy by taxonomy cell × arm × window with
    honest intervals (engine-iteration evidence).
 3. The preregistration discipline is established product-wide: predictions locked at
    serve, grades append-only, corrections versioned and visible.
@@ -101,8 +100,8 @@ state, never a number.
 | DR-2 | "Acquire side gained value" means | **Swap edge on consensus** (§4.1) — not standalone acquire %, not personal boards | Market drift cancels; personal Elo is endogenous + sparse (HL-2); consensus is the only yardstick with daily frozen history |
 | DR-3 | Preregistration: the immutable prediction | **`deck_impressions` row fields:** `assets_json` (asset ids + direction — the prediction proper), `served_at`, `league_id`, `user_id`, `is_ghost`, `trade_hash`, and the frozen slice keys (`shape_bucket`, `archetype`, `basis`, `model_arm`, `policy_version`, `features_json` slice keys). **Never used for valuation:** `features_json.give_value/receive_value` (may be personal-basis, `server.py:4159`) | The prediction is *what to swap*, not *what it was worth in engine units*; valuation both ends from the independently-frozen snapshot table |
 | DR-4 | Preregistration enforcement | Grader forbidden to: (1) import/replay engine code, (2) read any live value (seeds, `elo_to_value`, features values) **for valuation or edge arithmetic** — sole exemption: the grader's own frozen value-unit pick weights, coverage/pick-share only, versioned under `grader_version` (LLD §1, T-4), (3) reconstruct assets from `trade_hash`, (4) UPDATE/DELETE grades. Each rule has a named test (LLD §7 T-1/T-3/T-10); grades carry `grader_version` + `taxonomy_version`; corrections = version bump + visible footnote | "Can't move goalposts" must be mechanical, not aspirational |
-| DR-5 | Cohort graded | Telemetry-era rows (`assets_json IS NOT NULL`), **served and ghost, all arms, likes-you included**; pre-telemetry permanently ungradeable (NG-7); read-time filters do the rest | Grade everything gradeable once; filter per surface |
-| DR-6 | Ghost usage | Graded identically; **internal only**; fixed cohort ended 2026-08-21T00:43Z (verify at build, PLAN Q-5); never in user payloads | Served-vs-ghost = the selection-effect read (accuracy PLAN 1.2); showing withheld cards leaks the holdout |
+| DR-5 | Cohort graded | Telemetry-era rows (`assets_json IS NOT NULL`), **served rows only (`is_ghost` NULL/0 — operator ruling 2026-08-21), all arms, likes-you included**; pre-telemetry permanently ungradeable (NG-7); read-time filters do the rest | Grade everything gradeable once; filter per surface |
+| DR-6 | Ghost usage | **None — excluded entirely** (operator ruling 2026-08-21, post-sign-off amendment): `is_ghost=1` rows never enter the grading queue; historical rows untouched (append-only); user surfaces never included them, so no user-facing number changes | Operator is against ghost cards, full stop; the served-vs-ghost internal control analysis is deleted with the ruling |
 | DR-7 | Whose receipts | **Viewer's own impressions only** in v1; league-wide aggregate = operator question Q-2 | Other managers' decks are private; small-league aggregates reverse-engineer |
 | DR-8 | Platform scope | **Platform-agnostic** (pure DB feature; impressions + universal-pool ids carry it). De-facto Sleeper today; no platform check written | A check would need removing later; grading code has no platform surface |
 | DR-9 | Analytics events | `receipts_opened` (client, **INTENT** — i.e. registered in `ALLOWED_CLIENT_EVENTS` and deliberately ABSENT from the `NON_INTENT_EVENTS` deny-list; deliberate feature engagement, cf. `find_trades_tapped`), props `league_id, status, n_graded_28d, headline_bucket(neg/flat/pos)` · `receipts_window_changed` (client, listed in `NON_INTENT_EVENTS` — navigation, cf. `tab_selected`, `analytics_queries.py:73`) · `receipts_grade_run` (server-fired, listed in `NON_INTENT_EVENTS`), props `graded, ungradeable, cap_hit, duration_ms, trigger`. Registrations + classifications land **in the same commit as the emitters** | House rule (NULL-platform incident); minimal surface |
@@ -116,8 +115,7 @@ state, never a number.
 ledger), triggered by cron endpoint + daily-tick guard + backfill script.
 **FR-2** `GET /api/league/<id>/receipts` per LLD §2.2 — viewer-scoped, ghost-free,
 deduped, min-n-gated, all-windows payload.
-**FR-3** `GET /api/admin/receipts/metrics` per LLD §2.3 — cells, intervals,
-served-vs-ghost.
+**FR-3** `GET /api/admin/receipts/metrics` per LLD §2.3 — cells, intervals.
 **FR-4** `ReceiptsScreen` (mobile): root-stack push; own `FeedbackFAB
 activeScreen="Receipts"` (rule #188; global FAB covers tabs only, `RootNav.tsx:559`);
 entry point: a "Track record" row in `TradeHomeUtilityRow`
@@ -182,8 +180,8 @@ Q-1 ruled in favor of the ledger-state launch.
 - **Guardrails:** no support/feedback reports of debunkable numbers (any such report =
   A-2 review); screen error rate ~0; `receipts_grade_run` cadence daily; gradeable share
   not degrading (supply health).
-- **Program-level:** the P2 served-vs-ghost readout delivered to the accuracy program
-  (its Phase 1.2), regardless of screen launch.
+- **Program-level:** the P2 per-cell accuracy readout delivered to the accuracy
+  program, regardless of screen launch.
 
 ### 8.3 Manual TestFlight checklist (operator, the only runtime evidence — D-056)
 1. Fresh league (no grades): entry point visible when flag on; maturity state shows

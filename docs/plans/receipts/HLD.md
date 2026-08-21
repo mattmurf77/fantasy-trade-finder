@@ -47,7 +47,7 @@ _run_trade_job                         POST /api/cron/receipts-grade       Recei
                                           three-trigger pattern)            operator
 daily consensus snapshots (exists)     + scripts/receipts_backfill.py        └ GET /api/admin/receipts/metrics
  /api/cron/value-snapshot (:19493)        (operator loop until drained)         (X-Cron-Secret · per-cell n +
- + hourly-tick fallback (:19166)          │                                      Wilson intervals · served-vs-ghost)
+ + hourly-tick fallback (:19166)          │                                      Wilson intervals)
  └ player_value_history rows              ▼
                                        backend/receipts_service.py (new)
                                         reads:  deck_impressions, player_value_history
@@ -69,7 +69,8 @@ Components:
 Entities (full DDL in LLD §3):
 
 - **`deck_impressions` (read-only)** — the prediction. Grader inputs: `impression_id`,
-  `served_at`, `assets_json`, `league_id`, `user_id`, `is_ghost` + taxonomy slice keys
+  `served_at`, `assets_json`, `league_id`, `user_id`, `is_ghost` (queue-exclusion
+  predicate only — operator ruling 2026-08-21) + taxonomy slice keys
   (`shape_bucket`, `archetype`, `basis`, `model_arm`, `policy_version`).
   `features_json` is used for **slicing only, never valuation** (D-2).
 - **`player_value_history` (read-only)** — the yardstick. Daily
@@ -98,7 +99,7 @@ cell with intervals.
 | D-2 | **Serve anchor = `player_value_history` at serve date — never `features_json` values** | Frozen `give_value`/`receive_value` may be personal-basis (`user_value_basis`, `backend/server.py:4159`) and are engine units; comparing them to later consensus manufactures fake movement | Grading from frozen card values: fails whenever `user_value_basis='personal'` |
 | D-3 | **Append-only + `grader_version` (string, `'receipts-1'`)** — unique `(impression, window, version)`, reads pin max version, superseded rows retained, regrades footnoted on-screen | Corrections without goalpost-moving; precedent `SCORER_VERSION = "fit-1"` (`backend/trade_gen_fit.py:43`) | UPDATE-in-place (destroys the audit trail); never-fix (wrong screen forever) |
 | D-4 | **202 + daemon thread + single-flight + batch cap** for the cron endpoint | Single gunicorn worker (`render.yaml:16`); precedent `cron_players_refresh` (`backend/server.py:19512-19531`) | Inline grading (blocks all traffic); Celery/queue infra (over-scaled) |
-| D-5 | **Ghosts graded identically, internal-only; never in user payloads** | Free served-vs-ghost control read; but surfacing withheld suggestions leaks the holdout and invites "why didn't you show me?". Bounded cohort (PLAN §3.5) | Skipping ghosts (loses the only selection-effect control); showing them (trust harm) |
+| D-5 | **Ghost rows excluded from grading entirely** — queue predicate `is_ghost IS NULL OR is_ghost = 0`; historical rows untouched in the DB (append-only) | **Operator ruling 2026-08-21 (post-sign-off amendment)** — the operator is against ghost cards, full stop. Supersedes the dual-signed design, which graded ghosts as an internal served-vs-ghost control; that analysis is deleted, not deferred. User-facing numbers never included ghosts, so nothing user-visible changes | The round-3-signed design (ghosts graded, internal-only) — superseded by ruling |
 | D-6 | **User surface is viewer-scoped** (own impressions only), league-wide aggregate deferred | Other managers' decks are private; a league aggregate at n≈5 is reverse-engineerable. PLAN Q-2 for later | League-wide track record v1 |
 | D-7 | **Picks contribute Δ=0; pick-majority sides ungradeable; per-asset flags + coverage disclosure.** Pick weights for coverage/pick-share come from a value-unit table **frozen inside the grader** (versioned under `grader_version`) — never read live from `GENERIC_PICK_SEEDS` | Pick prices are static code seeds repriced by commits (D-084) — grading them, or even weighting by them live, grades deploys: a seed repricing would flip the same impression between graded and pick_majority under one grader version | Grading picks from seeds (phantom moves on deploy days); excluding pick trades entirely (kills too much cohort) |
 | D-8 | **Pool-floor imputation for players absent at window date** (present at serve), flagged `imputed_floor` | A cratered player falls out of the snapshot pool; marking him ungradeable deletes our worst outcomes — survivorship bias that flatters the engine | Ungradeable-on-missing (silently biased); carrying last-known value (understates busts) |

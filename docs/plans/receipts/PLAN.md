@@ -29,9 +29,9 @@ at 14/28/56-day windows, writing append-only `receipts_grades` rows. Two consume
 
 1. **User surface:** mobile `ReceiptsScreen` — the viewer's own suggestion track record in a
    league, both sides of every trade, wins and losses rendered identically.
-2. **Internal:** per-taxonomy-cell accuracy readouts (shape × basis × arm × ghost × window)
-   — the productization of trade-engine-accuracy PLAN Phase 1.2 ("read the ghost holdout —
-   nobody has looked", [docs/plans/trade-engine-accuracy/PLAN.md](../trade-engine-accuracy/PLAN.md)).
+2. **Internal:** per-taxonomy-cell accuracy readouts (shape × basis × arm × window) —
+   measurement substrate for the trade-engine-accuracy program
+   ([docs/plans/trade-engine-accuracy/PLAN.md](../trade-engine-accuracy/PLAN.md)).
 
 This is a **measurement** feature under that plan's philosophy: it changes zero engine
 behavior and creates the evidence a future engine change could be judged against.
@@ -87,15 +87,14 @@ Binding on every surface, user-facing and internal:
    toward the global mean where a point estimate is needed); the user surface renders a
    headline only at `n ≥ receipts_min_n` (default 10) and always displays n
    ("12 of 19 suggestions"). No bare percentages anywhere.
-5. **The ghost cohort is a fixed historical population.** `is_ghost=1` rows
-   (suggested-but-never-shown; 273 of 1,371 bake-off-era impressions) are graded
-   identically as the natural control for serving/selection effects — internal only.
-   The holdout was closed when the operator zeroed `ghost_holdout_one_in`
-   (ordered 2026-08-20, commit `024b030` message; effective end
-   **2026-08-21T00:43Z** per the coordinating session's prod `model_config_changes`
-   read — repo-unverifiable, re-verify at build, same as the breaker plan's A-1).
-   Design treats ghosts as a **bounded backtest cohort, not an ongoing stream**; if the
-   knob ever comes back, new rows extend the cohort without design change.
+5. **Ghost rows are excluded (operator ruling 2026-08-21, post-sign-off amendment).**
+   The operator is against ghost cards, full stop: `is_ghost=1` rows never enter the
+   grading queue (`AND (is_ghost IS NULL OR is_ghost = 0)` in the queue predicate, LLD
+   §4.1) and no surface analyzes them. Historical ghost rows stay untouched in
+   `deck_impressions` (append-only history; exclusion is queue/read-time only). Every
+   user-facing denominator already excluded ghosts, so user-facing numbers are
+   unchanged — this ruling removes only the internal served-vs-ghost control analysis
+   that the round-3-signed design had included.
 6. **Selection disclosure is structural.** Gradeable share (graded / touched) is computed
    from the grades table itself and reported next to every aggregate; internal cells with
    gradeable share < 70% are flagged. Losses render identically to wins; best-call is never
@@ -105,9 +104,9 @@ Binding on every surface, user-facing and internal:
 
 | Phase | Deliverable | Done bar |
 |---|---|---|
-| **P0 — pre-build data gate** | Read-only prod counts (LLD §8 queries): gradeable impressions, per-league histogram, ghost share + end date, pick-involvement share, snapshot gap rate | Numbers in this plan's directory; A-1 evaluated |
+| **P0 — pre-build data gate** | Read-only prod counts (LLD §8 queries): gradeable impressions, per-league histogram, ghost-row count (excluded — cohort sizing only), pick-involvement share, snapshot gap rate | Numbers in this plan's directory; A-1 evaluated |
 | **P1 — grader dark** | `backend/receipts_service.py` + tables via `_migrate_db` + `POST /api/cron/receipts-grade` (202 + daemon) + daily-tick guard + flag `receipts.grading` + knobs + pytest suite + `scripts/receipts_backfill.py` | CI green; job runs in prod dark; backfill drained; `receipts_grade_runs` ledger populating |
-| **P2 — internal readout** | `GET /api/admin/receipts/metrics` (X-Cron-Secret) with served-vs-ghost split + Wilson intervals | Operator reviews first real numbers (the A-2 checkpoint); accuracy-PLAN Phase 1.2 delivered |
+| **P2 — internal readout** | `GET /api/admin/receipts/metrics` (X-Cron-Secret) with per-cell Wilson intervals | Operator reviews first real numbers (the A-2 checkpoint) |
 | **P3 — user surface dark** | `GET /api/league/<id>/receipts` + `ReceiptsScreen` + RootNav root-stack registration + FeedbackFAB + analytics events (same commit as taxonomy/queries registration) + `mobile/tests/check-receipts.js` | CI green incl. structural check; screen behind `receipts.screen` (off) |
 | **P4 — graduate** | TestFlight checklist run by operator; flip `receipts.screen` | Graduation criteria of PRD §8 met |
 | **Follow-ons (not v1)** | feedback-into-scoring PRD (must answer HL-1's holdout objection); pick value history; league-wide aggregate (Q-2); shuffle baseline (`baseline_edge` reserved column) | own docs, own gates |
@@ -196,7 +195,10 @@ mirroring the doc version, stamped on every grade row — no shared module requi
 ### 7.4 Not foreclosing negative-results memory
 Three deliberate schema choices: (1) grades keyed by `impression_id` with league / taxonomy
 slice keys denormalized → per-league priors are one GROUP BY, no `features_json` parsing;
-(2) ghosts graded identically → no served-only assumption baked in; (3) per-asset deltas
+(2) ghost rows excluded by operator ruling 2026-08-21 — a queue predicate, not a schema
+choice: the `is_ghost` denorm column remains, so the exclusion is a one-line predicate
+and negmem can still read withheld history from `deck_impressions` directly if its own
+plan clears that with the operator; (3) per-asset deltas
 kept in `assets_detail_json` → asset-level priors remain possible. Rejected alternatives
 that WOULD have foreclosed it: grading only served+swiped rows; storing only package-level
 aggregates.
@@ -209,5 +211,5 @@ aggregates.
 | Q-2 | League-wide (all-manager) aggregate: allowed later, given reverse-engineerability at n≈5 leagues? | Out until leagues are bigger; viewer-scoped only |
 | Q-3 | `receipts_min_n` default (10) and 28d headline window — cheap to change (model_config) but the first published values anchor expectations | 10 / 28d |
 | Q-4 | Render cron 4th service vs daily-tick-guard-only | Guard-only; blueprint change deferred |
-| Q-5 | Ghost-cohort end timestamp + interleave state verified against prod `model_config_changes` at build (breaker A-1 twin) | Treat as closed 2026-08-21T00:43Z |
+| Q-5 | ~~Ghost-cohort end verification~~ **Resolved by operator ruling 2026-08-21:** ghost rows are excluded from Receipts entirely, so the end-date verification no longer matters to this feature | n/a |
 | Q-6 | Confirm sibling prefix claims + taxonomy 1.1.0 sign-off at reconciliation | Per §7 as written |

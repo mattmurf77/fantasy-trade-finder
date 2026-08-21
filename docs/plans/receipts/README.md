@@ -29,9 +29,10 @@ grades its own advice.
    prediction is the *asset set and direction*.
 3. **Append-only + `grader_version`** — corrections are new versions with visible
    footnotes, never edits; preregistration is mechanical (4 forbidden ops, each test-pinned).
-4. **Ghosts graded, internal-only, as a bounded cohort** (holdout closed
-   ~2026-08-21T00:43Z, verify at build) — the served-vs-ghost read the accuracy plan asked
-   for, without ever leaking a withheld card to users.
+4. **Ghosts are OUT — operator ruling 2026-08-21 (post-sign-off amendment):**
+   `is_ghost=1` rows never enter the grading queue; the dual-signed served-vs-ghost
+   internal control analysis was deleted by the ruling. Historical rows stay untouched in
+   the DB; user-facing numbers were never affected.
 5. **Viewer-scoped v1** with the maturity/"preregistration ledger" state as the launch
    hero — the honest empty state is the trust pitch, not an apology.
 
@@ -131,6 +132,17 @@ ordering for `grader_version`; HLD import-line sweep.
 ### Unresolved disagreements
 None — both lenses signed off. Two synthesis positions stand as recorded above (admin
 dedup default; constant-over-knob for the midpoint guard).
+
+### Post-sign-off amendment — operator ruling 2026-08-21 (ghosts out)
+After dual sign-off, the operator ruled against ghost cards entirely. Superseded on one
+point: the signed design graded `is_ghost=1` rows as an internal served-vs-ghost control
+(old HLD D-5, PLAN §3.5, PRD DR-6). Amended: ghost rows are excluded from the grading
+queue (`is_ghost IS NULL OR is_ghost = 0`, LLD §4.1), the served-vs-ghost analysis and
+admin split are deleted, PLAN Q-5 (ghost-end verification) is resolved-moot, and the P0
+ghost query becomes cohort sizing only. Historical rows stay untouched in the DB
+(append-only; exclusion is queue/read-time). Every user-facing denominator already
+excluded ghosts, so **no user-facing number changes** — the ruling removes only the
+internal control analysis. This entry, not the round-3 text, is authoritative on ghosts.
 
 ## Sibling coordination (three-plan batch)
 

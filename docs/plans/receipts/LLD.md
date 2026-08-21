@@ -77,7 +77,9 @@ the daily job's business, not the backfill's (no hot-loop, no early stop).
 
 ### 2.2 `GET /api/league/<league_id>/receipts`
 Session auth (viewer = session user); flag `receipts.screen` off → `404 {"error":
-"feature_disabled"}`. Viewer-scoped: rows where `user_id = viewer`, `is_ghost` falsy,
+"feature_disabled"}`. Viewer-scoped: rows where `user_id = viewer`, `is_ghost` falsy
+(defense in depth — ghost rows are never graded at all per the §4.1 queue predicate,
+operator ruling 2026-08-21),
 league matches; deduped by `(league_id, trade_hash)` keeping earliest serve; grader_version
 pinned to max present — ordering by the parsed numeric suffix (`receipts-10` >
 `receipts-2`), never lexicographic. Response (one payload, all windows — anti-cherry-pick by construction):
@@ -121,11 +123,10 @@ players cache at read time (display-only; never used in math).
 
 ### 2.3 `GET /api/admin/receipts/metrics`
 Auth `X-Cron-Secret` (operator-dashboard pattern, `backend/server.py:8140`). Query params:
-`window`, `shape_bucket`, `basis`, `model_arm`, `ghost` (0/1), `league_id`, `dedup`
+`window`, `shape_bucket`, `basis`, `model_arm`, `league_id`, `dedup`
 (default 1 — same earliest-serve rule as the user surface; `dedup=0` includes re-serves,
 response footnoted as correlated) — all optional. Returns per-cell rows: `{cell keys, n,
-win_share, wilson_low, wilson_high, median_edge_pct, gradeable_share, flag_low_share}`,
-a `served_vs_ghost` block (same stats split by `is_ghost`, ghost date range labeled), and
+win_share, wilson_low, wilson_high, median_edge_pct, gradeable_share, flag_low_share}` and
 an `effective_window` block — the distribution of `window_snap_date − serve_snap_date`,
 since the anchors make a nominal 14d window span roughly 11–20d (serve nearest-≤ up to
 3d earlier; window ±3d). Admin cells do **not** apply the user-surface coverage filter —
@@ -174,7 +175,9 @@ receipts_grades_table = Table("receipts_grades", metadata,
     Column("scoring_format",  String),
     Column("served_at",       String, nullable=False),
     Column("trade_hash",      String),                    # read-time dedup key
-    Column("is_ghost",        Integer),
+    Column("is_ghost",        Integer),   # always NULL/0 on graded rows — the queue
+                                            # excludes ghosts (operator ruling 2026-08-21);
+                                            # kept so a ruling change is a predicate flip
     Column("shape_bucket",    String), Column("archetype", String),
     Column("basis",           String), Column("model_arm", String),
     Column("policy_version",  String),
@@ -218,6 +221,8 @@ whose window snapshot isn't yet available simply stays in the queue (terminal ro
 ```
 todo = SELECT i.* FROM deck_impressions i
        WHERE i.assets_json IS NOT NULL                   -- telemetry era only (NG-7)
+         AND (i.is_ghost IS NULL OR i.is_ghost = 0)      -- operator ruling 2026-08-21:
+                                                         -- ghost rows are never graded
          AND date(i.served_at) + :w <= utc_today()       -- per window w ∈ (14,28,56)
          AND NOT EXISTS (SELECT 1 FROM receipts_grades g
                           WHERE g.impression_id = i.impression_id
@@ -386,7 +391,9 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
   completes without duplicates. Proves §5.1.
 - **T-8 regrade:** bump `GRADER_VERSION` → new rows appear, old retained, reads pin max.
   Proves D-3.
-- **T-9 route contracts:** viewer scoping, ghost exclusion, dedup-by-earliest, min-n
+- **T-9 route contracts:** viewer scoping, ghost exclusion at BOTH layers (the queue
+  predicate never grades an `is_ghost=1` row — operator ruling 2026-08-21 — and the route
+  filter stands as defense in depth), dedup-by-earliest, min-n
   gating, all-windows payload, flag-off 404s; `n == len(rows used)` (post-dedup,
   post-coverage) asserted; Wilson implementation against 3/5 → [0.231, 0.882].
 - **T-10 append-only:** module exposes no UPDATE/DELETE for `receipts_` tables.
@@ -403,7 +410,8 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
 Read-only, `prod_analytics` posture (`default_transaction_read_only=on`):
 
 1. `SELECT COUNT(*), COUNT(assets_json), MIN(served_at) FILTER (WHERE assets_json IS NOT NULL) FROM deck_impressions;` + per-league histogram → A-1 gate.
-2. Ghost share + `MAX(served_at) WHERE is_ghost=1` → confirm cohort end (PLAN Q-5) against `model_config_changes`.
+2. Ghost-row count (`is_ghost = 1`) — cohort sizing only: these rows are excluded from
+   grading (operator ruling 2026-08-21) and shrink the gradeable denominator.
 3. Pick-involvement share via `(features_json::jsonb)->>'involves_pick'` (the column is
    `Text`, `backend/database.py:506` — the cast is required on Postgres).
 4. `SELECT COUNT(DISTINCT snapshot_date) FROM player_value_history WHERE snapshot_date >= '2026-07-26'` vs calendar days → gap rate (A-5 tolerance check).
