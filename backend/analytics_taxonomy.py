@@ -606,6 +606,27 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # audit trail, and the import-time disjointness assert below would raise
     # (taking the app down at boot) if someone added it to both.
     "pick_assignment_changed",
+    # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
+    # Registered in the SAME commit as its emitter
+    # (`receipts_service._emit_run_event`), the house rule this file's
+    # docstring states and the NULL-`platform` incident is the reason for.
+    #
+    # SERVER-fired and unforgeable by design: a grading run is an OPERATIONAL
+    # fact about a background job, not a user gesture. Rows carry
+    # user_id="system:receipts" (never a real user), so it must never appear
+    # in ALLOWED_CLIENT_EVENTS — the import-time disjointness assert below
+    # would raise at boot if someone added it to both.
+    #
+    # NON_INTENT in analytics_queries (that row lands in this same commit):
+    # the job fires daily whether or not a human touched the app, so
+    # admitting it would mint a user-day out of a cron tick and break
+    # DAU/WAU at the seam, permanently and silently.
+    #
+    # Props: graded, ungradeable, cap_hit, duration_ms, trigger. Server-fired
+    # names need no CLIENT_EVENT_PROPS row — that registry is the client
+    # allowlist's prop filter, and the import-time completeness check below
+    # is scoped to ALLOWED_CLIENT_EVENTS.
+    "receipts_grade_run",
 })
 
 # ---------------------------------------------------------------------------

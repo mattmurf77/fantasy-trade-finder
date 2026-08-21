@@ -934,6 +934,28 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ the key is ABSENT from the profile (never 0, never null)
     # and no depth_chart_* attribute is read at all.
     "trade.rb_handcuff",
+    # ── Receipts — graded suggestion track record (docs/plans/receipts/) ──
+    # TWO INDEPENDENT KILL SWITCHES, both default false, sequenced
+    # grading-then-screen (PRD DR-11) so the numbers exist before any screen
+    # can show them.
+    #
+    # `receipts.grading` ON ⇒ POST /api/cron/receipts-grade does work, the
+    # daily-tick guard calls the same function, and GET
+    # /api/admin/receipts/metrics answers. OFF (default) ⇒ the cron endpoint
+    # returns {"ok": true, "skipped": "flag"} and writes NOTHING, the guard
+    # is a no-op, and the admin route 404s. Nothing else in the app reads
+    # `receipts_*` tables, so OFF is byte-identical serving by construction —
+    # the grader is an offline consumer of frozen impressions and frozen
+    # consensus snapshots, and adds no line to any generation module
+    # (PLAN §7.3, pinned by test_receipts_grading.py's isolation test).
+    "receipts.grading",
+    # `receipts.screen` ON ⇒ GET /api/league/<id>/receipts answers and the
+    # mobile "Track record" entry point renders. OFF (default) ⇒ that route
+    # 404s `feature_disabled` and the entry point is ABSENT (never an error
+    # dialog — PRD FR-5). Deliberately separate from `receipts.grading`: the
+    # grading half must run dark for ≥2 weeks before any screen ships, and a
+    # bad screen must be revertible without stopping data collection.
+    "receipts.screen",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
