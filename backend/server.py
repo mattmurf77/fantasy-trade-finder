@@ -1026,7 +1026,8 @@ _EVENER_PAIR_POOL = 15        # top-N sub-gap assets scanned pairwise for the co
 
 def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
                     exclude_ids: set, pool_players: list,
-                    seed_value, tier_of=None) -> list[dict]:
+                    seed_value, tier_of=None,
+                    scoring_format: str = DEFAULT_SCORING) -> list[dict]:
     """Evener candidates from one owner's roster + owned picks (Mode B).
 
     Up to _EVENER_MAX single assets whose consensus value falls inside the
@@ -1041,6 +1042,15 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     RAW seed Elo + active format). When given, each PLAYER row additionally
     carries `tier`; picks and 2-piece packages never do (a pick's own label
     already reads as a ladder rung, and a package sum has no single tier).
+
+    **D-147 — picks are priced, not read off the stored column.** Both call
+    sites live inside `_trade_evaluate_impl`, whose `gap_value` is computed
+    from the ENGINE's priced picks; sizing the candidates against the stored
+    ladder meant a one-tap "add their 2026 1.01" was offered as closing a
+    2117.0 gap the card charged 4867.1 for — the sweetener and the hole it
+    was sized to fill came off two different price lists. `scoring_format`
+    exists only for that: the waterfall needs a format, and the caller's is
+    the one the rest of the response used.
     """
     lo, hi = gap_value * _EVENER_WINDOW[0], gap_value * _EVENER_WINDOW[1]
     try:
@@ -1082,7 +1092,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
-        val = float(pk.get("pool_value") or 0.0)
+        val = _priced_pick_value(pk, slot_order, scoring_format)
         if pid in skip or val <= 0:
             continue
         assets.append({
@@ -9827,11 +9837,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                 _slot_order = _league_slot_order(league_id)
                 for _p in load_draft_picks(league_id=league_id,
                                            source=_pick_read_source()):
-                    league_pick_vals[_p["pick_id"]] = priced_pool_value(
-                        _p, scoring_format=fmt,
-                        slot=pick_slots.slot_for(
-                            _slot_order, _p.get("season"), _p.get("round"),
-                            _p.get("original_roster_id")))
+                    league_pick_vals[_p["pick_id"]] = _priced_pick_value(
+                        _p, _slot_order, fmt)
                     league_pick_meta[_p["pick_id"]] = _pick_wire_source(
                         _p, _tradeable, with_season=True)
             except Exception as _lp_err:
@@ -10052,7 +10059,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                              else opponent_user_id)
                     result["eveners"] = _roster_eveners(
                         league_id, owner, gap["value"], in_trade,
-                        _pool_players, seed_value, tier_of=_evener_tier)
+                        _pool_players, seed_value, tier_of=_evener_tier,
+                        scoring_format=fmt)
                 else:
                     pe = gap.get("pick_equivalent")
                     result["eveners"] = (
@@ -10080,7 +10088,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                     result["eveners"] = _roster_eveners(
                         league_id, _os_owner, _os_gap,
                         set(give_raw) | set(recv_raw),
-                        _pool_players, seed_value, tier_of=_evener_tier)
+                        _pool_players, seed_value, tier_of=_evener_tier,
+                        scoring_format=fmt)
             except Exception as evn_err:
                 log.warning("evaluate: one-sided evener build failed (omitted): %s",
                             evn_err)
@@ -10384,17 +10393,47 @@ def get_league_picks():
         # map: the seed map's real floor compression is genuine but is a
         # RANK-EQUIVALENCE issue against the outside market, not the cause of
         # the wrong badge. See docs/reviews/2026-08-19-pick-badge-scale.md.
+        #
+        # ── D-147 (2026-08-21, closes Q-026) — THE VALUE THIS BADGES IS NOW
+        # THE ENGINE'S. `pool_value` on the wire is `_priced_pick_value`, the
+        # same own-slot → round-curve → stored-ladder waterfall under the same
+        # D-090 resolution a trade card charges, so this list, the in-league
+        # calculator that reads `pool_value` off it, and the card can no
+        # longer disagree about a pick. Operator ruling: *"I want the league
+        # values to reflect the same pick values."*
+        #
+        # The badges MOVE, and that is the point rather than a side effect: a
+        # badge reflects the value it is served (D-320-2), and for a
+        # CURRENT-YEAR slotted pick the served value now spreads 5.9x across
+        # one round. A 2026 1.01 badges UP and a 1.12 badges DOWN — they were
+        # identical before, which is the thing the ruling calls wrong. The
+        # BANDS are untouched: `tier_config.json` and its five client mirrors
+        # (docs/cross-client-invariants.md, G-051) are byte-identical, and so
+        # is the inverse — `value_to_elo`, per D-088 below.
+        #
+        # NULL-tier contract, PRESERVED but re-anchored: a row is badgeless
+        # when the waterfall can price it at nothing at all (every step
+        # empty ⇒ 0.0), and `pool_value` then serves as null rather than as a
+        # fake zero. A stored NULL is no longer automatically badgeless,
+        # because the market can price a row the sync never did — which is
+        # exactly what `_power_picks_by_owner` and the engine already do with
+        # the same row, and disagreeing with them is what this ship exists to
+        # end. A price below the `waivers` floor still badges null.
         fmt = sess.get("active_format") or DEFAULT_SCORING
-        def _pick_tier(p: dict):
-            v = p.get("pool_value")
+        def _pick_tier(v):
             if v is None:
                 return None
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
         slot_order = _league_slot_order(league_id)      # D-090, once per request
-        all_picks = [{**p, "label": _owned_pick_label(p, slot_order),
-                      "tier": _pick_tier(p),
-                      **_pick_wire_source(p, tradeable)} for p in raw]
+        def _serialize(p: dict) -> dict:
+            priced = _priced_pick_value(p, slot_order, fmt)
+            value = round(priced, 1) if priced > 0 else None
+            return {**p, "pool_value": value,
+                    "label": _owned_pick_label(p, slot_order),
+                    "tier": _pick_tier(value),
+                    **_pick_wire_source(p, tradeable)}
+        all_picks = [_serialize(p) for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
         return jsonify({
             "my_picks": my_picks,
@@ -10739,6 +10778,45 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
+# ── D-147 — ONE priced value for an owned pick, engine and league alike ───
+#
+# D-146 shipped the per-slot waterfall into the ENGINE only and left the two
+# league SURFACES on the stored ladder, knowingly (slot-pricing scope §6
+# waiver 2). Live, that read as a 2.3x disagreement about the single most
+# valuable asset a team can hold: a 2026 1.01 was 2117.0 on Power Rankings
+# and 4867.1 inside a trade card. The operator's ruling — *"I want the league
+# values to reflect the same pick values"* (2026-08-21, Q-026) — closes it.
+#
+# This helper is the closure. Every site that prices an owned pick calls it,
+# so "the same waterfall with the same slot resolution" is STRUCTURAL rather
+# than six copies of one expression that agree today. `test_pick_pricing_
+# one_seam.py` asserts the reader set by AST walk, in both directions.
+#
+# It is deliberately NOT the place that resolves the order: `slot_order` is
+# passed in because this runs once per PICK and `_league_slot_order` costs a
+# DB read plus a cache lookup once per LEAGUE. Every caller hoists it.
+
+def _priced_pick_value(p: dict, slot_order: dict | None,
+                       scoring_format: str) -> float:
+    """The engine value of ONE owned-pick row `p` — THE only pricing call.
+
+    `pick_slots.slot_for` is pure and refuses everything it should (a future
+    season per #273, an unknown roster, a malformed blob, an unverifiable
+    snake reversal), so a `None` slot rides `priced_pool_value`'s step 2 by
+    itself. `slot_order=None` — the answer for every league whose order is
+    unset, unsupported or unresolvable, and for every league at all while
+    `picks.slot_labels` is off — reproduces the round curve for every pick.
+
+    Returns a number in the stored `draft_picks.pool_value` scale
+    (elo_to_value units). It NEVER writes: pricing is read-time in every mode
+    and the stored column stays the sync-written ladder value (D-146).
+    """
+    return priced_pool_value(
+        p, scoring_format=scoring_format,
+        slot=pick_slots.slot_for(slot_order, p.get("season"), p.get("round"),
+                                 p.get("original_roster_id")))
+
+
 def _owned_picks_available(league_id: str, league) -> bool:
     """May this league's owned picks enter ENGINE math?
 
@@ -10816,26 +10894,20 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
-    _slots: dict[str, int | None] = {}
     for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
-            # D-144 — the slot that sets the PRICE. `_owned_pick_label`
-            # below re-derives the same slot for the LABEL from the same
-            # `slot_order` and the same row, so the two agree by
-            # construction: `pick_slots.slot_for` is pure, and both calls
-            # pass identical arguments. That redundancy is deliberate —
-            # threading a precomputed slot through `_owned_pick_label` would
-            # mean changing all five of its call sites, four of which have no
-            # price to keep in step. If it ever grows a slot parameter, pass
-            # `_slots[pick_id]` here and the guarantee becomes structural
-            # instead of argued.
-            _slots[p["pick_id"]] = pick_slots.slot_for(
-                slot_order, p.get("season"), p.get("round"),
-                p.get("original_roster_id"))
-            _priced[p["pick_id"]] = priced_pool_value(
-                p, scoring_format=scoring_format, slot=_slots[p["pick_id"]])
+            # D-144 — the slot that sets the PRICE, resolved inside
+            # `_priced_pick_value`. `_owned_pick_label` below re-derives the
+            # same slot for the LABEL from the same `slot_order` and the same
+            # row, so the two agree by construction: `pick_slots.slot_for` is
+            # pure, and both calls pass identical arguments. That redundancy
+            # is deliberate — threading a precomputed slot through
+            # `_owned_pick_label` would mean changing all five of its call
+            # sites, four of which have no price to keep in step.
+            _priced[p["pick_id"]] = _priced_pick_value(p, slot_order,
+                                                       scoring_format)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -23241,11 +23313,28 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     Same source as /api/league/picks (load_draft_picks + _owned_pick_label).
     ESPN leagues carry no pick ownership (#158) and demo leagues have no
     rows — both yield {} so every team gets an empty picks group and totals
-    stay players-only. Value is the stored pool_value (written at sync via
-    pick_values.pick_pool_value); rows synced before the pool_value column
-    existed are re-priced via pick_pool_value directly, years_out relative
-    to the earliest synced season (sync writes seasons starting at the
-    league's current season, so min(season) recovers it).
+    stay players-only.
+
+    **Value is the ENGINE's price (D-147, 2026-08-21, closes Q-026).** Each
+    row goes through `_priced_pick_value` — the same three-step waterfall
+    (own slot → round curve → stored ladder) and the same D-090 resolution a
+    trade card charges, so the Power Rankings screen and a trade card can no
+    longer disagree about a pick. Before this, a 2026 1.01 read 2117.0 here
+    and 4867.1 on a card.
+
+    The stored `pool_value` did not stop mattering: it is step 3, the
+    waterfall's floor, so a league DP cannot price at all degrades to exactly
+    the number this function used to serve. Rows synced before the column
+    existed still carry NULL, and are still re-derived via `pick_pool_value`
+    (years_out relative to the earliest synced season — sync writes forward
+    from the league's current season, so min(season) recovers it) BEFORE the
+    waterfall runs, so that legacy floor survives the alignment rather than
+    collapsing to zero.
+
+    Callers inherit the move. `_do_league_history_snapshot` feeds this dict
+    to `roster_history`, so `team_value` / `team_value_picks` shift at this
+    ship — an ADR-011 time-series BOUNDARY, not a rewrite: history rows are
+    append-only and none are recomputed.
 
     `round` (#285, docs/feedback/items/285-pick-sums/status.md) rides each
     item purely for `_pick_firsts_equivalent`'s literal pick-count label
@@ -23270,14 +23359,21 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
         owner = str(p.get("owner_user_id") or "")
         if not owner:
             continue
-        val = p.get("pool_value")
-        if val is None:
+        if p.get("pool_value") is None:
             # NOTE (INV-5): this NULL branch is exactly why a contested slot is
             # withheld by ROW FILTER and never by nulling `pool_value` — nulling
             # would land here and silently re-derive the price the rule exists
             # to withhold.
+            #
+            # D-147 — re-derive INTO a row copy rather than short-circuiting
+            # the waterfall, so a legacy NULL row is priced by the same three
+            # steps as every other row and still keeps this ladder value as
+            # its step-3 floor. The copy is local; the loaded row (and the
+            # stored column behind it) is never mutated.
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
-            val = pick_pool_value(int(p.get("round") or 4), years_out, fmt)
+            p = {**p, "pool_value": pick_pool_value(
+                int(p.get("round") or 4), years_out, fmt)}
+        val = _priced_pick_value(p, slot_order, fmt)
         out.setdefault(owner, []).append({
             "label": _owned_pick_label(p, slot_order),
             "value": round(float(val), 1),

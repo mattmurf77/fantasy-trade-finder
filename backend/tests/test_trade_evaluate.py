@@ -12,6 +12,7 @@ import pytest
 
 import backend.server as srv
 import backend.database as db
+from backend.pick_values import market_pick_pool_value
 
 CALLER = "caller_uid"
 OPP = "opp_uid"
@@ -300,9 +301,24 @@ def test_mode_b_eveners_from_callers_roster_when_caller_wins(monkeypatch):
 
 
 def test_mode_b_eveners_include_owned_picks(monkeypatch):
+    """D-147 (2026-08-21, Q-026) — an evener pick is priced by the ENGINE's
+    waterfall, not by the stored `draft_picks.pool_value`.
+
+    Both call sites of `_roster_eveners` sit inside `_trade_evaluate_impl`,
+    whose `gap` is computed from priced picks. Sizing the candidates against
+    the stored ladder meant the sweetener and the hole it was sized to fill
+    came off two different price lists — a one-tap "add their 2026 1.01"
+    offered as closing a 2117.0 gap the same response charged 4867.1 for.
+
+    The fixture is built so the two answers PROVABLY differ and both are
+    in-window, so the assertion cannot pass by accident: the row STORES
+    1005.3 (0.9x gap) and the 2028 round-1 market curve prices it at 1263.0.
+    Ordering by |Δ| holds either way, so the ranking assertion stays a
+    ranking assertion and the value assertion carries the pricing claim."""
     gap = _consensus_gap(["mid"], ["good"])
-    pick = {"pick_id": "L1_2027_1_3", "owner_user_id": CALLER, "season": 2027,
-            "round": 1, "pool_value": round(gap * 0.9, 1), "is_traded": 0,
+    stored = round(gap * 0.9, 1)                      # 1005.3 — deliberately stale
+    pick = {"pick_id": "L1_2028_1_3", "owner_user_id": CALLER, "season": 2028,
+            "round": 1, "pool_value": stored, "is_traded": 0,
             "original_username": None}
     _install_evener_world(monkeypatch, CALLER, gap, picks=[pick],
                           untouchables=["ev_untouch"])
@@ -311,13 +327,18 @@ def test_mode_b_eveners_include_owned_picks(monkeypatch):
         "league_id": "L1", "opponent_user_id": OPP,
     }, _BOARDS, monkeypatch).get_json()
     singles = [e for e in d["eveners"] if not e.get("is_package")]
-    # |Δ|: ev_close 0 < ev_second 0.05 < pick 0.10 < ev_third 0.20 (capped).
-    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "L1_2027_1_3"]
+    # |Δ|: ev_close 0 < ev_second 0.05 < pick 0.13 < ev_third 0.20 (capped).
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "L1_2028_1_3"]
     pick_row = singles[2]
     assert pick_row["is_pick"] is True
     assert pick_row["position"] == "PICK"
-    assert pick_row["name"] == "2027 1st"
-    assert pick_row["value"] == pytest.approx(gap * 0.9, rel=0.01)
+    assert pick_row["name"] == "2028 1st"
+    # THE D-147 ASSERTION: the market curve, re-derived from the pricing
+    # function, and NOT the stored column the pre-D-147 line read.
+    expected = market_pick_pool_value(2028, 1, "1qb_ppr")
+    assert expected == 1263.0
+    assert pick_row["value"] == pytest.approx(expected, rel=1e-3)
+    assert pick_row["value"] != pytest.approx(stored, rel=1e-3)
 
 
 def test_mode_b_eveners_from_opponents_roster_when_opponent_wins(monkeypatch):

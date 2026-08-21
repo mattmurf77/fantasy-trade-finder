@@ -35,6 +35,7 @@
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
 - [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-144)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
 - [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-144)
+- [One number, one seam: aligning surfaces that must agree (2026-08-21, D-147)](#one-number-one-seam-aligning-surfaces-that-must-agree-2026-08-21-d-147)
 
 ---
 
@@ -529,6 +530,37 @@ The shape that worked, and generalises to any read-time enrichment:
   functions may read DP grew a second permitted reader; it was rewritten from a source-line comparison
   to an AST reader-set equality check with a module-level-import refusal, and sabotage-verified. A
   widened guard that is not also tightened is how a bound quietly becomes decorative.
+## One number, one seam: aligning surfaces that must agree (2026-08-21, D-147)
+
+D-144 put per-slot pick pricing into the engine and left two league surfaces on the stored column.
+Live, the app quoted 2117.0 and 4867.1 for the same pick on two screens. Closing that (Q-026) produced
+a convention for any value multiple surfaces must agree on:
+
+- **N surfaces that must agree get ONE named helper, not N copies of one expression.** The five pricing
+  sites had been drifting because each held its own copy of `priced_pool_value(row, fmt, slot_for(...))`.
+  Extracting `server._priced_pick_value` changed no behaviour at the two already-correct sites — the
+  point was to make the agreement *structural* rather than a fact about today's source.
+- **Guard the seam by AST, bidirectionally, and sabotage-verify both directions.** One test asserts the
+  underlying function is called from exactly one place; a second asserts the seam's caller set is
+  exactly the known surfaces. The first catches a new surface going around; the second catches a known
+  surface quietly regressing to the raw column. Verified by applying a sabotage that is *behaviourally
+  identical* (inlining the same expression) and confirming it still fails — a guard that only catches
+  behaviour changes is not a structural guard.
+- **The list of callers IS the documentation of "which surfaces price this".** Written as a commented
+  set in the test, so adding to it is a deliberate act with a reason attached, and reviewing "what
+  changed" is reading one list rather than grepping.
+- **When a fallback branch exists, feed it INTO the waterfall rather than around it.** The legacy
+  NULL-`pool_value` re-derivation used to short-circuit pricing. It now fills a row COPY and lets all
+  three steps run, so the legacy value becomes step 3 instead of bypassing steps 1-2. The alternative
+  (an early return) would have re-created the very disagreement being closed, for exactly the rows
+  least likely to be noticed.
+- **A per-scope lookup must be counted, not trusted.** `_league_slot_order`'s 60s cache would hide a
+  per-pick lookup in production, so the test counts calls directly: 48 picks, 12 rosters, one lookup.
+- **Name the time-series boundary in the same commit that creates it.** Any derived history table fed
+  by a re-priced reader gets a step at the merge. That belongs in the data dictionary, the scope block
+  and TEST_LEDGER — plus a test proving the writer has no pricing path of its own, so "append-only with
+  a step" is verifiable rather than asserted.
+
 ## Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)
 
 A table-family convention introduced by Receipts, worth reusing for anything that grades our
