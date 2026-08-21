@@ -25,10 +25,11 @@ WHAT THIS FILE PINS, in priority order:
             pricing is applied at READ time only (it is league-shared).
   T-M6B-04  GENERIC_PICK_SEEDS / the tier ladder are unchanged in BOTH modes
             (tier bands are absolute Elo mirrored across five clients).
-  T-M6B-05  **ROUND-LEVEL, NOT PER-SLOT** — a 2026 1.01 and a 2026 1.12 get
-            the SAME price. This is the honest scorecard for what the ruling
-            did and did not buy; true-slot pricing is the unbuilt half of
-            Q-023 and this test fails loudly if someone ships it silently.
+  T-M6B-05  **PER-SLOT: a resolved 1.01 outprices a 1.05 outprices a 1.12.**
+            The operator's ruling in one assertion — each pick holds real
+            value rather than generic. Its sibling pins the FALLBACK: a pick
+            whose order is UNRESOLVED still prices at the round curve, which
+            is what every future-year pick and every order-less league gets.
   plus      the slot-mapping basis, format awareness, the DP-horizon
             extrapolation, fail-soft to the ladder, the thread-local
             contextmanager, the cap-after-pricing rule, and the retired route.
@@ -340,75 +341,183 @@ def test_the_measured_reshaping_direction_is_deflation_not_inflation():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# T-M6B-05 — what the ruling did NOT buy: the price is ROUND-level
+# T-M6B-05 — the per-slot price, and the round-curve fallback under it
 # ═══════════════════════════════════════════════════════════════════════════
+#
+# Pinned against the snapshot `conftest.py` installs
+# (fixtures/dp_values_picks_2026-08-06.csv), 1QB, 2026 round 1:
+#
+#     ladder rung (every first alike) 2117.0
+#     round curve (mid tercile)       1859.5
+#     slot 1.01                       4867.1     2.62x the round price
+#     slot 1.05                       2343.2     1.26x
+#     slot 1.12                        820.8     0.44x
+#
+# The literals are spelled out rather than recomputed from the function under
+# test, so a change to the pricing path has to change this block on purpose.
 
-def test_m6b_05_a_101_and_a_112_price_identically(monkeypatch):
-    """**THE SCORECARD TEST. Read it before quoting a 1.01 number anywhere.**
+_R1_2026 = {1: 4867.1, 5: 2343.2, 12: 820.8}
+_R1_ROUND_PRICE = 1859.5
+_R1_LADDER_RUNG = 2117.0
 
-    Q-023 is about pricing a pick at its TRUE SLOT — a 1.01 above a 1.12. That
-    is NOT what shipped. `market_slots` prices at the round's mid-tercile
-    basis, so two 2026 firsts are the same number whatever slot D-090 resolved
-    for them. The engine sees no 1.01/1.12 spread at all.
 
-    The gap is large and the direction is counter-intuitive, so both are
-    pinned: DP's own slot curve says the 1.01 is worth ~2.6x the round price
-    and the 1.12 about 0.44x, and the shipped round price sits BELOW today's
-    flat ladder rung. "Adopting the market" made firsts CHEAPER, not dearer.
+def test_m6b_05_a_resolved_101_outprices_a_105_outprices_a_112():
+    """**THE RULING, AS ONE ASSERTION.** Operator: each pick should hold "real
+    value rather than generic".
 
-    If true-slot pricing is ever built, this test fails — which is the point.
-    Update it deliberately; do not relax it."""
-    slots = data_loader.load_pick_slot_values("1qb_ppr")
-    round_price = pv.market_pick_pool_value(2026, 1, "1qb_ppr")
+    Before D-144's per-slot extension all three of these priced identically at
+    the round curve; before M6b they priced identically at the ladder rung.
+    Now they are ordered, and the spread is enormous — a 1.01 is 5.9x a 1.12.
 
-    # Two owned 2026 firsts. Nothing in a `draft_picks` row carries a slot,
-    # and `priced_pool_value` takes none, so they cannot differ.
-    a = pv.priced_pool_value(_row(2026, 1, 2117.0, "the_101"),
+    The row is IDENTICAL in all three calls. Only `slot` differs, which is the
+    point: the price comes from the resolved slot, not from anything stored on
+    the pick."""
+    row = _row(2026, 1, _R1_LADDER_RUNG)
+    priced = {s: pv.priced_pool_value(row, scoring_format="1qb_ppr", slot=s)
+              for s in (1, 5, 12)}
+
+    assert priced[1] > priced[5] > priced[12]
+    for s, expected in _R1_2026.items():
+        assert priced[s] == pytest.approx(expected, abs=0.05), s
+    assert priced[1] / priced[12] > 5.0
+
+    # The round curve is not a floor or a ceiling — real slots straddle it.
+    assert priced[1] > _R1_ROUND_PRICE > priced[12]
+    # ...and so does the ladder rung the whole app used to charge.
+    assert priced[1] > _R1_LADDER_RUNG > priced[12]
+
+
+def test_m6b_05b_an_unresolved_slot_still_prices_at_the_round_curve():
+    """**THE FALLBACK CONTRACT — the sibling that keeps the ruling honest.**
+
+    Per-slot pricing applies only where D-090 resolved an order. Everything
+    else — every future-year pick (DP publishes no per-slot rows for them at
+    all), every league on an unsupported platform, every league whose order is
+    unpublished or unresolvable, and every call while `picks.slot_labels` is
+    off — must still price at the round curve, exactly as it did before the
+    extension.
+
+    Two 2026 firsts with NO slot are therefore identical, which is the
+    property `test_m6b_05_a_...` deliberately breaks when a slot IS known."""
+    row = _row(2026, 1, _R1_LADDER_RUNG)
+    for unresolved in (None, 0):
+        assert pv.priced_pool_value(row, scoring_format="1qb_ppr",
+                                    slot=unresolved) == _R1_ROUND_PRICE
+
+    # Two different picks, same round, neither resolved → same price.
+    a = pv.priced_pool_value(_row(2026, 1, _R1_LADDER_RUNG, "a"),
                              scoring_format="1qb_ppr")
-    b = pv.priced_pool_value(_row(2026, 1, 2117.0, "the_112"),
+    b = pv.priced_pool_value(_row(2026, 1, _R1_LADDER_RUNG, "b"),
                              scoring_format="1qb_ppr")
-    assert a == b == round_price
-
-    v101 = ts.elo_to_value(slots["2026 Pick 1.01"])
-    v112 = ts.elo_to_value(slots["2026 Pick 1.12"])
-    assert v101 / v112 > 5.0                       # the spread DP publishes…
-    assert a == b                                  # …and the spread we charge
-    assert v101 > round_price * 2.5                # what a 1.01 is NOT charged
-    assert v112 < round_price * 0.5                # what a 1.12 is NOT charged
-    # And the headline direction, against the flat ladder rung it replaces.
-    assert round_price < pv.pick_pool_value(1, 0)
+    assert a == b == _R1_ROUND_PRICE
 
 
-def test_m6b_05b_the_badge_follows_the_served_value(monkeypatch):
-    """D-320-2: a pick's tier badge reflects the value it is SERVED at, not
-    its name. So the badge move is a consequence of the repricing, not a
-    second decision — and it moves exactly as far as the value does.
+def test_m6b_05c_future_years_ignore_a_slot_because_dp_publishes_none():
+    """"Future picks stay default for now" — the operator's second clause.
+
+    It needs no branch in our code: DP prices individual slots only for the
+    current class, so `market_pick_slot_value` returns None for a future
+    season and the waterfall falls to the round curve by itself. Asserted at
+    BOTH levels so a future snapshot that starts publishing 2027 slots fails
+    here loudly rather than silently repricing next year's picks."""
+    for season in (2027, 2028, 2029):
+        assert pv.market_pick_slot_value(season, 1, 1, "1qb_ppr") is None, season
+        with_slot = pv.priced_pool_value(_row(season, 1, 999.0),
+                                         scoring_format="1qb_ppr", slot=1)
+        without = pv.priced_pool_value(_row(season, 1, 999.0),
+                                       scoring_format="1qb_ppr")
+        assert with_slot == without
+        assert with_slot == pv.market_pick_pool_value(season, 1, "1qb_ppr")
+
+
+def test_m6b_05d_per_slot_is_format_aware():
+    """A superflex 1.01 is dearer than a 1QB one, like every other DP price."""
+    for s in (1, 5, 12):
+        sf = pv.market_pick_slot_value(2026, 1, s, "sf_tep")
+        one = pv.market_pick_slot_value(2026, 1, s, "1qb_ppr")
+        assert sf > one, (s, sf, one)
+    assert pv.market_pick_slot_value(2026, 1, 1, "sf_tep") == pytest.approx(
+        6181.1, abs=0.05)
+
+
+def test_m6b_05e_slot_pricing_falls_soft_at_every_step(monkeypatch):
+    """The waterfall's three steps, each proven by removing the one above it.
+
+    Step 3 (the stored ladder) is the only safety net left, so its trigger —
+    DP unreachable — is exercised explicitly rather than assumed."""
+    # (a) a round DP does not publish per-slot: no row, so round curve.
+    assert pv.market_pick_slot_value(2026, 9, 1, "1qb_ppr") is None
+    # (b) junk slots never raise and never invent a price.
+    for junk in (None, 0, -3, "nope"):
+        assert pv.market_pick_slot_value(2026, 1, junk, "1qb_ppr") is None
+    # (c) DP unreachable ⇒ even a perfectly good slot yields the stored value.
+    monkeypatch.setattr(data_loader, "load_pick_slot_values", lambda *a, **k: {})
+    assert pv.market_pick_slot_value(2026, 1, 1, "1qb_ppr") is None
+    assert pv.priced_pool_value(_row(2026, 1, 1234.5), scoring_format="1qb_ppr",
+                                slot=1) == 1234.5
+
+
+def test_m6b_05f_the_badge_follows_the_served_value():
+    """D-320-2: a pick's tier badge reflects the value it is SERVED at, not its
+    name. Per-slot pricing is where that finally bites — a 1.01 and a 1.12 are
+    both "a 2026 1st" and now badge in genuinely different bands.
 
     Walked over the same inverse the clients use, so a badge computed here
-    matches what `/api/league/picks` would compute from the same number."""
+    matches what a client would compute from the same number."""
     tier_for = srv.RankingService.tier_for_elo
     v2e = ts.value_to_elo
+    band = lambda v: tier_for(v2e(v), None, "1qb_ppr")
 
-    ladder_1st = pv.pick_pool_value(1, 0)                       # 2117.0
-    market_1st = pv.market_pick_pool_value(2026, 1, "1qb_ppr")  # 1859.5
-    assert market_1st < ladder_1st
+    b101, b112 = band(_R1_2026[1]), band(_R1_2026[12])
+    assert b101 != b112, "the ruling's whole point: they no longer badge alike"
+    # The old world: one rung, therefore one badge for every 2026 first.
+    assert band(_R1_LADDER_RUNG) == band(_R1_LADDER_RUNG)
+    # Every band is a real band — no pick falls off the ladder into None.
+    for v in (*_R1_2026.values(), _R1_ROUND_PRICE, _R1_LADDER_RUNG):
+        assert band(v) is not None, v
 
-    # Both still band as firsts here — the round price did not fall through a
-    # band edge — which is the honest, unexciting answer for the ROUND-level
-    # curve. The 38/48 badge churn Q-023 measured belongs to TRUE-SLOT
-    # pricing; asserting it against this build would be false.
-    for value in (ladder_1st, market_1st):
-        assert tier_for(v2e(value), None, "1qb_ppr") is not None
 
-    # Where the badge DOES move: the per-slot curve, if it were ever served.
-    slots = data_loader.load_pick_slot_values("1qb_ppr")
-    band_101 = tier_for(v2e(ts.elo_to_value(slots["2026 Pick 1.01"])),
-                        None, "1qb_ppr")
-    band_112 = tier_for(v2e(ts.elo_to_value(slots["2026 Pick 1.12"])),
-                        None, "1qb_ppr")
-    band_now = tier_for(v2e(market_1st), None, "1qb_ppr")
-    assert band_101 != band_112                 # slots would badge apart…
-    assert band_now == tier_for(v2e(market_1st), None, "1qb_ppr")   # …we do not
+def test_m6b_05g_the_engine_read_site_applies_the_slot(monkeypatch):
+    """End to end through `_owned_pick_assets`, because a seam nothing calls
+    with a slot would pass every test above and still ship generic prices.
+
+    Pins the ORDERING too: the cap sorts on the priced value, so a 1.01 must
+    outrank a 1.12 of the same round — which the ladder could never express."""
+    rows = [_row(2026, 1, _R1_LADDER_RUNG, "P_101"),
+            _row(2026, 1, _R1_LADDER_RUNG, "P_112")]
+    rows[0]["original_roster_id"] = "r1"
+    rows[1]["original_roster_id"] = "r12"
+    order = {"schema": 1, "season": 2026, "teams": 12, "type": "linear",
+             "slots": {"r1": 1, "r12": 12}}
+    monkeypatch.setattr(srv, "load_draft_picks", lambda **k: [dict(r) for r in rows])
+    monkeypatch.setattr(srv, "_picks_pool_cap", lambda: 6)
+    monkeypatch.setattr(srv, "_league_slot_order", lambda lid: order)
+
+    out = srv._owned_pick_assets("L", "1qb_ppr")["o1"]
+    priced = {a.id: ts.elo_to_value(1200.0 + 6.0 * a.pick_value) for a in out}
+    assert priced["P_101"] == pytest.approx(_R1_2026[1], rel=1e-3)
+    assert priced["P_112"] == pytest.approx(_R1_2026[12], rel=1e-3)
+    assert [a.id for a in out] == ["P_101", "P_112"], "cap must sort on price"
+    # The label agrees with the price — the same slot drove both.
+    assert out[0].name.startswith("2026 1.01")
+    assert out[1].name.startswith("2026 1.12")
+
+
+def test_m6b_05h_no_resolved_order_reproduces_the_round_curve_at_the_read_site(monkeypatch):
+    """The same read site with `_league_slot_order` returning None — the
+    answer for every league we cannot resolve. Both picks price at the round
+    curve and the labels stay generic, byte-identical to pre-extension."""
+    rows = [_row(2026, 1, _R1_LADDER_RUNG, "P_a"),
+            _row(2026, 1, _R1_LADDER_RUNG, "P_b")]
+    monkeypatch.setattr(srv, "load_draft_picks", lambda **k: [dict(r) for r in rows])
+    monkeypatch.setattr(srv, "_picks_pool_cap", lambda: 6)
+    monkeypatch.setattr(srv, "_league_slot_order", lambda lid: None)
+
+    out = srv._owned_pick_assets("L", "1qb_ppr")["o1"]
+    priced = {a.id: ts.elo_to_value(1200.0 + 6.0 * a.pick_value) for a in out}
+    assert priced["P_a"] == pytest.approx(_R1_ROUND_PRICE, rel=1e-3)
+    assert priced["P_b"] == pytest.approx(_R1_ROUND_PRICE, rel=1e-3)
+    assert all(a.name == "2026 1st" for a in out)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
