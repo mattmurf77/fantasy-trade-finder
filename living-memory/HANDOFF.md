@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-21 — negmem planning COMPLETE; batch delivery staged; operator holds 3 decisions](#2026-08-21--negmem-planning-complete-batch-delivery-staged-operator-holds-3-decisions)
+- [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)
 - [2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge](#2026-08-21--counterparty-breaker-complete-suite-converged-v1-built-dark-pr-161-awaits-operator-merge)
 - [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
@@ -40,25 +40,44 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-21 — negmem planning COMPLETE; batch delivery staged; operator holds 3 decisions
+## 2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed
 
-**Where:** the "Negative-results memory" planning assignment is DONE on branch
-`claude/vigilant-spence-8583f5` — memo, scope, PLAN, PRD FINAL (4 rounds), HLD FINAL
-(4 rounds), LLD FINAL (3 rounds, Opus lenses), reconciliation-log with all three round
-trails. Planning only; zero code. plans/README row: "planned — suite complete, build
-gated on operator."
+**Where:** v1 is **complete and dark** on `claude/vigilant-spence-8583f5` — not merged, not
+pushed unless asked. The planning suite (memo · scope · PLAN · PRD/HLD/LLD FINAL ·
+reconciliation-log) is unchanged and on the same branch; the operator's three §6 rulings
+(2026-08-22) opened the build gate, and the build ran as four waves.
 
-**Batch state:** shared taxonomy v1.1.1 closed three-ways. Receipts suite staged;
-breaker suite converging (their build follows immediately per direct operator
-instruction in their session). Receipts pinged for the batch; the coordinator runs the
-final reconciliation check before operator delivery.
+**What exists (code):** `backend/negmem.py` — leaf, imports stdlib + feature_flags + database
+only · flag `trade.negmem` (**false**) + 6 `negmem_*` knobs ×3 registrations + `MODEL_A_PROFILE`
+pin at strength 0.0 · `config/negmem_leagues.json` (**empty**) + `FTF_NEGMEM_LEAGUES`, `"*"` =
+all · four consultation seams (serving stack, gen_v2, fit, and both `bakeoff_runner` arm
+adapters) · the features-assembly stamp trichotomy · the M2 feed at both gen_v2 call sites ·
+`backend/scripts/negmem_readout.py` + `negmem_rfps.py` · `scripts/negmem-stamp-rate.sql` +
+`scripts/negmem-gr4-joint.sql`. **Docs:** config-reference (flag + allowlist incl. the wildcard
++ 6 knobs + the M2 global-kill note) · data-dictionary (all four stamp variants + the job-dict
+`negmem_note`) · glossary (negmem / reason family / evidence cell) · architecture +
+living-memory/HLD + living-memory/LLD · runbook § negmem (8 lines) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-144](DECISIONS.md) ·
+TEST_LEDGER 2026-08-22.
 
-**The build gate = the three operator decisions in scope.md §6** (presented with
-recommendations in PRD §8.1): D-067 soft-family ruling · layer-2 v1 boundary (feed the
-stub) · privacy posture (recommend aggregate-only derive-on-read). Nothing builds
-before they're answered.
+**What is OWED, in order:**
+1. **Merge** (operator's call). Merging lights nothing: the ON-condition is flag **∧**
+   allowlist, and both ship off/empty.
+2. **The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+   — UNRUN.** It is the only runtime evidence under D-056, and **step 0 must run BEFORE the
+   flip** or the before-picture is unrecoverable.
+3. **Two rollout flips at a bake-off ROUND BOUNDARY** (GR3 — mid-round censors the window):
+   league into `config/negmem_leagues.json`, then `trade.negmem` true. Then the ≥4-week
+   arm-attributed read and the pre-registered RFPS graduation rule (PRD §8.3) — whose baseline
+   freeze + frozen-cohort artifact must be committed **before** the window opens.
 
-**Branch hygiene:** not merged, not pushed unless asked; ~20 commits, all planning docs.
+**Two traps that both look like success — do not re-derive:** killing M2 through a per-arm
+overlay leaves the feed populated (only a **GLOBAL** `gen2_accept_prior_strength = 0` empties
+it; `negmem_strength` governs M1 only), and a stamp-rate query returning **zero rows** means an
+empty allowlist, not failing builds. Both are runbook lines 4 and 7.
+
+**Do not claim this is validated.** Evidence is structural only: green suite with named
+sabotages. No deck has ever been generated with the flag on for a real league.
 ## 2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge
 
 **Where:** branch `claude/counterparty-breaker-plan`, tip `da23921`, **pushed** —

@@ -45,3 +45,6 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-010 User-Asserted Pick Ownership is League-Scoped Truth in `draft_picks`](adr-010-user-asserted-pick-ownership.md)
 - [ADR-011 League State Gets an Append-Only History](adr-011-league-state-history-is-append-only.md)
 - [ADR-012 A Co-Owned Sleeper Roster Has One League Identity: its Primary `owner_id`](adr-012-co-owned-roster-identity.md)
+- [ADR-013 The Fit Challenger is a Generator, Not a Config Profile of the Live Engine](adr-013-fit-challenger-is-a-generator.md)
+- [ADR-014 Bake-Off Serving Rounds](adr-014-bakeoff-serving-rounds.md)
+- [ADR-015 Negative-Results Memory is a Clamped Soft Prior, Not a Fourth Filter](adr-015-negmem-soft-prior-not-fourth-filter.md)

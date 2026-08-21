@@ -5,11 +5,23 @@ shape, and rejection reason — consulted by the trade engine as a **prior durin
 generation**, not just a filter after. The lesson from a rejected trade stops landing in
 a log row and staying there; the next generation run starts from a different place.
 
-**Status:** PLANNING ONLY — full gates, no build. Operator-assigned 2026-08-21 (dispatch
-session, item 2 of the product-gap review). Planning stops at the doc suite for operator
-review, after reconciliation with the sibling **Receipts** feature (item 1, planned in
-session `trade-suggestions-review-69c9eb-f4` — the post-mortem half of the same loop:
-Receipts grades what we suggested; this remembers what died so it isn't re-generated).
+**Status (2026-08-22): BUILT DARK — v1 complete on `claude/vigilant-spence-8583f5`, not
+merged, and lit nowhere.** The planning suite went through full gates first; the operator's
+three §6 rulings (2026-08-22) opened the build gate, and the build ran in four waves.
+Decision records: [ADR-015](../../adr/adr-015-negmem-soft-prior-not-fourth-filter.md),
+[D-144](../../../living-memory/DECISIONS.md).
+
+**Nothing is on.** The ON-condition is `trade.negmem` (**false**) **∧** the league appearing in
+`config/negmem_leagues.json` (**empty**) — so no deck has ever been generated with this active
+and **no runtime evidence exists**. [testflight-checklist.md](testflight-checklist.md) is the
+only runtime evidence this gets (D-056) and it is **UNRUN**; its step 0 has to happen *before*
+the flip. Rollout is two operator flips at a bake-off **round boundary** (GR3), not a code
+change — PRD §8.2.
+
+Originally operator-assigned 2026-08-21 (dispatch session, item 2 of the product-gap review),
+reconciled three-ways with the sibling **Receipts** (item 1 — the post-mortem half of the same
+loop: Receipts grades what we suggested; this remembers what died so it isn't re-generated) and
+**counterparty-breaker** features.
 
 **Two layers** (PRD decides the v1 boundary):
 1. **User-side memory** — what THIS user rejects (shape aversions, board misfits) → the
@@ -27,13 +39,14 @@ failed hypothesis, in the context where it failed, and the system stops repeatin
 
 | Doc | What | Status |
 |---|---|---|
-| [research-verification.md](research-verification.md) | Code-truth memo: every existing suppression/learning mechanism, with citations | in progress |
-| [scope.md](scope.md) | Feature-gate scope block (docs/templates/feature-scope.md) | pending |
-| [PLAN.md](PLAN.md) | Delivery plan | pending |
-| [PRD.md](PRD.md) | Product requirements (dual-agent-doc-review) | pending |
-| [HLD.md](HLD.md) | High-level design (dual-agent-doc-review) | pending |
-| [LLD.md](LLD.md) | Low-level design (dual-agent-doc-review) | pending |
-| reconciliation.md | The contract-level reconcile with Receipts (shared shape taxonomy, table ownership, pipeline touchpoints) | after both suites draft |
+| [research-verification.md](research-verification.md) | Code-truth memo: every existing suppression/learning mechanism, with citations | done |
+| [scope.md](scope.md) | Feature-gate scope block (docs/templates/feature-scope.md) | done — §6 rulings recorded 2026-08-22 |
+| [PLAN.md](PLAN.md) | Delivery plan | done |
+| [PRD.md](PRD.md) | Product requirements (dual-agent-doc-review) | FINAL |
+| [HLD.md](HLD.md) | High-level design (dual-agent-doc-review) | FINAL |
+| [LLD.md](LLD.md) | Low-level design (dual-agent-doc-review) | FINAL |
+| [reconciliation-log.md](reconciliation-log.md) | The contract-level reconcile with Receipts + breaker (shared shape taxonomy, table ownership, pipeline touchpoints) | done — three-way, taxonomy v1.1.1 |
+| [testflight-checklist.md](testflight-checklist.md) | The operator's runtime pass (LLD §8.5) — the ONLY runtime evidence under D-056 | **written, UNRUN** |
 
 ## Constraints of record (from dispatch + verified corrections)
 

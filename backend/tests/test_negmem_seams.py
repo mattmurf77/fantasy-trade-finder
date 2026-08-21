@@ -19,6 +19,11 @@ the leaf module; THIS file owns everything that had to be cut into an engine:
   N-25 the allowlist is the OTHER half of the ON-condition    (§4.1 / DE-7)
   N-27 the relaxed pass consults the SAME map                 (§6.2 / HLD §3.5)
 
+…plus the through-the-RUNNER half of N-8/N-18: `bakeoff_runner.gen_v2_cards`
+and `gen_fit_cards` are the only callers of their generators inside a bake-off
+job, so a runner that dropped §6.3/§6.4's forwarding would leave every
+direct-call seam test above green while arms C and fit ran negmem-blind.
+
 Three house rules are load-bearing here:
 
 * **Fixture power (HLD §7).** Every "nothing happened" assertion runs against
@@ -51,6 +56,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine, select, text
 
+import backend.bakeoff_runner as _bakeoff
 import backend.database as db_module
 import backend.feature_flags as ff
 import backend.negmem as negmem
@@ -1124,6 +1130,200 @@ def test_n9_arm_a_rows_stamp_exactly_identity():
             assert stamp == {"m": 1.0, "ver": negmem.NEGMEM_VER}
     influenced = [s for a, s in rows if a != "baseline" and s["m"] < 1.0]
     assert influenced, "fixture power: no non-baseline arm was influenced"
+
+
+# ===========================================================================
+# N-8 / N-18, through the RUNNER — `bakeoff_runner.gen_v2_cards` and
+# `gen_fit_cards` are the ONLY callers of their generators in a bake-off job
+# (§6.3's second call site + §6.4). The seam tests above call those generators
+# directly, so without this section a runner that dropped the forwarding would
+# leave every one of them green while arms C and fit ran negmem-blind.
+# ===========================================================================
+
+def _runner_kwargs(**extra):
+    """The shape `server._run_trade_job` splats into the fan-out lambdas."""
+    kwargs = dict(user_id=USER, user_elo=None, user_roster=None,
+                  league_id=LEAGUE, seed_elo=None, confidence=None,
+                  scoring_format="1qb_ppr")
+    kwargs.update(extra)
+    return kwargs
+
+
+def _runner_world(nm):
+    svc, players, league, user_roster, seed, user_elo = _service()
+    kwargs = _runner_kwargs(user_elo=user_elo, user_roster=user_roster,
+                            seed_elo=seed)
+    if nm is not None:
+        kwargs["negmem"] = nm          # server.py sets the key only when a map
+                                       # exists (§6.1) — mirrored here.
+    return svc, kwargs
+
+
+def test_runner_gen_v2_cards_forwards_the_map_and_the_m2_feed():
+    """§6.3's second call site, asserted with the SAME asymmetry the serving
+    path is held to by `test_n8_m2_feed_kwarg_is_conditional_...`:
+    `negmem_map` rides unconditionally (None when negmem is off),
+    `acceptance_stats` is spliced in only when a map exists.
+
+    Sabotage: delete either line from `gen_v2_cards` — the corresponding
+    assertion goes RED (and nothing else in this file notices).
+    """
+    nm = _build_map(accept_prior_strength=10.0, extra_seed=_seed_m2)
+    assert nm.m2_feed(), "fixture power: an empty feed would prove nothing"
+    calls: list[dict] = []
+    real = trade_gen_v2.generate_league_suggestions
+
+    def _spy(**kw):
+        calls.append(kw)
+        return real(**kw)
+
+    with _global_cfg(**_seam_cfg(1.0)):
+        with _pins(**{"trade.negmem": True}):
+            with patch.object(trade_gen_v2, "generate_league_suggestions",
+                              _spy):
+                for arg in (None, nm):
+                    svc, kwargs = _runner_world(arg)
+                    _bakeoff.gen_v2_cards(svc, kwargs)
+    assert len(calls) == 2
+    off, on = calls
+    assert "negmem_map" in off and off["negmem_map"] is None
+    assert "acceptance_stats" not in off
+    assert on["negmem_map"] is nm
+    assert on["acceptance_stats"] == nm.m2_feed()
+
+
+def test_runner_gen_v2_cards_carry_negmem_influence_to_arm_c():
+    """The behavioural half: arm C's emitted cards move by `m` and carry the
+    consult-time stamp when the runner forwards the map — membership
+    untouched, exactly as at the direct call site (N-8).
+
+    Sabotage: drop `negmem_map = _nm` from `gen_v2_cards` — every assertion
+    below except the membership one goes RED.
+    """
+    nm = _build_map()
+    m = nm.partner_mult[OPP_A]
+    # The runner applies C4b (`cap_give_headliners`) to what the generator
+    # returns, and that cap is keep-first-in-rank-order — real behaviour
+    # (test_n18_fit_cap_interaction_is_recorded records it for fit), but with
+    # it on a membership assertion would compare two different card sets.
+    with _global_cfg(**_seam_cfg(1.0, deck_give_headliner_cap=0.0)):
+        with _pins(**{"trade.negmem": True}):
+            svc_off, kw_off = _runner_world(None)
+            plain = _bakeoff.gen_v2_cards(svc_off, kw_off)
+            svc_on, kw_on = _runner_world(nm)
+            live = _bakeoff.gen_v2_cards(svc_on, kw_on)
+    assert plain, "the runner produced no arm-C cards"
+    assert [_key(c) for c in plain] == [_key(c) for c in live]
+    base = {_key(c): c.composite_score for c in plain}
+    moved = [c for c in live if c.target_user_id == OPP_A]
+    assert moved, "fixture power: arm C emitted no card toward the partner"
+    for card in moved:
+        assert card.composite_score == pytest.approx(
+            round(base[_key(card)] * m, 4), abs=1e-9)
+        assert card.negmem_stamp["m"] == round(m, 4)
+    for card in live:
+        if card.target_user_id != OPP_A:
+            assert card.composite_score == base[_key(card)]
+            assert getattr(card, "negmem_stamp", None) is None
+
+
+def test_runner_gen_fit_cards_forward_the_map_unconditionally():
+    """§6.4 through the runner. `negmem_map` is a plain kwarg on this path too
+    — no `acceptance_stats` splat, because `acceptance_prior` is a gen_v2
+    mechanism and `trade_gen_fit` has no such parameter.
+
+    Sabotage: drop `negmem_map = kwargs.get("negmem")` from `gen_fit_cards`.
+    """
+    nm = _build_map()
+    calls: list[dict] = []
+    real = trade_gen_fit.generate_league_suggestions
+
+    def _spy(**kw):
+        calls.append(kw)
+        return real(**kw)
+
+    with _global_cfg(**_seam_cfg(1.0)):
+        with _pins(**{"trade.negmem": True}):
+            with patch.object(trade_gen_fit, "generate_league_suggestions",
+                              _spy):
+                for arg in (None, nm):
+                    svc, kwargs = _runner_world(arg)
+                    _bakeoff.gen_fit_cards(svc, kwargs)
+    assert len(calls) == 2
+    off, on = calls
+    assert "negmem_map" in off and off["negmem_map"] is None
+    assert on["negmem_map"] is nm
+    assert all("acceptance_stats" not in kw for kw in calls)
+
+
+def test_runner_gen_fit_cards_carry_negmem_influence_to_arm_fit():
+    """Fit's effect is ORDER (§6.4), so the runner assertion is on order — and
+    on the stamp, which is what makes the influence observable in the readout.
+
+    Sabotage: drop the forwarding — order collapses back to the plain one and
+    no card is stamped.
+    """
+    nm = _build_map()
+    # Both caps off for the same reason as the arm-C case above (fit's own C4
+    # centerpiece cap is `deck_headliner_cap`, applied inside the module).
+    with _global_cfg(**_seam_cfg(1.0, deck_give_headliner_cap=0.0,
+                                 deck_headliner_cap=0.0)):
+        with _pins(**{"trade.negmem": True}):
+            svc_off, kw_off = _runner_world(None)
+            plain = _bakeoff.gen_fit_cards(svc_off, kw_off)
+            svc_on, kw_on = _runner_world(nm)
+            live = _bakeoff.gen_fit_cards(svc_on, kw_on)
+    assert plain, "the runner produced no arm-fit cards"
+    assert sorted(_key(c) for c in plain) == sorted(_key(c) for c in live)
+    assert [_key(c) for c in plain] != [_key(c) for c in live]
+    stamped = [c for c in live if getattr(c, "negmem_stamp", None)]
+    assert stamped and {c.target_user_id for c in stamped} == {OPP_A}
+    assert not [c for c in plain if getattr(c, "negmem_stamp", None)]
+
+
+def test_runner_bakeoff_job_carries_negmem_into_arm_c_and_arm_fit():
+    """The whole fan-out, assembled exactly as `server._run_trade_job` does it
+    (§6.1): ONE map, splatted into every arm's lambda. Both C and fit must come
+    back carrying influenced cards.
+
+    The harness world used by N-9 cannot host this assertion — its opponents
+    are unranked, so arms C and fit legitimately emit zero cards there and the
+    test would be vacuous. This world produces cards on all three paths, which
+    is what makes "the runner forwarded it" a real claim.
+
+    Sabotage: revert either forwarding block in `bakeoff_runner.py` — the
+    matching arm's stamp assertion goes RED while every direct-call seam test
+    above stays green.
+    """
+    nm = _build_map()
+    with _global_cfg(**_seam_cfg(1.0, bakeoff_include_gen_v2=1.0,
+                                 bakeoff_include_fit=1.0,
+                                 bakeoff_serve_fit=1.0,
+                                 deck_give_headliner_cap=0.0,
+                                 deck_headliner_cap=0.0)):
+        with _pins(**{"trade.negmem": True, "trade.bakeoff": True}):
+            svc, gen_kwargs = _runner_world(nm)
+            run = _bakeoff.run_bakeoff(
+                generate  = lambda **ov: svc.generate_trades(
+                    **{**gen_kwargs, **ov}),
+                gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
+                    svc, {**gen_kwargs, **ov}),
+                gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
+                    svc, {**gen_kwargs, **ov}),
+                league_id = LEAGUE,
+            )
+    for arm in ("gen_v2", "fit"):
+        result = run.arms.get(arm)
+        assert result is not None and not result.error, (
+            f"arm {arm} did not run: {result and result.error}")
+        assert result.cards, f"fixture power: arm {arm} emitted nothing"
+        stamped = [c for c in result.cards
+                   if getattr(c, "negmem_stamp", None)]
+        assert stamped, (
+            f"arm {arm} ran negmem-blind — the runner dropped the forwarding")
+        assert {c.target_user_id for c in stamped} == {OPP_A}
+        assert all(M_BAND[0] < c.negmem_stamp["m"] < M_BAND[1]
+                   for c in stamped)
 
 
 # ===========================================================================

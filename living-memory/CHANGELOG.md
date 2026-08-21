@@ -10,6 +10,24 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-22 — negmem BUILT DARK: the whole v1 is on the branch, nothing is lit (`claude/vigilant-spence-8583f5`, not merged)
+
+Build gate opened by the operator's three §6 rulings (D1 yes · D2 seed-only · D3 (a) full
+layer 2, knowingly against the recommendation). Built in **three waves**: B1 the leaf
+`backend/negmem.py` (83 tests, 26/26 sabotages RED-then-restored, LLD worked examples exact)
+→ B2 the registration surface (flag + 6 knobs ×3 registrations, arm-A pin, allowlist file;
+arm-A golden UNMOVED, no recapture) → B3 the four consultation seams + threading + the stamp
+trichotomy (33 seam tests, 6 sabotage families) → this wave: the `bakeoff_runner` forwarding
+that B3 left, 5 through-the-runner tests, the two readout SQL files, the TestFlight checklist,
+and every docs row. Suite **4025 passed / 1 skipped / 0 failed** (wave-2 baseline 4016; +9 this wave); testid-lint OK; zero mobile files touched.
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) + [D-144](DECISIONS.md)
+record the soft-prior-not-a-filter shape and the build-complete state.
+
+**Known gap, deliberate:** nothing is lit. `trade.negmem` is false and
+`config/negmem_leagues.json` is empty — the ON-condition is BOTH — so no deck has ever been
+generated with this on. The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+is written and **unrun**. Rollout is two operator flips at a bake-off round boundary, not code.
+
 ## 2026-08-21b — negmem LLD FINAL: the planning suite is COMPLETE (branch `claude/vigilant-spence-8583f5`, not merged)
 
 Resumed post-limit-reset; LLD authored via drafts (Fable) → merge agent under an 11-point

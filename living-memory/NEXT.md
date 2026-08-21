@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-21 — negmem: DONE planning; operator answers the three §6 decisions](#2026-08-21--negmem-done-planning-operator-answers-the-three-6-decisions)
+- [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
@@ -31,14 +31,25 @@
 
 ---
 
-## 2026-08-21 — negmem: DONE planning; operator answers the three §6 decisions
+## 2026-08-22 — negmem: BUILT dark; rollout is two operator flips
 
-Suite complete (see HANDOFF/CHANGELOG same date). Remaining: 1. operator reviews the
-three-plan batch when the coordinator delivers it; 2. answers negmem scope.md §6
-(D-067 family ruling · layer-2 boundary · privacy posture — PRD §8.1 carries
-recommendations); 3. on rulings, the build enters the normal gates as its own effort
-(P0 M2-feed is severable and uncontested). Branch `claude/vigilant-spence-8583f5`
-merges when the operator wants the docs on main.
+v1 is complete on `claude/vigilant-spence-8583f5` and lit nowhere ([D-144](DECISIONS.md),
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), CHANGELOG same date).
+*Why now:* the remaining work is operator actions and a measurement window, not engineering.
+
+1. **Merge the branch** when the operator wants it on main. Merging lights nothing — the
+   ON-condition is flag **∧** allowlist, and both ship off/empty.
+2. **Rollout, per [PRD](../docs/plans/negative-results-memory/PRD.md) §8.2 — at a bake-off
+   ROUND BOUNDARY** (GR3; mid-round censors the window): add the operator's league to
+   `config/negmem_leagues.json` → flip `trade.negmem` → ≥4-week arm-attributed read.
+3. **The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+   is UNRUN** — the only runtime evidence this feature gets under D-056. Step 0 (the
+   before-readout) has to happen *before* the flip or the baseline is gone.
+4. **P2 gates, none of them started:** the RFPS baseline freeze + frozen-cohort artifact
+   (`rfps-baseline-<date>.json`) must be committed at pre-registration, before the window
+   opens; layer-2 tendency modeling stays behind the data-volume gate; and any future
+   *persistence* of per-person profiles — which ruling D3(a) permits — carries its own scope
+   block with the `delete_user_data` partner-keyed deletion path as a named requirement.
 
 ## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
 

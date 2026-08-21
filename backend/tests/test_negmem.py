@@ -1262,6 +1262,24 @@ _MODULE_SQL = {
 _BANNED_TOKENS = ("json_extract", "->>", "::jsonb", "strftime", "date_trunc",
                   "percentile_cont", "julianday")
 
+#: The SHIPPED readout-pack files (LLD §7.2/§7.3). They are held to the same
+#: DE-4 rule as the module's own SQL: an operator runs these against SQLite
+#: locally and Postgres in prod, and a dialect-split token in one of them
+#: fails at the worst possible moment — mid-incident, at the keyboard.
+_PACK_SQL_FILES = ("negmem-stamp-rate.sql", "negmem-gr4-joint.sql")
+
+
+def _executable_sql(text_: str) -> str:
+    """Strip `--` comments — the banned-token rule governs the SQL that RUNS.
+
+    Both pack files document their Postgres-only variant in a comment (the
+    `bakeoff_readout.sql` convention), and those comments legitimately contain
+    `::jsonb` / `->>` / `PERCENTILE_CONT`. Scanning raw file text would ban
+    the documentation instead of the code; scanning the executable half is the
+    rule as written ("SQLite form is normative", §7.2).
+    """
+    return "\n".join(line.split("--", 1)[0] for line in text_.splitlines())
+
 
 @pytest.mark.parametrize("name", sorted(_MODULE_SQL))
 def test_n23_banned_token_scan(name):
@@ -1271,6 +1289,52 @@ def test_n23_banned_token_scan(name):
     lowered = _MODULE_SQL[name].lower()
     for token in _BANNED_TOKENS:
         assert token not in lowered, f"{name} uses banned token {token!r}"
+
+
+@pytest.mark.parametrize("fname", _PACK_SQL_FILES)
+def test_n23_pack_files_ship_and_obey_the_same_dialect_rule(fname):
+    """(1b) The same scan over the SHIPPED pack files — the coverage the
+    module-only scan was missing.
+
+    Also asserts each file still ships and still carries its two runner
+    contracts: the `{allowlist}` substitution point (the allowlist-scoped
+    denominator is the whole point — an unscoped one reads a partial rollout
+    as build failures) and the `:flag_on_day` bind (pre-flag rows carry no
+    stamp by construction; including them manufactures a false alarm).
+
+    Sabotage: paste `json_extract(i.features_json, '$.negmem.m')` into either
+    file's executable SQL, or drop the `{allowlist}` clause.
+    """
+    path = REPO / "scripts" / fname
+    assert path.exists(), f"the readout pack lost {fname}"
+    body = _executable_sql(path.read_text())
+    lowered = body.lower()
+    for token in _BANNED_TOKENS:
+        assert token not in lowered, f"{fname} uses banned token {token!r}"
+    assert "{allowlist}" in body, f"{fname} lost its allowlist scoping"
+    assert ":flag_on_day" in body, f"{fname} lost its flag-era bind"
+
+
+@pytest.mark.parametrize("fname", _PACK_SQL_FILES)
+def test_n23_pack_files_execute_against_sqlite(fname):
+    """(2b) Execution half for the pack, mirroring the module's: substitute a
+    real allowlist, bind a real day, run it against the seeded in-memory DB.
+    A syntax error or a column renamed out from under the pack fails loudly
+    here instead of in the operator's hands."""
+    from sqlalchemy import text as sa_text
+
+    # Comments are stripped BEFORE binding, not merely before scanning:
+    # SQLAlchemy's text() harvests `:name` binds out of comment text too, and
+    # both files name their binds in prose.
+    body = _executable_sql((REPO / "scripts" / fname).read_text()).replace(
+        "{allowlist}", "'" + LEAGUE + "'")
+    with _memdb() as engine:
+        _seed_world(engine)
+        with engine.connect() as conn:
+            result = conn.execute(sa_text(body),
+                                  {"flag_on_day": negmem.NEGMEM_CLEAN_EPOCH_DAY})
+            assert result.keys(), f"{fname} selected no columns"
+            assert result.fetchall() is not None
 
 
 def test_n23_every_statement_executes_with_the_expected_columns():
