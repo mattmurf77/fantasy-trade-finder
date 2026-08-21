@@ -1,8 +1,8 @@
 # LLD: Negative-results memory
 
-**Version:** candidate v1 (merged per orchestrator ruling sheet; cross-review pending)
+**Version:** candidate v2 (round-2 fixes applied; round-3 verification pending)
 **Date:** 2026-08-21
-**Serves:** [HLD.md](HLD.md) (FINAL — D-1..D-10 binding; §7 is this document's work order) ·
+**Serves:** [HLD.md](HLD.md) (FINAL — D-1..D-10 binding; **HLD §7** is this document's work order) ·
 [PRD.md](PRD.md) (FINAL — R1-R11, NG1-NG9, C1-C5, GR1-GR4, §8.3) ·
 Facts: [research-verification.md](research-verification.md) ("memo") ·
 Settled: [reconciliation-log.md](reconciliation-log.md) — nothing decided there is reopened here.
@@ -22,7 +22,7 @@ candidate stands alone. All file:line citations verified on this checkout
 | DE-2 | Netting mechanism: decrement vs reset; magnitude; bounds | **DECREMENT** by knob `negmem_like_net` (default 1.0) per admitted viewed like, folded chronologically against every (P, ✱) cell with a clamp-at-zero after **every** fold step — the per-step clamp is what answers the bounds question (a cell can never go negative; a like can never bank credit) (ruling 2) | §4.5 |
 | DE-3 | Build-time knob read path | **Pass-in-from-server** (ruling 3): `server._run_trade_job` reads ALL build knobs — including `gen2_accept_prior_strength` — via `trade_service._c(...)` on the job thread *before* the arm fan-out (no overlay active) and passes plain floats into `build_map`. negmem.py holds **zero** default literals. | §4.2 |
 | DE-4 | Admission dialect | **Python predicate over a plain dual-dialect row fetch** (ruling 4): no SQL JSON extraction, no SQL timestamp arithmetic; `substr(served_at,1,10)` day-prefix bounds. The FETCH SQL + the Python predicate are the ONE shared implementation pair (builder, readout, RFPS). Perf math §5.6. | §5 |
-| DE-5 | Id-space for M2 + evidence partner keys | **`owner_alias` injection** (ruling 5): the server builds the co-owner→canonical-owner map from the in-hand league object via `sleeper_roster` helpers and passes it into `build_map`. negmem never imports `sleeper_roster` — the ADR-012 predicate stays single-sourced, and the D-2 leaf import list is preserved. | §5.5 |
+| DE-5 | Id-space for M2 + evidence partner keys | **No mapping on the M1 evidence path; identity-default `owner_alias` on the M2 path** (round-2 revision of ruling 5). M1 needs no alias at all: `features_json.partner_user_id` IS `card.target_user_id` = `LeagueMember.user_id` = the canonical league identity (`server.py:4125`/`:4149`, `trade_service.py:3613`, ADR-012). M2 is the one real id-space gap (`trade_matches` carries account-side ids): `build_map` accepts `owner_alias` defaulting to **identity** (`{}`), unmapped ids are **dropped and counted** in `dropped_unmapped_partner_ids`, and the co-owner M2 miss is an **accepted v1 limitation** consistent with ADR-012's account-keyed exceptions. negmem never imports `sleeper_roster`; no server-built map exists in v1. | §4.2 · §5.2 · §5.4 |
 | DE-6 | GR4 computability: accept score-ratio pollution vs stamp `fatigue_m`/`taste_m` | **Accept the ratio pollution** (diversity penalty pollutes the joint *downward* = the false-trip direction = conservative; the 0.15 bar has margin). No new per-layer stamps in v1. | §7.3 |
 | DE-7 | League-allowlist mechanism (build_map's None seam) | **`config/negmem_leagues.json`** (JSON array of league_id strings; `"*"` = all leagues) ∪ env `FTF_NEGMEM_LEAGUES` (comma-separated), 60s cache — the `tester_allowlist.json` pattern (`backend/experiments.py:87,120-127`; Render-ignores-envVars precedent says ship via file). Missing/empty ⇒ **no** leagues (flipping the flag alone activates nothing). (ruling 9) | §4.1 |
 | DE-8 | gen_v2 seam placement | **m at pair-card creation, NOT in `_Candidate.score`** (ruling 8 — the membership-never-affected argument, reasoning verbatim §6.3). | §6.3 |
@@ -39,13 +39,16 @@ One new leaf module `backend/negmem.py` (D-2; the `suggestion_telemetry.py` leaf
 its header at `backend/suggestion_telemetry.py:12-16` is the model), plus:
 
 - three consultation seams (serving stack / gen_v2 / fit) of ≤ ~10 lines each (D-4, D-10),
-- one build + threading block in `server._run_trade_job` (D-3), including the server-built
-  `owner_alias` map (DE-5),
+- one build + threading block in `server._run_trade_job` (D-3) — knob reads only; **no identity
+  map is built server-side** (DE-5, round-2 revision),
 - one stamp block in the features assembly (`server.py:4135-4212` region),
 - the M2 `acceptance_stats` feed into gen_v2's two call sites
   (`trade_service.py:4001`, `bakeoff_runner.py:1212`),
-- 6 `model_config` knobs + 1 feature flag (`trade.negmem`) with full triple registration (R10, D-8),
-- readout SQL pack additions + the RFPS frozen-cohort artifact (§7),
+- 6 `model_config` knobs + 1 feature flag (`trade.negmem`) with full triple registration (R10, D-8;
+  R10 names four — the 4 → 6 expansion is a PRD delta, §9 delta g),
+- readout SQL pack additions + the RFPS frozen-cohort artifact (§7), plus the two operator
+  scripts `backend/scripts/negmem_readout.py` (R8 dump, §7.1) and
+  `backend/scripts/negmem_rfps.py` (§7.4),
 - the test plan of §10 (27 tests).
 
 **No new tables** (NG6, D-1). **No new analytics events.** **No new routes** (readout is a
@@ -68,7 +71,7 @@ membership is never affected (R4).
 | exclusion_keys overwrite-per-call seam | `trade_service.py:3980-3986` |
 | Relaxed pass | `trade_service._relaxed_targeted_pass` `:4271-4325` (re-invokes `_generate_trades_v2` under `_cfg_override`) |
 | `_dedup_and_sort` (no score writes — §6.2 once-only proof) | `trade_service.py:4180-4256` |
-| gen_v2 acceptance prior + per-pair loop | `trade_gen_v2.py:283-308` (E-B math, reproduced §5.4); orchestrator kwarg `acceptance_stats` `:862`; per-pair loop `:939-975`, `acceptance_prior` consumed `:951`; card build `:999` ff. |
+| gen_v2 acceptance prior + per-pair loop | `trade_gen_v2.py:283-308` (E-B math, reproduced §5.5); orchestrator kwarg `acceptance_stats` `:862`; per-pair loop `:939-975`, `acceptance_prior` consumed `:951`; card build `:999` ff., `composite_score` set `:1012` |
 | fit ranker + composite | `trade_gen_fit.py:389-392` (sort key, `-round(c["aggregate_raw"], 9)` quantization), `composite_score` set at `:442` |
 | `_generate_kwargs` | `server.py:5644-5671`; bake-off fan-out lambdas `:5679-5685`; organic call `:5696` |
 | features assembly | `server.py:4135-4212` (`features = {...}`), row build `:4219-4233`, `base_score` = `card.composite_score` at `:4213` |
@@ -82,7 +85,8 @@ membership is never affected (R4).
 | Spine tables | `deck_impressions` `database.py:500-608` (`served_at` NOT NULL `:513`, `features_json` Text `:507`, `propensity` `:508`), `deck_outcomes` `:741-761` (dup labels legal `:743`), `trade_pass_reasons` `:873-943` (layer-1 column `:894-902`, free_text quarantine `:903-905`), `trade_matches` `:417-436`, `trade_decisions` `:319-337` (`retracted_at` `:328-336`) |
 | Spine indexes | `ix_deck_impressions_user_league` `database.py:610`; `ix_deck_outcomes_impression` `:758`; `ix_trade_matches_user_*_league` `:443-452` |
 | Dialect precedent (no JSON/date SQL; `substr` day buckets; Python parsing) | `analytics_queries.py:8-12` |
-| Identity predicate (server-side only — DE-5) | `backend/sleeper_roster.py` (`canonical_owner_id`, `co_owner_ids`) — ADR-012 |
+| Evidence partner id IS league identity (DE-5, M1 needs no alias) | `target = getattr(card, "target_user_id", None)` `server.py:4125` → `"partner_user_id": target` `server.py:4149`; `LeagueMember.user_id` `trade_service.py:3613`; `league_members` single-valued on the canonical owner (`database.py:340-349`, ADR-012) |
+| Identity predicate — **NOT reachable server-side for this purpose** (DE-5) | `backend/sleeper_roster.py`: `co_owner_ids(roster)` takes a raw **Sleeper roster dict** (`:34`) and returns `[]` for a `LeagueMember`; `LeagueMember` (`trade_service.py:3612-3616`) has no `owner_id` field, and `league_members` (`database.py:340-349`) stores no co-owner column — so no server-side co-owner source exists in v1 |
 | Tester-allowlist precedent | `backend/experiments.py:87, 120-127` + `config/tester_allowlist.json` |
 | Timestamp writer (ISO `+00:00` text) | `datetime.now(timezone.utc).isoformat()` — `database.py:5542`, `server.py:4115` |
 | Batched events side-channel (`viewed` can land after the swipe) | `server.py:8088-8107` |
@@ -92,7 +96,9 @@ membership is never affected (R4).
 ## 2. Interfaces — `backend/negmem.py` module skeleton
 
 Leaf discipline (D-2, T1): imports **only** `feature_flags` and `database` (plus stdlib).
-**Not** `sleeper_roster` — identity arrives by injection (`owner_alias`, DE-5). Never imports
+**Not** `sleeper_roster` — and in v1 nothing needs it: M1's partner keys are already canonical
+league identities, and M2's residual gap is handled by an identity-default `owner_alias`
+argument plus a counted drop (DE-5). Never imports
 `server`, `trade_service`, or any engine module. Cycle check: `negmem → database →
 pick_values`; `pick_values` imports `trade_service` lazily inside functions
 (`database.py:36-38`), so no import-time cycle exists. Engines consume it via
@@ -108,8 +114,11 @@ M1: per-(league, partner, reason-family) soft down-weight built from reasoned
 rejections; M2: the acceptance_stats feed for trade_gen_v2.acceptance_prior.
 Derive-on-read, zero tables (NG6). LEAF: imports feature_flags + database
 only; engines `import negmem` and call attributes (T1) — the map moves
-exclusively as an argument (D-3). Identity: co-owner canonicalization is
-INJECTED (`owner_alias`) — the ADR-012 predicate lives server-side. PRD/HLD:
+exclusively as an argument (D-3). Identity: M1 evidence partner ids are
+ALREADY canonical league ids (features_json.partner_user_id ==
+card.target_user_id == LeagueMember.user_id, ADR-012) — no mapping. M2's
+account-side ids get an identity-default `owner_alias` and a counted drop
+(DE-5). PRD/HLD:
 docs/plans/negative-results-memory/. Admission is the ONE closed list (R1):
 the fetch-SQL + Python-predicate pair below are the only implementation —
 builder, readout, and RFPS all go through _admit_events()."""
@@ -119,9 +128,14 @@ NEGMEM_VER = 1                      # stamp schema version; bump on any change
 NEGMEM_CLEAN_EPOCH_DAY = "2026-08-20"        # R1(e); subsumes D-091 (ends 08-19)
 NEGMEM_ADMITTED_FAMILIES = ("value", "fit")  # R2 — closed set
 NEGMEM_HORIZON_HALFLIVES = 4.0               # HLD §3.1 read horizon
+NEGMEM_M2_LOOKBACK_DAYS = 180                # PRD R5 M2 window; INDEPENDENT of
+                                             # halflife_days, applied in the
+                                             # Python fold (§5.4), not in SQL
 NEGMEM_BUILD_BUDGET_MS = 250.0               # S6 absolute ceiling (HLD §3.1)
 NEGMEM_DEGRADE_MS = 2.0 * NEGMEM_BUILD_BUDGET_MS   # slow-but-valid ⇒ degraded
 _DECISION_ACTIONS = frozenset({"like", "pass", "not_interested", "propose"})
+_EMPTY_ALIAS = MappingProxyType({})          # the identity `owner_alias` default
+                                             # (DE-5) — immutable, never mutated
 
 ALLOWLIST_FILE = ".../config/negmem_leagues.json"   # os.path.join like experiments.py:87
 
@@ -144,7 +158,7 @@ def build_map(user_id: str, league_id: str, *,
               halflife_days: float, min_evidence: float, sat_k: float,
               like_net: float, floor_b: float,
               accept_prior_strength: float,
-              owner_alias: dict[str, str] | None = None,
+              owner_alias: Mapping[str, str] = _EMPTY_ALIAS,
               as_of: str | None = None) -> NegmemMap | None:
     """One bulk read → NegmemMap for this job; None iff league not allowlisted
     (the PRD §8.2 None seam — downstream indistinguishable from flag-off).
@@ -154,7 +168,18 @@ def build_map(user_id: str, league_id: str, *,
     access in this module (DE-3). Degenerate knobs sanitized once at entry:
     floor_b → min(max(floor_b, 0.0), 1.0); halflife_days, min_evidence,
     sat_k → max(value, 1e-6) — a fat-fingered admin PUT must not produce
-    ZeroDivisionError or a mult > 1. owner_alias None ⇒ identity mapping."""
+    ZeroDivisionError or a mult > 1.
+
+    `owner_alias` (DE-5) applies to the **M2 path only** and defaults to
+    IDENTITY. v1 ships no producer for a co-owner map: no server-side
+    co-owner source exists (§1.3 anchor), so callers pass nothing. The kwarg
+    exists so a future client-supplied or persisted alias source can be fed
+    in without touching this signature — that source is its own feature with
+    its own scope block per ADR-012, NOT part of this LLD. The one entry a
+    server CAN build today is {requesting user's session account id →
+    that user's league_user_id}, and passing only that is legal. M1's
+    evidence path takes no alias at all: its partner ids are already
+    canonical league identities."""
 
 def effective_mult(nm_map: "NegmemMap | None", partner_league_id: str, *,
                    strength: float, floor: float) -> float:
@@ -168,19 +193,19 @@ def stamp_payload(nm_map: "NegmemMap", partner_league_id: str,
     """The consult-time stamp the card carries (B2): {m, keys, ev, ver}. §3.3."""
 
 def load_admitted_events(user_id: str, league_id: str, *, as_of: str,
-                         horizon_floor_day: str,
-                         owner_alias: dict[str, str] | None = None
+                         horizon_floor_day: str
                          ) -> tuple[list[dict], list[dict], int]:
     """R1's closed list, THE one implementation: runs _SPINE_SQL (the plain
     dual-dialect fetch), then applies the Python predicate (per-impression
-    replay + closed-list checks + retraction leg + canonicalization + context
-    tags). Returns (evidence_events, netting_events, parse_errors). Consumed
+    replay + closed-list checks + retraction leg + context tags). Takes NO
+    `owner_alias`: evidence partner ids are canonical league ids already
+    (DE-5). Returns (evidence_events, netting_events, parse_errors). Consumed
     by build_map, negmem_readout, and the RFPS artifact generator — nobody
     re-implements."""
 
 def negmem_readout(user_id: str, league_id: str, as_of: str | None = None,
                    knobs: dict | None = None,
-                   owner_alias: dict[str, str] | None = None) -> dict:
+                   owner_alias: Mapping[str, str] = _EMPTY_ALIAS) -> dict:
     """R8 operator dump (§7.1 format). Same builder, allowlist check BYPASSED
     (the readout must work for a not-yet-allowlisted league — it reports
     `allowlisted` as data; a readout that returns None there is a tautology).
@@ -191,6 +216,8 @@ def negmem_readout(user_id: str, league_id: str, as_of: str | None = None,
 _SPINE_SQL: str        # §5.1 — the fetch half of the admission pair
 _RETRACTED_SQL: str    # §5.3 — the retraction-leg fetch
 _MATCHES_SQL: str      # §5.4 — the M2 fetch
+_MEMBERS_SQL: str      # §5.4 — the canonical league-member id set (M2 filter
+                       # + the dropped_unmapped_partner_ids counter)
 
 # internal: _admit_events (§5.2 — the predicate half of the pair),
 #           _fold_events (§4.3/§4.5), _cell_mult (§4.4),
@@ -204,10 +231,18 @@ Type notes (reviewer's first questions):
   silently lowers the gate).
 - `NegmemMap` and `NegmemCell` are `frozen=True`: the map is shared read-only across the
   bake-off fan-out and must be structurally immutable (H-4 defense; a seam cannot "fix up" a
-  cell in place).
-- `cells` uses league-identity partner keys only (R9); `owner_alias` maps any co-owner id
-  seen in source rows to the roster's canonical `owner_id` before keying (ADR-012, via
-  injection).
+  cell in place). `frozen=True` freezes the *bindings*, not the dicts behind them — so the
+  three dict fields (`cells`, `partner_mult`, `acceptance_stats`) are wrapped in
+  `types.MappingProxyType` at construction, making the immutability claim structural rather
+  than conventional (a seam that tries `nm_map.partner_mult[p] = x` raises `TypeError`). The
+  builder assembles plain dicts internally and wraps them in the single `NegmemMap(...)`
+  construction; `m2_feed()` returns the proxy (read-only) or `{}`.
+- `cells` uses league-identity partner keys only (R9), and on the M1 evidence path they arrive
+  that way — `features_json.partner_user_id` is written from `card.target_user_id`
+  (`server.py:4125`/`:4149`), which is `LeagueMember.user_id` (`trade_service.py:3613`), the
+  canonical league identity ADR-012 keeps `league_members` single-valued on. **No aliasing
+  happens on this path.** Account ids exist only in the M2 source (`trade_matches`) and are
+  handled in §5.4.
 
 ### 2.1 Threading interface changes (exact signatures)
 
@@ -221,11 +256,11 @@ precedent it was first modeled on; `trade_service.py:3983` remains the precedent
 | Site | Change |
 |---|---|
 | `server._run_trade_job` | build `nm_map` once per job after the flag check, before the fan-out (§6.1); conditionally add `negmem` to `_generate_kwargs` (`server.py:5669` region — after `exclusion_keys`); pass `nm_map` into `_log_deck_signal_impressions` |
-| `TradeService.generate_trades` / `_generate_trades_impl` (`trade_service.py:3899`) | new kwarg `negmem: "negmem.NegmemMap | None" = None`, documented alongside `exclusion_keys` (`:3951-3956`); threaded directly (no attribute) into `_generate_trades_v2(negmem_map=negmem, ...)` **and** inside the `v2_kwargs` dict handed to `_relaxed_targeted_pass` (`:4271`) — the relaxed pass then reuses the identical map at the same `_c`-read strength with zero special-casing (HLD §3.5) |
+| `TradeService.generate_trades` / `_generate_trades_impl` (`trade_service.py:3899`) | new kwarg `negmem: "negmem.NegmemMap | None" = None`, documented alongside `exclusion_keys` (`:3951-3956`); threaded by **adding one `negmem_map` key to the `_v2_kwargs` dict built at `:4052`** — that ONE dict is both splatted into `_generate_trades_v2(**_v2_kwargs)` (`:4080`) and handed whole to `_relaxed_targeted_pass(_v2_kwargs)` (`:4089`), so there is exactly one assignment and no duplicate-keyword hazard; the relaxed pass then reuses the identical map at the same `_c`-read strength with zero special-casing (HLD §3.5) |
 | `TradeService._generate_trades_v2` (`:4747`) | new kwarg `negmem_map=None` |
 | `trade_gen_v2.generate_league_suggestions` (`:844`) | new kwarg `negmem_map=None` (beside `acceptance_stats` `:862`) |
 | `trade_gen_fit.generate_league_suggestions` (`:237`) | new kwarg `negmem_map=None` |
-| `bakeoff_runner.gen_v2_cards` (`:1317` region, call at `:1212`) | forward `kwargs.get("negmem")` as `negmem_map` + the M2 feed (§6.3) |
+| `bakeoff_runner.gen_v2_cards` (**`:1156`**, gen_v2 call at `:1212`) | forward `kwargs.get("negmem")` as `negmem_map` + the M2 feed (§6.3) |
 | `bakeoff_runner.gen_fit_cards` (`:1317`) | forward `kwargs.get("negmem")` as `negmem_map` |
 
 Arms A/B need no forwarding code: the fan-out lambdas splat `**_generate_kwargs`
@@ -243,9 +278,20 @@ map, all arms** (H-3), differing only via each arm's overlay-read `negmem_streng
 class NegmemCell:
     n_raw: int          # admitted rejection events in the horizon (pre-decay, pre-net)
     n_decayed: float    # decayed, like-netted evidence mass at as_of; ≥ 0.0 always; rounded 1e-9
-    likes_net: float    # decayed like mass subtracted (readout transparency)
+    likes_net: float    # READOUT-ONLY: the decayed mass of this cell's admitted netting
+                        # likes evaluated at as_of, PRE-CLAMP — i.e. Σ like_net·0.5^((as_of−t_like)/H)
+                        # over the cell's admitted likes. It is a transparency figure, NOT a
+                        # term in n_decayed's arithmetic: the fold's per-step max(0.0, ·)
+                        # (§4.5) means the mass a like actually cancelled can be LESS than
+                        # likes_net (clamped) — so n_decayed ≠ (gross evidence − likes_net) in
+                        # general, and no consumer may reconstruct one from the other.
     mult: float         # base multiplier from §4.4; ∈ [floor_b, 1.0]; 1.0 below min_evidence; rounded 1e-6
-    floored: bool       # True when the §4.4 curve landed within 1e-9 of floor_b
+    floored: bool       # RESERVED — always False under the §4.4 asymptotic curve, which
+                        # approaches floor_b but never reaches it at any finite n_decayed.
+                        # Carried so a future curve change (or a knob regime that lands on
+                        # the asymptote) has a stamped field already in the schema and the
+                        # readout; consumers must treat True as "not observed in v1", never
+                        # as dead code to delete.
 ```
 
 Nullability: none — every field always set. Cells exist for every
@@ -261,13 +307,15 @@ class NegmemMap:
     league_id: str
     as_of: str                                   # ISO UTC, build time or caller's as_of
     ver: int                                     # = NEGMEM_VER
-    cells: dict[tuple[str, str], NegmemCell]     # key: (partner_league_id, family);
+    # All three dict fields are wrapped in types.MappingProxyType at construction —
+    # frozen=True only freezes the binding, and H-4 wants the CONTENTS unwritable too.
+    cells: Mapping[tuple[str, str], NegmemCell]  # key: (partner_league_id, family);
                                                  # family ∈ NEGMEM_ADMITTED_FAMILIES
-    partner_mult: dict[str, float]               # collapsed per-partner base mult (DE-1 MIN),
+    partner_mult: Mapping[str, float]            # collapsed per-partner base mult (DE-1 MIN),
                                                  # precomputed at build so effective_mult is
                                                  # O(1) per call; only partners with any cell;
                                                  # absent ⇒ 1.0
-    acceptance_stats: dict[str, tuple[int, int]] # M2: partner → (accepts, responses);
+    acceptance_stats: Mapping[str, tuple[int, int]]  # M2: partner → (accepts, responses);
                                                  # NOTE tuple order follows CODE
                                                  # (trade_gen_v2.py:305 unpacks
                                                  # `accepts, responses`) — the HLD §2.1
@@ -278,14 +326,20 @@ class NegmemMap:
     build_ms: float
     parse_errors: int                            # skipped rows (§8.1 row-level failures)
 
-    def m2_feed(self) -> dict[str, tuple[int, int]]:
-        """{} when degraded, else acceptance_stats — the ONE degraded-⇒-{} rule
-        (HLD §3.5); both gen_v2 call sites go through this, never the field."""
+    def m2_feed(self) -> Mapping[str, tuple[int, int]]:
+        """{} when degraded, else acceptance_stats (the read-only proxy) — the
+        ONE degraded-⇒-{} rule (HLD §3.5); both gen_v2 call sites go through
+        this, never the field. Drop-in safe: `acceptance_prior` only does
+        truthiness, `in`, and `[]` on it (trade_gen_v2.py:303-305) — all
+        supported by MappingProxyType — and it never mutates or copies it."""
 ```
 
-All partner keys are **league identities** (R9): global platform ids from the spine are
-canonicalized through the injected `owner_alias` (§5.5) before they become keys. Account ids
-never enter the map.
+All partner keys are **league identities** (R9). On the M1 evidence path they are *born* that
+way — `features_json.partner_user_id` is `card.target_user_id` = `LeagueMember.user_id`
+(`server.py:4125`/`:4149`, `trade_service.py:3613`), the canonical id ADR-012 keeps
+`league_members` single-valued on — so nothing is mapped or converted (DE-5). Account ids enter
+only through the M2 source (`trade_matches`), where §5.4's membership filter drops any id that
+is not a canonical league member and counts the drop. Account ids never become map keys.
 
 ### 3.3 Stamp payload (`features_json.negmem`) — schema + size
 
@@ -312,6 +366,10 @@ storage residue at 100% stamp-rate ≈ 20–85 B/row — inside the HLD's accept
 features assembly **copies**, never builds (B2, DE-10).
 
 ### 3.4 Knob table (R10 — full triple registration; ruling 11 carries this verbatim)
+
+PRD R10 names **four** keys; this LLD ships **six** — `negmem_sat_k` and `negmem_like_net` are
+required by the §4.4 curve and the DE-2 netting mechanism respectively. The 4 → 6 knob-surface
+expansion is recorded as a PRD delta (§9 delta g).
 
 | Key | Default | Role | Read at |
 |---|---|---|---|
@@ -407,8 +465,15 @@ arm A's opt-out is strength-only; stated so nobody "fixes" it):
 
 ```python
 # server.py, immediately before _generate_kwargs (:5644) —
-from .trade_service import _c as _ts_c       # module-scope import at top of server.py
-from . import negmem as _negmem
+# NOTE: no new import. server.py already holds the trade_service module object
+# (`from . import trade_service as _trade_service_mod`, server.py:232) — read
+# knobs through it (_trade_service_mod._c) rather than adding a fresh
+# `from .trade_service import _c` name-import, which would freeze a binding
+# (the same T1 hazard §10 N-11 sabotages on the negmem side) and add a second
+# way to reach one accessor.
+from . import negmem as _negmem              # module import, attribute calls (T1)
+_ts_c = _trade_service_mod._c                # local alias for readability ONLY —
+                                             # resolved at call time, per job
 
 nm_map = None
 if FLAGS.trade_negmem and league_id != "league_demo":
@@ -421,7 +486,9 @@ if FLAGS.trade_negmem and league_id != "league_demo":
             like_net              = _ts_c("negmem_like_net"),
             floor_b               = _ts_c("negmem_floor"),
             accept_prior_strength = _ts_c("gen2_accept_prior_strength"),
-            owner_alias           = _owner_alias_map(g_league),   # §5.5; {} for sole owners
+            # owner_alias: NOT PASSED in v1 (DE-5) — identity default. There is
+            # no server-side co-owner source to build one from, and M1 needs no
+            # mapping at all. See §5.4 for the M2 posture.
         )
     except Exception as nm_err:               # belt — build_map already never raises
         log.warning("negmem build failed hard (no stamps this job): %s", nm_err)
@@ -437,10 +504,17 @@ if nm_map is not None:
     _generate_kwargs["negmem"] = nm_map       # key ABSENT otherwise (C1)
 ```
 
-`_owner_alias_map(g_league)` is a small server-side helper:
-`{co_id: m.owner_id for m in league.members for co_id in co_owner_ids(m)}` via
-`sleeper_roster` helpers (the ONE predicate — ADR-012, DE-5). Sole-owner leagues yield `{}`
-(identity).
+**No `_owner_alias_map` helper exists** (round-2 deletion; candidate v1 specced one and it was
+unbuildable). Three facts kill it, each verified on this checkout: (i) `co_owner_ids(roster)`
+(`sleeper_roster.py:34`) expects a **raw Sleeper roster dict** and returns `[]` for a
+`LeagueMember`; (ii) `LeagueMember` (`trade_service.py:3612-3616`) has no `owner_id` field —
+its `user_id` IS the canonical owner; (iii) `league_members` (`database.py:340-349`) persists
+no co-owner column, so nothing server-side enumerates co-owners at job time. The v1 posture is
+therefore: identity default, unmapped M2 ids dropped-and-counted (§5.4), co-owner M2 responses
+accepted as a known miss. The one entry a server could legitimately build today —
+`{requesting user's session account id → that user's league_user_id}` — is legal to pass and
+changes nothing for partners; any richer source (client-supplied or persisted) is a separate
+feature with its own scope block per ADR-012.
 
 Why pass-in wins (HLD §7 tilt, confirmed; both drafts converged): `gen2_accept_prior_strength`'s
 seeded default lives in `_DEFAULT_CFG` (`trade_service.py:660`) and negmem is a leaf that cannot
@@ -495,14 +569,45 @@ mult  = 1.0                                          if n_decayed < min_evidence
 
 Saturating E-B-flavored curve: identity below the shrinkage threshold (R3), first effect exactly
 at threshold, asymptote `floor_b`, never below it and never above 1.0 by construction (`floored`
-is set when `mult` lands within 1e-9 of `floor_b` — with this curve only asymptotically, so it
-records knob-driven extremes). **Double role of `negmem_floor`, documented:** the same knob is
+is **RESERVED** — the curve reaches `floor_b` only in the limit, so no finite `n_decayed` sets
+it; §3.1). **Double role of `negmem_floor`, documented:** the same knob is
 the curve asymptote at build (global read) and the clamp floor at consult (seam `_c` read, so an
 arm overlay of `negmem_floor` moves the clamp but not the curve — accepted, since the only
-sanctioned arm pin is `negmem_strength` per D-6). Note for cross-review (OQ-4b): this curve is
-deliberately *not* continuous at the threshold (mult steps 1.0 → 0.900 as `n_decayed` crosses
-`min_evidence`); draft B flagged the day-to-day ordering flap as decay re-crosses the gate — the
-ruling sheet pins this curve via the `negmem_sat_k` knob, and the flap hazard is recorded in §11.
+sanctioned arm pin is `negmem_strength` per D-6).
+
+**The threshold discontinuity: KEPT and ACCEPTED (OQ-4b RESOLVED — §11).** The curve steps
+1.0 → 0.900 as `n_decayed` crosses `min_evidence`. Four quantified reasons replace the v1
+hand-wave:
+
+1. **The step size is a knob, not a constant.** Step = `mult(min_evidence)` subtracted from
+   identity = **(1 − floor_b) / (1 + sat_k)** — 0.100 at defaults (0.4/4), **0.05 at
+   `sat_k = 7`** (0.4/8), **0.02 at `sat_k = 19`** (0.4/20). So `negmem_sat_k` IS the
+   deploy-free flap-size lever: if the operator sees ordering churn, one admin config PUT
+   shrinks the step by 2× or 5× with no code change. **Stated trade-off:** raising `sat_k`
+   also flattens mid-range damping — at `n_eff = 3` the multiplier goes 0.800 (k=3) → 0.880
+   (k=7) → 0.945 (k=19), so a softer step buys less separation between a lightly-objected and a
+   heavily-objected partner. Flap size and mid-range authority trade against each other on one
+   dial; that is the honest shape of the choice, not a defect.
+2. **Decay crosses the gate downward exactly once.** Between admitted events `n_decayed` is
+   strictly monotone decreasing (a pure exponential), so it cannot oscillate across the
+   threshold on its own — there is no dithering regime. Re-crossing **upward** requires a
+   discrete admitted event worth ~1.0 evidence unit. Near the default threshold the decay
+   drift is `n·ln2/H ≈ 3 × 0.693 / 45 ≈ 0.046` units/**day** — and ~0.002 units between two
+   rebuilds an hour apart, the interval at which a user would actually notice churn. A +1.0
+   event is ~20× the daily drift and two orders of magnitude above that same-session hover
+   band: the gate is crossed by *evidence*, never by clock noise.
+3. **Crossings are bounded by the admitted-event rate,** not by rebuild frequency: at the
+   observed ~120 clean reason rows/week across the pilot, a league sees roughly **1–2 admitted
+   events per week**, so a given partner cell crosses the gate on the order of once per several
+   weeks. The flap is an event, not a regime.
+4. **The discontinuity is the FEATURE of a shrinkage gate.** `min_evidence` means exactly "act
+   after 3 objections, not before" — a continuous ramp would apply *some* damping at
+   `n_decayed = 0.4`, which is the false-confidence behavior R3 exists to forbid. It is also
+   load-bearing downstream: PRD §4.2's RFPS numerator ("cell held `n_decayed ≥
+   negmem_min_evidence` at `served_at`") and the frozen-cohort artifact (§7.4) both key on the
+   **hard** threshold. A continuous curve would leave the metric asking a binary question the
+   map no longer answers binarily — metric and map out of sync, with the pre-registered
+   baseline silently mismeasuring. Keeping the step keeps them one definition.
 
 **Worked examples** (floor_b=0.6, min_evidence=3, sat_k=3):
 
@@ -617,8 +722,21 @@ Worked: mult 0.8 → strength 0.5 ⇒ 0.9; strength 1 ⇒ 0.8; strength 2 ⇒ cl
 caps at 180d; evidence older than four half-lives contributes < 6.25% of an event — below the
 shrinkage floor's resolution (HLD §3.1). Day-granularity is deliberately conservative by at most
 one day of *extra* rows — never one day short, because `>=` on the day prefix admits the whole
-boundary day. The M2 aggregation carries its own 180d lookback (R5), independent of H,
-enforced in the Python fold (§5.4).
+boundary day. The M2 aggregation carries its own `NEGMEM_M2_LOOKBACK_DAYS` = 180d lookback
+(PRD R5), independent of H, enforced in the Python fold (§5.4).
+
+**Named asymmetry: the horizon is bounded on `served_at`, decay is keyed on `acted_at`.** The
+spine fetch filters `substr(di.served_at,1,10) >= horizon_floor_day` (§5.1 — `served_at` is the
+NOT-NULL column with the index, `database.py:513`/`:610`), while the evidence event's timestamp
+for decay is the decision's `acted_at` (§5.2). The two differ whenever a card is served near
+the floor and acted on later. Consequence: an impression **served outside** the horizon but
+**acted inside** it is never fetched, so its evidence is dropped. This is conservative in the
+right direction (it drops evidence, never invents it — the same posture as §5.3's retraction
+leg), and it is moot in practice for as long as `NEGMEM_CLEAN_EPOCH_DAY` dominates the floor:
+`horizon_floor_day = max(epoch, as_of − 4H)`, and until the epoch is more than 180 days old the
+floor IS the epoch, before which no row is admissible on any timestamp. It becomes live only
+once the rolling window overtakes the epoch (≈ 2027-02-16 at H=45); flagged here so the first
+person to see a "missing" old rejection has the answer, not a mystery.
 
 ---
 
@@ -684,8 +802,9 @@ WHERE di.user_id = :uid
 
 ### 5.2 The Python predicate — per-impression replay + the closed list
 
-`_admit_events(rows, *, as_of_dt, retracted_keys, owner_alias) ->
-(evidence: list, netting: list, parse_errors: int)`.
+`_admit_events(rows, *, as_of_dt, retracted_keys) ->
+(evidence: list, netting: list, parse_errors: int)`. **No `owner_alias` parameter** — the
+evidence path does no identity conversion (DE-5).
 
 **Undo pairing = per-impression replay.** Group fetched rows by `impression_id`; within a
 group, order outcome rows by `(acted_at, outcome_id)` ascending (`acted_at` is server-clock ISO
@@ -734,10 +853,14 @@ survived (that IS the undo half) AND its asset key ∉ `retracted_keys` when `as
 parses (§5.3); (e) epoch + horizon: enforced by the SQL bound (§5.1) — no second Python check
 to drift.
 
-`partner` = `features_json["partner_user_id"]` (global platform id, memo §2e) passed through
-`owner_alias` (DE-5); NULL/missing partner ⇒ row skipped, counted in `parse_errors` (a
-partnerless card cannot key a partner-keyed prior). The requesting user's own id is
-canonicalized the same way before the `partner != user` guard. `evidence.ts` = the **`acted_at`
+`partner` = `features_json["partner_user_id"]` — **used verbatim as the cell key, with no
+alias step (DE-5)**. It is written from `card.target_user_id` (`server.py:4125` → `:4149`),
+which the engines set to `LeagueMember.user_id` (`trade_service.py:3613`) — the canonical league
+identity that `league_members` is single-valued on (`database.py:340-349`, ADR-012) and the same
+space the §6.2 seam looks up. There is no global-platform-id → league-id hop on this path to get
+wrong. NULL/missing partner ⇒ row skipped, counted in `parse_errors` (a
+partnerless card cannot key a partner-keyed prior). The `partner != user` guard compares against
+the job's `user_id` in that same space. `evidence.ts` = the **`acted_at`
 of the last surviving decision row** (the decision is the evidence event, not the serve — decay
 must age the rejection, not the impression). Context tags (R11, recorded-not-consulted):
 `lane`, `user_value_basis` from `features_json`; `trade_intent` from the COLUMN
@@ -760,31 +883,67 @@ The two tables share no key (PRD R1(d) note). One batch fetch per build:
 
 ```sql
 -- negmem._RETRACTED_SQL (params :uid :lid :horizon_day)
-SELECT decision, give_player_ids, receive_player_ids, retracted_at, created_at
+SELECT id, decision, give_player_ids, receive_player_ids, retracted_at, created_at
 FROM trade_decisions
 WHERE user_id = :uid AND league_id = :lid
   AND decision IN ('pass', 'like')
-  AND retracted_at IS NOT NULL
   AND substr(created_at, 1, 10) >= :horizon_day
 ```
 
-Small by construction (`retracted_at` is set in practice by awaiting-dismiss on **like** rows,
-memo §1.1; retracted passes are near-nonexistent). Python builds
-`retracted_keys = {(decision, frozenset(give), frozenset(receive))}`; admission drops any
-evidence or netting event whose parsed `i.assets_json` (`{"give": [...], "receive": [...]}` —
-`server.py:4245`; present on every clean-epoch row: the telemetry columns predate the epoch,
-PRD §7 boundary (a)) matches a key of the corresponding decision class (`'pass'` for
-pass/not_interested — the UI's dismiss IS `decision='pass'`, memo §1.1 — `'like'` for netting
-likes). `assets_json` NULL ⇒ leg skipped for that row.
+**The `retracted_at IS NOT NULL` filter is deliberately ABSENT (round-2 fix; resolves OQ-3).**
+The schema documents an explicit revive path — *"A later re-like writes a fresh row with NULL —
+that is the revive path"* (`database.py:328-336`) — so a windowless set-equality over
+retracted-only rows is wrong: it lets a stale retraction poison a later, live decision over the
+identical asset set. Fetching **all** `('pass','like')` rows in the horizon and letting the
+**latest row decide** is the minimal correction, and it is what the schema's own comment says
+the data means.
+
+**The latest-row rule (Python, no SQL date math — DE-4):**
+
+1. Parse each fetched row. `give_player_ids` / `receive_player_ids` are **Text JSON arrays**
+   (`database.py:324-325`): `json.loads`, then `str()`-coerce every element before
+   `frozenset(...)`. The same coercion is applied on the impression side, where `assets_json`
+   is `json.dumps({"give": [...], "receive": [...]})` (`server.py:4245`) — `json.loads`, take
+   `["give"]`/`["receive"]`, `str()`-coerce, `frozenset`. **Both sides must be coerced**: player
+   ids are strings in the impression writer and may be ints in older decision rows, and
+   `frozenset({1}) != frozenset({"1"})` would silently disable the whole leg. Unparseable
+   either side ⇒ that row's leg is skipped (impression side counted in `parse_errors`).
+2. Group the decision rows by `key = (decision, frozenset(give), frozenset(receive))`.
+3. Within a group, the row with `max(created_at)` decides. `created_at` is nullable
+   (`database.py:327`) — NULLs sort as oldest (`("", id)` vs `(created_at, id)`), with the
+   autoincrement `id` as the deterministic tie-break for identical timestamps, matching §4.3's
+   total-order discipline.
+4. `key ∈ retracted_keys` **iff that latest row's `retracted_at` is non-NULL.** A pass→retract→
+   re-like→(live) history therefore admits; a like that is still retracted does not.
+
+Admission then drops any evidence or netting event whose parsed `i.assets_json` matches a key of
+the corresponding decision class (`'pass'` for pass/not_interested — the UI's dismiss IS
+`decision='pass'`, memo §1.1 — `'like'` for netting likes). `assets_json` NULL ⇒ leg skipped for
+that row. The fetch stays small by construction: it is one user's decisions in one league inside
+the horizon, and `retracted_at` is in practice set only by awaiting-dismiss on **like** rows
+(memo §1.1).
 
 **Asymmetry, stated (PRD R1(d))**: the pass-side retraction signal is the paired `undo`
 outcome, which the §5.2 replay already consumes — so no retracted-decision match for a pass
 event ⇒ admit (the check passes vacuously; there is no pass-side retraction state to miss). The
 like side is where `retracted_at` does real work, and the leg covers it (draft A's hazard,
 carried; draft B's fetch fetched `'pass'` only and would have missed retracted likes).
-Set-equality matching carries no time window — an old retracted decision over the identical
-asset set would drop a later re-pass of the same package; rare, and conservative (drops
-evidence, never invents it); flagged as OQ-3.
+
+**Why "conservative" is leg-specific — the v1 blanket claim was wrong in one direction.**
+Dropping evidence and dropping a netting like are opposite errors:
+
+- Dropping a **PASS** removes evidence ⇒ the cell is smaller ⇒ the multiplier is closer to
+  identity. Conservative: we under-act on a partner. Safe to over-drop.
+- Dropping a netting **LIKE** removes a *negative* term ⇒ the cell is **larger** ⇒ the
+  multiplier is further from identity. **Anti-conservative**: over-dropping likes manufactures
+  net-negative evidence and damps a partner the user has actually shown interest in — exactly
+  the lock-in failure PRD §5.3's netting exists to prevent.
+
+That asymmetry is precisely why the latest-row rule is required rather than merely tidy: under
+windowless retracted-only matching, one old dismissed like would suppress every future re-like
+of the same package forever, and the error would compound in the unsafe direction. With the
+latest-row rule the only residual is a *currently* retracted decision, which is the state the
+user last chose.
 
 ### 5.4 M2 aggregation (R5) — fetch + Python fold + feed guard
 
@@ -801,7 +960,17 @@ SELECT user_a_id, user_a_decision, user_a_decided_at,
        matched_at
 FROM trade_matches
 WHERE league_id = :lid
+
+-- negmem._MEMBERS_SQL (param :lid) — the canonical league identity set
+SELECT user_id FROM league_members WHERE league_id = :lid
 ```
+
+`_MEMBERS_SQL` is a leaf-legal read (`database` is an allowed import, D-2) over a table that is
+single-valued on the canonical owner id per ADR-012 (`database.py:340-349`) — 10-14 rows. It
+exists **only** to give the M2 membership filter and the `dropped_unmapped_partner_ids` counter
+something real to test against; nothing else in the module reads it. (Candidate v1 asserted both
+that league_members was never read AND that unmapped keys were counted; those cannot both be
+true. This is the reconciliation.)
 
 Column semantics verified against `database.py:417-436`: `user_a_id` = first swiper,
 `user_b_id` = counterparty; `user_{a,b}_decision ∈ {'accept','decline', NULL}`;
@@ -819,17 +988,40 @@ for row in rows:
         if dec not in ("accept", "decline"):    continue
         ts = _parse(dts) or _parse(matched_at)  # NULL decided_at → matched_at fallback
         if ts is None or ts > as_of_dt:          continue
-        if ts < as_of_dt - timedelta(days=180):  continue   # PRD R5 lookback
-        key = owner_alias.get(uid, uid)          # DE-5: id-space conversion
+        if ts < as_of_dt - timedelta(days=NEGMEM_M2_LOOKBACK_DAYS):  continue  # PRD R5
+        key = owner_alias.get(uid, uid)          # DE-5: identity by default
         acc, resp = stats.get(key, (0, 0))
         stats[key] = (acc + (dec == "accept"), resp + 1)
 ```
 
-Post-fold: drop keys that map to no league member (counted —
-`dropped_unmapped_partner_ids`, the memo's id-space check: `trade_matches.user_a/b_id` vs
-league member space), drop the requesting user. Result:
+Post-fold: drop the requesting user, then **drop every remaining key not in the `_MEMBERS_SQL`
+id set and increment `dropped_unmapped_partner_ids` once per dropped key**. Result:
 `{partner: (int(accepts), int(responses))}` — **tuple order (accepts, responses), per code**
 (`trade_gen_v2.py:305`; §9 delta a).
+
+**The v1 id-space posture (DE-5, round-2 revision) — stated honestly.** `trade_matches` is the
+one negmem source carrying **account-side** ids: `user_{a,b}_id` come from
+`trade_decisions.user_id`, i.e. the session's account-side platform id, while gen_v2 looks up
+`acceptance_stats[member.user_id]` = canonical league owner ids. For a **sole owner** these are
+the same string and the identity default is exactly right. For a **co-owner** they differ, and
+v1 has no way to bridge them: no server-side co-owner source exists (§4.2), and inventing one
+would be a new persisted or client-supplied identity surface — a separate feature with its own
+scope block per ADR-012. So:
+
+- `owner_alias` defaults to identity and v1 ships **no producer** for it.
+- A co-owner's response therefore falls out of the member set and is **dropped, not
+  mis-attributed** — the partner simply has fewer responses, and `acceptance_prior` returns a
+  value shrunk further toward `p0`. Under-informed, never wrong-partner.
+- Every drop is **counted and surfaced** in the readout's `dropped_unmapped_partner_ids` (§7.1).
+  That counter is the visible tripwire: a persistently non-zero value in a co-owned league is
+  the evidence that would justify building an alias source, and until it fires the mechanism is
+  not worth its risk.
+- This is the **accepted limitation**, consistent with ADR-012's existing account-keyed
+  exceptions (`member_rankings`, `league_preferences`) — the repo already tolerates specific
+  account-keyed surfaces rather than forcing a universal mapping.
+- The one alias entry a caller **can** legitimately supply today is
+  `{requesting user's session account id → that user's league_user_id}`. It is a no-op for
+  partner keys (the requesting user is dropped anyway) and is specced as legal, not required.
 
 - **The fold never emits zero-response keys** (structurally: a key exists only via `resp + 1`)
   — HLD §3.5 guard half. At n=0 a partner is simply absent and `acceptance_prior` returns
@@ -838,11 +1030,11 @@ league member space), drop the requesting user. Result:
   class the Python fold avoids outright); `{}` ⇒ uniform `p0` (C4's explicit empty case; S4
   expected-null: with the decline route having essentially never fired, memo §2c/§8, `stats`
   will be near-empty — a uniform read is annotated expected, not a bug).
-- **Why the id conversion is load-bearing (draft B's hazard):** `trade_matches.user_{a,b}_id`
-  come from `trade_decisions.user_id` = session account-side platform ids; a co-owner's id is
-  NOT the roster's canonical `owner_id`, while gen_v2 looks up
-  `acceptance_stats[member.user_id]` = canonical owner ids. Without conversion a co-owner's
-  responses silently vanish (dict miss → global prior — no error, wrong data).
+- **Draft B's id-space hazard, contained rather than solved:** the failure it named was a
+  *silent* one — a co-owner's responses vanishing into a dict miss, no error, wrong data. The
+  round-2 posture keeps the miss (v1 cannot bridge the id spaces, §4.2) but removes the silence:
+  the membership filter converts an invisible dict miss into a counted, readout-visible drop.
+  That is the whole difference between an accepted limitation and a latent bug.
 - 0/0 cannot reach `acceptance_prior`: a partner with responses ≥ 1 divides by
   `responses + m ≥ 1` even at `m = 0`; the `accepts ≤ responses` clamp already exists (`:307`).
 
@@ -858,21 +1050,36 @@ pins feed × function against hand-computed values at both call sites, including
 
 ### 5.6 The bulk read, assembled + perf math (S6)
 
-`build_map` issues, in order: (1) `_SPINE_SQL`, (2) `_RETRACTED_SQL`, (3) `_MATCHES_SQL` — all
+`build_map` issues, in order: (1) `_SPINE_SQL`, (2) `_RETRACTED_SQL`, (3) `_MATCHES_SQL`,
+(4) `_MEMBERS_SQL` — all
 on `database.engine` (product path; WAL/busy_timeout set, `database.py:79-87`), each in its own
 short-lived `engine.connect()` — **no long transaction**: consistency-within-job comes from
-building once per job (H-3), not snapshot isolation; holding a read txn across three queries on
-SQLite WAL would pin the WAL for the duration for no benefit. (`league_members` is NOT read here
-— the alias map arrives injected, DE-5.)
+building once per job (H-3), not snapshot isolation; holding a read txn across four queries on
+SQLite WAL would pin the WAL for the duration for no benefit. `_MEMBERS_SQL` is a 10-14-row
+league-keyed read whose cost is below measurement noise (§5.4).
 
-Perf math (draft B, carried per ruling 4): worst-case spine rows at 10× current volume ≈
+Perf math (draft B, carried per ruling 4; **restated in round 2 — v1's number omitted the
+likes**): worst-case spine rows at 10× current volume ≈
 10k–40k in the 180-day cap. Two costs dominate: row fetch (~1–3 µs/row → ≤120 ms worst case,
 but the league-scoped index makes the realistic case ≤3k rows ≪ 10 ms) and `json.loads` of
 `features_json` (~5–15 µs at its ~500–900 byte size). **Mitigation that keeps the ceiling:**
 `features_json` is parsed **only** for impressions that survive the cheap pre-filters
-(decision-class survivor, reason-family admitted OR netting-like) — bounded by ~120 clean
-reason rows/week × 26 weeks ≈ 3.1k parses ≈ 30–50 ms at 10×. Total worst-case ≈ **150 ms
-against the 250 ms ceiling**; measured p95 is the real gate (S6), and any build over
+(decision-class survivor, reason-family admitted **OR netting-like**). Both arms count:
+
+| Parse population | Volume at 10× over the 180d cap | Cost |
+|---|---|---|
+| admitted reason rows | ~120 clean reason rows/wk × 26 wk ≈ **3.1k** | 15–47 ms |
+| netting likes (~**39%** of decisions — the pre-filter admits every one of them) | ≈ **3.9k** | 20–59 ms |
+| `assets_json` on admitted likes (the §5.3 retraction leg; a second, ~100–200 B parse) | ≈ 3.9k | 12–20 ms |
+| **total parse** | ≈ **7k `features_json` + 3.9k `assets_json`** | **≈ 70–110 ms** |
+
+Total worst-case ≈ **190–230 ms against the 250 ms ceiling** — still inside it, but with far
+less headroom than v1's 150 ms claimed, and the margin is now thin enough that the two-pass
+fetch below is a live contingency rather than a theoretical one.
+**S6 must measure the like arm explicitly**: the timing record reports admitted reason-row count
+and **netting-like count separately** alongside `build_ms`, because likes are the larger half of
+the parse population and a like-heavy league is the realistic breach case. Measured p95 is the
+real gate (S6), and any build over
 `NEGMEM_DEGRADE_MS` (500 ms = 2× ceiling) is marked degraded — **discarded by design**
 (§4.6 returns 1.0, `m2_feed()` returns `{}`), not just stamped. One honest tail note:
 `SELECT di.features_json` transfers the text for every spine row even when Python won't parse
@@ -935,7 +1142,9 @@ this loop):
 call, T1. The 3-dp round matches every neighbor in this stack, e.g. `:5127`, `:5071`, `:5088`,
 `:5104`.) `member.user_id` here is `league_members.user_id` = the canonical roster owner id
 (ADR-012 keeps `league_members` single-valued on `owner_id`) — already league identity, the
-same space the map keys; aliasing was needed on the *data* side (§5.2, §5.4), not at this seam.
+same space the map keys — **and so is the evidence side** (`features_json.partner_user_id` is
+written from the same `card.target_user_id`, §5.2), which is why v1 does no aliasing anywhere on
+the M1 path. The only residual id-space handling is M2's membership filter (§5.4), not this seam.
 
 **Once-only proof under streaming (the invariant the HLD demands proven; draft B):** each
 `cards` list is created fresh per member by the pair generators (`:5021`/`:5057`/`:5059`),
@@ -975,7 +1184,7 @@ injector never consult the map — injector cards are the exempt class (§6.5).
 ```
 
 …and at the pair's card build inside the same loop (where each `_Candidate` becomes a
-`TradeCard`, `:999` ff.):
+`TradeCard`, `:999` ff.; `composite_score` is set at `:1012`):
 
 ```diff
 +            if _nm_stamp is not None:
@@ -987,8 +1196,12 @@ Placement rationale (draft A, verbatim, per ruling 8): the multiplier lands on t
 card's composite, **after** `_pair_survivors`' within-pair selection and after the pair-pool
 trims — a pair-constant multiplier cannot change within-pair selection anyway, and applying at
 card creation keeps `_Candidate.score`, the exposure/dedup machinery, and the MESO layer
-byte-identical (membership untouched, R4). Rounding matches the module's card-build precision
-(verify at implementation; 4 dp is this family's norm, `trade_gen_fit.py:442`).
+byte-identical (membership untouched, R4). **Rounding is pinned at 4 dp — verified, not deferred:**
+gen_v2's own card build writes `composite_score=round(cand.score / 1500.0, 4)`
+(`trade_gen_v2.py:1012`), so multiplying and re-rounding at 4 dp keeps the emitted field at
+exactly the precision the module already publishes (`trade_gen_fit.py:442` is the same norm).
+Any other precision here would change flag-off-identical rows' formatting and break C1's
+byte-equality; the value is fixed by this LLD, not chosen at implementation time.
 
 **M2 feed — both call sites** (the kwarg is added ONLY when a map exists; flag-off calls are
 byte-identical, C1):
@@ -1005,7 +1218,7 @@ byte-identical, C1):
              )
 ```
 
-`bakeoff_runner.gen_v2_cards` (`:1212`):
+`bakeoff_runner.gen_v2_cards` (defined `:1156`; its `generate_league_suggestions` call at `:1212`):
 
 ```diff
 +    _nm = kwargs.get("negmem")
@@ -1140,6 +1353,11 @@ the M2 feed, which `negmem_strength` does not govern — its kill is
 
 ### 7.1 `negmem_readout` output format (R8 — function/script, no route; ruling 11)
 
+The function lives in `backend/negmem.py`; its operator entry point is
+**`backend/scripts/negmem_readout.py`** (argv: `--user`, `--league`, `--as-of`; prints the dict
+below as indented JSON), the same one-off-script convention as `negmem_rfps.py` (§7.4). No
+route — see OQ-5.
+
 ```python
 {
   "user_id": ..., "league_id": ..., "as_of": ..., "ver": 1,
@@ -1153,18 +1371,39 @@ the M2 feed, which `negmem_strength` does not govern — its kill is
             "negmem_halflife_days": ..., "negmem_sat_k": ..., "negmem_like_net": ...,
             "gen2_accept_prior_strength": ..., "gen2_accept_global_prior": ...},
   "cells": [   # sorted (partner, family); EVERY cell incl. identity ones
-    {"partner_league_id": "...", "family": "value", "n_raw": 4, "n_decayed": 1.86,
+    # This row is the §4.5 worked example verbatim (passes day 0, 0, 10; like day 20;
+    # as_of day 30; H=45, min_evidence=3, like_net=1.0) — the readout's example and the
+    # core-logic examples are ONE set of numbers, so a reader can check the doc against
+    # itself. n_decayed 1.137 → 1.14; likes_net = 1.0·0.5^(10/45) = 0.857 → 0.86.
+    {"partner_league_id": "...", "family": "value", "n_raw": 3, "n_decayed": 1.14,
      "likes_net": 0.86, "mult": 1.0, "floored": false, "below_min_evidence": true,
-     "context_tag_counts": {"lane": {"window": 3, null: 1},
-                            "user_value_basis": {"personal": 4},
-                            "trade_intent": {null: 4}}},   # R11: annotated, NULL expected
+     "context_tag_counts": {"lane": {"window": 2, null: 1},
+                            "user_value_basis": {"personal": 3},
+                            "trade_intent": {null: 3}}},   # R11: annotated, NULL expected
     ...
   ],
+  "partner_likes": {"<partner>": 1, ...},            # §4.5 transparency: admitted netting
+                                                     # likes per partner (a like has no
+                                                     # family — it nets every (P, *) cell)
   "partner_mult": {"<partner>": 0.9, ...},           # DE-1 MIN collapse
   "acceptance_stats": {"<partner>": [3, 7], ...},    # (accepts, responses); {} when guard fired
-  "dropped_unmapped_partner_ids": 0                  # §5.4 id-space counter
+  "dropped_unmapped_partner_ids": 0                  # §5.4: M2 response keys that are not
+                                                     # canonical league members — the visible
+                                                     # tripwire for the accepted co-owner
+                                                     # limitation (DE-5). Persistently > 0 in a
+                                                     # co-owned league is the evidence that
+                                                     # would justify an alias source.
 }
 ```
+
+Two field notes the operator will otherwise trip on:
+
+- **`likes_net` is pre-clamp and readout-only** (§3.1). It is the decayed mass of the cell's
+  admitted likes at `as_of`, *not* a term you can subtract from anything: the fold clamps at
+  zero after every step, so the mass a like actually cancelled may be less. Do not expect
+  `n_decayed + likes_net` to equal the gross evidence.
+- **`floored` is RESERVED and always `false` in v1** (§3.1/§4.4) — the §4.4 curve approaches
+  `floor_b` asymptotically and never lands on it. A `true` here means the curve changed.
 
 Same builder, same admission implementation (C5 determinism holds for the readout too). This
 dict is the substance of the operator TestFlight checklist (§8.5) — the checklist's expected
@@ -1227,7 +1466,7 @@ joint(row) = negmem_m(row) × final_score / base_score        -- non-bake-off ro
   computes p5 in Python (SQLite has no percentile function). Trip: `p5(joint) < 0.15` ⇒ raise
   floors (GR4).
 
-### 7.4 RFPS (§4.2 PRD) — metric SQL + the R-X frozen-cohort artifact
+### 7.4 RFPS (PRD §4.2) — metric SQL + the R-X frozen-cohort artifact
 
 Computation (offline, `backend/scripts/negmem_rfps.py`, imports `backend.negmem` — one-off
 operator script per house convention):
@@ -1255,8 +1494,10 @@ operator script per house convention):
   "leagues": ["..."],
   "knobs_frozen": {"negmem_min_evidence": 3.0, "negmem_halflife_days": 45.0,
                    "negmem_sat_k": 3.0, "negmem_like_net": 1.0},
-  "id_mapping": "features_json.partner_user_id (global platform id) -> canonical league owner_id via the server-built owner_alias over league members (ADR-012, injected per DE-5); inline alias_map below is the mapping OF RECORD for this cohort",
-  "alias_map": {"<global_id>": "<league_owner_id>"},
+  "id_mapping": "NONE on the evidence path (DE-5, v1): features_json.partner_user_id IS card.target_user_id IS LeagueMember.user_id — already the canonical league identity, used verbatim as the cell key. The only id-space handling in v1 is on the M2 side, where trade_matches response keys not present in league_members are DROPPED and counted (dropped_unmapped_m2_keys below).",
+  "owner_alias": {},
+  "owner_alias_source": "identity (v1 ships no producer; the kwarg is reserved for a future client-supplied or persisted source, which requires its own scope block per ADR-012)",
+  "dropped_unmapped_m2_keys": 0,
   "admission_ver": 1,
   "cohort": [
     {"impression_id": "…", "served_at": "…", "outcome_id": 123,
@@ -1271,10 +1512,10 @@ operator script per house convention):
 Window-close evaluation runs over the **frozen `impression_id` cohort** with cell assignments
 frozen at close; the script reports the in-window family switch-rate (reason rows whose
 `switched_from` hop changed their family vs the artifact) alongside the point estimate;
-switch-rate > 5% ⇒ the window extends (§8.3 ladder). H-2's mutable-reason drift is thereby
+switch-rate > 5% ⇒ the window extends (PRD §8.3 ladder). H-2's mutable-reason drift is thereby
 contained to a reported number, never a silent baseline shift.
 
-**Power line for §8.3 (pre-registered formula, numbers filled at baseline freeze):**
+**Power line for PRD §8.3 (pre-registered formula, numbers filled at baseline freeze):**
 `n_per_period = (z_{0.975} + z_{0.80})² · (p₁(1−p₁) + p₂(1−p₂)) / (p₁ − p₂)²` with
 `p₂ = 0.75·p₁` (the 25% target). Worked at a plausible `p₁ = 0.30`: `7.849 · 0.3844 / 0.005625 ≈
 536` qualifying rejections per side ⇒ at ~120 clean reason rows/wk, ≈ 4.5 weeks per side of a
@@ -1309,7 +1550,9 @@ always a legal output), and the 500 ms discard bounds the damage window.
 
 **Concurrency statement (draft B, carried):** job workers are daemon threads; a session's
 `TradeService` is shared across its jobs. Negmem adds **zero shared mutable state**: no module
-global (T1), no instance attribute (§2.1), a frozen map passed by argument, and thread-local
+global (T1), no instance attribute (§2.1), a frozen map whose dict fields are
+`MappingProxyType`-wrapped (§3.2 — so "shared read-only" is enforced, not merely intended),
+passed by argument, and thread-local
 `_c` reads at seams. The only cross-thread writes are the job-dict note (under
 `_trade_jobs_lock`, existing discipline) and log lines. A concurrent same-session job builds
 its own map from its own reads — mixed-map decks are impossible by construction, not by
@@ -1326,7 +1569,9 @@ proof).
 - Reason upsert hop (H-2) → conceded per R6; RFPS contained by the frozen cohort (§7.4).
 - Concurrent same-session jobs (H-4) → kwarg-only threading, no shared slot (§2.1, §8.1).
 - Mid-week taxonomy extension → layer-1 column routing (§5.1 note).
-- Co-owned rosters → injected `owner_alias` (§5.4/§5.5).
+- Co-owned rosters → **M1 unaffected** (evidence partner ids are canonical league ids already,
+  §5.2); **M2 accepted limitation** — a co-owner's response is dropped and counted, never
+  mis-attributed (§5.4, DE-5).
 - Clock skew between rows → decay exponents clamped ≥ 0 (§4.3).
 - Deleted user data → derive-on-read: deleting spine rows IS deleting the memory (D3(c)).
 - Likes-you injections → exempt stamp (§6.5); boosted organic cards keep their real stamp.
@@ -1354,7 +1599,7 @@ proof).
 - **Rollout order** (PRD §6 severability respected): P0 = M2 feed (§5.4/§6.3) + harness +
   its goldens ⇒ mergeable alone behind the flag; P1 = builder + seams + stamps + readout +
   knobs + goldens. Dark (flag off, goldens green) → operator flips at a round boundary →
-  allowlist the pilot league → ≥4-week read → §8.3 graduation.
+  allowlist the pilot league → ≥4-week read → PRD §8.3 graduation.
 - **Feature-gate posture:** this change adds a flag + knobs ⇒ crosses the express-lane bright
   line ⇒ full gates (scope block, evidence, docs table, ledger), regardless of operator mood.
 
@@ -1366,8 +1611,8 @@ proof).
    (`negmem_note` on job dicts / `{degraded:true}` stamps) → knob triple
    (`negmem_strength` / `negmem_floor` / `gen2_accept_prior_strength`)."*
 2. *"negmem degraded-rate > 1% of jobs over 24h ⇒ set `negmem_strength = 0` and investigate;
-   window censored at the flip timestamp (§8.3 PRD)."*
-3. *"Any §8.3 guardrail breach at any time ⇒ `negmem_strength = 0` (deploy-free). A breach
+   window censored at the flip timestamp (PRD §8.3)."*
+3. *"Any PRD §8.3 guardrail breach at any time ⇒ `negmem_strength = 0` (deploy-free). A breach
    plausibly originating in the acceptance prior additionally takes
    `gen2_accept_prior_strength = 0` (or rung 1: flag off) — `negmem_strength` does NOT govern
    M2."*
@@ -1385,6 +1630,12 @@ proof).
 7. *"negmem stamp-rate query returns ZERO rows (empty denominator) while the flag is ON ⇒ the
    allowlist file is missing/unparseable or empty — check the build warning log and the
    readout's `allowlisted` field before assuming build failures."*
+8. *"A partner's cards moved for one deck and then settled ⇒ likely a min-evidence crossing, not
+   a bug: the §4.4 curve steps at the threshold. Compare the readout's `n_decayed` for that
+   partner's cells against `negmem_min_evidence` — a value hovering just either side confirms
+   it. To soften the step, raise `negmem_sat_k` (step size = (1 − negmem_floor)/(1 +
+   negmem_sat_k): 0.10 at k=3, 0.05 at k=7, 0.02 at k=19); deploy-free, at a round boundary,
+   and note that a higher k also flattens mid-range damping."*
 
 ### 8.5 Operator TestFlight checklist (D-056 — the runtime evidence mobile gets)
 
@@ -1407,11 +1658,11 @@ Concrete steps, built on the readout:
 
 ---
 
-## 9. HLD deltas (for the reconciliation log)
+## 9. HLD + PRD deltas (for the reconciliation log)
 
-Four discrepancies between this LLD and the FINAL HLD, found while implementing on paper —
+Seven discrepancies between this LLD and the FINAL HLD/PRD, found while implementing on paper —
 flagged here, resolved per the orchestrator's rulings, owed to the reconciliation log at
-finalization:
+finalization. (a)–(e) are HLD deltas; (f)–(g) are PRD deltas.
 
 - **(a) `acceptance_stats` tuple order — THE CODE WINS.** HLD §2.1 writes
   `{partner: (responses, accepts)}`; the ratified consumer unpacks
@@ -1419,18 +1670,26 @@ finalization:
   interface `uid → (accepts, responses)` agrees. This LLD follows the code —
   **(accepts, responses)** — and treats the HLD line as a transcription slip. Sabotage-pinned:
   §10 N-15's named sabotage is exactly the tuple flip.
-- **(b) §2.1-vs-§7 build-knob read contradiction — resolved by ruling 3 (pass-in).** The HLD
+- **(b) HLD §2.1-vs-HLD §7 build-knob read contradiction — resolved by ruling 3 (pass-in).** The HLD
   component diagram says build-time knobs are "read ONCE here, globally" *inside* `build_map`,
-  while §7 tilts the read path to pass-in-from-server; these cannot both be literal. This LLD
+  while HLD §7 tilts the read path to pass-in-from-server; these cannot both be literal. This LLD
   implements pass-in for ALL build knobs including `gen2_accept_prior_strength` (§4.2) — the
-  only reading consistent with D-2's leaf import list — and records that §2.1's phrase should
+  only reading consistent with D-2's leaf import list — and records that HLD §2.1's phrase should
   read "resolved once per job, before any arm context".
-- **(c) Co-owner canonicalization is impossible inside the leaf — resolved by injection
-  (ruling 5).** HLD §7 hands this LLD "co-owner canonicalization call sites" but D-2's import
-  list forbids the module that owns the predicate (`sleeper_roster`). The server builds
-  `owner_alias` from the in-hand league object and passes it into `build_map` (§4.2, §5.5) —
-  the ADR-012 predicate stays single-sourced, and D-2's import list needs no amendment.
-- **(d) §5.3 "kill M2 via the GLOBAL knob only" — PROCEDURE kept; rationale superseded by the
+- **(c) Co-owner canonicalization is not buildable ANYWHERE in v1 — the "call sites" HLD §7
+  hands this LLD do not exist.** Two facts, both verified: D-2's import list forbids the module
+  that owns the predicate (`sleeper_roster`), *and* the predicate cannot be applied server-side
+  either — `co_owner_ids` takes a raw Sleeper roster dict (`sleeper_roster.py:34`),
+  `LeagueMember` carries no `owner_id` (`trade_service.py:3612-3616`), and `league_members`
+  persists no co-owner column (`database.py:340-349`). Candidate v1 answered this with a
+  server-built `owner_alias` map; **round 2 deletes that mechanism** as unnecessary for M1 and
+  unbuildable for M2. Resolution: M1 needs no mapping at all (its partner ids are canonical
+  league ids by construction, §5.2); M2 keeps an identity-default `owner_alias` kwarg with no v1
+  producer, drops non-member response keys, and counts them (§5.4). The co-owner M2 miss is an
+  accepted limitation in line with ADR-012's existing account-keyed exceptions. HLD §7's
+  "co-owner canonicalization call sites" line should read "no canonicalization in v1; M2's
+  residual id-space gap is a counted drop."
+- **(d) HLD §5.3 "kill M2 via the GLOBAL knob only" — PROCEDURE kept; rationale superseded by the
   feed-guard (draft B's finding); re-word owed at finalization.** The rule is retained verbatim
   as operational procedure (runbook line 4: arm overlays are bake-off instruments, not kill
   switches). Draft B established that a *feed-side* guard structurally addresses the
@@ -1439,6 +1698,35 @@ finalization:
   only rung that verifiably empties the feed — so the procedure is load-bearing, and the HLD's
   stated rationale needs re-wording, not the rule. Final wording assigned to the
   reconciliation log.
+- **(e) D-3's "stored overwrite-per-call … read-once-into-local" is SUPERSEDED — this LLD
+  stores nothing.** HLD D-3 (`HLD.md:199-201`) specifies kwarg threading with a *stored*
+  overwrite-per-call slot, modeled on `_exclusion_keys` (`trade_service.py:3983`), plus a
+  read-once-into-local rule to prevent mixed-map decks (`HLD.md:149`). This LLD threads the map
+  **kwarg-only**: no `self._negmem` attribute, no module global, one `negmem_map` key in the
+  `_v2_kwargs` dict (§2.1, §6.2). That is a **strictly stronger discharge of H-4**, not a
+  weaker one: with no shared slot there is nothing for a concurrent same-session job to
+  overwrite, so "mixed-map decks are impossible" becomes structural rather than a convention a
+  future edit could violate. `_exclusion_keys` remains the precedent for kwarg *semantics*
+  only, not for storage. HLD D-3's title should drop "stored" and "read-once-into-local".
+- **(f) PRD R5's "lookback applied in the query" is applied in the PYTHON FOLD instead — same
+  180-day window.** PRD R5 (`PRD.md:237-238`) specifies the M2 lookback "applied **in the
+  query**". DE-4's dialect ruling forbids SQL date arithmetic outright (no dialect date
+  functions; `analytics_queries.py:8-12`), and unlike the spine there is no ISO day-prefix
+  column to bound on cheaply — `trade_matches` has two nullable `*_decided_at` columns plus a
+  `matched_at` fallback, so a correct SQL bound would need per-side COALESCE date math in two
+  dialects. The window is therefore enforced in the Python fold against
+  `NEGMEM_M2_LOOKBACK_DAYS = 180` (§5.4). **The window is identical; only the layer moved.**
+  The table is tiny (matches are rare) so the unfiltered fetch is not a perf concern — §5.6's
+  budget carries it.
+- **(g) PRD R10's knob list expands 4 → 6.** R10 (`PRD.md:260-263`) names `negmem_strength`,
+  `negmem_floor`, `negmem_min_evidence`, `negmem_halflife_days`. This LLD adds
+  **`negmem_sat_k`** (the §4.4 curve's saturation pseudo-count — also the deploy-free
+  flap-size lever that resolves OQ-4b) and **`negmem_like_net`** (DE-2's netting magnitude).
+  Both get the full R10 treatment — `_DEFAULT_CFG`, `_MODEL_CONFIG_DEFAULTS` seed row,
+  `_PINNED_KNOBS` entry, arm-A disposition sentence, `config_json` snapshot coverage (§3.4) —
+  so the *contract* R10 states is honored at six keys rather than four. Knob-surface growth is
+  a real cost (six admin-tunable numbers, six ways to misconfigure); both are argued in place
+  and neither is speculative.
 
 Also recorded (assumption made explicit, no ruling needed): the legacy pre-v2 serving loop
 (`trade_service.py:4095-4178`, `trade_engine_v2` flag OFF) receives no seam — the HLD's seam
@@ -1462,7 +1750,19 @@ roster from the `fixtures/sleeper/co-owned-league` shape); partner X with 5 admi
 passes (day −10..−1), partner Y with 2 (sub-threshold), partner Z with 3 `fit` passes + 1
 viewed like; one ghost pass, one unviewed pass, one `other`-family pass, one `key_source='local'`
 reason, one undone pass, one pre-epoch pass (all inadmissible); `trade_matches` rows giving X
-(2 accepts, 5 responses) including one response recorded under a co-owner alias id.
+(2 accepts, 5 responses) plus **one response recorded under a co-owner account id that is NOT a
+`league_members` row** — the DE-5 accepted-limitation case, which must be dropped and counted,
+never folded into X. `league_members` is seeded with the canonical 12 ids so `_MEMBERS_SQL`
+returns a real set.
+
+**Retraction rows (round-2 addition, §5.3):** the fixture carries three `trade_decisions`
+histories over the same asset sets — (i) a like that is still retracted (`retracted_at`
+non-NULL, latest row) ⇒ its impression's netting like is dropped; (ii) a **re-like**: an older
+retracted `like` row followed by a NEWER `like` row with `retracted_at` NULL over the identical
+give/receive sets (the schema's documented revive path, `database.py:328-336`) ⇒ the key must
+**NOT** be in `retracted_keys` and the netting like must be admitted; (iii) a retracted `pass`
+over an asset set that a later live `pass` repeats ⇒ admitted. Case (ii) is the one candidate
+v1's windowless retracted-only matching got wrong.
 **Fixture-power rule (HLD §7)**: this world yields m < 1.0 for X on a non-A arm in-job —
 N-7/N-9/N-10/N-11 all run against it, so none can pass vacuously.
 
@@ -1471,32 +1771,32 @@ Where both drafts named a sabotage for the same intent, both are listed (primary
 
 | # | Test | Fixture / shape | Proves | Sabotage (RED proof) | Drafts |
 |---|---|---|---|---|---|
-| N-1 | `test_admission_closed_list_matrix` | the inadmissible-row matrix above, run through `_admit_events` (the ONE implementation) | each R1 clause excludes exactly its row; the SQL bound + Python predicate together are the closed list (H-1 defense) | drop the ghost clause from the predicate | A T-1 (reshaped for DE-4) |
+| N-1 | `test_admission_closed_list_matrix` | the inadmissible-row matrix above, fed to `_admit_events` (the ONE implementation) as **`rows: list[dict]`** — one dict per fetched outcome row, keys exactly the `_SPINE_SQL` select list (`impression_id, served_at, features_json, is_ghost, assets_json, shape_bucket, trade_intent, outcome_id, action, acted_at, reason, detail, key_source`), values as the DB would return them (Text stays `str`; `is_ghost` stays an `int` or `None`, never coerced to `bool`). The test constructs these dicts directly — no engine round-trip — so the predicate is exercised in isolation; N-22 covers the SQL half | each R1 clause excludes exactly its row; the SQL bound + Python predicate together are the closed list (H-1 defense) | drop the ghost clause from the predicate | A T-1 (reshaped for DE-4) |
 | N-2 | `test_undo_replay_table` | unit table: pass→undo; pass→undo→pass; like→undo; stray undo; dup pass + one undo; pass→like no-undo | per-impression replay (§5.2): one net disposition; undo pops the most recent survivor | make undo pop the OLDEST decision — the pass→undo→pass case flips | B T-9 |
-| N-3 | `test_decay_shrinkage_worked_examples` | §4.3/§4.4 tables as literals; a clock-skew pair (later row with earlier ts) | formulas match this doc to 1e-9; identity below min_evidence; skew exponent clamped | flip `n_eff` off-by-one | A T-2 |
+| N-3 | `test_decay_shrinkage_worked_examples` | §4.3/§4.4 tables as literals; a clock-skew pair (later row with earlier ts); a `sat_k` sweep over {3, 7, 19} at `floor_b` 0.6 | formulas match this doc to 1e-9; identity below min_evidence; skew exponent clamped. **Plus the five restored threshold assertions (draft B's T-18), which are what make the OQ-4b resolution falsifiable rather than asserted:** (1) `mult` is monotone non-increasing in `n_decayed`; (2) strictly identity (`== 1.0`) everywhere below `min_evidence`; (3) the first non-identity value occurs exactly AT `min_evidence`, not one step past it; (4) `mult(min_evidence) == 1 − (1 − floor_b)/(1 + sat_k)` exactly — 0.900 / 0.950 / 0.980 at k = 3/7/19; (5) raising `sat_k` strictly SHRINKS the threshold step, so the §8.4 line-8 remedy provably works | flip `n_eff` off-by-one (breaks (3) and (4)); make the step independent of `sat_k` (breaks (5)) | A T-2 + B T-18 (B's T-18 shape, re-pointed at the merged curve — B asserted `mult(min_ev) == 1.0` for its *continuous* curve; the merged curve's first effect lands exactly AT the threshold, so assertion (3)/(4) invert B's boundary literal on purpose) |
 | N-4 | `test_combine_rule_min` | the DE-1 3-row table | partner_mult is MIN; product regression caught | change MIN→product (0.7/0.9 partner reads 0.63) | A T-3 / B T-6 |
 | N-5 | `test_effective_mult_invariants` | property sweep: mult∈[0,1], strength∈[−1,3]∪{NaN}, floor∈[0.4,1.2] (§4.6 table) | C2: eff∈[floor,1]; sink-never-rise; strength 0 ⇒ exactly 1.0; NaN/negative/floor>1 safe; pure (module engine patched to a poisoned object) | remove the upper `min(1.0, ·)` clamp — negative strength yields eff>1 | A T-4 + B T-4 |
-| N-6 | `test_netting_order_clamp_bounds` | like-before-evidence; like-after; 5 evidences + 1 like (≥ 3.9 decay-adjusted); 1 evidence + 5 likes (⇒ 0.0, mult 1.0); retracted like | DE-2: chronological fold, clamp-at-zero every step, no banked credit, cells never negative, one like ≤ `like_net`/cell; retracted like nets nothing | replace fold-clamp with end-clamp (early-like banking trips the like-before-evidence case) | A T-15 + B T-5 |
+| N-6 | `test_netting_order_clamp_bounds` | like-before-evidence; like-after; 5 evidences + 1 like (≥ 3.9 decay-adjusted); 1 evidence + 5 likes (⇒ 0.0, mult 1.0); currently-retracted like; **the revive case (§5.3 fixture (ii)): an older retracted `like` row + a newer live `like` row over the identical give/receive sets**; a NULL-`created_at` row in the same group | DE-2: chronological fold, clamp-at-zero every step, no banked credit, cells never negative, one like ≤ `like_net`/cell; currently-retracted like nets nothing. **Revive assertions:** the key is ABSENT from `retracted_keys`, the netting like IS admitted, the cell's `n_decayed` is lower than the retracted-only variant, and the NULL-`created_at` row never wins the `max(created_at)` comparison | replace fold-clamp with end-clamp (early-like banking trips the like-before-evidence case); **restore `AND retracted_at IS NOT NULL` to `_RETRACTED_SQL` — the revive case goes RED (the live re-like is suppressed by its own stale retraction)**; decide the group by `min(created_at)` instead of `max` | A T-15 + B T-5 |
 | N-7 | `test_serving_golden_strength0_stamp_inclusive` | `_negmem_world`, flag ON, `negmem_strength=0`, serving path + fit fixture | golden (a): FULL byte-equality of decks **against a stamp-inclusive fixture** — every row carries `{m:1.0,"ver":1}`; deck content/scores/order identical to pre-negmem capture; also asserts the arm-A profile pin changes `snapshot_config` output but not deck bytes | make the seam round() at identity; bake strength into `build_map` cell mults (the overlay-blind read) | A T-5 + B T-2 |
-| N-8 | `test_arm_c_dual_kill_golden` | `_negmem_world` bake-off job, `negmem_strength=0` ∧ `gen2_accept_prior_strength=0` | golden (b): arm-C deck byte-identical — verifies M2's structural kill AND gen_v2's M1 seam (which M2 could otherwise mask) | move the feed guard into `acceptance_prior`; remove the guard (pass stats at strength 0) | A T-6 + B T-3 |
+| N-8 | `test_arm_c_dual_kill_golden` | `_negmem_world` bake-off job, `negmem_strength=0` ∧ `gen2_accept_prior_strength=0`. **Both knobs are set GLOBALLY (the `_cfg` snapshot idiom), never through an arm overlay** — this is load-bearing, not a style choice: the feed guard fires on the job-level global read taken before the fan-out (§5.4, ruling 3), so an overlay pin of `gen2_accept_prior_strength` would leave the feed POPULATED and the golden would pass for the wrong reason (or fail confusingly). The test asserts the global read explicitly, mirroring runbook line 4 and §9 delta (d) | golden (b): arm-C deck byte-identical — verifies M2's structural kill AND gen_v2's M1 seam (which M2 could otherwise mask) | move the feed guard into `acceptance_prior`; remove the guard (pass stats at strength 0); **set `gen2_accept_prior_strength=0` via an arm overlay instead of globally — the feed stays populated, proving the test's global-set requirement is real** | A T-6 + B T-3 |
 | N-9 | `test_arm_a_rows_stamp_exactly_identity` | `_negmem_world` bake-off (fixture-power: live arm has m<1.0 in the same job) | golden (c): every `model_arm='baseline'` row stamps exactly `{m:1.0,"ver":1}` — never absence, never a live m | drop `negmem_strength` from MODEL_A_PROFILE | A T-7 |
 | N-10 | `test_stamp_provenance_b2_copy_only` | consult under arm overlay with strength 1.0, then flip live `_cfg` to strength 0 BEFORE logging | B2/DE-10: assembly copies card state — the stamp still shows the consult-time m (a recompute would show 1.0) | recompute m at assembly via `effective_mult` + live `_c` (draft B's named sabotage, per ruling 6) | A T-8 + B T-12 |
 | N-11 | `test_t1_sabotage_live_binding` | `_negmem_world`; monkeypatch-rebind `negmem.effective_mult` to return 0.5 | T1: fit + serving output CHANGES ⇒ live module-attribute binding, no frozen import | `from .negmem import effective_mult` at a seam | A T-9 / B T-11 |
 | N-12 | `test_likes_you_led_deck_batch_stamps` | deck whose FIRST card is a likes-you injection (the model_arm scar scenario), flag ON | C3: batch-wide `negmem` key retention through `save_deck_impressions`' executemany; injection stamps `exempt`, boosted organic keeps real stamp | move the stamp outside features_json; stamp only cards with `negmem_stamp` set | A T-10 + B T-14 |
 | N-13 | `test_c1_flag_off_and_unallowlisted_byte_identity` | `_negmem_world` with (i) flag OFF, (ii) flag ON + league NOT allowlisted | C1: `negmem` key absent from `_generate_kwargs`, no stamp key anywhere, features_json byte-identical; the None seam is indistinguishable from flag-off | stamp on `nm_map is None` (assembly stamps `{m:1.0}` when ctx None) | A T-11 + B T-1 |
-| N-14 | `test_map_determinism_and_asof` | build twice at same as_of; permute row insert order; build at historical as_of | C5 determinism to the bit incl. insert-order independence; as-of reproducibility incl. netting events in-domain (R6) | inject `now()` into the fold (or iterate a set for the fold) | A T-12 + B T-10 |
-| N-15 | `test_m2_parity_both_call_sites_incl_empty` | hand-computed E-B values; empty tables | C4: feed × `acceptance_prior` reproduces memo §2f exactly at `trade_service.py:4001` and `bakeoff_runner.py:1212`; empty ⇒ `{}` ⇒ uniform p0 (S4 expected-null) | flip the tuple to (responses, accepts) (§9 delta a pin) | A T-13 + B T-7 |
-| N-16 | `test_m2_feed_guard_and_zero_response_keys` | knob ≤ 0; a partner with matches but no decisions | feed `{}` at strength ≤ 0; zero-response keys structurally absent; global-kill (not overlay) semantics documented-in-assert | emit partners with `responses=0` | A T-14 + B T-7 |
+| N-14 | `test_map_determinism_and_asof` | build twice at same as_of; permute row insert order; build at historical as_of | C5 determinism to the bit incl. insert-order independence; as-of reproducibility incl. netting events in-domain (R6). **Plus the H-4 immutability assertion:** `nm_map.partner_mult["X"] = 0.5`, `nm_map.cells[...] = ...` and `nm_map.acceptance_stats[...] = ...` each raise `TypeError` (the §3.2 `MappingProxyType` wrap) — a seam cannot "fix up" a shared map in place | inject `now()` into the fold (or iterate a set for the fold); return the plain dicts unwrapped from the builder (the immutability assertions go RED) | A T-12 + B T-10 |
+| N-15 | `test_m2_parity_both_call_sites_incl_empty` | hand-computed E-B values; empty tables; **plus a lookback pair: one response at `as_of − (NEGMEM_M2_LOOKBACK_DAYS − 1)` days and one at `as_of − (NEGMEM_M2_LOOKBACK_DAYS + 1)` days** | C4: feed × `acceptance_prior` reproduces memo §2f exactly at `trade_service.py:4001` and `bakeoff_runner.py:1212`; empty ⇒ `{}` ⇒ uniform p0 (S4 expected-null). **Pins the window to the named constant**: the inside row counts, the outside row does not, and the boundary is read from `negmem.NEGMEM_M2_LOOKBACK_DAYS` rather than a literal 180 — so the PRD R5 window and the code cannot drift apart silently (§9 delta f) | flip the tuple to (responses, accepts) (§9 delta a pin); change `NEGMEM_M2_LOOKBACK_DAYS` to 90 and watch the inside row drop out | A T-13 + B T-7 |
+| N-16 | `test_m2_feed_guard_and_zero_response_keys` | knob ≤ 0; a partner with matches but no decisions; a response id absent from `league_members`; **a response dated exactly at the `NEGMEM_M2_LOOKBACK_DAYS` boundary** | feed `{}` at strength ≤ 0; zero-response keys structurally absent; global-kill (not overlay) semantics documented-in-assert; non-member key dropped AND `dropped_unmapped_partner_ids == 1` (DE-5's visible tripwire); the boundary row's disposition is pinned to the constant, not to a literal | emit partners with `responses=0`; drop the non-member key silently without incrementing the counter | A T-14 + B T-7 |
 | N-17 | `test_fit_end_to_end_ordering_restore_order` | bake-off fixed-order deck, fit arm rostered, likes-you injection active; fixture where negmem swaps two fit ranks | DE-9: the fit arm's negmem ordering survives to the FINAL served deck through `restore_order` (`server.py:5766`) — the composite re-sort does not erase it | skip `restore_order` | A T-16 + B T-13 |
 | N-18 | `test_fit_quantization_order` | C7c plateau pair (same partner, aggregate Δ ~1e-13) + cross-partner pair | m applied BEFORE the 1e-9 round: same-partner tie survives; cross-partner order splits by m | multiply after the round | A T-17 + B T-13 |
-| N-19 | `test_degraded_and_failure_taxonomy` | (i) builder raises mid-read; (ii) valid build with build_ms forced > 500ms; (iii) KeyboardInterrupt raised in a patched reader; (iv) one corrupt features_json row | degraded map: seams identity (incl. slow-but-valid discard), stamps `{m:1.0,degraded:true}` on every row, `m2_feed() == {}`, job survives; KI propagates (`except Exception`, not BaseException); corrupt row ⇒ `parse_errors` +1, map healthy | stamp degraded but keep multiplying; catch `BaseException` | A T-18 + B T-17 |
+| N-19 | `test_degraded_and_failure_taxonomy` | (i) builder raises mid-read; (ii) valid build whose `build_ms` exceeds `NEGMEM_DEGRADE_MS` — produced by **monkeypatching `time.perf_counter` in the negmem module namespace** to return a scripted sequence whose delta is > 500 ms (never by `sleep`, which would add half a second of wall time to every CI run for no extra coverage; `build_ms` is wall-clock around the reads + fold, §5.6, so the clock IS the only input to degrade); (iii) KeyboardInterrupt raised in a patched reader; (iv) one corrupt features_json row | degraded map: seams identity (incl. slow-but-valid discard), stamps `{m:1.0,degraded:true}` on every row, `m2_feed() == {}`, job survives; KI propagates (`except Exception`, not BaseException); corrupt row ⇒ `parse_errors` +1, map healthy | stamp degraded but keep multiplying; catch `BaseException` | A T-18 + B T-17 |
 | N-20 | `test_streaming_callback_golden` | serving path with `on_opponent_done` capturing every snapshot | strength-0 snapshots byte-identical; strength-1 snapshots multiply-once (composite == pre-capture base × m at every snapshot — `_dedup_and_sort` re-runs never compound, §6.2 proof) | multiply inside `_dedup_and_sort` | A T-19 |
-| N-21 | `test_identity_hygiene_owner_alias` | co-owned league; decisions/matches recorded under the alias id; injected `owner_alias` | DE-5/R9: map + M2 keys are canonical owner ids; the co-owner's decline lands on the canonical key; alias rows fold into the owner's cells; account ids never appear as keys; `owner_alias=None` ⇒ identity | key on raw `partner_user_id` (drop `owner_alias` — stats dict misses) | A T-20 + B T-8 |
-| N-22 | `test_horizon_and_epoch_day_prefix_boundaries` | one event at as_of−4H−1d, one inside; served 2026-08-20T00:00:00 (admitted) vs 2026-08-19T23:59 (not) | §4.7 horizon applied in-query (out-of-horizon rows never loaded); the day-prefix bound admits the whole boundary day and excludes D-091 structurally | filter horizon in Python instead; change the bound to full-timestamp comparison vs a 'Z' bind | A T-21 + B T-15 |
-| N-23 | `test_dual_dialect_sql_compiles` | compile `_SPINE_SQL`/`_RETRACTED_SQL`/`_MATCHES_SQL` + pack SQL via `sqlalchemy.text` against the `postgresql` dialect | no accidental SQLite-only syntax, without a live PG | introduce `json_extract` into the spine | B T-15 |
+| N-21 | `test_identity_hygiene_and_unmapped_drop` | **(a)** default build (no `owner_alias` passed) over `_negmem_world`: co-owned league, evidence written with `features_json.partner_user_id` = the canonical `LeagueMember.user_id`; **(b)** an M2 response recorded under a co-owner account id absent from `league_members`; **(c)** a UNIT-level call to `build_map` with an explicitly **injected** `owner_alias` mapping that account id to the canonical member | **R9 (the shipped behavior):** every cell key and every `acceptance_stats` key is a canonical league member id; account ids never appear as keys; **the M1 path performs no lookup at all** — assert `owner_alias` is never consulted for evidence, so a future edit re-introducing an alias hop on the evidence path is caught. **DE-5 (the accepted limitation):** in (b) the response is DROPPED, X's `responses` is unchanged, and `dropped_unmapped_partner_ids == 1`. **(c) is a UNIT assertion about the kwarg's contract only** — with the map injected, that same response folds onto the canonical key and the counter stays 0. It proves the parameter works if ever fed; **it must NOT be read as evidence that a server-built map exists — v1 ships no producer** (§4.2), and the test asserts the production call site passes no `owner_alias` | drop the membership filter so the non-member key silently survives into the feed (counter stays 0 — the exact silence DE-5 exists to remove); make the M1 evidence path route `partner_user_id` through `owner_alias` (a no-op in prod, so only this assertion catches the re-introduction) | A T-20 + B T-8 |
+| N-22 | `test_horizon_and_epoch_day_prefix_boundaries` | **halflife pinned small (`halflife_days = 2.0` ⇒ horizon = 8 days) and `as_of` set FAR past the epoch (e.g. 2027-06-01), so `max(NEGMEM_CLEAN_EPOCH_DAY, as_of − 4H)` resolves to the ROLLING floor, strictly later than 2026-08-20** — at default H=45 with a near-epoch `as_of` the epoch dominates and the horizon arm of the max is never exercised, which is how a broken horizon would pass unnoticed. Rows: one served at `floor − 1d`, one at `floor` exactly, one inside. Separately, an epoch pair at default knobs: served `2026-08-20T00:00:00` (admitted) vs `2026-08-19T23:59` (not) | §4.7 horizon applied in-query; the day-prefix bound admits the whole boundary day and excludes D-091 structurally. **Asserts on the FETCHED ROW COUNT** (rows returned by `_SPINE_SQL`, captured at the connection), not merely on final cell values — "never loaded" is the claim, and a Python-side filter would produce identical cells while loading everything | filter the horizon in Python after the fetch — cells match, **fetched row count does not**, so only the row-count assertion goes RED; change the bound to a full-timestamp comparison against a `'Z'`-suffixed bind | A T-21 + B T-15 |
+| N-23 | `test_sql_dialect_portability_banned_tokens_and_execution` | all four module SQL strings (`_SPINE_SQL`, `_RETRACTED_SQL`, `_MATCHES_SQL`, `_MEMBERS_SQL`) **plus the shipped pack files** (`negmem-stamp-rate.sql`, `negmem-gr4-joint.sql`, SQLite-normative forms) | **Two real checks replacing v1's vacuous one.** v1 compiled `text()` SQL against the `postgresql` dialect — but `text()` is an opaque string to SQLAlchemy: it compiles *any* SQLite-only syntax without complaint, so the assertion could never fail. Instead: **(1) banned-token scan** — case-insensitive assert that none of `json_extract`, `->>`, `::jsonb`, `strftime`, `date_trunc`, `PERCENTILE_CONT`, `julianday` appears in any of the strings (the DE-4 dialect rule made mechanical; `analytics_queries.py:8-12` is the precedent the list encodes); **(2) execution** — every statement runs against the in-memory SQLite engine over `_negmem_world`, binding real params, asserting it returns without error and with the expected column set (a syntax error or a renamed column fails loudly). The postgres-dialect compile is KEPT as a cheap smoke check but is explicitly documented as non-load-bearing | add `json_extract(di.features_json,'$.partner_user_id')` to the spine — **caught by (1)**, and by (2) only on Postgres, which is why (1) exists; add `strftime('%Y-%m-%d', di.served_at)` in place of `substr` — passes SQLite execution, caught by (1); rename a selected column — caught by (2) | B T-15 |
 | N-24 | `test_leaf_import_contract` | static assert on `negmem`'s module imports | imports ⊆ {stdlib, feature_flags, database} — no `sleeper_roster` (DE-5), no engines (D-2) | import trade_service (or sleeper_roster) in negmem | B T-16 |
 | N-25 | `test_knob_and_flag_registration` | — | six knobs present in `_DEFAULT_CFG` + seed rows + `_PINNED_KNOBS` (the existing inventory test `test_bakeoff_arm_a_golden.py:545` fails by name otherwise — this test pins the negmem-specific rows and the `MODEL_A_PROFILE` pin; the profile-names-real-knobs test `:562-567` covers deletion drift); `trade.negmem` in FLAG_KEYS; release.json mirror test already enforces the flag file | — (the inventory tests ARE the alarm) | A T-22 + B T-19 |
-| N-26 | `test_readout_format` | `_negmem_world`, incl. a non-allowlisted league | §7.1 dict shape snapshot incl. `allowlisted` (bypass semantics), `parse_errors`, `likes_net`, context-tag NULL annotation, dropped-id counter | — | A T-23 + B §12.1 |
+| N-26 | `test_readout_format` | `_negmem_world`, incl. a non-allowlisted league | §7.1 dict shape snapshot incl. `allowlisted` (bypass semantics), `parse_errors`, `likes_net` (pre-clamp semantics), `partner_likes`, `floored` present and `false` on every cell (the RESERVED contract, §3.1), context-tag NULL annotation, `dropped_unmapped_partner_ids` | — | A T-23 + B §12.1 |
 | N-27 | `test_relaxed_pass_same_map` | targeted job yielding zero cards then relaxed cards | relaxed re-run consults the SAME map/strength; relaxed cards stamped; no special case (HLD §3.5) | drop `negmem` from `v2_kwargs` (rebuild-in-relaxed also RED) | A T-24 + B T-20 |
 
 Coverage check (per ruling 11 — every C1-C5/GR invariant has a test + sabotage): C1 → N-7,
@@ -1516,20 +1816,34 @@ D-056.
   now §9 delta (a) — code wins, sabotage-pinned in N-15.
 - **OQ-2:** allowlist file name `config/negmem_leagues.json` — operator to confirm at the D1
   ruling touchpoint (mechanics are DE-7 regardless of name).
-- **OQ-3:** the retraction leg's set-equality matching (§5.3) carries no time window — draft A
-  proposed a 600s nearest-timestamp pairing, draft B a windowless retracted-keys set; the merge
-  took B's (simpler, and conservative: it can only drop evidence) extended to the `'like'`
-  decision class (A's hazard). Cross-review to confirm the windowless form, or reinstate a
-  proximity bound as a reviewable constant (not a knob).
+- **OQ-3 (RESOLVED in round 2 — the latest-row rule; §5.3):** the v1 form matched a windowless
+  set-equality against *retracted-only* rows. Both review lenses converged on the same defect:
+  the schema documents a revive path (`database.py:328-336` — "a later re-like writes a fresh
+  row with NULL"), so a stale retraction would suppress a later live decision over the same
+  asset set forever. Worse, the v1 "conservative" defense was leg-specific and only half true:
+  dropping a PASS is conservative, but dropping a netting LIKE manufactures net-negative
+  evidence — the anti-conservative direction. Resolution (4-line change): drop
+  `AND retracted_at IS NOT NULL` from `_RETRACTED_SQL`, fetch all `('pass','like')` rows,
+  group in Python by `(decision, frozenset(give), frozenset(recv))`, and let the row with
+  `max(created_at)` decide. Neither a time window nor A's 600s proximity pairing is needed.
+  Pinned by N-6's revive case.
 - **OQ-4:** `negmem_floor`'s double role (curve asymptote at build, clamp at seam — §4.4). The
   alternative (a separate `negmem_curve_floor` knob) was rejected to keep the knob surface at
   R10's four + two; revisit only if an arm-overlay use case for `negmem_floor` ever appears
   (none is sanctioned — D-6 is strength-only).
-- **OQ-4b (flagged for the orchestrator):** the §4.4 curve is discontinuous at the
-  min-evidence threshold (1.0 → 0.900 as decay crosses the gate) — draft B's continuous curve
-  avoided a day-to-day ordering flap there. The ruling sheet pins the 6-knob table (hence
-  `negmem_sat_k` and this curve); the flap hazard stands recorded. If cross-review wants
-  continuity, the curve change is localized to `_cell_mult` + N-3's literals.
+- **OQ-4b (RESOLVED in round 2 — KEEP the discontinuity, ACCEPT the flap; §4.4).** Both review
+  lenses converged on keep-and-accept, and the hand-wave is replaced by four quantified facts:
+  the step size is exactly `(1 − floor_b)/(1 + sat_k)`, so `negmem_sat_k` is a deploy-free
+  flap-size lever (0.10 → 0.05 → 0.02 at k = 3/7/19) at the stated cost of flatter mid-range
+  damping; decay is monotone between events, so the gate is crossed downward exactly once and
+  never dithers, with upward re-crossing requiring a discrete ~1.0-unit admitted event (~20× the
+  daily drift, two orders above the same-session hover band); crossings are bounded by the
+  admitted-event rate (~1–2 per league per week); and the discontinuity is the *point* of a
+  shrinkage gate — PRD §4.2's RFPS numerator and the §7.4 frozen-cohort artifact both key on the
+  hard threshold, so a continuous ramp would desynchronize metric from map. Falsifiable via
+  N-3's five restored threshold assertions; the operator remedy is runbook line 8. Should a
+  future round still want continuity, the change stays localized to `_cell_mult` + N-3's
+  literals — but it would owe the RFPS definition a rewrite too.
 - **OQ-5:** readout exposure as a CRON-authed admin route — deliberately out of v1 (R8 is
   scripts/pytest); noted for the explainer-UI feature's future gates (NG5). (Draft B specced a
   route; ruling 11 carries draft A's readout — no route, `docs/api-reference.md` stays n/a.)
@@ -1549,7 +1863,7 @@ D-056.
 | `docs/data-dictionary.md` | `deck_impressions.features_json.negmem` stamp key (schema §3.3) |
 | `docs/architecture.md` + `living-memory/HLD.md` | new leaf module + seam wiring |
 | `living-memory/LLD.md` | the T1/consult-seam + kwarg-threading convention rows |
-| `docs/runbook.md` | the seven lines of §8.4 |
+| `docs/runbook.md` | the **eight** lines of §8.4 (line 8 is the min-evidence-crossing triage added with the OQ-4b resolution), plus a pointer to the operator scripts `backend/scripts/negmem_readout.py` (§7.1 dump — the substance of the §8.5 TestFlight checklist) and `backend/scripts/negmem_rfps.py` (§7.4) |
 | `docs/glossary.md` | negmem, reason family, RFPS, evidence cell, like-netting |
 | `docs/api-reference.md` | n/a — no route changes (readout is a function; admin config PUT pre-exists) |
 | `docs/cross-client-invariants.md` | n/a — no client consumes the stamp in v1 |
