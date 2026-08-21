@@ -1,4 +1,4 @@
-# Reconciliation log — Negative-results memory PRD
+# Reconciliation log — Negative-results memory PRD + HLD
 
 **Document type:** PRD **Rounds run:** 4 (the cap) **Converged:** yes — dual sign-off in round 4
 **Process:** dual-agent-doc-review — Agent A (Product/User lens), Agent B
@@ -81,3 +81,53 @@ id-mapping note; ~120 rows/week labeled a derived estimate.
 None — both lenses signed off. Two items are *deliberately deferred to named owners*
 rather than unresolved: like-netting magnitude/mechanism (LLD), and shared-taxonomy
 v1.1.0 authorship (three-way reconciliation).
+
+
+---
+
+# HLD reconciliation
+
+**Document type:** HLD **Rounds run:** 4 (the cap) **Converged:** yes — dual sign-off in round 4
+Drafts: [HLD-draft-A.md](HLD-draft-A.md) (coherence), [HLD-draft-B.md](HLD-draft-B.md)
+(failure-modes). Both lenses independently converged on kwarg threading in round 1.
+
+## Round 1 → synthesis (candidate v1)
+A's decision set D-1..D-9 carried; B's failure engineering adopted wholesale (fail-open
++ degraded bit, hazards H-1..H-4, stamp trichotomy, R-X frozen-cohort rule, M2 0/0
+edge, materialization-as-cache, T1 no-module-global doctrine, underpowered-signal
+honesty). New D-10 at synthesis: one shared effective-multiplier function. Mid-round
+amendment: the operator's ghost ruling (2026-08-21) — checked not load-bearing; stamp
+rule reworded to "every row the job writes."
+
+## Round 2 (v1 → v2): 8 blocking objections, all synthesis errors, all applied
+A: §2.1/D-10 import contradiction + unstated cfg contract; strength-0 stamping
+three-way collision; GR4 "from stamps" false (taste/fatigue not stamped — B's
+computability fix had been dropped); the league-allowlist seam vanished (and would
+have made the stamp-rate tripwire false-alarm). B: the same cfg trap sharpened into
+the pure-function fix (`effective_mult(map, partner, *, strength, floor)` — the
+overlay-blind-frozen-read failure named); stamp provenance (consult-time m rides the
+card; assembly copies, never computes — else arm-A rows get poisoned with no failing
+test); the 4·halflife read horizon compressed out; GR4 uncomputable as reworded.
+Non-blockers folded: M2 guard placement (feed, never the ratified math — NG9),
+relaxed-pass note, fit quantization order + `restore_order` dependency test, S6
+anchors (2× fatigue p95 / 250ms), triage order, handoff additions.
+
+## Round 3 (v2 → v3): A signed; B found the M2 × strength-0 triangle
+§3.5/§5.1/§5.3 could not all be true — resolved by DECISION (PRD R5 supports it):
+`negmem_strength` is M1-only; M2 is governed by the existing seeded
+`gen2_accept_prior_*` knobs; M2's independent kill `gen2_accept_prior_strength = 0`
+IS the feed-guard's E-B pseudo-count. Arm A verified structurally M2-free (never runs
+gen_v2). Golden set re-scoped three ways. A's round-3 nits folded (GR4 double-count
+direction + Thompson layer; build-knob read-path decision; naming fixes).
+
+## Round 4 (v3 → FINAL): dual sign-off
+A: D-9 "one flag" verified to survive the decision; every cross-reference swept clean.
+B: every `negmem_strength` reference verified on the new reading. Six finishing nits
+applied at finalization: stamp-inclusive golden (a); dual-kill golden (b); breach-
+remedy runbook translation + R10 M1-scoping divergence note; degraded ⇒ M2 feed `{}`;
+knob-read tilted to pass-in for the gen2 knob; kill-M2-via-global-never-overlay line.
+
+## Unresolved disagreements
+None — both lenses signed off. Deferred to named owners: the GR4
+pollution-vs-stamping choice, the knob read path, and the netting mechanism (all LLD,
+listed in HLD §7).

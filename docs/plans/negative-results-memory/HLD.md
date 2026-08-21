@@ -1,6 +1,6 @@
 # HLD: Negative-results memory
 
-**Version:** candidate v3 (round-3 M2×strength decision applied; round-4 verification pending)
+**Version:** FINAL — dual sign-off, round 4 of 4 (log: [reconciliation-log.md](reconciliation-log.md) §HLD)
 **Date:** 2026-08-21 · Serves: [PRD.md](PRD.md) (FINAL — R/NG/C/GR/§8.3 are requirements) ·
 Facts: [research-verification.md](research-verification.md) ("memo") ·
 Drafts: [HLD-draft-A.md](HLD-draft-A.md) (coherence), [HLD-draft-B.md](HLD-draft-B.md) (failure-modes)
@@ -172,7 +172,8 @@ likes-you injection (the exact model_arm scar scenario) retains the key batch-wi
 
 ### 3.5 M2 flow and edges (draft B §3.5)
 `acceptance_stats` rides the map (D-9); both gen_v2 call sites receive it only when the
-map exists. At n=0 (today's reality — the decline route has essentially never fired)
+map exists AND is non-degraded — **degraded ⇒ the feed returns `{}`**, so "seams treat
+a degraded map as identity" covers M2, not just the M1 multiplier seams. At n=0 (today's reality — the decline route has essentially never fired)
 the E-B math must return the global prior, not 0/0 — **guard placement rule: the
 aggregation never emits zero-response keys and the feed returns `{}` when
 `gen2_accept_prior_strength ≤ 0` (the E-B pseudo-count `m` in the memo §2f formula IS
@@ -242,9 +243,13 @@ kill is `gen2_accept_prior_strength = 0`). Stamps FOLLOW THE TRICHOTOMY — ever
 carries `{m: 1.0}` while flag ON ∧ allowlisted, because the stamp-absence tripwire
 (§3.2) depends on it. This is an HLD strengthening over PRD R7 (which requires stamps
 only on influenced rows) — stated as such. The golden set is scoped to match: (a)
-serving-engine + fit fixtures assert FULL byte-equality at `negmem_strength = 0`; (b)
-arm-C parity is asserted separately at `gen2_accept_prior_strength = 0`; (c) the arm-A
-golden expects `{m: 1.0}` on every row — never absence, never a live m.
+serving-engine + fit fixtures assert FULL byte-equality at `negmem_strength = 0`
+**against a stamp-inclusive fixture** (rows carry `{m: 1.0}` while flag ON — a
+flag-off comparison would fail by design); (b) arm-C parity is asserted with **BOTH
+kills set** (`negmem_strength = 0` ∧ `gen2_accept_prior_strength = 0`) — the one
+fixture that verifies M2's structural kill AND gen_v2's M1 seam, which M2 could
+otherwise mask; (c) the arm-A golden expects `{m: 1.0}` on every row — never absence,
+never a live m.
 
 ### 5.2 The T1 rule (from the fit-challenger scar, now doctrine)
 No module-global map, ever — `from .negmem import current_map` would freeze the
@@ -268,7 +273,14 @@ rollback ladder, all deploy-free, nothing left behind at any rung (derive-on-rea
 `trade.negmem` off (everything, incl. M2) → `negmem_strength = 0` (M1 inert; M2 still
 feeds, with its OWN deploy-free kill `gen2_accept_prior_strength = 0` — §3.5; map still
 builds for readout) → `negmem_floor = 1.0` (clamp to identity; diagnostic posture —
-stamps keep flowing). Flag/knob flips at round boundaries only
+stamps keep flowing). Runbook lines carried with the ladder: a §8.3 guardrail breach
+plausibly originating in the acceptance prior takes `gen2_accept_prior_strength = 0`
+(or rung 1) alongside `negmem_strength = 0` — and note PRD R10's "0 = byte-identical
+disable" parenthetical is now M1-SCOPED, a documented divergence, not silent. **Kill
+M2 via the GLOBAL knob only, never an arm overlay pin** — a per-arm pin of
+`gen2_accept_prior_strength = 0` with a nonzero global leaves the feed populated and
+`acceptance_prior` returning the raw unshrunk ratio (the guard lives in the feed,
+NG9). Flag/knob flips at round boundaries only
 (GR3; operator procedure in the rollout runbook).
 
 ### 5.4 10x and the materialization fallback
@@ -328,8 +340,11 @@ passes) · degraded-map BEHAVIOR rule: seams treat a degraded map as identity ev
 the build was slow-but-valid (discarded by design, not just stamped) · the build-time
 knob read path: negmem reads `model_config` via `database.get_config()` directly
 (leaf-legal) OR the server reads via `_c` and passes values into `build_map` — LLD
-picks ONE and notes the two-read-paths drift surface (the knobs also live in
-`_DEFAULT_CFG` for D-8 snapshots).
+picks ONE, TILTED toward pass-in-from-server at least for
+`gen2_accept_prior_strength` (its seeded default lives in `_DEFAULT_CFG`,
+`trade_service.py:660`; a direct-read would force negmem to duplicate that default —
+a stale-copy drift surface), and notes the two-read-paths drift surface generally
+(the knobs also live in `_DEFAULT_CFG` for D-8 snapshots).
 Signatures + NegmemMap dataclass; the admission SQL fragment + predicate pair; decay/
 shrinkage formulas and the D-5 combine rule (product vs min) with fixtures; netting
 magnitude + decrement-vs-reset; the R1(d) join path (impression↔decision; asymmetric
