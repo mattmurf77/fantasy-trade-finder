@@ -1210,3 +1210,46 @@ silently. **If the operator disagrees, it is one line.**
 **Alternatives considered:** Acquire-side % with a `beat` flag (rejected: measures the market, and a standalone acquire-side % is now banned copy); grading against personal boards from `elo_history` (rejected as permanently endogenous — a user's swipes are partly the echo of our own suggestion, HL-2).
 **Consequences:** Harder to explain than "+14%", and the honest version is a smaller-sounding number. The drift-cancellation claim was overstated in the first draft ("cancels for every shape") and corrected in review; the SIGN of the disclosed 2x1 residual was also wrong at round 3, and is now test-pinned in both directions — a flipped sign would have rendered every win as a loss.
 **Status:** Active. Built dark 2026-08-21.
+
+## D-146 — Draft Picks Price at Their Own Draft Slot; the Per-User Mode, Its Route and Its Flag Are Retired
+
+**Date:** 2026-08-21 ([scope](../docs/plans/slot-pricing-unconditional/scope.md)); closes [Q-023](OPEN_QUESTIONS.md) in full, rules and defers [Q-026](OPEN_QUESTIONS.md)
+
+**Operator ruling.** *"Market slots should be default and not an opt-in or even an option to flip. Aligned that future picks stay default for now."* Clarified the same day: "market slots" means **each pick holding *real value rather than generic*** — true per-slot pricing, not merely a market-flavoured round curve.
+
+**Decision.** An owned pick's engine value is a three-step waterfall in `pick_values.priced_pool_value`, resolved at read time, for every user, with no flag read, no session read and no DB read:
+
+1. **The pick's OWN slot price** — `market_pick_slot_value(season, round, slot)`, DP's `values.csv` row for e.g. `"2026 Pick 1.03"` — whenever D-090 resolves a real slot.
+2. **The round curve** — `market_pick_pool_value`, the mid-tercile basis — when no slot resolves.
+3. **The stored ladder `pool_value`** — when DP publishes nothing at all.
+
+**Slot resolution is D-090's, reused rather than reimplemented**: `server._league_slot_order` (DB-backed, 60 s cache, once per *league*) → `pick_slots.slot_for`, which already refuses future seasons (#273), unknown rosters, malformed blobs and unverifiable snake reversals. `priced_pool_value` runs per *pick* and resolves nothing itself; the slot is passed in. The same resolution drives the LABEL, so a card cannot say "2026 1.03" while charging for a generic first.
+
+**Why step 2 survives as more than a curiosity.** It is what every future-year pick gets — and it needs no branch to be so, because DP publishes per-slot rows only for the current class, so step 1 returns `None` for 2027+ by itself. The operator's "future picks stay default for now" therefore falls out of the *data*, not out of a special case that could rot.
+
+**The three things the ruling deleted rather than defaulted:**
+
+- **The setting.** `users.pick_pricing_mode` becomes dead data (kept — additive-schema rule; a restore would need no migration). The mobile Settings row is deleted from both the legacy flat screen and the v2 `TradeValuesSection`, with its client, its state and its `pick_pricing_mode_changed` emitter.
+- **The route.** `PUT /api/settings/pick-pricing` → **410 Gone** for any body; `GET` → 200 `{mode: "market_slots", retired: true}` (the fixed state, not the dead column) so builds in the field render honestly instead of hiding the control on a 404. First retired route in this repo; the convention is in LLD § "Retiring a per-user setting".
+- **The flag.** `trade.slot_pricing` stays in `FLAG_KEYS` at `true` and is **never read**. Deleting it would force a six-file change to satisfy `test_release_flags_mirror_features_json`, make the key vanish from `/api/feature-flags` for shipped builds, and reinterpret any stored override row as an unknown key.
+
+**The spread this buys, 1QB, 2026 round 1** (pinned snapshot): 1.01 **4867.1**, 1.05 2343.2, 1.08 1435.5, 1.12 **820.8** — against one round price of 1859.5 and one ladder rung of 2117.0 that every 2026 first used to be charged at. A 1.01 is **5.9× a 1.12** and **2.30×** the old rung. Superflex is dearer again (1.01 = 6181.1). Rounds 2–4 deflate at almost every slot.
+
+**So the headline is DISPERSION, not deflation.** The round curve alone (the intermediate step this branch also built) deflates everything — 2026 1st −12.2 %, 2028 1st −40.3 %, 2026 2nd −28.4 %, with deep-future 4ths the lone inversion at +16.6 %. Per-slot then *re-inflates the top of round 1 past the old ladder* and pushes the bottom well below it. Both regimes are shown side by side on a real served card in the scope block §7.1.
+
+**What did NOT move.** `GENERIC_PICK_SEEDS`, the tier ladder, the absolute tier BANDS, `tier_config.json`, and `draft_picks.pool_value` (never written; pricing is read-time). Owned-pick tier BADGES do move — a badge reflects the served value (D-320-2) and the served value moved. Per-slot is where that finally bites: a 1.01 and a 1.12 now badge in genuinely different bands.
+
+**Consequence the operator should see: `picks.slot_labels` became a PRICING flag.** `_league_slot_order` returns `None` when it is off, so turning that flag off drops every pick from step 1 to step 2 without a deploy. This is an accident of reusing D-090 and it is also the **only deploy-free lever** over the larger half of the repricing. Recommended disposition: accept and document it (labels and prices moving together is coherent — you never show "2026 1.01" while charging generic). The alternative, a separate `trade.pick_slot_pricing` flag, means adding a flag on the day we retired one, and the ruling says pricing is not "an option to flip". **Needs a call — scope §6 waiver 1.**
+
+**Rejected: a `model_config` rollback knob for the mode itself.** D-079's precedent argues for one. Rejected because any such knob is *"an option to flip"*, which the ruling forbids in terms. Reverting to the ladder is revert-and-redeploy.
+
+**Rejected: clamping rounds in `market_pick_slot_value`.** `market_pick_pool_value` clamps to DP's published round 5 so a round-9 pick still gets a price. The per-slot function deliberately does not: a round-9 slot has no published row and no honest analogue, so it returns `None` and rides step 2's clamp. One clamp, one place, no drift.
+
+**Evidence.** **156 golden assertions across seven golden files pass with zero edits, twice** — once after the unconditional change and again after the per-slot extension, each time run in isolation before any fixture was touched. Arm A pins every input as a literal and its picks are Elo-map pseudo-assets, so it never constructs a `draft_picks` row and never reaches `priced_pool_value`; immune by construction. No kill-value pin, no re-capture. Gate interactions (overpay/R1, `sweetener_gap_threshold` 1539.0, `pick_gap_ok`) pass untouched — note the spread now straddles that threshold, with a 1.01 (4867.1) far above it and a 1.12 (820.8) far below, where the ladder put every first at 2117.0 on one side.
+
+Three test files moved, all re-derived from the new pricing functions with inputs pinned as literals; no tolerance widened. One structural guard was **made stricter while being widened**: `test_m6_02b_pick_values_reads_dp_only_through_the_m6b_seam` gained a second legitimate DP reader, so it was rewritten from a source-line comparison to an AST walk asserting the reader set is *exactly* `{market_pick_pool_value, market_pick_slot_value}` in both directions, plus a module-level-import refusal. Sabotage-verified: adding a third reader fails it.
+
+**Consequence worth naming: this change made pytest non-hermetic and required the repo's first `conftest.py`.** Unconditional pricing put a live DP fetch on the hot path of every pick-touching test — measured, a 2029 1st priced at 1459.4 from real network data. With network the suite is flaky-by-calendar; without it, it passes for the wrong reason. `backend/tests/conftest.py` `setdefault`s `FTF_DP_PICK_VALUES_FILE` to the checked-in snapshot, which already carries full per-slot coverage (2026, rounds 1–5, slots 01–12) and zero future-season slot rows — so it exercises both step 1 and step 2 without extension.
+
+**Status:** Active — **SHIPPED** same day as PR [#167](https://github.com/mattmurf77/fantasy-trade-finder/pull/167) → `main` `3192d13`. Waiver 1 (slot_labels-as-pricing-flag) shipped under the recommended-accept disposition; operator veto window open. Renumbered from the draft's D-144 (taken by a sibling session — G-048 again).
+

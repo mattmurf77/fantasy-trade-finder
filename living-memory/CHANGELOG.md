@@ -10,6 +10,26 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21b — Triple ship: Receipts LIVE (grading lit) · arm C unbenched with its sweetener · TRUE PER-SLOT pick pricing
+
+Three merges, all operator-driven same-day, each a value/measurement boundary:
+
+- **#165 `93f1fd0` Receipts** — nightly suggestion grading over the 4,051-card cohort
+  (P0 prod checks passed: cohort from 2026-08-16, zero snapshot gaps, top testers 750–840
+  gradeable each). `receipts.grading` LIT at ship (Q-1..Q-4 rulings); screen dark until the
+  operator's TestFlight pass. First mature grades ≈ 2026-08-30.
+- **#166 `3df71c0` arm-C gap sweetener** (cherry-picked from the operator's side session)
+  — closes the regression that benched gen_v2 at #162; `bakeoff_include_gen_v2` 0→1 @18:49Z.
+  **All three serving arms now run honest pricing + the sweetener.**
+- **#167 `3192d13` per-slot pick pricing, unconditional** ([D-146](DECISIONS.md), closes
+  Q-023 fully; Q-026 ruled-deferred). 1QB 2026: 1.01 **4867** … 1.12 **821** (5.9× spread)
+  where the ladder charged 2117 flat. The operator's Maye+Adams ↔ 1.05+2027-1st proof case:
+  +372 picks-favored → **−15 near-even**. Opt-in mode/route/Settings row retired (repo's
+  first 410). Goldens: 156 assertions, zero edits, twice. Repo's first conftest.py pins the
+  DP pick snapshot (suite was one network fetch from flaky).
+
+Origin story for the day: operator feedback on ONE trade (Maye+Adams for 1.03+1.05) →
+market-curve analysis → benchmark+sweetener ship → per-slot ship. Suite 3969p/1s at day end.
 ## 2026-08-21 — Receipts built dark on `feat/receipts` (NOT pushed, NOT merged)
 
 Grades our own past suggestions against subsequent consensus movement. No competitor grades

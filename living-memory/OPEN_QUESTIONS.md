@@ -98,6 +98,7 @@
   - **Status:** direction ruled, implementation queued in `NEXT.md`. Not blocking D-090.
 
 ## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
+- **CLOSED 2026-08-21 by [D-146](DECISIONS.md) — both halves, shipped (PR #167 `3192d13`).** Operator: *"Market slots should be default and not an opt-in or even an option to flip. Aligned that future picks stay default for now."* — clarified same day as true per-slot pricing ("each pick holding real value rather than generic"). Current-year resolved-order picks price at their own DP slot row; unresolved → round market curve; future years → generic rung (falls out of the data, no branch).
 
 ### Q-021 — Should `seed_elo_for_value`'s floor compression be re-anchored so 3rds and 4ths reach market-equivalent player ranks?
 - **Why it matters:** the surviving half of Q-019. Our Mid 3rd is worth the **165th** asset against a market median of **231.5**, and our Mid 4th the 228th against 296 — errors of 67 and 68 ranks. They are unreachable from the pick ladder because the seed map has almost no resolution down there (54.9 Elo across ranks 200–300; the market-implied Elo for a Mid 4th, ≈1207, sits **inside** the `waivers` band).
@@ -262,3 +263,7 @@
 - **Each item has:** why it matters, action to unblock, workaround, owner, ask date.
 - **Closed items move to the "Closed" section** with a one-line resolution.
 - **Don't delete.** Even resolved questions carry information about why decisions were made.
+
+### Q-026 — League surfaces price picks on the stored ladder while the engine prices per-slot
+**Raised:** 2026-08-21 (slot-pricing ship, scope §6 waiver 2). Power Rankings (`_power_picks_by_owner`) and `GET /api/league/picks` still read `draft_picks.pool_value`; the engine now prices per-slot. Worst live case: a 2026 1.01 reads **2117.0** on Power Rankings and **4867.1** on a trade card (+130%).
+**RULED-DEFERRED (operator, 2026-08-21):** *"I want the league values to reflect the same pick values.. But let's defer that until after finishing this one."* League-surface alignment is the committed next build: route both surfaces through `priced_pool_value` with the same D-090 resolution, re-derive `test_league_picks_tier.py` badges, watch `_user_pick_share` and Power-Rankings pick totals.
