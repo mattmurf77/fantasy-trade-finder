@@ -211,6 +211,15 @@ both fixed in `49c1d76`.**
   band check is a hard ratio test, which is *stricter* than v3's
   uncertainty-overlap allowance — it can only decline to sweeten, never smuggle
   a card in below the band.
+- **The `_pair_surpluses` / `_composite_v2` extraction really is byte-identical**
+  — sabotage-verified (`u_max` narrowed to the give side only) rather than
+  taken on trust. Correction to `0e04d30`'s commit message, which credited
+  "the arm-A/challenger/engine-quality goldens": those three run with
+  `trade_engine.v3` ON, so they never enter `_generate_for_pair_v2` and all
+  stayed green under the sabotage. The guards that actually caught it are
+  `test_trade_optimizer.py::test_v3_top_card_matches_v2_on_1for1_fixture` and
+  `test_trade_tier2.py::test_outlook_rebuilder_outranks_championship`. Full
+  detail in TEST_LEDGER 2026-08-21a.
 - **Five-registration rule** satisfied for all three knobs, and the
   knob-inventory guard is green with them in `_PINNED_KNOBS`.
 - **Arm A's pin is real, and now measured.** On both fixture leagues and both
