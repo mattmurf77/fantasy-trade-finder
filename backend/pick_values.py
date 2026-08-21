@@ -374,10 +374,12 @@ _MARKET_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th"}
 # (Elo 1658.6) sits ABOVE slot 1.06 (1636.5) — it prices "a 1st" as if you
 # held a lottery ticket on the 1.01. The tercile mean (1624.1) does not.
 #
-# NOT DONE, deliberately: pricing a pick at its TRUE slot when the Draft Room
-# has resolved the order. See `docs/plans/rookie-draft/build-m6b.md`
-# §"Slot-mapping decision" — the extension point is `_market_round_value`,
-# which would take an optional `slot` and skip the tercile.
+# THE TERCILE IS NOW THE FALLBACK, NOT THE ONLY ANSWER (2026-08-21, D-144).
+# When D-090's order resolves a pick to a real slot, `market_pick_slot_value`
+# prices it at THAT slot and the tercile is never consulted. Everything above
+# still governs the case the operator called out — a pick whose slot nobody
+# knows — which is every future-year pick and every league with no published
+# order. See `market_pick_slot_value` for the resolved case.
 UNKNOWN_SLOT_BASIS = "mid_tercile"
 _TERCILE_TEAMS = 12          # DP publishes a 12-team grid; Early/Mid/Late = 4 slots each
 
@@ -470,21 +472,92 @@ def market_pick_pool_value(season: int, round_: int,
     return round(base * (year_decay(round_) ** (season - horizon)), 1)
 
 
+def market_pick_slot_value(season: int, round_: int, slot: int,
+                           scoring_format: str = "1qb_ppr") -> float | None:
+    """Market price of ONE EXACT draft slot — "2026 Pick 1.03" — or None.
+
+    THE PER-SLOT PRICE (2026-08-21, D-144). Operator ruling: each pick should
+    hold *"real value rather than generic"*. Where `market_pick_pool_value`
+    answers "what is a 2026 1st worth", this answers "what is the 1.03 worth",
+    and the two are wildly different: in 1QB the 1.01 is 4867.1 against a
+    round price of 1859.5, and the 1.12 is 820.8.
+
+    Same units as `market_pick_pool_value` and the stored
+    `draft_picks.pool_value` — the engine value space — so it is a drop-in at
+    every read site.
+
+    **None means "no per-slot price", and the caller must fall back**, in the
+    order `priced_pool_value` implements: round curve, then the stored ladder.
+    None is returned for all of:
+
+      * DP publishes no per-slot row for that season+round+slot. In practice
+        this is EVERY future season — DP prices individual slots only for the
+        current class, because a slot only means something once an order
+        exists. That is not a gap to paper over; it is the operator's "future
+        picks stay default for now", falling out of the data by itself.
+      * `slot` is None/0/garbage, i.e. the caller could not resolve an order.
+      * DP is unreachable (`load_pick_slot_values` fail-softs to `{}`).
+
+    Rounds are NOT clamped here, deliberately, unlike `market_pick_pool_value`
+    (which clamps to DP's published round 5 so a round-9 pick still gets a
+    price). A round-9 slot has no published row and no honest analogue, so it
+    returns None and rides the round curve's clamp instead — one clamp, in one
+    place, rather than two that could drift apart.
+
+    The label is built by `data_loader.pick_slot_label`, the SAME formatter the
+    Draft Room's display axis uses, so the engine and the board can never
+    disagree about which DP row a slot means.
+    """
+    from .data_loader import load_pick_slot_values, pick_slot_label
+    from .trade_service import elo_to_value as _e2v
+    try:
+        season, round_, slot = int(season), int(round_), int(slot)
+    except (TypeError, ValueError):
+        return None
+    if round_ < 1 or slot < 1:
+        return None
+    slot_map = load_pick_slot_values(scoring_format)
+    if not slot_map:
+        return None
+    elo = slot_map.get(pick_slot_label(season, round_, slot))
+    return None if elo is None else round(_e2v(elo), 1)
+
+
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
-                      mode: str | None = None) -> float:
+                      mode: str | None = None, slot: int | None = None) -> float:
     """The engine value of ONE owned-pick row.
 
     THE read-time seam. `row` is a `draft_picks` row as `load_draft_picks`
     returns it; it is never mutated and never written back.
 
-    * `market_slots` (**the default and the only mode production reaches**
-      since the 2026-08-21 ruling) → `market_pick_pool_value(season, round)`,
-      **falling back to the stored ladder value when DP has no price**. That
-      fallback is now the whole safety net: DP unreachable, or a season DP
-      does not publish and cannot extrapolate to, silently yields today's
-      ladder price rather than a wrong number or an error.
+    **THE THREE-STEP WATERFALL** under `market_slots` — the only mode
+    production reaches since the 2026-08-21 ruling. Each step falls to the
+    next only when it has nothing honest to say:
+
+      1. **`slot` resolved → the pick's OWN per-slot market price**
+         (`market_pick_slot_value`). This is the operator's ruling: each pick
+         holds *"real value rather than generic"*. A 2026 1.01 is 4867.1 in
+         1QB where the 1.12 is 820.8 — a 5.9x spread the round curve erased.
+      2. **no slot, or DP publishes none for it → the ROUND curve**
+         (`market_pick_pool_value`, the mid-tercile basis). This is every
+         future-year pick — DP prices slots only for the current class, so
+         the operator's "future picks stay default for now" falls out of the
+         data rather than out of a branch — and every league whose draft order
+         is unpublished, unsupported, or unresolvable.
+      3. **no market price at all → the stored ladder value.** DP unreachable,
+         or a season DP neither publishes nor can extrapolate to. This is the
+         whole safety net, and it degrades to exactly today's price rather
+         than to a wrong number or an error.
+
+    `slot` is PASSED IN, never resolved here. Resolution is D-090's job
+    (`server._league_slot_order` → `pick_slots.slot_for`), it costs a DB read
+    plus a cache lookup per LEAGUE, and this function runs per PICK. Passing
+    it also keeps the price and the LABEL derived from one resolution, so a
+    card cannot say "2026 1.03" while charging for a generic first.
+
     * `tier_ladder` (harness/test axis only) → `float(row["pool_value"] or
-      0.0)`, the stored value verbatim. No DP read is attempted at all.
+      0.0)`, the stored value verbatim. No DP read is attempted at all, and
+      `slot` is ignored — the ladder has no per-slot concept to apply it to.
 
     `mode=None` resolves the thread-local pin (`trade_service`), so a caller
     that has already entered `pick_pricing_override(...)` need not thread it;
@@ -496,6 +569,11 @@ def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
     stored = float(row.get("pool_value") or 0.0)
     if mode != "market_slots":
         return stored
+    if slot:
+        exact = market_pick_slot_value(row.get("season"), row.get("round"),
+                                       slot, scoring_format)
+        if exact is not None:
+            return exact
     market = market_pick_pool_value(row.get("season"), row.get("round"),
                                     scoring_format)
     return stored if market is None else market

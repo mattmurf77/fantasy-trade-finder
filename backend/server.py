@@ -234,7 +234,7 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
-from . import pick_slots                          # D-090 — real-slot pick labels
+from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -9758,10 +9758,10 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         #
         # The price is resolved at READ time under the pricing mode pinned for
         # this request by trade_evaluate_route, alongside the #215 stud-tax
-        # pin. Since D-144 that is always `market_slots`: the DP market curve
-        # for the pick's absolute season+round, fail-softing to the stored
-        # ladder value when DP publishes no price. The stored column is never
-        # written — pricing is read-time in every mode.
+        # pin. Since D-144 that is always `market_slots`, and the waterfall is
+        # the pick's OWN slot price when D-090 resolves one → the round curve
+        # → the stored ladder value. The stored column is never written —
+        # pricing is read-time in every mode.
         #
         # W3 M-C (S1) — the read opts into asserted rows behind
         # `picks.assign_tradeable`, and each priced pick entry carries its
@@ -9772,10 +9772,18 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _tradeable = _asserted_picks_tradeable()
         if league_id and league_id != "league_demo":
             try:
+                # D-144 per-slot pricing needs the league's resolved draft
+                # order. Looked up ONCE per request (it is DB-backed with a
+                # 60s cache), never per pick — same discipline as the deck
+                # lane's lookup in `_owned_pick_assets`.
+                _slot_order = _league_slot_order(league_id)
                 for _p in load_draft_picks(league_id=league_id,
                                            source=_pick_read_source()):
                     league_pick_vals[_p["pick_id"]] = priced_pool_value(
-                        _p, scoring_format=fmt)
+                        _p, scoring_format=fmt,
+                        slot=pick_slots.slot_for(
+                            _slot_order, _p.get("season"), _p.get("round"),
+                            _p.get("original_roster_id")))
                     league_pick_meta[_p["pick_id"]] = _pick_wire_source(
                         _p, _tradeable, with_season=True)
             except Exception as _lp_err:
@@ -10729,7 +10737,9 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
 
     **Pricing (D-144, 2026-08-21)** — the price is resolved HERE, at read
     time, through `pick_values.priced_pool_value` under the thread-local
-    pricing mode, which is now always `market_slots`. The stored
+    pricing mode, which is now always `market_slots`. A pick whose slot D-090
+    resolves is priced at THAT slot's market value; everything else rides the
+    round curve. The stored
     `draft_picks.pool_value` column is NEVER rewritten: it is written by a
     league-wide sync path and shared by every user of the league, and keeping
     pricing read-time is what leaves the legacy ladder available as a harness
@@ -10740,6 +10750,11 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     the market curve re-shapes the ladder — a 2029 3rd and a 2026 1st do not
     keep their relative order across the two curves, and capping on the stale
     order would inject a different top-N than the one the engine then prices.
+    **Per-slot pricing makes this load-bearing rather than merely tidy**: the
+    ladder prices every 2026 first identically, so it cannot rank a 1.01 above
+    a 1.12, and a cap applied on stored values would routinely inject the
+    wrong first. It now sorts 1.01 (4867.1) above 2026 2.01 above 1.12
+    (820.8), which is the whole point of the ruling.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
@@ -10753,12 +10768,26 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    _slots: dict[str, int | None] = {}
     for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
+            # D-144 — the slot that sets the PRICE. `_owned_pick_label`
+            # below re-derives the same slot for the LABEL from the same
+            # `slot_order` and the same row, so the two agree by
+            # construction: `pick_slots.slot_for` is pure, and both calls
+            # pass identical arguments. That redundancy is deliberate —
+            # threading a precomputed slot through `_owned_pick_label` would
+            # mean changing all five of its call sites, four of which have no
+            # price to keep in step. If it ever grows a slot parameter, pass
+            # `_slots[pick_id]` here and the guarantee becomes structural
+            # instead of argued.
+            _slots[p["pick_id"]] = pick_slots.slot_for(
+                slot_order, p.get("season"), p.get("round"),
+                p.get("original_roster_id"))
             _priced[p["pick_id"]] = priced_pool_value(
-                p, scoring_format=scoring_format)
+                p, scoring_format=scoring_format, slot=_slots[p["pick_id"]])
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
