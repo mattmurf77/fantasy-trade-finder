@@ -64,6 +64,8 @@
   "outlook.odds": true,
   "outlook.trade_impact": true,
   "trades.team_review": true,
+  "trade.outlook_net_firsts": false,
+  "trades.window_from_odds": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,
@@ -200,5 +202,7 @@
   "_comment_feedback_decline_reasons": "2026-08-17 decline-reason capture (docs/plans/decline-reason-capture/SPEC.md). Mirrors config/features.json \u2014 see the note there. Ships ON for all users; this key is the one-line kill switch.",
   "feedback.decline_reasons": true,
   "trade.bakeoff": true,
-  "trades.presentation_v2": false
+  "trades.presentation_v2": false,
+  "trade.position_tiers": false,
+  "trade.rb_handcuff": false
 }

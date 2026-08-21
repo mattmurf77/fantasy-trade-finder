@@ -53,7 +53,9 @@
     "test:outlook-bands": "node tests/check-outlook-bands.js",
     "test:card-impact": "node tests/check-card-impact-order.js",
     "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js",
-    "test:team-review": "node tests/check-team-review.js"
+    "test:team-review": "node tests/check-team-review.js",
+    "test:window-signals": "node tests/check-window-signals.js",
+    "test:team-review-depth": "node tests/check-team-review-depth.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

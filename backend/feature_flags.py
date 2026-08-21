@@ -512,6 +512,29 @@ FLAG_KEYS: tuple[str, ...] = (
     # #357/#358/#359 — the six-beat Team Review flow (client surface in the
     # Trades tab, hence the `trades.*` namespace; `trade.*` is the engine).
     "trades.team_review",
+    # #365 — the net first-round-pick term inside `infer_team_outlook`
+    # ("number of 1sts owned vs traded away"). NAMED `trade.*` ON PURPOSE:
+    # this one lives in the ENGINE's classifier, whose verdict feeds
+    # outlook_alpha for trade_gen_v2, the mock draft and the outlook seed.
+    # OFF (default) ⇒ the kwarg is accepted and IGNORED, so
+    # `infer_team_outlook` is byte-identical for every caller (INV-365) and
+    # the Team Review route never even reads the pick ledger. ON ⇒ the term
+    # applies ONLY where a ledger is supplied, and today only the Team Review
+    # route supplies one — so lighting this moves the WINDOW BEAT and no deck
+    # (INV-365b). Knobs: `infer_w_net_firsts` (0.10),
+    # `infer_net_firsts_cap` (1.0); either at 0 neutralises the term without
+    # changing the payload shape.
+    "trade.outlook_net_firsts",
+    # #371 — let the simulated PLAYOFF BAND drive the Team Review window
+    # instead of the roster heuristic. `trades.*` because it composes in the
+    # route and changes no engine value: `infer_team_outlook` still runs, and
+    # its verdict still ships as `window.roster_inferred` whichever path wins.
+    # Sleeper-only by construction (backend/outlook/league_state.py registers
+    # the other platforms as NotImplemented stubs) and REFUSED in preseason,
+    # `completed_weeks == 0` being the odds engine's weakest window (D-094).
+    # OFF (default) ⇒ `window` carries none of the source/odds keys and the
+    # payload is byte-identical.
+    "trades.window_from_odds",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
@@ -858,6 +881,41 @@ FLAG_KEYS: tuple[str, ...] = (
     # TradeFinderModeBar / TradeHomeUtilityRow render byte-identical to
     # today. The existing deck is never modified either way.
     "trades.presentation_v2",
+    # ── #366 — position-relative tier bands (docs/feedback/items/366-tier-ladder) ──
+    # ON ⇒ trade_service.analyze_roster_strengths bands each player by his rank
+    # WITHIN HIS POSITION instead of by three absolute dynasty-value cuts, and
+    # mirrors every `bench` count onto a `replacement` key (alias, not a fourth
+    # bin — `bench` is retained so pre-#366 clients still parse). The absolute
+    # cuts are a disguised OVERALL-search_rank cut, which is why "elite" admits
+    # 33 RBs and 7 TEs today; the report asked for that logic to be reviewed.
+    #
+    # THIS IS NOT A DISPLAY FLAG. `analyze_roster_strengths` also produces
+    # `position_needs` / `position_surplus`, consumed by trade_gen_v2 (:930,
+    # :980) and trade_service (:3413, :3440, :4096, :4172, :4259) — flipping it
+    # ON CHANGES EVERY DECK FOR EVERY USER. Graduation wants a deck-quality
+    # read (scripts/deck_eval.py) on real leagues first, not an eyeball.
+    #
+    # OFF (default) ⇒ `_bin_player`'s three absolute cuts run unchanged and the
+    # profile dict is byte-identical to pre-#366 — pinned by
+    # backend/tests/test_position_tiers.py, which is the whole reason this is a
+    # flag rather than an edit.
+    "trade.position_tiers",
+    # ── #366 — the RB Handcuff tag ────────────────────────────────────────────
+    # ON ⇒ the roster profile gains `handcuff_rb`: how many of the roster's RBs
+    # are the RB2 on their NFL depth chart (`depth_chart_position == "RB"` AND
+    # `depth_chart_order == 2`). This rides Sleeper's OWN depth chart, already
+    # ingested (database.py:970-971, :8769-8770, re-synced every 24h) and
+    # already hydrated onto every pooled Player (server.py:1580-1581) — it is
+    # NOT the "second-highest-valued RB on the team" approximation that
+    # plan-remaining.md §2 proposed and rightly warned against (D-121).
+    #
+    # Deliberately SEPARATE from `trade.position_tiers`: this key is purely
+    # additive and no engine path reads it, so a deck regression must be
+    # revertible without also taking down a harmless label.
+    #
+    # OFF (default) ⇒ the key is ABSENT from the profile (never 0, never null)
+    # and no depth_chart_* attribute is read at all.
+    "trade.rb_handcuff",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

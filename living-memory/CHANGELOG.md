@@ -38,6 +38,51 @@ zero mobile files changed.
 **Corrections:** D-096 likes-you gates (`7110af2`), balanced-claim fix (`d755b3b`), and arm D
 (`38806e0`) are MERGED on `origin/main` — earlier HANDOFF/NEXT entries calling them unmerged are
 stale.
+## 2026-08-20 — "Elite" meant four different things, and the NFL depth chart was there all along (#366, dark, not merged)
+
+Second item from the same operator pass. Two flags, both **OFF**, neither graduated; committed on
+`worktree-agent-a4ab94c51456abb78`, **not pushed and not merged**.
+[scope](../docs/feedback/items/366-tier-ladder/scope.md) ·
+[code-walk](../docs/feedback/items/366-tier-ladder/code-walk.md) ·
+[D-120](DECISIONS.md) · [D-121](DECISIONS.md)
+
+- **The elite logic was a disguised overall-rank cut.** `_bin_player` banded on three absolute
+  `dynasty_value` thresholds, and `dynasty_value` is a monotone function of Sleeper's **overall**
+  `search_rank` — so 4000/1500/500 really meant "overall rank ≤ 73 / 151 / 238", applied identically
+  to a TE and a RB. Measured on the live pool: **33 elite RBs, 33 elite WRs, 17 elite QBs, 7 elite
+  TEs.** One word, four meanings, exactly as reported. Behind `trade.position_tiers` the bands now cut
+  in rank **within the position** — Elite = top half of the league's starting demand, Starter = inside
+  1.5×, Replacement = inside 2.5×, superflex widening QB to the RB/WR cuts.
+
+- **The third layer existed and was never rendered.** `bench` has been computed since the function was
+  written; the beat printed `N elite · N starter` and dropped it. `bench` is **not renamed** —
+  `replacement` ships alongside it as an alias so the shipped TestFlight build keeps parsing, and the
+  screen reads `replacement ?? bench`. The label is "Replacement"; the word "bench" is never shown.
+
+- **Handcuff is real data, and the plan doc was wrong about that.**
+  [plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md) §2 said no FTF
+  feed carries an NFL depth chart and floated approximating with "second-highest-valued RB on the
+  team". Sleeper's `depth_chart_position` / `depth_chart_order` have been ingested since
+  `database.py:8769`, re-synced every 24 h, and hydrated onto every pooled `Player` at
+  `server.py:1580` — **149 of 603 RBs carry a real order today**, matching the 32 actual NFL charts.
+  So the tag is the operator's literal definition (`order == 2`), not a guess that would have been
+  wrong in precisely the committee backfields where the label matters. `handcuff_rb` is **absent** when
+  its flag is off, never `0`: "we did not look" and "you own none" are different claims.
+
+- **Two flags, not one, because the blast radii differ by orders of magnitude.**
+  `analyze_roster_strengths` also produces `position_needs` / `position_surplus`, which the trade
+  engine consumes — `trade.position_tiers` ON **changes every deck for every user**, so OFF returns a
+  byte-identical dict (pinned, sabotage-proven). `trade.rb_handcuff` is one additive integer no engine
+  path reads. Rollback is deploy-free: flip `config/features.json`, `POST /api/feature-flags/reload`.
+
+- **Found while testing, and it is a graduation blocker:** 65 pre-existing engine tests are
+  **completely insensitive** to the new banding — they stay green with the flag forced on, because
+  every fixture pool is smaller than the small-pool guard and cannot distinguish the bands.
+  `trade.position_tiers` must not graduate on a green suite; it needs `scripts/deck_eval.py` on real
+  leagues plus the TestFlight step written for it.
+
+Gates: **3638 backend tests** (+32), `tsc` clean, 65 `check-*.js` suites green (new
+`check-team-review-depth`, 8 assertions), testid-lint OK, **12 of 12 sabotages red then green**.
 
 ## 2026-08-20 — Team Review defect batch: the sell list was inverted, the partners beat was starved (#364/#367/#368)
 

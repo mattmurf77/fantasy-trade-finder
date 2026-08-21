@@ -97,6 +97,21 @@ or drop Handcuff.
 > *"The plan summary page only shows window.. it's a good page intent but needs more detail. I think
 > we just show the full set of adjustments a user can make with the trade finder."*
 
+> **BUILT 2026-08-20** — see [`docs/feedback/items/369-plan-beat/`](../369-plan-beat/)
+> ([scope](../369-plan-beat/scope.md), [code-walk](../369-plan-beat/code-walk.md),
+> [D-130 / D-131](../../../../living-memory/DECISIONS.md)). **The diagnosis below was
+> incomplete**, and the correction matters more than the section did: the receipt design was
+> only half the cause. `positions_set` could never be true, because the depth beat posted a
+> positions-only body and `POST /api/league/preferences` **400s without `team_outlook`**
+> (`backend/server.py:15788-15790`); `apiRequest` throws on non-2xx, so the `await` in
+> `savePrefs` threw and `done.current.add('positions_set')` on the next line never ran — the
+> catch swallowed it and no analytics fired. The window beat's body *does* carry
+> `team_outlook`, so it alone succeeded. **That, not the receipt alone, is why the page showed
+> only the window.** A third defect surfaced in the same trace: the partners beat never called
+> `setHandoff`, so the scoped partner was recorded and then dropped and the plan beat's "I've
+> already pointed the finder at it" was false. The decision below was also resolved the other
+> way — see the note at the end of this section.
+
 Correct as reported: `Plan` (`mobile/src/screens/TeamReviewScreen.tsx`) renders only what the user
 *changed in this session* — `outlook` if `outlook_set` fired, positions if `positions_set` fired,
 and the scoped partner. Skip a beat and it shows nothing for it.
@@ -110,6 +125,17 @@ That is a settings summary with edit affordances, and it wants the same source o
 **Decision needed:** does the plan beat become a live preferences editor (read the saved prefs, edit
 any of them in place), or stay a receipt and gain a "Review all trade settings" link into the
 existing preferences surface? The second is much smaller and probably right.
+
+> **Resolved — neither, exactly.** The operator's own words (*"we just show the full set of
+> adjustments a user can make with the trade finder"*) rule out the receipt-plus-link, and a
+> twelve-lever editor is not buildable without a second `asset_preferences` writer and a
+> cross-screen state layer. Shipped as a **hybrid** ([D-131](../../../../living-memory/DECISIONS.md)):
+> the three `league_preferences` levers are edited in place through the existing write path;
+> the other nine are displayed with their current standing where readable and their home
+> named. Also corrected: **`trade.avoid_positions` is not on `origin/main`** — it lives on
+> `feat/jon-360-362` and nothing in `backend/` or `mobile/` references it, so the build took no
+> dependency on it. The full verified lever inventory is in
+> [`369-plan-beat/scope.md`](../369-plan-beat/scope.md) §0.1.
 
 ---
 
