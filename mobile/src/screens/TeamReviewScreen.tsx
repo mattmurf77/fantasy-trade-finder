@@ -445,6 +445,18 @@ function Window({
   // #371 — `source` is absent while `trades.window_from_odds` is off, and the
   // beat then reads exactly as it did before, off the roster heuristic.
   const fromOdds = w.source === 'odds';
+  // #372 — same rule as the ledger above: the composite's cards and rows are
+  // driven by the PAYLOAD, never by a flag the client holds. `starters.applied`
+  // is the single switch — it is true exactly when the composite weight vector
+  // scored, which is also when `model.w_vet_share` carries 0.40 rather than
+  // 1.00. That is why every weight below is READ and none is written here.
+  const st = w.signals.starters;
+  const po = w.signals.playoff;
+  const composite = !!st && st.applied && m?.composite === true;
+  const wStarter = m?.w_starter_index;
+  const starterScored = composite && typeof wStarter === 'number';
+  const wPlayoff = m?.w_playoff_index;
+  const playoffScored = composite && !!po && po.applied && typeof wPlayoff === 'number';
   return (
     <View testID="team-review.beat.window">
       <Bubble pose="thinking">
@@ -459,7 +471,9 @@ function Window({
         <ChalkText style={styles.kicker}>
           {fromOdds
             ? 'Your window · from your playoff odds'
-            : 'Your window · inferred from roster shape'}
+            : composite
+              ? 'Your window · from your starters, your picks and your age'
+              : 'Your window · inferred from roster shape'}
         </ChalkText>
         <ChalkText style={styles.headline}>{OUTLOOK_LABEL[w.inferred]}</ChalkText>
         {/* #371 — when the odds drove, the roster model's own answer stays on
@@ -471,14 +485,17 @@ function Window({
             {`${OUTLOOK_LABEL[w.roster_inferred ?? w.inferred].toLowerCase()}.`}
           </ChalkText>
         ) : null}
-        {!fromOdds && w.odds_reason === 'preseason' && w.odds ? (
+        {/* #372 — under the composite these two lines would double up with the
+            Playoff likelihood card below, which states the same refusal beside
+            the band it applies to. One statement of a fact, not two. */}
+        {!composite && !fromOdds && w.odds_reason === 'preseason' && w.odds ? (
           <ChalkText style={styles.fine}>
             {`Your playoff odds read ${BAND_LABEL[w.odds.band].toLowerCase()}, but `}
             {'nobody has played a game yet, so we are not letting a preseason '}
             {'simulation set your window. Roster shape below.'}
           </ChalkText>
         ) : null}
-        {!fromOdds && w.odds_reason === 'odds_unavailable' ? (
+        {!composite && !fromOdds && w.odds_reason === 'odds_unavailable' ? (
           <ChalkText style={styles.fine}>
             We do not have playoff odds for this league, so this is roster shape only.
           </ChalkText>
@@ -532,6 +549,105 @@ function Window({
         </View>
       ) : null}
 
+      {/* #372 — "we calculate starter dynasty value. Let's incorporate that."
+          Shown whenever the backend computed it, INCLUDING when it refused to
+          score it: a league we cannot read a starting lineup for must say so,
+          never index at a confident 0. */}
+      {st ? (
+        <View style={styles.card} testID="team-review.window.starters">
+          <ChalkText style={styles.kicker}>Your starting lineup</ChalkText>
+          <Row label="Value of your starters" value={`${Math.round(st.starter_value)}`} />
+          <Row
+            label="Share of the league's starter value"
+            value={pct(st.share)}
+          />
+          {/* The MEASURED index, not the scored one. They differ when the cap
+              binds, and printing only the scored value would tell a caller his
+              starters are 50 % above average when they are 82 % above. The
+              next line names the cap whenever the two disagree. */}
+          {st.provenance === 'observed' ? (
+            <ChalkText style={styles.fine}>
+              {st.index_raw > 0.02
+                ? `That is ${pct(st.index_raw)} above an average starting lineup in this league — you are strong where you actually start players, which reads as going for it now.`
+                : st.index_raw < -0.02
+                  ? `That is ${pct(Math.abs(st.index_raw))} below an average starting lineup in this league — the value you hold is not where you start it.`
+                  : 'That is an average starting lineup for this league, so it pushes your window neither way.'}
+            </ChalkText>
+          ) : st.provenance === 'lineup_unknown' ? (
+            <ChalkText style={styles.fine}>
+              We do not know this league&apos;s starting-lineup template, so we
+              cannot tell which of your players are starters. This signal is not
+              counted and the reading below falls back to roster age and picks.
+            </ChalkText>
+          ) : (
+            <ChalkText style={styles.fine}>
+              Nobody in this league has priced starter value yet, so this signal
+              is not counted.
+            </ChalkText>
+          )}
+          {/* Only offensive slots carry value — the same limit the standing
+              beat already names for `priced_slot_coverage`. Stated here too
+              because this row is a share of a total the user cannot see. */}
+          {/* The cap is a knob, so it is read off `model` and never restated —
+              and it is only mentioned when it actually bit. */}
+          {st.provenance === 'observed' && starterScored
+            && st.index !== st.index_raw ? (
+              <ChalkText style={styles.fine}>
+                {`We cap this signal at ${pct(m?.starter_index_cap ?? 0)} either way, `}
+                {'so it counts for that much rather than the full gap — one lopsided '}
+                {'roster should not decide your window on its own.'}
+              </ChalkText>
+            ) : null}
+          {st.provenance === 'observed' ? (
+            <ChalkText style={styles.fine}>
+              Offensive starters only. We rank QB, RB, WR and TE, so kicker and
+              IDP slots carry no value in this comparison.
+            </ChalkText>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* #372 — playoff likelihood as a TERM. The band is shown whether or not
+          it scored, and the reason it did not is named rather than implied. */}
+      {po ? (
+        <View style={styles.card} testID="team-review.window.playoff">
+          <ChalkText style={styles.kicker}>Playoff likelihood</ChalkText>
+          {/* THE BAND IS THE VISIBLE SURFACE, never the percentage — the same
+              cross-client rule the standing beat and League Summary follow.
+              The number exists only as a VoiceOver label. */}
+          {po.band ? (
+            <Row label="Simulated outlook" value={BAND_LABEL[po.band]} />
+          ) : null}
+          {po.provenance === 'observed' ? (
+            <ChalkText
+              style={styles.fine}
+              accessibilityLabel={po.playoff_pct === null ? undefined : `Playoff odds ${pct(po.playoff_pct)}, against an even ${pct(po.center)}`}
+            >
+              {'Against an even shot, that counts '}
+              {po.index > 0 ? 'toward your window'
+                : po.index < 0 ? 'against your window'
+                  : 'neither way'}
+              {'.'}
+            </ChalkText>
+          ) : po.provenance === 'preseason' ? (
+            <ChalkText style={styles.fine}>
+              Nobody has played a game yet, so we are not letting a preseason
+              simulation weigh in on your window. This fills in from week 1.
+            </ChalkText>
+          ) : po.provenance === 'odds_unavailable' ? (
+            <ChalkText style={styles.fine}>
+              We do not have playoff odds for this league, so this signal is not
+              counted.
+            </ChalkText>
+          ) : (
+            <ChalkText style={styles.fine}>
+              Playoff odds are switched off for this league, so we did not ask
+              for them.
+            </ChalkText>
+          )}
+        </View>
+      ) : null}
+
       {m ? (
         <View style={styles.card} testID="team-review.window.inputs">
           <ChalkText style={styles.kicker}>Every input behind that call</ChalkText>
@@ -555,14 +671,40 @@ function Window({
               value={signed(-(wFirsts as number) * f.net_share)}
             />
           ) : null}
+          {/* #372 — same rule, one report later: a term that scores must
+              appear here, and a term that did not score must not. */}
+          {starterScored && st ? (
+            <Row
+              label={`Starters ${signed(st.index)} vs the league × ${wStarter}`}
+              value={signed((wStarter as number) * st.index)}
+            />
+          ) : null}
+          {playoffScored && po ? (
+            <Row
+              label={`Playoff odds ${signed(po.index)} vs even × ${wPlayoff}`}
+              value={signed((wPlayoff as number) * po.index)}
+            />
+          ) : null}
           <Row label="Total score" value={signed(w.signals.score)} accent />
           <ChalkText style={styles.fine}>
             {`Contending at ${signed(m.contender_cut)} or above, rebuilding at `}
             {`${signed(m.rebuilder_cut)} or below, anything between is "not sure".`}
           </ChalkText>
           {/* This sentence becomes a lie the moment the net-firsts term is
-              scored, so it is conditional on the term rather than fixed copy. */}
-          {firstsScored ? (
+              scored, so it is conditional on the term rather than fixed copy.
+              #372 adds two more terms and therefore two more branches — the
+              copy enumerates what actually ran, in every combination. */}
+          {composite ? (
+            <ChalkText style={styles.fine}>
+              {'That is the whole model — your starting lineup'}
+              {playoffScored ? ', your playoff odds' : ''}
+              {', pick capital'}
+              {firstsScored ? ', the firsts you have moved' : ''}
+              {' and roster age, which now counts for less than the rest.'}
+              {playoffScored ? '' : ' It does not read your record.'}
+              {' You have the final say below.'}
+            </ChalkText>
+          ) : firstsScored ? (
             <ChalkText style={styles.fine}>
               That is the whole model — roster age, pick capital, and the firsts you
               have moved. It still does not read your record or your starting lineup.

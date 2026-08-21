@@ -10,6 +10,50 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-20f — Composite window model #372 (starter value + playoff likelihood + age at 40 %) — full gates, FLAG DARK, NOT MERGED, on `claude/372-window-composite`
+
+**Branch:** `claude/372-window-composite`, cut from `origin/main` at `c00a9a6`. **Not pushed, not merged** — parent agent integrates.
+Full gates ran — operator did **not** declare express, and the change is outside the express lane by the bright-line rule anyway (a new feature flag and new API fields).
+Scope: [docs/feedback/items/372-window-composite/scope.md](../docs/feedback/items/372-window-composite/scope.md) ·
+code-walk: [code-walk.md](../docs/feedback/items/372-window-composite/code-walk.md) ·
+checklist: [testflight-checklist.md](../docs/feedback/items/372-window-composite/testflight-checklist.md).
+Decisions: [D-140](DECISIONS.md), [D-141](DECISIONS.md).
+
+**Flag, default OFF and NOT graduated:** `trade.outlook_composite`.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3761 passed, 1 skipped, 0 failed** (bar was 3721 on `c00a9a6`; +38 new in `test_window_composite.py`, +2 parametrized fixture rows) |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`node_modules` symlinked from `jolly-leakey-d20295`) |
+| every `mobile/tests/check-*.js` | **67 scripts, 0 failed**, including the new `check-window-composite.js` (14 assertions) |
+| `mobile/scripts/testid-lint.sh` | **OK** (2 new testIDs: `team-review.window.starters`, `team-review.window.playoff`) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything above plus the prod calibration below |
+
+**Two structural guards on `origin/main` fired on this change and were answered, not silenced.** `test_no_generation_knob_was_added_without_an_arm_a_decision` caught all eight new `infer_composite_*` knobs — they are added to `_PINNED_KNOBS` with a written exclusion rationale (they cannot reach generation: the term they weight needs an applied starter signal, which needs a league-wide power-rankings call no generation path makes). `test_release_flags_mirror_features_json` caught the new flag missing from `backend/tests/fixtures/flags/release.json`, and two sibling fixtures (`onboarding-v2`, `profiles-on`) needed the same mirror.
+
+**Sabotage evidence — 22 cycles, every one RED with the NAMED test in the failures, restored via `git checkout --`, proved restored with `git diff --quiet`, re-run GREEN. `__pycache__` cleared between every cycle.**
+
+Backend (13, against `backend/tests/test_window_composite.py`): S1 composite branch drops the `starter_signal is not None` gate · S2 `composite` set regardless of `applied` · S3 flag gate removed · S4 `model` not re-stated at composite weights · S5 refused playoff term scored anyway · S6 starter index uncapped · S7 precedence rule deleted (band replaces AND scores) · S8 `_window` stops passing `starters` through · S9 `starter_value_signal` fakes `observed` on unreadable input · S10 age weights left at 1.00 inside the composite · S11 playoff index scale doubled · S12 starter term gated on `index != 0` instead of `applied` · S13 `index_raw` capped, so the card would print the model's number instead of the team's.
+
+Mobile (9, against `check-window-composite.js`): M1 starter weight hardcoded · M2 `composite` derived from `st.applied` alone · M3 `lineup_unknown` copy branch removed · M4 `signals.starters` made required in the type · M5 `'composite'` dropped from the `source` union · M6 "whole model" sentence made unconditional · M7 `starterScored` gated on `st.index !== 0` · M8 playoff contribution row deleted · M9 starter card switched to the capped `index`.
+
+**TWO DEAD ASSERTIONS FOUND AND FIXED — this is the finding, not a footnote.**
+
+1. **S5 did not go red on the first run.** `test_a_refused_playoff_term_is_absent_from_the_score_not_a_zero` built its refused signal from `playoff_odds_signal`, which zeroes `index` whenever it refuses — so deleting the `applied` guard was a numeric no-op and the test passed against a broken function. Fixed by handing `infer_team_outlook` a refused block with a **loud** index of 0.8; only the `applied` check can now keep it out. Its starter-side sibling (`test_an_unapplied_starter_signal_with_a_LOUD_index_still_scores_nothing`, sabotage S12) was written at the same time for the same reason.
+2. **M7 did not go red on the first run.** Mobile check 4 read `/starters[\s\S]{0,80}index\s*[!=]==?\s*0/` — it required the literal word "starters" within 80 characters of the comparison, but the real gate is written `st.index`. Rewritten to match the comparison itself anywhere in the beat, plus a new positive half (4b) asserting both `Scored` flags derive from `applied`.
+
+Both were the exact class the brief warned about: an assertion that holds by accident and can never fail. They join the three found earlier the same day.
+
+**Prod calibration — read-only, and it is the load-bearing evidence.** The #365 session concluded from `data/trade_finder.db` that this family of signal pointed the wrong way; **that corpus does not contain FFV3 at all**. Every number below comes from a read-only `DATABASE_URL_PROD` connection (`set_session(readonly=True)`) plus the league's real Sleeper lineup template.
+
+- **`Fantasy Football Version 3` (`1312140920132497408`), `mattmurf77`: legacy `−0.4867 rebuilder` → composite `+0.2009 CONTENDER`.** His starters are worth 43,615 against a league mean of 23,963 — 82 % above average, the best starting lineup in the league — while he holds essentially no pick capital (0.004 share against an even 0.083). The league is `pre_draft`, so the playoff term is refused (`preseason` / `odds_disabled`) and the composite runs on starters, picks and down-weighted age alone.
+- **The reverse sanity check:** `PaulSm3nis` is a legacy **contender** on age alone (vet share 0.65) while owning the league's *worst* starting lineup (3.2 % share) and sitting 12th of 12 in value. The composite calls him a rebuilder.
+- **Across 12 prod leagues / 156 teams:** legacy = **101 rebuilder / 26 not_sure / 29 contender** (65 % rebuilder, and *zero* not_sure verdicts in FFV3 itself); composite = 62 / 40 / 54. Transitions run both ways (29 rebuilder→contender, 4 contender→rebuilder, 8 contender→not_sure), which is what a re-weighting looks like rather than a thumb on the scale. This distribution is the evidence for **leaving `infer_contender_cut` / `infer_rebuilder_cut` unmoved** (D-140).
+
+**Not run:** the TestFlight checklist (8 numbered steps across all four flag combinations) — it needs a build containing this branch, which does not exist. No runtime mobile evidence exists for #372 yet; the flag stays dark until it does.
+
 ## 2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run (SHIPPED to `main` 2026-08-20)
 
 **Branch:** `claude/trade-suggestions-review-69c9eb` (worktree), on top of PR-F2 `d8a80a5`. **Not committed, not merged** — the finishing package of the fit-challenger build ([PRD-build](../docs/plans/fit-challenger/PRD-build.md) PR-F3 + deferred docs rows).

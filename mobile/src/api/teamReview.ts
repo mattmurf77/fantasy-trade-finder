@@ -77,6 +77,32 @@ export interface TeamReviewStanding {
  *                 picks, MFL crosswalk gap, demo, unsynced). Not counted */
 export type FirstsProvenance = 'observed' | 'none_traded' | 'absent';
 
+/** #372 — why the starter-value term is or is not being counted. Never infer
+ *  it from an `index` of 0: an exactly average starting lineup and a lineup we
+ *  could not read both index at 0 and mean different things.
+ *    observed        a lineup template was known and the league has priced
+ *                    starter value — the term counts
+ *    lineup_unknown  the platform exposes no roster_positions equivalent and
+ *                    no template was found, so there is no "starting lineup"
+ *                    to value. We did not look
+ *    absent          a template existed but the league's total starter value
+ *                    is zero (unsynced or demo league) */
+export type StarterProvenance = 'observed' | 'lineup_unknown' | 'absent';
+
+/** #372 — why the playoff-likelihood term is or is not being counted.
+ *    observed          the band was admitted and scored
+ *    preseason         a band exists and was deliberately NOT used —
+ *                      `completed_weeks === 0` is the simulator's weakest
+ *                      window (D-094) and preseason is when window-setting
+ *                      matters most
+ *    odds_unavailable  no band at all: non-Sleeper league, `outlook.odds` off,
+ *                      or the simulator failed
+ *    odds_disabled     `trades.window_from_odds` is off, so we never asked.
+ *                      Distinct from `odds_unavailable` on purpose — "we did
+ *                      not ask" is not "we asked and got nothing" */
+export type PlayoffProvenance =
+  | 'observed' | 'preseason' | 'odds_unavailable' | 'odds_disabled';
+
 export interface TeamReviewWindow {
   /** Only ever contender | rebuilder | not_sure — inference never claims an
    *  extreme. `options` still offers all five, because a user may DECLARE one.
@@ -108,6 +134,44 @@ export interface TeamReviewWindow {
        *  it from `provenance`, and never from `net_share === 0`. */
       applied: boolean;
     };
+    /** #372 "we calculate starter dynasty value. Let's incorporate that."
+     *  Present only while `trade.outlook_composite` is on. `index` is
+     *  `share × num_teams − 1`: 0.0 is an exactly average starting lineup,
+     *  +0.30 is 30 % above the league mean, clamped to
+     *  ±`model.starter_index_cap`. */
+    starters?: {
+      starter_value: number;
+      league_starter_value: number;
+      /** Your starters' value as a fraction of the league's. */
+      share: number;
+      /** What ENTERED the score — `index_raw` clamped to
+       *  ±`model.starter_index_cap`. */
+      index: number;
+      /** What was MEASURED, uncapped. Show this one; the cap binds on real
+       *  rosters, so rendering `index` would understate a lopsided team. When
+       *  the two differ, say the signal was capped. */
+      index_raw: number;
+      provenance: StarterProvenance;
+      /** Whether the term entered `score` — AND, because starter value is the
+       *  composite's anchor, whether the whole composite weight vector ran.
+       *  `false` here means `model` still carries the LEGACY weights. */
+      applied: boolean;
+    };
+    /** #372 "…and playoff likelihood". The same simulated band
+     *  `trades.window_from_odds` reads, entering the score as a weighted term
+     *  instead of overwriting the verdict. */
+    playoff?: {
+      playoff_pct: number | null;
+      band: PlayoffBand | null;
+      /** 2 × (playoff_pct − center): +0.30 at the `likely` boundary, −0.30 at
+       *  `unlikely`, clamped to ±`model.playoff_index_cap`. */
+      index: number;
+      /** The neutral point — the midpoint of the `tossup` band. Read it; do
+       *  not restate 0.5 in copy (D-101). */
+      center: number;
+      provenance: PlayoffProvenance;
+      applied: boolean;
+    };
   };
   /** #365 — every input the inference actually used. Read these rather than
    *  hardcoding a threshold in copy: the screen shipped saying "age 23 and
@@ -126,11 +190,26 @@ export interface TeamReviewWindow {
      *  the beat can never render a ledger without the weight that scored it. */
     w_net_firsts?: number;
     net_firsts_cap?: number;
+    /** #372 — `true` when the COMPOSITE vector scored. The three weights above
+     *  are then the composite's own (vet/youth at 0.40, not 1.00): they are
+     *  RE-STATED by the backend rather than left at their legacy values, so
+     *  reading them is always correct and hardcoding one never is. */
+    composite?: boolean;
+    /** Present only alongside `signals.starters.applied`. */
+    w_starter_index?: number;
+    starter_index_cap?: number;
+    /** Present only alongside `signals.playoff.applied` — a weight is never
+     *  rendered beside a term that did not score. */
+    w_playoff_index?: number;
+    playoff_center?: number;
+    playoff_index_cap?: number;
   };
   /** #371 — which model produced `inferred`. Absent entirely while
    *  `trades.window_from_odds` is off, which is what keeps the flag-off payload
-   *  identical to what build 122 already parses. */
-  source?: 'roster' | 'odds';
+   *  identical to what build 122 already parses.
+   *  #372 — `'composite'` means the playoff band was SCORED AS A TERM rather
+   *  than used to overwrite the verdict, so `inferred === roster_inferred`. */
+  source?: 'roster' | 'odds' | 'composite';
   /** The roster heuristic's own verdict, ALWAYS — even when the odds drove.
    *  Both definitions of "contender" ship together rather than one silently
    *  replacing the other. */

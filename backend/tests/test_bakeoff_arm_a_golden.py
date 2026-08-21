@@ -455,7 +455,16 @@ def test_r4_bypass_is_thread_local():
 #: caller supplying `first_round_ledger`, and the only caller that does is
 #: GET /api/league/team-review — trade_gen_v2, the mock draft and the outlook
 #: seed all still pass four positional arguments. Pinning a kill value would
-#: imply the knobs matter to a deck; they provably do not.) This is the
+#: imply the knobs matter to a deck; they provably do not.
+#: 2026-08-20 added the eight `infer_composite_*` knobs, D-140: excluded for
+#: the SAME reason, one report later. They weight `infer_team_outlook`'s
+#: composite vector, which is gated on BOTH `trade.outlook_composite` AND a
+#: caller supplying an APPLIED `starter_signal` — and starter value can only
+#: be summed off a league-wide power-rankings call, which no generation path
+#: makes. trade_gen_v2, the mock draft and the outlook seed still pass four
+#: positional arguments, so with the flag lit they score the LEGACY vector
+#: (INV-372b, pinned by test_window_composite.py). Excluded rather than
+#: pinned: a kill value would assert these reach a deck.) This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -494,6 +503,9 @@ gen2_centerpiece_top_k gen2_consol_floor gen2_consol_gamma gen2_dedup_jaccard
 gen2_epsilon gen2_exposure_cap gen2_exposure_floor gen2_featured_count
 gen2_give_pool gen2_meso_band gen2_meso_max_variants gen2_min_divergence
 gen2_recv_extra_pool gen2_youth_age ghost_holdout_one_in infer_contender_cut
+infer_composite_playoff_cap infer_composite_playoff_center
+infer_composite_starter_cap infer_composite_w_pick infer_composite_w_playoff
+infer_composite_w_starter infer_composite_w_vet infer_composite_w_youth
 infer_net_firsts_cap infer_rebuilder_cut infer_w_net_firsts
 infer_w_pick_share infer_w_vet_share infer_w_youth_share
 jets_age ktc_fallback_rank ktc_k ktc_max lane_shift_frac

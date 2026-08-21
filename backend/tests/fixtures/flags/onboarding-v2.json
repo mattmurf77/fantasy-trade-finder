@@ -66,6 +66,7 @@
   "trades.team_review": true,
   "trade.outlook_net_firsts": false,
   "trades.window_from_odds": false,
+  "trade.outlook_composite": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,
