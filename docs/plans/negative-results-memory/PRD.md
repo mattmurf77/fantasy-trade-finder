@@ -136,7 +136,12 @@ anchored on shipped `trade_pass_reasons` codes + PRODUCER column).
 
 All metrics computable from existing instrumentation; no new events. All windows
 exclude D-091 (2026-08-16→08-19); "never shown" analyses respect the ghost boundary
-2026-08-21T00:43Z.
+2026-08-21T00:43Z. **Operator ruling 2026-08-21 (relayed via Receipts): ghost cards are
+ruled out, period** — the holdout stays disabled, Receipts will not grade `is_ghost=1`
+rows, and the served-vs-ghost control is removed from the sibling's measurement plan.
+Checked against this PRD: nothing here DEPENDS on ghost-graded rows (R1(c) already
+excludes ghosts from evidence; no metric consumes them); the fixed historical ghost
+cohort remains available read-only for any future analysis but nothing is built on it.
 
 ### 4.1 Correctness set (gates — must be green to ship at all)
 | # | Metric | Target | Source |
