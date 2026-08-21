@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — Counterparty-breaker planning: PLAN+HLD converged, LLD mid-merge; session limit stopped the loop](#2026-08-21--counterparty-breaker-planning-planhld-converged-lld-mid-merge-session-limit-stopped-the-loop)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
@@ -36,6 +37,47 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-21 — Counterparty-breaker planning: PLAN+HLD converged, LLD mid-merge; session limit stopped the loop
+
+**Where:** branch `claude/counterparty-breaker-plan` (worktree `trading-engine-eval-8ab7bc`), tip
+`0eb5f60` + one uncommitted rulings file at stop. **Planning only — nothing builds until the
+operator approves the suite.** Operator brief: "Counterparty breaker" (adversarial pass that
+evaluates each suggestion from the OTHER manager's seat and surfaces their strongest objection),
+full gates, dual-agent-doc-review as the vehicle, coordinate with the Receipts and
+negative-results-memory sibling sessions.
+
+**DONE and dual-signed:** `docs/plans/counterparty-breaker/` — `scope.md` (full gates, no
+waivers), `PLAN.md` (sibling-reconciled: producer-column vocabulary boundary, F-1/F-2/F-3
+folded, A-1+A-2 closed), **`HLD.md` CONVERGED** (4 rounds; final blocker was a payload-layer
+privacy leak — the client payload is now narration-gated: the dark-stamp window serves NO
+`breaker` key). `reconciliation-log.md` is complete through LLD round 2 and is the fastest
+cold-start read.
+
+**IN FLIGHT — resume here:** the LLD. Drafts A (implementer) and B (reviewer) are complete in
+`drafts/`; the merge agent died on the session usage limit (resets 05:10 ET). **Every merge
+decision is already made** — execute
+[`drafts/LLD-merge-rulings.md`](../docs/plans/counterparty-breaker/drafts/LLD-merge-rulings.md)
+(M-1…M-12) to write `LLD.md`, then cross-review (adjudicate M-8's `fit_outlook` scalar — the
+one deliberately unsettled call), sign-off, then the three HLD errata named in that file, then
+the PRD loop, then taxonomy 1.1.0 authoring + final sibling reconciliation (the Receipts
+session runs the batch check) and operator delivery.
+
+**Binding constraints a resuming session must not re-derive:** operator ruled **NO ghost cards,
+full stop** (batch-wide; recorded PLAN §7/§6, HLD §2.3) · interleaved serving is LIVE since
+2026-08-21T00:43Z — v1 has zero ordering effect by design · cost basis is **60** cards
+(`bakeoff_deck_limit` doubled at that boundary) · objection vocabulary anchors on
+`trade_pass_reasons` codes; `roster_crunch` is the only breaker extension
+(`shape_aversion` = negmem's, producer column enforces it) · no client renders
+`TradeCard.narrative` (verified) — the hesitation line is a distinct mobile element ·
+fit-challenger operator rulings stand untouched.
+
+**Sibling state at stop:** Receipts suite COMPLETE (contract at `docs/plans/receipts/PLAN.md`
+§7 in its worktree `agent-af95ea98f982612d6`; taxonomy seed v1.0.0 at
+`docs/plans/shared/trade-shape-taxonomy.md` there, §5 reserved for my vocabulary section);
+negmem memo landed (`docs/plans/negative-results-memory/research-verification.md`, its
+worktree); both signed off on my PLAN. They await my finished suite for the three-way batch
+delivery.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 
