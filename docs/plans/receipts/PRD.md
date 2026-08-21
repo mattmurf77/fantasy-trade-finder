@@ -61,10 +61,13 @@ modeling, pre-telemetry backfill, negmem).
 ### 4.1 Definitions (normative; formulas in LLD §4)
 - **Swap edge** = (receive-side consensus delta) − (give-side consensus delta), in
   consensus value units, both endpoints from `player_value_history` at the serve date and
-  serve+window date. The give side is the built-in market control.
+  serve+window date. The give side is the built-in market control — drift common to both
+  sides cancels in proportion to serve-time balance and shape symmetry; the exact
+  statements and disclosed residuals are HLD D-1.
 - **`edge_pct`** = edge ÷ serve-time package midpoint.
-- **Win** = `edge > 0`; **win share** reported against an explicit 50% null ("a coin-flip
-  swap breaks even").
+- **Win** = `edge > 0`; ties (`edge == 0`) count as non-wins and their count is
+  disclosed; **win share** reported against an explicit 50% null ("a coin-flip swap
+  breaks even").
 - **Windows:** 14 / 28 / 56 days; 28d is the fixed headline window; all three always
   shipped in one payload.
 - Picks: held constant (Δ=0), counted in coverage; pick-majority rows excluded
@@ -76,9 +79,11 @@ consensus", never "accuracy" or "graded against reality". Consensus (DynastyProc
 the yardstick; the yardstick has opinions (disclosed in methodology line).
 
 ### 4.3 Small-n presentation rules
-n is always shown ("12 of 19"); headline requires `n ≥ receipts_min_n` (10); internal
-cells carry Wilson 95% intervals; sub-min-n leagues get the maturity/ledger state, never a
-number.
+n is always shown ("12 of 19") and always means the **post-dedup, coverage-passing
+graded count** — the same rows every displayed stat is computed over (LLD §2.2, asserted
+in tests); headline requires that n ≥ `receipts_min_n` (10); internal cells carry Wilson
+95% intervals (center-shifted form, LLD §4.4); sub-min-n leagues get the maturity/ledger
+state, never a number.
 
 ### 4.4 Banned phrasing (copy review checks against this list)
 - Any acquire-side % without the give side beside it ("+14% on the acquire side" alone —
@@ -95,12 +100,12 @@ number.
 | DR-1 | Grading windows | **14/28/56d, headline 28d, all always reported** | 14d = news-cycle read (noisy, labeled early); 28d = signal/wait balance; 56d = season arc (empty until ~Oct 11 given the 8/16 cohort start — the screen's maturity state covers it) |
 | DR-2 | "Acquire side gained value" means | **Swap edge on consensus** (§4.1) — not standalone acquire %, not personal boards | Market drift cancels; personal Elo is endogenous + sparse (HL-2); consensus is the only yardstick with daily frozen history |
 | DR-3 | Preregistration: the immutable prediction | **`deck_impressions` row fields:** `assets_json` (asset ids + direction — the prediction proper), `served_at`, `league_id`, `user_id`, `is_ghost`, `trade_hash`, and the frozen slice keys (`shape_bucket`, `archetype`, `basis`, `model_arm`, `policy_version`, `features_json` slice keys). **Never used for valuation:** `features_json.give_value/receive_value` (may be personal-basis, `server.py:4159`) | The prediction is *what to swap*, not *what it was worth in engine units*; valuation both ends from the independently-frozen snapshot table |
-| DR-4 | Preregistration enforcement | Grader forbidden to: (1) import/replay engine code, (2) read any live value (seeds, `elo_to_value`, features values), (3) reconstruct assets from `trade_hash`, (4) UPDATE/DELETE grades. Each rule has a named test (LLD §7 T-1/T-3/T-10); grades carry `grader_version` + `taxonomy_version`; corrections = version bump + visible footnote | "Can't move goalposts" must be mechanical, not aspirational |
+| DR-4 | Preregistration enforcement | Grader forbidden to: (1) import/replay engine code, (2) read any live value (seeds, `elo_to_value`, features values) **for valuation or edge arithmetic** — sole exemption: the grader's own frozen value-unit pick weights, coverage/pick-share only, versioned under `grader_version` (LLD §1, T-4), (3) reconstruct assets from `trade_hash`, (4) UPDATE/DELETE grades. Each rule has a named test (LLD §7 T-1/T-3/T-10); grades carry `grader_version` + `taxonomy_version`; corrections = version bump + visible footnote | "Can't move goalposts" must be mechanical, not aspirational |
 | DR-5 | Cohort graded | Telemetry-era rows (`assets_json IS NOT NULL`), **served and ghost, all arms, likes-you included**; pre-telemetry permanently ungradeable (NG-7); read-time filters do the rest | Grade everything gradeable once; filter per surface |
 | DR-6 | Ghost usage | Graded identically; **internal only**; fixed cohort ended 2026-08-21T00:43Z (verify at build, PLAN Q-5); never in user payloads | Served-vs-ghost = the selection-effect read (accuracy PLAN 1.2); showing withheld cards leaks the holdout |
 | DR-7 | Whose receipts | **Viewer's own impressions only** in v1; league-wide aggregate = operator question Q-2 | Other managers' decks are private; small-league aggregates reverse-engineer |
 | DR-8 | Platform scope | **Platform-agnostic** (pure DB feature; impressions + universal-pool ids carry it). De-facto Sleeper today; no platform check written | A check would need removing later; grading code has no platform surface |
-| DR-9 | Analytics events | `receipts_opened` (client, **INTENT** — deliberate feature engagement, cf. `find_trades_tapped`), props `league_id, status, n_graded_28d, headline_bucket(neg/flat/pos)` · `receipts_window_changed` (client, NON_INTENT navigation, cf. `tab_selected` classification `analytics_queries.py:74`) · `receipts_grade_run` (server-fired, NON_INTENT), props `graded, ungradeable, cap_hit, duration_ms, trigger`. All registered in `analytics_taxonomy.py` + classified in `NON_INTENT_EVENTS` **in the same commit as the emitters** | House rule (NULL-platform incident); minimal surface |
+| DR-9 | Analytics events | `receipts_opened` (client, **INTENT** — i.e. registered in `ALLOWED_CLIENT_EVENTS` and deliberately ABSENT from the `NON_INTENT_EVENTS` deny-list; deliberate feature engagement, cf. `find_trades_tapped`), props `league_id, status, n_graded_28d, headline_bucket(neg/flat/pos)` · `receipts_window_changed` (client, listed in `NON_INTENT_EVENTS` — navigation, cf. `tab_selected`, `analytics_queries.py:73`) · `receipts_grade_run` (server-fired, listed in `NON_INTENT_EVENTS`), props `graded, ungradeable, cap_hit, duration_ms, trigger`. Registrations + classifications land **in the same commit as the emitters** | House rule (NULL-platform incident); minimal surface |
 | DR-10 | Feedback-into-scoring boundary | **Out of v1 entirely (NG-1).** Receipts' side of the boundary = the per-cell accuracy read (admin metrics keyed taxonomy cell × `taxonomy_version` × `policy_version` × window). A future PRD that consumes it must (a) hook only the ordering/presentation multiplier stack (PLAN §7.3 RESERVED seam), (b) answer HL-1's holdout objection, (c) clear the accuracy plan's change-control rule | The boundary is an artifact, not a vibe |
 | DR-11 | Flags & sequencing | `receipts.grading` then `receipts.screen`, both default false; grading runs dark ≥2 weeks before any screen ship | A-1/A-2 sequencing; screen must launch with real maturity data |
 | DR-12 | Regrades | `grader_version` bump + full regrade + retained history + on-screen footnote ("regraded under receipts-2: <reason>") | D-3; corrections without goalpost-moving accusations |
@@ -115,8 +120,10 @@ deduped, min-n-gated, all-windows payload.
 served-vs-ghost.
 **FR-4** `ReceiptsScreen` (mobile): root-stack push; own `FeedbackFAB
 activeScreen="Receipts"` (rule #188; global FAB covers tabs only, `RootNav.tsx:559`);
-entry point "Track record" row on the league/trades surface, hidden while
-`receipts.screen` dark.
+entry point: a "Track record" row in `TradeHomeUtilityRow`
+(`mobile/src/components/TradeHomeUtilityRow.tsx`) on TradesHome — placement to be
+confirmed at build against the `trades_home_inline` experiment state (it runs at 100%
+strip on the tester allowlist) — hidden while `receipts.screen` dark.
 **FR-5** Screen states — all designed, none an afterthought:
 - **Maturity/ledger state (the launch hero):** "23 suggestions on record since Aug 16 —
   first full report ~Oct 11. Predictions are locked the moment we show them; we grade
@@ -124,7 +131,8 @@ entry point "Track record" row on the league/trades surface, hidden while
   count + per-window pending counts.
 - **Mature state:** headline (28d win share + median edge_pct + n), three window chips
   (ready/insufficient/pending), row list (both sides, serve values, deltas per window,
-  pick + imputation flags), best call + worst call (always both), methodology line.
+  pick + imputation flags), best call + worst call (always both; selection = max/min `edge_pct` at the headline
+  window among the displayed rows — symmetric by construction), methodology line.
 - **Loading** skeleton; **error** + retry; **flag-off/404** → entry hidden (never an
   error dialog).
 **FR-6** Chalkline compliance: ledger tone; no streaks/letter-grades/confetti; flare

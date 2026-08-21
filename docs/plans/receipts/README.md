@@ -78,9 +78,37 @@ draft-B adversary/risk). Synthesis resolutions:
   (`server.py:725`); added `latest_value_snapshot_date` (`database.py:10883`) as the
   nearest-date idiom.
 
-### Round 2 (cross-review of this committed suite)
-Recorded in the final report to the operator (objections, fixes, and any unresolved items
-with both positions).
+### Round 2 (cross-review of commit `fad7d0f`)
+Both reviewers returned NO sign-off — 8 distinct blocking objections (one shared), all
+accepted and fixed in the amendment commit:
+
+- **A/B-1 (shared with BB-1 spirit) — drift-cancellation overclaim:** "additive drift
+  cancels for every shape" is false (edge = d·Δcardinality). D-1/T-2/PLAN §3.2/PRD §4.1
+  restated as the true invariants; residuals disclosed per shape cell.
+- **A-B2 + B-BB1 — pick weighting unit bug + import contradiction:** GENERIC_PICK_SEEDS
+  are Elo units read live (deploy-variant, D-084 class) and the conversion path was
+  banned/import-blocked. Fixed: `RECEIPTS_PICK_WEIGHTS` frozen value-unit constants
+  inside the grader (versioned under `grader_version`); imports widened to
+  `pick_values.parse_generic_pick_id` (import-safe by design); owned-pick regex copied
+  locally; DR-4(2) ban qualified (valuation/edge arithmetic); T-4 deploy-invariance case.
+- **A-B3 + B-BB2 — coverage denominator uncomputable / degenerate:** Σcv0 of players
+  with no cv0 is always 0. Fixed: explicit weight convention (graded → cv0; unresolved →
+  serve-date floor, flagged; picks → frozen weights); knob compares min(sides); ordered
+  terminal checks; either-side-zero-graded ⇒ ungradeable (never one-sided — preserves the
+  market control and the midpoint).
+- **B-BB3 — Wilson formula wrong** (center shift dropped, 0.2–0.4 at n≤10 on a trust
+  feature). Corrected + pinned to 3/5 → [0.231, 0.882].
+- **B-BB4 — remaining/backfill contradiction + hot-loop:** `remaining_resolvable`
+  (excludes retry-pending) precomputed into the 202; backfill terminates on two
+  consecutive zero-work runs; run ledger becomes start-row + end-row pairs (killed runs
+  visible, still append-only).
+- **B-BB5 — n not pinned to the displayed cohort:** n and the min-n gate are now
+  post-dedup, post-coverage counts, asserted `n == len(rows used)` in tests.
+
+17 non-blocking suggestions; all folded except two recorded as positions (admin `dedup`
+param defaults to the user-surface rule; `EDGE_PCT_MIN_MIDPOINT` constant chosen over a
+knob to keep the honesty rules version-pinned rather than tunable). Round-3 re-review
+requested from both lenses on the amended commit.
 
 ## Sibling coordination (three-plan batch)
 

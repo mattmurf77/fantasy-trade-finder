@@ -35,7 +35,7 @@
   criteria). Both → `config/features.json` + `feature_flags.py` `FLAG_KEYS` +
   `docs/config-reference.md`.
 - **New `model_config` keys:** `receipts_grade_batch` (500) · `receipts_min_n` (10) ·
-  `receipts_coverage_min` (0.5) · `receipts_pick_share_max` (0.5) ·
+  `receipts_coverage_min` (0.5, compared against min of the two sides' coverage) · `receipts_pick_share_max` (0.5) ·
   `receipts_snap_tolerance_days` (3) → `docs/config-reference.md`. Deploy-free rollback
   levers: both flags; env kill switch `FTF_RECEIPTS_GRADE=0`.
 

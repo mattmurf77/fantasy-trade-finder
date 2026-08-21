@@ -20,9 +20,14 @@
 
 Implements HLD components: `backend/receipts_service.py`, three `server.py` routes, the
 daily-tick guard, schema, mobile screen contract, knobs. Assumes the HLD's decisions D-1…D-11.
-Module import contract: `receipts_service` imports `database`, `feature_flags`, stdlib —
-**nothing from `trade_service` / `trade_optimizer` / `trade_gen_*` / `bakeoff_*` / `server`**
-(leaf pattern per `suggestion_telemetry.py`'s docstring; test-pinned §7 T-1).
+Module import contract: `receipts_service` imports `database`, `feature_flags`,
+`pick_values` (only `parse_generic_pick_id`; module-level import is safe — pick_values'
+`elo_to_value` dependency is deliberately lazy, `backend/pick_values.py:11-14`), stdlib —
+**nothing from `trade_service` / `trade_optimizer` / `trade_gen_*` / `bakeoff_*` /
+`server` / `suggestion_telemetry`** (leaf pattern per `suggestion_telemetry.py`'s
+docstring; test-pinned §7 T-1). The owned-pick pseudo-id pattern
+(`{league_id}_{season}_{round}_{orig_roster}` — cf. `suggestion_asset_token`,
+`backend/suggestion_telemetry.py:196`) is a 3-line regex copied locally, not imported.
 
 Constants in `receipts_service.py`:
 
@@ -30,6 +35,15 @@ Constants in `receipts_service.py`:
 GRADER_VERSION   = "receipts-1"   # bump on any grading-semantics change (D-3)
 TAXONOMY_VERSION = "1.0.0"        # mirrors docs/plans/shared/trade-shape-taxonomy.md (D-10)
 WINDOWS_DAYS     = (14, 28, 56)   # fixed; additive changes only (PLAN §3.3)
+EDGE_PCT_MIN_MIDPOINT = 100.0     # value units; below -> edge_pct = NULL (junk-for-junk guard)
+
+# Pick weights for coverage / pick-share ONLY — never edge arithmetic. VALUE-unit
+# constants FROZEN here, populated ONCE at build time from
+# elo_to_value(GENERIC_PICK_SEEDS[(round, "Mid")]) and then hard-coded as literals;
+# deliberately NOT read live (Elo units + deploy repricing, D-084 class, would flip
+# pick_majority under one grader version — HLD D-7). Owned picks map to their round's
+# Mid rung. Any change bumps GRADER_VERSION.
+RECEIPTS_PICK_WEIGHTS = {1: <lit>, 2: <lit>, 3: <lit>, 4: <lit>}   # round -> value units
 ```
 
 `model_config` knobs (seeded via `_MODEL_CONFIG_DEFAULTS`, flipped via `scripts/set_knob.py`):
@@ -38,7 +52,7 @@ WINDOWS_DAYS     = (14, 28, 56)   # fixed; additive changes only (PLAN §3.3)
 |---|---|---|
 | `receipts_grade_batch` | 500 | impressions per run (fan-out cap) |
 | `receipts_min_n` | 10 | user-facing headline gate |
-| `receipts_coverage_min` | 0.5 | value-weighted gradeable share below which a graded row is excluded from user headline aggregates |
+| `receipts_coverage_min` | 0.5 | `min(coverage_give, coverage_receive)` below which a graded row is excluded from user-facing aggregates (read-time filter) |
 | `receipts_pick_share_max` | 0.5 | pick share of a side's serve value above which the row is `ungradeable/pick_majority` |
 | `receipts_snap_tolerance_days` | 3 | ± days for snapshot-date matching |
 
@@ -47,12 +61,16 @@ WINDOWS_DAYS     = (14, 28, 56)   # fixed; additive changes only (PLAN §3.3)
 ### 2.1 `POST /api/cron/receipts-grade`
 Auth `X-Cron-Secret` (`_require_cron_auth()`, `backend/server.py:19038`-area). Behavior:
 flag `receipts.grading` off → `200 {"ok": true, "skipped": "flag"}` (no writes).
-On → **202 immediately**, `{"ok": true, "started": bool}` (`started=false` when a run is
-already in flight); grading proceeds in a daemon thread (precedent `cron_players_refresh`,
+On → **202 immediately**, `{"ok": true, "started": bool, "remaining_resolvable": int}`
+(`started=false` when a run is already in flight; `remaining_resolvable` = cheap COUNT of
+eligible-and-resolvable-now work — retry-pending impressions excluded — computed before
+the thread starts); grading proceeds in a daemon thread (precedent `cron_players_refresh`,
 `backend/server.py:19512-19531`). Query `?batch=N` overrides the knob for one run
 (bounded 1..5000). Env kill switch `FTF_RECEIPTS_GRADE=0` → always `skipped`.
 Also invoked (same function, fire-and-forget) from the **daily-tick guard** and from
-`scripts/receipts_backfill.py` (loops until `remaining == 0`).
+`scripts/receipts_backfill.py`, which loops while `remaining_resolvable > 0` **and** the
+previous run graded > 0, and terminates after two consecutive zero-work runs —
+retry-pending rows are the daily job's business, not the backfill's (no hot-loop).
 
 ### 2.2 `GET /api/league/<league_id>/receipts`
 Session auth (viewer = session user); flag `receipts.screen` off → `404 {"error":
@@ -88,16 +106,23 @@ pinned to max present. Response (one payload, all windows — anti-cherry-pick b
 }
 ```
 
-Names resolved server-side from the players cache at read time (display-only; never used in
-math). Win/median stats computed over rows passing the coverage filter
-(`receipts_coverage_min`) — excluded counts appear in `disclosure`.
+**n semantics (binding):** every displayed n — `graded_n`, per-window `n`, and the min-n
+gate — is the **post-dedup, post-coverage-filter** graded count for that window, and the
+stats are computed over exactly those rows (`n == len(rows used)`, asserted in T-9).
+Excluded rows appear only in `disclosure.excluded` / `disclosure.ties`. Best call / worst
+call = max / min `edge_pct` at the headline window among those same displayed rows —
+symmetric by construction, no discretionary selection. Names resolved server-side from the
+players cache at read time (display-only; never used in math).
 
 ### 2.3 `GET /api/admin/receipts/metrics`
 Auth `X-Cron-Secret` (operator-dashboard pattern, `backend/server.py:8140`). Query params:
-`window`, `shape_bucket`, `basis`, `model_arm`, `ghost` (0/1), `league_id` — all optional
-filters. Returns per-cell rows: `{cell keys, n, win_share, wilson_low, wilson_high,
-median_edge_pct, gradeable_share, flag_low_share}` plus a `served_vs_ghost` block (same
-stats split by `is_ghost`, ghost date range labeled). Available regardless of
+`window`, `shape_bucket`, `basis`, `model_arm`, `ghost` (0/1), `league_id`, `dedup`
+(default 1 — same earliest-serve rule as the user surface; `dedup=0` includes re-serves,
+response footnoted as correlated) — all optional. Returns per-cell rows: `{cell keys, n,
+win_share, wilson_low, wilson_high, median_edge_pct, gradeable_share, flag_low_share}`,
+a `served_vs_ghost` block (same stats split by `is_ghost`, ghost date range labeled), and
+an `effective_window` block — the distribution of `window_snap_date − serve_snap_date`,
+since snapshot tolerance makes a nominal 14d window span roughly 11–17d. Available regardless of
 `receipts.screen`; requires `receipts.grading` on (404 `feature_disabled` while fully dark).
 
 Route additions land in `docs/api-reference.md` in the same PR (mandatory docs gate).
@@ -149,20 +174,27 @@ receipts_grades_table = Table("receipts_grades", metadata,
     UniqueConstraint("impression_id", "window_days", "grader_version",
                      name="uq_receipts_grade"),
 )
-Index("ix_receipts_grades_league", c.league_id, c.window_days)
-Index("ix_receipts_grades_user",   c.user_id,   c.league_id)
-Index("ix_receipts_grades_shape",  c.shape_bucket, c.window_days)
+Index("ix_receipts_grades_league",
+      receipts_grades_table.c.league_id, receipts_grades_table.c.window_days)
+Index("ix_receipts_grades_user",
+      receipts_grades_table.c.user_id, receipts_grades_table.c.league_id)
+Index("ix_receipts_grades_shape",
+      receipts_grades_table.c.shape_bucket, receipts_grades_table.c.window_days)
 
-# receipts_grade_runs — run ledger, one row per grading invocation (bakeoff_runs style)
+# receipts_grade_runs — run ledger, APPEND-ONLY, TWO rows per invocation sharing a
+# run_id: kind='start' at run begin, kind='end' at completion. A killed run (crash,
+# free-instance spin-down) is visible as an unmatched start row. Counts live on 'end'.
 receipts_grade_runs_table = Table("receipts_grade_runs", metadata,
     Column("id",             Integer, primary_key=True, autoincrement=True),
-    Column("run_at",         String,  nullable=False),
+    Column("run_id",         String,  nullable=False),    # uuid4 hex, shared by the pair
+    Column("kind",           String,  nullable=False),    # 'start' | 'end'
+    Column("run_at",         String,  nullable=False),    # ISO UTC of this row
     Column("trigger",        String),                     # 'cron' | 'daily_tick' | 'backfill'
-    Column("duration_ms",    Integer),
+    Column("duration_ms",    Integer),                    # end rows only
     Column("graded",         Integer), Column("ungradeable", Integer),
     Column("reason_counts_json", Text),
     Column("batch_cap",      Integer), Column("cap_hit", Integer),
-    Column("remaining",      Integer),                    # backlog estimate at run end
+    Column("remaining_resolvable", Integer),              # backlog estimate (end rows)
     Column("grader_version", String),
 )
 ```
@@ -186,13 +218,22 @@ todo = SELECT i.* FROM deck_impressions i
        ORDER BY i.served_at LIMIT :batch
 ```
 
+Date arithmetic is shown PG-flavored; the implementation computes cutoff dates in Python
+so the identical query runs on SQLite (tests) and Postgres (prod). Retry-pending
+impressions (window endpoint not yet resolvable, §4.3 step 4) are **skipped in-loop
+without consuming the batch cap** (skip-and-fill) — a head-of-queue block of unresolvable
+rows cannot starve a run.
+
 ### 4.2 Snapshot prefetch
 One query per run: all `player_value_history` rows for the distinct
-`(player_id, scoring_format)` set across `[serve_date − tol, serve_date + tol]` ∪
+`(player_id, scoring_format)` set across `[serve_date − tol, serve_date]` ∪
 `[window_date − tol, window_date + tol]`, memoized `{(pid, fmt, date): value}` — lookups
-against `uq_value_snapshot` (`backend/database.py:1310`); the nearest-date resolution
-reuses the `latest_value_snapshot_date` nearest-≤ idiom (`backend/database.py:10883`)
-generalized to ± tolerance. Fan-out bound: 500 × 3 windows × ≤6 assets × 2 endpoints ≤
+against `uq_value_snapshot` (`backend/database.py:1310`). Anchor rules: the **serve**
+endpoint resolves nearest-**≤** `serve_date` within tolerance (no post-serve information
+ever enters the baseline — exactly the `latest_value_snapshot_date` idiom,
+`backend/database.py:10883`); the **window** endpoint resolves nearest within ±tolerance.
+Actual dates used are recorded per row (`serve_snap_date`, `window_snap_date`) and their
+spread is surfaced in the admin `effective_window` block. Fan-out bound: 500 × 3 windows × ≤6 assets × 2 endpoints ≤
 18k dict lookups per run.
 
 ### 4.3 `grade_one(imp, window_days)` — pure function
@@ -205,49 +246,72 @@ serve_date  = utc_date(imp.served_at)
 window_date = serve_date + window_days
 
 def side(ids):
-    players = [a for a in ids if not is_pick(a)]     # picks: generic_pick_* ids via
-    picks   = [a for a in ids if is_pick(a)]         # parse_generic_pick_id + owned-pick
-                                                     # pseudo-id pattern (suggestion_
-                                                     # telemetry.suggestion_asset_token
-                                                     # regex, :196) — same classifier
-    cv0 = {p: snap(p, fmt, serve_date  ± tol) for p in players}
+    players = [a for a in ids if not is_pick(a)]   # is_pick = parse_generic_pick_id
+    picks   = [a for a in ids if is_pick(a)]       #   OR the local owned-pick regex (§1)
+    cv0 = {p: snap(p, fmt, ≤ serve_date, tol) for p in players}   # nearest-≤ (§4.2)
     cv1 = {p: snap(p, fmt, window_date ± tol) for p in players}
     # D-8 anti-survivorship: present at serve, absent at window → impute pool floor
     for p where cv0[p] and not cv1[p]:
         cv1[p] = floor_value(fmt, window_snap_date); flag imputed_floor
-    graded = [p for p in players if cv0[p] and cv1[p]]
-    excluded_at_serve = players − graded              # direction-neutral exclusion
-    pick_w  = Σ GENERIC_PICK_SEEDS-derived serve weights of picks   # weighting ONLY
-    coverage = Σcv0[graded] / (Σcv0[graded] + Σcv0[excluded_at_serve] + pick_w)
-    return Σcv0[graded], Σcv1[graded], coverage, picks, detail
+    graded     = [p for p in players if cv0[p] and cv1[p]]
+    unresolved = players − graded                  # no serve snapshot within tolerance
+    # Weights are for coverage / pick-share ONLY — never edge arithmetic:
+    #   graded player     → cv0[p]
+    #   unresolved player → floor_value(fmt, serve_snap_date)  (flagged, direction-neutral)
+    #   pick              → RECEIPTS_PICK_WEIGHTS[round]        (frozen value units, §1)
+    denom      = Σ weight(a) over ALL assets       # > 0 whenever the side is non-empty
+    coverage   = Σ cv0[graded] / denom
+    pick_share = Σ weight(picks) / denom
+    return Σcv0[graded], Σcv1[graded], coverage, pick_share, detail
 
-give  = side(assets.give); recv = side(assets.receive)
-if pick_share(either side) > receipts_pick_share_max:  → ungradeable/pick_majority
-if no graded players on either side:                   → ungradeable/no_serve_snapshot
-if a window endpoint unresolvable within ±tol:
-    if utc_today() < window_date + 14: leave unqueued (retry later, no row)
-    else:                                              → ungradeable/missing_snapshot
+give = side(assets.give); recv = side(assets.receive)
+
+Terminal checks, in order (first hit wins):
+1. either side empty / assets_json not a two-list object   → ungradeable/malformed_assets
+2. pick_share(either side) > receipts_pick_share_max       → ungradeable/pick_majority
+3. zero graded players on EITHER side                      → ungradeable/no_serve_snapshot
+   (never grade one-sided: a one-empty-side grade would delete D-1's market control and
+    halve edge_pct's midpoint)
+4. window endpoint unresolvable within ±tol:
+     utc_today() < window_date + 14  → leave unqueued (retry later, NO row; skip-and-fill)
+     else                            → ungradeable/missing_snapshot
+
 give_delta = give.Σcv1 − give.Σcv0 ; recv_delta = recv.Σcv1 − recv.Σcv0
 edge     = recv_delta − give_delta
-edge_pct = edge / ((give.Σcv0 + recv.Σcv0) / 2)        # serve-time package midpoint
-status   = 'graded'  (coverage recorded; read-time filter applies receipts_coverage_min)
+midpoint = (give.Σcv0 + recv.Σcv0) / 2                     # serve-time package midpoint
+edge_pct = edge / midpoint  if midpoint ≥ EDGE_PCT_MIN_MIDPOINT else NULL
+           # junk-for-junk guard: edge still recorded; NULL edge_pct rows excluded from
+           # the median but counted + disclosed
+status   = 'graded'   (coverage recorded per side; the read-time filter applies
+                       min(coverage_give, coverage_receive) < receipts_coverage_min)
 ```
 
-**Forbidden operations (preregistration, D-2 / PRD §5.3):** reading
-`features_json.give_value/receive_value` for any arithmetic; calling `elo_to_value` or any
-live seed/pool value; reconstructing assets from `trade_hash`; touching engine modules.
+**Forbidden operations (preregistration, D-2 / PRD DR-4):** reading
+`features_json.give_value/receive_value` for any arithmetic; calling `elo_to_value` or
+reading any live seed/pool value **for valuation or edge arithmetic** — the sole,
+test-pinned exemption is the in-module frozen `RECEIPTS_PICK_WEIGHTS`, used for
+coverage/pick-share only (T-4); reconstructing assets from `trade_hash`; touching engine
+modules.
 
 ### 4.4 Read-side statistics
-Win share = share of graded rows with `edge > 0` (explicit 50% null model in copy). Median
-`edge_pct` (median, not mean — heavy tails). Wilson 95% interval on win share for admin
-cells: `p̂ ± z√(p̂(1−p̂)/n + z²/4n²) / (1 + z²/n)`, z = 1.96.
+Win share = share of graded rows with `edge > 0`; ties (`edge == 0`, possible on
+pick-heavy or floor-imputed rows) count as non-wins and their count is reported in
+`disclosure.ties` — the explicit 50% null model in copy assumes ties are rare, and the
+visible tie count keeps that honest. Median `edge_pct` over non-NULL values only (NULL =
+sub-midpoint junk rows, counted + disclosed). Wilson 95% interval on win share for admin
+cells — note the center shift `z²/2n`, material at n ≤ 10:
+
+`( p̂ + z²/2n ± z·√( p̂(1−p̂)/n + z²/4n² ) ) / ( 1 + z²/n )`, z = 1.96
+
+Unit-tested against the known triple: 3 wins of 5 → [0.231, 0.882] (T-9).
 
 ## 5. Concurrency, error handling & edge cases
 
 ### 5.1 Concurrency
 Module-level `threading.Lock` single-flight (`started=false` when held); daemon thread;
 batch cap bounds each run. Crash mid-batch: completed inserts stand (unique-keyed), the
-rest re-queue next run. Double-fire (cron + daily-tick same day): second call no-ops on
+rest re-queue next run; Render free-instance spin-down mid-run is the same case — the
+unmatched `kind='start'` ledger row is the kill marker, the next trigger resumes. Double-fire (cron + daily-tick same day): second call no-ops on
 the lock or finds an empty queue.
 
 ### 5.2 Error handling
@@ -270,7 +334,7 @@ left league (route scopes by membership check, existing pattern) · duplicate se
 same trade (read-time dedup by earliest) · `served_at` in the future / malformed (skip +
 counter) · window lands beyond newest snapshot (retry window §4.3) · format flips
 mid-history (grades pin `scoring_format` at grade time; aggregates group by it) · DST/local
-time (all UTC, D-11/HLD §5).
+time (all UTC, HLD §5).
 
 ## 6. Backward compatibility & migration
 
@@ -285,20 +349,29 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
 - **T-1 module isolation:** importing `receipts_service` pulls no engine module
   (assert on `sys.modules`); grep-level pin that `server.py`'s engine paths don't import
   receipts. Proves PLAN §7.3.
-- **T-2 honesty theorem:** synthetic snapshots with uniform additive drift → `edge ≈ 0`
-  for every package shape. Proves D-1's cancellation claim mechanically.
+- **T-2 honesty theorem (as actually true):** uniform additive drift on
+  equal-cardinality synthetics → edge **exactly 0**; uniform multiplicative drift on
+  serve-sum-balanced synthetics → edge ≈ 0; and the disclosed residual pinned: additive
+  drift `d` on a 2x1 → edge = d. Proves D-1's cancellation claims as stated — no more.
 - **T-3 anchor independence:** perturb `features_json` values → byte-identical grades.
   Proves D-2.
-- **T-4 pick rules:** Δ=0, weighting-only seeds, `pick_majority` threshold. Proves D-7.
+- **T-4 pick rules:** Δ=0; frozen value-unit weights; `pick_majority` threshold;
+  **deploy-invariance** — perturbing `GENERIC_PICK_SEEDS` changes no grade under a fixed
+  `GRADER_VERSION`. Proves D-7 incl. recalibration immunity.
 - **T-5 anti-survivorship:** player present at serve, absent at window → floor-imputed
-  loss retained, flagged. Proves D-8.
-- **T-6 snapshot matching:** ±tol selection, retry window, `missing_snapshot` terminal.
+  loss retained, flagged; unresolved-at-serve players weighted at serve-date floor in the
+  coverage denominator (flagged, direction-neutral). Proves D-8 + the §4.3 weight
+  convention.
+- **T-6 snapshot matching:** serve anchor nearest-≤ (a post-serve snapshot is never used
+  for the baseline even when nearer), window ±tol, retry window, `missing_snapshot`
+  terminal, skip-and-fill (unresolvable head rows don't consume the cap).
 - **T-7 idempotency:** second run inserts zero; crash-sim (partial insert) re-run
   completes without duplicates. Proves §5.1.
 - **T-8 regrade:** bump `GRADER_VERSION` → new rows appear, old retained, reads pin max.
   Proves D-3.
 - **T-9 route contracts:** viewer scoping, ghost exclusion, dedup-by-earliest, min-n
-  gating, all-windows payload, flag-off 404s, admin Wilson numbers.
+  gating, all-windows payload, flag-off 404s; `n == len(rows used)` (post-dedup,
+  post-coverage) asserted; Wilson implementation against 3/5 → [0.231, 0.882].
 - **T-10 append-only:** module exposes no UPDATE/DELETE for `receipts_` tables.
 - **Structural (`mobile/tests/check-receipts.js` + npm script):** ReceiptsScreen
   registered as root-stack push; `FeedbackFAB activeScreen="Receipts"` exactly once; all
@@ -314,6 +387,7 @@ Read-only, `prod_analytics` posture (`default_transaction_read_only=on`):
 
 1. `SELECT COUNT(*), COUNT(assets_json), MIN(served_at) FILTER (WHERE assets_json IS NOT NULL) FROM deck_impressions;` + per-league histogram → A-1 gate.
 2. Ghost share + `MAX(served_at) WHERE is_ghost=1` → confirm cohort end (PLAN Q-5) against `model_config_changes`.
-3. Pick-involvement share via `features_json->>'involves_pick'`.
+3. Pick-involvement share via `(features_json::jsonb)->>'involves_pick'` (the column is
+   `Text`, `backend/database.py:506` — the cast is required on Postgres).
 4. `SELECT COUNT(DISTINCT snapshot_date) FROM player_value_history WHERE snapshot_date >= '2026-07-26'` vs calendar days → gap rate (A-5 tolerance check).
 5. Per-user × league gradeable counts → screen maturity forecast (Q-1).

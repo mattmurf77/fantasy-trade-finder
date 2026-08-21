@@ -58,7 +58,7 @@ events; flags `receipts.grading` + `receipts.screen`; shared trade-shape taxonom
 | NG-4 | Grading against personal boards (`elo_history`, `backend/database.py:1274`) | Endogeneity: swipes prompted by our own suggestion move the yardstick (PRD HL-2) |
 | NG-5 | Web/extension surface, push notifications, Wrapped tie-in | Trust-risk blast radius before the numbers are understood |
 | NG-6 | Pick-value modeling — picks are Δ=0, never modeled | Pick prices are code events (`GENERIC_PICK_SEEDS`, `backend/pick_values.py:24`; D-084 repriced round 2 on 2026-08-19) — grading them grades our own commits |
-| NG-7 | Backfilling pre-telemetry impressions | The 7,740 arm-`(none)` rows have no `assets_json` (telemetry columns landed 2026-08-16, commit `1ba148c`, "no backfill") and `trade_hash` is not invertible. Reconstructing assets at grade time would mint a new prediction — the exact move preregistration forbids |
+| NG-7 | Backfilling pre-telemetry impressions | Pre-telemetry rows (`assets_json IS NULL`; telemetry columns landed 2026-08-16, commit `1ba148c`, "no backfill") are permanently ungradeable — `trade_hash` is not invertible, and reconstructing assets at grade time would mint a new prediction, the exact move preregistration forbids. The cohort predicate is `assets_json IS NOT NULL`, **not** `model_arm IS NOT NULL`: arm-NULL rows include telemetry-era likes-you injections, which ARE gradeable |
 | NG-8 | Negative-results memory (sibling plan) | Out of scope here; §7.4 records the schema choices made so it is NOT foreclosed |
 
 ## 3. Measurement honesty rules
@@ -71,13 +71,16 @@ Binding on every surface, user-facing and internal:
    enforcement rules in PRD §5.3 / LLD §4.
 2. **The headline metric is swap edge, not acquire-side %.** `edge = receive-side consensus
    delta − give-side consensus delta`, both endpoints from `player_value_history` — the give
-   side is the control arm, so market drift cancels to first order. A standalone
+   side is the market control: uniform multiplicative drift cancels in proportion to how
+   value-balanced the package was at serve (fairness-gated packages are near-balanced), and
+   uniform additive drift cancels exactly for equal-cardinality shapes; residuals are
+   disclosed per shape cell, never hidden (exact statements: HLD D-1). A standalone
    "acquire side +X%" is on the banned-phrasing list (PRD §4.4).
 3. **All three windows (14/28/56d), always.** One API payload carries all windows; no
    surface may select the best-looking one. Headline window is 28d, fixed in advance.
 4. **Small-n discipline.** Total engagement history is tiny (~845 like/pass outcomes
    all-time at 2026-08-19 — verified in the negative-results session's memo,
-   `docs/plans/negative-results-memory/research-verification.md` §8, citing
+   `docs/plans/negative-results-memory/research-verification.md` §8 (that session's branch — not on `main` yet), citing
    TEST_LEDGER; the gradeable impression cohort starts 2026-08-16). Per-taxonomy-cell
    counts will be single digits for months. Therefore: every internal per-cell readout
    reports n and a **Wilson 95% interval** on win share (or empirical-Bayes shrinkage

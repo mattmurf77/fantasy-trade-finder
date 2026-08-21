@@ -93,13 +93,13 @@ cell with intervals.
 
 | # | Decision | Rationale | Rejected alternative |
 |---|---|---|---|
-| D-1 | **Metric = swap edge** (receive-delta − give-delta, consensus units; `edge_pct` vs serve-time package midpoint; win share vs an explicit 50% null) | The give side is the control arm: additive market drift cancels exactly; multiplicative recalibrations scale both sides and rarely flip sign. A standalone acquire-side % measures the market, not the engine | Acquire-side %: banned as standalone (PRD §4.4). Value space is exponential in Elo (`elo_to_value`, `backend/trade_service.py:1265`), so per-asset percentages don't compose |
+| D-1 | **Metric = swap edge** (receive-delta − give-delta, consensus units; `edge_pct` vs serve-time package midpoint; win share vs an explicit 50% null) | The give side is the market control. Precisely: uniform **multiplicative** drift `m` yields `edge = m · (serve-time imbalance)` — ≈0 for fairness-gated, near-balanced packages; uniform **additive** drift `d` yields `edge = d · (n_receive − n_give)` — exactly 0 for equal-cardinality shapes. Residual shape effects (asymmetric cardinality, side-size beta) are disclosed per shape cell, not hidden. A standalone acquire-side % measures the market, not the engine | Acquire-side %: banned as standalone (PRD §4.4). Value space is exponential in Elo (`elo_to_value`, `backend/trade_service.py:1267`), so per-asset percentages don't compose |
 | D-2 | **Serve anchor = `player_value_history` at serve date — never `features_json` values** | Frozen `give_value`/`receive_value` may be personal-basis (`user_value_basis`, `backend/server.py:4159`) and are engine units; comparing them to later consensus manufactures fake movement | Grading from frozen card values: fails whenever `user_value_basis='personal'` |
 | D-3 | **Append-only + `grader_version` (string, `'receipts-1'`)** — unique `(impression, window, version)`, reads pin max version, superseded rows retained, regrades footnoted on-screen | Corrections without goalpost-moving; precedent `SCORER_VERSION = "fit-1"` (`backend/trade_gen_fit.py:43`) | UPDATE-in-place (destroys the audit trail); never-fix (wrong screen forever) |
 | D-4 | **202 + daemon thread + single-flight + batch cap** for the cron endpoint | Single gunicorn worker (`render.yaml:16`); precedent `cron_players_refresh` (`backend/server.py:19512-19531`) | Inline grading (blocks all traffic); Celery/queue infra (over-scaled) |
 | D-5 | **Ghosts graded identically, internal-only; never in user payloads** | Free served-vs-ghost control read; but surfacing withheld suggestions leaks the holdout and invites "why didn't you show me?". Bounded cohort (PLAN §3.5) | Skipping ghosts (loses the only selection-effect control); showing them (trust harm) |
 | D-6 | **User surface is viewer-scoped** (own impressions only), league-wide aggregate deferred | Other managers' decks are private; a league aggregate at n≈5 is reverse-engineerable. PLAN Q-2 for later | League-wide track record v1 |
-| D-7 | **Picks contribute Δ=0; pick-majority sides ungradeable; per-asset flags + coverage disclosure** | Pick prices are static code seeds repriced by commits (D-084) — grading them grades deploys | Grading picks from seeds (phantom moves on deploy days); excluding pick trades entirely (kills too much cohort) |
+| D-7 | **Picks contribute Δ=0; pick-majority sides ungradeable; per-asset flags + coverage disclosure.** Pick weights for coverage/pick-share come from a value-unit table **frozen inside the grader** (versioned under `grader_version`) — never read live from `GENERIC_PICK_SEEDS` | Pick prices are static code seeds repriced by commits (D-084) — grading them, or even weighting by them live, grades deploys: a seed repricing would flip the same impression between graded and pick_majority under one grader version | Grading picks from seeds (phantom moves on deploy days); excluding pick trades entirely (kills too much cohort) |
 | D-8 | **Pool-floor imputation for players absent at window date** (present at serve), flagged `imputed_floor` | A cratered player falls out of the snapshot pool; marking him ungradeable deletes our worst outcomes — survivorship bias that flatters the engine | Ungradeable-on-missing (silently biased); carrying last-known value (understates busts) |
 | D-9 | **Trigger = dedicated cron endpoint + daily-tick internal guard**, render.yaml cron optional | `roster_history` three-trigger precedent (`backend/database.py:1320-1336`); value-snapshot's "provisioned cron" turned out to be fictional (commit `1e50d3e`) — the guard is what actually fires | Blueprint-only cron (launch coupled to render.yaml sync risk) |
 | D-10 | **Taxonomy artifact of record = `docs/plans/shared/trade-shape-taxonomy.md`**; receipts-local `TAXONOMY_VERSION` constant stamped per row; Python mirror module proposed as 1.2.0 direction, not v1 | Three-way co-ownership already anchored on the doc; a code module is a governance change needing sibling sign-off (PLAN §7.1) | New `backend/trade_shape_taxonomy.py` now (draft A's proposal — carried as recommendation) |
@@ -113,9 +113,14 @@ cell with intervals.
   the run; screen degrades to its empty state on API failure.
 - **Idempotency/concurrency:** structural — work queue is defined by the absence of a grade
   row at the current version; unique constraint + insert-or-ignore; single-flight lock; a
-  crash loses at most one batch's progress. Same pattern family as `uq_value_snapshot`.
-- **Observability:** `receipts_grade_runs` ledger + `receipts_grade_run` server analytics
-  event; remaining-backlog counter in every cron response.
+  crash loses at most one batch's progress. Render free-instance spin-down mid-run is the
+  same case: completed inserts stand, the run's start ledger row stays unmatched (the kill
+  marker), the next trigger resumes. Same pattern family as `uq_value_snapshot`.
+- **Observability:** `receipts_grade_runs` ledger — a start row at run begin and a
+  completion row at run end, both append-only, so a killed run is visible as an unmatched
+  start; `receipts_grade_run` server analytics event; `remaining_resolvable`
+  (eligible-and-resolvable-now, excluding retry-pending) precomputed into every cron 202
+  response.
 - **Security/trust boundaries:** cron + admin routes behind `X-Cron-Secret`
   (`_require_cron_auth`, fails closed); user route behind session auth, viewer-scoped;
   no board content in any payload (consensus-derived numbers only).
