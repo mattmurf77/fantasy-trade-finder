@@ -8681,6 +8681,48 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
     }
 
 
+def load_league_preferences_bulk(user_ids: list, league_id: str) -> dict:
+    """Bulk sibling of `load_league_preference` — {user_id: prefs_row_dict}
+    for every user in `user_ids` that has a row (absent users simply missing).
+
+    Counterparty breaker LLD §2.2: ONE `IN (...)` select instead of a
+    per-partner query loop on the trade-job thread. Read-only; identical
+    per-row shape to `load_league_preference`.
+    """
+    ids = [u for u in dict.fromkeys(user_ids or ()) if u]
+    if not ids:
+        return {}
+
+    def _parse_positions(raw) -> list:
+        if not raw:
+            return []
+        try:
+            result = json.loads(raw)
+            return result if isinstance(result, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    out: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(league_preferences_table).where(
+                and_(
+                    league_preferences_table.c.user_id.in_(ids),
+                    league_preferences_table.c.league_id == league_id,
+                )
+            )
+        ).fetchall()
+    for row in rows:
+        out[row.user_id] = {
+            "team_outlook":          row.team_outlook,
+            "acquire_positions":     _parse_positions(
+                getattr(row, "acquire_positions", None)),
+            "trade_away_positions":  _parse_positions(
+                getattr(row, "trade_away_positions", None)),
+        }
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Asset preferences — untouchables + targets + not-interested (backlog #2, #163)
 # ---------------------------------------------------------------------------
@@ -8709,6 +8751,44 @@ def load_asset_preferences(user_id: str, league_id: str) -> dict:
             out["targets"].append(r.player_id)
         elif r.list_type == "not_interested":
             out["not_interested"].append(r.player_id)
+    return out
+
+
+def load_asset_preferences_bulk(user_ids: list, league_id: str) -> dict:
+    """Bulk sibling of `load_asset_preferences` — {user_id: {list_key: [...]}}
+    for every user in `user_ids` that has rows (absent users simply missing,
+    so callers can distinguish "no prefs saved" from "not asked about").
+
+    Counterparty breaker LLD §2.2: ONE `IN (...)` select instead of a
+    per-partner query loop on the trade-job thread. Read-only; per-user shape
+    identical to `load_asset_preferences` (plural list keys, `ASSET_PREF_LISTS`
+    row types).
+    """
+    ids = [u for u in dict.fromkeys(user_ids or ()) if u]
+    if not ids:
+        return {}
+    _KEY = {"untouchable":    "untouchables",
+            "target":         "targets",
+            "not_interested": "not_interested"}
+    out: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(asset_preferences_table).where(
+                and_(
+                    asset_preferences_table.c.user_id.in_(ids),
+                    asset_preferences_table.c.league_id == league_id,
+                )
+            )
+        ).fetchall()
+    for r in rows:
+        key = _KEY.get(r.list_type)
+        if key is None:
+            continue
+        bucket = out.get(r.user_id)
+        if bucket is None:
+            bucket = out[r.user_id] = {"untouchables": [], "targets": [],
+                                       "not_interested": []}
+        bucket[key].append(r.player_id)
     return out
 
 
