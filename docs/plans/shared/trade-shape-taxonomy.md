@@ -1,6 +1,6 @@
 # Trade-shape taxonomy — shared vocabulary (co-owned)
 
-**Version:** 1.0.0 (seed)
+**Version:** 1.1.0 — additive: §5 objection vocabulary (authored by the counterparty-breaker session, incorporated verbatim 2026-08-21). Sign-off: breaker yes · Receipts yes · coordinator yes · **negmem sign-off PENDING** (pre-agreed the producer split; explicit 1.1.0 confirmation owed per the change rule). 1.0.0 seed content (§1–§4) unchanged.
 **Date:** 2026-08-21
 **Status:** draft — pending three-way reconciliation sign-off
 **Co-owners:** Receipts (post-hoc suggestion scoring) · Negative-results memory (per-league priors feeding generation) · Counterparty breaker (partner-side objection scoring)
@@ -106,17 +106,29 @@ read time when a frozen stamp exists (preregistration discipline).
   generation-side hook is adjacent to the fit arm's `them` lens
   (`backend/trade_gen_fit.py:673-722`), not a new taxonomy dimension.
 
-## 5. Objection vocabulary — RESERVED for 1.1.0 (contributed by counterparty-breaker; pending three-way sign-off)
+## 5. Objection vocabulary (counterparty breaker · negative-results memory)
 
-Placeholder only — the counterparty-breaker session owns this text and will contribute it
-as the taxonomy's first minor bump (1.0.0 → 1.1.0). Agreed shape per its PLAN §8
-(`docs/plans/counterparty-breaker/PLAN.md`, on that session's branch): `trade_pass_reasons`
-layer-2 codes as the anchor set, plus breaker extension candidates (`shape_aversion`,
-`roster_crunch`) defined as per-class severities — explicitly NOT a second overall liking
-scale (§2.8's no-parallel-scale rule). Converged shape (both siblings, 2026-08-21): the
-vocabulary table carries a **producer column** per code — which plan/system emits each code —
-so the negmem/breaker boundary is mechanically enforceable inside this file; converged
-per-code assignments so far: `roster_crunch` → producer=breaker, `shape_aversion` →
-producer=negmem. Sign-off state:
-coordinator yes · negative-results memory yes (converged) · Receipts yes (this file's author). Do not author content here outside the
-breaker session's contribution PR.
+*Contributed by the counterparty-breaker session (LLD converged `59a5d23`); incorporated
+verbatim by the file's author session, formatting only. negmem's explicit 1.1.0 sign-off
+pending per the change rule.*
+
+One vocabulary for "why a manager declines," anchored on the SHIPPED trade_pass_reasons
+layer-2 codes (backend/database.py:5579-5583) — predictions (breaker) and observations
+(negmem) use the same codes, differing only in tense. The PRODUCER column enforces the
+present-state/historical boundary mechanically: a code with producer=negmem appearing in a
+breaker output is a reviewable defect, and vice versa where marked.
+
+| Code | Producer | Basis | Definition |
+|---|---|---|---|
+| fit_outlook | breaker (predicted) · negmem (observed) | present-state / historical | pushes against the counterparty's window; breaker quantity = unweighted _give_side_now_lean mean incl. picks at the −0.25 constant (XOR-coherent with _opponent_frame, LLD §3.3) |
+| fit_new_weakness | breaker · negmem | as above | opens a starting hole they can't fill (mirrored lineup feasibility, their seat) |
+| fit_duplicate | breaker · negmem | as above | stacks a position they're already deep at (their position_surplus; tier_basis marked) |
+| value_giving | breaker · negmem | as above | from their seat they overpay — on their own board (board basis, narration-INELIGIBLE) or vs consensus optics (consensus basis) |
+| other_player_keep | breaker · negmem | as above | asks for a player they've marked untouchable (private-state: stamps dark, never renders v1) |
+| roster_crunch (EXTENSION) | breaker | present-state only | accepting is structurally costly from their seat: forced drop, lineup slot math, positional pile-up |
+| shape_aversion (EXTENSION) | negmem | historical only | a manager's LEARNED resistance to a package shape; breaker may cite only via the future memory→breaker coupling |
+| value_getting, value_other, fit_other, other_player_avoid | negmem (observed only) | historical | shipped codes with no v1 breaker predicate; predictions for them are a future minor bump |
+| other_text | NONE | — | free-text bucket; excluded from both producers' coded vocabularies; calibration joins treat filed other_text rows as unmatched-by-construction |
+
+Severity (breaker-only): per-class 0–1 from present-state margins (LLD §3), NOT a
+partner-liking magnitude — that remains the fit arm's them-score (§2.8 rule upheld).
