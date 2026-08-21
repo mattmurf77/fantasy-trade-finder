@@ -10,6 +10,28 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-22 — SHIPPED early by operator call: package pricing honesty + gap auto-sweetener (PR #162, `d42872f`)
+
+Operator: *"I would rather the more accurate trade suggestions now."* Merged ahead of the
+Monday boundary; this week's readout is two-window censored at the merge SHA (accepted).
+
+- **The mid-package-buys-stud defect is dead:** `_package_value_market` depth discount now
+  benchmarks against the TRADE's best asset. Nacua proof case 0.952 → 0.709 (blocked).
+- **Gap auto-sweetener:** consensus gap > 1539 (one late 1st) ⇒ generation adds the best
+  equalizer from the richer side. Real-boards replay: fires 1.42/deck, closed **17 of 17**
+  it touched (mean gap 2173 → 850); deck cost only **−1.6%**; arm-B over-line 8.1 → 3.8%.
+- **NOT independently revertable** (replay finding): the benchmark fix ALONE raises the
+  over-line share (v3 6.7→11.3%) — the sweetener nets it down. Rollback = BOTH
+  `package_bench_trade_wide ≤ 0` AND `sweetener_gap_threshold ≤ 0` together ([D-143](DECISIONS.md)).
+- **Arm A never moved:** knobs pinned 0.0 in `MODEL_A_PROFILE`, deck-level byte-identity
+  proven on fixtures AND real boards — golden un-recaptured, operator-ratified ("Y").
+- **Arm C benched at ship** (`bakeoff_include_gen_v2` 0, logged 16:37Z): it inherits honest
+  pricing without the sweetener (37.2% over-line on real boards). Unbench when the arm-C
+  sweetener extension (separate session, in flight) merges.
+- `ghost_holdout_one_in` code/seed defaults → 0 (the 08-21 ruling, now durable). Opus
+  review pre-ship fixed two inherited defects (sweetener targeting bypass; stale
+  fit_premium on v3 sweetened cards). Suite 3897p/1s post-#161-merge; CI green ×2.
+
 ## 2026-08-21 — Counterparty-breaker suite CONVERGED (dual-agent, three-way reconciled); build started dark
 
 Full planning suite for the "Counterparty breaker" (evaluates every trade suggestion from the
