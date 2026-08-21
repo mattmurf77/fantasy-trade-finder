@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
@@ -36,6 +37,24 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-21 — Serving live; operator iterating; planning fleet converging
+
+**Live state:** interleaved serving ON (B/D/C), deck cap 60, ghosts off + ruled out, QB 1QB
+repriced (cap 1644/knee 1200 — operator owes the `players-refresh?force=1` click or waits for
+the daily cycle). All flips logged in `model_config_changes`.
+
+**In flight:** market-curve comparison (Opus agent → `docs/reviews/2026-08-21-market-curve-comparison.md`,
+uncommitted) · Receipts suite FINAL on `plan/receipts` in the planner worktree
+(`agent-af95ea98f982612d6`, 5 commits, not pushed) · negmem + breaker LLDs in their sessions ·
+three-way batch → operator review next.
+
+**Queued builds (operator-commissioned):** auto-sweetener pass (all arms; threshold in
+pick-equivalents, late 1st = 1539) · ghost knob code-default → 0 · fit W3 roster flip
+(`bakeoff_include_fit` 1, operator: yes at W3).
+
+**Watch:** daily deck-median tripwire (investigate < 22, revert < 18 ×2 days) — first Friday
+readout due; `scripts/bakeoff_readout.sql`.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 
