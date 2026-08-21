@@ -94,7 +94,11 @@ facts make "confidently wrong" the default outcome absent counter-design:
   testIDs per scope.md §3 — nothing else in any client changes.
 - **NFR-6 — fail-open is self-surfacing.** Rung markers are visible in the coverage metric.
   Coverage for the graduation gate = share of served impressions carrying a **scored objections
-  vector** (rungs 0–2); rung-marked rows are reported separately, never counted as covered. Two
+  vector** — covered **iff the objections vector is scored** (true of rungs 0–2, including
+  rung-1/2 rows that ALSO carry a degradation marker; the two properties overlap and are
+  tracked independently). Rung-3+ rows (marker, `objections: null`) are never covered. Pinned
+  again in the preregistered calibration-readout spec so the gate is not arguable after the
+  fact. Two
   criteria, side by side: scored coverage ≥99% of served impressions AND degraded share
   (rungs 1–3) < 5% (`breaker_degraded_share_max`, operator-tunable). A silent breaker outage
   presents as a failed graduation criterion, not a discovered mystery (§5.5).
@@ -200,8 +204,12 @@ evaluate cards that never serve and miss cards that do.
 completes — post-F9, pre-ghost-split** — after the F9 block ends and before
 `served_final = final_cards` (`server.py:6034`), so the list it evaluates is the exact list
 that feeds `_log_deck_signal_impressions` (call site `server.py:6101`), likes-you-injected
-cards included. Cost is bounded by the **final served-deck size** (post-clamp,
-post-injection). Rationale:
+cards included. Cost is bounded by the **final pre-ghost-split deck size** (post-clamp,
+post-injection) — this list is served cards **plus ghost cards** (`served_final ⊆ final_cards`,
+`server.py:6034-6046`); stamping ghosts is deliberate (ghost rows land on the F1 impression
+spine flagged `is_ghost`, and stamps must not differ by ghost status or the counterfactual
+read is biased). D-9's "served deck only" means served-plus-ghost as opposed to
+full-candidate-pool. Rationale:
 
 1. Every card that reaches impression logging is present, and only those cards — the §6
    readouts join stamps to outcomes, which exist only for served cards.
@@ -463,19 +471,23 @@ calibration population):
 
 ```python
 if flags.trade_breaker:                    # OUTSIDE the bakeoff_run guard
-    features["breaker"] = getattr(card, "breaker", None)
-    # value is the scored stamp or the §2.6 minimal marker — key on EVERY
-    # row of a flag-on deck (M4 pattern); absent key = flag-off only
+    features["breaker"] = card.breaker     # attribute REQUIRED on every card of a
+    # flag-on deck — scored stamp or §2.6 minimal marker, never None (a missing
+    # attribute here is a bug; no getattr default that would bless a bare null)
     features["breaker_shadow"] = getattr(card, "breaker_shadow", None)
-    # viewer-seat shadow (§3.1): same shape, same uniform-keys rule,
-    # never serialized to clients
+    # viewer-seat shadow (§3.1): same shape; when the shadow run is ON the same
+    # marker discipline applies (incl. a rung-5 shadow marker from the outer
+    # handler — unlabeled shadow missingness would undermine R-3 exactly as
+    # bare-null breaker missingness would); null permitted only when the shadow
+    # run is OFF (operator decision 5). Never serialized to clients.
 ```
 
 - Rides **inside** `features_json` (one column), so the `save_deck_impressions` executemany
   first-row-keys trap (`database.py:5503`; row dicts must share keys or non-first-row keys are
   silently dropped) cannot bite — fit-challenger LLD §3.3 reasoning. The uniform-keys rule still
-  applies at the JSON level: key present (possibly null) on every row of a flag-on deck,
-  extending `test_impressions_uniform_columns` (`backend/tests/test_bakeoff_serving.py:1170`).
+  applies at the JSON level: `breaker` carries a scored stamp or a §2.6 minimal marker on every
+  row of a flag-on deck (`breaker_shadow` may be null only with the shadow run off), extending
+  `test_impressions_uniform_columns` (`backend/tests/test_bakeoff_serving.py:1170`).
 - Flag off ⇒ no key ⇒ rows byte-identical to today (NFR-3).
 - The stamp is draft-agnostic and must hold under both draft paths (`compose_deck` and
   `team_draft`, `group_size` ∈ {0, N} — fit F-6 trap).
@@ -514,15 +526,24 @@ compute: G-045 (partner pruned from pool) → rung 1; co-owner split → §3.4; 
 
 ```python
 _bk = getattr(card, "breaker", None)
-if _bk is not None and _bk.get("top"):
-    d["breaker"] = {"code": ..., "severity": ..., "sentence": _bk.get("narrated")}
+if _bk is not None and _bk.get("narrated"):        # narration-gated: dark window serves NOTHING
+    d["breaker"] = {"code": ..., "severity": ..., "sentence": _bk["narrated"]}
 ```
 
-Serve the *distilled* object, not the full objection vector — the vector stays server-side in
-`features_json` for measurement. `card.breaker_shadow` is **never** serialized here
-(`test_breaker_shadow_never_serialized`, §3.1). `sentence` is populated only when
-`trade.breaker_narrative` is on (flag-off payloads carry no sentence; the element renders
-nothing). `docs/api-reference.md` row per scope.md §4.
+**The client payload is narration-gated, not stamp-gated (round-4 fix).** During the phase-1
+dark-stamp window (`trade.breaker` on, `trade.breaker_narrative` off) the payload carries **no
+`breaker` key at all** — an earlier draft served `{code, severity}` whenever `top` was non-null,
+which would have shipped dark-class, possibly private-state-derived codes
+(`other_player_keep`, board-basis `value_giving`) as inspectable structured data to the
+counterparty's direct negotiation adversary, hollowing out the D-6 copy whitelist at the
+payload layer. Gating on `narrated` restricts the serialized object, by construction, to
+classes that are graduated (D-6 switch), whitelist-clean, and above their narration floor —
+`compose_narration` populates `narrated` only for those. Payload-side guard joins the §5.8
+family: `test_breaker_payload_absent_during_dark_window` (stamped card, narrative flag off ⇒
+no `breaker` key in `trade_card_to_dict` output) alongside
+`test_breaker_shadow_never_serialized` (§3.1). The full objection vector never serializes —
+it stays server-side in `features_json` for measurement. `docs/api-reference.md` row per
+scope.md §4.
 
 ### 3.7 End-to-end flow (one job)
 
@@ -543,8 +564,8 @@ nothing). `docs/api-reference.md` row per scope.md §4.
    republish lands the sentence in the client payload on every flag combination (§2.3).
 5. Ghost split (`served_final`, `server.py:6034`); `_log_deck_signal_impressions` (call
    `:6101`) freezes `features_json.breaker` (+ `breaker_shadow`) per row (uniform keys).
-6. `trade_card_to_dict` serves the additive object; the client's gated element renders the
-   sentence.
+6. `trade_card_to_dict` serves the additive object **only for narrated cards** (§3.6 — the
+   dark window serves no `breaker` key); the client's gated element renders the sentence.
 7. Outcomes accrue in `deck_outcomes` / `trade_pass_reasons` exactly as today; every PLAN §6
    readout is a SQL join over stamps + outcomes. No breaker-specific write path exists.
 
@@ -678,7 +699,11 @@ population-independent validity signal.
 **Decision.** (1) Per-class floors are knobs (`breaker_floor_<class>`), with the
 consensus-basis `value_giving` floor set materially higher than board-basis — a single global
 floor cannot survive the near-tautological consensus case (viewer receives more on 86.3% of
-consensus cards). (2) Repetition suppression: if the same (partner, code) hesitation would
+consensus cards). **Board-basis `value_giving` is narration-INELIGIBLE outright** (not merely
+evidence-masked): its `breaker_narrate_value_giving` switch governs the consensus basis only,
+so no LLD can word a board-triggered sentence in consensus terms while its very presence
+discloses the board delta (round-4 privacy refinement; consistent with D-8's public-state
+rule). (2) Repetition suppression: if the same (partner, code) hesitation would
 render on more than `breaker_max_repeat_frac` of a deck's cards for that partner, render on the
 top-severity card only; the rest stamp `narrated: null, suppressed: "repetition"` so the A/B
 readout distinguishes "no objection" from "objection muted". (3) A class-entropy monitor over
@@ -914,7 +939,7 @@ Severity = product damage × likelihood-as-designed-without-the-mitigation.
 | R-3 | High | **Calibration theater** | Counterparty-seat cut n≈0 (96.3% one-directional × 84.5% unboarded); 40% majority-class baseline flatters aggregate match-rate | D-6 preregistered per-class baselines + minimum-n gates, pinned in the **calibration-readout spec committed before `trade.breaker` first lights** (D-6 — per-class minimum n, margins over both baselines, `outlook_src` × board-basis stratification); §6.2b labeled as proxy with selection caveat; §2.7 cross-seat check as population-independent third signal |
 | R-4 | High | **Dominant-objection collapse / wallpaper** | Consensus-basis `value_giving` fires near-tautologically (86.3% viewer-receives-more) → banner blindness + useless stamp distribution | D-7: per-class floors (consensus floor high), repetition suppression, entropy red line before narrative graduation |
 | R-5 | High | **Wrong counterparty state — input-wrongness family** | Co-owner identity split; G-045 pruned partners; G-026 IDP/K zero-values; 12-team `_POS_TIER_CUTS` assumption; stale/clone boards | §3.2/§3.4/§3.5 degrade-and-mark table is normative: every input has a degrade path and a stamp marker; F-3 `board_auth` heuristic; fixtures required. Residual: board staleness recoverability (Q-2) |
-| R-6 | High | **Cross-seat story mismatch — LIVE the day `trade.breaker_narrative` lights** | User A's card damns a trade whose mirror user B's app served approvingly (or B's own deck carries the mirror with no hesitation); two league-mates compare screens | §2.7 mirrored predicates + cross-seat coherence test keep factual claims consistent; §5.2 copy rules keep both statements hedged and roster-fact-grounded (two perspectives, not a contradiction of fact); D-6 per-class switches bound exposure per class. Residual accepted and monitored (§5.6) |
+| R-6 | High | **Cross-seat story mismatch — LIVE the day `trade.breaker_narrative` lights** | User A's card damns a trade whose mirror user B's app served approvingly (or B's own deck carries the mirror with no hesitation); two league-mates compare screens | §2.7 mirrored predicates + cross-seat coherence test keep factual claims consistent; §5.2 copy rules keep both statements hedged and roster-fact-grounded (two perspectives, not a contradiction of fact); D-6 per-class switches bound exposure per class. Residual accepted; **named monitor**: a mirrored-serve narration-divergence count (cards whose mirror was served to the counterparty within the A-5 window and whose narration verdicts differ) rides the per-job diagnostics (§5.5), re-read at the A-5 re-measure cadence |
 | R-7 | Med | **Latency on the widened (organic-included) path** | Per-card feasibility × every deck job can bias stamps by rank if truncated naively | §2.2 amortization + §2.6 labeled ladder (deck-uniform pass-2 drop) + p95 gate as graduation criterion + pre-flag dry-run ms number |
 | R-8 | Med | **Ordering/serving contamination** | Accidental reorder (in-place sort in a predicate); conditionally-present key dropped by executemany | Byte-level inertness tests both draft paths; attribute-only stamp; uniform-keys extension (§3.3) |
 | R-9 | Med | **Version-skew corruption of the readout** | Predicate/floor/template change mid-window = two experiments summed | `ver` bumps on ANY predicate/threshold/evidence-shape change; `tmpl_ver` on any template change, stamped alongside (§3.1); calibration keys on `ver`, narration A/B on the (`ver`, `tmpl_ver`) pair; readout refuses cross-version; M1 censoring |
