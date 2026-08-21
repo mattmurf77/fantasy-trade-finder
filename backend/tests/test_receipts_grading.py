@@ -1168,19 +1168,20 @@ def test_receipts_knobs_are_absent_from_the_generation_config():
 
 
 def test_receipts_flags_are_registered_and_default_false():
-    """New code ships dark: both keys exist in the registry, both default
-    False in code, and both are mirrored into the release flag fixture."""
+    """Code defaults stay dark (registry False) so a missing features.json
+    key never lights anything. SHIP STATE (operator Q-1..Q-4 rulings,
+    2026-08-22): receipts.grading is LIT in features.json so the nightly
+    grader accrues; receipts.screen stays dark until the operator's
+    TestFlight pass. Both files must mirror each other exactly."""
     for key in ("receipts.grading", "receipts.screen"):
         assert key in ff.FLAG_KEYS
         assert ff.DEFAULT_FLAGS[key] is False
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads(
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
-    for key in ("receipts.grading", "receipts.screen"):
-        assert features[key] is False
-        assert release[key] is False
-
-
+    for key, expected in (("receipts.grading", True), ("receipts.screen", False)):
+        assert features[key] is expected, key
+        assert release[key] is expected, key
 def test_receipts_grade_run_is_server_fired_and_non_intent():
     """Analytics classification, asserted rather than assumed: the event is
     server-authoritative (never client-forgeable) and NON_INTENT (a cron tick
