@@ -10,6 +10,21 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21b — negmem LLD FINAL: the planning suite is COMPLETE (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Resumed post-limit-reset; LLD authored via drafts (Fable) → merge agent under an 11-point
+ruling sheet → rounds 2–3 on **Opus** (operator-directed model switch). Dual sign-off
+round 3/4. The round-2 review killed a merge-adopted mechanism outright (`owner_alias`:
+unbuildable AND unnecessary — M1 needed no aliasing; M2 ships identity + a real
+tripwire), fixed the like-leg retraction to honor the schema's revive path, made a
+vacuous sabotage falsifiable, and resolved OQ-4b by independent convergence (keep the
+shrinkage-gate discontinuity; `negmem_sat_k` is the deploy-free flap lever). 27
+sabotage-pinned tests; 7 HLD/PRD deltas logged. **Suite: memo · scope · PLAN · PRD FINAL
+· HLD FINAL · LLD FINAL · reconciliation-log (3 sections) — planning only, zero code.**
+Shared taxonomy closed at v1.1.1 (three-way + my admission-list footnote). Batch
+delivery to the operator: pinged Receipts; rides with the breaker suite. The three
+operator decisions (negmem scope §6) remain the build gate.
+
 ## 2026-08-21 — negmem planning suite: memo, scope, plan, PRD FINAL, HLD FINAL (branch `claude/vigilant-spence-8583f5`, not merged)
 
 Operator product-gap item 2 ("Negative-results memory") taken through full gates,

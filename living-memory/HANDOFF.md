@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-21 — negmem planning: PRD+HLD FINAL; LLD blocked on session limit](#2026-08-21--negmem-planning-prdhld-final-lld-blocked-on-session-limit)
+- [2026-08-21 — negmem planning COMPLETE; batch delivery staged; operator holds 3 decisions](#2026-08-21--negmem-planning-complete-batch-delivery-staged-operator-holds-3-decisions)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
@@ -38,30 +38,25 @@
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
 
-## 2026-08-21 — negmem planning: PRD+HLD FINAL; LLD blocked on session limit
+## 2026-08-21 — negmem planning COMPLETE; batch delivery staged; operator holds 3 decisions
 
-**Where:** the "Negative-results memory" planning assignment (operator product-gap item 2,
-dispatched cross-session) is 4/6 done on branch `claude/vigilant-spence-8583f5`, all
-committed: research-verification memo → scope.md (3 operator decisions in §6) → PLAN.md →
-**PRD.md FINAL** (dual-agent, sign-off round 4/4) → **HLD.md FINAL** (dual-agent, round
-4/4) → reconciliation-log.md (both documents' full round trail). Planning ONLY — no build.
+**Where:** the "Negative-results memory" planning assignment is DONE on branch
+`claude/vigilant-spence-8583f5` — memo, scope, PLAN, PRD FINAL (4 rounds), HLD FINAL
+(4 rounds), LLD FINAL (3 rounds, Opus lenses), reconciliation-log with all three round
+trails. Planning only; zero code. plans/README row: "planned — suite complete, build
+gated on operator."
 
-**Blocked:** the LLD. Both dual-agent draft subagents died on the session usage limit
-(resets 5:10am ET 2026-08-22). No partial drafts exist (LLD-draft-A/B.md were never
-written).
+**Batch state:** shared taxonomy v1.1.1 closed three-ways. Receipts suite staged;
+breaker suite converging (their build follows immediately per direct operator
+instruction in their session). Receipts pinged for the batch; the coordinator runs the
+final reconciliation check before operator delivery.
 
-**Resume recipe:** dual-agent-doc-review skill, LLD doc type. Agent A (implementer) and
-B (reviewer) draft independently against **HLD §7 "Handed to the LLD"** — that section is
-the complete work-order checklist, including the round-3/round-4 additions (dual-kill
-golden (b), GR4 ratio-excludes-m, knob-read tilt, degraded⇒M2-{} rule). Binding decisions
-already made (do NOT reopen): reconciliation-log.md both sections; the M2×strength
-decision (negmem_strength is M1-only; M2 kill = gen2_accept_prior_strength=0).
+**The build gate = the three operator decisions in scope.md §6** (presented with
+recommendations in PRD §8.1): D-067 soft-family ruling · layer-2 v1 boundary (feed the
+stub) · privacy posture (recommend aggregate-only derive-on-read). Nothing builds
+before they're answered.
 
-**Sibling state (three-way batch delivery):** Receipts suite COMPLETE, my reconciliation
-against their PLAN §7 contract CONFIRMED and closed on their ledger; breaker HLD
-converged, LLD in flight; operator ghost ruling (no ghost cards) absorbed by all three.
-Batch delivery to the operator = my LLD + breaker's suite, then ping
-trade-suggestions-review-69c9eb-f4. Taxonomy v1.1.0 agreed pending breaker's §5 text.
+**Branch hygiene:** not merged, not pushed unless asked; ~20 commits, all planning docs.
 
 ## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
 

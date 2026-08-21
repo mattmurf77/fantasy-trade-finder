@@ -1,4 +1,4 @@
-# Reconciliation log — Negative-results memory PRD + HLD
+# Reconciliation log — Negative-results memory PRD + HLD + LLD
 
 **Document type:** PRD **Rounds run:** 4 (the cap) **Converged:** yes — dual sign-off in round 4
 **Process:** dual-agent-doc-review — Agent A (Product/User lens), Agent B
@@ -131,3 +131,61 @@ knob-read tilted to pass-in for the gen2 knob; kill-M2-via-global-never-overlay 
 None — both lenses signed off. Deferred to named owners: the GR4
 pollution-vs-stamping choice, the knob read path, and the netting mechanism (all LLD,
 listed in HLD §7).
+
+
+---
+
+# LLD reconciliation
+
+**Document type:** LLD **Rounds run:** 3 (of the 4-round cap) **Converged:** yes — dual
+sign-off in round 3 (conditional on a mechanical finalization set, applied; no design
+change, no further adversarial round per both lenses).
+**Process variant:** round-1 drafts (LLD-draft-A implementer / LLD-draft-B reviewer, both
+Fable pre-limit-reset relaunch) → merge AGENT under an 11-point orchestrator ruling sheet
+(the HLD round's hand-compression errors motivated delegating the merge) → rounds 2–3 on
+**Opus** per operator instruction.
+
+## Round 1 → merge (candidate v1)
+Ruling sheet decided: MIN combine (F3 "never a product" precedent) · decrement netting,
+clamp-at-zero · pass-in-from-server knobs (both drafts converged) · Python-predicate
+admission over plain dual-dialect fetch (B) · copy-only stamp assembly (B) · fit
+end-to-end ordering pin (B) · gen_v2 seam at pair-card creation (A) · allowlist
+`negmem_leagues.json` (A). Merge agent surfaced 5 silent-spot calls (4 ratified: kwarg-
+only threading, extended retraction fetch, no readout route, gen_v2 map-kwarg) and
+refused to decide OQ-4b (sat_k discontinuity at min-evidence). It also found the
+rulings-interaction fact that the kill-M2-via-global procedure is load-bearing (a
+per-arm strength pin does not empty the feed) — later code-verified by lens B.
+
+## Round 2 (v1 → v2): both lenses no; 3+3 blockers, heavy convergence
+Convergent blocker 1 — **owner_alias unbuildable AND unnecessary**: `co_owner_ids` takes
+raw Sleeper dicts; `LeagueMember` has no `owner_id`; no server-side co-owner source
+exists (ADR-012 deliberately rejected server-side resolution); AND M1 never needed
+aliasing (`partner_user_id` is already league identity — the memo §2e citation did not
+transfer). Resolution: mechanism deleted; M2 v1 posture = identity default + the
+`dropped_unmapped_partner_ids` tripwire (made real via a new leaf-legal `_MEMBERS_SQL` —
+the fix editor caught that candidate v1 asserted both the counter and
+never-reads-league_members). Convergent blocker 2 — **like-leg retraction
+anti-conservative**: windowless set-equality permanently blocked revived likes from
+netting (the schema's own documented revive path); resolution = the latest-row rule,
+identical from both lenses independently. Lens-B-only blocker — **N-23 vacuous**
+(`text()` compiles any string): respecced to banned-token scan + SQLite execution.
+Lens-A-only — §9 deltas (e) D-3 kwarg-only supersession, (f) R5 lookback-in-Python,
+(g) R10 4→6 knobs. **OQ-4b resolved by independent convergence: keep + accept** — the
+threshold step (1−floor)/(1+sat_k) makes `negmem_sat_k` the deploy-free flap lever;
+monotone decay crosses the gate downward exactly once; the discontinuity is the feature
+of a shrinkage gate, and RFPS/frozen-cohort key on the hard threshold. Quantified in
+§4.4; draft-B's T-18 assertions restored into N-3. 15 non-blockers folded (incl. the
+N-8 global-not-overlay note and the honest perf restatement).
+
+## Round 3 (v2 → FINAL): dual sign-off
+Both lenses re-verified every fix against the checkout (independent re-derivation of the
+curve arithmetic and all worked examples; the ±1 citation drift caught and fixed).
+Finalization set (12 mechanical items, both lenses convergent on the core four): the
+counter's missing NegmemMap carrier; the counter name unified; §5.6 parse arithmetic
+restated to its own rows (190–246 ms vs 250 — S6 remains the real gate); N-6's NULL
+sub-case respecced as a direct-fold call (the vacuity class the round existed to
+eliminate, caught once more); guard short-circuit semantics stated; prose drift aligned.
+
+## Unresolved disagreements
+None across all three documents. All deferred items carry named owners; OQ-1..OQ-4 all
+RESOLVED in-document.
