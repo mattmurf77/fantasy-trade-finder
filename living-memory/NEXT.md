@@ -48,6 +48,31 @@ Built dark on `claude/trade-suggestions-review-69c9eb` (see HANDOFF + CHANGELOG 
 
 *(Cap note: added while the 7-item cap is already blown — this is the current operative work;
 the 2026-08-08/08-11 sections remain first in line to drop.)*
+## 2026-08-20 — Team Review is shipped; what is owed is RUNTIME evidence, not code
+
+All thirteen reports (#364–#376) are closed in code on `main` `25cc699`, builds 124/125.
+*Why now:* four TestFlight checklists are unrun and one lit flag moves every deck.
+
+1. **Operator: run the four checklists.** `364-team-review-fixes` (13 steps — **step 8**, the sell
+   list holds players you are LOW on, is the whole of #367), plus `366-tier-ladder`,
+   `369-plan-beat`, `372-window-composite`. Under [D-056](DECISIONS.md) this is the only runtime
+   evidence any of it gets, and **#372 is in no build at all**.
+2. **Watch `trade.position_tiers`.** Lit by operator call; it moves `position_needs`/`position_surplus`
+   and therefore every deck, on evidence a green suite provably cannot supply. First suspect if deck
+   composition looks off. Rollback: `false` + `POST /api/feature-flags/reload`.
+3. **Run `scripts/deck_eval.py` on real leagues** — the evidence `position_tiers` was lit without,
+   and the graduation criterion for `trade.outlook_composite` too.
+4. **Decide the three dark flags** after the checklists: `trade.outlook_net_firsts`,
+   `trades.window_from_odds`, `trade.outlook_composite`.
+5. **Fix the test suite's blind spots.** Five dead tests surfaced today and every engine fixture is
+   smaller than `_POS_TIER_MIN_POOL`, so the suite cannot see tier changes at all. A realistically
+   sized shared fixture is worth more than the next feature.
+6. **Still open, not from this batch:** #370 (repeat liked trades — needs a repro against
+   `deck_impressions`, device vs account) and #367's consensus-vs-league toggle
+   (`364-team-review-fixes/plan-remaining.md` §4).
+
+---
+
 ## 2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports
 
 Built and unmerged on **`claude/team-outlook-experience-27a7a1`** ([D-100](DECISIONS.md), [D-101](DECISIONS.md),

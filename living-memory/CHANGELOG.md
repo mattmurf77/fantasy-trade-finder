@@ -10,7 +10,38 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
-## 2026-08-20 — Fit-challenger arm BUILT + measurement rail + serving guards (dark; SHIPPED to `main` 2026-08-20)
+## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
+
+Operator ran the flow end-to-end and filed **thirteen reports**. All closed in code across
+PRs #152/#155/#156/#157/#158 and builds **124**/**125**.
+
+- **#372 — one re-weighted composite window** ([D-140](DECISIONS.md), `trade.outlook_composite`,
+  **dark**): age 1.00 → 0.40, `starter_index` +0.60, `playoff_index` +0.40, cuts unmoved. Measured
+  on prod (12 leagues / 156 teams) the legacy vector called **65% of every team a rebuilder**; the
+  composite gives 62/40/54. FFV3 flips rebuilder → contender; `PaulSm3nis` flips the other way,
+  reading contender on age alone while owning the league's worst starting lineup.
+- **#366 tiers LIT** (PR #157, operator call, evidence caveat reaffirmed). `trade.position_tiers`
+  moves `position_needs`/`position_surplus` and therefore **every deck**. Handcuff is real, not
+  approximated — Sleeper's `depth_chart_order`, exactly 32 RB2s, one per NFL team.
+- **#369/#375 — plan beat rebuilt**, and it uncovered live data loss: the depth beat's "Save &
+  continue" **had never saved anything** (positions-only body, route 400s without `team_outlook`,
+  client throws, the success line never ran behind an empty `catch`). So
+  `team_review_action_taken{action:'positions_set'}` has **never fired in production**.
+- **#376 — the filters were NOT removed by an update.** Build 123→124 changed four files, none on
+  TradesHome; all 178 prod flags matched `main`. Cause: `trades_home_inline` at **100% strip since
+  2026-08-09**, where `TradeHomeUtilityRow` replaces the mode bar and shipped with no conditions
+  entry. Filters button restored; experiment kept by operator choice.
+- **#374** — "pointed the other way" defined from both sides in the user's own window terms.
+- **Evidence quality is the story: FIVE dead tests found** across three waves — one asserted the
+  defect, one went vacuous when a fix changed selection, one's escape hatch held only by accident,
+  one's helper zeroed its own index so deleting the guard was a numeric no-op, one regex needed a
+  literal word near a differently-written gate. Separately, forcing #366's bands on left **all 65
+  engine tests green** — proven meaningless by disabling the small-pool guard, which turned exactly
+  1 of 65 red.
+- Final gates: pytest **3761 passed, 1 skipped**, tsc clean, **68** `check-*.js` suites, testid-lint OK.
+- **Owed:** four TestFlight checklists, all unrun. #372 is in no build.
+
+ + measurement rail + serving guards (dark; SHIPPED to `main` 2026-08-20)
 
 **Session arc:** re-reviewed the trade-suggestion research corpus against fresh read-only prod
 pulls (position curve INVERTED — like-rate 16.9% top-of-deck → 50%+ past card 25; `propose` = 0

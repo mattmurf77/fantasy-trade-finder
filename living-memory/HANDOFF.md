@@ -65,7 +65,43 @@ the W1 re-light per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md) (B+D+
 **Blocking:** operator decisions only. **Stale-entry corrections:** the 2026-08-19 entries below
 saying likes-you gates / arm D are unmerged are outdated — `7110af2`, `d755b3b`, `38806e0` are
 all on `origin/main`.
-## 2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
+## 2026-08-20 — Team Review #364–#376 all shipped; three flags dark, four TestFlight checklists unrun
+
+`origin/main` = `25cc699`. Builds **124** (`bc43b6f`) and **125** (`63d2965`) in TestFlight;
+Render live. All thirteen reports closed in code.
+
+**Flag state, and it matters.** LIT by operator call: `trade.position_tiers`, `trade.rb_handcuff`
+(verified serving in prod). DARK, not graduated: `trade.outlook_net_firsts`,
+`trades.window_from_odds`, `trade.outlook_composite`.
+
+**The single most important thing for the next session:** `trade.position_tiers` is lit and it
+**moves every deck** — it changes `position_needs`/`position_surplus`, which the engine reads. It
+was lit on evidence that provably cannot support it (all 65 engine tests stayed green with the
+bands forced on; disabling the small-pool guard turned exactly 1 of 65 red, proving every fixture
+is too small to distinguish them). If deck composition looks wrong, that flag is the first suspect.
+Rollback is `false` + `POST /api/feature-flags/reload` — no build, no deploy. `scripts/deck_eval.py`
+on real leagues is the evidence nobody has run.
+
+**Do not re-derive these; they each cost real time today.**
+- `compute_consensus_gap`'s sell direction is ungated and shared by three surfaces — **no flag
+  reverts #367**; rollback is a code revert.
+- The depth beat's positions write had never succeeded, so
+  `team_review_action_taken{action:'positions_set'}` has **no production history**. Not a baseline.
+- `trades_home_inline` runs at **100% strip, control 0 bp**, on the tester allowlist. Anything that
+  "disappeared from TradesHome" should be checked against that experiment before the build diff.
+- A local `data/trade_finder.db` **missing the subject league is the wrong sample, not a small one**
+  — it produced a confident, inverted #365 finding that argued against shipping the right fix.
+  Prefer read-only prod (`DATABASE_URL_PROD`; the value is quoted, strip before connecting).
+- Restoring a sabotaged file leaves an older mtime than the run's `.pyc` — clear `__pycache__` or a
+  correct tree tests red. And **commit before sabotaging**: `git checkout --` reverts to HEAD and
+  silently wiped uncommitted work once today.
+
+**Owed:** TestFlight checklists for the #364 batch (13 steps), #366, #369 and #372 — all unrun, and
+under [D-056](DECISIONS.md) they are the only runtime evidence any of this gets.
+
+**Worktrees swept** — [recovery ledger](../docs/recovery/2026-08-20-team-review-batch-worktrees.md).
+
+ `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
 
 **Branch:** `claude/team-outlook-experience-27a7a1` (worktree of the same name), at `origin/main` `a76498e`.
 **SHIPPED** — PR #152 merged `bc43b6f`, Render live on it, EAS build 124 submitted to TestFlight and
