@@ -10,6 +10,29 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21 — Receipts built dark on `feat/receipts` (NOT pushed, NOT merged)
+
+Grades our own past suggestions against subsequent consensus movement. No competitor grades
+its own advice. Everything is behind two default-false flags.
+
+- **Metric is swap edge** (`receive-delta − give-delta` on `player_value_history`), not an
+  acquire-side % — the give side is the market control (D-145). Valuation never comes from
+  the frozen card, whose values may be the user's personal board.
+- **Grades are append-only + `grader_version`-stamped** (D-144): no UPDATE/DELETE path exists
+  for `receipts_*`, test-enforced. A correction is a regrade; old rows stay.
+- Ships: `backend/receipts_service.py` (leaf — no engine import, both directions guarded), 2
+  tables, 3 routes (cron 202+daemon, viewer-scoped league read, admin per-cell readout with
+  Wilson intervals), daily-tick guard, `scripts/receipts_backfill.py`, `ReceiptsScreen` +
+  entry point, 3 analytics events.
+- **Both screen states built** per operator ruling Q-1 — the maturity/ledger state is the
+  launch hero, not an empty state.
+- Evidence: 54 pytest + 12 structural checks, **21 named sabotages all RED**; six guards were
+  blind on the first pass and were strengthened. Two real defects caught: a dedup keeping the
+  latest serve (masked by a stale `.pyc`) and a flag-off daily-tick payload change.
+- Backfill exercised on a synthetic fixture DB: 565 resolvable → 542 graded + 23 ungradeable,
+  terminating on two zero-work runs, 0 ghosts graded. The real dev DB has no impressions, so
+  its dry-run correctly reports 0; the prod P0 cohort read is still outstanding.
+
 ## 2026-08-22 — SHIPPED early by operator call: package pricing honesty + gap auto-sweetener (PR #162, `d42872f`)
 
 Operator: *"I would rather the more accurate trade suggestions now."* Merged ahead of the

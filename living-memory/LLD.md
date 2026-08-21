@@ -464,3 +464,37 @@ conventions for any future layer that **predicts something a user will later tel
   the T1 discipline, sabotage-proven. And any layer that values assets outside the generator pins the
   ambient valuation mode explicitly (`ts.stud_tax_override("market")`), because a thread-local left unset is
   a silent dependency on whoever ran before you.
+
+## Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)
+
+A table-family convention introduced by Receipts, worth reusing for anything that grades our
+own past output.
+
+- **The prefix owns the writer.** `receipts_*` tables are written by exactly one module
+  (`backend/receipts_service.py`) and read by that module's two read surfaces. Sibling efforts
+  take their own prefixes (`negmem_`, `breaker_`), so "who wrote this row" is answerable from
+  the table name.
+- **INSERT + SELECT helpers only.** `database.py` deliberately exposes no UPDATE or DELETE
+  path for these tables, and a test greps for one. That is what makes "we can't move the
+  goalposts" a mechanism rather than a promise — a correction is a `grader_version` bump plus
+  a regrade, with the superseded rows retained.
+- **Version suffixes are NUMERIC, and reads must sort them that way.** `receipts-10` beats
+  `receipts-2`; lexicographic ordering silently pins reads to a stale version the moment a
+  tenth correction ships. `receipts_service.parse_grader_version` is the one comparator.
+- **The work queue is defined by ABSENCE, never by a progress marker.** "Rows with no grade at
+  this `(window, grader_version)`" makes the job idempotent by construction: a crash loses at
+  most one batch, a double-fire no-ops, and there is no cursor to corrupt. The corollary bites —
+  *pending* states must not be persisted, because a row written for "not ready yet" would
+  permanently hide that work from its own queue.
+- **Denormalize the slice keys at write time.** Grade rows copy `shape_bucket` / `basis` /
+  `model_arm` / `policy_version` from the impression rather than re-deriving them, so a per-cell
+  read is one GROUP BY and no read-time recomputation can drift from what was frozen at serve.
+- **Constants that encode honesty rules stay constants, not knobs.** The junk-for-junk midpoint
+  floor, the window set, the headline window and the frozen pick weights are pinned under
+  `grader_version` — a tunable pick weight would let a config write flip existing rows between
+  `graded` and `pick_majority` with no regrade and no audit trail.
+- **Cross-format work queues take the UNION and skip in-loop.** Where a predicate depends on
+  per-format data (here, snapshot coverage), build the queue from the union across formats and
+  skip rows whose own format has not resolved — *without* consuming the batch cap. Folding
+  resolvability into the WHERE is what stops a head-of-queue block of unresolvable rows
+  starving every run.
