@@ -10,6 +10,27 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21c — League surfaces now price picks at the engine's waterfall (PR #169, `70ae4f4`)
+
+Closes the disagreement [D-146](DECISIONS.md) knowingly left open: a 2026 1.01 read **2117.0 on
+Power Rankings and 4867.1 inside a trade card**. Five call sites now share ONE seam
+(`_priced_pick_value`), bidirectionally AST-guarded so a sixth cannot appear —
+[D-148](DECISIONS.md), closes [Q-026](OPEN_QUESTIONS.md).
+
+- **A real defect fell out:** `_roster_eveners` sized its one-tap "add their 1.01" suggestions off
+  the stored ladder while the same response's `gap` came from priced picks — offering to close a
+  2117.0 hole it charged 4867.1 for.
+- **Power Rankings deflate, monotonically by slot:** +12.4 % (1.01 holder) → −40.3 % (1.12),
+  **−22.1 % league-wide**. These have been the ENGINE's prices since `3192d13`; this stops a
+  screen contradicting them. **50 of 96 badges re-band** (bands + five client mirrors untouched).
+- **ADR-011 boundary named:** `roster_history.team_value` steps at this merge (Wrapped/trends read
+  across it). Nothing historical recomputed — pinned by a test asserting `roster_history.py`
+  contains no pricing call at all.
+- Golden set in isolation **3×, zero edits**; suite **4114p/1s**; zero client diffs.
+- Residues raised not buried: pick-SHARE ratios stay legacy (waiver 3 — an inference input, and
+  changing it changes deck generation), and the non-12-team board/engine mapping became
+  **[Q-027](OPEN_QUESTIONS.md)** (a 10-team league's last first displays 820.8, prices 1069.8).
+
 ## 2026-08-22c — negmem SHIPPED dark: merged to `main`, deployed to Render (PR #168)
 
 The negative-results-memory branch merged (`7b7c314`) after re-merging `origin/main`
