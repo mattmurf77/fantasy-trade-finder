@@ -28,10 +28,10 @@
 
 - [x] **Unit tests:** `backend/tests/test_trade_breaker.py` (new) — objection determinism (same inputs → same top objection), vocabulary closure (every emitted code exists in the shared taxonomy / `trade_pass_reasons` extension set), per-class predicate correctness on fixture rosters, severity ordering, flag-off byte-identity (organic decks unchanged; module never imported — `test_organic_never_imports_fit` precedent), interleave safety (breaker stamp present, deck ORDER unchanged on bake-off decks — `bypass_rerankers` discipline), stamp uniformity (extend `test_impressions_uniform_columns`), narrative honesty (the sentence never names a position/player the objection evidence doesn't contain — D-053 precedent).
 - [x] **Code-walk proof:** file:line-cited trace of the stamp seam (post-ranking, pre-impression-log, `stamp_fit_diag` precedent at `server.py` M3 site) and of the narrative composition site in `trade_narrative.build_narrative` — written at build time, per D-056.
-- [x] **Structural guard:** only if the client renders a NEW element for the hesitation line. If v1 ships the line inside the existing server-composed `narrative` string (the PLAN's default), **zero client code changes** and no structural guard is needed — that is a finding for the PRD to confirm, not a waiver.
+- [x] **Structural guard:** `mobile/tests/check-breaker-card.js` — REQUIRED. Verified 2026-08-21: **no client renders `TradeCard.narrative`** (arm-B audit refuted section + fresh grep — only a comment at `mobile/src/components/TradeCard.tsx:437`), so the hesitation line must be a distinct card element (the PLAN's amended default, decision register #3). The guard pins: element gated on the `breaker` payload key + `trade.breaker_narrative`, no render when absent, Chalkline-token styling assertions per the repo's structural-test idiom.
 - [x] **Manual TestFlight checklist:** required before `trade.breaker_narrative` graduates (the line is user-visible copy). Drafted in the PRD; run by the operator; logged in TEST_LEDGER. Not required for `trade.breaker` (no user-visible surface).
 - [ ] **WAIVED:** none claimed at scope time.
-- `testID`s added/renamed: none expected in v1 (no new client element in the default design).
+- `testID`s added/renamed: the hesitation element (e.g. `trade-card-breaker-hesitation`) — exact names in the LLD; must pass `mobile/scripts/testid-lint.sh`.
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 

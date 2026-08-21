@@ -69,8 +69,13 @@ breaker = {
 are not a new vocabulary — they anchor on the SHIPPED `trade_pass_reasons` layer-1/layer-2 codes
 (`value_giving | value_getting | value_other | fit_outlook | fit_new_weakness | fit_duplicate |
 fit_other | other_player_keep | other_player_avoid`, `backend/database.py:5580-5582`), extended
-only where those codes lack a needed concept (candidates: `shape_aversion`, `roster_crunch`) via
-the shared taxonomy file. This buys three things at once:
+only where those codes lack a needed concept (one candidate: `roster_crunch`) via the shared
+taxonomy file. **Boundary enforcement (reconciled 2026-08-21):** `shape_aversion` — a manager's
+*learned* resistance to a package shape — is a real concept but belongs to negative-results
+memory (behavioral/historical, its layer); the shared taxonomy's vocabulary section gains a
+**producer column** (`producer: breaker | negmem`), and any code with `producer=negmem`
+appearing in a breaker output is a reviewable defect. The breaker may cite shape-aversion only
+via the future memory→breaker coupling. This buys three things at once:
 
 1. **Falsifiability.** When the counterparty is also an FTF user and later passes on the mirrored
    card, their filed pass reason either matches the breaker's prediction or it doesn't — direct
@@ -89,8 +94,7 @@ Objection classes for v1 (each a deterministic predicate over present state, det
 | `fit_duplicate` | card stacks a position they're already deep at (their `position_surplus`) |
 | `value_giving` | from their seat they overpay on their own board (if boarded) or vs consensus optics (unboarded) — reuses the fit arm's them-lens inputs, raw boards only |
 | `other_player_keep` | card asks for their pinned/untouchable/franchise-tagged player (asset_preferences, their side) |
-| `shape_aversion` (ext.) | package shape a manager predictably resists (e.g. 3-for-1 consolidation asked of a thin roster; roster-spot math via `waiver_slot_cost` from their seat) |
-| `roster_crunch` (ext.) | accepting forces a drop of a player they demonstrably value (their board/depth) |
+| `roster_crunch` (ext.) | accepting is structurally costly from their seat: forced drop of a player they demonstrably value, lineup slot math (`waiver_slot_cost` from their seat), positional pile-up from a consolidation ask |
 
 Severity is 0–1 per class from the underlying margins (not a new value model — reuses existing
 quantities: their-board deltas, `position_needs`/`position_surplus`, `infer_team_outlook` score
@@ -137,7 +141,7 @@ filter earns its existence from the calibration readout, or it doesn't ship.
 | Mechanism | What it is | Why the breaker is not it |
 |---|---|---|
 | Fit arm them-score (`trade_gen_fit`, D-098) | 0–100 "how much they should like it," three lenses, fit-arm candidates ranked by aggregate; `fit_diag` stamped on every bake-off card | A magnitude, not a reason. The breaker names the objection CLASS with evidence, covers non-value objections (shape, crunch, untouchables), runs on EVERY arm's cards including organic decks, and feeds user-facing copy. Where the them-lens already computes the needed quantity, the breaker READS the stamp rather than rescoring (LLD hook; Receipts contract cites this adjacency) |
-| `trade_gen_v2.acceptance_prior` (`trade_gen_v2.py:283`, dark) | EB-shrunk per-manager historical accept-rate multiplier | Scalar propensity, historical, reasonless, and dark. Breaker is present-state, per-card, reasoned. Sibling memo (negmem session) will document it; both plans cite that memo rather than re-deriving |
+| `trade_gen_v2.acceptance_prior` (`trade_gen_v2.py:283-308`, multiplied into every gen_v2 score at `:655`) | EB-shrunk per-manager historical accept-rate multiplier — **an unfed stub today**: no caller passes `acceptance_stats`, so it returns 0.5 uniformly (memo: `docs/plans/negative-results-memory/research-verification.md`, vigilant-spence branch) | Scalar propensity, historical, reasonless — and unfed (negmem IS the planned feed). Breaker is present-state, per-card, reasoned. Memo §2 also catalogs every existing rejection-consumer (F3 fatigue, D-067 cooldown, F5 taste incl. `partner:{user_id}`) — cited wholesale rather than re-derived |
 | Negative-results memory (sibling, planning) | Historical behavioral prior: rejections recorded per league-mate/shape/reason, regime-tagged at rejection time, consulted at GENERATION time | Different tense, agreed boundary (recorded in their README): memory = history, breaker = present state. Future coupling (neither v1): memory confirms/weights breaker objections; breaker answers "does this objection still apply today" for memory |
 | Receipts (sibling, planning) | Retrospective: re-scores PAST suggestions against subsequent value movement; user-facing track record | Backward-looking accuracy accounting vs. forward-looking pre-serve evaluation. Shared: taxonomy + measurement vocabulary only |
 | `taste_service` (F5, live) | Viewer-side learned preference vectors from swipes/board (has `partner:{user_id}` attr — learns the VIEWER's taste about a partner) | Learns the viewer, from the viewer's behavior. Breaker reasons about the COUNTERPARTY from their state, no learning in v1 |
@@ -156,6 +160,14 @@ serves; INV-372b means legacy today) · declared `league_preferences` outlooks +
 league format/starter slots. Explicitly NOT read in v1: any LLM, any new external feed,
 `negmem_*` tables (future coupling), ghost/counterfactual rows.
 
+**Data-quality caveat (F-3, reconciled):** `LeagueMember.elo_ratings` authenticity is suspect in
+places — prod boards for 5 of 6 members of the one boarded league are near-uniform ~644-646 rows,
+likely bulk-seeded (trade-engine-accuracy PLAN appendix). An objection inferred from a
+consensus-clone board just re-derives consensus while claiming to speak for the manager. The LLD
+includes a cheap authenticity heuristic (board-vs-seed divergence count) that discounts
+board-based severity confidence on clone boards; the them-board lens falls back to
+consensus-optics with the confidence discount stamped.
+
 ## 6. Measurement plan
 
 Stamp-first, exactly like the fit arm's M3 rail:
@@ -164,10 +176,12 @@ Stamp-first, exactly like the fit arm's M3 rail:
    against the 60s job hard timeout.
 2. **Calibration (the headline):** among passed cards where the pass reason was filed, does the
    filed layer-2 code match the breaker's predicted top objection *for the passing seat*? Two
-   cuts: (a) counterparty-seat validation where both managers use FTF and the mirrored card was
-   served; (b) same-seat sanity cut (breaker run on the VIEWER's seat as a shadow — cheap
-   validation population since viewers file reasons today). Baseline exists: pass reasons are 40%
-   `value_giving` / 33% `fit_outlook` (n=208).
+   cuts, **weighted honestly:** (a) counterparty-seat validation where both managers use FTF and
+   the mirrored card was served — expected-n is TINY on current data (96.3% of 1-for-1s exist in
+   one orientation only; the both-ways fit arm would fix this but is not serving), so (a) is a
+   long-run check, never the v1 verdict; (b) viewer-seat shadow (breaker run on the VIEWER's
+   seat) is the **primary calibration population** — viewers file reasons today. Baseline
+   exists: pass reasons are 40% `value_giving` / 33% `fit_outlook` (n=208).
 3. **Lift (needs `trade.breaker_narrative` A/B):** like→propose conversion and pass-reason mix on
    cards WITH the hesitation line vs without. Honest note: `propose` base rate is zero all-time,
    so v1's realistic readout is like-rate + pass-reason shift + the G1 funnel gate
@@ -187,7 +201,10 @@ windows operator-owned · D-056 evidence regime (no Maestro; structural + code-w
 D-053 narrative honesty · D-062/G6 stays user-seat and untouched · D-067 accuracy-over-volume ·
 Chalkline for any UI (no new screen expected ⇒ no FeedbackFAB question in v1; revisit if the PRD
 lands a tappable element) · one-engine-change-per-tester-week change control · five-registration
-rule per knob · deterministic templates in `trade_narrative.py`, LLM = explicit operator decision.
+rule per knob · deterministic templates in `trade_narrative.py`, LLM = explicit operator decision ·
+D-067's family-suppression ruling ("one swipe must not silence a player's whole trade space") —
+does not bind v1 (the breaker evaluates, never suppresses), but binds any future v2 demotion
+below visibility.
 
 ## 8. Reconciliation contract (three-plan batch)
 
@@ -195,9 +212,11 @@ rule per knob · deterministic templates in `trade_narrative.py`, LLM = explicit
   (first mover), adopted verbatim by all three plans; known-fixed dimensions: `shape_bucket`
   "NxM", `basis`, `lane`, `model_arm`, `involves_pick`, value bands, fit buckets. **This plan
   contributes the objection-vocabulary section**: `trade_pass_reasons` codes as the anchor set +
-  breaker extensions (`shape_aversion`, `roster_crunch`) — per the negmem session's hard
-  constraint, extensions extend the shipped taxonomy, never parallel it. Changes only by PR
-  touching the shared file.
+  breaker extension `roster_crunch`, plus the **producer column** (`breaker | negmem`) that
+  mechanically enforces the present-state/historical boundary (`shape_aversion` lands with
+  `producer=negmem`) — per the negmem session's hard constraint, extensions extend the shipped
+  taxonomy, never parallel it. Changes only by PR touching the shared file (targets v1.1.0
+  minor bump, three-way signed).
 - **Table ownership:** `receipts_` (Receipts) · `negmem_` (memory) · `breaker_` (this, reserved,
   UNUSED in v1).
 - **Seams, disjoint by construction:** negmem = generation-time prior (inside candidate
@@ -215,17 +234,23 @@ rule per knob · deterministic templates in `trade_narrative.py`, LLM = explicit
 |---|---|---|
 | 1 | v1 = stamp + narrative only; filter/demote deferred to v2 with its own gates | stamp+narrative only |
 | 2 | Narrative stays deterministic templates (LLM = separate explicit decision) | deterministic |
-| 3 | Hesitation line copy tone + whether it renders inside the existing `narrative` string (zero client change) or as a distinct card element (client change + structural guard + Chalkline pass) | inside existing narrative string |
+| 3 | Hesitation line surface. **Finding (verified 2026-08-21): NO client renders `TradeCard.narrative` today** — only a code comment in `mobile/src/components/TradeCard.tsx:437` mentions it (arm-B audit "Refuted" section, re-verified by grep across mobile/web/extension). The "inside the existing narrative string" option therefore ships an invisible feature. Default flips to: **distinct card element** (mobile client change + Chalkline + structural guard + testIDs + TestFlight). Alternative the operator may prefer: a precondition ticket that makes `narrative` render at all, then ride it | distinct card element |
 | 4 | `breaker_min_severity` initial bar (only knob with user-visible effect in v1) | set from calibration readout, not shipped-guessed |
 | 5 | Shadow same-seat run (viewer-seat breaker for calibration §6.2b) — acceptable compute? | yes, behind `trade.breaker` |
 | 6 | v2 seam election (per-arm pre-draft vs bypassed-on-interleave vs user-side filter) | none — decided after §6.4 readout |
-| 7 | Extension codes `shape_aversion`/`roster_crunch` accepted into the shared taxonomy | proposed, pending sibling+operator yes |
+| 7a | Extension code `roster_crunch` (broadened: forced drop / lineup slot math / positional pile-up) accepted into the shared taxonomy as `producer=breaker` | sibling-agreed 2026-08-21, pending operator yes |
+| 7b | `shape_aversion` enters the taxonomy as `producer=negmem` (breaker may cite it only via future memory→breaker coupling); producer column added to the shared file | sibling-agreed 2026-08-21, pending operator yes |
 
 ## 10. Assumptions to verify at build (not trusted from this session)
 
-- **A-1:** interleaved serving live + ghost rows ended 2026-08-21 — sibling-reported; this
-  session's prod read was permission-blocked. Verify via `model_config_changes` before any
-  measurement window is defined.
+- **A-1: CLOSED 2026-08-21** (evidence via Receipts session's prod read of
+  `model_config_changes`, source=operator rows): `ghost_holdout_one_in` 10→0 @00:43:32Z,
+  `bakeoff_group_size` 10→0 @00:43:33Z, `bakeoff_deck_limit` 30→60 @00:43:33Z,
+  `bakeoff_serve_interleaved` 0→1 @00:43:34Z. Ghost rows END at that boundary; interleaved
+  decks (arm mix challenger/current/gen_v2, zero ghosts) are live. Also logged same table:
+  `qb_1qb_cap_elo` 1785→1644 and `qb_1qb_cap_knee_elo` 1580→1200 @04:46Z — 1QB QB prices drop
+  sharply at the next value refresh; value-optics objections must not treat pre-boundary QB
+  values as comparable.
 - **A-2:** Receipts Reconciliation-contract text (RESERVED seams) — pending; reconcile before
   operator delivery.
 - **A-3:** exact current line numbers for the M3 stamp site / `_log_deck_signal_impressions`
