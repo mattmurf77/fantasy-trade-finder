@@ -61,9 +61,13 @@ const SHIPPED = [
 
 // Template-generated ids: one per segmented-control option, so the check is
 // on the PREFIX (`settings.stud-tax.${o.key}`), not on a fixed string.
+//
+// `settings.pick-pricing.` left this list on 2026-08-21 (D-144) — see
+// DELETED_PREFIXES below. It is not "temporarily missing": the operator ruled
+// pick pricing is "not an opt-in or even an option to flip", so the control
+// it handled no longer exists in any build.
 const SHIPPED_PREFIXES = [
   'settings.stud-tax.',
-  'settings.pick-pricing.',
 ];
 
 // Added by this plan. `file` pins where it must live when that matters.
@@ -87,6 +91,18 @@ const NEW_GATED = [
 
 // Dies with the modal presentation (plan §5, §8).
 const DELETED = 'settings.close-btn';
+
+// Templated ids that must NO LONGER be generated anywhere under src/.
+// `settings.pick-pricing.*` — the Pick pricing segmented control, removed
+// 2026-08-21 (D-144) when the operator ruled market pricing unconditional.
+// Asserted as an absence, not merely dropped from SHIPPED_PREFIXES, so a
+// well-meaning revert that re-adds the control fails here loudly instead of
+// quietly restoring a setting the operator deleted.
+const DELETED_PREFIXES = [
+  { prefix: 'settings.pick-pricing.',
+    why: 'the Pick pricing control was removed 2026-08-21 (D-144) — pick '
+       + 'pricing is unconditional and is no longer a setting' },
+];
 
 // ── Collect every testID= attribute value under src/ ──────────────────────
 const walk = (dir, out = []) => {
@@ -160,12 +176,24 @@ const inNewTree = (id) => [...(idsToFiles.get(id) || [])].some((f) => f.startsWi
     for (const p of SHIPPED_PREFIXES) {
       console.log(`      ${(p + '*').padEnd(32)} ${prefixHit(p).map(where).join(', ')}`);
     }
-    ok(`both templated testID prefixes still generate ids in the new subtree `
-       + `(${SHIPPED_PREFIXES.join(', ')})`);
+    ok(`all ${SHIPPED_PREFIXES.length} templated testID prefix(es) still generate ids `
+       + `in the new subtree (${SHIPPED_PREFIXES.join(', ')})`);
   } else {
     fail('templated testID prefixes still generate ids in the new subtree',
          badPrefix.map((p) => `${p}* → ${prefixHit(p).map(where).join(', ') || 'nothing'}`).join('; ')
            + ' — the segmented control lost its handles');
+  }
+
+  // Retired prefixes: the inverse assertion. A generated id under one of
+  // these means a removed control came back.
+  for (const { prefix, why } of DELETED_PREFIXES) {
+    const hits = prefixHit(prefix);
+    if (hits.length === 0) {
+      ok(`${prefix}* generates no testIDs — ${why}`);
+    } else {
+      fail(`${prefix}* generates no testIDs`,
+           `still generated at ${hits.map(where).join(', ')} — ${why}`);
+    }
   }
 }
 
