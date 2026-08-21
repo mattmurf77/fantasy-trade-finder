@@ -284,6 +284,7 @@ for (const id of settingsIds) console.log(`  ${id.padEnd(36)} ${where(id)}`);
 console.log(failures === 0
   ? `\nAll settings testID inventory checks passed `
     + `(${SHIPPED.length} shipped + ${SHIPPED_PREFIXES.length} templated kept, `
-    + `${NEW.length + NEW_GATED.length} added, 1 deleted).`
+    + `${NEW.length + NEW_GATED.length} added, `
+    + `1 id + ${DELETED_PREFIXES.length} templated prefix(es) asserted GONE).`
   : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
