@@ -189,8 +189,11 @@ Stamp-first, exactly like the fit arm's M3 rail:
 4. **Filter counterfactual (decides v2):** outcome delta between cards the breaker WOULD have
    killed (severity ≥ bar) and the rest, per arm — computed from stamps, no serving change.
 
-**Data boundaries:** ghost (`is_ghost=1`) rows end 2026-08-21 (A-1, sibling-reported — the
-counterfactual designs above deliberately avoid ghosts); D-091 phantom-pick window
+**Data boundaries:** **operator ruling (2026-08-21, batch-wide, relayed via the coordination
+channel): NO ghost cards, full stop** — `ghost_holdout_one_in` = 0 in prod since 00:43Z, made
+durable in Receipts' next ship. Every §6 design above is served-cards-only by construction and
+none uses ghost impressions, backward- or forward-looking; the historical `is_ghost=1` rows
+(ended at the boundary) are excluded from every breaker readout. D-091 phantom-pick window
 (2026-08-16→08-19) excluded from any baseline; `model_config_changes` timestamps censor
 measurement windows (M1 rail, live since PR-M).
 
@@ -204,7 +207,8 @@ lands a tappable element) · one-engine-change-per-tester-week change control ·
 rule per knob · deterministic templates in `trade_narrative.py`, LLM = explicit operator decision ·
 D-067's family-suppression ruling ("one swipe must not silence a player's whole trade space") —
 does not bind v1 (the breaker evaluates, never suppresses), but binds any future v2 demotion
-below visibility.
+below visibility · **no ghost cards, full stop** (operator, 2026-08-21, batch-wide): no breaker
+design or measurement may create or consume ghost impressions.
 
 ## 8. Reconciliation contract (three-plan batch)
 

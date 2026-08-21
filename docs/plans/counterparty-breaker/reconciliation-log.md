@@ -34,6 +34,11 @@ coordinated live over session messaging; all outcomes committed in `cd5cd64`:
 - **Prior art:** `trade_gen_v2.acceptance_prior` cited as an UNFED STUB (returns 0.5 uniformly;
   no caller passes `acceptance_stats`) per the negmem research memo; memo §2 cited wholesale for
   existing rejection-consumers.
+- **Operator ruling relayed batch-wide (2026-08-21): NO ghost cards, full stop.**
+  `ghost_holdout_one_in` = 0 in prod, made durable in Receipts' next ship. Breaker impact:
+  none material — every measurement design was served-cards-only already; the HLD's
+  ghost-stamp robustness clause reworded to a non-dependency, and the ruling recorded as
+  binding in PLAN §7 and HLD §2.3.
 
 ---
 
@@ -99,8 +104,27 @@ from calibration denominators; stamp line outside the `bakeoff_run` guard; compo
 exposure predicate = `narrated != null AND platform = mobile`, three-cell readout; scope.md
 executemany citation errata (`database.py:5427` → `:5503`).
 
+### Round 4 — sign-off run
+- **A: SIGN-OFF yes.** All round-2 blockers verified resolved against re-checked `server.py`
+  citations; three non-blocking wording items (coverage covered-iff-scored, ghost-stamp
+  acknowledgment, one line-cite drift) — all folded.
+- **B: one NEW blocker found in the sign-off check, then resolved and diff-verified:** §3.6
+  served the top objection `{code, severity}` to the client whenever `trade.breaker` was on —
+  ungated by class privacy and live during the dark-stamp window, shipping private-state-derived
+  codes as structured data to the negotiation adversary (the copy whitelist governed prose only).
+  Fix: the payload is **narration-gated** — the dark window serves no `breaker` key; serialization
+  restricted by construction to graduated, whitelist-clean, above-floor classes; payload guard
+  test added. B's non-blocking refinements also folded: no-getattr-default stamp sketch, shadow
+  marker discipline (incl. rung-5), board-basis `value_giving` narration-ineligible outright,
+  named R-6 monitor. **B re-verified the diff: SIGN-OFF yes.**
+
+### Post-convergence constraint fold
+The batch-wide operator no-ghost ruling arrived after B's verify; the ghost-stamp clause was
+reworded to a non-dependency and the ruling recorded as binding (PLAN §7, HLD §2.3). No
+measurement design changed — all were served-cards-only.
+
 ### Unresolved disagreements (HLD)
-None left blocking after round 3 — round-4 sign-off run confirms (see below).
+None — both lenses signed off (A round 4; B round 4 + diff re-verify).
 
 ---
 

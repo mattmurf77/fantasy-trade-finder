@@ -205,11 +205,14 @@ completes — post-F9, pre-ghost-split** — after the F9 block ends and before
 `served_final = final_cards` (`server.py:6034`), so the list it evaluates is the exact list
 that feeds `_log_deck_signal_impressions` (call site `server.py:6101`), likes-you-injected
 cards included. Cost is bounded by the **final pre-ghost-split deck size** (post-clamp,
-post-injection) — this list is served cards **plus ghost cards** (`served_final ⊆ final_cards`,
-`server.py:6034-6046`); stamping ghosts is deliberate (ghost rows land on the F1 impression
-spine flagged `is_ghost`, and stamps must not differ by ghost status or the counterfactual
-read is biased). D-9's "served deck only" means served-plus-ghost as opposed to
-full-candidate-pool. Rationale:
+post-injection). **Operator ruling (2026-08-21, batch-wide): NO ghost cards, full stop** —
+`ghost_holdout_one_in` = 0 in prod since 00:43Z and the code/seed defaults flip to 0 in
+Receipts' next ship, so `final_cards == served_final` in practice and D-9's "served deck only"
+means exactly that. The ghost-split code path (`server.py:6034-6046`) still exists; the seam
+sits before it as a code location only. Robustness note, not a design dependency: if a ghost
+row ever existed again, the stamp is uniform across the pre-split list by construction — but
+no breaker measurement may use ghost impressions, backward- or forward-looking, per the
+ruling. Rationale:
 
 1. Every card that reaches impression logging is present, and only those cards — the §6
    readouts join stamps to outcomes, which exist only for served cards.
@@ -562,8 +565,9 @@ scope.md §4.
    floor + `breaker_min_severity`, format envelope, repetition suppression D-7) →
    `trade_narrative.hesitation_line` templates → `card.breaker["narrated"]`; the snapshot
    republish lands the sentence in the client payload on every flag combination (§2.3).
-5. Ghost split (`served_final`, `server.py:6034`); `_log_deck_signal_impressions` (call
-   `:6101`) freezes `features_json.breaker` (+ `breaker_shadow`) per row (uniform keys).
+5. Ghost split (`served_final`, `server.py:6034` — inert under the no-ghost ruling:
+   `served_final == final_cards`); `_log_deck_signal_impressions` (call `:6101`) freezes
+   `features_json.breaker` (+ `breaker_shadow`) per row (uniform keys).
 6. `trade_card_to_dict` serves the additive object **only for narrated cards** (§3.6 — the
    dark window serves no `breaker` key); the client's gated element renders the sentence.
 7. Outcomes accrue in `deck_outcomes` / `trade_pass_reasons` exactly as today; every PLAN §6
