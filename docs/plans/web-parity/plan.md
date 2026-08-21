@@ -14,6 +14,7 @@
 - [Phase 1 — foundation](#phase-1--foundation)
 - [Phase 2 — public surface](#phase-2--public-surface)
 - [Phase 3 — parity, tiered](#phase-3--parity-tiered)
+- [Phase 4 — acquisition: SEO content loop + app promotion](#phase-4--acquisition-seo-content-loop--app-promotion)
 - [Cross-cutting](#cross-cutting)
 - [Sequencing and sizing](#sequencing-and-sizing)
 - [Risks](#risks)
@@ -261,6 +262,55 @@ A web rebuild must keep these — they are **web-only consumers today**: `/api/p
 
 ---
 
+## Phase 4 — acquisition: SEO content loop + app promotion
+
+> **Added 2026-08-21 by operator direction.** Sourced from an external growth tip the
+> operator reviewed, plus the gap this plan already names in
+> [What this costs](#what-this-costs). Both items are marketing-shaped as much as
+> engineering-shaped — `mkt-seo` / `mkt-writer` involvement expected, not just code.
+
+### P4-1 — Search-Console content-gap loop
+
+The Phase 1 SEO work (P1-3: metadata, `robots.txt`, `sitemap.xml`) makes the site
+*indexable*; nothing yet gives search a reason to *rank* it. The loop:
+
+1. Google Search Console → Performance → range 12 months → export `Pages.csv` +
+   `Queries.csv`. **Operator input required:** a verified GSC property for the prod
+   domain must exist — if it doesn't, that is a same-day setup task and the loop starts
+   accruing data from then (first useful export a few weeks later).
+2. Find the gap: queries the site earns impressions for but has **no dedicated content
+   answering** (rank-without-content).
+3. Write content pages for the best of them — likely families: dynasty trade-value
+   questions ("what is X worth"), format-specific ranking queries (`sf_tep` vs
+   `1qb_ppr` language), trade-calculator comparisons. Static pages under `web/`,
+   linked from `index.html`, on P1-1's shared token stylesheet, rows added to
+   `sitemap.xml`.
+4. Re-run the export on a cadence (quarterly is enough at current traffic) and repeat.
+
+This is the acquisition answer that **survives the no-anonymous-surfaces decision**:
+content pages are public and indexable without exposing any tool endpoint, so this
+composes with the 2026-08-19 ruling rather than reopening it.
+
+### P4-2 — Advertise the mobile app from every page
+
+P2-3 fixes the landing page's silence about the app; this widens it to a site-wide
+rule: **every public page carries an app-promotion surface.**
+
+- A shared footer/banner component (single include, per P1-1's dedup posture): Fleeced
+  name (P1-6), one screenshot strip, TestFlight CTA.
+- `apple-itunes-app` smart-banner meta on every page once the App Store listing is
+  live; until then the TestFlight public link is the CTA target.
+- Highest-intent placements first: the `/s/*` share pages and `/u/` profile unfurls
+  (P1-3) — a league-mate viewing a shared trade card is the exact moment to offer the
+  app. P4-1's content pages get the same treatment as they land.
+- Instrumentation: a `web_app_cta_tapped` analytics event (new event — **bright line:**
+  taxonomy row + `NON_INTENT_EVENTS` classification in the same commit, per root
+  CLAUDE.md). This is also the measurement for open question 5: if the success metric
+  is "web converts visitors into testers," P4-2 is the mechanism and this event is the
+  scoreboard.
+
+---
+
 ## Cross-cutting
 
 **Branching.** This checkout is **215 commits behind `origin/main`** (v1.13.2 vs v1.15.0) and
@@ -294,6 +344,7 @@ Sizes are relative, not calendar estimates.
 | **2** | P2-1…P2-3 | **M** — no backend work | nothing; Phase 1 already landed |
 | **3a** | 7 items | **L** | needs Phase 1 |
 | **3b/3c** | multi-platform, write-back, decks, drafts | **XL** | needs 3a + a credential-capture design |
+| **4** | P4-1, P4-2 | **S–M** — engineering is a shared include + meta tags; content writing dominates | P4-1 step 1 needs operator GSC access; independent of Phase 3 |
 
 Critical path: **P0 → P1-2 → P1-1 → P2-1**. Phases 0 and 1 are built; Phase 2 has no
 backend dependency and no blocker.
