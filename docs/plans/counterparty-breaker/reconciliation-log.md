@@ -195,7 +195,30 @@ layer; `_job_superseded` as cheap compute avoidance); the "narrate on demo decks
 material" option is recorded as a PRD open question — a deliberate product lift, not a default.
 
 ### Round 4 — revision + sign-off
-*(appended after the sign-off run)*
+All six blocking fixes, the T-1 ruling, and ten accepted refinements applied (one honest
+deviation: the literal "min_severity ≥ every floor" test pin would be FALSE at shipped
+defaults — 0.75 consensus floor > 0.60 bar — so the test pins the effective `max()` ordering
+with the consensus floor excepted). **Both lenses verified the revision against the diff and
+live code and signed off:**
+- **A: yes** — picks-in-mean cell now byte-provable against `_now_lean`; snapshot union
+  contradiction-free; Monday-delta text matches the `package_value_v2` docstring verbatim;
+  E-D declared. Accepted the test-pin deviation as "the honest testable half".
+- **B: yes** — rung-5 handler now constructible with zero breaker state (the removed
+  `trade_service._c` call would itself have raised: the local is the per-format instance,
+  `_c` is module-level); `predicate_error` durably visible in the §8 arithmetic; all six
+  non-blocking items landed; the T-1/Q-10 closure records B's position accurately.
+
+Sign-off-round polish (four non-blocking items, applied post-convergence): the
+`is_pick_asset(players.get(p))` sketch fix (called on a pid, takes a player object — B);
+rung-5 decorrelation acceptance note (B); honesty note extended to engine-internal KNOB reads
+(`package_discount_cap`/`elo_value_*` read live inside `ts` helpers — A); card-side pick shape
+clause (`position == "PICK"`; generic-pool `team == "PICK"` picks don't reach the seam — A).
+
+### Unresolved disagreements (LLD)
+None — both lenses signed off. M-8 (`fit_outlook` scalar) was confirmed by both with the same
+reasoning: provable XOR coherence with `_opponent_frame` beats value-weighting, and the
+failure mode under-fires (a missed hesitation, never a wrong sentence). A value-weighted
+variant is a v2 conversation gated on a replacement coherence proof.
 
 ---
 

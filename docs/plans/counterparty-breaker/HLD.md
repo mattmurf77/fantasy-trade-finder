@@ -77,8 +77,11 @@ facts make "confidently wrong" the default outcome absent counter-design:
   default 250 ms/deck; §5.4 puts expected cost 1–2 orders of magnitude below it). Degradation is
   a *ladder with stamped rungs* (§2.6) — a truncated stamp says so and why; unlabeled
   missingness is a defect, because rank-correlated missingness silently poisons the §6.4
-  counterfactual. Fail-open everywhere, but **never a bare null**: any per-card exception stamps
-  the minimal marker object for that card, and the outer except handler stamps the minimal
+  counterfactual. Fail-open everywhere, but **never a bare null**: a per-card exception
+  *outside any class predicate* stamps the minimal marker object for that card — an exception
+  inside ONE class's predicate stamps that class alone `skipped: "predicate_error"` and the
+  card stays rung 0 with the other classes scored (per-class containment; see LLD §5.1/E-14)
+  *(erratum E-D, LLD-driven, 2026-08-21)* — and the outer except handler stamps the minimal
   marker on every card (§2.6 — `{ver, degraded: <rung>, objections: null}`, constructible with
   no breaker state; warning-log precedent `backend/server.py:5715-5716`). An absent `breaker`
   key means flag-off, nothing else. A pre-flag-on dry-run ms number is handed to the operator
@@ -317,7 +320,9 @@ Naive cost is (cards × classes × predicate cost); the expensive inputs are per
   (legacy vector today per INV-372b; the breaker records which it got, §3.2, retains BOTH the
   declared and inferred values — D-8's agreement rule and the stamp need the pair — and inherits
   the composite automatically iff/when the engine graduates — §4 D-8); `asset_preferences` (their
-  side, resolved per §3.4); board accessor (raw `member.elo_ratings` — T3 provenance rule,
+  side, resolved per §3.4; NOT data the job already loaded — the job loads only the viewer's
+  untouchables, so partner `asset_preferences` and declared `league_preferences` come from the
+  two per-job bulk readers, LLD §2.2 *(erratum E-C, LLD-driven, 2026-08-21)*); board accessor (raw `member.elo_ratings` — T3 provenance rule,
   `trade_gen_fit.py:5-13`: the breaker must never touch `_shrink_user_elo`) + the PLAN F-3
   authenticity heuristic result (§3.2 `board_auth`); starter-slot map; depth-chart reads.
 - **Phase 2 — per-card class evaluation, two deck-wide passes:** cheap arithmetic against the
@@ -351,7 +356,7 @@ a magic fraction); pass 2 = the feasibility tier for every card, run whole or dr
 | 1 | partner snapshot fails | that partner's cards: cheap classes where computable, else the minimal marker | `degraded: "partner_snapshot"` |
 | 2 | budget checkpoint trips after pass 1 | feasibility tier dropped WHOLE — no card in the deck gets it (deck-uniform, labeled) | `skipped: ["roster_crunch","fit_new_weakness"], reason: "budget"` on every card |
 | 3 | budget exhausted mid-pass | remaining cards get the minimal marker | `degraded: "budget_exhausted"` |
-| 4 | exception (card) | that card gets the minimal marker | `degraded: "exception_card"`; logged, counted |
+| 4 | exception (card) — **whole-card evaluation failure outside any class predicate only** *(erratum E-D, LLD-driven, 2026-08-21: an exception inside ONE class's predicate stamps that class alone `severity: null, skipped: "predicate_error"` and the card stays rung 0 with the other classes scored — per-class containment, LLD §5.1/E-14; one flaky predicate must not zero coverage for all six classes)* | that card gets the minimal marker | `degraded: "exception_card"`; logged, counted |
 | 5 | exception (outer) | the except handler stamps the minimal marker on EVERY card | `degraded: "exception_outer"` + warning log + diagnostics counter |
 
 Rung 2 drops a *class tier* deck-uniformly rather than truncating within a class by rank — the
@@ -467,23 +472,38 @@ Every stamp carries the markers that make wrongness attributable:
 
 In `_log_deck_signal_impressions` (`server.py:4020`), inside the features assembly beside the
 existing `features["fit_diag"] = getattr(card, "fit_diag", None)` at `server.py:4205`, one
-flag-guarded block. **Unlike the fit keys, which sit inside the `bakeoff_run is not None` guard
-(`server.py:4193`), the breaker lines sit OUTSIDE that guard — organic decks stamp too** (the
-PLAN requires it; a breaker key that only appeared on bake-off rows would silently halve the
-calibration population):
+**attribute-gated** block *(erratum E-A, LLD-driven, 2026-08-21 — this section's earlier
+"`card.breaker` required / no getattr default" flag-gated sketch had a live crash path: the
+impression row loop has no per-row try/except, so one AttributeError after a mid-job hot flag
+flip or an injected-card race would lose the entire deck's impressions to the outer catch; the
+binding copy semantics are LLD §1.4)*. **Unlike the fit keys, which sit inside the
+`bakeoff_run is not None` guard (`server.py:4193`), the breaker lines sit OUTSIDE that guard —
+organic decks stamp too** (the PLAN requires it; a breaker key that only appeared on bake-off
+rows would silently halve the calibration population):
 
 ```python
-if flags.trade_breaker:                    # OUTSIDE the bakeoff_run guard
-    features["breaker"] = card.breaker     # attribute REQUIRED on every card of a
-    # flag-on deck — scored stamp or §2.6 minimal marker, never None (a missing
-    # attribute here is a bug; no getattr default that would bless a bare null)
+# OUTSIDE the bakeoff_run guard; ATTRIBUTE-gated per LLD §1.4 (ruling M-2)
+_bk = getattr(card, "breaker", _BK_SENTINEL)   # fresh sentinel, never None
+if _bk is not _BK_SENTINEL:
+    features["breaker"]        = _bk           # scored stamp or minimal marker
     features["breaker_shadow"] = getattr(card, "breaker_shadow", None)
     # viewer-seat shadow (§3.1): same shape; when the shadow run is ON the same
     # marker discipline applies (incl. a rung-5 shadow marker from the outer
     # handler — unlabeled shadow missingness would undermine R-3 exactly as
     # bare-null breaker missingness would); null permitted only when the shadow
     # run is OFF (operator decision 5). Never serialized to clients.
+elif FLAGS.trade_breaker:
+    # flag on at log time, attribute absent (hot-reload flip mid-job,
+    # injected-card race): SYNTHETIC degradation marker — never a bare
+    # null, never a crash, never a silent absence on a flag-on row
+    features["breaker"] = {"ver": None,
+                           "degraded": "flag_flip_or_unstamped",
+                           "objections": None}
+    features["breaker_shadow"] = None
 ```
+
+The invariant this section always intended — never a bare null, absence impossible on a
+flag-on row — is preserved by the synthetic marker and enforced in tests (LLD §7.3).
 
 - Rides **inside** `features_json` (one column), so the `save_deck_impressions` executemany
   first-row-keys trap (`database.py:5503`; row dicts must share keys or non-first-row keys are
@@ -838,9 +858,16 @@ registrations in the consumer's commit (`trade_service._DEFAULT_CFG`,
 documented disable value (floors/severity → 1.1 disables a class or the line; budget → 0
 disables evaluation).
 
-**Cost** (NFR-2 backing): 12-team league, ~30 served cards. PartnerContext: only partners in
+**Cost** (NFR-2 backing): 12-team league, up to 60 served cards *(erratum E-B, LLD-driven,
+2026-08-21 — `bakeoff_deck_limit` was raised 30→60 at the A-1 boundary; all ms budgets,
+checkpoint math, the size budget, and the pre-flag-on dry-run contract use 60 as the bake-off
+deck bound, LLD §0.2)*. PartnerContext: only partners in
 the deck (typically ≤10), each `analyze_roster_strengths` + `infer_team_outlook` over data the
-job already loaded — ≤1 ms/partner. Per-card: predicates over prebuilt context; dominated by
+job already loaded for rosters, boards, and league state — partner `asset_preferences` and
+declared `league_preferences` are NOT already loaded (the job loads only the viewer's
+untouchables) and come from two read-only bulk readers, one `IN (...)` select each per job
+*(erratum E-C, LLD-driven, 2026-08-21 — see LLD §2.2)* — ≤1 ms/partner. Per-card:
+predicates over prebuilt context; dominated by
 `package_value_v2` / `_feasible_after`; `fit_diag` reuse (D-3) removes value-scoring cost on
 bake-off decks. Envelope: ~10–100 ms/deck expected vs a 250 ms budget vs a 60,000 ms timeout.
 The viewer-seat shadow run (operator decision 5) is ≤2× per-card cost inside the same budget.

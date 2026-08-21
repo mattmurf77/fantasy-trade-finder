@@ -300,9 +300,10 @@ breaker reads is in scope: `g_league`, `players_dict`, `seed_map`, `active_forma
         # a flag-on deck. Ghost split below is inert (no-ghost ruling):
         # served_final == final_cards.
         # Both flags read ONCE, up front (§5.5 E-8): the pair the whole
-        # block acts on is one coherent read. (Flags read at call time
-        # INSIDE engine helpers — e.g. trade_crown_asset in
-        # _package_value_market — are the accepted engine-wide residual.)
+        # block acts on is one coherent read. (Flag and knob reads at call
+        # time INSIDE engine helpers — e.g. trade_crown_asset and the _c()
+        # knob reads in _package_value_market — are the accepted
+        # engine-wide residual, §5.5 E-8.)
         # Skips (T-1 ruling, §9 Q-10): the demo league (consistent with
         # every neighboring mutation layer, server.py:5631-:5981, and the
         # demo-guarded impressions block :6066/:6092; a PRD open question
@@ -789,7 +790,11 @@ partner quantity). Present on every card of a flag-on deck when `breaker_shadow_
 calibration population exactly as breaker missingness would); permitted null only when the
 shadow knob is off — with one exception: the rung-5 seam handler stamps a shadow minimal
 marker unconditionally (it cannot read the knob at failure time, §1.2), so a shadow-off deck
-that hits rung 5 carries markers; harmless, readouts treat markers as degraded either way. Shadow evaluation is **interleaved per card after the primary stamp**,
+that hits rung 5 carries markers; harmless, readouts treat markers as degraded either way. One
+accepted asymmetry rides that handler (§1.2): the rung-5 primary marker OVERWRITES any existing
+`breaker` stamp while an existing `breaker_shadow` stamp is PRESERVED, which mildly decorrelates
+primary/shadow coverage on rung-5 decks — accepted; readouts treat markers as degraded on both
+sides. Shadow evaluation is **interleaved per card after the primary stamp**,
 never a second loop — budget exhaustion degrades primary and shadow *together*, keeping their
 coverage correlated, which R-3's proxy-population argument needs (uncorrelated shadow
 missingness would bias the viewer-seat calibration cut). **Never serialized**
@@ -957,12 +962,13 @@ stud-tax pin:
 ```python
 def _net_player_bodies(view: "_CardView", players: dict) -> int:
     """Net PLAYER bodies the partner absorbs (recv − give), picks excluded
-    (ts.is_pick_asset, trade_service.py:1764 — Sleeper picks occupy no
+    (ts.is_pick_asset, trade_service.py:1764 — takes the player OBJECT, not
+    the pid, hence the players.get lookup — Sleeper picks occupy no
     roster slot). The ONE computation behind both value_giving's waiver-slot
     adjustment and roster_crunch's `extra` (§3.5): shared so the two can
     never diverge."""
-    recv = sum(1 for p in view.recv_ids if not ts.is_pick_asset(p))
-    give = sum(1 for p in view.give_ids if not ts.is_pick_asset(p))
+    recv = sum(1 for p in view.recv_ids if not ts.is_pick_asset(players.get(p)))
+    give = sum(1 for p in view.give_ids if not ts.is_pick_asset(players.get(p)))
     return recv - give
 
 rvals = [val(p) for p in view.recv_ids]; gvals = [val(p) for p in view.give_ids]
@@ -1184,7 +1190,11 @@ test per cell (§7.1).
 | `roster_crunch` | picks incoming occupy no Sleeper roster slot ⇒ only player assets count toward `extra` | same | `not_applicable` | slot math counts the asset (a K occupies a spot); pile-up positions limited to `_POS_TIER_CUTS` keys; a K/DEF-carrying roster inside the envelope contributes no pile-up rows |
 
 Also normative: **empty give or receive side** (defensive) ⇒ classes score 0.0 or
-`not_applicable` per their column, no exception. **Self-trade guard**: a card whose
+`not_applicable` per their column, no exception. **Pick shape at this seam:** card-side picks
+are the owned-pick pseudo-player shape (`position == "PICK"`, injected by
+`server._owned_pick_assets`) — the shape that hits `ts._now_lean`'s PICK branch
+(`trade_service.py:2652`); universal-pool generic picks (real position, `team == "PICK"`)
+never reach the trade-job seam. **Self-trade guard**: a card whose
 `target_user_id == viewer_user_id` (data corruption upstream — the phantom-13th-team bug
 class, `server.py:16970-16975` comment) stamps `degraded: "self_partner"` and is skipped; not
 constructible today, guarded anyway (§5.5 E-7).
@@ -1318,8 +1328,8 @@ Every row is a contract; §7 maps each to a test.
 | # | Case | Contract |
 |---|---|---|
 | E-1 | Deck of 0 cards (F3 can empty one; `_log_deck_signal_impressions` early-returns `:4060-4061`) | `stamp_breaker`/`compose_narration` no-op; report `cards_seen=0`; no republish; no crash |
-| E-8 | Hot flag reload mid-job (`POST /api/feature-flags/reload` between seam and impression block) | Stamp site reads both breaker flags ONCE, into locals at the top of the seam block (§1.2). Impression copy is attribute-gated with the M-2 synthetic marker (§1.4). Flip on→off mid-job: stamps land in `features_json` (correct — they existed at serve); serializer re-reads nothing (narration already composed). Flip off→on: no stamp ⇒ synthetic marker rows, no crash. **Honesty note:** feature FLAGS read at call time INSIDE engine helpers (e.g. `trade_crown_asset` in `_package_value_market`, `trade_service.py:1357/:1409`) are NOT covered by the §3.0 knob snapshot — an accepted intra-deck determinism hole shared with the whole engine, not breaker-specific |
-| E-9 | Hot KNOB change mid-job (`PUT /api/admin/config`) | §3.0 snapshot: one job, one knob-state (knobs only — engine-internal flag reads are the E-8 residual); `model_config_changes` censors the readout window (M1) |
+| E-8 | Hot flag reload mid-job (`POST /api/feature-flags/reload` between seam and impression block) | Stamp site reads both breaker flags ONCE, into locals at the top of the seam block (§1.2). Impression copy is attribute-gated with the M-2 synthetic marker (§1.4). Flip on→off mid-job: stamps land in `features_json` (correct — they existed at serve); serializer re-reads nothing (narration already composed). Flip off→on: no stamp ⇒ synthetic marker rows, no crash. **Honesty note:** flag AND knob reads at call time INSIDE engine helpers are NOT covered by the §3.0 knob snapshot — the snapshot governs only the breaker's own `cfg` reads. Examples: `trade_crown_asset` flag in `_package_value_market` (`trade_service.py:1357/:1409`); `_package_value_market` reads `_c("package_adj_gamma_market")`/`_c("package_discount_cap")` live (`:1402/:1406`); `elo_to_value` reads the `elo_value_*` keys live (`:1280-1281`). §3.0's "one job, one knob-state" is therefore exact-with-stated-residual — an accepted intra-deck determinism hole shared with the whole engine, not breaker-specific; mitigated by the M1 rail (knob changes are logged in `model_config_changes` and censor readout windows) |
+| E-9 | Hot KNOB change mid-job (`PUT /api/admin/config`) | §3.0 snapshot: one job, one knob-state (the breaker's own `cfg` reads only — flag AND knob reads inside engine helpers are the E-8 residual); `model_config_changes` censors the readout window (M1) |
 | E-10 | `_cfg_override` overlay / bake-off arm profile | Verified inactive at the post-F9 seam (contextmanager exits with the arm's `with` block, `trade_service.py:995`); §3.0 snapshot makes it moot; binding-sabotage test pins module-import discipline across calls |
 | E-11 | Stud-tax thread-local unpinned at seam | Explicit `ts.stud_tax_override("market")` around all breaker valuations, `value_mode` stamped (§3.0, M-5) |
 | E-12 | Two concurrent jobs, same league, different viewers | No shared mutable state: `PartnerContext` cache is per-call (local dict); knob reads are snapshot-per-call; report is per-call. Nothing to lock |
@@ -1406,7 +1416,7 @@ mode fails loudly instead of testing the wrong bands. Fixture idiom otherwise pe
 | `test_roster_crunch_predicate` | 1-for-2 from their seat ⇒ extra=1, sev 0.50 at defaults; pile-up bonus caps at +0.30; extra ≤ 0 ⇒ 0.0; picks occupy no slot |
 | `test_degenerate_inputs_per_class` | one parametrized case per §3.10 cell: all-picks × each class, empty roster, empty sides, K/DEF assets — every cell returns its contracted scored/`not_applicable`/`format_gap` result, never raises |
 | `test_board_auth_heuristic` | divergent-row counts on both sides of `breaker_board_min_divergent` ⇒ `board`/`board_suspect`; no board ⇒ `consensus` |
-| `test_lean_quantity_parity` | breaker lean == `trade_narrative._give_side_now_lean` for shared fixtures **including pick-carrying and all-pick packages** (picks in the mean at −0.25 — F1; coherence precondition — M-8 flagged) |
+| `test_lean_quantity_parity` | breaker lean == `trade_narrative._give_side_now_lean` for shared fixtures **including pick-carrying and all-pick packages** (picks in the mean at −0.25 — F1; coherence precondition — M-8 flagged). Fixture pin: pick fixtures use `position == "PICK"` — the owned-pick pseudo-player shape, the only pick shape at the trade-job seam (§3.10) |
 | `test_opponent_frame_breaker_coherence` (characterization) | over a fixture grid (outlook × lean ∈ {−0.2, −0.05, 0, +0.05, +0.2}): never both `_opponent_frame` non-None and breaker `fit_outlook` fired for the same (card, outlook value); pins today's `:96-99` thresholds; asserts both writers consumed the same outlook value or fails (HLD §2.4 precondition) |
 | `test_mirrored_card_cross_seat_coherence` (HLD §2.7) | mirrored fixture: high breaker `fit_new_weakness` from seat B ⟺ B's own viewer-seat `need_gate_ok`/feasibility view flags the mirror |
 | `test_breaker_binding_sabotage` (sabotage) | monkeypatch a `ts` knob (e.g. `waiver_slot_cost`) ⇒ the NEXT `stamp_breaker` call's verdict moves (T1 discipline + §3.0 per-call snapshot boundary); module-attribute monkeypatch of `ts.package_value_v2` to a sentinel ⇒ verdicts move — value-binding would no-op and fail |
