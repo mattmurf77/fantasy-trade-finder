@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-22f — #384 E2E review: do NOT flip `calc.merged_layout` yet (review-only, nothing shipped)
+
+Five independent Fable code-walk reviews + lead verification of every P0/P1 on
+`feat/calc-finder-merge` @ `7399e18`. Gates re-run and green (tsc · lint · 76/76 guards ·
+pytest 4117). **5 P0 · 8 P1 · 7 P2 · 4 P3** in
+[review-2026-08-22-e2e.md](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md).
+The journey does not work: the ✕-overlay strands every card (layer-1 closes the sheet, the host
+advances only from layer 2); four `action` beats have no `advanceGuideIfActive` call site; the
+deck half of the tour is unreachable (navigate PUSHES a second TradesHome — routers 7.5.3, no
+`getId`/`pop` — and nothing regenerates; deck targets never registered); the tour's spotlights
+and caps hang off `onboarding.guide_v2` (false) and the outlook row off `trade.outlook_direction`
+(false), neither named as a prerequisite; the ✓ cell is a permanently disabled control
+(`onLikeTrade` never passed). Also: receive-side pins are any-one not all (`trade_optimizer.py:522`),
+the overlay is app-wide (`TradeCard.tsx:205`), no first-visit gate, league switch leaves a stale
+canvas, format chips dropped, 12/61 sabotages stayed green, no scope.md, tour events unregistered.
+Four bright-line operator decisions listed in the review. Suggested W5 (no API) / W6 (after rulings).
 
 ## 2026-08-22e — The merged calculator: five waves, BUILT DARK (#384, `feat/calc-finder-merge`, not merged)
 

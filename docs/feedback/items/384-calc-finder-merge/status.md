@@ -1,6 +1,6 @@
 # Status — #384 Manual calculator becomes the merged trade surface
 
-**Status:** **BUILT DARK** — all five waves on `feat/calc-finder-merge`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist UNRUN.
+**Status:** **BUILT DARK — E2E REVIEW FAILED (2026-08-22)** — all five waves on `feat/calc-finder-merge`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist UNRUN. The [E2E review](review-2026-08-22-e2e.md) found 5 P0 / 8 P1: the tour cannot advance past its first beat, never reaches the deck, the ✕-overlay strands every card, and the ✓ cell is unwired. **Do not flip or run the checklist until W5 lands.**
 **Date:** 2026-08-22
 **Covered feedback IDs:** #384 canonical. Folds in **#310** (don't lock the manual calc behind trades; simplify nav), **#379** (filters back in-page, minimized default), **#380** (clicking a partner minimizes that section and raises the calculator). Touches **#333** (league/team as side-by-side dropdowns under the fold).
 **Reported:** `mattmurf77`, screen `TradesHome`, v1.15.0, filed 2026-08-22T03:04Z
