@@ -74,7 +74,7 @@ import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
-import type { CalcPlayer } from '../data/tradeCalcMock';
+import type { CalcPlayer } from '../data/calcTypes';
 import {
   generateTrades,
   getTradeStatus,

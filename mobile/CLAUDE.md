@@ -30,7 +30,7 @@ Also mounted here: TanStack Query `focusManager` ← AppState, `onlineManager` �
 |---|---|---|
 | `src/api/` | HTTP clients. No React, no state | [src/api/CLAUDE.md](src/api/CLAUDE.md) |
 | `src/components/` | Reusable UI; `chalkline/` primitives, `analyst/` mascot, `draft/` draft rows | [src/components/CLAUDE.md](src/components/CLAUDE.md) |
-| `src/data/` | `tradeCalcMock.ts` — demo-mode calculator data only | — |
+| `src/data/` | `calcTypes.ts` — shared calculator asset types | — |
 | `src/hooks/` | Cross-cutting React hooks | [src/hooks/CLAUDE.md](src/hooks/CLAUDE.md) |
 | `src/navigation/` | Stacks, tabs, re-tap registry, rank chooser model | [src/navigation/CLAUDE.md](src/navigation/CLAUDE.md) |
 | `src/observability/` | `sentry.ts` — init wrapper, no-ops without a DSN | — |

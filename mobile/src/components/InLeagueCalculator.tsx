@@ -34,7 +34,7 @@ import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
-import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
+import type { CalcPlayer, CalcPos } from '../data/calcTypes';
 import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '../shared/types';
 
 // In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).

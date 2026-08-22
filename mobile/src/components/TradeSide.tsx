@@ -4,7 +4,7 @@ import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import { Button, Card, Icon, TickLabel } from './chalkline';
-import { CalcPlayer } from '../data/tradeCalcMock';
+import { CalcPlayer } from '../data/calcTypes';
 import { ink, type, space, radii } from '../theme/chalkline';
 import type { Tier } from '../shared/types';
 

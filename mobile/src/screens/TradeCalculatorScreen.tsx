@@ -12,25 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 
+import type { CalcPlayer, CalcPos } from '../data/calcTypes';
 import {
-  CALC_LEAGUE_NAME,
-  CALC_MY_TEAM,
-  CALC_PARTNERS,
-  CALC_PLAYER_BY_ID,
-  CalcPlayer,
-  CalcPos,
-  boardFor,
-} from '../data/tradeCalcMock';
-import {
-  CALC_VERDICT_LABEL,
   CalcSuggestion,
   evalFromConsensus,
-  evaluateTrade as evaluateTradeLocal,
-  formatDelta,
   rankAddOnCandidates,
   rankPackageCandidates,
-  suggestAddOns,
-  suggestPackages,
 } from '../utils/tradeCalcMath';
 import {
   evaluateTrade as evaluateTradeApi,
@@ -39,7 +26,6 @@ import {
   type TradeProbe,
 } from '../api/calc';
 import TradeSide from '../components/TradeSide';
-import VerdictPanel from '../components/VerdictPanel';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
 import ShareTradeImage, { type ShareAsset } from '../components/ShareTradeImage';
 import SuggestionCard from '../components/SuggestionCard';
@@ -49,41 +35,40 @@ import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { resolveShareUrl } from '../utils/shareLinks';
-import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
+import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
-import { tierForElo } from '../utils/tierBands';
-import type { Position, ScoringFormat, Tier } from '../shared/types';
+import type { ScoringFormat, Tier } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
 // snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
 const UNDO_HOLD_MS = 5000;
 
 // Manual Trade Calculator. Two modes:
-//   'live' — REAL consensus values from the backend's universal pool.
-//            Verdicts are server-authoritative (POST /api/trade/evaluate
-//            reuses the finder's _fairness_v3), per the plan doc
-//            docs/plans/manual-trade-calculator-plan.md. No login needed.
-//   'demo' — the seeded mock league (data/tradeCalcMock.ts): dual-board
-//            fairness, partner tendencies, arbitrage badges. Demonstrates
-//            the future league-aware version.
-
-const MY_BOARD = boardFor(CALC_MY_TEAM);
-const PARTNER_BOARDS = Object.fromEntries(CALC_PARTNERS.map((o) => [o.id, boardFor(o)]));
+//   'live'   — REAL consensus values from the backend's universal pool.
+//              Verdicts are server-authoritative (POST /api/trade/evaluate
+//              reuses the finder's _fairness_v3), per the plan doc
+//              docs/plans/manual-trade-calculator-plan.md. No login needed.
+//              This is the league-free entry point #310 requires.
+//   'league' — InLeagueCalculator, mounted below. Needs a real league.
+//
+// A third mode, 'demo' (a seeded mock dual-board league), was REMOVED on
+// 2026-08-22 — feedback #384, operator: "let's also remove the demo calc,
+// it's pointless". Its fixture module `data/tradeCalcMock.ts` went with it;
+// the two types it also exported live on in `data/calcTypes.ts`.
+// NOTE: this is unrelated to the demo SESSION (/api/session/demo,
+// useSession.isDemo, onboarding.demo_bridge), which is untouched.
 
 // Persisted draft trade — survives leaving the Trades stack / app restart.
 const DRAFT_KEY = 'ftf:tradecalc:v1';
-
-// A board disagreement big enough to flag as arbitrage in the demo picker.
-const ARBITRAGE_EDGE = 1.05;
 
 // Live-mode suggestion search runs over the top-N pool players (combos over
 // the full ~500-player universe would be wasteful for no ranking benefit;
 // 40 keeps the 1–3-piece combo scan around ~10k evaluations per edit).
 const LIVE_SUGGEST_POOL = 40;
 
-type CalcMode = 'live' | 'demo' | 'league';
+type CalcMode = 'live' | 'league';
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: '1qb_ppr', label: '1QB PPR' },
@@ -116,11 +101,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const [format, setFormat] = useState<ScoringFormat>(
     sessionFormat === 'sf_tep' || sessionFormat === '1qb_ppr' ? sessionFormat : '1qb_ppr',
   );
-  // Demo-mode trade state.
-  const [partnerId, setPartnerId] = useState(CALC_PARTNERS[0].id);
-  const [sendIds, setSendIds] = useState<string[]>([]);
-  const [receiveIds, setReceiveIds] = useState<string[]>([]);
-  // Live-mode trade state (separate so switching modes keeps both drafts).
+  // Live-mode trade state.
   const [liveSendIds, setLiveSendIds] = useState<string[]>([]);
   const [liveReceiveIds, setLiveReceiveIds] = useState<string[]>([]);
   const [picker, setPicker] = useState<'send' | 'receive' | null>(null);
@@ -154,11 +135,10 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const modeTabs: { key: CalcMode; label: string }[] = [
     ...(hasLeague ? [{ key: 'league' as CalcMode, label: 'In league' }] : []),
     { key: 'live', label: 'Real values' },
-    { key: 'demo', label: 'Demo league' },
   ];
 
-  // Restore the persisted draft once; demo ids validate against the mock
-  // rosters here, live ids validate lazily once the pool loads (below).
+  // Restore the persisted draft once; live ids validate lazily as the pool
+  // loads (below).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -169,23 +149,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           // #190 — a prefilled launch stays in In-league mode; the stored
           // draft's mode must not yank the user away from the handed-off
           // package (list drafts still restore for later manual visits).
-          if (!prefill && (draft?.mode === 'demo' || draft?.mode === 'live'))
-            setMode(draft.mode);
+          // A draft saved before 2026-08-22 may carry mode 'demo'; that
+          // mode no longer exists, so it falls through to the 'live'
+          // default rather than restoring into nothing.
+          if (!prefill && draft?.mode === 'live') setMode(draft.mode);
           if (draft?.format === '1qb_ppr' || draft?.format === 'sf_tep') setFormat(draft.format);
-          const savedPartner = CALC_PARTNERS.find((o) => o.id === draft?.partnerId);
-          if (savedPartner) {
-            setPartnerId(savedPartner.id);
-            setSendIds(
-              (Array.isArray(draft.sendIds) ? draft.sendIds : []).filter((id: string) =>
-                CALC_MY_TEAM.rosterIds.includes(id),
-              ),
-            );
-            setReceiveIds(
-              (Array.isArray(draft.receiveIds) ? draft.receiveIds : []).filter((id: string) =>
-                savedPartner.rosterIds.includes(id),
-              ),
-            );
-          }
           if (Array.isArray(draft.liveSendIds)) setLiveSendIds(draft.liveSendIds.map(String));
           if (Array.isArray(draft.liveReceiveIds))
             setLiveReceiveIds(draft.liveReceiveIds.map(String));
@@ -204,9 +172,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     if (!hydrated) return;
     AsyncStorage.setItem(
       DRAFT_KEY,
-      JSON.stringify({ mode, format, partnerId, sendIds, receiveIds, liveSendIds, liveReceiveIds }),
+      JSON.stringify({ mode, format, liveSendIds, liveReceiveIds }),
     ).catch(() => {});
-  }, [hydrated, mode, format, partnerId, sendIds, receiveIds, liveSendIds, liveReceiveIds]);
+  }, [hydrated, mode, format, liveSendIds, liveReceiveIds]);
 
   // ── Live mode: real consensus values ─────────────────────────────────
   const valuesQuery = useQuery({
@@ -384,86 +352,39 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     },
   });
 
-  // ── Demo mode: seeded dual boards ────────────────────────────────────
-  const partner = CALC_PARTNERS.find((o) => o.id === partnerId)!;
-  const theirBoard = PARTNER_BOARDS[partnerId];
+  // Only 'live' reaches the body below — 'league' returns InLeagueCalculator
+  // in the render. The `active*` aliases survive the demo removal because the
+  // JSX below reads them in ~30 places; they are now plain live bindings.
+  const activeSendIds = liveSendIds;
+  const activeReceiveIds = liveReceiveIds;
+  const setActiveSendIds = setLiveSendIds;
+  const setActiveReceiveIds = setLiveReceiveIds;
+  const activeBoard = liveBoard;
+  const activeOtherBoard = liveBoard;
+  const activePlayerById = livePlayerById;
 
-  const isLive = mode === 'live';
-  const activeSendIds = isLive ? liveSendIds : sendIds;
-  const activeReceiveIds = isLive ? liveReceiveIds : receiveIds;
-  const setActiveSendIds = isLive ? setLiveSendIds : setSendIds;
-  const setActiveReceiveIds = isLive ? setLiveReceiveIds : setReceiveIds;
-  const activeBoard = isLive ? liveBoard : MY_BOARD;
-  const activeOtherBoard = isLive ? liveBoard : theirBoard;
-  const activePlayerById = isLive ? livePlayerById : CALC_PLAYER_BY_ID;
-
-  // #263 — pick-value tier for a player row, keyed off the SAME board a
-  // given TradeSide/picker column already reads its number from. Live mode
-  // reads the server-computed tier (liveTierById); demo mode's mock boards
-  // are already on the raw-Elo scale (data/tradeCalcMock.ts `base`), so
-  // they run straight through the existing tierForElo/TIER_LABEL util — the
-  // one client-side mapping every other rank screen already uses. Picks
-  // (pos 'PICK') have no tier of their own; callers fall back to the
-  // numeric value for them.
-  const tierFor = (board: Record<string, number>, p: CalcPlayer): Tier | null => {
+  // #263 — pick-value tier for a player row, read from the server-computed
+  // `liveTierById`. Picks (pos 'PICK') have no tier of their own; callers
+  // fall back to the numeric value for them. The board argument became
+  // unused when the demo boards were removed (they were the only caller
+  // that needed a client-side tierForElo mapping) — kept so the ~6 call
+  // sites in the JSX below stay untouched by this change.
+  const tierFor = (_board: Record<string, number>, p: CalcPlayer): Tier | null => {
     if (p.pos === 'PICK') return null;
-    if (isLive) return liveTierById[p.id] ?? null;
-    return tierForElo(board[p.id] ?? p.base, p.pos as Position, '1qb_ppr');
+    return liveTierById[p.id] ?? null;
   };
 
-  const demoEvaluation = useMemo(
-    () => evaluateTradeLocal(sendIds, receiveIds, MY_BOARD, theirBoard),
-    [sendIds, receiveIds, theirBoard],
-  );
-
-  // Demo-mode fair-package + balance-add-on suggestions: the demo verdict
-  // panel IS the local dual-board math, so local suggestions agree with it
-  // by construction. Live mode instead renders the server-confirmed
-  // suggestions from suggestQuery (#78) — never these local rankings.
-  const demoSuggested = useMemo(
-    () =>
-      isLive
-        ? null
-        : suggestPackages(
-            sendIds,
-            receiveIds,
-            CALC_MY_TEAM.rosterIds,
-            partner.rosterIds,
-            MY_BOARD,
-            theirBoard,
-            CALC_PLAYER_BY_ID,
-          ),
-    [isLive, sendIds, receiveIds, partner, theirBoard],
-  );
-  const demoAddOns = useMemo(
-    () =>
-      isLive
-        ? null
-        : suggestAddOns(
-            sendIds,
-            receiveIds,
-            CALC_MY_TEAM.rosterIds,
-            partner.rosterIds,
-            MY_BOARD,
-            theirBoard,
-            CALC_PLAYER_BY_ID,
-          ),
-    [isLive, sendIds, receiveIds, partner, theirBoard],
-  );
-
-  // What the sections below render, in either mode: {forSide, suggestions}.
-  const addOns = isLive
-    ? liveAddOnPlan && (suggestQuery.data?.addOns.length ?? 0) > 0
+  // What the sections below render: {forSide, suggestions}. Server-confirmed
+  // (#78) — the local dual-board rankings died with the demo boards.
+  const addOns =
+    liveAddOnPlan && (suggestQuery.data?.addOns.length ?? 0) > 0
       ? { forSide: liveAddOnPlan.forSide, suggestions: suggestQuery.data!.addOns }
-      : null
-    : demoAddOns;
-  const suggested = isLive
-    ? livePkgForSide
-      ? { forSide: livePkgForSide, suggestions: suggestQuery.data?.packages ?? [] }
-      : null
-    : demoSuggested;
-  // Live empty-state only once confirmation has settled (no flicker mid-probe).
-  const suggestSettled = !isLive || (!!valuesQuery.data && !suggestQuery.isFetching);
+      : null;
+  const suggested = livePkgForSide
+    ? { forSide: livePkgForSide, suggestions: suggestQuery.data?.packages ?? [] }
+    : null;
+  // Empty-state only once confirmation has settled (no flicker mid-probe).
+  const suggestSettled = !!valuesQuery.data && !suggestQuery.isFetching;
 
   const bothSides = activeSendIds.length > 0 && activeReceiveIds.length > 0;
   const anySide = activeSendIds.length > 0 || activeReceiveIds.length > 0;
@@ -472,12 +393,6 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     if (m === mode) return;
     haptics.selection();
     setMode(m);
-  };
-
-  const switchPartner = (id: string) => {
-    haptics.selection();
-    setPartnerId(id);
-    setReceiveIds([]); // their roster changed; what you send can stay
   };
 
   const switchFormat = (f: ScoringFormat) => {
@@ -502,28 +417,19 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     haptics.selection();
     const names = (ids: string[]) =>
       ids.map((id) => activePlayerById[id]?.name ?? id).join(', ');
-    const lines = isLive
-      ? [
-          `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
-          `Side A: ${names(liveSendIds)}`,
-          `Side B: ${names(liveReceiveIds)}`,
-          evalQuery.data
-            ? `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}${
-                evalQuery.data.point_ratio !== null
-                  ? ` (ratio ${Math.round(evalQuery.data.point_ratio * 100)}%)`
-                  : ''
-              }`
-            : '',
-          evalQuery.data?.verdict ? `Verdict: ${evalQuery.data.verdict}` : '',
-        ]
-      : [
-          `Trade idea vs ${partner.teamName} (DTF Trade Calculator)`,
-          `I send: ${names(sendIds)}`,
-          `I get: ${names(receiveIds)}`,
-          `My board: ${demoEvaluation.myGive.toLocaleString()} out, ${demoEvaluation.myGet.toLocaleString()} back (${formatDelta(demoEvaluation.myDeltaPct)})`,
-          `Their board: ${demoEvaluation.theirGive.toLocaleString()} out, ${demoEvaluation.theirGet.toLocaleString()} back (${formatDelta(demoEvaluation.theirDeltaPct)})`,
-          `Verdict: ${CALC_VERDICT_LABEL[demoEvaluation.verdict]}`,
-        ];
+    const lines = [
+      `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+      `Side A: ${names(liveSendIds)}`,
+      `Side B: ${names(liveReceiveIds)}`,
+      evalQuery.data
+        ? `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}${
+            evalQuery.data.point_ratio !== null
+              ? ` (ratio ${Math.round(evalQuery.data.point_ratio * 100)}%)`
+              : ''
+          }`
+        : '',
+      evalQuery.data?.verdict ? `Verdict: ${evalQuery.data.verdict}` : '',
+    ];
     // S7 PRD-01 (growth.share_landing): shares carry a landing URL with
     // ?ref= attribution.
     //
@@ -538,11 +444,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     let landing = false;
     if (shareLandingOn) {
       const resolved = await resolveShareUrl({
-        // Demo mode's assets are mock ids (data/tradeCalcMock) and the
-        // server refuses demo sessions anyway — pass no ids so the ladder
-        // short-circuits and the demo message stays byte-identical.
-        giveIds: isLive ? liveSendIds : [],
-        receiveIds: isLive ? liveReceiveIds : [],
+        // Real consensus ids. `isDemo` below is the demo SESSION
+        // (/api/session/demo), which the mint server-refuses — unrelated to
+        // the demo CALCULATOR mode removed in #384.
+        giveIds: liveSendIds,
+        receiveIds: liveReceiveIds,
         username: user?.username,
         enabled: shareLandingOn,
         isDemo: useSession.getState().isDemo,
@@ -568,7 +474,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       if (shareLandingOn && res.action !== Share.dismissedAction) {
         track(
           'calc_trade_shared',
-          { mode, landing, ...(isLive ? { surface: 'calc_live' } : {}) },
+          { mode, landing, surface: 'calc_live' },
           'Calculator',
         );
       }
@@ -615,7 +521,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         onDismiss={() => setToast(null)}
       />
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Mode switch: real consensus values vs the seeded demo league. */}
+        {/* Mode switch: In-league vs league-free real consensus values. */}
         <View style={styles.modeRow}>
           {modeTabs.map((m) => {
             const active = mode === m.key;
@@ -636,7 +542,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
         {/* #213 — one quiet path from the hand-built calculator to the
             finder. A single text-link row under the mode tabs covers every
-            calculator surface (In-league, live, demo) with one affordance —
+            calculator surface (In-league, live) with one affordance —
             InLeagueCalculator is only ever mounted here, so this is the one
             "Find a trade" entry for the whole create-a-trade feature.
             Chalk-dim text-link tier (the "More ways to rank" precedent),
@@ -675,8 +581,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           />
         ) : (
         <>
-        {isLive ? (
-          <>
+        <>
             <TickLabel>Scoring format</TickLabel>
             <View style={styles.partnerRow}>
               {FORMATS.map((f) => {
@@ -721,38 +626,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 </View>
               </Card>
             ) : null}
-          </>
-        ) : (
-          <>
-            <Text style={styles.league}>{CALC_LEAGUE_NAME}</Text>
-            <TickLabel>Trade partner</TickLabel>
-            <View style={styles.partnerRow}>
-              {CALC_PARTNERS.map((o) => {
-                const active = o.id === partnerId;
-                return (
-                  <Pressable
-                    key={o.id}
-                    style={[styles.partnerChip, active && styles.partnerChipActive]}
-                    onPress={() => switchPartner(o.id)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                  >
-                    <Text style={[styles.partnerText, active && styles.partnerTextActive]}>
-                      {o.teamName}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.tendency}>
-              {partner.ownerName}'s board: {partner.tendency}
-            </Text>
-          </>
-        )}
+        </>
 
         <TradeSide
-          title={isLive ? 'Side A sends' : 'You send'}
-          teamName={isLive ? 'any player' : CALC_MY_TEAM.teamName}
+          title="Side A sends"
+          teamName="any player"
           players={activeSendIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           tierOf={(p) => tierFor(activeBoard, p)}
@@ -772,8 +650,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         </View>
 
         <TradeSide
-          title={isLive ? 'Side B sends' : 'You receive'}
-          teamName={isLive ? 'any player' : partner.teamName}
+          title="Side B sends"
+          teamName="any player"
           players={activeReceiveIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           tierOf={(p) => tierFor(activeBoard, p)}
@@ -786,7 +664,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           }}
         />
 
-        {isLive ? (
+        {
           anySide && evalQuery.data ? (
             <View testID="calc.verdict">
               <ConsensusVerdictCard
@@ -812,51 +690,14 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 <Text style={type.bodySm}>Evaluating…</Text>
               </View>
             </Card>
-          ) : null
-        ) : bothSides ? (
-          <View testID="calc.verdict"><VerdictPanel evaluation={demoEvaluation} /></View>
-        ) : anySide ? (
-          <Card>
-            <Text style={styles.oneSidedText}>
-              {sendIds.length > 0 ? (
-                <>
-                  That package is worth{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.myGive.toLocaleString()}
-                  </Text>{' '}
-                  on your board and{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.theirGet.toLocaleString()}
-                  </Text>{' '}
-                  on {partner.ownerName}'s.
-                </>
-              ) : (
-                <>
-                  That package is worth{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.myGet.toLocaleString()}
-                  </Text>{' '}
-                  on your board and{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.theirGive.toLocaleString()}
-                  </Text>{' '}
-                  on {partner.ownerName}'s.
-                </>
-              )}
-            </Text>
-          </Card>
-        ) : null}
+          ) : null}
 
         {addOns && addOns.suggestions.length > 0 ? (
           <View style={styles.suggestions}>
             <TickLabel color={semantic.warn}>
-              {isLive
-                ? addOns.forSide === 'send'
-                  ? 'To balance — add to Side A'
-                  : 'To balance — add to Side B'
-                : addOns.forSide === 'send'
-                ? 'To balance — add from your side'
-                : `To balance — ask ${partner.teamName} to add`}
+              {addOns.forSide === 'send'
+                ? 'To balance — add to Side A'
+                : 'To balance — add to Side B'}
             </TickLabel>
             {addOns.suggestions.map((s) => (
               <SuggestionCard
@@ -871,13 +712,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         {suggested && suggested.suggestions.length > 0 ? (
           <View style={styles.suggestions}>
             <TickLabel>
-              {isLive
-                ? suggested.forSide === 'receive'
-                  ? 'Fair returns (consensus)'
-                  : 'Fair offers (consensus)'
-                : suggested.forSide === 'receive'
-                ? `Fair asks from ${partner.teamName}`
-                : `Fair offers from your roster`}
+              {suggested.forSide === 'receive'
+                ? 'Fair returns (consensus)'
+                : 'Fair offers (consensus)'}
             </TickLabel>
             {suggested.suggestions.map((s) => (
               <SuggestionCard
@@ -896,12 +733,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
         {anySide ? (
           <View style={styles.actions}>
-            {bothSides && (!isLive || evalQuery.data) ? (
+            {bothSides && evalQuery.data ? (
               <Button label="Share trade" variant="secondary" onPress={shareTrade} />
             ) : null}
             {/* Share-as-image (DynastyDealer teardown 2026-07-26): PNG of
                 the verdict card via the native sheet; text fallback. */}
-            {isLive && bothSides && evalQuery.data ? (
+            {bothSides && evalQuery.data ? (
               <ShareTradeImage
                 caption={`Trade idea · ${FORMATS.find((f) => f.key === format)?.label ?? ''}`}
                 sendTitle="Side A sends"
@@ -967,29 +804,15 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       <>
       <PlayerPickerModal
         visible={picker === 'send'}
-        title={isLive ? 'Add to Side A' : `Send from ${CALC_MY_TEAM.teamName}`}
-        players={
-          isLive ? livePlayers : CALC_MY_TEAM.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])
-        }
+        title="Add to Side A"
+        players={livePlayers}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
-        // B3 — live mode's pool is `valuesQuery`; the demo pool is a static
-        // mock import that is never in flight.
-        loading={isLive && valuesQuery.isLoading}
+        loading={valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeBoard, p)}
-        secondaryValue={isLive ? undefined : (p: CalcPlayer) => theirBoard[p.id]}
-        // #277 — the demo's dual-board secondary line reads as a tier label
-        // too (theirBoard is on the raw-Elo scale, so tierFor applies).
-        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(theirBoard, p)}
-        secondaryPrefix="them"
-        badgeFor={
-          isLive
-            ? undefined
-            : (p: CalcPlayer) =>
-                theirBoard[p.id] >= MY_BOARD[p.id] * ARBITRAGE_EDGE
-                  ? { label: 'Sell high', color: flare.base }
-                  : null
-        }
+        // The secondary "them" column and the Sell high / Target badges were
+        // the DEMO's dual-board comparison — one consensus board has no
+        // second opinion to show. Removed with the demo boards (#384).
         onPick={(p) => {
           haptics.selection();
           setActiveSendIds((ids) => [...ids, p.id]);
@@ -999,24 +822,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
       <PlayerPickerModal
         visible={picker === 'receive'}
-        title={isLive ? 'Add to Side B' : `Receive from ${partner.teamName}`}
-        players={isLive ? livePlayers : partner.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])}
+        title="Add to Side B"
+        players={livePlayers}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
-        loading={isLive && valuesQuery.isLoading}
+        loading={valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeOtherBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeOtherBoard, p)}
-        secondaryValue={isLive ? undefined : (p: CalcPlayer) => MY_BOARD[p.id]}
-        // #277 — same tier-label treatment for the "you" secondary line.
-        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(MY_BOARD, p)}
-        secondaryPrefix="you"
-        badgeFor={
-          isLive
-            ? undefined
-            : (p: CalcPlayer) =>
-                MY_BOARD[p.id] >= theirBoard[p.id] * ARBITRAGE_EDGE
-                  ? { label: 'Target', color: semantic.pos }
-                  : null
-        }
         onPick={(p) => {
           haptics.selection();
           setActiveReceiveIds((ids) => [...ids, p.id]);
@@ -1032,7 +843,6 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, gap: space.md, paddingBottom: space.xxl + space.lg },
-  league: { ...type.bodySm },
   modeRow: {
     flexDirection: 'row',
     borderRadius: radii.sm,
@@ -1064,7 +874,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
   },
   partnerChipActive: { borderColor: ice.base },
-  partnerChipPressed: { backgroundColor: ink.ink3 },
   partnerText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   partnerTextActive: { color: chalk.base },
   tendency: { ...type.bodySm },
@@ -1075,8 +884,6 @@ const styles = StyleSheet.create({
     gap: space.md,
   },
   rule: { flex: 1, height: 1, backgroundColor: ink.line },
-  oneSidedText: { ...type.body },
-  oneSidedValue: { ...type.data },
   suggestions: { gap: space.sm },
   noSuggestions: { ...type.bodySm },
   actions: { gap: space.sm, alignItems: 'center' },

@@ -7,7 +7,7 @@
 // Swap path: replaced by `/api/trade/evaluate` when the server-authoritative
 // version ships (docs/plans/manual-trade-calculator-plan.md).
 
-import { CalcPlayer } from '../data/tradeCalcMock';
+import { CalcPlayer } from '../data/calcTypes';
 
 /**
  * Consolidation premium: the best player counts full, extra pieces are
