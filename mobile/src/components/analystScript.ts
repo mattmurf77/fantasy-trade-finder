@@ -330,6 +330,178 @@ export const S = {
     retireAfter: { event: R.leagueFilterApplied, count: 1 },
     adoptionEvent: 'league_pos_candidates_viewed',
   }),
+
+  // ── #384 W4 — the merged calculator tour (beats n10–n24) ───────────────
+  //
+  // The report wrote fifteen prose beats. They could not ship as prose: this
+  // file is under a CI copy budget (auto 12 / action 16 / tap 20 / cta 16
+  // words, enforced by mobile/tests/check-guide-script.js), so the work was
+  // compression, not writing. Its step 11 alone — "the clear button has
+  // become the X, the X records your decision, the check does as before" —
+  // is three beats here (n14, n19), not one paragraph.
+  //
+  // Retirement: every beat below is part of ONE scripted walkthrough that
+  // the user either finishes or re-runs deliberately from "Show me around".
+  // There is no behavioural receipt that means "this person now understands
+  // the calculator", so inventing one would be dishonest — they decline to
+  // retire behaviourally, each with the reason stated inline, and the
+  // display cap is what bounds them. (This sentence deliberately avoids the
+  // literal field-and-value pair: the lint's justification check is
+  // line-based, so prose quoting it reads as an unjustified declaration.)
+  // n11 is the exception: setting an outlook IS the
+  // thing it asks for, so it retires on that receipt like N2 does.
+  //
+  // Ordering and the tour hold live in the runner (utils/calcTour.ts), not
+  // here — this file stays DATA.
+
+  n10: (): GuideStep => ({
+    id: 'n10', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.mode-tab.league', side: 'right',
+    line: 'Two ways to build a trade. Tap In league to use your real roster.',
+    degradeLine: 'Two ways to build a trade — In league uses your real roster.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: opens a walkthrough the user re-runs on purpose; the display cap is the bound, and no receipt means "understands the calculator".
+    adoptionEvent: 'calc_tour_started',
+  }),
+
+  n11: (): GuideStep => ({
+    id: 'n11', screen: 'TradeCalculator', pose: 'thinking', advance: 'cta',
+    line: 'Set your outlook first — it aims every suggestion at your plan.',
+    ctas: [{ label: 'Set outlook', kind: 'primary', action: 'accept' }],
+    maxDisplayCount: 2,
+    retireAfter: { event: R.outlookSaved, count: 1 },
+    adoptionEvent: 'outlook_saved',
+  }),
+
+  n12: (): GuideStep => ({
+    id: 'n12', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
+    target: 'calc.trade-columns',
+    line: 'This is your canvas. Both rosters side by side — build any trade by hand.',
+    degradeLine: 'Both rosters sit side by side here — build any trade by hand.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_asset_added',
+  }),
+
+  n13: (): GuideStep => ({
+    id: 'n13', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
+    target: 'calc.action.find-a-trade',
+    line: "Find a Trade searches for you. We'll come back to it in a moment.",
+    degradeLine: "Find a Trade searches for you — we'll come back to it.",
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_tour_started',
+  }),
+
+  n14: (): GuideStep => ({
+    id: 'n14', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
+    target: 'calc.action.clear',
+    line: 'Clear wipes the canvas.',
+    degradeLine: 'The clear control wipes the canvas.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_tour_started',
+  }),
+
+  n15: (): GuideStep => ({
+    id: 'n15', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
+    target: 'calc.action.confirm',
+    line: 'The check queues this trade for the other manager, if it fits their preferences.',
+    degradeLine: 'Confirming queues a trade for the other manager, if it fits their preferences.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_tour_started',
+  }),
+
+  n16: (): GuideStep => ({
+    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.league-give-add',
+    line: "Add someone you'd move. Tap Add player on your side.",
+    degradeLine: 'Add someone you would move from your own roster.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_asset_added',
+  }),
+
+  n17: (): GuideStep => ({
+    id: 'n17', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.action.include-players',
+    line: 'Include players keeps them in the search. Off, we look anywhere.',
+    degradeLine: 'Include players keeps your canvas in the search; off looks anywhere.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_tour_started',
+  }),
+
+  n18: (): GuideStep => ({
+    id: 'n18', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.action.find-a-trade',
+    line: 'Now tap Find a Trade.',
+    degradeLine: 'Tap Find a Trade when you are ready.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'find_trades_tapped',
+  }),
+
+  n19: (): GuideStep => ({
+    id: 'n19', screen: 'Trades', pose: 'point', advance: 'tap',
+    target: 'trades.pass-btn',
+    line: 'Check accepts. The cross records why you passed, so your next cards fit better.',
+    degradeLine: 'Accept with the check; the cross records why you passed.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_disposition',
+  }),
+
+  // Untargeted on purpose: the swap affordance is per-player-row, so there is
+  // no one node to point at. The line therefore carries no deixis and needs
+  // no degrade contract.
+  n20: (): GuideStep => ({
+    id: 'n20', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Swap arrows change any player without leaving the card.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_card_swap',
+  }),
+
+  n21: (): GuideStep => ({
+    id: 'n21', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    target: 'trades.package-toggle',
+    line: 'Package shows every piece in a multi-player deal.',
+    degradeLine: 'Multi-player deals expand to show every piece.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_disposition',
+  }),
+
+  n22: (): GuideStep => ({
+    id: 'n22', screen: 'Trades', pose: 'point', advance: 'tap',
+    target: 'trades.fairness-help',
+    line: 'Tap the meter to see how we judged this trade fair.',
+    degradeLine: 'The fairness meter explains how a trade was judged.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_disposition',
+  }),
+
+  // Untargeted: the send control is platform-resolved (Sleeper / MFL / ESPN),
+  // so a fixed target would point at the wrong node — or nothing — for two of
+  // the three. No deixis in the line, so nothing to degrade.
+  n23: (): GuideStep => ({
+    id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Sending goes straight to your league. Passwords never leave your phone.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'send_attempted',
+  }),
+
+  n24: (): GuideStep => ({
+    id: 'n24', screen: 'Trades', pose: 'celebrate', advance: 'tap',
+    line: 'Take it from here. Decide, and the next trade comes up automatically.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: closes the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_disposition',
+  }),
 } as const;
 
 /** Fixed leverage order for the S5.5 next-position ask (client-side proxy

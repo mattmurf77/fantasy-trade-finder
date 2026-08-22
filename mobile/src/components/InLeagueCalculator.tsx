@@ -36,6 +36,7 @@ import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/calcTypes';
@@ -153,6 +154,30 @@ export default function InLeagueCalculator({
   // built the canvas on purpose — an unconstrained search from a filled
   // canvas silently ignores the work they just did.
   const [includePlayers, setIncludePlayers] = useState(true);
+
+  // #384 W4 — spotlight targets for the calculator beats (n12–n18). Only
+  // registered in the merged layout: with the flag off none of these nodes
+  // exist, and a registered ref to an unmounted node measures as null, which
+  // would degrade every beat rather than simply not running the tour.
+  const columnsRef = useRef<View | null>(null);
+  const findBtnRef = useRef<View | null>(null);
+  const clearBtnRef = useRef<View | null>(null);
+  const confirmBtnRef = useRef<View | null>(null);
+  const includeBtnRef = useRef<View | null>(null);
+  const giveAddRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (!merged) return;
+    const pairs: [string, React.RefObject<View | null>][] = [
+      ['calc.trade-columns', columnsRef],
+      ['calc.action.find-a-trade', findBtnRef],
+      ['calc.action.clear', clearBtnRef],
+      ['calc.action.confirm', confirmBtnRef],
+      ['calc.action.include-players', includeBtnRef],
+      ['calc.league-give-add', giveAddRef],
+    ];
+    pairs.forEach(([id, ref]) => registerGuideTarget(id, ref));
+    return () => pairs.forEach(([id]) => unregisterGuideTarget(id));
+  }, [merged]);
   // #166/#167 — the format defaults to the LEAGUE's detected scoring
   // format (useSession.activeFormat, kept league-accurate by
   // useLeagueFormatDefault in RootNav), not a hard-coded 1QB PPR. A chip
@@ -845,6 +870,7 @@ export default function InLeagueCalculator({
             tierOf={(p) => tierById[p.id] ?? null}
             accent={semantic.neg}
             addTestID="calc.league-give-add"
+            addRef={giveAddRef}
             leagueId={leagueId}
             compact={merged}
             onAdd={() => setPicker('give')}
@@ -874,7 +900,7 @@ export default function InLeagueCalculator({
         );
         if (merged) {
           return (
-            <View style={styles.columns} testID="calc.trade-columns">
+            <View ref={columnsRef} style={styles.columns} testID="calc.trade-columns">
               <View style={styles.column}>{give}</View>
               <View style={styles.column}>{receive}</View>
             </View>
@@ -905,6 +931,7 @@ export default function InLeagueCalculator({
       {merged ? (
         <View style={styles.actionRow} testID="calc.action-row">
           <Pressable
+            ref={findBtnRef}
             testID="calc.action.find-a-trade"
             accessibilityRole="button"
             accessibilityLabel="Find a trade"
@@ -930,6 +957,7 @@ export default function InLeagueCalculator({
           {/* Ruling 2: ON ⇒ the finder must include what is on the canvas.
               A toggle, so the state is visible without opening anything. */}
           <Pressable
+            ref={includeBtnRef}
             testID="calc.action.include-players"
             accessibilityRole="switch"
             accessibilityState={{ checked: includePlayers }}
@@ -953,6 +981,7 @@ export default function InLeagueCalculator({
           </Pressable>
 
           <Pressable
+            ref={clearBtnRef}
             testID="calc.action.clear"
             accessibilityRole="button"
             accessibilityLabel="Clear the trade"
@@ -971,6 +1000,7 @@ export default function InLeagueCalculator({
           </Pressable>
 
           <Pressable
+            ref={confirmBtnRef}
             testID="calc.action.confirm"
             accessibilityRole="button"
             accessibilityLabel="Queue this trade for the other manager"

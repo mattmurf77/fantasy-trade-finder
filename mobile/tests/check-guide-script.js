@@ -126,6 +126,23 @@ const PROBES = {
   n8: { id: 'n8', args: [[]] },
   n9: { id: 'n9', args: [[]] },
   n5: { id: 'n5', args: [[]] },
+  // #384 W4 — the merged calculator tour. Every beat is argument-free
+  // (no slots), so one probe each is the whole surface.
+  n10: { id: 'n10', args: [[]] },
+  n11: { id: 'n11', args: [[]] },
+  n12: { id: 'n12', args: [[]] },
+  n13: { id: 'n13', args: [[]] },
+  n14: { id: 'n14', args: [[]] },
+  n15: { id: 'n15', args: [[]] },
+  n16: { id: 'n16', args: [[]] },
+  n17: { id: 'n17', args: [[]] },
+  n18: { id: 'n18', args: [[]] },
+  n19: { id: 'n19', args: [[]] },
+  n20: { id: 'n20', args: [[]] },
+  n21: { id: 'n21', args: [[]] },
+  n22: { id: 'n22', args: [[]] },
+  n23: { id: 'n23', args: [[]] },
+  n24: { id: 'n24', args: [[]] },
 };
 
 // ═══ 1 — the builder set: cuts stay cut ════════════════════════════════════

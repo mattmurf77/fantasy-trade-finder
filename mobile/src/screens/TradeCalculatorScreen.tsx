@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -38,6 +38,9 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { startCalcTour, stopCalcTour } from '../utils/calcTour';
+import { guidedAvatarActive } from '../state/useGuide';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
 import type { Player, ScoringFormat, Tier } from '../shared/types';
@@ -109,6 +112,29 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     | { opponentUserId?: string; giveIds?: string[]; receiveIds?: string[] }
     | undefined;
   const [mode, setMode] = useState<CalcMode>(prefill ? 'league' : 'live');
+  const calcMergedOn = useFlag('calc.merged_layout');
+
+  // #384 W4 — the tour's first beat points at the In-league tab, so it needs
+  // a measurable node. Registered here because the tabs live on this screen.
+  const leagueTabRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('calc.mode-tab.league', leagueTabRef);
+    return () => unregisterGuideTarget('calc.mode-tab.league');
+  }, []);
+
+  // Entry point 1 (operator): the tour auto-starts the moment the user lands
+  // on the calculator, "since the first step brings them to the league
+  // version". Guarded three ways — the merged layout must be on (the tour
+  // describes controls that only exist there), a prefilled arrival is a
+  // deliberate hand-off from a card and must not be hijacked, and
+  // startCalcTour itself refuses when the guided experience is off.
+  useEffect(() => {
+    if (!calcMergedOn || prefill) return;
+    startCalcTour('auto');
+    // Leaving the screen abandons the run — otherwise the tour hold would
+    // outlive the tour and mute every interstitial app-wide.
+    return () => stopCalcTour();
+  }, [calcMergedOn, prefill]);
   // #166/#167 — default to the LEAGUE's detected scoring format (same rule
   // as InLeagueCalculator); the chips still override per-session, and the
   // saved-draft restore below keeps precedence over this initial value.
@@ -543,6 +569,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             return (
               <Pressable
                 key={m.key}
+                // #384 W4 — the tour's first beat spotlights the In-league
+                // tab; only that one needs a measurable node.
+                ref={m.key === 'league' ? leagueTabRef : undefined}
                 testID={`calc.mode-tab.${m.key}`}
                 style={[styles.modeChip, active && styles.modeChipActive]}
                 onPress={() => switchMode(m.key)}
@@ -593,6 +622,13 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             initialOpponentId={prefill?.opponentUserId}
             initialGiveIds={prefill?.giveIds}
             initialReceiveIds={prefill?.receiveIds}
+            // Entry point 2 (ruling 4): re-runnable from the top right.
+            // startCalcTour returns false when the guided experience is off,
+            // and the component renders no link without a handler — so the
+            // affordance never appears unless it can actually do something.
+            onShowMeAround={
+              guidedAvatarActive() ? () => startCalcTour('show_me_around') : undefined
+            }
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.

@@ -15,6 +15,7 @@
     "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
     "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",
     "test:calc-send-placement": "node tests/check-calc-send-placement.js",
+    "test:calc-tour": "node tests/check-calc-tour.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:card-impact": "node tests/check-card-impact-order.js",
     "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js",

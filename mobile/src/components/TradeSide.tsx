@@ -42,11 +42,16 @@ interface Props {
    *  losing size). Only layout changes — no row is removed, no value is
    *  hidden, and `MemberEnteredMarker` still renders. */
   compact?: boolean;
+  /** #384 W4 — spotlight target for the tour's "add a player" beat. The
+   *  guide measures a real node, so the ref must reach the actual button;
+   *  registering a target that can never measure is the "points at nothing"
+   *  defect the script lint exists to catch. */
+  addRef?: React.RefObject<View | null>;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their pick-value tier + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact, addRef }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
@@ -144,7 +149,13 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
           ))
         )}
 
-        <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
+        {/* Wrapped rather than ref-forwarded: `Button` is shared across the
+            app and does not forward refs, and adding forwardRef to it for one
+            spotlight would be a drive-by change to every caller. A wrapper
+            View measures the same box the spotlight needs. */}
+        <View ref={addRef}>
+          <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
+        </View>
       </View>
     </Card>
   );
