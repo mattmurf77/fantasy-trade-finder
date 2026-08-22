@@ -272,6 +272,47 @@ NON_INTENT_EVENTS = frozenset({
     # user, so no user-day exists for this to add. `receipts_opened` itself
     # stays deliberately ABSENT from this deny-list.
     "receipts_window_changed",
+    # ── #384 merged calculator + finder, 2026-08-22 — added in the SAME
+    # commit that registered the batch in ALLOWED_CLIENT_EVENTS, for the
+    # reason stated at the top of this block. Addendum:
+    # docs/business/analytics/2026-08-22-384-calc-finder-addendum.md.
+    # Per-event, one line each:
+    #
+    #   calc_tour_started — the tour AUTO-starts on landing on the
+    #     calculator, so this is a MOUNT counter for a primary surface (the
+    #     `trio_session_started` class); admitting it would promote every
+    #     calculator visit to a user-day and step-change DAU from ship day.
+    #   calc_tour_ended — a TERMINATOR, the `league_team_closed` /
+    #     `team_review_exited` class; every end is preceded by its own start.
+    #   calc_tour_beat_missing — a SCRIPT DEFECT diagnostic: a beat the
+    #     builder could not resolve. Nothing the user did or was shown.
+    #   trade_pass_overlay_opened — an EXPOSURE of the capture surface, not
+    #     the decision it collects (`trade_pass_layer1`/`_layer2` carry that
+    #     and stay INTENT); an overlay opened and dismissed without a choice
+    #     is a NON-conversion, and crediting it a user-day would be the
+    #     `rankings_preset_detected` mistake.
+    #   trade_pass_overlay_dismissed — a DISMISSAL, the
+    #     `apple_banner_dismissed` class: something shown TO the user waved
+    #     away. Every one is preceded on the same card by trade_card_viewed.
+    #   prompt_deferred — a SYSTEM REFUSAL, the exact peer of
+    #     `guide_step_suppressed`: the arbiter declined to show a prompt. The
+    #     user chose nothing and, on the `blocked_by:'tour'` lane, was shown
+    #     nothing. Its granted twin `prompt_shown` is already here.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: calc_mode_switched,
+    # calc_include_players_toggled, calc_asset_added, calc_cleared,
+    # calc_find_a_trade_tapped, deck_back_to_calculator, deck_unpin_retry —
+    # all seven are real user decisions (configuration changes, the core
+    # add-an-asset gesture, a deliberate clear, the hand-off tap, and two
+    # deck actions reachable only from a deck the user asked for). Every one
+    # of them fires behind an INTENT event that already counts the user that
+    # day, so none opens a DAU seam.
+    "calc_tour_started",
+    "calc_tour_ended",
+    "calc_tour_beat_missing",
+    "trade_pass_overlay_opened",
+    "trade_pass_overlay_dismissed",
+    "prompt_deferred",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
