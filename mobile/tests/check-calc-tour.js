@@ -90,6 +90,15 @@ assert(/startCalcTour\('show_me_around'/.test(screen), '13. re-entry from the li
   assert(/return \(\) => calcTourScreenBlurred\(\)/.test(after),
     '15. leaving the screen abandons the run — through the hand-off-aware exit',
     'an unconditional stop here kills the parked deck half, because Find a Trade unmounts this screen too');
+  // …and the effect has to RE-RUN when its guards resolve. `hasLeague` is
+  // false on the first render of a cold start (the session league hydrates
+  // asynchronously) and `calcMergedOn` is false until the flags land, so an
+  // empty dep array means the tour never starts for the users it is for —
+  // and never re-evaluates when a prefilled arrival is replaced. Verified
+  // green against the old assertions, which only looked for the call.
+  assert(/\}, \[calcMergedOn, prefill, hasLeague\]\);/.test(after),
+    '15a. the auto-start effect declares all three of its guards as deps',
+    'deps `[]` freeze the guards at their first-render values — usually all false');
 }
 assert(/guidedAvatarActive\(\) && guideV2Active\(\)/.test(screen),
   '16. the "Show me around" handler needs guided-avatar AND guide_v2',
@@ -178,6 +187,16 @@ assert(/resetTourDisplayCounts\(\)/.test(tour),
   assert(/TOUR_IDS\.has\(stale\)\) useGuide\.getState\(\)\.skipStep\(\)/.test(start),
     '29. re-entry dismisses the bubble a previous run left standing',
     'one-bubble-at-a-time would otherwise refuse every beat of the new run');
+  // "Show me around" RESTARTS. A re-entry that leaves `cursor` where the last
+  // run stopped resumes mid-tour — and `requestAt(0)` below would then be the
+  // only thing disagreeing with it, because `cursor` is what every subsequent
+  // `requestAt(i + 1)` chains off. Dropping the reset was green before this.
+  assert(/running = true;\s*\n\s*cursor = 0;\s*\n\s*beatsShown = 0;/.test(start),
+    '29a. re-entry resets the cursor and the shown counter before requesting',
+    'without `cursor = 0` the run resumes where the last one stopped, and '
+    + 'beats_shown accumulates across runs');
+  assert(/requestAt\(0\);/.test(start),
+    '29b. …and the first request is the top of the list');
 }
 assert(/export function calcTourOwnsStep/.test(tour),
   '30. the runner exposes calcTourOwnsStep for callers outside the guide store');

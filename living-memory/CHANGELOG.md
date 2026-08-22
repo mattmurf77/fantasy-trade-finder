@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-08-22g — #384 W5: the journey works on paper again (three Opus build packages, lead-reviewed; still dark, not pushed)
+
+Built on the review below, same branch. `fcf3413` **W5-B** — 13 calculator/tour/deck events +
+`prompt_deferred` registered with exact prop allowlists and NON_INTENT classification
+(ingest was dropping every one); addendum `docs/business/analytics/2026-08-22-384-calc-finder-addendum.md`;
+pytest 4128. `9dcd003` **W5-D** — the ✕-overlay stays up through layer 2 and a backdrop-dismiss after a
+banked tile commits the deferred advance (the P0 dead-end); `reasonsAsOverlay` is a host PROP driven by a
+handoff `origin:'calculator'` (not a flag read — shipped decks keep their tiles); `FinderHandoff` gains
+`origin`/`includePlayers`/nullable opponent and the choke point regenerates on a calculator arrival;
+Back-to-calculator via the #190 prefill shape; unpin-retry for any pin count, regenerates; deck guide
+targets registered. `a52c91e` **W5-T** — n10/n16/n17/n18 advance on the real action; Find a Trade uses
+`popTo` (G-056) and the runner PARKS/resumes on deck arrival; auto-start gated on a `calc_tour_completed`
+receipt, `hasLeague`, and `onboarding.guide_v2`; tour-owned mute in `useGuide`; n11 opens the DNA sheet +
+outlook fallback row; format chips restored; league-keyed remount; n23/n23b by platform. Lead added: endTour
+tears down its own bubble, run-ahead Find-a-Trade jumps to the deck half, arrival waits for a card.
+Gates: tsc · lint · **76/76 guards** (+13 assertions) · pytest 4128. **Still open (bright line):** ✓
+like/queue contract (cell stays disabled), receive-side `pinned_receive_mode:'all'`, §6b, rollout shape.
+
 ## 2026-08-22f — #384 E2E review: do NOT flip `calc.merged_layout` yet (review-only, nothing shipped)
 
 Five independent Fable code-walk reviews + lead verification of every P0/P1 on

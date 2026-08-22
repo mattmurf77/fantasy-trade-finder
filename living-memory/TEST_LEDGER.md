@@ -12,6 +12,63 @@
 ---
 
 
+## 2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`
+
+W5 answers the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md)
+(5 P0 / 8 P1) in three build packages — `fcf3413` (analytics registration), `9dcd003` (the deck
+side), `a52c91e` (the tour) — plus this evidence pass. Scope block:
+[scope.md](../docs/feedback/items/384-calc-finder-merge/scope.md) (written retrospectively; gate 1
+had been skipped). Decision: [D-150](DECISIONS.md), amended. Checklist:
+[testflight-checklist.md](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) —
+rewritten against current behaviour, **still UNRUN**.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4128 passed, 1 skipped** (+11 over W4 — the taxonomy/NON_INTENT registration) |
+| `cd mobile && npx tsc --noEmit` | clean, exit 0 |
+| every `mobile/tests/check-*.js` | **76 files, 0 failed** |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| `npm run test:<name>` coverage | **76 / 76** — the last 19 unscripted guards wired into `mobile/package.json` (additions only, 19 insertions / 0 deletions) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**Guard hardening — 15 sabotages, all GREEN before / RED after.** The review's QA pass ran 61
+cycles against W4's guards and found **12 that stayed green**. Each named case below was patched
+into the real source, run against the guard as it stood at `a52c91e` **and** against the hardened
+guard, then reverted (`git status --short` confirmed only `mobile/tests/` + `mobile/package.json`
+modified afterwards).
+
+| # | Sabotage | Guard | Before | After | Assertion that catches it |
+|---|---|---|---|---|---|
+| 1 | `const merged = useFlag('calc.merged_layout') \|\| true;` | `check-calc-merged-layout` | GREEN | RED | 4 — the flag read anchored to its whole statement incl. `;` |
+| 2 | `const merged = !useFlag('calc.merged_layout');` | `check-calc-merged-layout` | GREEN | RED | 4 (same anchor) |
+| 3 | `compact={true}` at both `TradeSide` mounts | `check-calc-merged-layout` | GREEN | RED | 4b — every `compact=` prop must read exactly `merged` |
+| 4 | target-registration effect loses `if (!merged) return;` | `check-calc-merged-layout` | GREEN | RED | 4c — the effect body must bail; 4d pins `[merged]` deps |
+| 5 | `if (give.length \|\| receive.length)` — Include OFF still pins | `check-calc-merged-behavior` | GREEN | RED | 13a — `includePlayers &&` must be IN the pin condition |
+| 6 | `reasonsAsOverlay = calcMergedOn && deckOrigin === 'calculator' \|\| true;` | `check-calc-merged-behavior` | GREEN | RED | 1c — anchored to the statement terminator |
+| 7 | `endTourHold: () => {}` | `check-tour-suppression` | GREEN | RED | 8 — the store is now transpiled and EXECUTED, not modelled |
+| 8 | `beginTourHold: () => {}` | `check-tour-suppression` | GREEN | RED | 2a — `tourHold` read back off the real store |
+| 9 | the `blocked_by:'tour'` `track()` call deleted, doc comment kept | `check-tour-suppression` | GREEN | RED | 13 — anchored on the emitter, not the phrase |
+| 10 | `cursor = 0` dropped from `startCalcTour` (re-entry resumes) | `check-calc-tour` | GREEN | RED | 29a — the reset triple before `requestAt(0)` |
+| 11 | auto-start effect deps `[]` | `check-calc-tour` | GREEN | RED | 15a — `[calcMergedOn, prefill, hasLeague]` |
+| 12 | demo-bridge surface deleted from `TradesScreen` | `check-demo-calc-removed` | GREEN | RED | 7 — three named anchors, replacing a ≥2-FILE threshold that prose could satisfy |
+| 13 | "Retry, or switch to the demo league." copy restored | `check-demo-calc-removed` | GREEN | RED | 8 — comment-stripped copy scan (new) |
+| 14 | n12 loses `target`, keeps "This is your canvas" | `check-guide-script` | GREEN | RED | 5b — a `degradeLine` may exist only on a beat with a `target` |
+| 15 | n22 loses `target`, keeps "Tap the meter…" | `check-guide-script` | GREEN | RED | 5b (same rule) |
+
+`check-tour-suppression` no longer re-implements the reducer it tests: it transpiles
+`useInterruptCoordinator.ts` with the project's own TypeScript and executes it against a minimal
+zustand `create`, the way `check-presentation-v2.js` executes `tradePresentation.ts`. That single
+change is what makes cases 7 and 8 falsifiable — the old model was green through both because
+nothing in the file ever ran the source's version. `check-guide-script`'s DEIXIS vocabulary was
+also widened with the calculator beats' element nouns (`canvas`, `cross`, `check`, `meter`,
+`columns`, `arrows`), and the copy budget was not loosened.
+
+**What this run does NOT prove.** Nothing has executed on a device or a simulator. The feature is
+almost entirely presentation and timing — two columns at SE width, 53pt tap targets, spotlight
+geometry, the rhythm of a 15-beat tour — which is the class of claim a structural guard cannot
+reach. The rewritten TestFlight checklist (46 steps, A/B/C/D + a five-flag Prerequisites table) is
+the only runtime evidence available, and it is unrun.
+
 ## 2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`
 
 Branch cut from `origin/main` `941a36d`. Five waves, each committed with its own gate run.
@@ -2639,6 +2696,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`](#2026-08-22e--384-merged-calculator-w5--guard-hardening--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
 - [2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`](#2026-08-22d--384-merged-calculator-w0w4--full-gates-flag-dark-not-merged-on-featcalc-finder-merge)
 - [2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build](#2026-08-22c--feedback-capture-cap-2000--8000--the-three-silences--full-gates-backend-shipped-client-awaiting-a-build)
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)

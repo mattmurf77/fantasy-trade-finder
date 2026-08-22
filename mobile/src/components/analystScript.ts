@@ -366,7 +366,7 @@ export const S = {
     degradeLine: 'Two ways to build a trade — In league uses your real roster.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: opens a walkthrough the user re-runs on purpose; the display cap is the bound, and no receipt means "understands the calculator".
-    adoptionEvent: 'calc_tour_started',
+    adoptionEvent: 'calc_mode_switched',
   }),
 
   n11: (): GuideStep => ({
@@ -395,7 +395,7 @@ export const S = {
     degradeLine: "Find a Trade searches for you — we'll come back to it.",
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'calc_tour_started',
+    adoptionEvent: 'calc_find_a_trade_tapped',
   }),
 
   n14: (): GuideStep => ({
@@ -405,7 +405,7 @@ export const S = {
     degradeLine: 'The clear control wipes the canvas.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'calc_tour_started',
+    adoptionEvent: 'calc_cleared',
   }),
 
   n15: (): GuideStep => ({
@@ -415,6 +415,8 @@ export const S = {
     degradeLine: 'Confirming queues a trade for the other manager, if it fits their preferences.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // The ✓ is unwired pending its contract (Q-029): there is no event a user
+    // could fire by adopting it. The tour's own start stands in until then.
     adoptionEvent: 'calc_tour_started',
   }),
 
@@ -435,7 +437,7 @@ export const S = {
     degradeLine: 'Include players keeps your canvas in the search; off looks anywhere.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'calc_tour_started',
+    adoptionEvent: 'calc_include_players_toggled',
   }),
 
   n18: (): GuideStep => ({

@@ -120,12 +120,45 @@ for (const [rel, re, what] of SESSION_ANCHORS) {
     + `and is NOT the demo calculator. Removing it is the #384 conflation trap.`);
 }
 
-// Sabotage: delete the demo-bridge surface → red.
-const bridge = ALL.filter((f) => /demo_bridge|demo-bridge/.test(fs.readFileSync(f, 'utf8')));
-assert(bridge.length >= 2,
-  '7. the demo→real conversion bridge still exists',
-  `only ${bridge.length} file(s) reference demo_bridge; expected the flag read `
-  + `and the TradesScreen surface`);
+// Sabotage: delete the demo-bridge surface from TradesScreen → red.
+//
+// The old form counted FILES mentioning `demo_bridge` and passed at ≥2. Two
+// of the "files" it counted were a comment in TradeCalculatorScreen and the
+// surface itself, so the threshold was carrying the guarantee rather than the
+// anchors — and a threshold can be satisfied by prose. The surface is three
+// named things in ONE file; each is asserted on its own.
+{
+  const tradesScreen = read('screens/TradesScreen.tsx');
+  const BRIDGE_ANCHORS = [
+    [/useOnboardingFeature\('onboarding\.demo_bridge'\)/, 'the flag read'],
+    [/testID="trades\.demo-bridge"/, 'the surface itself'],
+    [/track\('demo_bridge_tapped'/, 'the conversion event'],
+  ];
+  for (const [re, what] of BRIDGE_ANCHORS) {
+    assert(re.test(tradesScreen),
+      `7. the demo→real conversion bridge still exists — ${what}`,
+      'TradesScreen no longer carries it. The bridge converts demo SESSIONS to '
+      + 'real accounts and has nothing to do with the removed demo calculator.');
+  }
+}
+
+// ── Side C: no demo CALCULATOR copy survives ────────────────────────────
+//
+// The removal left an instruction behind ("Retry, or switch to the demo
+// league") on the calculator's error state — a dead instruction naming a tab
+// that no longer exists. Copy is not covered by the union/tab assertions
+// above, which is how it survived W0. The word `demo` is still legal here:
+// the file carries provenance comments and the demo-SESSION reference, and
+// banning it would pressure the next author to delete the explanation. So the
+// COMMENTS are stripped and only the code that ships is scanned.
+{
+  const code = calc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const offenders = [...code.matchAll(/.{0,60}\bdemo\s+(?:league|calculator|mode|board|values)\b.{0,20}/gi)]
+    .map((m) => m[0].replace(/\s+/g, ' ').trim());
+  assert(offenders.length === 0,
+    '8. no demo-CALCULATOR instruction copy survives in TradeCalculatorScreen',
+    `found: ${offenders.map((s) => `"…${s}…"`).join(' · ')} — the tab it names is gone`);
+}
 
 console.log(
   failures === 0

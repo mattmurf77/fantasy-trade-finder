@@ -1,6 +1,6 @@
 # mobile/tests/
 
-50 **structural guards** — all 50 run in CI (the `mobile-typecheck` job globs `tests/check-*.js`); 41 also have an `npm run test:<name>` script for local use. Since [D-056](../../living-memory/DECISIONS.md) (2026-08-15) retired Maestro and the simulator, these plus unit tests are the primary automated evidence for any mobile change.
+76 **structural guards** — all 76 run in CI (the `mobile-typecheck` job globs `tests/check-*.js`), and as of 2026-08-22 all 76 also have an `npm run test:<name>` script for local use. Since [D-056](../../living-memory/DECISIONS.md) (2026-08-15) retired Maestro and the simulator, these plus unit tests are the primary automated evidence for any mobile change.
 
 They are not a conventional unit-test suite. Most pin a claim about **code shape** — placement, an unconditional render, a marker's presence, a threshold shared across clients — that a value-based test cannot see and a passing UI would hide. Several transpile a real module and execute it under plain node. Read the `WHY THIS EXISTS` block at the top of any file: nearly every guard was written after a specific defect shipped.
 
@@ -20,6 +20,7 @@ node tests/check-<name>.js   # same thing, for the ones with no script
 |---|---|
 | Deck & trades | `check-card-disposition` · `check-single-pin-actions` · `check-session-rerank` · `check-trade-text` · `check-send-button-platform` · `check-trades-banner-region` (#314/#315) · `check-dna-side-order` (#312, GIVE-LEFT/GET-RIGHT) · `check-fairness-default` (unset ⇒ OFF) · `check-decline-reasons` · `check-offer-prefill-330` + `check-offer-prefill-330-unit` (#330 epoch guard) |
 | Calculator | `check-calc-send-placement` (#303) · `check-calc-partner-labels` (#306) · `check-calc-pick-tiers` (#320) · `check-picker-chip-alignment` (#320 defect A) |
+| #384 merged calculator | `check-demo-calc-removed` (two-sided: the demo CALCULATOR is gone AND the demo SESSION is untouched — the conflation trap) · `check-calc-merged-layout` (the flag read is the bare statement; every merged-only testID excised by brace-balancing when the flag is off; `compact` comes from the flag; the price moves, never drops) · `check-calc-merged-behavior` (`reasonsAsOverlay` is a prop gated on flag AND calculator origin; the overlay survives to layer 2; `includePlayers` is IN the pin condition; both end-of-deck exits regenerate) · `check-tour-suppression` (**transpiles and EXECUTES** `useInterruptCoordinator.ts` — the hold, the gap between beats, idempotent begin) · `check-calc-tour` (15 beats in order; every action beat has an `advanceGuideIfActive` call site; one hold-release site; park + 30 s bound; first-visit receipt; cursor reset on re-entry) |
 | Matches | `check-matches-counts` (#334/#335) · `check-match-value-section` (#319) · `check-matches-calc-handoff` (#319 cross-league) · `check-matches-league-param` + `check-matches-tile-league-param` (#307) · `check-awaiting-dismiss` (#318) |
 | League | `check-league-unlocks` (#265/#308) · `check-league-drill-in` (#299/#302) · `check-league-candidates-300` · `check-contrarian-format-key` (#308) · `check-picks-subset-invariance` (#293/#294) · `check-analytics-297-302` · `check-analytics-300` |
 | Rankings & import | `check-anchor-labels` · `check-rank-nav-exit` (never-strand topology) · `check-rank-presets` (D-058 CSV parser) · `check-premium-import` (D-058 lanes 1 + 2a) |
@@ -32,9 +33,9 @@ node tests/check-<name>.js   # same thing, for the ones with no script
 
 ## Guards with no npm script
 
-`check-analytics-300.js` and `check-espn-nav-policy.js` are in the tree but absent from `package.json`.
+**None today.** The last 19 unscripted guards were wired into `package.json` on 2026-08-22. The section stays because the underlying fact has not changed and the next guard added without a script will be in exactly this position.
 
-**They still run in CI.** The `mobile-typecheck` job globs the directory rather than calling npm scripts:
+**An unscripted guard still runs in CI.** The `mobile-typecheck` job globs the directory rather than calling npm scripts:
 
 ```yaml
 - run: for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done

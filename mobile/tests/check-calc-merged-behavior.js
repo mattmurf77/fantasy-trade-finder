@@ -33,10 +33,16 @@ assert(!/useFlag\(\s*['"]calc\.merged_layout['"]\s*\)/.test(card),
   'a flag read inside the card cannot know where the deck came from');
 assert(/reasonsAsOverlay\?:\s*boolean/.test(card),
   '1b. TradeCard takes `reasonsAsOverlay` as a prop');
-assert(/const\s+reasonsAsOverlay\s*=\s*calcMergedOn\s*&&\s*deckOrigin\s*===\s*['"]calculator['"]/
+// Anchored to the STATEMENT TERMINATOR. Without the `;` the assertion matched
+// `= calcMergedOn && deckOrigin === 'calculator' || true;` — the overlay on
+// every deck for every user, which is the exact leak this line exists to stop.
+assert(/const\s+reasonsAsOverlay\s*=\s*calcMergedOn\s*&&\s*deckOrigin\s*===\s*['"]calculator['"];/
   .test(trades),
   '1c. the host gates the overlay on the flag AND a calculator origin',
-  'either half alone leaks the overlay onto decks the operator did not scope it to');
+  'either half alone — or anything OR-ed onto the end — leaks the overlay '
+  + 'onto decks the operator did not scope it to');
+assert((trades.match(/const\s+reasonsAsOverlay\s*=/g) || []).length === 1,
+  '1c-bis. there is exactly one definition of the overlay gate');
 {
   const at = trades.indexOf('declineReasons={declineReasonProps}');
   const seg = trades.slice(at, at + 300);
@@ -190,6 +196,15 @@ assert(!/requireAssets/.test(screen),
   // W5 grew this handler (analytics + the tour hand-off + the #330 handoff),
   // so the window is sized to the whole prop body, not to W2's shape.
   const seg = screen.slice(at, at + 3000);
+  // The TOGGLE has to be inside the pin condition, not merely somewhere in
+  // the handler. `if (give.length || receive.length)` pins the canvas with
+  // Include players switched OFF — the search is then constrained by assets
+  // the user explicitly excluded, and it is the precise case the operator's
+  // ruling 2 and checklist step 13 are about. Verified green against the old
+  // three assertions, which only looked for the calls.
+  assert(/if \(includePlayers && \(give\.length \|\| receive\.length\)\) \{/.test(seg),
+    '13a. `includePlayers` is IN the pin condition, not just in the handler',
+    'the toggle must gate the write; a canvas-only condition pins with Include OFF');
   assert(/setSide\('give'/.test(seg) && /setSide\('receive'/.test(seg),
     '13. include-ON pins both sides of the canvas');
   assert(/setPackageMode\(true\)/.test(seg),

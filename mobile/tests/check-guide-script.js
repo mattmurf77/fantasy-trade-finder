@@ -270,8 +270,14 @@ assert(
 // Deixis: words that point at a UI element the spotlight was supposed to
 // frame. Screen-level orientation ("land here") is not deixis — there is no
 // pointer to lose. Element-level pointing is.
+//
+// The noun list was widened 2026-08-22 (#384 W5) with the element nouns the
+// calculator beats actually use — `cross`, `check`, `canvas`, `meter`,
+// `columns`, `arrows`, `switch`, `panel`, `sheet` — plus the bare "this is
+// your X" form. Removing n12's `target` while keeping "This is your canvas"
+// was green under the narrower list, because `canvas` was not a noun it knew.
 const DEIXIS =
-  /\b(?:that|this|these|those)\s+(?:label|chip|button|control|card|row|pill|tab|section|icon|badge|banner|menu|toggle|slider|field)\b|\b(?:tap|see|hit|press)\s+(?:that|this)\b|\b(?:right|up|down)\s+there\b|\bbelow\b|\babove\b/i;
+  /\b(?:that|this|these|those)\s+(?:label|chip|button|control|card|row|pill|tab|section|icon|badge|banner|menu|toggle|slider|field|cross|check|canvas|meter|column|columns|arrow|arrows|switch|panel|sheet|link)\b|\bthis is your\b|\b(?:tap|see|hit|press)\s+(?:that|this)\b|\b(?:right|up|down)\s+there\b|\bbelow\b|\babove\b/i;
 
 for (const { step, args } of rendered) {
   if (!isV2(step.id)) continue;
@@ -307,6 +313,22 @@ for (const { step, args } of rendered) {
     step.target
       ? 'a targeted step needs a degradeLine or degrade:"suppress"'
       : `an untargeted line must carry no deixis: "${step.line}"`,
+  );
+
+  // 5b is the CONVERSE, and it is what makes 5a falsifiable by the sabotage
+  // that matters: deleting a beat's `target` line while leaving its copy
+  // alone. 5a then evaluates the untargeted branch, and a deictic line only
+  // fails if the DEIXIS vocabulary happens to know the noun — a copy-shaped
+  // dependency, not a structural one. A `degradeLine` is the beat's own
+  // declaration that it HAS a spotlight to lose; carrying one with no target
+  // is a contradiction inside a single object, and every #384 beat carries
+  // one. Verified: removing `target` from n12/n14/n19/n22 was green before
+  // this and is red after.
+  assert(
+    !step.degradeLine || !!step.target,
+    `5b — ${tag} declares a degradeLine only if it has a target to lose`,
+    'a degradeLine on an untargeted beat means the target was deleted and the '
+      + 'copy was not — the beat now points at nothing on every run',
   );
 }
 

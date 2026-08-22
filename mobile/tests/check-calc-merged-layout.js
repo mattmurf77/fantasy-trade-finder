@@ -50,9 +50,46 @@ const release = JSON.parse(read(path.join(ROOT, 'backend/tests/fixtures/flags/re
 assert(Object.prototype.hasOwnProperty.call(release, FLAG),
   '3. flag is mirrored in the release fixture');
 
-// 4 — the client reads it.
-assert(/useFlag\(\s*['"]calc\.merged_layout['"]\s*\)/.test(calc),
-  '4. InLeagueCalculator reads the flag');
+// 4 — the client reads it, and reads it STRAIGHT.
+//
+// Anchored on the whole statement, terminator included. The loose form this
+// replaced (`/useFlag\('calc\.merged_layout'\)/`) matched
+// `const merged = useFlag('calc.merged_layout') || true;` — which renders the
+// merged page to every user with the flag OFF — and matched
+// `!useFlag(...)`, which inverts the whole feature. Both were verified green
+// against the loose form. There is exactly ONE read, and it is this one.
+assert(/\n  const merged = useFlag\('calc\.merged_layout'\);\n/.test(calc),
+  '4. InLeagueCalculator reads the flag, unmodified',
+  'the flag read must be the bare statement — no `|| true`, no `!`, no default');
+assert((calc.match(/useFlag\(\s*['"]calc\.merged_layout['"]\s*\)/g) || []).length === 1,
+  '4a. exactly one flag read in the component',
+  'a second read is a second gate that can disagree with the first');
+
+// 4b — the column re-flow is the flag, not a constant. `compact` always-on
+// re-flows the SHIPPED stacked page (narrow rows, moved price) with the flag
+// off, which is the byte-identity promise broken in the quietest possible way.
+{
+  const compactProps = [...calc.matchAll(/\bcompact=\{([^}]*)\}/g)].map((m) => m[1].trim());
+  assert(compactProps.length === 2 && compactProps.every((v) => v === 'merged'),
+    '4b. both TradeSide columns take `compact` FROM the flag',
+    `found [${compactProps.join(', ')}] — compact must be exactly \`merged\` at both mounts`);
+}
+
+// 4c — the spotlight-target registration is gated on the flag too. With the
+// flag off none of those nodes is mounted, and a registered ref to an
+// unmounted node measures null: every beat would DEGRADE (pointing at
+// nothing) rather than simply not running.
+{
+  const at = calc.indexOf("['calc.trade-columns', columnsRef]");
+  assert(at > 0, '4c. the guide-target registration table exists');
+  const start = calc.lastIndexOf('useEffect(() => {', at);
+  assert(start > 0 && /if \(!merged\) return;/.test(calc.slice(start, at)),
+    '4c. the target registration bails out when the flag is off',
+    'registering refs to unmounted nodes degrades every beat instead of not running the tour');
+  assert(/\}, \[merged\]\);/.test(calc.slice(at, at + 900)),
+    '4d. the registration effect re-runs when the flag resolves',
+    'deps that omit `merged` freeze the registration at its first-render value');
+}
 
 // 5 — every merged-only surface is gated behind the flag.
 //
