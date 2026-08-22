@@ -52,3 +52,23 @@ view" meant something else, the layout section is the part to correct.
 
 [`plan.md`](plan.md) — layout spec, the tour as authorable guide steps, and the four things that
 need a decision before a build agent starts.
+
+## Round-2 rulings — 2026-08-22, answering plan §5
+
+| # | Ruling |
+|---|---|
+| 1 | ✕ → decline-reason overlay applies to **this calculator only**; the deck keeps its inline tiles |
+| 2 | **Include Players ON ⇒ the search must include the players on the canvas**; OFF ⇒ unconstrained by the canvas |
+| 3 | The new surface **replaces the manual calc tab and lives within the league calc**. **Remove the demo calculator** — "it's pointless" |
+| 4 | Tour is **re-runnable** via a **"Show me around"** link, **top right** of the page |
+| + | The tour **auto-starts on landing** on the manual calc page, since its first beat carries the user to the league version |
+
+**Two things surfaced by ruling 3, both recorded in [`plan.md`](plan.md) §6:**
+
+1. **"Demo" is two systems.** The demo *calculator mode* (mock dual-board league) is the one being
+   deleted. The demo *session* (`/api/session/demo`, try-before-signin, `onboarding.demo_bridge`)
+   must not be touched — they share only a word.
+2. **Ruling 3 collides with #310 and with the tour's own first step.** `TradesScreen.tsx:4944`
+   records the current intent — *"Calculator … is always reachable — it needs no league"* — and
+   #310 is the report that asked for it. The plan proceeds on a stated assumption (two tabs,
+   `Manual` | `In league`, demo deleted, rich spec on the league side) which needs a yes/no.

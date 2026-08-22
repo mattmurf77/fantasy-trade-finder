@@ -1,6 +1,7 @@
 # Plan — #384 the manual calculator becomes the merged trade surface
 
-**Status:** draft for operator review. Nothing built. **Four decisions (§5) gate the build.**
+**Status:** draft for operator review. Nothing built. **All four gating decisions are RULED (§5);**
+**one working assumption in §6b needs a yes/no.**
 Rulings and scope: [`status.md`](status.md).
 
 ---
@@ -72,7 +73,7 @@ receipt, the Apple session-2 banner, the diff banner, the adaptation moment and 
 note all consult. Today each decides independently. This is the single largest hidden cost in the
 report and should be its own work item.
 
-## 4. Proposed sequencing
+## 4. Proposed sequencing — SUPERSEDED by §7 (kept for the reasoning)
 
 | Wave | Content | Why here |
 |---|---|---|
@@ -81,24 +82,66 @@ report and should be its own work item.
 | **W3** | The interstitial suppression gate | Prerequisite for W4; touches many surfaces, wants its own scope block |
 | **W4** | The tour itself, compressed to budget, with receipts | Depends on every control above existing and on W3 |
 
-## 5. Four decisions before a build agent starts
+## 5. The four decisions — RULED, 2026-08-22
 
-1. **Does the ✕ overlay change apply only to this page, or everywhere `decline_reasons` renders?**
-   Ruling 1 is written against the calculator. The shipped inline-tile form is live on the deck. Two
-   presentations of one mechanism is a real cost; one presentation is a change to a surface this
-   round was scoped to leave alone.
-2. **What does "Include Players" toggle *mean* against the engine?** The report says a trade can be
-   found with no players selected. Is the toggle "may my roster players be used as outbound
-   assets", or "restrict the search to the assets on the canvas"? These produce different requests.
-3. **Which of the three calculator modes gets this?** `live` (no league), `demo`, `league`. League
-   and team dropdowns and a platform-aware send button only mean something in `league`. #310 is
-   explicit that the manual calculator must not be locked behind a league — so what does the page
-   look like in `live` mode?
-4. **Is the tour for first visit only, or re-runnable?** The report says "first visit (including
-   current testers)". Current testers already have guide state; re-showing needs either a version
-   bump or a deliberate reset, and FR-E9's v1-upgrader release cap interacts with it.
+| # | Question | Ruling |
+|---|---|---|
+| 1 | ✕-overlay scope | **Just this version of the calculator.** The deck keeps the shipped inline Value/Fit/Neither tiles; the overlay presentation is local to this page |
+| 2 | What "Include Players" means | **The search must include the players on the canvas.** ON ⇒ the canvas assets are required in any returned trade. OFF ⇒ the finder is unconstrained by the canvas (the report's "we can find a trade without any players selected") |
+| 3 | Which mode | **This replaces the manual calc tab and lives within the league calc. Demo calc is removed** — "it's pointless" |
+| 4 | First-visit or re-runnable | **Re-runnable**, via a **"Show me around"** link in the **top right** of the page |
 
-## 6. Not addressed by this plan
+**Added in the same ruling:** the tour **auto-starts the moment the user lands on the manual calc
+page** — because its first beat is what carries them to the league version.
+
+## 6. Two findings that change how ruling 3 gets built
+
+### 6a. "Demo" names two unrelated things. Only one is being deleted.
+
+`git grep` finds `demo` across sixteen files, and they are **two separate systems**:
+
+| | What it is | Disposition |
+|---|---|---|
+| **Demo calculator mode** | `CalcMode = 'demo'`, the seeded mock dual-board league in `data/tradeCalcMock.ts`; `demoEvaluation` / `demoSuggested` / `demoAddOns` in `TradeCalculatorScreen` | **This is what "remove the demo calc" means.** Delete |
+| **Demo *session*** | `/api/session/demo`, `useSession.isDemo`, the SignIn "try before you sync" path, flags `landing.try_before_sync` and `onboarding.demo_bridge`, the `trades.demo-bridge` conversion surface | **Do not touch.** This is open-access onboarding |
+
+They share a word and nothing else. A build agent told to "remove the demo calc" without this
+distinction can plausibly delete the try-before-signin path. Named here so it cannot happen.
+Also in scope for the deletion, and easy to miss: `mobile/tests/check-picker-pick-filter.js`
+asserts against demo-mode behavior, and `PlayerPickerModal` / `TradeSide` / `tradeCalcMath.ts` /
+`shareLinks.ts` / `api/calc.ts` all carry demo branches.
+
+### 6b. Ruling 3 collides with #310, and with the tour's own first step
+
+`TradesScreen.tsx:4944` states the current architecture's intent outright:
+
+> *"Calculator (manual trade builder, demo data) is always reachable — **it needs no league**."*
+
+That is deliberate, and **#310 is the report that asked for it** — *"we should not lock the manual
+calculator behind trades."* Folding the manual calculator into the league calculator locks it
+behind having a league, which is the opposite. `mode: 'league'` is only offered when
+`hasLeague` is true (`TradeCalculatorScreen.tsx:150-155`).
+
+The tour points the same way: *"the first step brings them to the league version"* — the user
+cannot be brought **to** the league version unless they started somewhere that is not it.
+
+**Working assumption, stated so it can be corrected rather than discovered mid-build:** the mode
+switcher becomes **two** tabs, `Manual` | `In league`, with `demo` deleted. The rich spec in §2 is
+the **In league** surface. `Manual` survives as the league-free entry point that #310 requires and
+that the tour's first beat starts from. Everything else in this plan is unaffected by that choice;
+only this paragraph is.
+
+## 7. Sequencing, revised
+
+| Wave | Content |
+|---|---|
+| **W0** | Delete demo calculator mode (per §6a — the mode, never the session) |
+| **W1** | Layout: two columns, outlook collapsible + league/team dropdowns beneath, four-button row, remove/add buttons, no utility row, no three-tab subnav, "Show me around" top-right |
+| **W2** | ✕ → decline-reason overlay (this page only); platform-aware single send button; end-of-deck "back to calculator" + "find a trade without <player> pinned"; the Include-Players contract from ruling 2 |
+| **W3** | The interstitial suppression gate — prerequisite for W4, wants its own scope block |
+| **W4** | The tour: compressed to the copy budget, auto-start on landing, re-entry via "Show me around", receipts wired to real local writes |
+
+## 8. Not addressed by this plan
 
 The report's closing expectation — *"when the user makes a decision, the find a trade feature works
 as is, the next trade card comes up automatically"* — conflicts with ruling 8, which adds an
