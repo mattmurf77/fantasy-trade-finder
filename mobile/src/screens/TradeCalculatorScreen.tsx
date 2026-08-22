@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  InteractionManager,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -237,14 +236,20 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       startCalcTour('auto', { openOutlook: () => outlookOpenerRef.current?.() });
     };
     const unsub = navigation.addListener('transitionEnd', begin);
-    const task = InteractionManager.runAfterInteractions(begin);
+    // The fallback is a TIMER, not React Native's run-after-interactions
+    // hook: that one fires the moment no touch is in flight — i.e. before the push
+    // transition ends and before the native header has laid out — and the
+    // first beat's frame was measured ~44 pt too high (simulator,
+    // 2026-08-22). `transitionEnd` is the normal path; the timer only covers
+    // a route that never emits it (a cold deep link onto this screen).
+    const fallback = setTimeout(begin, 1000);
     // Leaving the screen abandons the run — otherwise the tour hold would
     // outlive the tour and mute every interstitial app-wide. NOT an
     // unconditional stop: Find a Trade unmounts this screen too, and that
     // departure is the tour continuing onto the deck.
     return () => {
       unsub();
-      task.cancel();
+      clearTimeout(fallback);
       calcTourScreenBlurred();
     };
   }, [calcMergedOn, prefill, hasLeague, navigation]);
@@ -512,15 +517,16 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const anySide = activeSendIds.length > 0 || activeReceiveIds.length > 0;
 
   const switchMode = (m: CalcMode) => {
+    // n10 is an `advance: 'action'` beat — tap-anywhere is off for it, so the
+    // tap on the In-league tab is the only thing that can move it on. It
+    // counts even when In league is ALREADY selected: "Show me around" is
+    // offered on that very tab, and a re-run that could not get past its
+    // first beat looked like a dead link.
+    if (m === 'league') advanceGuideIfActive('n10', 'action');
     if (m === mode) return;
     haptics.selection();
     setMode(m);
     track('calc_mode_switched', { mode: m }, 'TradeCalculator');
-    // n10 is an `advance: 'action'` beat — tap-anywhere is off for it, so the
-    // REAL switch is the only thing that can move it on. Only the switch INTO
-    // league mode counts: that is what the beat asked for, and it is what
-    // mounts the targets n12–n18 point at.
-    if (m === 'league') advanceGuideIfActive('n10', 'action');
   };
 
   const switchFormat = (f: ScoringFormat) => {

@@ -528,11 +528,17 @@ if (!placeDecl || !placeDecl.initializer) {
   const init = placeDecl.initializer;
   const initText = flat(overlay, init);
 
-  // The latch itself: a ref read from `place`'s initializer.
-  const refRead = findAll(
-    init,
-    (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current',
-  )[0];
+  // The latch itself: a ref read from `place`'s initializer — or, since the
+  // live-offset change (2026-08-22, the band must FOLLOW a ring that
+  // re-measures after the push transition), from the `latched` declaration
+  // that `place` derives from. Either way the side comes from a ref.
+  const latchedDecl = declOf(overlay, 'latched');
+  const refRead =
+    findAll(init, (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current')[0] ||
+    (latchedDecl && latchedDecl.initializer &&
+      referencesIdentifier(overlay, init, 'latched') &&
+      findAll(latchedDecl.initializer,
+        (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current')[0]);
   assert(
     !!refRead,
     '7b — `place` reads a latch ref',
@@ -571,6 +577,22 @@ if (!placeDecl || !placeDecl.initializer) {
         /\bid\b/.test(flat(overlay, latchWrite.right)),
         '7e — the latch is keyed on the step id',
         `saw: ${flat(overlay, latchWrite.right)}`,
+      );
+      // And only on an ON-SCREEN cutout: the first frame of a step can
+      // resolve while the push transition still has the screen off to the
+      // right, which solves to the bottom band — latching that pins the
+      // wrong SIDE for the life of the step (simulator, 2026-08-22).
+      assert(
+        !!guard && referencesIdentifier(overlay, guard.expression, 'cutout'),
+        '7h — the latch is written only once the cutout is ON-screen',
+        guard ? `guard: ${flat(overlay, guard.expression)}` : 'no guard',
+      );
+      // The OFFSET is live whenever the solver agrees on the side — the band
+      // must follow a ring that re-measures (post-transition, scroll).
+      assert(
+        /latched\.from === solved\.from \? solved/.test(flat(overlay, placeDecl.initializer)),
+        '7g — the placement offset is live when the latched side agrees with the solver',
+        `saw: ${flat(overlay, placeDecl.initializer)}`,
       );
     }
     assert(
@@ -1205,6 +1227,67 @@ function walkTsFiles(dir) {
       `references ${seen.join(', ')}`,
     );
   }
+}
+
+// ── 14: the entry slide runs against a MOUNTED band ───────────────────────
+//
+// Operator device report 2026-08-22 (builds 126 and 127), reproduced in the
+// simulator on the sign-in username beat: a TARGETED beat that follows another
+// beat drew its ring and no avatar/bubble. The overlay returns null while a
+// targeted step's spotlight is pending, so the band UNMOUNTS; the entry
+// spring used to start on step activation — i.e. against the unmounted band —
+// with the native driver, and the remounted band initialised from the stale
+// JS-side value (0) and never received another native frame. Two properties
+// pin the fix: the spring is keyed on the band rendering (`spotlightPending`
+// in its deps and its guard), and it is JS-driven.
+{
+  const springs = findAll(
+    overlay,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      flat(overlay, n.expression) === 'Animated.spring',
+  );
+  assert(springs.length === 1, '14a — exactly one entry spring', `${springs.length} found`);
+  if (springs.length === 1) {
+    const spring = springs[0];
+    const cfg = spring.arguments[1];
+    assert(
+      !!cfg && /useNativeDriver:\s*false/.test(flat(overlay, cfg)),
+      '14b — the entry spring is JS-driven (useNativeDriver: false)',
+      'a native-driven value on a band that unmounts and remounts initialises ' +
+        'the remounted view from the stale JS value and never updates it',
+    );
+    const effect = enclosing(spring, (n) => isCallTo(n, 'useEffect'));
+    assert(!!effect, '14c — the entry spring lives in a useEffect');
+    if (effect) {
+      const deps = effect.arguments[1] ? flat(overlay, effect.arguments[1]) : '';
+      assert(
+        /spotlightPending/.test(deps),
+        '14d — the spring effect is keyed on spotlightPending (the band RENDERING), not only the step id',
+        `deps are ${deps || '(none)'} — keyed on activation alone, the spring runs against an unmounted band`,
+      );
+      const fn = effect.arguments[0];
+      const guard = findAll(fn, (n) => ts.isIfStatement(n)).find((n) =>
+        /spotlightPending/.test(flat(overlay, n.expression)),
+      );
+      assert(
+        !!guard,
+        '14e — the spring effect bails while the spotlight is pending',
+        'without the guard the spring still starts on the pending (null) render',
+      );
+    }
+  }
+  // And the activation effect must NOT start the spring any more.
+  const activation = findAll(
+    overlay,
+    (n) => isCallTo(n, 'useEffect') && /\[active\?\.id\]/.test(flat(overlay, n.arguments[1] || n)),
+  );
+  assert(
+    activation.length >= 1 && activation.every((e) => !referencesIdentifier(overlay, e.arguments[0], 'spring')),
+    '14f — the [active?.id] activation effect does not animate the band',
+    'the regression is exactly a spring started on activation',
+  );
 }
 
 console.log('');

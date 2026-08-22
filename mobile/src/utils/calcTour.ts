@@ -149,7 +149,9 @@ function endTour(reason: 'finished' | 'abandoned'): void {
   useGuide.getState().setTourOwnedIds(new Set<string>());
   // The first-visit gate. Only a completed run counts: an abandoned one
   // taught nothing, so re-offering it on the next landing is correct.
-  if (reason === 'finished') {
+  // A run that reached the end of the list without SHOWING a beat (every
+  // request refused) taught nothing and must not retire the auto-start.
+  if (reason === 'finished' && shown > 0) {
     useGuide.getState().recordGuideReceipt(GUIDE_RECEIPTS.calcTourCompleted);
   }
   track('calc_tour_ended', { reason, beats_shown: shown }, 'TradeCalculator');
@@ -315,20 +317,36 @@ export function startCalcTour(
   // First-visit gate: the auto-start is an offer, and an offer the user has
   // already taken all the way through is not re-made. "Show me around" is a
   // deliberate ask and ignores this.
-  if (
-    source === 'auto' &&
-    (getOnboardingState().guideReceipts[GUIDE_RECEIPTS.calcTourCompleted] ?? 0) > 0
-  ) {
-    return false;
+  if (source === 'auto') {
+    const ob = getOnboardingState();
+    if ((ob.guideReceipts[GUIDE_RECEIPTS.calcTourCompleted] ?? 0) > 0) return false;
+    // The offer is also bounded by n10's display cap — and it is n10's cap
+    // that bounds it, not each beat's own. The runner steps over a refused
+    // beat, so once n10 (and n11) had hit `maxDisplayCount` an auto-start
+    // opened on n12's DEGRADE line with the page still on Real values
+    // (simulator, 2026-08-22: "Both rosters sit side by side here…" in the
+    // bottom band, no ring, nothing to tap). A tour is a sequence; a sequence
+    // that cannot show its first beat is not offered. "Show me around" resets
+    // the caps below, so the explicit ask is unaffected.
+    const first = GUIDE.n10();
+    if (
+      first.maxDisplayCount != null &&
+      (ob.guideDisplayCounts[first.id] ?? 0) >= first.maxDisplayCount
+    ) {
+      return false;
+    }
   }
   // Re-entry restarts from the top: "Show me around" is a deliberate ask to
   // see the whole thing, not to resume wherever a previous run stopped.
   if (running) endTour('abandoned');
-  // …and the bubble the previous run left standing has to go with it. One
-  // bubble at a time is `requestStep`'s first rule, so a stale beat would
-  // refuse every beat of the new run and the link would look dead.
-  const stale = useGuide.getState().active?.id;
-  if (stale && TOUR_IDS.has(stale)) useGuide.getState().skipStep();
+  // …and WHATEVER bubble is standing has to go. One bubble at a time is
+  // `requestStep`'s first rule, so an active beat refuses every beat of the
+  // new run — the runner steps over each refusal and ends a run in which
+  // nothing was shown. Reproduced in the simulator 2026-08-22: the deck's
+  // "Reading the league rosters…" beat followed the user onto the calculator
+  // and the auto-tour died silently behind it. A non-tour bubble is not
+  // skipped (that would spend its `once`); it is dismissed, the way a swipe
+  // would — the scripted tour owns the floor for its run (ruling 10).
   if (source === 'show_me_around') resetTourDisplayCounts();
   handlers = tourHandlers;
   running = true;
@@ -336,6 +354,22 @@ export function startCalcTour(
   beatsShown = 0;
   useGuide.getState().setTourOwnedIds(TOUR_IDS);
   useInterruptCoordinator.getState().beginTourHold();
+  // Tear the stale bubble down only AFTER the hold is up and the tour's ids
+  // are registered: dismissing a screen's beat lets that screen request its
+  // NEXT beat synchronously from the terminal callback (the deck's s2.wait →
+  // N2 did exactly this, simulator 2026-08-22), and with the hold already
+  // held that request is refused as a non-tour beat instead of taking the
+  // slot n10 is about to ask for.
+  const stale = useGuide.getState().active;
+  if (stale) {
+    tearingDown = true;
+    try {
+      if (TOUR_IDS.has(stale.id)) useGuide.getState().skipStep();
+      else useGuide.getState().dismissActiveStep('swipe');
+    } finally {
+      tearingDown = false;
+    }
+  }
   track('calc_tour_started', { source }, 'TradeCalculator');
   requestAt(0);
   return true;

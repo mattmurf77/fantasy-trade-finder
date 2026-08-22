@@ -41,6 +41,9 @@ const BAND_GAP = 12;
 const BAND_EDGE = 8;
 /** The legacy bottom band — still the fallback when nothing fits adjacent. */
 const BAND_BOTTOM = 92;
+/** Bottom chrome a tab screen draws over the window: the tab bar plus the
+ *  strip that can float above it. Scroll-into-view keeps targets above it. */
+const BOTTOM_CHROME = 96;
 
 export interface BandPlacement {
   from: 'top' | 'bottom';
@@ -140,19 +143,6 @@ export default function AnalystGuide() {
         if (!cancelled) setLocalFrame(f);
       });
     }
-    if (active) {
-      if (guideV2 && reduceMotion) {
-        slide.setValue(1);
-      } else {
-        slide.setValue(0);
-        Animated.spring(slide, {
-          toValue: 1,
-          useNativeDriver: true,
-          speed: 16,
-          bounciness: 7,
-        }).start();
-      }
-    }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
@@ -238,7 +228,13 @@ export default function AnalystGuide() {
     // Reserve room for a band ABOVE the target, so a step that scrolls also
     // arrives with the preferred placement available.
     const wantTop = insets.top + BAND_EDGE + bandH + BAND_GAP;
-    const wantBottom = winH - insets.bottom - BAND_EDGE;
+    // The window's bottom edge is not the visible edge on a tab screen: the
+    // tab bar (and any strip floating above it) covers the last ~96 pt, and
+    // a target "in view" by window math sits under them. Seen in the
+    // simulator 2026-08-22 — the action row's ring drawn beneath the verify
+    // strip. Reserve that chrome; a non-tab host merely scrolls a little
+    // higher than it strictly needed to.
+    const wantBottom = winH - insets.bottom - BAND_EDGE - BOTTOM_CHROME;
     let delta = 0;
     if (frame.y < wantTop) delta = frame.y - wantTop;
     else if (frame.y + frame.height > wantBottom) {
@@ -281,6 +277,33 @@ export default function AnalystGuide() {
     AccessibilityInfo.announceForAccessibility(displayLine);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, spotlightPending, guideV2]);
+
+  // The entry slide. Keyed on the band actually RENDERING, not on the step
+  // activating: a targeted step returns null while its spotlight is pending,
+  // so an animation started on activation runs against an UNMOUNTED band.
+  // With the native driver that view then remounted initialised from the
+  // stale JS-side value (0) and never received another native frame — the
+  // ring drew, the avatar and bubble were fully transparent (operator
+  // device report, 2026-08-22, reproduced in the simulator on the sign-in
+  // username beat). JS-driven on purpose: one bubble, one spring, and the
+  // mounted view must always carry the real value.
+  useEffect(() => {
+    if (!active || spotlightPending) return;
+    if (guideV2 && reduceMotion) {
+      slide.setValue(1);
+      return;
+    }
+    slide.setValue(0);
+    const anim = Animated.spring(slide, {
+      toValue: 1,
+      useNativeDriver: false,
+      speed: 16,
+      bounciness: 7,
+    });
+    anim.start();
+    return () => anim.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, spotlightPending]);
 
   if (!active) return null;
   // A targeted step whose spotlight has not resolved yet: hold the bubble
@@ -330,10 +353,23 @@ export default function AnalystGuide() {
   // band: latching earlier would freeze the pre-measure fallback and park the
   // bubble in the bottom band for a step whose ring is right there.
   const solved = solveBandPlacement(cutout, bandH, winH, insets);
-  if (frame && bandH > 0 && bandRef.current?.id !== active.id) {
+  // Latch only on an ON-SCREEN cutout. The first frame of a step can resolve
+  // while the native-stack push is still sliding the screen in — the target
+  // measures OFF-screen to the right, `cutout` is null, the solver answers
+  // "bottom band", and a latch taken then pins the band to the wrong SIDE for
+  // the life of the step (simulator, 2026-08-22: the bubble stayed across the
+  // In-league tab while its ring tracked the scroll correctly).
+  if (frame && cutout && bandH > 0 && bandRef.current?.id !== active.id) {
     bandRef.current = { id: active.id, place: solved };
   }
-  const place = bandRef.current?.id === active.id ? bandRef.current.place : solved;
+  // The SIDE is latched for the life of the step (no flip-flop mid-scroll);
+  // the OFFSET is live whenever the solver agrees on the side, so the band
+  // follows its ring when the ring moves — a post-transition re-measure, a
+  // scroll, a keyboard. Latching the offset too parked the band over a ring
+  // that had since corrected itself (simulator, 2026-08-22, first landing on
+  // the calculator: bubble drawn across the In-league tab it pointed at).
+  const latched = bandRef.current?.id === active.id ? bandRef.current.place : null;
+  const place = latched && latched.from === solved.from ? solved : (latched ?? solved);
   const atTop = place.from === 'top';
   // A targeted step is held invisible for the one frame between mount and the
   // band's `onLayout`, because placing it needs its height. An untargeted step
