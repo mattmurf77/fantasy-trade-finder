@@ -125,7 +125,9 @@ assert(
   'sabotage detected: writing route params instead — ignored while trades.sheet_targeting is ON',
 );
 assert(
-  /if \(finderHubOn && finderMode\) \{\s*autoRunPendingRef\.current = true;\s*setAutoRunSeq\(finderHandoff\.seq\);\s*\}/.test(consumeEffect),
+  // #384 — the calculator origin is armed alongside the pending ref, inside
+  // the SAME gate; the optional middle line is that, and nothing else.
+  /if \(finderHubOn && finderMode\) \{\s*autoRunPendingRef\.current = true;\s*(?:autoRunOriginRef\.current = origin;\s*)?setAutoRunSeq\(finderHandoff\.seq\);\s*\}/.test(consumeEffect),
   'S-2 the ref-arm (and seq bump) is guarded by the SAME finderHubOn && finderMode gate the choke point uses (R-8)',
   'sabotage detected: arming unconditionally leaves a live ref to detonate when the user later enters a finder mode',
 );
@@ -141,7 +143,10 @@ assert(
   'sabotage detected: dropping it — a repeat Offer to the SAME team changes no dep, the second handoff lands its pin on the stale deck silently (the original #330 symptom reborn)',
 );
 assert(
-  /if \(\(finderScopeSeen\.current \|\| autoRun\) && scopedOpponent\) \{/.test(chokeEffect),
+  // #384 — the calculator's hand-off may carry NO opponent (its Team dropdown
+  // is optional); that origin, and only that origin, widens the opponent half
+  // of the gate. The #330 shape is the first alternative, byte-identical.
+  /if \(\(finderScopeSeen\.current \|\| autoRun\) && scopedOpponent\) \{|if \(\s*\(finderScopeSeen\.current \|\| autoRun\) &&\s*\(scopedOpponent \|\| \(autoRun && autoRunOrigin === 'calculator'\)\)\s*\) \{/.test(chokeEffect),
   'S-2 an armed handoff widens the fresh-mount gate (generate on first observation)',
   'sabotage detected: keeping the bare finderScopeSeen gate makes the cold-mount handoff a prefill with no search',
 );
@@ -164,8 +169,11 @@ assert(
 // ═══════════════════════════════════════════════════════════════════════
 
 assert(
-  /if \(autoRun\) \{\s*track\('find_trades_tapped', \{ source: 'league_offer', mode: deckMode \}, 'Trades'\);\s*\}/.test(chokeEffect),
-  "S-3 the auto-run dispatch emits find_trades_tapped {source:'league_offer', mode}",
+  // #384 — `source` is a ternary over the armed origin (calculator vs
+  // league_offer); the emit is still inside the autoRun branch, still `mode:
+  // deckMode`, still exactly one call.
+  /if \(autoRun\) \{[\s\S]*?track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\);\s*\}/.test(chokeEffect),
+  "S-3 the auto-run dispatch emits find_trades_tapped {source:'league_offer' | 'calculator', mode}",
   'sabotage detected: dropping the emit makes handoff adoption unmeasurable; emitting outside the autoRun branch double-counts in-place team picks',
 );
 // Source-of-truth cross-check (the check-league-candidates-300.js pattern):

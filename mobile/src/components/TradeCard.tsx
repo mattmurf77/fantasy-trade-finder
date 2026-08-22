@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Modal,
+  Platform,
+  KeyboardAvoidingView,
   Pressable,
   ActivityIndicator,
   type AccessibilityActionEvent,
@@ -20,9 +22,23 @@ import DeclineReasonPanel, {
   type DeclineReasonPanelProps,
 } from './DeclineReasonPanel';
 import { LockGlyph } from './PlayerContextMenu';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
+
+// #384 — the overlay presentation needs two host hooks the inline form has no
+// use for. Kept OUT of `DeclineReasonPanelProps` on purpose: the panel itself
+// knows nothing about being hosted in a sheet, and every existing caller of it
+// (inline deck, EndorsedTradeCard) must stay untouched.
+export interface DispositionReasons extends DeclineReasonPanelProps {
+  /** The ✕ opened the reason sheet. */
+  onOverlayOpened?: () => void;
+  /** The sheet was dismissed by the backdrop / system close. `banked` is true
+   *  when a layer-1 tile had already committed the pass — the host must then
+   *  commit the deferred deck advance, or the card is stranded (review #1). */
+  onOverlayDismissed?: (banked: boolean) => void;
+}
 
 interface Props {
   data: TradeCardData;
@@ -105,8 +121,14 @@ interface Props {
     // the ✓ is untouched. Absent (flag off, or any non-deck mount) ⇒ the
     // shipped ✓/✕ row renders byte-identically. Only TradesScreen's top
     // card ever supplies it.
-    reasons?: DeclineReasonPanelProps;
+    reasons?: DispositionReasons;
   };
+  // #384 ruling 1 (review #7) — render the decline reasons as an OVERLAY over
+  // the page instead of the shipped inline tiles. A PROP, never a flag read:
+  // the operator scoped the overlay to "this version of the calculator", and
+  // only the host knows whether this deck was reached from it. Absent/false ⇒
+  // the shipped inline-tile form, byte-identical.
+  reasonsAsOverlay?: boolean;
   // #319 — rendered as the card's FINAL block, after the actions/send rows.
   // The Matches inbox mounts MatchValueSection (and the awaiting Dismiss row)
   // here; every other caller omits it and the card renders byte-identically.
@@ -159,6 +181,7 @@ function TradeCardComp({
   hideMatchStrength = false,
   hideLockButton = false,
   disposition,
+  reasonsAsOverlay = false,
   footer,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
@@ -199,11 +222,41 @@ function TradeCardComp({
   const reasonsEnabled = useFlag('trade_math.human_explanations');
   // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
   // button and the reasons arrive as an overlay over the page, instead of
-  // three inline tiles replacing the ✕. Scope is deliberately narrow: the
-  // operator ruled "just this version of the calculator", so with the flag
-  // off the shipped inline-tile form renders byte-identically.
-  const reasonsAsOverlay = useFlag('calc.merged_layout');
+  // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
+  // Props comment): the host owns the "arrived from the calculator" fact.
   const [reasonOverlayOpen, setReasonOverlayOpen] = useState(false);
+  // Review #1 — a layer-1 tile BANKS the pass (`advance('pass', {
+  // deferDeckAdvance: true })`) and the host only fronts the next card from
+  // layer 2. So the sheet must stay up through layer 2, and a backdrop
+  // dismiss AFTER a tile has been banked has to tell the host to commit that
+  // deferred advance — otherwise ✓/✕/swipe/VoiceOver are all inert and the
+  // card is a dead end. Ref, not state: read inside the dismiss handler only.
+  const reasonBankedRef = useRef(false);
+  // Review #3c — n19 spotlights `trades.pass-btn`, which was never registered
+  // as a guide target (only four ids are, TradesScreen :3003-3006). Registered
+  // per-instance from here because ONLY the deck's top card is given
+  // `disposition` (TradesScreen :6972 is the single call site), so exactly one
+  // node can ever claim the id. Skipped when the inline-tile form removes the
+  // button — an id pointing at an unmounted node measures to null anyway.
+  const passBtnRef = useRef<View | null>(null);
+  const passBtnMounted = !!disposition && !(disposition.reasons && !reasonsAsOverlay);
+  useEffect(() => {
+    if (!passBtnMounted) return;
+    registerGuideTarget('trades.pass-btn', passBtnRef);
+    return () => unregisterGuideTarget('trades.pass-btn');
+  }, [passBtnMounted]);
+
+  // Backdrop / system dismiss of the reason overlay. BEFORE any tile the card
+  // is simply left undecided (today's intent). AFTER a tile, the pass is
+  // already written server-side and the deck advance is the only thing still
+  // owed — the host commits it with layer 2 = none, which is exactly the row
+  // an inline-mode user leaves when they answer layer 1 and stop.
+  function dismissReasonOverlay() {
+    const banked = reasonBankedRef.current;
+    reasonBankedRef.current = false;
+    setReasonOverlayOpen(false);
+    disposition?.reasons?.onOverlayDismissed?.(banked);
+  }
   const showReasons = reasonsEnabled
     && Array.isArray(data.reasons)
     && data.reasons.length > 0;
@@ -613,6 +666,8 @@ function TradeCardComp({
                 byte-identically to the shipped ✓/✕ row. */}
             {disposition.reasons && !reasonsAsOverlay ? null : (
               <Pressable
+                ref={passBtnRef}
+                collapsable={false}
                 testID="trades.pass-btn"
                 onPress={
                   // Overlay mode: the ✕ opens the reason sheet, and the
@@ -620,7 +675,11 @@ function TradeCardComp({
                   // disposition — same contract as the inline form). Without
                   // reasons wired it is the plain pass it has always been.
                   disposition.reasons && reasonsAsOverlay
-                    ? () => setReasonOverlayOpen(true)
+                    ? () => {
+                        reasonBankedRef.current = false;
+                        setReasonOverlayOpen(true);
+                        disposition.reasons!.onOverlayOpened?.();
+                      }
                     : disposition.onPass
                 }
                 disabled={disposition.disabled}
@@ -664,34 +723,45 @@ function TradeCardComp({
               visible={reasonOverlayOpen}
               transparent
               animationType="fade"
-              onRequestClose={() => setReasonOverlayOpen(false)}
+              onRequestClose={() => dismissReasonOverlay()}
             >
-              <Pressable
-                style={styles.reasonOverlayBackdrop}
-                onPress={() => setReasonOverlayOpen(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Dismiss without passing"
-              />
-              <View style={styles.reasonOverlaySheet} testID="trades.pass-reason-overlay">
-                {/* Every callback closes the overlay first, then runs the
-                    host's handler. The host advances the deck on commit, so
-                    leaving the sheet up would strand it over the NEXT card. */}
-                <DeclineReasonPanel
-                  onLayer1={(r, from) => {
-                    setReasonOverlayOpen(false);
-                    disposition.reasons!.onLayer1(r, from);
-                  }}
-                  onLayer2Select={(r, d) => {
-                    setReasonOverlayOpen(false);
-                    disposition.reasons!.onLayer2Select(r, d);
-                  }}
-                  onLayer2Bank={(r, d) => disposition.reasons!.onLayer2Bank(r, d)}
-                  onLayer2Send={(r, d, t) => {
-                    setReasonOverlayOpen(false);
-                    disposition.reasons!.onLayer2Send(r, d, t);
-                  }}
+              {/* The "Other" composer's send button opens BELOW its text box.
+                  Inside a Modal the host ScrollView's inset machinery cannot
+                  reach it, so the sheet lifts itself. */}
+              <KeyboardAvoidingView
+                style={styles.reasonOverlayFill}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              >
+                <Pressable
+                  style={styles.reasonOverlayBackdrop}
+                  onPress={() => dismissReasonOverlay()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss the decline reasons"
                 />
-              </View>
+                <View style={styles.reasonOverlaySheet} testID="trades.pass-reason-overlay">
+                  {/* The sheet STAYS UP through layer 1 (review #1): the tile
+                      tap banks the pass but defers the deck advance, and the
+                      host only fronts the next card from layer 2. Closing here
+                      left the card banked and every control inert. Only the two
+                      ADVANCING callbacks close. */}
+                  <DeclineReasonPanel
+                    onLayer1={(r, from) => {
+                      reasonBankedRef.current = true;
+                      disposition.reasons!.onLayer1(r, from);
+                    }}
+                    onLayer2Select={(r, d) => {
+                      setReasonOverlayOpen(false);
+                      disposition.reasons!.onLayer2Select(r, d);
+                    }}
+                    onLayer2Bank={(r, d) => disposition.reasons!.onLayer2Bank(r, d)}
+                    onLayer2Send={(r, d, t) => {
+                      setReasonOverlayOpen(false);
+                      disposition.reasons!.onLayer2Send(r, d, t);
+                    }}
+                    onRevealRequest={disposition.reasons!.onRevealRequest}
+                  />
+                </View>
+              </KeyboardAvoidingView>
             </Modal>
           ) : null}
         </>
@@ -818,6 +888,7 @@ const styles = StyleSheet.create({
   // #384 ruling 1 — the decline reasons as an overlay over the page. Bottom
   // sheet rather than a centred dialog: the panel's layer 2 opens a text
   // composer, and a keyboard under a centred dialog would cover it.
+  reasonOverlayFill: { flex: 1 },
   reasonOverlayBackdrop: { flex: 1, backgroundColor: '#0009' },
   reasonOverlaySheet: {
     maxHeight: '80%',

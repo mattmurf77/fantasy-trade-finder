@@ -30,10 +30,29 @@ import type { Player } from '../shared/types';
 // only by LeagueSummaryScreen's row action, consumed (and nulled) by
 // TradesScreen on focus; an un-consumed handoff persists until consume,
 // `clear()`, or the league-switch subscription below — no timeout.
+// #384 — the merged calculator reuses the SAME one-shot handoff to hand the
+// deck its opponent and arm the auto-run. Two optional fields carry what the
+// deck cannot otherwise know about that arrival:
+//   * `origin: 'calculator'` — the deck was reached FROM the calculator, which
+//     is the only place the ✕ decline-reason OVERLAY is allowed (round-2
+//     ruling 1: "this calculator only"). TradesScreen records it as
+//     `deckOrigin` and clears it on league switch, on a pin clear, on a later
+//     handoff with a different origin, and on a finder-mode change.
+//   * `includePlayers` — the state of the calculator's "Include players"
+//     toggle at hand-off time. `false` means the sweep is deliberately
+//     unconstrained by the canvas, so the deck asserts the pins are empty.
+// Both absent ⇒ a #330 league-offer handoff, byte-identical to before.
+// `opponent` is nullable ONLY for the calculator origin: its Team dropdown is
+// optional, and the pins alone are a complete search. `null` consumes as
+// `setSheetOpponent(null)` — an unscoped sweep, which is exactly what "no
+// partner chosen" means. #330's own caller always supplies one, so that path
+// is unchanged.
 export interface FinderHandoff {
   seq: number;
-  opponent: { userId: string; name: string };
+  opponent: { userId: string; name: string } | null;
   autoRun: true;
+  origin?: 'calculator';
+  includePlayers?: boolean;
 }
 
 interface FinderTargetsState {

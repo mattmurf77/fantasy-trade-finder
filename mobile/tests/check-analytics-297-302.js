@@ -263,11 +263,13 @@ assert(
   `expected 3 (handleFindTrades + the legacy !consolidateOn arm + the #330 auto-run emit in the choke-point effect), saw ${findTapped.length}`,
 );
 assert(
-  countOf(
-    tradesCode,
-    "track('find_trades_tapped', { source: 'league_offer', mode: deckMode }, 'Trades')",
-  ) === 1,
-  "#330 the third emitter is the auto-run's source:'league_offer' dispatch, reading the same deckMode",
+  // #384 — the auto-run emitter now attributes the calculator's hand-off too
+  // (`source` is a ternary over the armed origin); `mode` still reads the
+  // ONE deckMode derivation.
+  (tradesCode.match(
+    /track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\)/g,
+  ) || []).length === 1,
+  "#330 the third emitter is the auto-run's source:'league_offer' (or 'calculator') dispatch, reading the same deckMode",
   'a third emitter with its own mode derivation is how the arms come to disagree; details pinned by check-offer-prefill-330.js S-3',
 );
 assert(

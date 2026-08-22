@@ -114,10 +114,18 @@ if (guard) {
     'an unconditional mount would grow a tile row on every deck card',
   );
 }
+// #384 W5 widened the type to `DispositionReasons` (DeclineReasonPanelProps
+// plus the two overlay-lifecycle hooks the sheet host needs). Both names are
+// accepted; the thing being pinned is the `?`.
 assert(
-  /reasons\?:\s*DeclineReasonPanelProps/.test(cardText),
+  /reasons\?:\s*(DeclineReasonPanelProps|DispositionReasons)\b/.test(cardText),
   'TradeCard: `disposition.reasons` is optional',
   'a required prop would force every caller to supply it — match/peek mounts must not',
+);
+assert(
+  /interface DispositionReasons extends DeclineReasonPanelProps/.test(cardText),
+  'TradeCard: the overlay hooks EXTEND the panel props, they do not replace them',
+  'forking the panel contract would let the overlay and inline forms drift apart',
 );
 
 // ═══════════════════════════════════════════════════════════════════════
