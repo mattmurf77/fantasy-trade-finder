@@ -117,7 +117,7 @@ import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { ApiError, getBaseUrl } from '../api/client';
 import { resolveShareUrl } from '../utils/shareLinks';
-import { useInterruptSlot } from '../state/useInterruptCoordinator';
+import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
 import FormatGate, { formatLabel } from '../components/FormatGate';
@@ -1251,6 +1251,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // the deck's exhausted state offers the two calculator-first exits
   // (ruling 8). Nothing else on this screen branches on it.
   const calcMergedOn = useFlag('calc.merged_layout');
+  // #384 ruling 10 — the four in-flow notices below are not arbiter
+  // surfaces (they never claimed a slot, and enrolling them now would make
+  // them defer to each other in ordinary use). They take the tour-only
+  // mute instead: hidden while a scripted tour holds the floor, unchanged
+  // in every other state.
+  const mutedForTour = useMutedDuringTour();
   // #287 — the featured window renders the pinned idea as an editable
   // InLeagueCalculator instead of a read-only TradeCard tile.
   const playerOffersCalcOn = useFlag('trades.player_offers_calc');
@@ -4837,7 +4843,7 @@ export default function TradesScreen({ navigation, route }: any) {
             shopping/untouchables) changed while it was open, this one-line
             strip offers the refresh instead of silently leaving a stale
             deck on screen. */}
-        {consolidateOn && showPrefsChangedStrip ? (
+        {consolidateOn && showPrefsChangedStrip && !mutedForTour ? (
           <Pressable
             testID="trades.prefs-changed-strip"
             accessibilityRole="button"
@@ -5832,7 +5838,7 @@ export default function TradesScreen({ navigation, route }: any) {
           />
           </View>
         ) : null}
-        {quicksetDiffBanner ? (
+        {quicksetDiffBanner && !mutedForTour ? (
           <View testID="trades.diff-banner" style={styles.diffBanner}>
             <Text style={styles.diffBannerText}>
               Re-ranked with your {quicksetDiffBanner.position} board —{' '}
@@ -5905,6 +5911,7 @@ export default function TradesScreen({ navigation, route }: any) {
             theater rule). One line, dismissible per job; Undo lifts the
             newest suppression and regenerates. */}
         {fatigueOn &&
+        !mutedForTour &&
         job?.suppression_note &&
         job.suppression_note.count > 0 &&
         suppressionNoteDismissedJob !== job.job_id ? (
@@ -5996,7 +6003,7 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
-          ) : adaptationMoment && topCard ? (
+          ) : adaptationMoment && topCard && !mutedForTour ? (
             // F9 (deck.first_session) — the adaptation moment: ONE inline
             // card between deck cards (QuickSetPromptCard precedent — it
             // holds the top-of-deck slot until dismissed; the deck resumes

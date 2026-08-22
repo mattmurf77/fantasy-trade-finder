@@ -59,6 +59,7 @@
     "test:single-pin-actions": "node tests/check-single-pin-actions.js",
     "test:team-review": "node tests/check-team-review.js",
     "test:team-review-depth": "node tests/check-team-review-depth.js",
+    "test:tour-suppression": "node tests/check-tour-suppression.js",
     "test:trade-text": "node tests/check-trade-text.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
     "test:window-composite": "node tests/check-window-composite.js",
