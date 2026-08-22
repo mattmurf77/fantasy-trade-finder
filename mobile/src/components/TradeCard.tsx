@@ -245,6 +245,20 @@ function TradeCardComp({
     registerGuideTarget('trades.pass-btn', passBtnRef);
     return () => unregisterGuideTarget('trades.pass-btn');
   }, [passBtnMounted]);
+  // #384 device feedback (report 4) — n20 ("Swap arrows change any player")
+  // shipped untargeted because the affordance is per-row. It only needs ONE
+  // row to teach the control, so the FIRST give row's swap button carries the
+  // id. Same scoping rule as `trades.pass-btn` above: registered only when
+  // `disposition` is present, i.e. only on the deck's top card, so exactly one
+  // node can ever claim it. Also gated on `onSwapPlayer` — without it the slot
+  // renders null and an empty wrapper measures to nothing.
+  const swapFirstRef = useRef<View | null>(null);
+  const swapFirstMounted = !!disposition && !!onSwapPlayer && givePlayers.length > 0;
+  useEffect(() => {
+    if (!swapFirstMounted) return;
+    registerGuideTarget('trades.swap-first', swapFirstRef);
+    return () => unregisterGuideTarget('trades.swap-first');
+  }, [swapFirstMounted]);
 
   // Backdrop / system dismiss of the reason overlay. BEFORE any tile the card
   // is simply left undecided (today's intent). AFTER a tile, the pass is
@@ -574,7 +588,7 @@ function TradeCardComp({
         <View style={styles.side}>
           <TickLabel>YOU SEND</TickLabel>
           <View style={styles.sideStack}>
-            {givePlayers.map((p) => (
+            {givePlayers.map((p, i) => (
               <PlayerCard
                 key={p.id}
                 player={p}
@@ -600,7 +614,17 @@ function TradeCardComp({
                   (!hideLockButton && onPlayerMenu && onToggleUntouchable) ? (
                     <View style={styles.rightSlotStack}>
                       {lockSlot(p)}
-                      {swapSlot(p, 'give')}
+                      {/* n20's spotlight rides the FIRST give row's swap
+                          control — one row is enough to teach a per-row
+                          affordance, and the top card is the only card that
+                          ever has one (#384 report 4). */}
+                      {i === 0 ? (
+                        <View ref={swapFirstRef} collapsable={false}>
+                          {swapSlot(p, 'give')}
+                        </View>
+                      ) : (
+                        swapSlot(p, 'give')
+                      )}
                       {removeSlot(p, 'give')}
                     </View>
                   ) : undefined

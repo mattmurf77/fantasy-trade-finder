@@ -465,3 +465,107 @@ clean · `bash mobile/scripts/testid-lint.sh` OK · **76/76** `check-*.js` guard
 known-unfixed carry-forwards above are unchanged — the action row is still inside the page
 ScrollView, the outlook row is a receipt rather than a disclosure, the mode row still renders one
 lonely chip for a league-less user, and `lineupHeadText` is still 10 pt.
+
+## W7 — 2026-08-22: device feedback on the shipped tour
+
+The merged calculator and its thirteen-beat tour shipped this morning (PR #172, `calc.merged_layout`
++ `onboarding.guide_v2` on, build **1.16.0 (126)**). The operator ran it on a real device and filed
+six reports. All six are real, all six are fixed here, and one of the lead's diagnoses was
+**incomplete** — noted below.
+
+### The six reports, their causes and their fixes
+
+| # | Report | Cause | Fix |
+|---|---|---|---|
+| 1 | "Box was in the wrong spot when I first navigated to the page. When I navigated to the in league page after the tour and hit 'Show me around', it worked." | MEASURE TIMING, two halves. The auto-start ran from a bare mount effect (`TradeCalculatorScreen.tsx` old :202), so `measureInWindow` — which returns ABSOLUTE window coordinates — was called while the native-stack push was still sliding the screen in. Nothing re-measured afterwards: the only producer of `notifyGuideTargetsMoved` was `onScroll`, and a first landing has no scroll. "Show me around" worked because by then the screen had settled. | The auto-start waits for the transition: `navigation.addListener('transitionEnd', begin)` with an `InteractionManager.runAfterInteractions(begin)` fallback and a `started` latch so whichever lands first runs once — `TradeCalculatorScreen.tsx:236-249`. And the page ScrollView announces from `onLayout` + `onContentSizeChange` as well as `onScroll` (`:669-670`), because this page's content GROWS after first paint (rosters land; the outlook receipt swaps with its fallback) and that moves every target below it with no scroll event at all. The receipt gate and the `hasLeague`/`prefill` gates are untouched. |
+| 2 | "Set outlook has the set outlook button in the dialogue box (good), but doesn't highlight the outlook box on the page." | `n11` carried no `target` at all (`analystScript.ts` old :374-381). | One `View` wraps the WHOLE outlook section — `OutlookBiasReceipt` AND the `calc.outlook-fallback` twin, whichever renders — registered as `calc.outlook-row` (`InLeagueCalculator.tsx:196`, `:214`, `:713`, `collapsable={false}`). `n11` targets it with `side: 'left'` and a deixis-free `degradeLine` (`analystScript.ts:391-393`). The CTA is unchanged. |
+| 3 | "After the outlook, no analyst avatar or dialogue box is present for: Add a player section / Find a trade / Like / Add a player / Find a trade second time (box is right)." | PLACEMENT. The solver put the band at a fixed `top: 54` whenever the target's bottom edge fell below 60 % of the window. Every calculator beat after the outlook (n12, n13, n15, n16, n18) has a low target, so all five went there — on `TradeCalculator`, which carries a native-stack header (`subScreenOptions` in `TabNav.tsx:485-490`). `n10` (high target) and `n11` (no target) used the `bottom: 92` band and were both seen, and the avatar returned at `n19` on the header-less deck: the correlation is exact. | The band is placed ADJACENT to its cutout — `solveBandPlacement()` in `AnalystGuide.tsx:66-92`, called at `:332`: above the ring when the whole band clears `insets.top + 8`, else below it when it clears `insets.bottom`, else the old bottom band. The band's own height comes from `onLayout` (`:382-388`) and both height and placement are LATCHED per step (`:113`, `:333-336`), so a tracked frame cannot re-site the band mid-scroll; a targeted step renders at `opacity: 0` for the one frame before it is measured (`:341`, `:410`; the hide sits on the inner row so the animated opacity is never overridden). |
+| 4 | "Avatar reappears when the trade pops up but doesn't highlight the swap player button." | `n20` was untargeted by design ("the swap affordance is per-player-row"). | One row is enough to teach a per-row control: the FIRST give row's swap slot on the top card registers `trades.swap-first` (`TradeCard.tsx:255-261`, attached `:622`). Scoped exactly like `trades.pass-btn` — only a card with a `disposition` registers, and the deck's top card is the only card that gets one — plus `onSwapPlayer`, because without it the slot renders null and an empty wrapper measures to nothing. `n20` targets it with a `degradeLine` (`analystScript.ts:486-489`). |
+| 5 | "Scroll is broken when on the page and the focus isn't on the cards… So the 'Sending goes straight to league' dialogue doesn't have the button in view." | TWO causes. (a) Every talk beat was `advance: 'tap'`, and a tap beat mounts a full-screen `Pressable` catcher over the whole window (`AnalystGuide.tsx:368-377`) — it swallows the scroll gesture. (b) `n23`/`n23b` had no target, and the send button sits below the fold. | (a) is fixed by report 6 below: no #384 beat is a tap beat any more, so no #384 beat mounts a catcher. The catcher code path survives for any remaining `advance:'tap'` step elsewhere in the script. (b) `guideTargets.ts` gains a scroller registry (`:77-97`) — `registerGuideScroller(screenKey, {scrollTo, getScrollY})`, keyed by the screen name the step declares — registered by `TradeCalculatorScreen.tsx:154-160` and `TradesScreen.tsx:3262-3269`. When a targeted step's frame resolves off-screen or too close to an edge for the band, the overlay scrolls it in (`AnalystGuide.tsx:231-253`) and the host's existing `onScroll` → `notifyGuideTargetsMoved` re-measures. Once per step, latched (`:234`, `:237`) — scrolling notifies, the notify re-measures, and a re-entry would never settle. The send router is wrapped in a registered `trades.send-btn` View (`TradesScreen.tsx:3241`, `:3248`, `:6461-6466`); the wrapper is the target because the button inside resolves to one of four platform branches. |
+| 6 | "Progression needs to be more graceful. Right now it's based on screen tap. The dialogue boxes that the user isn't expected to take action should get a 'next' button." | By design in W4 — talk beats were `advance: 'tap'`. | Every #384 talk beat is now `advance: 'cta'` with a single primary button (`analystScript.ts:74-76` defines the shared `NEXT`/`DONE` objects). The action beats `n10` and `n18` stay `action`; `n11` stays `cta` with its own "Set outlook". `calcTour.ts:230` now treats `via === 'cta'` as progress alongside `'advance'`, so n10's abandon-on-✕ rule can never fire on a button. |
+
+### One correction to the lead's diagnosis
+
+The lead's report-3 fix was right and is what shipped. Its report-5 fix was **incomplete in one
+place I found by running the new solver**: the BELOW branch, as specified, could put the band inside
+the TOP inset — a ring clamped to `y = 0` (a target the user has scrolled up past, which the cutout
+math produces by design) gives `below = 0 + height + 12`, which for a short ring is under the status
+bar. That is the same defect as report 3, one screen edge over. The solver floors the below-branch
+offset at `insets.top + 8` (`AnalystGuide.tsx:88`). The sweep in
+`check-guide-spotlight-tracking.js` §11j is what found it and is what keeps it.
+
+Nothing else in the lead's diagnosis was wrong. On report 3 the mechanism is worth stating
+precisely, because I could not run the app: what is PROVEN is that the fixed `top: 54` band is the
+only thing the five invisible beats share and the two visible ones do not, and that the one
+structural difference between the calculator and the deck is the native-stack header. Whether the
+band was occluded by that header or merely sited far enough from the ring that the operator read it
+as absent, adjacency removes both readings.
+
+### Beats converted to a button
+
+| Beat | Was | Now | Line words (cta cap = 16) |
+|---|---|---|---|
+| n12 | tap | cta · Next | 14 |
+| n13 | tap | cta · Next | 14 |
+| n15 | tap | cta · Next | 14 |
+| n16 | tap | cta · Next | 11 |
+| n19 | tap | cta · Next | 13 |
+| n20 | tap | cta · Next | 9 |
+| n21 | tap | cta · Next | 8 |
+| n22 | tap | cta · Next | 11 |
+| n23 | tap | cta · Next | 11 |
+| n23b | tap | cta · Next | 6 |
+| n24 | tap | cta · **Done** | 12 |
+
+`n10` and `n18` remain `action` (they advance on the real mode switch and the real Find-a-Trade
+tap). `n11` was already `cta`. Every label is one word, well inside the ≤4-word budget, and every
+line and `degradeLine` is inside the 16-word cta cap — `check-guide-script.js` §2b/2c/2d measures
+the RENDERED strings, not these numbers.
+
+### Files
+
+| File | Change |
+|---|---|
+| `mobile/src/state/guideTargets.ts` | `GuideScroller` + `registerGuideScroller` / `unregisterGuideScroller` / `getGuideScroller` |
+| `mobile/src/components/AnalystGuide.tsx` | exported pure `solveBandPlacement`; measured + latched `bandH`; the latch now holds `{from, offset}`; scroll-into-view effect; `bandPending` opacity |
+| `mobile/src/components/analystScript.ts` | shared `NEXT`/`DONE`; eleven beats tap → cta; targets + degradeLines on n11/n20/n23/n23b |
+| `mobile/src/utils/calcTour.ts` | `via === 'cta'` counts as progress at the n10 abandon rule |
+| `mobile/src/components/InLeagueCalculator.tsx` | `calc.outlook-row` wrapper + registration |
+| `mobile/src/components/TradeCard.tsx` | `trades.swap-first` on the first give row of a card with a `disposition` |
+| `mobile/src/screens/TradeCalculatorScreen.tsx` | `transitionEnd` auto-start; `onLayout` + `onContentSizeChange` announcements; scroller registration |
+| `mobile/src/screens/TradesScreen.tsx` | `trades.send-btn` wrapper + registration; scroller registration; unconditional scroll-offset ref |
+| `mobile/tests/check-calc-tour.js` | §15b–d, §39–41 |
+| `mobile/tests/check-guide-spotlight-tracking.js` | §7 re-pointed at `place`; §11 (solver lifted + RUN), §12, §13 |
+
+### Evidence
+
+- **Guards:** 76/76 `check-*.js` pass. `check-calc-tour.js` gained the device-pass section (no tap
+  beats; the four new targets exist AND are registered by the file owning the node; the auto-start
+  waits for `transitionEnd`; both screens register a scroller under the exact key their beats
+  declare). `check-guide-spotlight-tracking.js` LIFTS `solveBandPlacement` out of the source,
+  transpiles it and runs it over a sweep of ring positions × band heights, asserting the band never
+  overlaps its ring and a top-anchored band always clears the top inset.
+- **A hole this closed in the older guards:** assertion 17's registration check used
+  `registerGuideTarget\('id'` — which `unregisterGuideTarget('id')` satisfies as a substring, so
+  deleting a registration read as green. Both call sites now use `\b`, and the send-btn sabotage is
+  red because of it.
+- **Sabotages, all red, all reverted:** band style back to `{ top: 54 }` (§11l) · solver's ABOVE
+  branch returns a constant (§11d) · solver ignores `insets.top` (§11j) · `n21` back to
+  `advance:'tap'` (§39) · `n20` loses its target and buttons (§39a/§40 + `check-guide-script` §2f/§5b)
+  · `trades.send-btn` registration deleted (§40b) · calculator drops `onContentSizeChange` (§12b) ·
+  auto-start stops listening for `transitionEnd` (§15b).
+- **Runtime: none** (D-056). The checklist below gained a section G.
+
+**Gates:** `npx tsc --noEmit` clean · **76/76** `mobile/tests/check-*.js` · `bash
+mobile/scripts/testid-lint.sh` OK. Backend untouched, so `pytest` is unchanged from W6-B.
+
+### Still open after W7
+
+- **Report 3's mechanism is inferred, not observed.** The fix is mechanism-independent, but if the
+  band is still invisible on the calculator after this build, the next thing to check is whether the
+  native-stack header renders above `RootNav`'s overlay sibling — which would be a z-order problem
+  no placement solver can fix.
+- **`n18` is still an action beat with a low target.** It now gets an adjacent band and, if needed,
+  a scroll-into-view, but it has no Next button by design: the user is being asked to tap Find a
+  Trade. If the operator finds it hard to reach, the answer is a scroll, not a button.
+- The W6-B carry-forwards are unchanged.

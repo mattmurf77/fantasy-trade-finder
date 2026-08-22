@@ -1,4 +1,4 @@
-# TestFlight checklist — #384 merged calculator (W0–W6-B)
+# TestFlight checklist — #384 merged calculator (W0–W7)
 
 **Under [D-056](../../../living-memory/DECISIONS.md) this is the ONLY runtime evidence any of
 this can get.** Everything below is structurally verified and has never run on a device.
@@ -303,11 +303,74 @@ defect in the gating, not in the feature.
 
 ---
 
+## G. The device-feedback fixes (W7) — run this on 1.16.x after (126)
+
+Six reports off build 1.16.0 (126). These steps exist to confirm each one is gone, and they are
+the ONLY runtime proof any of it gets — none of it ran on a device before shipping.
+
+**Requires `calc.merged_layout` = true, `onboarding.guide_v2` = true, and onboarding state cleared
+(a `calc_tour_completed` receipt retires the auto-start).**
+
+50. **First landing is correct without a re-run.** Cold-start the app, go to the Acquire tab →
+    **Manual calc**. Let the tour auto-start. The very first spotlight ring sits **exactly on the
+    In league tab** — not offset left, not floating in empty space. Do NOT tap "Show me around"
+    first; the point of this step is that the FIRST landing is right. *(Report 1: the tour used to
+    measure while the push animation was still sliding the screen in.)* ☐
+51. **…and it survives the page filling in.** While that first beat is up, watch the ring as the
+    rosters finish loading and the page gets taller. The ring **stays on the In league tab**. ☐
+52. **The outlook beat highlights the outlook row.** Tap **In league** to advance. Beat 2 —
+    *"Set your outlook first…"* — now draws a ring around the **Outlook row** (the receipt, or the
+    "Outlook · Not set" fallback row if `trade.outlook_direction` is off). Both are correct; only
+    one of them renders. *(Report 2.)* ☐
+53. **"Set outlook" still opens the sheet.** Tap the button in the bubble. The Trade DNA sheet
+    opens, and the tour moves on. ☐
+54. **Every calculator beat shows the avatar AND the bubble, next to its ring.** Walk the rest of
+    the calculator half — canvas → Find a Trade → ✓ → Add a player → Find a Trade again. For
+    **each** beat: the ring is on the right control, AND the Analyst + bubble are **adjacent to
+    that ring** (directly above it, or directly below it if there is no room above). No beat shows
+    a ring on its own, and no bubble sits under the status bar or the "Calculator" header.
+    *(Report 3 — five consecutive beats used to show a ring with no Analyst.)* ☐
+55. **Next buttons, not screen taps.** Each of those beats carries a **Next** button inside the
+    bubble. Tapping the page background does **nothing**. *(Report 6.)* ☐
+56. **Scrolling works during a beat.** With any of those bubbles up, drag the page. It **scrolls**,
+    and the ring **tracks its control** as it moves. *(Report 5a — a tap beat used to mount an
+    invisible full-screen catcher that ate the gesture.)* ☐
+57. **Find a Trade with the canvas empty** (beat n18 is an action beat — no Next button, it waits
+    for the real tap). You land on the modeled deck. ☐
+58. **The deck beats keep the avatar and hit their targets.** On the deck: the ✕ beat rings the
+    card's ✕; the **swap** beat rings the **swap arrow on the first give-side player row** — not
+    the whole card, not nothing *(report 4)*; the package beat rings the package toggle; the
+    fairness beat rings the meter's ⓘ. Every one shows the Analyst beside its ring. ☐
+59. **The send beat scrolls its button into view.** When the *"Sending goes straight to your
+    league"* beat comes up, the **Send** button is **visible on screen** — the page scrolls itself
+    to bring it in if it was below the fold — and the ring is on it. *(Report 5b.)* ☐
+    - Off Sleeper (MFL/ESPN) the line is the shorter *"Sending goes straight to your league."*
+      with no password claim, and it rings the same control. ☐
+    - With `trade.send_in_sleeper` OFF the button does not render; the beat then shows its
+      **degrade** line and **no ring**. That is correct, not a bug. ☐
+60. **The last beat says Done.** The closing beat's button reads **Done**, not Next. Tapping it
+    ends the tour: no bubble is left floating over the deck, and the next interstitial the app
+    wants to show is free to appear. ☐
+61. **Re-run is still clean.** Go back to the calculator and tap **Show me around**. The whole
+    thing runs again from the top with the same placements. ☐
+62. **Regression — the OTHER guided beats still work.** Fresh install, sign in, and let the
+    first-run deck tour run (swipe hint / provenance chip / trio entry). Those beats are untouched
+    by this wave; confirm none of them lost its avatar or its ring. ☐
+
+---
+
 ## Known-unverified / known-imperfect
 
-- Nothing in this document has run on a device. Every claim in the six wave commits is
-  structural: type checks, 76 `check-*.js` guards (15 named sabotages re-verified red), and a
-  file:line code-walk.
+- Nothing in this document has run on a device **except** what the operator's 2026-08-22 pass on
+  build 1.16.0 (126) found — section G exists to re-check exactly those six reports. Everything
+  else is structural: type checks, 76 `check-*.js` guards (23 named sabotages re-verified red),
+  and a file:line code-walk.
+- **Report 3's mechanism is inferred.** The fixed `top: 54` band is the only thing the five
+  invisible beats shared and the two visible ones did not, and the native-stack header is the
+  only structural difference between the calculator and the deck — but whether the band was
+  OCCLUDED by that header or merely sited far from its ring was never observed. Adjacency fixes
+  both readings. If step 54 still shows a ring with no Analyst, the remaining suspect is
+  z-order between the native header and `RootNav`'s overlay sibling, which no solver can fix.
 - **The action row is inside the page ScrollView**, not pinned. With 3+ assets per column it
   scrolls out of frame — against the report's one "important" ("fits in the frame"). Steps 10 and
   18 will show this; it is a known gap, not a new defect.

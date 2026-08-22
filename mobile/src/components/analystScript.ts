@@ -62,6 +62,19 @@ export const GUIDE_RECEIPTS = {
 
 const R = GUIDE_RECEIPTS;
 
+/** #384 device feedback (report 6) — "Progression needs to be more graceful.
+ *  Right now it's based on screen tap. The dialogue boxes that the user isn't
+ *  expected to take action should get a 'next' button in the dialogue box."
+ *
+ *  Two consequences, both wanted: the user gets an explicit control instead of
+ *  guessing that a tap anywhere advances, and the overlay stops mounting the
+ *  full-screen tap-catcher for these beats — which is what was eating the
+ *  scroll gesture on the deck (report 5). `advance: 'tap'` survives in the
+ *  engine for older beats; no #384 beat uses it. */
+const NEXT = { label: 'Next', kind: 'primary', action: 'accept' } as const;
+/** The last beat of the walkthrough — the button says so. */
+const DONE = { label: 'Done', kind: 'primary', action: 'accept' } as const;
+
 /** Any board-building receipt: a user who has ranked by ANY method has
  *  answered the questions `n1`/`s3.2`/`n8` exist to ask. */
 const BOARD_RECEIPTS = [
@@ -371,18 +384,27 @@ export const S = {
     adoptionEvent: 'calc_mode_switched',
   }),
 
+  // Device feedback 2026-08-22 (report 2): the beat opened the sheet but
+  // highlighted nothing, because it carried no `target`. `calc.outlook-row`
+  // wraps whichever outlook row rendered — the receipt or its fallback.
   n11: (): GuideStep => ({
     id: 'n11', screen: 'TradeCalculator', pose: 'thinking', advance: 'cta',
+    target: 'calc.outlook-row', side: 'left',
     line: 'Set your outlook first — it aims every suggestion at your plan.',
+    degradeLine: 'Setting an outlook aims every suggestion at your plan.',
     ctas: [{ label: 'Set outlook', kind: 'primary', action: 'accept' }],
     maxDisplayCount: 2,
     retireAfter: { event: R.outlookSaved, count: 1 },
     adoptionEvent: 'outlook_saved',
   }),
 
+  // Device feedback 2026-08-22 (report 6): every beat the user is not asked to
+  // ACT on carries a Next button instead of advancing on a screen tap. A tap
+  // beat mounts a full-screen catcher, which also swallowed the scroll — so
+  // this is the same change as report 5's second half.
   n12: (): GuideStep => ({
-    id: 'n12', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
-    target: 'calc.trade-columns',
+    id: 'n12', screen: 'TradeCalculator', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'calc.trade-columns',
     line: 'This is your canvas. Both rosters side by side — build any trade by hand.',
     degradeLine: 'Both rosters sit side by side here — build any trade by hand.',
     maxDisplayCount: 3,
@@ -391,8 +413,8 @@ export const S = {
   }),
 
   n13: (): GuideStep => ({
-    id: 'n13', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
-    target: 'calc.action.find-a-trade',
+    id: 'n13', screen: 'TradeCalculator', pose: 'point', advance: 'cta',
+    ctas: [NEXT], target: 'calc.action.find-a-trade',
     line: "Find a Trade searches for you. We'll come back to it in a moment.",
     degradeLine: "Find a Trade searches for you — we'll come back to it.",
     maxDisplayCount: 3,
@@ -401,8 +423,8 @@ export const S = {
   }),
 
   n15: (): GuideStep => ({
-    id: 'n15', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
-    target: 'calc.action.confirm',
+    id: 'n15', screen: 'TradeCalculator', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'calc.action.confirm',
     line: 'The check queues this trade for the other manager, if it fits their preferences.',
     degradeLine: 'Confirming queues a trade for the other manager, if it fits their preferences.',
     maxDisplayCount: 3,
@@ -414,15 +436,16 @@ export const S = {
     adoptionEvent: 'calc_trade_queued',
   }),
 
-  // W6-B (D-153) — n16 is a TAP beat that INFORMS rather than an action beat
-  // that commands. The operator's reshape: "the tour mentions they can add
-  // players and we'll find trades with those players included, and then the
-  // user is pushed to find a trade with the calc empty." An action beat here
-  // could only advance on a real pick, which is exactly the canvas state the
-  // tour must NOT end in — the run has to reach the modeled deck.
+  // W6-B (D-153) — n16 INFORMS rather than commands. The operator's reshape:
+  // "the tour mentions they can add players and we'll find trades with those
+  // players included, and then the user is pushed to find a trade with the
+  // calc empty." An action beat here could only advance on a real pick, which
+  // is exactly the canvas state the tour must NOT end in — the run has to
+  // reach the modeled deck. (It was a tap beat until the 2026-08-22 device
+  // pass; it is a Next beat now, which changes the control, not the contract.)
   n16: (): GuideStep => ({
-    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
-    target: 'calc.league-give-add',
+    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'cta',
+    ctas: [NEXT], target: 'calc.league-give-add',
     line: "Add players you'd move and we'll find trades that include them.",
     degradeLine: 'Adding players to a side finds trades that include them.',
     maxDisplayCount: 3,
@@ -446,8 +469,8 @@ export const S = {
   // X records your decision, the check does as before". The calculator's
   // Clear IS the deck's cross — naming that continuity is the beat's job.
   n19: (): GuideStep => ({
-    id: 'n19', screen: 'Trades', pose: 'point', advance: 'tap',
-    target: 'trades.pass-btn',
+    id: 'n19', screen: 'Trades', pose: 'point', advance: 'cta',
+    ctas: [NEXT], target: 'trades.pass-btn',
     line: 'Clear became this cross. It records why you passed; the check still accepts.',
     degradeLine: 'Clear became the cross — it records why you passed. The check accepts.',
     maxDisplayCount: 3,
@@ -455,20 +478,23 @@ export const S = {
     adoptionEvent: 'trade_pass_layer1',
   }),
 
-  // Untargeted on purpose: the swap affordance is per-player-row, so there is
-  // no one node to point at. The line therefore carries no deixis and needs
-  // no degrade contract.
+  // Was untargeted "because the swap affordance is per-player-row". Device
+  // feedback 2026-08-22 (report 4): the avatar came back for this beat and
+  // pointed at nothing. Per-row is true, but ONE row is enough to teach the
+  // control — the top card's first give row registers `trades.swap-first`.
   n20: (): GuideStep => ({
-    id: 'n20', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    id: 'n20', screen: 'Trades', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'trades.swap-first',
     line: 'Swap arrows change any player without leaving the card.',
+    degradeLine: 'Every player row carries a swap arrow that changes that piece.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     adoptionEvent: 'trade_swap_suggest_opened',
   }),
 
   n21: (): GuideStep => ({
-    id: 'n21', screen: 'Trades', pose: 'neutral', advance: 'tap',
-    target: 'trades.package-toggle',
+    id: 'n21', screen: 'Trades', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'trades.package-toggle',
     line: 'Package shows every piece in a multi-player deal.',
     degradeLine: 'Multi-player deals expand to show every piece.',
     maxDisplayCount: 3,
@@ -479,8 +505,8 @@ export const S = {
   }),
 
   n22: (): GuideStep => ({
-    id: 'n22', screen: 'Trades', pose: 'point', advance: 'tap',
-    target: 'trades.fairness-help',
+    id: 'n22', screen: 'Trades', pose: 'point', advance: 'cta',
+    ctas: [NEXT], target: 'trades.fairness-help',
     line: 'Tap the meter to see how we judged this trade fair.',
     degradeLine: 'The fairness meter explains how a trade was judged.',
     maxDisplayCount: 3,
@@ -489,9 +515,12 @@ export const S = {
     adoptionEvent: 'help_opened',
   }),
 
-  // Untargeted: the send control is platform-resolved (Sleeper / MFL / ESPN),
-  // so a fixed target would point at the wrong node — or nothing — for two of
-  // the three. No deixis in the line, so nothing to degrade.
+  // The send control is platform-resolved (Sleeper / MFL / ESPN), so no INNER
+  // button id could be right for more than one of the three — which is why
+  // this beat shipped untargeted, and why the operator's device pass found the
+  // send button off-screen with nothing pointing at it (report 5). The target
+  // is the stable WRAPPER the deck mounts the router in, `trades.send-btn`;
+  // the overlay scrolls it into view before it draws the ring.
   //
   // TWO BEATS, one slot. The password sentence is true on Sleeper (the JWT is
   // captured in a WebView and kept on-device) and FALSE elsewhere: MFL POSTs
@@ -500,8 +529,10 @@ export const S = {
   // runner picks by `resolveSendPlatform` (utils/calcTour.ts) rather than
   // shipping one line that is a lie for two platforms.
   n23: (): GuideStep => ({
-    id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'trades.send-btn',
     line: 'Sending goes straight to your league. Passwords never leave your phone.',
+    degradeLine: 'Sending a trade goes straight to your league. Passwords stay on your phone.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     adoptionEvent: 'sleeper_send_attempted',
@@ -509,8 +540,10 @@ export const S = {
 
   /** Off-Sleeper sibling of `n23` — same slot, no password claim. */
   n23b: (): GuideStep => ({
-    id: 'n23b', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    id: 'n23b', screen: 'Trades', pose: 'neutral', advance: 'cta',
+    ctas: [NEXT], target: 'trades.send-btn',
     line: 'Sending goes straight to your league.',
+    degradeLine: 'Sending a trade goes straight to your league.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     // The registered send event is Sleeper's; MFL/ESPN sends fire no client
@@ -521,7 +554,9 @@ export const S = {
   }),
 
   n24: (): GuideStep => ({
-    id: 'n24', screen: 'Trades', pose: 'celebrate', advance: 'tap',
+    id: 'n24', screen: 'Trades', pose: 'celebrate', advance: 'cta',
+    // The closing beat, so its button says so rather than promising a next.
+    ctas: [DONE],
     line: 'Take it from here. Decide, and the next trade comes up automatically.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: closes the re-runnable walkthrough; capped, not retired.
