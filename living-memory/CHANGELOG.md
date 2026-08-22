@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-08-22j — #384 SHIPPED: merged calculator LIVE for all users (PR #172 `80dee42`, flags LIT, app 1.16.0)
+
+Operator: *"Merge and ship live. Turn the flags on and make available for all users."* Branch
+`claude/manual-calculator-e2e-review-39a467` (20 commits: E2E review → W5 → D-151 → W6-A → W6-B →
+flip) rebased onto `613a34c`, squash-merged as **#172**. `calc.merged_layout` **true** and
+**`onboarding.guide_v2` true** (its original graduation criteria — TestFlight pass + M1–M8
+diagnostics — waived by the operator; note it lights EVERY v2 Analyst beat for all users, not only
+the calculator tour; config-only revert). Fixture mirrors updated (release, onboarding-v2,
+profiles-on). App **1.16.0** (`app.json`, `Info.plist`, pbxproj) — EAS production build
+`--auto-submit` to TestFlight cut from the same tip. Gates at ship: pytest 4173 · tsc · 76/76
+guards · testid-lint. **No runtime evidence** (D-056); the rewritten checklist is now a POST-ship
+checklist. Render auto-deploys the backend from `main`.
+
 ## 2026-08-22i — #384 W6-B: Find a Trade forks on the canvas — fairness-only packages (D-153); still dark, not pushed
 
 Operator re-ruled the contract (no model for a filled canvas; toggle dropped; tour ends in the
