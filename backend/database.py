@@ -2433,6 +2433,8 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── #172/#189 follow-up — asset-centric trade ideas (trade.asset_ideas) ──
     ("asset_ideas_lateral_band", 0.10,  "asset ideas: ± consensus-value band around the pinned asset classifying a counterpart as Lateral; above=Upgrade, below=Downgrade piece"),
     ("asset_ideas_group_cap",    6.0,   "asset ideas: max ideas returned per group (upgrade/lateral/downgrade), ordered by |difference|"),
+    # ── #384 W6-B — fairness-only packages for a fixed give anchor (calc.merged_layout) ──
+    ("fair_packages_cap",       20.0,   "#384: max fair-package ideas returned by POST /api/trades/fair-packages — ONE flat swipeable deck, so one cap (not per group)"),
     ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
     ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
     ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),
@@ -5512,6 +5514,42 @@ def load_recent_league_likes(
             "created_at":         r.created_at,
         })
     return result
+
+
+def find_live_trade_like(user_id: str, league_id: str, trade_id: str) -> dict | None:
+    """The newest still-live (`retracted_at IS NULL`) 'like' row for this
+    (user, league, trade_id), or None. Read-only.
+
+    D-152 — the idempotency probe for `POST /api/trades/queue`. That route
+    mints a DETERMINISTIC `trade_id` from the package, so "has this exact
+    package already been queued?" is exactly this lookup, and it is unbounded
+    in time — unlike `save_trade_decision`'s `TRADE_DECISION_DEDUPE_SECONDS`
+    window, which is a double-fire guard and would let a re-tap ten seconds
+    later double the Elo signal.
+
+    Filters `retracted_at IS NULL` on purpose: the #318 revive path (like ->
+    retract -> re-like) must be able to queue the package again.
+    """
+    if not (user_id and league_id and trade_id):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(
+                trade_decisions_table.c.id,
+                trade_decisions_table.c.created_at,
+            ).where(
+                and_(
+                    trade_decisions_table.c.user_id      == user_id,
+                    trade_decisions_table.c.league_id    == league_id,
+                    trade_decisions_table.c.trade_id     == trade_id,
+                    trade_decisions_table.c.decision     == "like",
+                    trade_decisions_table.c.retracted_at.is_(None),
+                )
+            ).order_by(trade_decisions_table.c.id.desc()).limit(1)
+        ).fetchone()
+    if row is None:
+        return None
+    return {"id": row.id, "created_at": row.created_at}
 
 
 # ---------------------------------------------------------------------------

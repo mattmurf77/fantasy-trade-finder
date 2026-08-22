@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
 - [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
 - [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
@@ -23,6 +24,64 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-22 — Open Items (#384 merged calculator)
+
+### Q-028 — §6b: does the merged surface REPLACE the manual calc tab, or sit beside it as a second tab?
+
+- **Why it matters:** round-2 ruling 3 (2026-08-22) reads *"the new surface replaces the manual calc tab and lives within the league calc"*. The build kept **two** tabs — `In league` | `Real values` — and defaults to **Real values** on a cold open (`TradeCalculatorScreen.tsx`: `useState(prefill ? 'league' : 'live')`). The plan recorded this as a stated assumption needing a yes/no ([`plan.md` §6b](../docs/feedback/items/384-calc-finder-merge/plan.md)); nobody ever answered it, and W0–W5 built to the assumption.
+- **The #310 consequence, which is why this is not cosmetic:** #310 is the report that asked for the calculator to stop being locked behind the trades flow, and `TradesScreen.tsx` records the resulting intent verbatim — *"Calculator … is always reachable — it needs no league"*. The `Real values` tab **is** that reachability: it is the league-free calculator. Collapsing to one page in the ruling's literal sense would delete it and re-answer #310 in the opposite direction. Keeping both tabs honours #310 but leaves ruling 3 half-executed — the merged surface exists *alongside* the manual calc rather than replacing it.
+- **The tour consequence:** the whole walkthrough opens with **n10** — *"Two ways to build a trade. Tap In league to use your real roster."* — an `advance: 'action'` beat that moves only when the user switches tabs, and a run that is ✕-ed there ends the tour (`calcTour.ts` `onBeatComplete`, `slot === 'n10' && via !== 'advance'`). One page means n10 has nothing to point at and the tour needs a new opening beat. It also means a zero-league user has no second tab at all, and today's mode row still renders a single lonely chip for them (e2e review P2 #14, unfixed).
+- **What is unclear:** whether *"replaces the manual calc tab"* meant "the merged layout is what the In-league tab now is" (which is exactly what was built, and then the question is closed as a no-op) or "there is one calculator page, no tabs".
+- **Action to unblock:** operator reads the two sentences above and picks. If it is one page, W6 needs: the mode row deleted, a new opening beat, a #310 re-answer, and a decision about league-less users.
+- **Discovered by:** the #384 plan (§6b) and re-raised by the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md) spec-traceability table, which marks §6b **still open**.
+- **Owner:** operator. Not blocking the flag flip — the built form works either way — but it *is* blocking a truthful "#384 is done".
+
+**CLOSED 2026-08-22 by [D-151](DECISIONS.md).** Operator: *"I'm fine with it as its own tab for now."* The two-tab form (In league | Real values) as built is the answer; #310's league-free reachability stands; n10 keeps its target. Revisit when Find a Trade is absorbed.
+
+### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call? — **CLOSED 2026-08-22 (both halves)**
+
+- **RESOLUTION — the ✓ half, 2026-08-22 (W6-A, [D-152]).** The operator approved building the
+  contract; option (b), a new endpoint, is what shipped as **`POST /api/trades/queue`**. The
+  reading that made it small: the operator's sentence names two systems that already exist —
+  "queue this trade" IS the deck's like (same `trade_decisions` row, same `_reconstruct_swipe_card`
+  → `record_decision` path) and "shows up in their suggested trades" IS the likes-you injector,
+  which reads exactly those rows. So the route mints no new object; a **deterministic** `calcq_`
+  trade_id derived from the package solves the "a canvas has no server-minted id" problem the
+  paragraph below treats as fatal. And because every gate the injector applies is a pure function
+  of state the request already holds, the route evaluates "meets their preferences" **up front**
+  and refuses with a named reason, recording nothing — which is what the operator's *if* actually
+  demands. Contract, evidence and the honest limits of `queued: true`:
+  [`status.md` § W6-A](../docs/feedback/items/384-calc-finder-merge/status.md). Beat n15's copy
+  needed no change, and its placeholder `adoptionEvent` is now `calc_trade_queued`.
+- **RESOLUTION — the receive-side half, 2026-08-22 (W6-B, [D-153]). CLOSED BY RETIREMENT: the
+  concept no longer exists.** The operator re-specified the request rather than answering it.
+  Verbatim: *"I'm thinking that this type of request shouldn't go through our models. It should be
+  a much simpler set of cards solving for fairness only. Similar to how we determine the
+  consolidate and downgrade suggestions already"* — and, on what Include-players OFF should mean,
+  *"C works"*, i.e. the toggle is dropped and the canvas is always the anchor.
+  So there is no longer a pinned model job for `pinned_receive_mode:'all'` to be added to. A
+  filled canvas now runs **`POST /api/trades/fair-packages`**: the canvas GIVE side is an EXACT
+  anchor (every served card gives away precisely that set — stricter than `pinned_give_mode:'all'`
+  ever was, because nothing may be added either), and the receive side is a **ranking preference**
+  — ideas containing all of it sort first, ideas that cannot are still served. That asymmetry is
+  now a decision with a reason rather than an oversight: a hard receive constraint returns an empty
+  deck the moment the canvas names an asset the partner does not own.
+  The **`picks_pool_cap` half dissolves with it.** The anchor is priced from the seed board and is
+  never re-checked against `user_roster`, so a canvas pick outside the cap cannot reject every
+  subset any more — there is no subset search on the give side at all.
+  `POST /api/trades/generate` and its three enumerators are **untouched**: `pinned_give_mode` and
+  the intersect-only receive behaviour are exactly as they were for every non-calculator caller.
+  Contract and evidence: [`status.md` § W6-B](../docs/feedback/items/384-calc-finder-merge/status.md),
+  [`api-reference.md`](../docs/api-reference.md).
+- **Why it mattered (original entry, kept):** the merged action row's ✓ (`calc.action.confirm`) was a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
+- **Why it cannot just be wired:** there is no backend route that queues a **hand-built** package for a counterparty. The deck's like path (`trade_queue` / the likes surface) needs a **server-minted `trade_id`**, which only the generator produces; a calculator canvas has no card and therefore no id. This is an **API contract decision**, not an omission — the bright line CLAUDE.md draws.
+- **The options:** (a) mint via the existing share-package route (`POST /api/trades/share-package` returns a package id) and then like that id — cheapest, but a share-package row is not a trade card and the likes surface would need to render one; (b) a new "submit package as like" endpoint that mints and queues in one call — cleanest contract, most work, and it needs a mutual-match story (what does the counterparty *see*?); (c) **cut the cell and beat n15** until (a) or (b) exists, and correct D-150 / status / checklist — the option that makes the shipped surface honest today.
+- **Second half of the same decision — receive-side "must include".** Ruling 2 says Include-players ON ⇒ the search must include the canvas. The give side honours it (`trade_optimizer.py` `pinned_give_mode:'all'` — every pin required); the receive side requires only that the served card **intersect** the pinned set, in all three enumerators. Making it symmetric means adding `pinned_receive_mode:'all'` through `api/trades.ts` → `server.py` → the enumerators — again an API change. Related: a canvas pick outside `picks_pool_cap` (default 6) is never on `user_roster`, so `pinned_all` rejects every subset and the user gets zero cards behind a misleading "try turning fairness off" message.
+- ~~**Workaround in the meantime:** the cell renders disabled with an honest a11y state, and the TestFlight checklist now tests that it *is* disabled rather than telling the operator to tap it.~~ **Superseded 2026-08-22** — the cell is live, and checklist steps 13 / 13a / 13b test the queue and both refusal paths instead.
+- **Owner:** both halves **closed**. What is left of #384's bright-line list is not this question:
+  the overlay scope (built calculator-origin; reversing it needs an explicit call) and the rollout
+  shape (global boolean vs the `trades_home_inline` tester-allowlist path).
 
 ## 2026-08-19 — Open Items (team review)
 

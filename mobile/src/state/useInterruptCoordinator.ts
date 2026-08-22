@@ -30,8 +30,29 @@ import { track } from '../api/events';
 // directly), so a modal never presents over an open banner/prompt — and,
 // via the guide's claim, never over an open guide bubble either.
 //
+// ── Tour hold (#384 ruling 10, 2026-08-22) ───────────────────────────────
+//
+// The slot above is per-SURFACE and frees the moment a surface releases it.
+// A scripted tour is many steps with gaps between them, and in those gaps
+// any waiting interstitial legitimately wins the free slot — which is
+// exactly the interruption the operator asked to eliminate ("ensure no
+// scripted tour interruptions by muting other interstitials or analyst
+// prompts during the tour").
+//
+// So a tour takes a HOLD that spans the whole run, not a per-step claim.
+// While the hold is up:
+//   * every `useInterruptSlot` surface except `guide_step` is refused, and
+//     the refusal is measured as `blocked_by: 'tour'` like any other;
+//   * `isInterruptBusy()` reads true even between steps, so the root modals
+//     that self-defer on it stay deferred across the gaps too.
+//
+// The hold is NOT the slot. `guide_step` still claims and releases normally
+// inside it — the tour's own bubbles are the thing being protected, and
+// leaving them on the ordinary path keeps their analytics unchanged.
+//
 // Flag off: `useInterruptSlot` is a passthrough (returns `wants`, never
-// claims, never tracks) — byte-identical behavior.
+// claims, never tracks) — byte-identical behavior. The tour hold rides the
+// same flag, so `ux.prompt_arbiter` off means no hold either.
 
 export type InterruptSurface =
   | 'guide_step'
@@ -51,25 +72,67 @@ export const SURFACE_PRIORITY: Record<InterruptSurface, number> = {
 
 interface CoordinatorState {
   activeSurface: InterruptSurface | null;
+  /** #384 — a scripted tour is running; everything but `guide_step` waits. */
+  tourHold: boolean;
   /** Claim the slot. Returns true when granted (or already held by `id`). */
   claim: (id: InterruptSurface) => boolean;
   /** Release the slot iff held by `id`. */
   release: (id: InterruptSurface) => void;
+  /** Take/drop the tour-long hold. Idempotent — a re-entered tour that
+   *  begins twice must not need two ends. */
+  beginTourHold: () => void;
+  endTourHold: () => void;
 }
 
 export const useInterruptCoordinator = create<CoordinatorState>((set, get) => ({
   activeSurface: null,
+  tourHold: false,
   claim: (id) => {
     const cur = get().activeSurface;
     if (cur === id) return true;
     if (cur !== null) return false; // no preemption — defer
+    // The tour's own bubbles still claim; nothing else may, even when the
+    // slot itself is free between steps.
+    if (get().tourHold && id !== 'guide_step') return false;
     set({ activeSurface: id });
     return true;
   },
   release: (id) => {
     if (get().activeSurface === id) set({ activeSurface: null });
   },
+  beginTourHold: () => set({ tourHold: true }),
+  endTourHold: () => set({ tourHold: false }),
 }));
+
+/** True while ANY interrupt surface is up, or a tour holds the floor.
+ *
+ *  The root modals (PushPrimingModal, AppleSaveMomentSheet) self-defer on
+ *  this rather than on `activeSurface !== null` — otherwise a modal would
+ *  slip through in the gap between two tour steps, which is precisely the
+ *  interruption the hold exists to prevent. */
+export function isInterruptBusy(s: CoordinatorState): boolean {
+  return s.activeSurface !== null || s.tourHold;
+}
+
+/**
+ * #384 ruling 10 — tour-only mute for surfaces that are NOT enrolled in
+ * general arbitration.
+ *
+ * Several passive interstitials (the deck's diff banner, adaptation moment,
+ * suppression note, prefs-changed strip) never claimed a slot: they are
+ * in-flow notices rather than modal interrupts, and enrolling them now would
+ * change shipped behaviour by making them defer to each other in ordinary
+ * use — a much larger change than the operator asked for.
+ *
+ * This hook gives them exactly the asked-for behaviour and nothing else:
+ * hidden while a scripted tour holds the floor, byte-identical otherwise.
+ * It deliberately does NOT claim, so it cannot wedge the slot.
+ */
+export function useMutedDuringTour(): boolean {
+  const arbiterOn = useFlag('ux.prompt_arbiter');
+  const tourHold = useInterruptCoordinator((s) => s.tourHold);
+  return arbiterOn && tourHold;
+}
 
 /**
  * Surface hook: `id` wants to show iff `wants`. Returns whether it may
@@ -89,6 +152,7 @@ export function useInterruptSlot(
 ): boolean {
   const arbiterOn = useFlag('ux.prompt_arbiter');
   const active = useInterruptCoordinator((s) => s.activeSurface);
+  const tourHold = useInterruptCoordinator((s) => s.tourHold);
   const wasGrantedRef = useRef(false);
   const deferTrackedRef = useRef(false);
 
@@ -97,6 +161,16 @@ export function useInterruptSlot(
     const store = useInterruptCoordinator.getState();
     if (wants) {
       const granted = store.claim(id);
+      // A tour refusal is measured like any other deferral, with its own
+      // low-cardinality reason so "the tour ate my prompt" is legible in
+      // the funnel rather than looking like ordinary slot contention.
+      if (!granted && store.tourHold && id !== 'guide_step') {
+        if (!deferTrackedRef.current) {
+          deferTrackedRef.current = true;
+          track('prompt_deferred', { surface: id, blocked_by: 'tour' }, screen);
+        }
+        return;
+      }
       if (granted) {
         if (!wasGrantedRef.current) {
           wasGrantedRef.current = true;
@@ -116,7 +190,8 @@ export function useInterruptSlot(
       store.release(id);
     }
     // `active` in deps: when the slot frees, waiting surfaces re-claim.
-  }, [arbiterOn, wants, id, active, screen]);
+    // `tourHold` too: when the tour ends, everything it muted re-tries.
+  }, [arbiterOn, wants, id, active, tourHold, screen]);
 
   // Release on unmount so a navigated-away surface can't wedge the slot.
   useEffect(
@@ -126,5 +201,5 @@ export function useInterruptSlot(
     [id],
   );
 
-  return arbiterOn ? wants && active === id : wants;
+  return arbiterOn ? wants && active === id && (!tourHold || id === 'guide_step') : wants;
 }

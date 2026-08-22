@@ -295,6 +295,13 @@ export interface AssetIdea {
   // Undefined on old servers ⇒ the window's TradeValueBar hides.
   favors?: 'give' | 'receive' | 'even' | null;
   gap?: CalcGap | null;
+  // #384 W6-B — set only by POST /api/trades/fair-packages, whose ideas are
+  // DECK CARDS rather than window decoration. `trade_id` is the server's
+  // deterministic `fairpk_…`, which is the row key a swipe / queue / flag on
+  // the card reconstructs under (FB-46); `basis` makes the consensus caveat
+  // render. Asset ideas carry neither, so their cards are unchanged.
+  trade_id?: string;
+  basis?: 'divergence' | 'consensus';
 }
 
 export interface AssetIdeasResponse {
@@ -347,6 +354,14 @@ function normalizeAssetIdea(raw: any): AssetIdea {
       : raw?.gap === null
         ? { gap: null }
         : {}),
+    // #384 W6-B — fair packages only. Validated rather than coerced so an
+    // asset-ideas payload (which carries neither) stays byte-identical.
+    ...(typeof raw?.trade_id === 'string' && raw.trade_id
+      ? { trade_id: raw.trade_id }
+      : {}),
+    ...(raw?.basis === 'consensus' || raw?.basis === 'divergence'
+      ? { basis: raw.basis as 'consensus' | 'divergence' }
+      : {}),
   };
 }
 
@@ -372,6 +387,66 @@ export async function fetchAssetIdeas(body: {
       lateral: norm(g.lateral),
       downgrade: norm(g.downgrade),
     },
+  };
+}
+
+// ── #384 W6-B — fair packages for a hand-built give side ─────────────────
+//
+// D-153, operator: "this type of request shouldn't go through our models. It
+// should be a much simpler set of cards solving for fairness only." So Find a
+// Trade with a FILLED canvas calls this — one synchronous sweep, no job, no
+// polling — and Find a Trade with an EMPTY canvas still runs the model deck.
+//
+// The give side is an ANCHOR: every idea gives away exactly `givePlayerIds`.
+// `receivePlayerIds` is a PREFERENCE — ideas containing all of them sort
+// first, ideas that cannot are still returned, which is what stops a canvas
+// pick outside `picks_pool_cap` from emptying the deck.
+//
+// The ideas are DECK CARDS (`ideas.map(ideaToCard)` → `setDeck`), which is why
+// each carries a server-minted `trade_id`: the deck's swipe / queue / flag
+// routes all reconstruct an unknown card from the echoed context (FB-46) and
+// key the row under that id.
+
+export interface FairPackagesResult {
+  basis: 'consensus';
+  anchor: {
+    give_player_ids: string[];
+    receive_player_ids: string[];
+    opponent_user_id: string | null;
+  };
+  ideas: AssetIdea[];
+  /** #189 — the whole list came from the widened fairness band. */
+  relaxed: boolean;
+  /** Present only alongside an EMPTY list: `give_untouchable` |
+   *  `unknown_asset` | `no_partner` | `unknown_league`. */
+  reason?: string;
+}
+
+export async function getFairPackages(body: {
+  league_id: string;
+  give_player_ids: string[];
+  receive_player_ids?: string[];
+  opponent_user_id?: string;
+  fairness_threshold?: number;
+}): Promise<FairPackagesResult> {
+  const res = await api.post<any>('/api/trades/fair-packages', body);
+  const anchor = res?.anchor ?? {};
+  return {
+    basis: 'consensus',
+    anchor: {
+      give_player_ids: Array.isArray(anchor.give_player_ids)
+        ? anchor.give_player_ids.map(String)
+        : body.give_player_ids,
+      receive_player_ids: Array.isArray(anchor.receive_player_ids)
+        ? anchor.receive_player_ids.map(String)
+        : body.receive_player_ids ?? [],
+      opponent_user_id: anchor.opponent_user_id
+        ? String(anchor.opponent_user_id)
+        : null,
+    },
+    ideas: Array.isArray(res?.ideas) ? res.ideas.map(normalizeAssetIdea) : [],
+    relaxed: res?.relaxed === true,
+    ...(typeof res?.reason === 'string' ? { reason: res.reason } : {}),
   };
 }
 
@@ -442,6 +517,59 @@ export async function flagBadTrade(
     reason:             reason || undefined,
     impression_id:      impressionId || undefined,
   });
+}
+
+// ── #384 ✓ cell — queue a hand-built package for the counterparty ────
+//
+// D-152. The merged calculator's confirm control. The server records the
+// package as the caller's LIKE (the same row a deck swipe writes) ONLY when
+// the likes-you injector would actually mirror it into the counterparty's
+// deck — so a `queued: false` means nothing was recorded and the reason says
+// why. Idempotent per (user, league, opponent, give set, receive set): a
+// second identical call answers `already_queued: true` and moves no Elo.
+//
+// The reason vocabulary is a cross-client invariant
+// (docs/cross-client-invariants.md § Trade-queue refusal reasons) — the
+// server's `CALC_QUEUE_REASONS`. `detail` is diagnostic free text; never
+// switch UI on it.
+export type CalcQueueReason =
+  | 'likes_you_off'
+  | 'not_league_member'
+  | 'assets_not_on_roster'
+  | 'opponent_untouchable'
+  | 'opponent_not_interested'
+  | 'fails_fairness_floor';
+
+export interface CalcQueueResult {
+  queued: boolean;
+  /** true when this exact package was already queued (no second record). */
+  already_queued?: boolean;
+  trade_id?: string;
+  reason?: CalcQueueReason;
+  detail?: string;
+}
+
+// POST /api/trades/queue  {league_id, opponent_user_id, give_player_ids,
+//                          receive_player_ids}
+export async function queueTradeForOpponent(args: {
+  leagueId: string;
+  opponentUserId: string;
+  giveIds: string[];
+  receiveIds: string[];
+}): Promise<CalcQueueResult> {
+  const res = await api.post<any>('/api/trades/queue', {
+    league_id:          args.leagueId,
+    opponent_user_id:   args.opponentUserId,
+    give_player_ids:    args.giveIds,
+    receive_player_ids: args.receiveIds,
+  });
+  return {
+    queued:         !!res?.queued,
+    already_queued: !!res?.already_queued,
+    trade_id:       typeof res?.trade_id === 'string' ? res.trade_id : undefined,
+    reason:         typeof res?.reason === 'string' ? (res.reason as CalcQueueReason) : undefined,
+    detail:         typeof res?.detail === 'string' ? res.detail : undefined,
+  };
 }
 
 // ── Trade-match normalizer ───────────────────────────────────────────

@@ -185,6 +185,41 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 
 ---
 
+## Trade-queue refusal reasons (`POST /api/trades/queue`)
+
+The merged calculator's ✓ cell ("queue this trade for the other manager")
+answers `{queued: false, reason}` when the counterparty's own preferences mean
+the like would never surface in their deck. **`reason` is a closed,
+low-cardinality enum and every client switches on it**, so a value added
+server-side without the clients falls through to a generic "couldn't queue
+that" line — the exact dishonest state the cell was left disabled to avoid
+(#384, Q-029, [D-152]).
+
+| `reason` | What refused it | Mirror-time source |
+|---|---|---|
+| `likes_you_off` | the mirror surface itself is dark — flag `trade.likes_you` off, or the demo league | `server._likes_you_enabled()`; `league_id != "league_demo"` guard on the injector call |
+| `not_league_member` | the caller or the named counterparty is not in this league (includes queueing against yourself) | `members_by_id.get(...)` / `opp.user_id == user_id` |
+| `assets_not_on_roster` | a side is no longer on the roster it must come from — includes an owned pick outside `picks_pool_cap`, which is never injected and so can never mirror | `set(their_give) <= set(opp.roster)`, `set(their_recv) <= user_roster_set` |
+| `opponent_untouchable` | THEY marked a player you are asking for untouchable (#95) | `untouchable_ids & their_recv` |
+| `opponent_not_interested` | THEY marked a player you are offering not-interested (#163) | `not_interested_ids & their_give` |
+| `fails_fairness_floor` | the D-096 quality ladder refuses it **from their side** — the user-gain floor, directional `overpay_ok`, or `filler_ok` | `_likes_you_user_delta` / `_likes_you_package_delta` / `_likes_you_presentment_ok` |
+
+Locations to change together:
+
+- `backend/server.py` — `CALC_QUEUE_REASONS` (the tuple is asserted verbatim by `backend/tests/test_calc_trade_queue.py::test_the_refusal_enum_is_closed`) and `_calc_queue_mirror_reason`, whose branches are a line-for-line re-read of `_inject_likes_you_cards_impl`'s own `continue`s.
+- `mobile/src/api/trades.ts` — the `CalcQueueReason` union.
+- `mobile/src/screens/TradeCalculatorScreen.tsx` — `queueRefusalLine`, one toast line per value (`mobile/tests/check-calc-merged-behavior.js` 18f/18g fails on a missing case).
+
+Web and the extension have neither the calculator nor the deck, so there is
+nothing to mirror there today. `detail` is **not** part of the contract: it is
+diagnostic free text (it can name player ids), no client switches on it, and it
+is never an analytics property.
+
+The client event `calc_trade_queued {queued, reason?}` carries the same six
+values plus a client-only `error` for a request that never got an answer.
+
+---
+
 ## Notification type strings
 
 `notifications.type` (the in-app bell inbox) — **nine values, and the failure mode is silent:**
@@ -752,11 +787,17 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
   - Growth: `rating_prompt_requested`
   - **`quickset_completed` is NOT among them, on purpose:** the name is server-fired and the namespaces are disjoint by an import-time assert, so the colliding client emitter in `QuickSetTiersScreen.tsx` was **deleted** (its `onboarding` prop is recorded as accepted loss in the addendum), never registered and never aliased.
 
+- **#384 merged calculator + finder batch (2026-08-22 — [addendum](business/analytics/2026-08-22-384-calc-finder-addendum.md)); mobile only:**
+  - Calculator tour (screen `TradeCalculator`): `calc_tour_started` (`source` ∈ **`auto` | `show_me_around`**), `calc_tour_ended` (`reason` ∈ **`finished` | `abandoned`**, `beats_shown`), `calc_tour_beat_missing` (`beat` = a script beat id `n10`…`n24`, owned by `mobile/src/components/analystScript.ts`). All three had **live emitters and no registration** since W4 shipped — every one was counted-and-dropped behind a 200.
+  - Calculator interactions: `calc_mode_switched` (`mode` ∈ **`live` | `league`**), `calc_include_players_toggled` (`on` = the RESULTING state), `calc_asset_added` (`side` ∈ **`give` | `receive`**), `calc_cleared` (`mode`), `calc_find_a_trade_tapped` (`include_players`, `give_count`, `receive_count`, `has_partner`). **`calc_find_a_trade_tapped` is NOT `find_trades_tapped`** — the latter fires only from `TradesScreen`'s own controls, and the calculator's control navigates to `TradesHome` without `TradesScreen` firing on mount, so one tap is still one event. The props are the calculator's state and would hollow out the deck emitter's two-prop row. `calc_trade_queued` (`queued` bool; `reason` present ONLY on `queued: false` — the six `POST /api/trades/queue` refusal codes above plus the client-only `error` for a request that never got an answer) is the ✓ cell's outcome, one event per tap on both outcomes.
+  - Deck (screen `Trades`): `deck_back_to_calculator`, `deck_unpin_retry` (both `pin_count`); the #384-local pass **overlay** pair `trade_pass_overlay_opened` (no props, on purpose) / `trade_pass_overlay_dismissed` (`banked` — a BOOLEAN, never the reason code and never the free text). The overlay presentation is local to this page: the shipped deck keeps `DeclineReasonPanel`'s inline tiles, and `trade_pass_layer1` / `trade_pass_layer2` remain the reason capture on both.
+  - Prompt arbiter: `prompt_deferred` (`surface` = the `InterruptSurface` enum, identical to `prompt_shown.surface`; `blocked_by` = the literal **`tour`** for a calc-tour hold, else the holding surface). **Registration of a live emitter, not a new signal** — `useInterruptCoordinator.ts` has fired it since the arbiter shipped while only its granted twin `prompt_shown` was registered.
+
 **Canonical send names + the `surface` enum.** The reserved names are `sleeper_send_attempted` / `sleeper_send_failed` / `sleeper_send_succeeded` — **not** `send_in_sleeper_*`. `analytics_queries` reserved this exact trio in 2026-07-17 and `FUNNEL_STAGES` stage 8 + `FEATURE_VERTICALS["send_in_sleeper"]` already reference the succeeded name, so the reserved spelling lights those up without a query edit. Every one of them carries `surface` ∈ **`deck` | `match` | `awaiting` | `calculator`** — the four `SendInSleeperButton` mounts. Canonical definition: `SendSurface` / `SEND_SURFACES` in `mobile/src/utils/tradeText.ts`; mirrored in `CLIENT_EVENT_PROPS`. **`awaiting` is the Matches non-match send row — it is NOT `suggested`.** Adding a mount means adding a value in both places.
 
 **`celebration_shown`, never `celebration_fired`.** The registered name has always been `celebration_shown`; the client emitted `celebration_fired` and every one of those events was dropped. Fixed 2026-08-11 by **renaming the client**, deliberately **without an alias** — an alias would make the taxonomy the place typos go to live.
 
-**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum. `lineup_impact_unavailable` (impression) and `league_team_closed` (terminator/dismissal, like `quickset_abandoned`) are classified **non-intent** for the same reason, added in the same commit as their allowlist entries. `league_team_opened` **stays intent** — the enter half is the value moment and already counts the user once, so admitting its terminator too would only ever add user-days where the opener was lost to queue overflow. The 2026-08-13 backlog batch classifies eight of its 27 names non-intent (`prompt_shown`, `push_primer_shown`, `notif_denied_settings_shown`, `apple_banner_dismissed`, `push_primer_dismissed`, `deck_summary_viewed`, `trio_session_started` — fires on mount — and `rating_prompt_requested` — a StoreKit request the OS may never honor); the other 19 are real user decisions and stay intent, which widens INTENT coverage at that seam (recorded in the addendum).
+**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum. `lineup_impact_unavailable` (impression) and `league_team_closed` (terminator/dismissal, like `quickset_abandoned`) are classified **non-intent** for the same reason, added in the same commit as their allowlist entries. `league_team_opened` **stays intent** — the enter half is the value moment and already counts the user once, so admitting its terminator too would only ever add user-days where the opener was lost to queue overflow. The 2026-08-13 backlog batch classifies eight of its 27 names non-intent (`prompt_shown`, `push_primer_shown`, `notif_denied_settings_shown`, `apple_banner_dismissed`, `push_primer_dismissed`, `deck_summary_viewed`, `trio_session_started` — fires on mount — and `rating_prompt_requested` — a StoreKit request the OS may never honor); the other 19 are real user decisions and stay intent, which widens INTENT coverage at that seam (recorded in the addendum). The 2026-08-22 #384 batch classifies six of its 13 names non-intent — `calc_tour_started` (the tour **auto-starts on landing**, so it is a mount counter for a primary surface; admitting it would make DAU ≈ calculator-visit count), `calc_tour_ended` (terminator), `calc_tour_beat_missing` (script-defect diagnostic), `trade_pass_overlay_opened` (exposure — the decision is `trade_pass_layer1`/`_layer2`), `trade_pass_overlay_dismissed` (dismissal) and `prompt_deferred` (a system refusal, the `guide_step_suppressed` peer, matching its already-non-intent twin `prompt_shown`); the other seven — the two calculator toggles, `calc_asset_added`, `calc_cleared`, `calc_find_a_trade_tapped`, `deck_back_to_calculator`, `deck_unpin_retry` — are real user decisions and stay intent. `calc_trade_queued` (added 2026-08-22, W6-A) joins them as **intent**: the tap IS the user's decision to offer the trade — the `sleeper_send_attempted` class, not `prompt_deferred` — and it is unreachable without a filled canvas, so `calc_asset_added` has already counted the user-day.
 
 **Web (`web/js/events.js`) and the extension (`extension/background.js`) fire NONE of the P0-batch names.** That omission is deliberate — these are mobile surfaces — and is stated here so a future reader reads it as a decision, not as drift.
 

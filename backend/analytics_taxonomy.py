@@ -516,6 +516,110 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # a cohort switch: the chips select a field of a payload already in
     # memory and never refetch.
     "receipts_opened", "receipts_window_changed",
+    # ── #384 merged calculator + finder, 2026-08-22 ─────────────────────
+    # Tracking-plan addendum (the precondition this module's docstring
+    # demands): docs/business/analytics/2026-08-22-384-calc-finder-
+    # addendum.md. Origin: docs/feedback/items/384-calc-finder-merge/
+    # review-2026-08-22-e2e.md §Analytics, which found the W4 tour firing
+    # three names this registry had never heard of.
+    #
+    # This registry is default-deny behind a 200 (analytics_ingest.py counts
+    # + drops), so every name below has been — or would have been —
+    # SILENTLY dropped with a success-shaped response. `calc_tour_started`,
+    # `calc_tour_ended` and `calc_tour_beat_missing` already have live
+    # emitters (mobile/src/utils/calcTour.ts:100/53/72); the rest land with
+    # their emitters in the same change.
+    #
+    # All MOBILE-fired; web and the extension have neither the merged
+    # calculator nor the deck. Six of the fourteen are also added to
+    # analytics_queries.NON_INTENT_EVENTS in this SAME commit — INTENT is
+    # derived by SUBTRACTION, so a passive name registered here and nowhere
+    # else step-changes DAU/WAU on ship day, silently and permanently.
+    #
+    # Calculator tour (screen 'TradeCalculator'). The tour AUTO-starts on
+    # landing, which is exactly why all three are NON_INTENT: admitting them
+    # would promote every calculator visit to a user-day (the
+    # `trio_session_started` mount precedent).
+    "calc_tour_started", "calc_tour_ended", "calc_tour_beat_missing",
+    # Calculator interactions — all three are real user decisions and stay
+    # INTENT (deliberately absent from NON_INTENT_EVENTS): a mode switch is a
+    # configuration change (the `league_basis_changed` / `stud_tax_mode_changed`
+    # peers), adding an asset is the calculator's core gesture (the
+    # `finder_target_pinned` peer), and clearing is a deliberate destructive
+    # action whose undo (`calc_clear_undone`) is already INTENT.
+    # `calc_include_players_toggled` was registered in W5-B and REMOVED in W6-B
+    # (2026-08-22, D-153) together with its control: the operator dropped the
+    # Include-players toggle — the canvas is now always the anchor — so the
+    # name had no emitter and no plan. A dead registration is noise, not
+    # forward compatibility.
+    "calc_mode_switched",
+    "calc_asset_added", "calc_cleared",
+    # `calc_find_a_trade_tapped` — the merged calculator's OWN hand-off
+    # control (TradeCalculatorScreen, testID calc.find-a-trade). It does NOT
+    # duplicate `find_trades_tapped`, which fires only from TradesScreen's
+    # own controls: the calculator's control navigates to TradesHome and
+    # TradesScreen fires nothing on mount, so one tap still produces one
+    # event. A separate name (rather than a `source` value on
+    # find_trades_tapped) because the props are the CALCULATOR's state —
+    # they are meaningless on the deck's emitter and would hollow out its
+    # two-prop row. INTENT: the conversion moment of the whole merge.
+    "calc_find_a_trade_tapped",
+    # `calc_trade_queued` — #384 W6-A / D-152, the merged calculator's ✓ cell
+    # (testID calc.action.confirm). Fires once per TAP, on both outcomes.
+    # INTENT, and deliberately absent from NON_INTENT_EVENTS: the tap IS the
+    # user's decision to offer this trade — the calculator's equivalent of a
+    # deck `like`, which is already INTENT via `trade_proposed`. The server
+    # may REFUSE to record it (the counterparty's preferences), but a refusal
+    # is the system's answer to a decision the user made, not something shown
+    # to them unbidden — the `sleeper_send_attempted` class, not the
+    # `prompt_deferred` one. It also cannot open a DAU seam: it can only be
+    # reached from a filled canvas, which required `calc_asset_added` (INTENT)
+    # on the same screen the same day.
+    "calc_trade_queued",
+    # Deck (screen 'Trades'). Both are INTENT and deliberately absent from
+    # NON_INTENT_EVENTS. `deck_back_to_calculator` is the end-of-deck return
+    # to editing — the `trade_edit_in_calculator_tapped` peer, not
+    # navigation-class: it is reachable only from a deck the user reached by
+    # tapping Find a Trade, so it can add no user-day. `deck_unpin_retry` is
+    # a retry after an empty/failed deck, the `find_trades_tapped{source:
+    # deck_error_retry}` and `suppression_undo_tapped` peer.
+    # `deck_search_all_tapped` (#384 W6-B, D-153) joins them on the same
+    # argument: it is the end-of-a-FAIR-deck escape hatch — "search all
+    # trades", which drops the canvas anchor and runs the model deck for the
+    # same partner. INTENT, same class as `deck_unpin_retry` (a deliberate
+    # widening after an exhausted deck), and reachable only from a deck the
+    # user reached by tapping Find a Trade, so it opens no DAU seam.
+    "deck_back_to_calculator", "deck_unpin_retry", "deck_search_all_tapped",
+    # The #384-local pass overlay (plan.md W2 — this page only; the shipped
+    # deck keeps DeclineReasonPanel's inline tiles). BOTH are NON_INTENT and
+    # both land in NON_INTENT_EVENTS in this same commit.
+    #   trade_pass_overlay_opened — the EXPOSURE of the capture surface. The
+    #     decision it collects already has two INTENT names
+    #     (`trade_pass_layer1` / `trade_pass_layer2`); an overlay the user
+    #     opens and dismisses without choosing is precisely a
+    #     NON-conversion, and admitting it to INTENT would credit a user-day
+    #     to a flow nobody finished (the `rankings_preset_detected`
+    #     argument). No new blind spot either way: every emission is
+    #     preceded on the same card by `trade_card_viewed` (INTENT).
+    #   trade_pass_overlay_dismissed — a TERMINATOR / dismissal, the
+    #     `league_team_closed` and `apple_banner_dismissed` class. `banked`
+    #     is the boolean that makes the pair readable: dismissed-with-a-
+    #     reason-banked vs dismissed-having-said-nothing is the only measure
+    #     of whether the overlay presentation costs reasons the inline tiles
+    #     were getting. NEVER the free text — that lives on the
+    #     trade_pass_reasons row and nowhere else (SPEC §3.4).
+    "trade_pass_overlay_opened", "trade_pass_overlay_dismissed",
+    # `prompt_deferred` — REGISTRATION OF A LIVE EMITTER, not a new signal.
+    # mobile/src/state/useInterruptCoordinator.ts:170/183 has fired it since
+    # the prompt arbiter shipped (flag ux.prompt_arbiter) and every envelope
+    # was counted-and-dropped behind a 200, which is why "the tour ate my
+    # prompt" (blocked_by:'tour') has never been readable. Its granted twin
+    # `prompt_shown` was registered in the 2026-08-13 backlog sweep and this
+    # one was missed — the G-031 backlog's last live straggler on this
+    # surface. NON_INTENT: a SYSTEM refusal, the exact peer of
+    # `guide_step_suppressed`; the user chose nothing and, on the tour lane,
+    # was not even shown anything.
+    "prompt_deferred",
 })
 
 # ---------------------------------------------------------------------------
@@ -1276,6 +1380,97 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "swipe_guard_blocked": frozenset({"guard", "decision", "trade_id",
                                       "impression_id", "blocked_n",
                                       "ms_since_render"}),
+    # ── #384 merged calculator + finder, 2026-08-22 ─────────────────────
+    # Addendum: docs/business/analytics/2026-08-22-384-calc-finder-
+    # addendum.md, whose props table IS this block and nothing more. An
+    # unregistered prop key is STRIPPED at ingest while the envelope still
+    # reports dropped == 0, so a narrowed row is silent data loss.
+    #
+    # CLOSED ENUMS:
+    #   calc_tour_started.source ∈ auto | show_me_around — the two entry
+    #     points calcTour.ts:startCalcTour takes. The split is the whole
+    #     point: `auto` is the tour the product forces, `show_me_around` is
+    #     the tour a user asked for, and their completion rates are not
+    #     comparable numbers.
+    #   calc_tour_ended.reason ∈ finished | abandoned. `beats_shown` is the
+    #     count of beats actually rendered at exit (int >= 0) — where the
+    #     tour lost people. The pre-#384-fix emitter zeroed its counter
+    #     BEFORE reading it and shipped `beats_shown: 0` on every row (the
+    #     e2e review's finding); the emitter now snapshots first. A field
+    #     that is 0 on every row in a window is that bug returning, not a
+    #     tour nobody sees — beat 1 renders before any exit can fire.
+    #   calc_mode_switched.mode ∈ live | league — the mode being switched
+    #     TO. Same vocabulary as calc_cleared.mode.
+    #   calc_asset_added.side ∈ give | receive (the `player_menu_opened.side`
+    #     and `finder_target_pinned.side` vocabulary).
+    # `on` is a BOOLEAN — the RESULTING include-players state (post-toggle),
+    # the `untouchable_toggled.marked` convention.
+    "calc_tour_started":           frozenset({"source"}),
+    "calc_tour_ended":             frozenset({"reason", "beats_shown"}),
+    # `beat` is the script beat id (n10…n24) that could not be built — a
+    # bounded vocabulary owned by components/analystScript.ts, never copy.
+    "calc_tour_beat_missing":      frozenset({"beat"}),
+    "calc_mode_switched":          frozenset({"mode"}),
+    "calc_asset_added":            frozenset({"side"}),
+    "calc_cleared":                frozenset({"mode"}),
+    # The calculator's hand-off, and the one row here that carries shape.
+    # `path` (#384 W6-B, D-153) is the LOW-CARDINALITY fork the tap took:
+    #   'fair'  — the canvas had a give side, so the tap ran the synchronous
+    #             fairness sweep (POST /api/trades/fair-packages)
+    #   'model' — the canvas was empty, so the tap ran the model deck
+    # It REPLACES `include_players`, which described a toggle that no longer
+    # exists. The two are not renameable into each other: the toggle was the
+    # user's declaration, `path` is what the system actually did.
+    # `give_count` / `receive_count` are small ints (assets per side, the
+    # trade_sent naming); `has_partner` (bool) is whether a trade partner was
+    # selected. NO player ids, NO names, NO league id (that rides the envelope
+    # column), and NO device platform — that is a user_events COLUMN
+    # derived server-side (the NULL-`platform` incident).
+    "calc_find_a_trade_tapped":    frozenset({"path",
+                                              "give_count", "receive_count",
+                                              "has_partner"}),
+    # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
+    # the server record the package as a like. `reason` is present ONLY on
+    # `queued: false` and is a LOW-CARDINALITY enum: the six server refusal
+    # codes (`server.CALC_QUEUE_REASONS`, mirrored in
+    # docs/cross-client-invariants.md and mobile/src/api/trades.ts) plus the
+    # client-only value `error` for a request that never got an answer. NO
+    # player ids, NO opponent id, and NOT the server's `detail` string —
+    # detail is free text for the server log, and admitting it here would put
+    # unbounded cardinality (and player names) into a props column.
+    "calc_trade_queued":           frozenset({"queued", "reason"}),
+    # `pin_count` (int >= 0) on both deck rows: how many assets were pinned
+    # when the user backed out / retried. It is the ONLY number that
+    # separates "the finder returns nothing with three pins" from "the user
+    # changed their mind", which is what both affordances exist to answer.
+    "deck_back_to_calculator":     frozenset({"pin_count"}),
+    "deck_unpin_retry":            frozenset({"pin_count"}),
+    # #384 W6-B — the fair deck's "Search all trades" exit. NO props on
+    # purpose: a fair deck has no pins to count (the anchor rode the request,
+    # not the pin store), the partner is already on every card the user just
+    # saw, and the model run this exit dispatches fires its own
+    # `find_trades_tapped` with the source. A prop here would be a second
+    # source of truth for a fact two other rows already carry.
+    "deck_search_all_tapped":      frozenset(),
+    # The overlay pair. `opened` carries NO props on purpose: the card it
+    # belongs to is already identified by the trade_pass_layer* rows and by
+    # trade_card_viewed on the same card, and a trade_id here would be a
+    # third source of truth for one interaction (#208/#248/#293).
+    # `banked` is a BOOLEAN — whether a layer-1 reason was committed before
+    # the dismiss. Never the free text, and never a reason code: the code
+    # is `trade_pass_layer1.reason`'s job and duplicating it here would let
+    # the two disagree.
+    "trade_pass_overlay_opened":    frozenset(),
+    "trade_pass_overlay_dismissed": frozenset({"banked"}),
+    # `prompt_deferred` — the row MIRRORS what the shipped emitter sends
+    # today (useInterruptCoordinator.ts:170/183), the registration-only
+    # discipline of the 2026-08-13 backlog sweep. `surface` is the
+    # InterruptSurface enum, identical to `prompt_shown.surface`
+    # (quickset_prompt | coach_mark | apple_banner | outlook_banner |
+    # guide_step). `blocked_by` is the refusal reason: the literal 'tour'
+    # for a calc-tour hold, otherwise the InterruptSurface currently
+    # holding the slot. One row per deferral episode, not per retry.
+    "prompt_deferred":             frozenset({"surface", "blocked_by"}),
 }
 
 

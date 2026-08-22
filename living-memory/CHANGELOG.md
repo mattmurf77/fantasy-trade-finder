@@ -11,6 +11,125 @@
 
 ---
 
+## 2026-08-22i — #384 W6-B: Find a Trade forks on the canvas — fairness-only packages (D-153); still dark, not pushed
+
+Operator re-ruled the contract (no model for a filled canvas; toggle dropped; tour ends in the
+modeled cards). One Opus build package, lead-reviewed. Backend: `POST /api/trades/fair-packages`
+(flag-gated) — give side an exact anchor, 1–3-asset returns, receive side a ranking preference;
+`_generate_asset_ideas_impl._eval` extracted to `trade_service.eval_consensus_package` and shared
+(asset-ideas byte-identical, golden green); `fair_packages_cap` knob (20); deterministic `fairpk_`
+ids that `_reconstruct_swipe_card` accepts (tested end to end). Mobile: handoff `fairAnchor`
+replaces `includePlayers`; TradesScreen forks before the model gate and `setDeck`s
+`ideaToCard` cards (helper moved to `utils/ideaToCard.ts`, pure); toggle removed (row 70/15/15);
+tour `n10 n11 n12 n13 n15 n16 n18 | n19–n24` (n14/n17 builders deleted; n16 a tap beat);
+calculator `ScrollView` announces scroll + guard rule 10 makes it mandatory; "Search all trades"
+exit on fair decks. Analytics: `calc_include_players_toggled` removed, `path` prop,
+`deck_search_all_tapped`. Gates: pytest **4173** · tsc · 76/76 guards · 5 sabotages red.
+Q-029 fully closed (✓ half D-152, receive-side half retired by D-153). Also this session:
+`docs/plans/ram-mascot/brief.md` (own thread, awaiting D1).
+
+## 2026-08-22h — #384 W6-A: the ✓ cell is wired — `POST /api/trades/queue` (D-152); D-151 closes §6b (still dark, not pushed)
+
+Operator rulings: §6b → the merged calculator keeps its own tab ([D-151](DECISIONS.md), Q-028 closed);
+the ✓ like/queue contract approved and built as **W6-A** ([D-152](DECISIONS.md)). One Opus build
+package, lead-reviewed: the route records the deck's own like through `_reconstruct_swipe_card` →
+`record_decision` with a deterministic `calcq_` id (idempotent, one Elo signal), evaluates the
+counterparty's likes-you gates **up front** and refuses with a closed six-reason enum recording
+nothing; `find_live_trade_like` is a read-only helper (no schema change). Mobile: `onLikeTrade` →
+`queueTradeForOpponent`, per-reason toasts, in-flight lock; `calc_trade_queued {queued, reason}`
+registered (INTENT). 26 backend tests incl. "the queued like reaches the opponent's deck"; pytest
+**4154**; 76/76 guards; docs (api-reference, cross-client-invariants reasons enum, architecture,
+LLD, glossary, scope, status W6-A, checklist 13/13a/13b). Next: **W6-B** — Find a Trade with a
+filled canvas becomes a fairness-only package search (asset-ideas engine generalised), empty canvas
+keeps the modeled deck, the Include-players toggle is removed, the tour is reshaped to end in the
+modeled cards, and the calculator `ScrollView` announces scroll so spotlights track.
+
+## 2026-08-22g — #384 W5: the journey works on paper again (three Opus build packages, lead-reviewed; still dark, not pushed)
+
+Built on the review below, same branch. `fcf3413` **W5-B** — 13 calculator/tour/deck events +
+`prompt_deferred` registered with exact prop allowlists and NON_INTENT classification
+(ingest was dropping every one); addendum `docs/business/analytics/2026-08-22-384-calc-finder-addendum.md`;
+pytest 4128. `9dcd003` **W5-D** — the ✕-overlay stays up through layer 2 and a backdrop-dismiss after a
+banked tile commits the deferred advance (the P0 dead-end); `reasonsAsOverlay` is a host PROP driven by a
+handoff `origin:'calculator'` (not a flag read — shipped decks keep their tiles); `FinderHandoff` gains
+`origin`/`includePlayers`/nullable opponent and the choke point regenerates on a calculator arrival;
+Back-to-calculator via the #190 prefill shape; unpin-retry for any pin count, regenerates; deck guide
+targets registered. `a52c91e` **W5-T** — n10/n16/n17/n18 advance on the real action; Find a Trade uses
+`popTo` (G-056) and the runner PARKS/resumes on deck arrival; auto-start gated on a `calc_tour_completed`
+receipt, `hasLeague`, and `onboarding.guide_v2`; tour-owned mute in `useGuide`; n11 opens the DNA sheet +
+outlook fallback row; format chips restored; league-keyed remount; n23/n23b by platform. Lead added: endTour
+tears down its own bubble, run-ahead Find-a-Trade jumps to the deck half, arrival waits for a card.
+Gates: tsc · lint · **76/76 guards** (+13 assertions) · pytest 4128. **Still open (bright line):** ✓
+like/queue contract (cell stays disabled), receive-side `pinned_receive_mode:'all'`, §6b, rollout shape.
+
+## 2026-08-22f — #384 E2E review: do NOT flip `calc.merged_layout` yet (review-only, nothing shipped)
+
+Five independent Fable code-walk reviews + lead verification of every P0/P1 on
+`feat/calc-finder-merge` @ `7399e18`. Gates re-run and green (tsc · lint · 76/76 guards ·
+pytest 4117). **5 P0 · 8 P1 · 7 P2 · 4 P3** in
+[review-2026-08-22-e2e.md](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md).
+The journey does not work: the ✕-overlay strands every card (layer-1 closes the sheet, the host
+advances only from layer 2); four `action` beats have no `advanceGuideIfActive` call site; the
+deck half of the tour is unreachable (navigate PUSHES a second TradesHome — routers 7.5.3, no
+`getId`/`pop` — and nothing regenerates; deck targets never registered); the tour's spotlights
+and caps hang off `onboarding.guide_v2` (false) and the outlook row off `trade.outlook_direction`
+(false), neither named as a prerequisite; the ✓ cell is a permanently disabled control
+(`onLikeTrade` never passed). Also: receive-side pins are any-one not all (`trade_optimizer.py:522`),
+the overlay is app-wide (`TradeCard.tsx:205`), no first-visit gate, league switch leaves a stale
+canvas, format chips dropped, 12/61 sabotages stayed green, no scope.md, tour events unregistered.
+Four bright-line operator decisions listed in the review. Suggested W5 (no API) / W6 (after rulings).
+
+## 2026-08-22e — The merged calculator: five waves, BUILT DARK (#384, `feat/calc-finder-merge`, not merged)
+
+The report the cap ate ([D-149](DECISIONS.md)) turned into the build. #384 — canonical for
+#310/#379/#380, touching #333 — specced a merged Find-a-Trade/calculator surface plus a
+fifteen-beat tour. Ten rulings at triage, four at plan review, then "continue through all
+waves". [D-150](DECISIONS.md).
+
+- **W0 `224a830` — the demo CALCULATOR removed** (net −239 lines), and only that. "Demo" names
+  two unrelated systems across sixteen files; the demo **SESSION** (`/api/session/demo`,
+  try-before-you-sync, `onboarding.demo_bridge`) is open-access onboarding and is untouched,
+  verified by an empty `git diff` over its five files. `check-demo-calc-removed.js` is
+  two-sided so a future change cannot delete the wrong one. It also surfaced that
+  `tradeCalcMock.ts` exported two types that were never demo-only, and that
+  `utils/CLAUDE.md` called `tradeCalcMath.ts` "demo mode only" when three components import
+  it — a stale doc that would have justified deleting a live module.
+- **W1 `dfcd532` — the layout**, behind `calc.merged_layout` (**false**). Outlook beat,
+  league/team dropdowns (#333), two vertical columns, the 40/30/15/15 action row. Flag-off is
+  proven by **excising every gated region by brace balancing** and asserting no merged-only
+  testID survives — not by grepping for gates.
+- **W2 `56111a0` — behaviour.** ✕ keeps one button and pops the reasons as an overlay;
+  end-of-deck gains "Back to calculator" and "Search without <player>"; include-players writes
+  the **shipped** `useFinderTargets` pin store rather than a `requireAssets` param nothing
+  would have read. **The send ruling needed no code** — `resolveSendPlatform` already routes
+  Sleeper/MFL/ESPN.
+- **W3 `4ff15f3` — a tour-long HOLD, not a new gate.** The plan priced this as building
+  suppression across six surfaces; `useInterruptCoordinator` already was that gate and is
+  live. The real gap: the slot frees BETWEEN steps, so an interstitial legitimately wins the
+  gap. A hold closes it; `isInterruptBusy()` extends it to the root modals.
+- **W4 `ae605ad` — 15 beats compressed to the CI copy budget** (auto 12 / action 16 / tap 20 /
+  cta 16), every line word-counted before authoring, worst case 14/16. Runner owns sequence
+  and lifecycle; the script stays data. Beats decline behavioural retirement **with the reason
+  written inline**, because no receipt means "understands the calculator".
+
+**Gates every wave:** pytest **4117 passed / 1 skipped**, tsc clean, testid-lint OK,
+structural suites **71 → 76**.
+
+**Five dead assertions found and fixed — all in MY OWN guards, none in the product:** two
+substring anchors that survived their own sabotage (`/isDemo/` matched `isDemoRenamed`,
+`/onDemo/` matched `onDemoStarted`), a backwards proximity search for the flag gate that
+stayed green when the gate it should have read was replaced, a fixed-size window that read the
+next JSX prop's body, and a drift detector that threw instead of failing a named assertion.
+An existing suite also broke honestly (`check-decline-reasons.js` pinned the ✕ condition as a
+literal string); its two legal shapes are now enumerated rather than the pattern loosened —
+verified by sabotage that it still rejects `reasons && false`.
+
+**Nothing is live and nothing has runtime evidence.** `calc.merged_layout` is false, the
+branch is unmerged, and the 27-step TestFlight checklist is unrun. Reported not buried: a
+**pre-existing** Chalkline floor violation (`lineupHeadText` at fontSize 10, on `main` since
+#297), and plan §6b — ruling 3 collides with #310 and with the tour's own first beat, built to
+a stated assumption that still wants a yes/no.
+
 ## 2026-08-22d — A long feedback note stopped vanishing (cap 2000 → 8000, and the three silences around it)
 
 The operator wrote a long in-app note, tapped Save, watched the sheet close normally — and it

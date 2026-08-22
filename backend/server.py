@@ -84,7 +84,7 @@ from .database import (
     upsert_user, upsert_league,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
-    load_recent_league_likes, log_trade_impressions,
+    load_recent_league_likes, find_live_trade_like, log_trade_impressions,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
@@ -11841,6 +11841,215 @@ def asset_trade_ideas():
     })
 
 
+# ---------------------------------------------------------------------------
+# Fair packages for a hand-built give side (#384 W6-B, D-153)
+# docs/feedback/items/384-calc-finder-merge/status.md § W6-B
+# ---------------------------------------------------------------------------
+# The operator's ruling, verbatim: "this type of request shouldn't go through
+# our models. It should be a much simpler set of cards solving for fairness
+# only. Similar to how we determine the consolidate and downgrade suggestions
+# already."
+#
+# So: Find a Trade with a FILLED canvas is not a model run. It is one
+# synchronous fairness sweep around the canvas's give side — no job, no
+# divergence, no streaming, no lanes. Find a Trade with an EMPTY canvas is
+# unchanged and still runs the model deck (the #330 hand-off auto-run).
+
+def _fair_package_trade_id(user_id: str, league_id: str, opponent_user_id: str,
+                           give_ids: list, recv_ids: list) -> str:
+    """Deterministic card id for one fair package.
+
+    Same construction and the same reasoning as `_calc_queue_trade_id`: the
+    SET is the identity, so re-ordering the canvas is the same trade and the
+    same id. It matters here because these cards are never registered by a
+    generator — a swipe on one arrives at `/api/trades/swipe` with an id the
+    in-memory deck has never seen, and `_reconstruct_swipe_card` rebuilds it
+    from the echoed context. A stable id is what makes a re-swipe one row.
+    """
+    payload = "|".join([
+        str(user_id), str(league_id), str(opponent_user_id or ""),
+        ",".join(sorted(str(p) for p in give_ids)),
+        ",".join(sorted(str(p) for p in recv_ids)),
+    ])
+    return "fairpk_" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+@app.route("/api/trades/fair-packages", methods=["POST"])
+@_gate_unverified_write
+def fair_packages():
+    """POST /api/trades/fair-packages   (flag calc.merged_layout; #384 W6-B)
+
+    Fairness-only ideas around a FIXED give-side anchor — the merged
+    calculator's Find a Trade when the canvas has assets on it.
+
+    Body: {
+      league_id            required — must be the session's active league
+      give_player_ids      required, non-empty — the ANCHOR. Every idea's
+                           give side is exactly this set, in this order.
+      receive_player_ids?  the canvas receive side. A PREFERENCE, not a
+                           constraint: ideas containing all of them sort
+                           first, ideas that cannot are still returned.
+      opponent_user_id?    scope the sweep to one league-mate; omitted ⇒
+                           every league-mate with a roster
+      fairness_threshold?  default 0.50, the same wide net asset-ideas uses
+    }
+
+    Response 200: {
+      basis:   "consensus",
+      anchor:  {give_player_ids, receive_player_ids, opponent_user_id|null},
+      ideas:   [idea],            # flat, capped at model_config
+                                  # `fair_packages_cap` (default 20)
+      relaxed: bool,              # #189 — the whole list came from the
+                                  # widened band because the strict one was empty
+      reason?: str                # only alongside `ideas: []`
+    }
+    idea = the asset-ideas shape (counterparty ids, both id lists and player
+    dicts, give_value/receive_value/difference/fairness, favors/gap, the #189
+    `relaxed` labels) PLUS `trade_id` (deterministic `fairpk_…`) and
+    `basis: "consensus"`, which together are what let a client swipe, queue or
+    flag one of these cards through the shipped routes: they all echo card
+    context and rebuild through `_reconstruct_swipe_card`.
+
+    `reason` vocabulary (200 with an empty list, never a 4xx — the request was
+    well formed and the answer is a product answer):
+      give_untouchable  an anchor asset is on the CALLER's untouchable list
+      unknown_asset     an anchor id is not in the player pool
+      no_partner        `opponent_user_id` is not a league-mate with a roster
+      unknown_league    the league is not loaded on this session
+
+    400: `missing_field` (give_player_ids), `league_mismatch`.
+    404 `feature_disabled` when `calc.merged_layout` is off — checked before
+    any session work, the same convention `/api/trades/queue` uses.
+
+    Gates are `trade_service.eval_consensus_package` — literally the function
+    `_generate_asset_ideas_impl` calls, so a fair package and an asset idea can
+    never price the same trade differently.
+    """
+    if not getattr(FLAGS, "calc_merged_layout", False):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    if not (g_user_id and g_league):
+        return jsonify({"error": "session missing user/league"}), 400
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_raw = body.get("receive_player_ids")
+    recv_ids = [str(p) for p in recv_raw] if isinstance(recv_raw, list) else []
+
+    league_id = str(body.get("league_id") or "").strip() or g_league.league_id
+    if league_id != g_league.league_id:
+        # The sweep needs THIS league's members, rosters and seed board, all of
+        # which live on the session — another league is unanswerable, not
+        # refusable. Same call as /api/trades/queue.
+        return jsonify({"error": "league_mismatch"}), 400
+
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip() or None
+    fairness_threshold = float(body.get("fairness_threshold", 0.50))
+
+    fmt           = _active_format(sess)
+    services      = sess.get("services") or {}
+    trade_svcs    = sess.get("trade_svcs") or {}
+    service       = services.get(fmt) or sess.get("service")
+    trade_service = trade_svcs.get(fmt) or sess.get("trade_svc")
+    g_user_roster = sess.get("user_roster")
+    g_players     = sess.get("players")
+    if not (service and trade_service and g_user_roster and g_players):
+        return jsonify({"error": "session missing required state"}), 400
+
+    user_rankings = service.get_rankings(position=None)
+    raw_user_elo  = {rp.player.id: rp.elo for rp in user_rankings.rankings}
+    seed_map      = dict(service._seed or {})
+    players_dict  = {p.id: p for p in g_players}
+    user_roster   = list(g_user_roster)
+
+    # Backlog #2 / #163 — the same exclusion lists asset-ideas loads.
+    untouchable_ids: set = set()
+    not_interested_ids: set = set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+            untouchable_ids = set(ap.get("untouchables", []))
+            not_interested_ids = set(ap.get("not_interested", []))
+        except Exception as ap_err:
+            log.warning("fair-packages: asset prefs load failed: %s", ap_err)
+
+    # #170/#171/#185 — owned-pick injection through the shared helper, so a
+    # canvas pick is priced and returnable exactly as it is everywhere else.
+    if _owned_picks_available(league_id, g_league):
+        try:
+            seed_map, user_roster, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = fmt,
+                trade_service  = trade_service,
+                players_dict   = players_dict,
+                seed_map       = seed_map,
+                user_elo       = raw_user_elo,
+                user_id        = g_user_id,
+                user_roster    = user_roster,
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("fair-packages: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    result = trade_service.generate_fair_packages(
+        user_id            = g_user_id,
+        user_roster        = user_roster,
+        league_id          = league_id,
+        seed_elo           = seed_map,
+        give_player_ids    = give_ids,
+        receive_player_ids = recv_ids,
+        fairness_threshold = fairness_threshold,
+        raw_user_elo       = raw_user_elo,
+        untouchable_ids    = untouchable_ids or None,
+        not_interested_ids = not_interested_ids or None,
+        opponent_user_id   = opponent_user_id,
+    )
+
+    def _idea_row(idea: dict) -> dict:
+        out = dict(idea)
+        out["give"]    = [player_to_dict(players_dict[p])
+                          for p in idea["give_player_ids"] if p in players_dict]
+        out["receive"] = [player_to_dict(players_dict[p])
+                          for p in idea["receive_player_ids"] if p in players_dict]
+        # #216 — the same single-source verdict construction evaluate, the deck
+        # cards and asset-ideas use, so the four surfaces cannot drift.
+        verdict = _value_verdict_payload(
+            float(out.get("give_value") or 0.0),
+            float(out.get("receive_value") or 0.0),
+            even=float(out.get("fairness") or 0.0) >= 0.95,
+        )
+        out["favors"]   = verdict["favors"]
+        out["gap"]      = verdict["gap"]
+        out["basis"]    = "consensus"
+        out["trade_id"] = _fair_package_trade_id(
+            g_user_id, league_id, idea["counterparty_user_id"],
+            idea["give_player_ids"], idea["receive_player_ids"])
+        return out
+
+    payload = {
+        "basis":   "consensus",
+        "anchor":  {
+            "give_player_ids":    give_ids,
+            "receive_player_ids": recv_ids,
+            "opponent_user_id":   opponent_user_id,
+        },
+        "ideas":   [_idea_row(i) for i in result.get("ideas") or []],
+        "relaxed": bool(result.get("relaxed")),
+    }
+    if result.get("reason"):
+        payload["reason"] = result["reason"]
+    return jsonify(payload)
+
+
 @app.route("/api/trades/suppressions/undo", methods=["POST"])
 @_gate_unverified_write
 def undo_deck_suppression():
@@ -12279,6 +12488,397 @@ def swipe_trade():
     except Exception as e:
         log.exception("swipe_trade failed")
         return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# Queue a hand-built package for the counterparty (#384 ✓ cell, D-152)
+# docs/feedback/items/384-calc-finder-merge/status.md § W6-A
+# ---------------------------------------------------------------------------
+# The merged calculator's ✓ cell. The operator's spec, verbatim: "queue this
+# trade for the other manager — it shows up in their suggested trades if it
+# meets their preferences." That sentence names two existing systems and adds
+# nothing:
+#
+#   1. "queue this trade"      = the deck's LIKE. One record path, reused
+#                                verbatim (`_reconstruct_swipe_card` ->
+#                                `record_decision` -> `save_trade_decision` /
+#                                `save_trade_swipes`), so a calculator like and
+#                                a deck like are the same row in the same table
+#                                with the same Elo weighting.
+#   2. "shows up in their      = the likes-you injector (`_inject_likes_you_cards_impl`).
+#      suggested trades if it    It reads exactly the rows (1) writes, and every
+#      meets their preferences"  gate it applies is a pure function of state
+#                                this route already holds. So the route
+#                                EVALUATES that predicate UP FRONT and refuses
+#                                with a named reason instead of recording a
+#                                like that would silently never mirror.
+#
+# The route mints NOTHING new: no table, no card type, no second like path.
+# Its only original content is (a) a deterministic trade_id so the same
+# package queued twice is one row, and (b) `_calc_queue_mirror_reason`, which
+# is a line-for-line re-read of the injector's own skip conditions.
+
+# Refusal vocabulary. LOW-CARDINALITY and shared with the clients — mirrored in
+# `mobile/src/api/trades.ts` (CalcQueueReason) and listed in
+# docs/cross-client-invariants.md. `detail` is free text for the log/debug and
+# is never switched on by a client.
+CALC_QUEUE_REASONS = (
+    "likes_you_off",            # the mirror surface itself is dark (flag/demo)
+    "not_league_member",        # caller or opponent is not in this league
+    "assets_not_on_roster",     # an asset is not on the roster it must come from
+    "opponent_untouchable",     # they marked something you are asking for untouchable
+    "opponent_not_interested",  # they marked something you are offering not-interested
+    "fails_fairness_floor",     # the D-096 quality ladder refuses it from THEIR side
+)
+
+
+def _calc_queue_denied():
+    """Gate for /api/trades/queue — an error response, or None.
+
+    Flag-only, checked BEFORE any session work (the `draft.room` /
+    `feedback.decline_reasons` convention). `calc.merged_layout` OFF ⇒ the ✓
+    cell does not render on any client, so the route must not exist either.
+    Ordinary write auth still applies via `@_gate_unverified_write`.
+    """
+    if not getattr(FLAGS, "calc_merged_layout", False):
+        return jsonify({"error": "feature_disabled"}), 404
+    return None
+
+
+def _calc_queue_trade_id(user_id: str, league_id: str, opponent_user_id: str,
+                         give_ids: list, recv_ids: list) -> str:
+    """The deterministic card id for one queued package.
+
+    The deck mints `uuid4()[:8]` per generated card because each card is a
+    fresh object. A queued package has no card — the SET is the identity — so
+    the id is derived from (user, league, opponent, give set, receive set).
+    Sets, so re-ordering the canvas is the same trade; sorted, so the digest is
+    stable. `calcq_` prefixes it the way `likesyou_` prefixes a synthesized
+    mirror, and keeps it un-collidable with an 8-hex deck id.
+
+    This IS the idempotency key: `find_live_trade_like` on it answers "already
+    queued?" without a second table.
+    """
+    payload = "|".join([
+        str(user_id), str(league_id), str(opponent_user_id),
+        ",".join(sorted(str(p) for p in give_ids)),
+        ",".join(sorted(str(p) for p in recv_ids)),
+    ])
+    return "calcq_" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _calc_queue_mirror_reason(*, league, caller_member, opponent, give_ids: list,
+                              recv_ids: list, seed_map: dict) -> tuple:
+    """Would `_inject_likes_you_cards_impl` mirror this like into the
+    OPPONENT's deck? Returns `(reason, detail)`, or `(None, None)` to pass.
+
+    Read this against `_inject_likes_you_cards_impl` — every branch below is
+    one of its `continue`s, evaluated with the same inputs from the OPPONENT's
+    point of view. In the injector's variable names, with the opponent as the
+    viewer and the caller as `opp`:
+
+        their_give = give_ids        (the caller's give side)
+        their_recv = recv_ids        (the caller's receive side)
+        my_give    = recv_ids        (the OPPONENT gives what the caller receives)
+        my_recv    = give_ids
+
+    WHAT IS EVALUATED HERE (all pure functions of state that is stable between
+    now and the opponent's next deck): membership, roster actionability, the
+    opponent's untouchables and not-interested lists, and the D-096 quality
+    ladder — the gate level, the user-gain floor, directional R1 and
+    `filler_ok`. Those ARE "their preferences" as the operator used the phrase.
+
+    WHAT IS NOT, AND CANNOT BE (facts that only exist at the opponent's next
+    generation, so a `queued: true` is "eligible", not "guaranteed position 1"):
+      * `_LIKES_YOU_CAP` — at most 3 mirrors per deck; a better like can win the
+        slot.
+      * `_past_decision_keys` — whether the opponent has already swiped this
+        exact package (per-session state rebuilt by replay).
+      * the R4 `exclusion_keys` dedup — whether the package is already live in
+        their match pipeline.
+      * the 90-day recency window in `load_recent_league_likes`, and any roster
+        or preference change between now and then.
+    """
+    # 1 — membership. The injector resolves the liker through
+    #     `members_by_id.get(like["user_id"])` and skips when it is None or is
+    #     the viewer themselves.
+    if caller_member is None:
+        return "not_league_member", "caller is not a member of this league"
+    if opponent is None:
+        return "not_league_member", "opponent is not a member of this league"
+    if opponent.user_id == caller_member.user_id:
+        return "not_league_member", "cannot queue a trade with yourself"
+
+    # 2 — still actionable. `set(their_give) <= set(opp.roster)` and
+    #     `set(their_recv) <= user_roster_set`. Both rosters are the
+    #     pick-injected ones (the caller runs `_inject_owned_picks` first, which
+    #     rewrites EVERY member's roster in place), so an owned pick inside
+    #     `picks_pool_cap` passes and one outside it does not — which is
+    #     exactly what the opponent's own deck will conclude.
+    missing_give = [p for p in give_ids if p not in set(caller_member.roster)]
+    if missing_give:
+        return "assets_not_on_roster", f"not on your roster: {','.join(missing_give)}"
+    missing_recv = [p for p in recv_ids if p not in set(opponent.roster)]
+    if missing_recv:
+        return ("assets_not_on_roster",
+                f"not on @{opponent.username}'s roster: {','.join(missing_recv)}")
+
+    # 3 — the opponent's asset preference lists (backlog #2 / #163), loaded for
+    #     THEM, not for the caller. `untouchable_ids & their_recv` and
+    #     `not_interested_ids & their_give` in the injector.
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=opponent.user_id,
+                                        league_id=league.league_id)
+        except Exception as ap_err:
+            log.warning("trades/queue: opponent asset prefs load failed: %s", ap_err)
+            ap = {}
+        untouchable = set(ap.get("untouchables", []))
+        not_interested = set(ap.get("not_interested", []))
+        hit = untouchable & set(recv_ids)
+        if hit:
+            return "opponent_untouchable", ",".join(sorted(hit))
+        hit = not_interested & set(give_ids)
+        if hit:
+            return "opponent_not_interested", ",".join(sorted(hit))
+
+    # 4 — the D-096 quality ladder, measured from the OPPONENT's side, under
+    #     THEIR pinned stud-tax mode (#215 — `_likes_you_package_delta` must run
+    #     inside that context, which is why `_inject_likes_you_cards` wraps the
+    #     whole impl in it).
+    my_give, my_recv = list(recv_ids), list(give_ids)
+    _mode = (_trade_service_mod.pinned_stud_tax_mode()
+             or _trade_service_mod.stud_tax_mode_for_user(opponent.user_id))
+    with _trade_service_mod.stud_tax_override(_mode):
+        if _likes_you_gate_level() <= 0:
+            if (_likes_you_user_delta(my_give, my_recv, seed_map)
+                    < _likes_you_min_user_delta()):
+                return "fails_fairness_floor", "level 0 raw-sum floor"
+        else:
+            seed_value = _likes_you_seed_value(seed_map)
+            _gv, _rv, delta = _likes_you_package_delta(my_give, my_recv, seed_value)
+            if delta < _likes_you_min_user_gain():
+                return "fails_fairness_floor", f"package delta {delta:.0f}"
+            if (_likes_you_gate_level() >= 2
+                    and not _likes_you_presentment_ok(my_give, my_recv, seed_value)):
+                return "fails_fairness_floor", "presentment (R1/filler)"
+    return None, None
+
+
+@app.route("/api/trades/queue", methods=["POST"])
+@_gate_unverified_write
+def queue_trade_for_opponent():
+    """POST /api/trades/queue — queue a hand-built package for a league-mate.
+
+    Body:
+      league_id           required — must be the session's active league
+      opponent_user_id    required — the counterparty's LEAGUE member id
+      give_player_ids     required, non-empty — what the caller sends
+      receive_player_ids  required, non-empty — what the caller receives
+
+    404 `feature_disabled` when `calc.merged_layout` is off.
+
+    200 `{queued: true, trade_id, already_queued: bool}` — the like is
+    recorded and WILL be eligible for the opponent's likes-you injection.
+    200 `{queued: false, reason, detail?}` — nothing is recorded; `reason` is
+    one of `CALC_QUEUE_REASONS`. A refusal is deliberately not a 4xx: the
+    request was well formed and the answer is a product answer.
+
+    **A `queued: false` records nothing.** The operator's spec is "it shows up
+    in their suggested trades IF it meets their preferences" — a like that the
+    mirror would silently drop is worse than no like: it moves the caller's
+    Elo board and lands in their "Awaiting them" list for a trade the other
+    manager will never see.
+
+    Idempotent per (user, league, opponent, give set, receive set) via the
+    deterministic `trade_id` from `_calc_queue_trade_id`. A second identical
+    call finds the live row, returns `already_queued: true`, and fires NO Elo
+    signal and NO second `trade_decisions` / `swipe_decisions` write. This
+    guard sits BEFORE `record_trade_signal` — unlike `swipe_trade`, where the
+    G-049 / D-073 note deliberately leaves the in-memory signal ungated,
+    because a deck swipe cannot be replayed by the user at will and a ✓ tap
+    can.
+
+    Mutual-match detection is deliberately NOT run here. The queued like
+    reaches the counterparty as a likes-you card on their next deck, and their
+    swipe on it fires `check_for_match` through the shipped path — one place
+    where a match is minted, not two.
+    """
+    denied = _calc_queue_denied()
+    if denied:
+        return denied
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    recv_raw = body.get("receive_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    if not isinstance(recv_raw, list) or not recv_raw:
+        return jsonify({"error": "missing_field", "field": "receive_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_ids = [str(p) for p in recv_raw]
+
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip()
+    if not opponent_user_id:
+        return jsonify({"error": "missing_field", "field": "opponent_user_id"}), 400
+
+    league_id = str(body.get("league_id") or "").strip()
+    if not league_id:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+    if not g_league or league_id != g_league.league_id:
+        # The predicate below needs THIS league's members, rosters and seed
+        # board, all of which live on the session. Another league is not a
+        # product refusal, it is an unanswerable request.
+        return jsonify({"error": "league_mismatch"}), 400
+
+    service       = sess.get("service")
+    trade_service = sess.get("trade_svc")
+    if not (service and trade_service):
+        return jsonify({"error": "session missing required state"}), 400
+
+    # The mirror surface has to exist at all before its preferences can matter.
+    # Checked before any pick/board work — there is nothing to evaluate.
+    if not _likes_you_enabled():
+        return jsonify({"queued": False, "reason": "likes_you_off",
+                        "detail": "trade.likes_you is off"})
+    if league_id == "league_demo":
+        return jsonify({"queued": False, "reason": "likes_you_off",
+                        "detail": "the demo league has no likes-you injection"})
+
+    # League identity for the roster comparisons (backend/CLAUDE.md § Identity);
+    # the DECISION row keeps `sess["user_id"]`, byte-identical to swipe_trade,
+    # because that is the id `load_recent_league_likes` will read back.
+    caller_league_id = _league_user_id(sess)
+    seed_map = dict(getattr(service, "_seed", None) or {})
+
+    # #170/#171/#185 — the same owned-pick injection the generate job and
+    # asset-ideas run, so `member.roster` and `seed_map` carry priced picks and
+    # a pick on the canvas is judged exactly as the opponent's own deck will
+    # judge it. Best-effort, same as both existing call sites.
+    if _owned_picks_available(league_id, g_league):
+        try:
+            seed_map, _ur, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = _active_format(sess),
+                trade_service  = trade_service,
+                players_dict   = {p.id: p for p in (sess.get("players") or [])},
+                seed_map       = seed_map,
+                user_elo       = {},
+                user_id        = caller_league_id,
+                user_roster    = list(sess.get("user_roster") or []),
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("trades/queue: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    members_by_id = {m.user_id: m for m in g_league.members}
+    caller_member = members_by_id.get(caller_league_id)
+    opponent      = members_by_id.get(opponent_user_id)
+
+    reason, detail = _calc_queue_mirror_reason(
+        league        = g_league,
+        caller_member = caller_member,
+        opponent      = opponent,
+        give_ids      = give_ids,
+        recv_ids      = recv_ids,
+        seed_map      = seed_map,
+    )
+    if reason:
+        resp = {"queued": False, "reason": reason}
+        if detail:
+            resp["detail"] = detail
+        return jsonify(resp)
+
+    trade_id = _calc_queue_trade_id(g_user_id, league_id, opponent_user_id,
+                                    give_ids, recv_ids)
+
+    # Idempotency probe — BEFORE any signal or write. See the docstring.
+    try:
+        existing = find_live_trade_like(g_user_id, league_id, trade_id)
+    except Exception as dup_err:
+        log.warning("trades/queue: idempotency probe failed: %s", dup_err)
+        existing = None
+    if existing is not None:
+        return jsonify({"queued": True, "already_queued": True,
+                        "trade_id": trade_id})
+
+    # ── Record the like. ONE path, the swipe route's, reused verbatim. ──────
+    card = _reconstruct_swipe_card(
+        trade_service,
+        {
+            "trade_id":           trade_id,
+            "league_id":          league_id,
+            "give_player_ids":    give_ids,
+            "receive_player_ids": recv_ids,
+            "target_user_id":     opponent.user_id,
+            "target_username":    opponent.username,
+        },
+        g_user_id,
+        league_id,
+    )
+    if card is None:
+        return jsonify({"error": "bad_request"}), 400
+    card = trade_service.record_decision(trade_id=trade_id, decision="like")
+
+    # D-060 fit-congruence + the bake-off Elo freeze, computed exactly as
+    # swipe_trade does. A queued card carries no `lane_shift` (there was no
+    # generation to stamp one), so `fit_congruence_mult` returns 1.0 — the same
+    # value an FB-46 reconstruction gets.
+    fit_mult = _trade_service_mod.fit_congruence_mult(
+        getattr(card, "lane_shift", None), "like")
+    fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
+    from .ranking_service import _c as _rs_c
+    service.record_trade_signal(
+        winner_ids = card.receive_player_ids,
+        loser_ids  = card.give_player_ids,
+        decision   = "like",
+        fit_mult   = fit_mult,
+    )
+
+    try:
+        wrote_decision = save_trade_decision(
+            user_id            = g_user_id,
+            league_id          = league_id,
+            trade_id           = trade_id,
+            give_player_ids    = card.give_player_ids,
+            receive_player_ids = card.receive_player_ids,
+            decision           = "like",
+        )
+        if wrote_decision:
+            save_trade_swipes(
+                user_id        = g_user_id,
+                winner_ids     = card.receive_player_ids,
+                loser_ids      = card.give_player_ids,
+                k_factor       = _rs_c("trade_k_like") * fit_mult,
+                scoring_format = _active_format(sess),
+            )
+        record_event(
+            g_user_id,
+            "trade_proposed",
+            league_id = league_id,
+            source    = "calc_queue",
+            props     = {
+                "decision": "like",
+                "trade_id": trade_id,
+                "give":     card.give_player_ids,
+                "receive":  card.receive_player_ids,
+                "target":   opponent.user_id,
+            },
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception as db_err:
+        log.warning("DB write failed for queued trade (continuing): %s", db_err)
+
+    log.info("trades/queue: %s queued %s for %s (league=%s)",
+             g_user_id, trade_id, opponent.user_id, league_id)
+    return jsonify({"queued": True, "already_queued": False,
+                    "trade_id": trade_id})
 
 
 # ---------------------------------------------------------------------------

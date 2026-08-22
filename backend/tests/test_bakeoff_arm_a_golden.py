@@ -486,6 +486,12 @@ def test_r4_bypass_is_thread_local():
 #: its seam multiplies `composite_score` inside generation, so 0.0 (the
 #: documented byte-identical M1 disable) is what preserves the pre-wave engine;
 #: the golden was re-run with the pin in place and did NOT need re-capturing.
+#: 2026-08-22 added `fair_packages_cap` (#384 W6-B, POST /api/trades/fair-packages).
+#: EXCLUDED from MODEL_A_PROFILE: it caps a SURFACE, not a generator. No arm
+#: reaches `TradeService.generate_fair_packages` — the bake-off deck comes from
+#: `generate_trades` / `trade_gen_v2` / `generate_pair_trades_v3`, none of which
+#: calls it — so a kill value would falsely assert the knob reaches an arm-A deck.
+#: Same rule as `asset_ideas_group_cap`, its sibling one line up.
 #: The other five (`negmem_floor`, `negmem_min_evidence`, `negmem_halflife_days`,
 #: `negmem_sat_k`, `negmem_like_net`) are EXCLUDED: at strength 0.0
 #: `negmem.effective_mult` returns exactly 1.0 before any of them is consulted —
@@ -536,6 +542,7 @@ fit_expand_from fit_junk_floor fit_k_defying_mult fit_k_explained_mult
 fit_max_packages_per_pair fit_min_aggregate fit_min_them fit_pool_cap
 fit_pool_consensus fit_pool_div_opp fit_pool_div_seed fit_premium_max_loss
 fit_r5_mode fit_score_even fit_score_scale fit_w_board fit_w_cons fit_w_div
+fair_packages_cap
 fuzzy_match_tau
 gen2_accept_global_prior gen2_accept_prior_strength gen2_band
 gen2_centerpiece_top_k gen2_consol_floor gen2_consol_gamma gen2_dedup_jaccard

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed](#2026-08-22--384-merged-calculator-e2e-review-failed-w5-fixed-it-on-claudemanual-calculator-e2e-review-39a467-four-bright-line-calls--a-testflight-pass-owed)
 - [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)
 - [2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed](#2026-08-21--receipts-built-dark-on-featreceipts-not-pushed-p0-prod-read-owed)
 - [2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge](#2026-08-21--counterparty-breaker-complete-suite-converged-v1-built-dark-pr-161-awaits-operator-merge)
@@ -40,6 +41,43 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed
+
+**Where:** `claude/manual-calculator-e2e-review-39a467` = `feat/calc-finder-merge` (W0–W4, `7399e18`)
++ the E2E review + G-056 + four W5 commits (`fcf3413` analytics · `9dcd003` deck · `a52c91e` tour ·
+`fc062dc` guards/scope/docs). **Not pushed, not merged, `calc.merged_layout` false.** The
+`feat/calc-finder-merge` branch itself is untouched — W5 lives only on the review branch; ship from
+the review branch (or cherry-pick), do not rebuild on `feat/calc-finder-merge`. `mobile/node_modules`
+in this worktree is a symlink to `new-user-feedback-d4c47d`'s install.
+
+**What happened:** the W0–W4 build passed every gate and did not work as a journey — review
+(`docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md`, 5 P0 / 8 P1). W5 fixed
+everything that needed no new contract: overlay dead-end, four beats that could not advance, the deck
+half of the tour, first-visit gate, `guide_v2` prerequisite, outlook fallback + CTA opener, Back-to-
+calculator/unpin, league-switch canvas, format chips, analytics (13 events were being dropped), 15
+guards that stayed green through real regressions. Gates: tsc · lint · **76/76 guards** (all wired to
+`npm run`) · pytest **4128**.
+
+**Then the operator ruled, and W6 landed the same day:** §6b → own tab ([D-151](DECISIONS.md));
+the ✓ contract → `POST /api/trades/queue` (**W6-A** `d6c54cf`, [D-152](DECISIONS.md)); Find a
+Trade forks on the canvas — empty ⇒ modeled deck, filled ⇒ fairness-only `POST
+/api/trades/fair-packages`, toggle removed, tour reshaped to end in the modeled cards, calculator
+scroll-tracking fixed (**W6-B**, [D-153](DECISIONS.md)). Q-028 and Q-029 both closed. pytest
+**4173**, 76/76 guards.
+
+**Still owed:** (1) rollout shape — global flag vs tester allowlist (scope.md §6); (2) the
+prerequisite flags — `onboarding.guide_v2` is **false** and the tour does not run without it,
+`trade.outlook_direction` false ⇒ the outlook fallback row; (3) the TestFlight checklist, rewritten
+for W6, **UNRUN** — section A flag-OFF first. Known minor: partner-summary lines are not in the
+merged team sheet; the fair sweep inherits the `finderHubOn && finderMode` choke-point posture.
+
+**Parallel thread:** `docs/plans/ram-mascot/brief.md` (ram replaces The Analyst) — a separate
+session is executing it; Part 3 of that brief must not start until this branch's W6-B commit is
+confirmed (it is, as of this handoff).
+
+**Next session:** run the checklist on a build containing the W6-B commit or later; then the
+rollout-shape call; then push/PR.
 
 ## 2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed
 

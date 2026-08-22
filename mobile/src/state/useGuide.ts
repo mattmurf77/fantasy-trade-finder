@@ -171,6 +171,15 @@ interface GuideStore {
    *  the N6.1 matched branch): mark it seen + retired and measure the
    *  suppression, without ever showing a bubble. */
   markGuideStepConsumed: (id: string, blockedBy: GuideBlockedBy) => void;
+  /** #384 — ids a running scripted tour owns. Registered by the tour runner
+   *  (utils/calcTour.ts) on start and cleared on end. It is a REGISTRATION,
+   *  not an import: calcTour imports this module, so this module must never
+   *  import calcTour. Two consequences while a tour holds the floor:
+   *  everything outside the set is refused silently, and the FR-E9 v1
+   *  release cap does not apply to what is inside it (a walkthrough the
+   *  user asked for is not release drip). */
+  tourOwnedIds: ReadonlySet<string>;
+  setTourOwnedIds: (ids: ReadonlySet<string>) => void;
 }
 
 /** True when the guided-avatar experience owns the onboarding surfaces. */
@@ -339,9 +348,21 @@ export const useGuide = create<GuideStore>((set, get) => {
     spotlight: 'none',
     spotlightFrame: null,
     stepsSeenCount: 0,
+    tourOwnedIds: new Set<string>(),
 
     requestStep: (step, handlers) => {
       if (!guidedAvatarActive()) return false;
+      // #384 review §20 — a scripted tour owns the floor for its whole run.
+      // A beat that is not the tour's is refused with NO side effects: no
+      // retirement, no suppression episode, no `seen` mark. The step was
+      // never eligible-and-lost, it was asked at the wrong moment, and
+      // recording it as blocked would spend a beat the user never saw.
+      if (
+        useInterruptCoordinator.getState().tourHold &&
+        !get().tourOwnedIds.has(step.id)
+      ) {
+        return false;
+      }
       const v2 = guideV2Active();
       const ob = getOnboardingState();
       if (step.once && ob.guideSeen[step.id]) {
@@ -374,9 +395,15 @@ export const useGuide = create<GuideStore>((set, get) => {
           noteSuppressed(step.id, 'retired', step.screen);
           return false;
         }
+        // FR-E9's one-beat-per-release drip is for beats the app volunteers.
+        // A tour beat is neither volunteered nor drip-fed: the user landed on
+        // the page or tapped "Show me around", and a walkthrough that stops
+        // after its first beat teaches nothing. Tour-owned ids are therefore
+        // exempt — the display cap still bounds them.
         if (
           isReturningV1User() &&
           isV2NewStepId(step.id) &&
+          !get().tourOwnedIds.has(step.id) &&
           obv.guideV2BeatShownVersion === appVersion()
         ) {
           noteSuppressed(step.id, 'v1_release_cap', step.screen);
@@ -509,6 +536,8 @@ export const useGuide = create<GuideStore>((set, get) => {
       patchOnboardingState({ guideSeen: { [id]: true }, guideRetired: { [id]: true } });
       noteSuppressed(id, blockedBy);
     },
+
+    setTourOwnedIds: (ids) => set({ tourOwnedIds: ids }),
   };
 });
 

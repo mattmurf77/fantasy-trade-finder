@@ -206,13 +206,20 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 8. **Impressions logging:** the final served deck is written to `trade_impressions` (one row per card, true positions), once per job.
 9. `trade_narrative.build_narrative()` fills `TradeCard.narrative`; cards served via `GET /api/trades` / job snapshots.
 
+**Fairness-only path** (`calc.merged_layout`, #384 W6-B / [D-153]): `POST /api/trades/fair-packages` → `TradeService.generate_fair_packages` runs BESIDE the pipeline above, not inside it — one synchronous sweep, no job, no streaming, no divergence. The merged calculator's canvas is a fixed give-side ANCHOR and only the return is enumerated; pricing and gates are `trade_service.eval_consensus_package`, the function extracted from `_generate_asset_ideas_impl` so the two consensus surfaces share one gate set instead of two copies. Find a Trade with an EMPTY canvas still runs the pipeline above.
+
 **Tier 3** (`trade_engine.v3`, flag-selectable): `backend/trade_optimizer.py` replaces step 4's enumeration with an exact per-pair package search, adds a sweetener pass for near-miss-fair trades, and (behind `trade.three_team`) 3-team cycle clearing. Off → v2.
 
 **Legacy path** (`trade_engine.v2` off — kill-switch fallback, byte-for-byte unchanged): mismatch (user-Elo gap) and fairness weighted `0.70 / 0.30`, fixed package diminishing weights (`package_value`), flag-gated QB/star/clogger taxes, filters by `min_mismatch_score`, `max_value_ratio`, `trade_elo_gap_max`. Outlook is ignored; positional preferences are the same hard filter.
 
 ## Request lifecycle (trade match)
 
-1. Either user `POST /api/trades/swipe` with `like`.
+1. Either user `POST /api/trades/swipe` with `like` — **or**, behind `calc.merged_layout`,
+   `POST /api/trades/queue` (#384 ✓ cell, [D-152]), which records a HAND-BUILT package as a like
+   through the same `_reconstruct_swipe_card` → `record_decision` → `save_trade_decision` path.
+   The queue route does **not** run step 2: it refuses up front unless the likes-you injector's
+   own gates would mirror the like into the counterparty's deck, and the match is then minted by
+   *their* swipe on that mirrored card — one place, not two.
 2. `server.py` checks for a mirrored existing like from the other side (`database.check_for_match`). With flag `trade.fuzzy_match`, a near-mirror also matches: Jaccard ≥ `fuzzy_match_tau` (0.8) per side, and only low-value players (`search_rank ≥ 120`) may differ.
 3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
 4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).

@@ -4,7 +4,7 @@ import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import { Button, Card, Icon, TickLabel } from './chalkline';
-import { CalcPlayer } from '../data/tradeCalcMock';
+import { CalcPlayer } from '../data/calcTypes';
 import { ink, type, space, radii } from '../theme/chalkline';
 import type { Tier } from '../shared/types';
 
@@ -31,24 +31,43 @@ interface Props {
    *  pick on this side. Only the In-league mount passes it; without it the
    *  marker has no correction target and renders nothing. */
   leagueId?: string | null;
+  /** #384 — column mode. The merged calculator layout stands the two sides
+   *  side by side, which halves the available width to roughly 165pt on a
+   *  375pt screen. The stacked row (44pt chip slot + name + tier + a 32pt
+   *  remove target) does not fit in that, so column mode re-flows each row
+   *  to two lines and drops the fixed chip slot.
+   *
+   *  It does NOT shrink type: the Chalkline 11pt floor holds, and the 32pt
+   *  remove control keeps its hit area (it gains `hitSlop` rather than
+   *  losing size). Only layout changes — no row is removed, no value is
+   *  hidden, and `MemberEnteredMarker` still renders. */
+  compact?: boolean;
+  /** #384 W4 — spotlight target for the tour's "add a player" beat. The
+   *  guide measures a real node, so the ref must reach the actual button;
+   *  registering a target that can never measure is the "points at nothing"
+   *  defect the script lint exists to catch. */
+  addRef?: React.RefObject<View | null>;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their pick-value tier + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact, addRef }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
-        <View style={styles.header}>
+        <View style={[styles.header, compact && styles.headerCompact]}>
           <TickLabel color={accent}>{title}</TickLabel>
-          <Text style={type.bodySm}>{teamName}</Text>
+          {/* Clamped in COLUMN mode only. The stacked page is unchanged
+              behind the flag: a long "@username" wrapped there before and
+              must keep wrapping, not start ellipsizing. */}
+          <Text style={type.bodySm} numberOfLines={compact ? 1 : undefined}>{teamName}</Text>
         </View>
 
         {players.length === 0 ? (
           <Text style={styles.empty}>No players yet — add someone to start the trade.</Text>
         ) : (
           players.map((p) => (
-            <View key={p.id} style={styles.row}>
+            <View key={p.id} style={[styles.row, compact && styles.rowCompact]}>
               {/* #320 — fixed-width chip slot: PICK (4 chars) is wider than
                   QB/RB/WR/TE, so a self-sized chip pushed pick rows' names
                   right. The slot pins one name x-position for every row.
@@ -56,14 +75,48 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   Tiers/Trades/Matches (no drive-by). Same 44pt constant as
                   PlayerPickerModal's chipCol; keep the two in lockstep
                   (mobile/tests/check-picker-chip-alignment.js). */}
-              <View style={styles.chipCol}>
-                <PositionChip position={p.pos} size="sm" />
-              </View>
+              {compact ? null : (
+                <View style={styles.chipCol}>
+                  <PositionChip position={p.pos} size="sm" />
+                </View>
+              )}
               <View style={styles.info}>
-                <Text style={type.title}>{p.name}</Text>
-                <Text style={type.bodySm}>
-                  {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
-                </Text>
+                {compact ? (
+                  <View style={styles.compactTopLine}>
+                    <PositionChip position={p.pos} size="sm" />
+                    <Text style={[type.title, styles.compactName]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={type.title}>{p.name}</Text>
+                )}
+                <View style={compact ? styles.compactMetaLine : undefined}>
+                  {/* flexShrink so this line yields before the tier badge:
+                      without it the badge is pushed out of the ~97pt of
+                      info width a 375pt screen leaves, which is the price
+                      silently disappearing again. */}
+                  <Text
+                    style={[type.bodySm, compact && styles.compactMetaText]}
+                    numberOfLines={compact ? 1 : undefined}
+                  >
+                    {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
+                  </Text>
+                  {/* Column mode has no room for a trailing value column, so
+                      the tier/value rides the meta line. It is MOVED, never
+                      dropped — a narrower row that silently stops pricing an
+                      asset would be worse than a wrapped one. */}
+                  {compact
+                    ? (() => {
+                        const t = tierOf?.(p);
+                        return t ? (
+                          <TierBadge tier={t} />
+                        ) : (
+                          <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+                        );
+                      })()
+                    : null}
+                </View>
                 {/* D17 — priced surface 4 of 5: the calculator's pick rows.
                     UNCONDITIONAL by design; the marker self-gates on the
                     flag AND `source === 'user'`, so wrapping this in a
@@ -77,7 +130,7 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   testID={`calc.member-entered.${p.id}`}
                 />
               </View>
-              {(() => {
+              {compact ? null : (() => {
                 const t = tierOf?.(p);
                 return t ? (
                   // TierBadge hardcodes alignSelf:'flex-start' (fine in its
@@ -93,7 +146,9 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
               })()}
               <Pressable
                 onPress={() => onRemove(p.id)}
-                hitSlop={6}
+                // Column mode narrows the row, not the target: the control
+                // keeps its 32pt box and gains slop instead of shrinking.
+                hitSlop={compact ? 12 : 6}
                 style={({ pressed }) => [styles.remove, pressed && styles.removePressed]}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove ${p.name}`}
@@ -104,7 +159,13 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
           ))
         )}
 
-        <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
+        {/* Wrapped rather than ref-forwarded: `Button` is shared across the
+            app and does not forward refs, and adding forwardRef to it for one
+            spotlight would be a drive-by change to every caller. A wrapper
+            View measures the same box the spotlight needs. */}
+        <View ref={addRef}>
+          <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
+        </View>
       </View>
     </Card>
   );
@@ -141,4 +202,17 @@ const styles = StyleSheet.create({
   removePressed: { backgroundColor: ink.ink3 },
   addBtn: { marginTop: space.xs },
   tierSlot: { alignSelf: 'center' },
+  // #384 column mode. Type sizes are untouched (Chalkline 11pt floor); only
+  // the row's flow changes — chip+name on line 1, meta+value on line 2.
+  headerCompact: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
+  rowCompact: { alignItems: 'flex-start', gap: space.xs },
+  compactTopLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  compactName: { flexShrink: 1 },
+  compactMetaText: { flexShrink: 1 },
+  compactMetaLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.xs,
+  },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
 import { getLeagueRosters, myOwnerId } from '../api/sleeper';
@@ -27,14 +27,19 @@ import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import TierBadge from './TierBadge';
 import SendInSleeperButton from './SendInSleeperButton';
+import OutlookBiasReceipt from './OutlookBiasReceipt';
+import TradeDnaSheet from './TradeDnaSheet';
+import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
-import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
+import type { CalcPlayer, CalcPos } from '../data/calcTypes';
 import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '../shared/types';
 
 // In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).
@@ -52,6 +57,41 @@ interface Props {
   // only — this component owns all state after mount.
   initialOpponentId?: string;
   initialGiveIds?: string[];
+  /** #384 — the merged layout's primary action. Absent ⇒ the Find a Trade
+   *  button is not rendered (the host owns navigation, not this component). */
+  onFindATrade?: (opts: {
+    /** The resolved canvas assets, not just ids — the caller sends these to
+     *  the fair-package sweep and would otherwise have to re-resolve them
+     *  against a pool it does not hold. Empty arrays are meaningful: "the
+     *  canvas is empty", which is the MODEL deck's fork (D-153). */
+    give: CalcPlayer[];
+    receive: CalcPlayer[];
+    /** #384 review §6 — the Team dropdown's partner, so the finder run is
+     *  SCOPED to the team the user chose instead of sweeping the league.
+     *  Null when no partner is selected: the caller then navigates without
+     *  a handoff rather than inventing one. */
+    opponent: { userId: string; name: string } | null;
+  }) => void;
+  /** #384 — re-entry for the guided tour ("Show me around", top right).
+   *  Absent ⇒ the link is not rendered. */
+  onShowMeAround?: () => void;
+  /** #384 W5 — filled on mount with an opener for the outlook sheet. The
+   *  sheet lives here; the tour is started by the SCREEN, and n11's CTA has
+   *  to reach it. A ref rather than a callback prop so the screen can hand
+   *  the same opener to the runner without re-rendering this component. */
+  outlookOpenerRef?: React.MutableRefObject<(() => void) | null>;
+  /** #384 W6-A — the action row's confirm control. Queues the built trade for
+   *  the counterparty's suggestions (POST /api/trades/queue, D-152). The
+   *  SCREEN owns the request, the toast and the analytics; this component
+   *  owns the canvas and the in-flight lock, so a double tap cannot send the
+   *  package twice. Absent ⇒ the cell renders disabled.
+   *  `opponent` is passed because the route is addressed to a league member
+   *  and only this component holds the Team dropdown's selection. */
+  onLikeTrade?: (args: {
+    giveIds: string[];
+    receiveIds: string[];
+    opponent: { userId: string; name: string };
+  }) => void | Promise<void>;
   initialReceiveIds?: string[];
 }
 
@@ -117,7 +157,58 @@ export default function InLeagueCalculator({
   initialOpponentId,
   initialGiveIds,
   initialReceiveIds,
+  onFindATrade,
+  onShowMeAround,
+  outlookOpenerRef,
+  onLikeTrade,
 }: Props) {
+  // #384 — the merged calculator layout. OFF is byte-identical to the
+  // shipped stacked page; every branch below reads this one flag.
+  const merged = useFlag('calc.merged_layout');
+  const [dnaOpen, setDnaOpen] = useState(false);
+  // #384 review §4 — the receipt renders nothing when `trade.outlook_direction`
+  // is off or no outlook resolves, which left the merged page with no outlook
+  // section and no way into the sheet at all. Mirrors TradesScreen's
+  // `outlookReceiptShown` fallback: one honest row instead of a silent gap.
+  const [outlookHidden, setOutlookHidden] = useState(false);
+  const [leagueSwitcherOpen, setLeagueSwitcherOpen] = useState(false);
+  const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+  // #384 W6-A — the confirm cell's in-flight lock. POST /api/trades/queue is
+  // idempotent server-side (D-152), but a second tap would still fire a
+  // second toast and a second analytics row, so the control locks itself for
+  // the length of the round trip.
+  const [queueing, setQueueing] = useState(false);
+
+  // #384 W4 — spotlight targets for the calculator beats (n12–n18). Only
+  // registered in the merged layout: with the flag off none of these nodes
+  // exist, and a registered ref to an unmounted node measures as null, which
+  // would degrade every beat rather than simply not running the tour.
+  const columnsRef = useRef<View | null>(null);
+  const findBtnRef = useRef<View | null>(null);
+  const clearBtnRef = useRef<View | null>(null);
+  const confirmBtnRef = useRef<View | null>(null);
+  const giveAddRef = useRef<View | null>(null);
+  // n11's CTA has to open the sheet this component owns; the screen holds the
+  // ref and hands the same opener to the tour runner.
+  useEffect(() => {
+    if (!outlookOpenerRef) return;
+    outlookOpenerRef.current = () => setDnaOpen(true);
+    return () => {
+      outlookOpenerRef.current = null;
+    };
+  }, [outlookOpenerRef]);
+  useEffect(() => {
+    if (!merged) return;
+    const pairs: [string, React.RefObject<View | null>][] = [
+      ['calc.trade-columns', columnsRef],
+      ['calc.action.find-a-trade', findBtnRef],
+      ['calc.action.clear', clearBtnRef],
+      ['calc.action.confirm', confirmBtnRef],
+      ['calc.league-give-add', giveAddRef],
+    ];
+    pairs.forEach(([id, ref]) => registerGuideTarget(id, ref));
+    return () => pairs.forEach(([id]) => unregisterGuideTarget(id));
+  }, [merged]);
   // #166/#167 — the format defaults to the LEAGUE's detected scoring
   // format (useSession.activeFormat, kept league-accurate by
   // useLeagueFormatDefault in RootNav), not a hard-coded 1QB PPR. A chip
@@ -554,6 +645,7 @@ export default function InLeagueCalculator({
   const anySide = giveIds.length > 0 || receiveIds.length > 0;
   const clear = () => {
     haptics.warning();
+    track('calc_cleared', { mode: 'league' }, 'TradeCalculator');
     setGiveIds([]);
     setReceiveIds([]);
   };
@@ -576,9 +668,152 @@ export default function InLeagueCalculator({
     );
   }
 
+  const leagueName = useSession.getState().league?.league_name ?? 'This league';
+
   return (
     <View style={styles.wrap}>
-      {collapsedPartner ? (
+      {/* ── #384 merged layout header ──────────────────────────────────
+          Ruling 4: the tour is re-runnable from a "Show me around" link in
+          the top right. Ruling: the outlook beat is a collapsible section
+          whose Change control pops the window. Rulings 6/7: no utility row
+          and no three-tab subnav on this page — neither is mounted here,
+          so both are satisfied by omission rather than by hiding. */}
+      {merged ? (
+        <>
+          {onShowMeAround ? (
+            <View style={styles.mergedTopBar}>
+              <Pressable
+                testID="calc.show-me-around"
+                accessibilityRole="button"
+                accessibilityLabel="Show me around this page"
+                hitSlop={8}
+                onPress={() => {
+                  haptics.selection();
+                  onShowMeAround();
+                }}
+                // hitSlop extends the touch area but not the CONTROL: the
+                // 44pt floor is a property of the pressable itself.
+                style={({ pressed }) => [styles.showMeAroundTap, pressed && styles.linkPressed]}
+              >
+                <Text style={styles.showMeAround}>Show me around</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <OutlookBiasReceipt
+            onChange={() => setDnaOpen(true)}
+            onHiddenChange={setOutlookHidden}
+          />
+          {outlookHidden ? (
+            // The receipt's own row, minus the claim it cannot make. Same
+            // Change control, same sheet — the page always has an outlook
+            // section and always a way into the editor.
+            <View testID="calc.outlook-fallback" style={styles.outlookFallback}>
+              <Text style={styles.outlookFallbackText} numberOfLines={1}>
+                Outlook · Not set
+              </Text>
+              <Pressable
+                testID="calc.outlook-fallback.change"
+                accessibilityRole="button"
+                accessibilityLabel="Set your outlook"
+                hitSlop={8}
+                onPress={() => {
+                  haptics.selection();
+                  setDnaOpen(true);
+                }}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.outlookFallbackChange, pressed && styles.linkPressed]}>
+                    Change
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* #384 review §11 — the scoring format is the #166/#167 session
+              override, and the merged layout dropped it entirely. Same chips,
+              same handler, same honesty note as the stacked page; only the
+              slot moved. */}
+          <TickLabel>Scoring format</TickLabel>
+          <View style={styles.chipRow}>
+            {FORMATS.map((f) => {
+              const active = format === f.key;
+              return (
+                <Pressable
+                  key={f.key}
+                  testID={`calc.merged-format.${f.key}`}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => {
+                    if (f.key !== format) {
+                      haptics.selection();
+                      setFormatChoice(f.key);
+                    }
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {opponent && rankStateFor(opponent, format) === 'R*' ? (
+            // #191 — the conversion note is an honesty line, not decoration:
+            // their side of the verdict was value-mapped from another format.
+            <Text style={styles.note}>
+              @{opponent.username} ranked in{' '}
+              {FORMAT_LABEL[(opponent.ranked_formats ?? []).find((f) => f !== format) ?? ''] ??
+                'another format'}{' '}
+              — values converted to {FORMAT_LABEL[format]} for this read.
+            </Text>
+          ) : null}
+
+          {/* #333 — league and team as side-by-side dropdowns, beneath the
+              collapsible outlook section rather than above it. */}
+          <View style={styles.dropdownRow}>
+            <Pressable
+              testID="calc.league-dropdown"
+              accessibilityRole="button"
+              accessibilityLabel={`League: ${leagueName}. Change league`}
+              onPress={() => {
+                haptics.selection();
+                setLeagueSwitcherOpen(true);
+              }}
+              style={({ pressed }) => [styles.dropdown, pressed && styles.dropdownPressed]}
+            >
+              <Text style={styles.dropdownLabel}>League</Text>
+              <View style={styles.dropdownValueRow}>
+                <Text style={styles.dropdownValue} numberOfLines={1}>{leagueName}</Text>
+                <Icon name="chevron-down" size={14} />
+              </View>
+            </Pressable>
+
+            <Pressable
+              testID="calc.team-dropdown"
+              accessibilityRole="button"
+              accessibilityLabel={
+                opponent ? `Team: @${opponent.username}. Change team` : 'Choose a team'
+              }
+              onPress={() => {
+                haptics.selection();
+                setTeamPickerOpen(true);
+              }}
+              style={({ pressed }) => [styles.dropdown, pressed && styles.dropdownPressed]}
+            >
+              <Text style={styles.dropdownLabel}>Team</Text>
+              <View style={styles.dropdownValueRow}>
+                <Text style={styles.dropdownValue} numberOfLines={1}>
+                  {opponent ? `@${opponent.username}` : 'Choose…'}
+                </Text>
+                <Icon name="chevron-down" size={14} />
+              </View>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {!merged && collapsedPartner ? (
         <View style={styles.partnerCollapsed} testID="calc.partner-collapsed" accessible={false}>
           <Text style={styles.partnerCollapsedText} numberOfLines={1}>
             Trading with <Text style={styles.partnerCollapsedName}>@{opponent!.username}</Text>
@@ -599,6 +834,8 @@ export default function InLeagueCalculator({
         </View>
       ) : null}
 
+      {!merged ? (
+        <>
       <TickLabel>Scoring format</TickLabel>
       <View style={styles.chipRow}>
         {FORMATS.map((f) => {
@@ -713,47 +950,171 @@ export default function InLeagueCalculator({
       })() : null}
         </>
       ) : null}
+        </>
+      ) : null}
       {!picksSupported ? (
         <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
       ) : null}
 
-      <TradeSide
-        title="You send"
-        teamName="your roster"
-        players={giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
-        valueOf={(p) => board[p.id] ?? 0}
-        tierOf={(p) => tierById[p.id] ?? null}
-        accent={semantic.neg}
-        addTestID="calc.league-give-add"
-        leagueId={leagueId}
-        onAdd={() => setPicker('give')}
-        onRemove={(id) => {
-          haptics.warning();
-          setGiveIds((ids) => ids.filter((x) => x !== id));
-        }}
-      />
+      {/* #384 — the two rosters stand as two vertical columns rather than
+          stacked sections. Same TradeSide, same handlers, same add/remove
+          controls; `compact` only re-flows each row for the narrower box.
+          The swap rule between them is a STACKED-layout separator — two
+          columns are already visibly two sides, so it would be noise. */}
+      {(() => {
+        const give = (
+          <TradeSide
+            title="You send"
+            teamName="your roster"
+            players={giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
+            valueOf={(p) => board[p.id] ?? 0}
+            tierOf={(p) => tierById[p.id] ?? null}
+            accent={semantic.neg}
+            addTestID="calc.league-give-add"
+            addRef={giveAddRef}
+            leagueId={leagueId}
+            compact={merged}
+            onAdd={() => setPicker('give')}
+            onRemove={(id) => {
+              haptics.warning();
+              setGiveIds((ids) => ids.filter((x) => x !== id));
+            }}
+          />
+        );
+        const receive = (
+          <TradeSide
+            title="You receive"
+            teamName={opponent ? `@${opponent.username}` : 'their roster'}
+            players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
+            valueOf={(p) => board[p.id] ?? 0}
+            tierOf={(p) => tierById[p.id] ?? null}
+            accent={semantic.pos}
+            addTestID="calc.league-receive-add"
+            leagueId={leagueId}
+            compact={merged}
+            onAdd={() => setPicker('receive')}
+            onRemove={(id) => {
+              haptics.warning();
+              setReceiveIds((ids) => ids.filter((x) => x !== id));
+            }}
+          />
+        );
+        if (merged) {
+          return (
+            <View ref={columnsRef} style={styles.columns} testID="calc.trade-columns">
+              <View style={styles.column}>{give}</View>
+              <View style={styles.column}>{receive}</View>
+            </View>
+          );
+        }
+        return (
+          <>
+            {give}
+            <View style={styles.swap}>
+              <View style={styles.rule} />
+              <Icon name="swap" size={16} />
+              <View style={styles.rule} />
+            </View>
+            {receive}
+          </>
+        );
+      })()}
 
-      <View style={styles.swap}>
-        <View style={styles.rule} />
-        <Icon name="swap" size={16} />
-        <View style={styles.rule} />
-      </View>
+      {/* #384 action row — Find a Trade 70% · Clear 15% · confirm 15%,
+          directly beneath the canvas so the two occupy one frame together
+          (the report's "important that this fits in the frame with the
+          entire trade calc section").
 
-      <TradeSide
-        title="You receive"
-        teamName={opponent ? `@${opponent.username}` : 'their roster'}
-        players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
-        valueOf={(p) => board[p.id] ?? 0}
-        tierOf={(p) => tierById[p.id] ?? null}
-        accent={semantic.pos}
-        addTestID="calc.league-receive-add"
-        leagueId={leagueId}
-        onAdd={() => setPicker('receive')}
-        onRemove={(id) => {
-          haptics.warning();
-          setReceiveIds((ids) => ids.filter((x) => x !== id));
-        }}
-      />
+          W6-B (D-153) removed the Include-players toggle and gave its 30% to
+          Find a Trade. The toggle asked a question the operator answered
+          globally — "C works", the canvas is ALWAYS the anchor — so the only
+          honest state it could show was permanently on.
+
+          The two 15% cells are icon-only. That is a size decision, not a
+          style one: at 15% of a 375pt screen they are ~53pt wide, and any
+          word that fit would have to breach the Chalkline 11pt type floor.
+          Both carry accessibilityLabel, and both keep a 44pt tap height. */}
+      {merged ? (
+        <View style={styles.actionRow} testID="calc.action-row">
+          <Pressable
+            ref={findBtnRef}
+            testID="calc.action.find-a-trade"
+            accessibilityRole="button"
+            accessibilityLabel="Find a trade"
+            disabled={!onFindATrade}
+            onPress={() => {
+              if (!onFindATrade) return;
+              haptics.selection();
+              onFindATrade({
+                give: giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+                receive: receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+                opponent: opponent
+                  ? { userId: opponent.user_id, name: opponent.username }
+                  : null,
+              });
+            }}
+            style={({ pressed }) => [
+              styles.actionFind, styles.actionBtn, styles.actionPrimary,
+              pressed && styles.actionBtnPressed,
+              !onFindATrade && styles.actionBtnDisabled,
+            ]}
+          >
+            <Text style={styles.actionPrimaryText} numberOfLines={1}>Find a Trade</Text>
+          </Pressable>
+
+          <Pressable
+            ref={clearBtnRef}
+            testID="calc.action.clear"
+            accessibilityRole="button"
+            accessibilityLabel="Clear the trade"
+            disabled={!anySide}
+            onPress={() => {
+              haptics.warning();
+              clear();
+            }}
+            style={({ pressed }) => [
+              styles.actionSmall, styles.actionBtn,
+              pressed && styles.actionBtnPressed,
+              !anySide && styles.actionBtnDisabled,
+            ]}
+          >
+            <Icon name="x" size={18} />
+          </Pressable>
+
+          {/* #384 W6-A — the confirm/queue control (D-152). Disabled only for the
+              three reasons a tap could not mean anything: no host handler,
+              an incomplete trade, no partner to queue it FOR, or a request
+              already in flight. The a11y state says which. */}
+          <Pressable
+            ref={confirmBtnRef}
+            testID="calc.action.confirm"
+            accessibilityRole="button"
+            accessibilityLabel="Queue this trade for the other manager"
+            accessibilityState={{ disabled: !onLikeTrade || !bothSides || !opponent || queueing }}
+            disabled={!onLikeTrade || !bothSides || !opponent || queueing}
+            onPress={() => {
+              if (!onLikeTrade || !opponent || queueing) return;
+              haptics.selection();
+              setQueueing(true);
+              Promise.resolve(
+                onLikeTrade({
+                  giveIds,
+                  receiveIds,
+                  opponent: { userId: opponent.user_id, name: opponent.username },
+                }),
+              ).finally(() => setQueueing(false));
+            }}
+            style={({ pressed }) => [
+              styles.actionSmall, styles.actionBtn, styles.actionPrimary,
+              pressed && styles.actionBtnPressed,
+              (!onLikeTrade || !bothSides || !opponent || queueing)
+                && styles.actionBtnDisabled,
+            ]}
+          >
+            <Icon name="check" size={18} color={ice.base} />
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* #251 (operator, via the featured-trade window's edit-in-calculator
           hand-off): the "Recommended to even it" rows sit DIRECTLY under
@@ -883,8 +1244,71 @@ export default function InLeagueCalculator({
               ].join('\n')}
             />
           ) : null}
-          <Button label="Clear trade" variant="ghost" onPress={clear} />
+          {/* The action row already owns Clear in the merged layout;
+              rendering both would give one destructive action two controls
+              on one screen. */}
+          {merged ? null : <Button label="Clear trade" variant="ghost" onPress={clear} />}
         </View>
+      ) : null}
+
+      {/* ── #384 merged-layout pickers ─────────────────────────────────── */}
+      {merged ? (
+        <>
+          <TradeDnaSheet visible={dnaOpen} onClose={() => setDnaOpen(false)} />
+          <LeagueSwitcherSheet
+            visible={leagueSwitcherOpen}
+            onClose={() => setLeagueSwitcherOpen(false)}
+          />
+          <Modal
+            visible={teamPickerOpen}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setTeamPickerOpen(false)}
+          >
+            <Pressable
+              style={styles.teamSheetBackdrop}
+              onPress={() => setTeamPickerOpen(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close team picker"
+            />
+            <View style={styles.teamSheet} testID="calc.team-sheet">
+              <TickLabel>Trade partner</TickLabel>
+              <ScrollView>
+                {opponents.map((o) => {
+                  const active = o.user_id === opponentId;
+                  const state = rankStateFor(o, format);
+                  return (
+                    <Pressable
+                      key={o.user_id}
+                      testID={`calc.team-sheet.${o.user_id}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}`}
+                      onPress={() => {
+                        haptics.selection();
+                        setOpponentId(o.user_id);
+                        setTeamPickerOpen(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.teamRow,
+                        pressed && styles.actionBtnPressed,
+                      ]}
+                    >
+                      <Text style={[styles.dropdownValue, active && { color: ice.base }]}>
+                        @{o.username}
+                      </Text>
+                      <Badge
+                        label={state}
+                        color={state === 'NR' ? chalk.dim : semantic.pos}
+                        colorText
+                      />
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </Modal>
+        </>
       ) : null}
 
       <PlayerPickerModal
@@ -904,6 +1328,13 @@ export default function InLeagueCalculator({
         onPick={(p) => {
           haptics.selection();
           setGiveIds((ids) => [...ids, p.id]);
+          track('calc_asset_added', { side: 'give' }, 'TradeCalculator');
+          // The tour beat n16 is deliberately NOT advanced from here. W6-B
+          // (D-153) made it a TAP beat: it tells the user they CAN add
+          // players ("we'll find trades that include them") rather than
+          // commanding one, because the run has to end on the MODELED deck
+          // with an empty canvas — and a beat that only moves on a real pick
+          // makes an empty canvas impossible.
         }}
         onClose={() => setPicker(null)}
       />
@@ -924,6 +1355,7 @@ export default function InLeagueCalculator({
         onPick={(p) => {
           haptics.selection();
           setReceiveIds((ids) => [...ids, p.id]);
+          track('calc_asset_added', { side: 'receive' }, 'TradeCalculator');
         }}
         onClose={() => setPicker(null)}
       />
@@ -1247,6 +1679,98 @@ function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpact
 
 const styles = StyleSheet.create({
   wrap: { gap: space.md },
+
+  // ── #384 merged layout ───────────────────────────────────────────────
+  // Every value below is a layout value. No type size is reduced: the
+  // Chalkline 11pt floor holds throughout, and every tap target clears 44pt
+  // (the two 15%-width buttons in the action row are the tight ones and are
+  // sized by minHeight, not by their label).
+  mergedTopBar: { flexDirection: 'row', justifyContent: 'flex-end' },
+  // 44pt is the control's own floor; hitSlop widens the touch area but does
+  // not make the control itself reachable-sized.
+  showMeAroundTap: { minHeight: 44, justifyContent: 'center' },
+  showMeAround: { ...type.bodySm, color: chalk.dim, fontFamily: fonts.uiSemi },
+  linkPressed: { opacity: 0.6 },
+  // Honest empty twin of OutlookBiasReceipt's row: same quiet bar, same
+  // Change control, no lean claim.
+  outlookFallback: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+  },
+  outlookFallbackText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  outlookFallbackChange: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
+
+  dropdownRow: { flexDirection: 'row', gap: space.sm },
+  dropdown: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+  },
+  dropdownPressed: { backgroundColor: ink.ink3 },
+  dropdownLabel: { ...type.bodySm, color: chalk.dim, fontSize: 11, lineHeight: 14 },
+  dropdownValueRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  dropdownValue: { ...type.bodySm, fontFamily: fonts.uiSemi, flexShrink: 1 },
+
+  columns: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
+  // flexBasis 0 + flex 1 makes the two columns share the width evenly no
+  // matter how much content each holds; minWidth 0 lets their children
+  // actually ellipsize instead of forcing the row wider than the screen.
+  column: { flex: 1, flexBasis: 0, minWidth: 0 },
+
+  // The four-control action row, sized to the operator's spec:
+  // Find a Trade 40% · Include players 30% · Clear 15% · confirm 15%.
+  // The two 15% cells are ~53pt on a 375pt screen, which is why they carry
+  // an icon and an accessibilityLabel rather than a text label — a word
+  // would either truncate or breach the 11pt floor.
+  actionRow: { flexDirection: 'row', gap: space.xs, alignItems: 'stretch' },
+  actionFind: { flex: 70 },
+  actionSmall: { flex: 15 },
+  actionBtn: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.xs,
+  },
+  actionBtnPressed: { backgroundColor: ink.ink3 },
+  actionBtnDisabled: { opacity: 0.4 },
+  actionPrimary: { borderColor: ice.base },
+  actionPrimaryText: { ...type.bodySm, fontFamily: fonts.uiSemi, color: ice.base },
+  teamSheetBackdrop: { flex: 1, backgroundColor: '#0009' },
+  teamSheet: {
+    maxHeight: '60%',
+    gap: space.sm,
+    padding: space.md,
+    backgroundColor: ink.ink2,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
+  teamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    minHeight: 44,
+    paddingHorizontal: space.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
+  },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {

@@ -33,6 +33,7 @@ import type { GuideStep } from '../state/useGuide';
 //   import_completed          rankings import — an import landed
 //   league_filter_applied     LeagueSummaryScreen — a position pill tapped
 //   send_attempted            Send-in-{Sleeper,MFL,ESPN}/copy — send tapped
+//   calc_tour_completed       utils/calcTour — the #384 walkthrough finished
 //
 // Each name is ALSO the analytics event where one exists, but the receipt is
 // the local write; the two are recorded independently.
@@ -53,6 +54,10 @@ export const GUIDE_RECEIPTS = {
   importCompleted: 'import_completed',
   leagueFilterApplied: 'league_filter_applied',
   sendAttempted: 'send_attempted',
+  /** #384 — the merged-calculator walkthrough ran to its last beat. Written
+   *  by the runner, not a screen: only it knows the tour finished rather
+   *  than being abandoned. It is what gates the auto-start to first visit. */
+  calcTourCompleted: 'calc_tour_completed',
 } as const;
 
 const R = GUIDE_RECEIPTS;
@@ -329,6 +334,200 @@ export const S = {
     maxDisplayCount: 2,
     retireAfter: { event: R.leagueFilterApplied, count: 1 },
     adoptionEvent: 'league_pos_candidates_viewed',
+  }),
+
+  // ── #384 W4 — the merged calculator tour (beats n10–n24) ───────────────
+  //
+  // The report wrote fifteen prose beats. THIRTEEN survive: W6-B (D-153)
+  // deleted n14 (Clear) and n17 (Include players) along with the toggle and
+  // the sequencing they existed for. They could not ship as prose: this
+  // file is under a CI copy budget (auto 12 / action 16 / tap 20 / cta 16
+  // words, enforced by mobile/tests/check-guide-script.js), so the work was
+  // compression, not writing. Its step 11 — "the clear button has become the
+  // X, the X records your decision, the check does as before" — is carried by
+  // n19 on the deck.
+  //
+  // Retirement: every beat below is part of ONE scripted walkthrough that
+  // the user either finishes or re-runs deliberately from "Show me around".
+  // There is no behavioural receipt that means "this person now understands
+  // the calculator", so inventing one would be dishonest — they decline to
+  // retire behaviourally, each with the reason stated inline, and the
+  // display cap is what bounds them. (This sentence deliberately avoids the
+  // literal field-and-value pair: the lint's justification check is
+  // line-based, so prose quoting it reads as an unjustified declaration.)
+  // n11 is the exception: setting an outlook IS the
+  // thing it asks for, so it retires on that receipt like N2 does.
+  //
+  // Ordering and the tour hold live in the runner (utils/calcTour.ts), not
+  // here — this file stays DATA.
+
+  n10: (): GuideStep => ({
+    id: 'n10', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.mode-tab.league', side: 'right',
+    line: 'Two ways to build a trade. Tap In league to use your real roster.',
+    degradeLine: 'Two ways to build a trade — In league uses your real roster.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: opens a walkthrough the user re-runs on purpose; the display cap is the bound, and no receipt means "understands the calculator".
+    adoptionEvent: 'calc_mode_switched',
+  }),
+
+  n11: (): GuideStep => ({
+    id: 'n11', screen: 'TradeCalculator', pose: 'thinking', advance: 'cta',
+    line: 'Set your outlook first — it aims every suggestion at your plan.',
+    ctas: [{ label: 'Set outlook', kind: 'primary', action: 'accept' }],
+    maxDisplayCount: 2,
+    retireAfter: { event: R.outlookSaved, count: 1 },
+    adoptionEvent: 'outlook_saved',
+  }),
+
+  n12: (): GuideStep => ({
+    id: 'n12', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
+    target: 'calc.trade-columns',
+    line: 'This is your canvas. Both rosters side by side — build any trade by hand.',
+    degradeLine: 'Both rosters sit side by side here — build any trade by hand.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_asset_added',
+  }),
+
+  n13: (): GuideStep => ({
+    id: 'n13', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
+    target: 'calc.action.find-a-trade',
+    line: "Find a Trade searches for you. We'll come back to it in a moment.",
+    degradeLine: "Find a Trade searches for you — we'll come back to it.",
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_find_a_trade_tapped',
+  }),
+
+  n15: (): GuideStep => ({
+    id: 'n15', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
+    target: 'calc.action.confirm',
+    line: 'The check queues this trade for the other manager, if it fits their preferences.',
+    degradeLine: 'Confirming queues a trade for the other manager, if it fits their preferences.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // #384 W6-A / D-152 — the ✓ is wired (POST /api/trades/queue), so the beat
+    // has its own adoption event at last. The copy above is unchanged because
+    // the built mechanism is exactly what it already described: the like is
+    // recorded only when the counterparty's likes-you gates would surface it.
+    adoptionEvent: 'calc_trade_queued',
+  }),
+
+  // W6-B (D-153) — n16 is a TAP beat that INFORMS rather than an action beat
+  // that commands. The operator's reshape: "the tour mentions they can add
+  // players and we'll find trades with those players included, and then the
+  // user is pushed to find a trade with the calc empty." An action beat here
+  // could only advance on a real pick, which is exactly the canvas state the
+  // tour must NOT end in — the run has to reach the modeled deck.
+  n16: (): GuideStep => ({
+    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
+    target: 'calc.league-give-add',
+    line: "Add players you'd move and we'll find trades that include them.",
+    degradeLine: 'Adding players to a side finds trades that include them.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'calc_asset_added',
+  }),
+
+  n18: (): GuideStep => ({
+    id: 'n18', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    target: 'calc.action.find-a-trade',
+    // The second clause is the whole point of the reshape: an empty canvas is
+    // what routes this tap to the MODELED deck, where n19-n24 live.
+    line: 'Now tap Find a Trade — start with the canvas empty.',
+    degradeLine: 'Tap Find a Trade with the canvas empty when you are ready.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'find_trades_tapped',
+  }),
+
+  // The operator's step 11 in full: "the clear button has become the X, the
+  // X records your decision, the check does as before". The calculator's
+  // Clear IS the deck's cross — naming that continuity is the beat's job.
+  n19: (): GuideStep => ({
+    id: 'n19', screen: 'Trades', pose: 'point', advance: 'tap',
+    target: 'trades.pass-btn',
+    line: 'Clear became this cross. It records why you passed; the check still accepts.',
+    degradeLine: 'Clear became the cross — it records why you passed. The check accepts.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_pass_layer1',
+  }),
+
+  // Untargeted on purpose: the swap affordance is per-player-row, so there is
+  // no one node to point at. The line therefore carries no deixis and needs
+  // no degrade contract.
+  n20: (): GuideStep => ({
+    id: 'n20', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Swap arrows change any player without leaving the card.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'trade_swap_suggest_opened',
+  }),
+
+  n21: (): GuideStep => ({
+    id: 'n21', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    target: 'trades.package-toggle',
+    line: 'Package shows every piece in a multi-player deal.',
+    degradeLine: 'Multi-player deals expand to show every piece.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // Toggling the package re-runs generation, so the regeneration IS the
+    // adoption signal — there is no dedicated package-toggle event.
+    adoptionEvent: 'deck_regenerated',
+  }),
+
+  n22: (): GuideStep => ({
+    id: 'n22', screen: 'Trades', pose: 'point', advance: 'tap',
+    target: 'trades.fairness-help',
+    line: 'Tap the meter to see how we judged this trade fair.',
+    degradeLine: 'The fairness meter explains how a trade was judged.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // The ⓘ this beat points at fires help_opened{topic:'trade_pricing'}.
+    adoptionEvent: 'help_opened',
+  }),
+
+  // Untargeted: the send control is platform-resolved (Sleeper / MFL / ESPN),
+  // so a fixed target would point at the wrong node — or nothing — for two of
+  // the three. No deixis in the line, so nothing to degrade.
+  //
+  // TWO BEATS, one slot. The password sentence is true on Sleeper (the JWT is
+  // captured in a WebView and kept on-device) and FALSE elsewhere: MFL POSTs
+  // the password to /api/mfl/auth-link and ESPN stores espn_s2/SWID
+  // server-side. The operator vouched for the Sleeper claim only, so the
+  // runner picks by `resolveSendPlatform` (utils/calcTour.ts) rather than
+  // shipping one line that is a lie for two platforms.
+  n23: (): GuideStep => ({
+    id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Sending goes straight to your league. Passwords never leave your phone.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    adoptionEvent: 'sleeper_send_attempted',
+  }),
+
+  /** Off-Sleeper sibling of `n23` — same slot, no password claim. */
+  n23b: (): GuideStep => ({
+    id: 'n23b', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Sending goes straight to your league.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // The registered send event is Sleeper's; MFL/ESPN sends fire no client
+    // event yet (P0-7 parity is carried, not landed). Naming the one that
+    // exists keeps the field greppable against the taxonomy — the join for
+    // this beat's platforms lands when their events do.
+    adoptionEvent: 'sleeper_send_attempted',
+  }),
+
+  n24: (): GuideStep => ({
+    id: 'n24', screen: 'Trades', pose: 'celebrate', advance: 'tap',
+    line: 'Take it from here. Decide, and the next trade comes up automatically.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: closes the re-runnable walkthrough; capped, not retired.
+    // The claim is literally "the next card comes up" — deck_card_viewed is
+    // that card being seen, which is the only honest downstream event here.
+    adoptionEvent: 'deck_card_viewed',
   }),
 } as const;
 

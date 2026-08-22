@@ -84,8 +84,8 @@ const { S, GUIDE_RECEIPTS, nextUnrankedPosition } = shim.exports;
 
 assert(!!S && typeof S === 'object', '0a — the script table loads and executes');
 assert(
-  !!GUIDE_RECEIPTS && Object.keys(GUIDE_RECEIPTS).length === 7,
-  '0b — the client-receipt vocabulary is exported (7 names)',
+  !!GUIDE_RECEIPTS && Object.keys(GUIDE_RECEIPTS).length === 8,
+  '0b — the client-receipt vocabulary is exported (8 names)',
   'screens import these ids; an unexported vocabulary is a naming drift waiting to happen',
 );
 assert(
@@ -126,6 +126,24 @@ const PROBES = {
   n8: { id: 'n8', args: [[]] },
   n9: { id: 'n9', args: [[]] },
   n5: { id: 'n5', args: [[]] },
+  // #384 W4 — the merged calculator tour. Every beat is argument-free
+  // (no slots), so one probe each is the whole surface.
+  n10: { id: 'n10', args: [[]] },
+  n11: { id: 'n11', args: [[]] },
+  n12: { id: 'n12', args: [[]] },
+  n13: { id: 'n13', args: [[]] },
+  n15: { id: 'n15', args: [[]] },
+  n16: { id: 'n16', args: [[]] },
+  n18: { id: 'n18', args: [[]] },
+  n19: { id: 'n19', args: [[]] },
+  n20: { id: 'n20', args: [[]] },
+  n21: { id: 'n21', args: [[]] },
+  n22: { id: 'n22', args: [[]] },
+  n23: { id: 'n23', args: [[]] },
+  // The off-Sleeper sibling of n23 — same slot in the runner, chosen by
+  // `resolveSendPlatform`. It is a full beat and is held to the full contract.
+  n23b: { id: 'n23b', args: [[]] },
+  n24: { id: 'n24', args: [[]] },
 };
 
 // ═══ 1 — the builder set: cuts stay cut ════════════════════════════════════
@@ -250,8 +268,14 @@ assert(
 // Deixis: words that point at a UI element the spotlight was supposed to
 // frame. Screen-level orientation ("land here") is not deixis — there is no
 // pointer to lose. Element-level pointing is.
+//
+// The noun list was widened 2026-08-22 (#384 W5) with the element nouns the
+// calculator beats actually use — `cross`, `check`, `canvas`, `meter`,
+// `columns`, `arrows`, `switch`, `panel`, `sheet` — plus the bare "this is
+// your X" form. Removing n12's `target` while keeping "This is your canvas"
+// was green under the narrower list, because `canvas` was not a noun it knew.
 const DEIXIS =
-  /\b(?:that|this|these|those)\s+(?:label|chip|button|control|card|row|pill|tab|section|icon|badge|banner|menu|toggle|slider|field)\b|\b(?:tap|see|hit|press)\s+(?:that|this)\b|\b(?:right|up|down)\s+there\b|\bbelow\b|\babove\b/i;
+  /\b(?:that|this|these|those)\s+(?:label|chip|button|control|card|row|pill|tab|section|icon|badge|banner|menu|toggle|slider|field|cross|check|canvas|meter|column|columns|arrow|arrows|switch|panel|sheet|link)\b|\bthis is your\b|\b(?:tap|see|hit|press)\s+(?:that|this)\b|\b(?:right|up|down)\s+there\b|\bbelow\b|\babove\b/i;
 
 for (const { step, args } of rendered) {
   if (!isV2(step.id)) continue;
@@ -287,6 +311,22 @@ for (const { step, args } of rendered) {
     step.target
       ? 'a targeted step needs a degradeLine or degrade:"suppress"'
       : `an untargeted line must carry no deixis: "${step.line}"`,
+  );
+
+  // 5b is the CONVERSE, and it is what makes 5a falsifiable by the sabotage
+  // that matters: deleting a beat's `target` line while leaving its copy
+  // alone. 5a then evaluates the untargeted branch, and a deictic line only
+  // fails if the DEIXIS vocabulary happens to know the noun — a copy-shaped
+  // dependency, not a structural one. A `degradeLine` is the beat's own
+  // declaration that it HAS a spotlight to lose; carrying one with no target
+  // is a contradiction inside a single object, and every #384 beat carries
+  // one. Verified: removing `target` from n12/n16/n19/n22 was green before
+  // this and is red after.
+  assert(
+    !step.degradeLine || !!step.target,
+    `5b — ${tag} declares a degradeLine only if it has a target to lose`,
+    'a degradeLine on an untargeted beat means the target was deleted and the '
+      + 'copy was not — the beat now points at nothing on every run',
   );
 }
 
@@ -340,6 +380,30 @@ assert(
   '8b — the router-less n6.1 variant offers no route it cannot honour',
   'routing into an empty "Awaiting them" one tap after "logged" is the R1 moment',
 );
+
+// ═══ 9 — the n23 pair: one platform claim, two beats ═══════════════════════
+//
+// "Passwords never leave your phone" is true on Sleeper only: MFL POSTs the
+// password to /api/mfl/auth-link and ESPN stores espn_s2/SWID server-side.
+// The operator vouched for the Sleeper claim, so the sentence may exist in
+// exactly one beat and the sibling must carry no password claim at all.
+{
+  const sleeper = S.n23().line;
+  const other = S.n23b().line;
+  assert(
+    /password/i.test(sleeper),
+    '9a — n23 (Sleeper) is the beat that carries the password claim',
+  );
+  assert(
+    !/password/i.test(other),
+    '9b — n23b (off-Sleeper) makes no password claim',
+    `"${other}" — MFL and ESPN both send a credential off the device`,
+  );
+  assert(
+    S.n23().screen === 'Trades' && S.n23b().screen === 'Trades',
+    '9c — both n23 variants declare the deck screen',
+  );
+}
 
 console.log(
   failures === 0
