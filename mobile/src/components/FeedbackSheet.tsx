@@ -15,6 +15,7 @@ import {
   ink,
   chalk,
   ice,
+  semantic,
   space,
   radii,
   type,
@@ -24,6 +25,7 @@ import {
 } from '../theme/chalkline';
 import { Button } from './chalkline';
 import { useFeedback, type FeedbackSeverity } from '../state/useFeedback';
+import { FEEDBACK_TEXT_MAX } from '../api/feedback';
 import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
@@ -40,6 +42,27 @@ const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string }[] = [
   { value: 'idea',   label: 'Idea'   },
 ];
 
+// Thousands separators without Intl — Hermes may ship without full ICU (see
+// the same caveat on X-User-TZ in api/client.ts).
+function groupDigits(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+const MAX_LABEL = groupDigits(FEEDBACK_TEXT_MAX);
+
+// Shown while the note exceeds the cap. Names the exact overshoot so the fix
+// is concrete, and says the text is still there — Save is held, not the note.
+function overflowMessage(length: number): string {
+  const over = length - FEEDBACK_TEXT_MAX;
+  return `Too long to send — trim ${groupDigits(over)} character${over === 1 ? '' : 's'}. Your text is still here.`;
+}
+
+// Shown when the note synced OK locally but the POST failed. Deliberately
+// says "saved, not sent" — the item IS still in AsyncStorage and retrySync()
+// will re-attempt it, so telling the user it was lost would be wrong.
+const SAVE_FAILED_MESSAGE =
+  'Saved on this device, but not sent yet. Nothing is lost — retry it from Settings → Testing → Test feedback.';
+
 // Modal-based bottom sheet for capturing a single feedback note. Keyboard-
 // avoiding so the text area doesn't get hidden on smaller phones.
 //
@@ -54,15 +77,28 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
   const [severity, setSeverity] = useState<FeedbackSeverity>('bug');
   const [screen, setScreen] = useState(defaultScreen);
   const [text, setText] = useState('');
+  // In-flight POST (add() awaits the round-trip) and the failure notice from
+  // the last Save attempt. Both are transient — cleared on edit and on open.
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const add = useFeedback((s) => s.add);
   const guardOn = useFlag('ux.sheet_guard');
+
+  // Gate on the TRIMMED length: that's what onSave posts, and what the
+  // backend measures. No `maxLength` on the input — silently truncating a
+  // long note is the same data loss as silently dropping it. The user keeps
+  // typing; the counter turns red and Save is held until they trim.
+  const noteLength = text.trim().length;
+  const overLimit = noteLength > FEEDBACK_TEXT_MAX;
 
   // Re-seed screen whenever the sheet opens (it may have changed since the
   // last open). Reset other fields too — unless the guard flag is on and a
   // draft note exists, in which case restore everything as the user left it.
   useEffect(() => {
     if (visible) {
+      // Stale notice from a previous attempt — never greet a fresh open with it.
+      setSaveFailed(false);
       if (guardOn && text.trim()) {
         // Draft restore: keep note + severity + screen override. Only
         // backfill the screen field if the user blanked it.
@@ -90,16 +126,33 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       onClose();
       return;
     }
-    await add({
-      screen: screen.trim() || 'Unknown',
-      severity,
-      text: trimmed,
-      app_version: Constants.expoConfig?.version,
-    });
-    // Saved — clear the draft so the next open starts clean (flag-off gets
-    // the same net result via the reset-on-open effect above).
-    setText('');
-    onClose();
+    // Belt-and-braces: Save is already disabled past the cap.
+    if (trimmed.length > FEEDBACK_TEXT_MAX) return;
+
+    setSaveFailed(false);
+    setSaving(true);
+    try {
+      const saved = await add({
+        screen: screen.trim() || 'Unknown',
+        severity,
+        text: trimmed,
+        app_version: Constants.expoConfig?.version,
+      });
+      if (!saved.synced) {
+        // The note IS on the device (add() persisted it before POSTing), but
+        // it never reached the backend. Keep the sheet open and the draft
+        // intact and say so — clearing here is how long notes used to
+        // vanish without a trace.
+        setSaveFailed(true);
+        return;
+      }
+      // Delivered — clear the draft so the next open starts clean (flag-off
+      // gets the same net result via the reset-on-open effect above).
+      setText('');
+      onClose();
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -168,21 +221,43 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               testID="feedback.note-input"
               ref={inputRef}
               value={text}
-              onChangeText={setText}
+              onChangeText={(next) => {
+                setText(next);
+                // Any edit invalidates the previous attempt's verdict.
+                if (saveFailed) setSaveFailed(false);
+              }}
               accessibilityLabel="Note"
-              style={styles.noteInput}
+              style={[styles.noteInput, overLimit && styles.noteInputOver]}
               placeholder="What did you notice?"
               placeholderTextColor={chalk.faint}
               multiline
               textAlignVertical="top"
             />
+            <Text
+              testID="feedback.char-count"
+              style={[styles.charCount, overLimit && styles.charCountOver]}
+              accessibilityLabel={`${noteLength} of ${MAX_LABEL} characters used`}
+            >
+              {groupDigits(noteLength)} / {MAX_LABEL}
+            </Text>
           </ScrollView>
+
+          {overLimit ? (
+            <Text testID="feedback.note-error" style={styles.notice}>
+              {overflowMessage(noteLength)}
+            </Text>
+          ) : saveFailed ? (
+            <Text testID="feedback.save-error" style={styles.notice}>
+              {SAVE_FAILED_MESSAGE}
+            </Text>
+          ) : null}
 
           <View style={styles.actions}>
             <Button
               variant="secondary"
               label="Cancel"
               onPress={onClose}
+              disabled={saving}
               style={styles.actionBtn}
             />
             <Button
@@ -190,7 +265,8 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               variant="primary"
               label="Save"
               onPress={onSave}
-              disabled={!text.trim()}
+              loading={saving}
+              disabled={!noteLength || overLimit}
               style={styles.actionBtn}
             />
           </View>
@@ -266,6 +342,27 @@ const styles = StyleSheet.create({
     fontFamily: fonts.ui,
     fontSize: 14,
     minHeight: 120,
+  },
+  noteInputOver: { borderColor: semantic.neg },
+
+  // Data numeral → Plex Mono tabular, 11px type floor (design-system.md).
+  charCount: {
+    alignSelf: 'flex-end',
+    marginTop: 6,
+    fontFamily: fonts.data,
+    fontSize: 11,
+    lineHeight: 14,
+    fontVariant: ['tabular-nums'],
+    color: chalk.dim,
+  },
+  charCountOver: { color: semantic.neg },
+
+  // Pinned above the actions so it's readable with the keyboard up, whatever
+  // the ScrollView is showing.
+  notice: {
+    ...type.bodySm,
+    color: semantic.neg,
+    marginTop: space.md,
   },
 
   actions: {

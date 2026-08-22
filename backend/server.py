@@ -8075,6 +8075,17 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
     return derived
 
 
+# Application-level cap on an in-app feedback note, in characters.
+# `app_feedback.text` is a SQLAlchemy `Text` column (unbounded in both SQLite
+# and Postgres), so this is validation, not storage — but /api/feedback accepts
+# ANONYMOUS writes, so the bound is the only thing keeping a runaway payload out.
+# Raised 2000 -> 8000 on 2026-08-22 (operator confirm, express lane): the old cap
+# silently ate a long operator report. The client mirrors this as
+# FEEDBACK_TEXT_MAX in mobile/src/api/feedback.ts — the two are pinned together by
+# mobile/tests/check-feedback-capture.js. Change both or neither.
+FEEDBACK_TEXT_MAX = 8000
+
+
 @app.route("/api/feedback", methods=["POST"])
 @_gate_unverified_write
 def submit_feedback_route():
@@ -8084,7 +8095,7 @@ def submit_feedback_route():
       client_id           required, unique per note (mobile's local id)
       screen              required, non-empty (≤ 100 chars; truncated)
       severity            required, one of bug | polish | idea
-      text                required, non-empty, ≤ 2000 chars
+      text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
     Auth is best-effort: if X-Session-Token resolves to a session we
@@ -8117,8 +8128,9 @@ def submit_feedback_route():
     screen    = screen_raw.strip()[:100]
     severity  = severity_raw
     text_body = text_raw.strip()
-    if len(text_body) > 2000:
-        return jsonify({"error": "text_too_long", "limit": 2000}), 400
+    if len(text_body) > FEEDBACK_TEXT_MAX:
+        return jsonify({"error": "text_too_long",
+                        "limit": FEEDBACK_TEXT_MAX}), 400
 
     # ── Best-effort session lookup; anonymous on miss ──────────────────
     user_id = None

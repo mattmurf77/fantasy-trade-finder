@@ -10,6 +10,48 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+
+## 2026-08-22d — A long feedback note stopped vanishing (cap 2000 → 8000, and the three silences around it)
+
+The operator wrote a long in-app note, tapped Save, watched the sheet close normally — and it
+never arrived. Not a network blip: `POST /api/feedback` had refused it with `400 text_too_long`,
+and **three separate behaviors conspired to make that invisible** ([G-055](GOTCHAS.md),
+[D-149](DECISIONS.md)):
+
+- the compose sheet had **no counter and no `maxLength`**, so nothing hinted a cap existed;
+- `onSave` cleared the draft and closed **unconditionally**, so failure looked exactly like success;
+- `useFeedback.add` fired the POST into a detached `void (async …)()` IIFE that **always** resolved
+  `synced:false`, so the caller could not have checked even if it had tried. And because a 400 is
+  *permanent*, `retrySync()` plus the AppState foreground hook re-attempted the same doomed
+  request forever.
+
+**Nothing was actually lost** — `add()` persists to AsyncStorage *before* the network call, so the
+note sat readable the whole time at Settings → Testing → "Test feedback", badged `Sync failed`. The
+defect is that nothing said so.
+
+- **Cap raised 2000 → 8000, and deliberately kept.** `/api/feedback` accepts anonymous writes, so
+  the bound is the only limit on payload size. `app_feedback.text` is unbounded `TEXT` — validation,
+  not storage, so no migration.
+- **Soft cap, not `maxLength`.** RN's `maxLength` silently truncates a *paste* — the same data loss
+  moved earlier. The counter reddens, names the overshoot, and holds Save; the app never edits the
+  user's text.
+- **One number, pinned across the seam** (`backend/server.py` ↔ `mobile/src/api/feedback.ts`) by
+  `check-feedback-capture.js`. **It caught a real mismatch on day one:** mid-build the client was at
+  8000 while the server was still at 2000, and the assertion fired with the right diagnosis.
+- **Deploy order matters and CI cannot enforce it:** backend-first is safe, client-first *reproduces*
+  the defect for 2001–8000-char notes. Backend ships now; the client half waits for a build.
+
+**Evidence.** pytest **4117 passed / 1 skipped** (baseline 4114 + 3 boundary tests); `tsc` clean;
+testid-lint OK; **71** structural guards incl. the new 6-assertion one. Red-proofed both ways: the
+new guard is **6/6 RED** on the pristine defect tree at `9e1a8be`, and **20 sabotage cycles** (one
+per named failure branch) each fired the branch it targeted. The backend trio caught three
+sabotages including the nastiest — making the server **truncate** at 2000 instead of refusing still
+returns `201`, so only the stored-length assertion catches it.
+
+**Unknowable, and worth stating plainly:** a rejected POST writes no row, so there is no
+server-side record of how many notes this cap ate before today. `obs.api_events` captures the 400s
+from here on.
+
 ## 2026-08-21d — Decision-ID attribution corrected: slot pricing is D-146 everywhere (docs only)
 
 Nine reference-doc sites and three `LLD.md` headings credited the wrong decision for

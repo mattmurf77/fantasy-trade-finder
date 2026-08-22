@@ -11,6 +11,18 @@
 import { api } from './client';
 import type { FeedbackSeverity } from '../state/useFeedback';
 
+// Maximum characters accepted in a feedback note's `text`.
+//
+// MIRROR of `FEEDBACK_TEXT_MAX` in backend/server.py (same name, same value),
+// which `POST /api/feedback` enforces by rejecting a longer body with
+// `400 {"error": "text_too_long", "limit": <that number>}`. Keep the two
+// identical: a client cap ABOVE the server's turns every long note into a
+// failed submit, and a cap BELOW it silently shortens what testers can say.
+// The compose sheet (components/FeedbackSheet.tsx) reads this for both its
+// live character counter and its Save gate, so there is exactly one number to
+// change on the client side when the server's moves.
+export const FEEDBACK_TEXT_MAX = 8000;
+
 export interface FeedbackSubmitPayload {
   client_id: string;
   screen: string;

@@ -1198,7 +1198,7 @@ In-app feedback notes captured via the mobile FeedbackSheet and POSTed to `/api/
 | `username` | str | denormalized snapshot from session at submit time |
 | `screen` | str, not null | e.g. `Trades` / `Tiers` / `Rank/Trios`; auto-filled by FAB, user-editable |
 | `severity` | str, not null | `'bug'` / `'polish'` / `'idea'` — see cross-client-invariants.md |
-| `text` | text, not null | the feedback content, 1..2000 chars |
+| `text` | text, not null | the feedback content. **Unbounded in storage** — SQLAlchemy `Text` is `TEXT` in both SQLite and Postgres, neither of which enforces a length. The 1..8000-character bound is *application-level validation* in `POST /api/feedback` (`backend/server.py:FEEDBACK_TEXT_MAX`), not a column constraint, so rows written before 2026-08-22 or by any future path that bypasses the route are not limited by it. Raised 2000 → 8000 on 2026-08-22 |
 | `app_version` | str | from `X-App-Version` header |
 | `platform` | str | `ios` / `android` |
 | `device_type` | str | from `X-Device` (`iphone` / `ipad` / `macos`) |
