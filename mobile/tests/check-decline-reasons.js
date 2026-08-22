@@ -93,13 +93,23 @@ if (guard) {
     'TradeCard: the ✕ still exists inside the disposition guard',
     'flag OFF must render the shipped ✓/✕ row — the ✕ is conditioned, never removed',
   );
+  // #384 W2 added a SECOND presentation (an overlay, behind
+  // `calc.merged_layout`), so the condition gained a conjunct. The two
+  // legal forms are enumerated rather than matched loosely: a permissive
+  // pattern like /disposition\.reasons[^?]*\?/ would also accept
+  // `disposition.reasons && false ?`, which is the defect these two
+  // assertions exist to catch. Either exact shape, nothing else.
+  const XI = /disposition\.reasons\s*\?\s*null\s*:\s*\(/;                          // pre-#384
+  const XO = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*null\s*:\s*\(/;  // #384 overlay build
   assert(
-    /disposition\.reasons\s*\?\s*null\s*:\s*\(/.test(inGuard),
+    XI.test(inGuard) || XO.test(inGuard),
     'TradeCard: the ✕ renders only when `disposition.reasons` is absent',
     'without this condition a flag-ON build shows the ✕ AND the tiles',
   );
+  const PI = /disposition\.reasons\s*\?\s*\(?\s*<DeclineReasonPanel/;
+  const PO = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*\(?\s*<DeclineReasonPanel/;
   assert(
-    /disposition\.reasons\s*\?\s*\(?\s*<DeclineReasonPanel/.test(inGuard),
+    PI.test(inGuard) || PO.test(inGuard),
     'TradeCard: the panel renders only when `disposition.reasons` is present',
     'an unconditional mount would grow a tile row on every deck card',
   );

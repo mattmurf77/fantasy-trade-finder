@@ -1247,6 +1247,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
+  // #384 — the merged calculator flow. Read here only to decide whether
+  // the deck's exhausted state offers the two calculator-first exits
+  // (ruling 8). Nothing else on this screen branches on it.
+  const calcMergedOn = useFlag('calc.merged_layout');
   // #287 — the featured window renders the pinned idea as an editable
   // InLeagueCalculator instead of a read-only TradeCard tile.
   const playerOffersCalcOn = useFlag('trades.player_offers_calc');
@@ -6265,6 +6269,41 @@ export default function TradesScreen({ navigation, route }: any) {
                   <Text style={styles.emptyBody}>{GUIDE.n4().line}</Text>
                 ) : null}
                 <View style={styles.summaryBtnRow}>
+                  {/* #384 ruling 8 — the merged flow starts at the
+                      calculator, so a finished deck needs a way BACK to it.
+                      Flag-gated: without the merged layout there is no
+                      calculator-first flow to return to, and the button
+                      would be a non-sequitur. */}
+                  {calcMergedOn ? (
+                    <Button
+                      testID="trades.deck-summary.back-to-calc"
+                      label="Back to calculator"
+                      variant="secondary"
+                      compact
+                      onPress={() => {
+                        haptics.selection();
+                        navigation.navigate('TradeCalculator');
+                      }}
+                    />
+                  ) : null}
+                  {/* #384 ruling 8 — a deck generated for ONE pinned asset
+                      is exhausted; the pin is the most likely reason it ran
+                      dry. Offer the same search without it. handleClearPin
+                      already restores the pre-pin deck snapshot and fires
+                      trade_pin_cleared, so this reuses that path rather
+                      than inventing a second way to unpin. */}
+                  {calcMergedOn && singlePin ? (
+                    <Button
+                      testID="trades.deck-summary.unpin-retry"
+                      label={`Search without ${singlePin.player.name}`}
+                      variant="secondary"
+                      compact
+                      onPress={() => {
+                        setSummaryDismissed(true);
+                        handleClearPin();
+                      }}
+                    />
+                  ) : null}
                   <Button
                     testID="trades.deck-summary.see-liked"
                     label="See liked"

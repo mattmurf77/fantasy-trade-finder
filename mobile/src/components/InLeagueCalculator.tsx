@@ -58,7 +58,14 @@ interface Props {
   initialGiveIds?: string[];
   /** #384 — the merged layout's primary action. Absent ⇒ the Find a Trade
    *  button is not rendered (the host owns navigation, not this component). */
-  onFindATrade?: (opts: { includePlayers: boolean; giveIds: string[]; receiveIds: string[] }) => void;
+  onFindATrade?: (opts: {
+    includePlayers: boolean;
+    /** The resolved canvas assets, not just ids — the caller pins these and
+     *  would otherwise have to re-resolve them against a pool it does not
+     *  hold. Empty arrays are meaningful: "the canvas is empty". */
+    give: CalcPlayer[];
+    receive: CalcPlayer[];
+  }) => void;
   /** #384 — re-entry for the guided tour ("Show me around", top right).
    *  Absent ⇒ the link is not rendered. */
   onShowMeAround?: () => void;
@@ -905,7 +912,11 @@ export default function InLeagueCalculator({
             onPress={() => {
               if (!onFindATrade) return;
               haptics.selection();
-              onFindATrade({ includePlayers, giveIds, receiveIds });
+              onFindATrade({
+                includePlayers,
+                give: giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+                receive: receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+              });
             }}
             style={({ pressed }) => [
               styles.actionFind, styles.actionBtn, styles.actionPrimary,

@@ -10,6 +10,7 @@
     "test:analytics-297-302": "node tests/check-analytics-297-302.js",
     "test:anchor-labels": "node tests/check-anchor-labels.js",
     "test:breaker-card": "node tests/check-breaker-card.js",
+    "test:calc-merged-behavior": "node tests/check-calc-merged-behavior.js",
     "test:calc-merged-layout": "node tests/check-calc-merged-layout.js",
     "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
     "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",

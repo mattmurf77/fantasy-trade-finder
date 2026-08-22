@@ -37,9 +37,10 @@ import { track } from '../api/events';
 import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
+import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
-import type { ScoringFormat, Tier } from '../shared/types';
+import type { Player, ScoringFormat, Tier } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
 // snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
@@ -83,6 +84,20 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(t);
   }, [value, ms]);
   return v;
+}
+
+// #384 ruling 2 — the canvas speaks CalcPlayer; the finder's pin store
+// speaks Player. One mapping, here, so the two shapes meet in exactly one
+// place. `pos` → `position` and `nflTeam` → `team` are the only renames;
+// everything the pin store reads downstream is id + name + position.
+function toFinderPlayer(p: CalcPlayer): Player {
+  return {
+    id: p.id,
+    name: p.name,
+    position: p.pos,
+    team: p.nflTeam === '—' ? null : p.nflTeam,
+    age: p.age,
+  };
 }
 
 export default function TradeCalculatorScreen({ route, navigation }: any) {
@@ -581,17 +596,29 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.
-            onFindATrade={({ includePlayers, giveIds, receiveIds }) =>
-              navigation.navigate('TradesHome', {
-                // Ruling 2 (#384): ON ⇒ the search must INCLUDE the canvas
-                // assets. OFF ⇒ unconstrained, and we deliberately send no
-                // ids at all rather than empty arrays the finder would have
-                // to distinguish from "cleared".
-                ...(includePlayers && (giveIds.length || receiveIds.length)
-                  ? { requireAssets: { giveIds, receiveIds } }
-                  : {}),
-              })
-            }
+            onFindATrade={({ includePlayers, give, receive }) => {
+              // Ruling 2 (#384): ON ⇒ the finder MUST include the canvas
+              // assets; OFF ⇒ the search is unconstrained by them.
+              //
+              // This writes the canvas into `useFinderTargets` — the SAME
+              // pin store #186's "build around this side" and the deck's
+              // generate payload already read — rather than inventing a
+              // route param nothing consumes. `packageMode` is what makes
+              // the contract literal: with 2+ give pins the served card's
+              // give side must carry EVERY pinned player.
+              const t = useFinderTargets.getState();
+              if (includePlayers && (give.length || receive.length)) {
+                t.setSide('give', give.map(toFinderPlayer));
+                t.setSide('receive', receive.map(toFinderPlayer));
+                t.setPackageMode(true);
+              } else {
+                // Unconstrained means unconstrained: a stale pin from an
+                // earlier run would silently re-apply the constraint the
+                // user just switched off.
+                t.clear();
+              }
+              navigation.navigate('TradesHome');
+            }}
           />
         ) : (
         <>

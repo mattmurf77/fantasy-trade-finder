@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
+  Modal,
   Pressable,
   ActivityIndicator,
   type AccessibilityActionEvent,
@@ -196,6 +197,13 @@ function TradeCardComp({
   // omits `reasons` when the flag is off, double-gating client-side keeps
   // the rendering predictable if flags drift (e.g. cached job snapshot).
   const reasonsEnabled = useFlag('trade_math.human_explanations');
+  // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
+  // button and the reasons arrive as an overlay over the page, instead of
+  // three inline tiles replacing the ✕. Scope is deliberately narrow: the
+  // operator ruled "just this version of the calculator", so with the flag
+  // off the shipped inline-tile form renders byte-identically.
+  const reasonsAsOverlay = useFlag('calc.merged_layout');
+  const [reasonOverlayOpen, setReasonOverlayOpen] = useState(false);
   const showReasons = reasonsEnabled
     && Array.isArray(data.reasons)
     && data.reasons.length > 0;
@@ -603,10 +611,18 @@ function TradeCardComp({
                 alone — unchanged in every other respect. `reasons` absent
                 (flag off, and on every non-deck mount) ⇒ this renders
                 byte-identically to the shipped ✓/✕ row. */}
-            {disposition.reasons ? null : (
+            {disposition.reasons && !reasonsAsOverlay ? null : (
               <Pressable
                 testID="trades.pass-btn"
-                onPress={disposition.onPass}
+                onPress={
+                  // Overlay mode: the ✕ opens the reason sheet, and the
+                  // PANEL commits the pass (its layer-1 tap is the
+                  // disposition — same contract as the inline form). Without
+                  // reasons wired it is the plain pass it has always been.
+                  disposition.reasons && reasonsAsOverlay
+                    ? () => setReasonOverlayOpen(true)
+                    : disposition.onPass
+                }
                 disabled={disposition.disabled}
                 style={({ pressed }) => [
                   styles.dispositionBtn,
@@ -640,8 +656,43 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons ? (
+          {disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
+          ) : null}
+          {disposition.reasons && reasonsAsOverlay ? (
+            <Modal
+              visible={reasonOverlayOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setReasonOverlayOpen(false)}
+            >
+              <Pressable
+                style={styles.reasonOverlayBackdrop}
+                onPress={() => setReasonOverlayOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss without passing"
+              />
+              <View style={styles.reasonOverlaySheet} testID="trades.pass-reason-overlay">
+                {/* Every callback closes the overlay first, then runs the
+                    host's handler. The host advances the deck on commit, so
+                    leaving the sheet up would strand it over the NEXT card. */}
+                <DeclineReasonPanel
+                  onLayer1={(r, from) => {
+                    setReasonOverlayOpen(false);
+                    disposition.reasons!.onLayer1(r, from);
+                  }}
+                  onLayer2Select={(r, d) => {
+                    setReasonOverlayOpen(false);
+                    disposition.reasons!.onLayer2Select(r, d);
+                  }}
+                  onLayer2Bank={(r, d) => disposition.reasons!.onLayer2Bank(r, d)}
+                  onLayer2Send={(r, d, t) => {
+                    setReasonOverlayOpen(false);
+                    disposition.reasons!.onLayer2Send(r, d, t);
+                  }}
+                />
+              </View>
+            </Modal>
           ) : null}
         </>
       ) : null}
@@ -764,6 +815,17 @@ function TradeCardComp({
 export default React.memo(TradeCardComp);
 
 const styles = StyleSheet.create({
+  // #384 ruling 1 — the decline reasons as an overlay over the page. Bottom
+  // sheet rather than a centred dialog: the panel's layer 2 opens a text
+  // composer, and a keyboard under a centred dialog would cover it.
+  reasonOverlayBackdrop: { flex: 1, backgroundColor: '#0009' },
+  reasonOverlaySheet: {
+    maxHeight: '80%',
+    padding: space.md,
+    backgroundColor: ink.ink2,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
   // #276 — vertical-cost audit (typical 2-for-2 must fit an 852pt viewport
   // alongside the pick-valuation line): padding lg→md and the outer stack
   // gap md→sm trim ~28pt across a typical card's ~6 sections without
